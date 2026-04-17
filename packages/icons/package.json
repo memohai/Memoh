@@ -1,6 +1,6 @@
 {
   "name": "@memohai/icon",
-  "version": "0.7.0-beta.4",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "exports": {

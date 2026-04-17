@@ -14,15 +14,23 @@ Configure your bot's connections from the **Platforms** tab in the Bot Detail pa
 
 ### Platform Guides
 
-For detailed step-by-step guides on how to create and configure bots for each platform, see:
+| Platform | Guide | Notes |
+|----------|-------|-------|
+| Telegram | [Telegram Configuration](/channels/telegram) | Strong attachment and streaming support |
+| Feishu (Lark) | [Feishu Configuration](/channels/feishu) | Supports webhook-style inbound mode |
+| Discord | [Discord Configuration](/channels/discord) | Good fit for communities and servers |
+| QQ | [QQ Configuration](/channels/qq) | Personal DM oriented |
+| Matrix | [Matrix Configuration](/channels/matrix) | Decentralized homeserver support |
+| Misskey | [Misskey Configuration](/channels/misskey) | Replies and reactions, no streaming |
+| DingTalk | [DingTalk Configuration](/channels/dingtalk) | Enterprise private/group chat |
+| WeCom (WeWork) | [WeCom Configuration](/channels/wecom) | Enterprise workspace integration |
+| WeChat | [WeChat Configuration](/channels/weixin) | Personal QR login flow |
+| WeChat Official Account | [WeChat Official Account Configuration](/channels/wechatoa) | Official account webhook flow |
 
-- **[Telegram Configuration](/channels/telegram)**
-- **[Feishu (Lark) Configuration](/channels/feishu)**
-- **[Discord Configuration](/channels/discord)**
-- **[QQ Configuration](/channels/qq)**
-- **[Matrix Configuration](/channels/matrix)**
-- **[WeCom (WeWork) Configuration](/channels/wecom)**
-- **[WeChat Configuration](/channels/weixin)**
+Two WeChat adapters exist on purpose:
+
+- **WeChat** is the QR-login personal messaging integration.
+- **WeChat Official Account** is the official account / webhook integration for private-message scenarios.
 
 ---
 
@@ -49,11 +57,26 @@ If using **Feishu** in `webhook` inbound mode:
 2. Copy this URL and paste it into your Feishu App's event configuration.
 3. This allows Feishu to send messages directly to Memoh.
 
-### 4. Special Case: WeChat QR Code
+### 4. Special Case: WeChat QR Login
 
 If using **WeChat**:
 1. After enabling the channel, a QR code flow is provided for connecting.
 2. Scan the QR code with WeChat to link the bot.
+
+### 5. Special Case: WeChat Official Account Webhook
+
+If using **WeChat Official Account**:
+1. Create and save the channel first.
+2. Memoh generates a **Webhook Callback URL** for that channel.
+3. Copy the callback URL into the WeChat Official Account platform configuration.
+4. Keep the configured `Token`, `Encryption Mode`, and optional AES settings aligned between Memoh and WeChat.
+
+### 6. Special Case: DingTalk Stream Connection
+
+If using **DingTalk**:
+1. Configure `App Key` and `App Secret`.
+2. Save and enable the channel.
+3. Memoh maintains the stream connection for inbound events; you do not need to manage a separate webhook callback URL for the standard setup.
 
 ---
 

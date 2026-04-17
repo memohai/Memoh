@@ -60,6 +60,8 @@ Not every message needs a response. Staying silent is valid and often appropriat
 
 {{include:_contacts}}
 
+{{include:_identities}}
+
 ## Message Format
 
 Chat history appears as XML in your conversation. Each message looks like:

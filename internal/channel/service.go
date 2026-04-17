@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -235,6 +236,32 @@ func (s *Store) ResolveEffectiveConfig(ctx context.Context, botID string, channe
 		return ChannelConfig{}, err
 	}
 	return ChannelConfig{}, fmt.Errorf("%w", ErrChannelConfigNotFound)
+}
+
+// ListBotConfigs returns all registered channel configs for a bot.
+// Missing configs are skipped so callers can enumerate platform state without
+// knowing which integrations are currently configured.
+func (s *Store) ListBotConfigs(ctx context.Context, botID string) ([]ChannelConfig, error) {
+	if strings.TrimSpace(botID) == "" {
+		return nil, errors.New("bot id is required")
+	}
+	types := s.registry.Types()
+	sort.Slice(types, func(i, j int) bool {
+		return strings.Compare(types[i].String(), types[j].String()) < 0
+	})
+
+	items := make([]ChannelConfig, 0, len(types))
+	for _, channelType := range types {
+		cfg, err := s.ResolveEffectiveConfig(ctx, botID, channelType)
+		if err != nil {
+			if errors.Is(err, ErrChannelConfigNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		items = append(items, cfg)
+	}
+	return items, nil
 }
 
 // ListConfigsByType returns all channel configurations of the given type.

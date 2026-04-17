@@ -23,7 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/oauthctx"
 )
 
-const probeTimeout = 15 * time.Second
+const probeTimeout = DefaultProviderProbeTimeout
 
 // Test probes a model's provider endpoint using the Twilight AI SDK
 // to verify connectivity, authentication, and model availability.
@@ -140,7 +140,7 @@ func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID
 // It is exported so that other packages (e.g. providers) can reuse it for testing.
 func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: timeout}
+		httpClient = NewProviderHTTPClient(timeout)
 	}
 
 	switch clientType {

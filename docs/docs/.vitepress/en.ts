@@ -49,6 +49,10 @@ export const en = [
         link: '/getting-started/skills.md'
       },
       {
+        text: 'Supermarket',
+        link: '/getting-started/supermarket.md'
+      },
+      {
         text: 'MCP',
         link: '/getting-started/mcp.md'
       },
@@ -152,12 +156,24 @@ export const en = [
         link: '/channels/matrix.md'
       },
       {
+        text: 'Misskey',
+        link: '/channels/misskey.md'
+      },
+      {
+        text: 'DingTalk',
+        link: '/channels/dingtalk.md'
+      },
+      {
         text: 'WeCom (WeWork)',
         link: '/channels/wecom.md'
       },
       {
         text: 'WeChat',
         link: '/channels/weixin.md'
+      },
+      {
+        text: 'WeChat Official Account',
+        link: '/channels/wechatoa.md'
       },
     ]
   },

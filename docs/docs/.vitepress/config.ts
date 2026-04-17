@@ -9,7 +9,7 @@ export default defineConfig({
   description: 'Multi-Member, Structured Long-Memory, Containerized AI Agent System.',
 
   head: [
-    ['link', { rel: 'icon', href: '/logo.png' }]
+    ['link', { rel: 'icon', href: '/logo.svg' }]
   ],
 
   base: '/',
@@ -39,7 +39,7 @@ export default defineConfig({
     ],
 
     logo: {
-      src: '/logo.png',
+      src: '/logo.svg',
       alt: 'Memoh'
     },
     

@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp"
+	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
@@ -276,7 +277,7 @@ func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
 	}
 	defer func() { _ = gz.Close() }()
 
-	skillDir := path.Join(skillsDirPath, skillID)
+	skillDir := path.Join(skillset.ManagedDir(), skillID)
 	if err := client.Mkdir(ctx, skillDir); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
 	}

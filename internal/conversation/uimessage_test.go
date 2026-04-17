@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -198,6 +199,60 @@ func TestUIMessageStreamConverterAccumulatesToolProgress(t *testing.T) {
 	}
 	if end[0].ID != start[0].ID || len(end[0].Progress) != 2 {
 		t.Fatalf("expected final snapshot to keep id and progress, got %#v", end[0])
+	}
+}
+
+func TestUIMessageStreamConverterMergesRepeatedToolCallStart(t *testing.T) {
+	t.Parallel()
+
+	converter := NewUIMessageStreamConverter()
+
+	start := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+	})
+	if len(start) != 1 || start[0].Type != UIMessageTool {
+		t.Fatalf("unexpected initial tool placeholder: %#v", start)
+	}
+	if start[0].Input != nil {
+		t.Fatalf("expected initial tool placeholder to have nil input, got %#v", start[0].Input)
+	}
+
+	fullInput := map[string]any{"path": "/tmp/long.txt"}
+	update := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+		Input:      fullInput,
+	})
+	if len(update) != 1 {
+		t.Fatalf("expected one updated tool snapshot, got %#v", update)
+	}
+	if update[0].ID != start[0].ID {
+		t.Fatalf("expected repeated tool start to reuse message id, got start=%d update=%d", start[0].ID, update[0].ID)
+	}
+	if !reflect.DeepEqual(update[0].Input, fullInput) {
+		t.Fatalf("expected repeated tool start to backfill input, got %#v", update[0].Input)
+	}
+	if update[0].Running == nil || !*update[0].Running {
+		t.Fatalf("expected merged tool message to stay running, got %#v", update[0])
+	}
+
+	end := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+		Output:     map[string]any{"ok": true},
+	})
+	if len(end) != 1 || end[0].ID != start[0].ID {
+		t.Fatalf("expected tool end to reuse merged message id, got %#v", end)
+	}
+	if !reflect.DeepEqual(end[0].Input, fullInput) {
+		t.Fatalf("expected tool end to preserve merged input, got %#v", end[0].Input)
+	}
+	if end[0].Running == nil || *end[0].Running {
+		t.Fatalf("expected tool end to mark message complete, got %#v", end[0])
 	}
 }
 

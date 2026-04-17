@@ -38,7 +38,8 @@ RETURNING *;
 DELETE FROM providers WHERE id = sqlc.arg(id);
 
 -- name: CountProviders :one
-SELECT COUNT(*) FROM providers;
+SELECT COUNT(*) FROM providers
+WHERE client_type NOT IN ('edge-speech');
 
 -- name: CreateModel :one
 INSERT INTO models (model_id, name, provider_id, type, config)
@@ -64,6 +65,7 @@ ORDER BY created_at DESC;
 
 -- name: ListModels :many
 SELECT * FROM models
+WHERE type != 'speech'
 ORDER BY created_at DESC;
 
 -- name: ListModelsByType :many
@@ -74,6 +76,7 @@ ORDER BY created_at DESC;
 -- name: ListModelsByProviderID :many
 SELECT * FROM models
 WHERE provider_id = sqlc.arg(provider_id)
+  AND type != 'speech'
 ORDER BY created_at DESC;
 
 -- name: ListModelsByProviderIDAndType :many
@@ -108,7 +111,8 @@ DELETE FROM models WHERE id = sqlc.arg(id);
 DELETE FROM models WHERE model_id = sqlc.arg(model_id);
 
 -- name: CountModels :one
-SELECT COUNT(*) FROM models;
+SELECT COUNT(*) FROM models
+WHERE type != 'speech';
 
 -- name: CountModelsByType :one
 SELECT COUNT(*) FROM models WHERE type = sqlc.arg(type);
@@ -143,6 +147,7 @@ SELECT m.*
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
+  AND m.type != 'speech'
 ORDER BY m.created_at DESC;
 
 -- name: ListEnabledModelsByType :many

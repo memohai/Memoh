@@ -1,8 +1,8 @@
 <template>
   <section class="relative rounded-full p-0.5 border flex-none">
     <img
-      src="/logo.png"
-      alt="logo.png"
+      src="/logo.svg"
+      alt="logo.svg"
       class="w-6.5"
     >
     <LoaderCircle

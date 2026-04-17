@@ -18,6 +18,7 @@ import (
 	ctr "github.com/memohai/memoh/internal/containerd"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/identity"
+	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -208,7 +209,7 @@ func workspaceCDIDevicesFromLabels(labels map[string]string) []string {
 	return normalizeWorkspaceGPUDevices(strings.Split(value, ","))
 }
 
-func (m *Manager) buildWorkspaceContainerSpec(botID string, gpu WorkspaceGPUConfig) (ctr.ContainerSpec, error) {
+func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string, gpu WorkspaceGPUConfig) (ctr.ContainerSpec, error) {
 	resolvPath, err := ctr.ResolveConfSource(m.dataRoot())
 	if err != nil {
 		return ctr.ContainerSpec{}, err
@@ -243,9 +244,15 @@ func (m *Manager) buildWorkspaceContainerSpec(botID string, gpu WorkspaceGPUConf
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
 
-	env := make([]string, 0, len(tzEnv)+1)
+	skillRoots, err := m.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
+	if err != nil {
+		return ctr.ContainerSpec{}, err
+	}
+	skillEnv := skillset.ContainerEnv(skillRoots)
+	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	env = append(env, skillEnv...)
 
 	return ctr.ContainerSpec{
 		Cmd:        []string{"/opt/memoh/bridge"},
@@ -259,7 +266,7 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 	if err := validateBotID(botID); err != nil {
 		return err
 	}
-	spec, err := m.buildWorkspaceContainerSpec(botID, gpu)
+	spec, err := m.buildWorkspaceContainerSpec(ctx, botID, gpu)
 	if err != nil {
 		return err
 	}

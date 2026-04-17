@@ -15,10 +15,10 @@ import (
 // OpenAI-compatible /embeddings endpoint for all other provider types.
 func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout time.Duration, httpClient *http.Client) *sdk.EmbeddingModel {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = DefaultProviderRequestTimeout
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: timeout}
+		httpClient = NewProviderHTTPClient(timeout)
 	}
 
 	switch ClientType(clientType) {

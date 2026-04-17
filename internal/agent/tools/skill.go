@@ -61,6 +61,7 @@ func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 					"skillName":   skillName,
 					"description": skill.Description,
 					"content":     skill.Content,
+					"path":        skill.Path,
 				}, nil
 			},
 		},

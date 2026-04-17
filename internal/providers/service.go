@@ -209,7 +209,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-const probeTimeout = 5 * time.Second
+const probeTimeout = models.DefaultProviderProbeTimeout
 
 // Test probes the provider using the Twilight AI SDK to check
 // reachability and authentication.
@@ -326,7 +326,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 	}
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: URL is from operator-configured provider base URL
+	resp, err := models.NewProviderHTTPClient(probeTimeout).Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}

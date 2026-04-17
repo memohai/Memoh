@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,10 +15,11 @@ import (
 )
 
 const (
-	workspaceMetadataKey      = "workspace"
-	workspaceImageMetadataKey = "image"
-	workspaceGPUMetadataKey   = "gpu"
-	workspaceGPUDevicesKey    = "devices"
+	workspaceMetadataKey                    = "workspace"
+	workspaceImageMetadataKey               = "image"
+	workspaceGPUMetadataKey                 = "gpu"
+	workspaceGPUDevicesKey                  = "devices"
+	workspaceSkillDiscoveryRootsMetadataKey = "skill_discovery_roots"
 )
 
 type WorkspaceGPUConfig struct {
@@ -115,6 +117,34 @@ func workspaceGPUFromMetadata(metadata map[string]any) (WorkspaceGPUConfig, bool
 	return WorkspaceGPUConfig{Devices: normalizeWorkspaceGPUDevices(devices)}, true
 }
 
+func workspaceSkillDiscoveryRootsFromMetadata(metadata map[string]any) ([]string, bool) {
+	section := workspaceSection(metadata)
+	raw, ok := section[workspaceSkillDiscoveryRootsMetadataKey]
+	if !ok {
+		return nil, false
+	}
+
+	var roots []string
+	switch typed := raw.(type) {
+	case []string:
+		roots = append(roots, typed...)
+	case []any:
+		for _, item := range typed {
+			if root, ok := item.(string); ok {
+				roots = append(roots, root)
+			}
+		}
+	default:
+		return []string{}, true
+	}
+
+	normalized := normalizeWorkspaceSkillDiscoveryRoots(roots)
+	if normalized == nil {
+		return []string{}, true
+	}
+	return normalized, true
+}
+
 func withWorkspaceImagePreference(metadata map[string]any, image string) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
@@ -145,6 +175,18 @@ func withWorkspaceGPUPreference(metadata map[string]any, gpu WorkspaceGPUConfig)
 	return next
 }
 
+func withWorkspaceSkillDiscoveryRoots(metadata map[string]any, roots []string) map[string]any {
+	next := cloneAnyMap(metadata)
+	section := workspaceSection(next)
+	normalized := normalizeWorkspaceSkillDiscoveryRoots(roots)
+	if normalized == nil {
+		normalized = []string{}
+	}
+	section[workspaceSkillDiscoveryRootsMetadataKey] = normalized
+	next[workspaceMetadataKey] = section
+	return next
+}
+
 func withoutWorkspaceGPUPreference(metadata map[string]any) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
@@ -157,8 +199,20 @@ func withoutWorkspaceGPUPreference(metadata map[string]any) map[string]any {
 	return next
 }
 
+func withoutWorkspaceSkillDiscoveryRoots(metadata map[string]any) map[string]any {
+	next := cloneAnyMap(metadata)
+	section := workspaceSection(next)
+	delete(section, workspaceSkillDiscoveryRootsMetadataKey)
+	if len(section) == 0 {
+		delete(next, workspaceMetadataKey)
+		return next
+	}
+	next[workspaceMetadataKey] = section
+	return next
+}
+
 func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string) (string, error) {
-	if m.queries == nil {
+	if m.db == nil || m.queries == nil {
 		return "", nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -180,7 +234,7 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 }
 
 func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, image string, clearPreference bool) error {
-	if m.queries == nil {
+	if m.db == nil || m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -224,7 +278,7 @@ func (m *Manager) ClearWorkspaceImagePreference(ctx context.Context, botID strin
 }
 
 func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (WorkspaceGPUConfig, bool, error) {
-	if m.queries == nil {
+	if m.db == nil || m.queries == nil {
 		return WorkspaceGPUConfig{}, false, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -246,8 +300,31 @@ func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (
 	return gpu, ok, nil
 }
 
+func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context, botID string) ([]string, bool, error) {
+	if m.db == nil || m.queries == nil {
+		return nil, false, nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, false, err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	metadata, err := decodeBotMetadata(row.Metadata)
+	if err != nil {
+		return nil, false, err
+	}
+	roots, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
+	return roots, ok, nil
+}
+
 func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID string, gpu WorkspaceGPUConfig, clearPreference bool) error {
-	if m.queries == nil {
+	if m.db == nil || m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -299,8 +376,20 @@ func (m *Manager) ResolveWorkspaceGPU(ctx context.Context, botID string) (Worksp
 	return m.resolveWorkspaceGPU(ctx, botID)
 }
 
+func (m *Manager) ResolveWorkspaceSkillDiscoveryRoots(ctx context.Context, botID string) ([]string, error) {
+	return m.resolveWorkspaceSkillDiscoveryRoots(ctx, botID)
+}
+
+func SkillDiscoveryRootsFromMetadata(metadata map[string]any) []string {
+	roots, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
+	if !ok {
+		return nil
+	}
+	return roots
+}
+
 func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (string, error) {
-	if m.queries != nil {
+	if m.db != nil && m.queries != nil {
 		pgBotID, err := db.ParseUUID(botID)
 		if err == nil {
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)
@@ -335,4 +424,41 @@ func (m *Manager) resolveWorkspaceGPU(ctx context.Context, botID string) (Worksp
 	}
 
 	return WorkspaceGPUConfig{}, nil
+}
+
+func (m *Manager) resolveWorkspaceSkillDiscoveryRoots(ctx context.Context, botID string) ([]string, error) {
+	roots, hasPreference, err := m.botWorkspaceSkillDiscoveryRootsPreference(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	if !hasPreference {
+		return nil, nil
+	}
+	return roots, nil
+}
+
+func normalizeWorkspaceSkillDiscoveryRoots(roots []string) []string {
+	if len(roots) == 0 {
+		return nil
+	}
+
+	managedDir := path.Join(config.DefaultDataMount, "skills")
+	legacyDir := path.Join(config.DefaultDataMount, ".skills")
+	seen := make(map[string]struct{}, len(roots))
+	normalized := make([]string, 0, len(roots))
+	for _, raw := range roots {
+		root := path.Clean(strings.TrimSpace(raw))
+		if root == "" || !strings.HasPrefix(root, "/") {
+			continue
+		}
+		if root == managedDir || root == legacyDir {
+			continue
+		}
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		normalized = append(normalized, root)
+	}
+	return normalized
 }

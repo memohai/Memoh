@@ -19,6 +19,8 @@ Without a memory provider, the bot will not have an active memory backend config
 
 Memories are stored and retrieved through the assigned memory provider. Depending on the provider type and mode, retrieval may use file-based indexing, sparse vectors, dense embeddings, or an external API. When a user sends a message, Memoh finds the most relevant memories and includes them in the bot's runtime context.
 
+This page is about **long-term memory**. It is separate from **session context compaction**, which reduces the prompt footprint of a single conversation session. See [Context Compaction](/getting-started/compaction).
+
 ---
 
 ## Operations
@@ -38,14 +40,22 @@ Manage your bot's memories from the **Memory** tab in the Bot Detail page.
 
 ---
 
-## Memory Compression (Compact)
+## Memory Compaction
 
-Over time, memories can accumulate and become redundant. The **Compact** feature helps optimize the memory pool.
+Over time, long-term memories can accumulate and become redundant. The **Compact** action in the **Memory** tab rewrites the stored memory set itself.
 
-- **Ratio**: Set the compression ratio (for example `0.8`, `0.5`, or `0.3`) to determine how much information is retained.
-- **Decay Days**: Optionally specify a time window to compact only memories older than a certain number of days.
+This operation is provider-level memory maintenance. It is useful when you want to:
 
-For more details on compaction, see [Memory Compaction](/getting-started/compaction).
+- merge overlapping memories
+- remove stale or low-value entries
+- improve retrieval quality by reducing noise
+
+Parameters:
+
+- **Ratio** — Compression ratio such as `0.8`, `0.5`, or `0.3`. Lower values make compaction more aggressive.
+- **Decay Days** — Optionally restrict compaction to older memories only.
+
+This is different from [Context Compaction](/getting-started/compaction), which compresses the active prompt for one session rather than rewriting stored memories.
 
 ---
 
@@ -78,6 +88,21 @@ The Memory tab displays storage usage information:
 
 - **Total Memories** — The number of memory entries stored for this bot.
 - **Index Status** — Whether the vector index is up-to-date.
+
+---
+
+## Memory vs Session Context
+
+Memoh has two different "compaction" concepts:
+
+| Concept | Scope | Where to trigger it | What it changes |
+|--------|-------|---------------------|-----------------|
+| **Memory Compaction** | Long-term memory provider | Memory tab | Rewrites stored memory entries |
+| **Context Compaction** | One conversation session | Session status panel or `/compact` | Summarizes older session context for future model calls |
+
+If you are trying to reduce retrieval noise across many conversations, use **Memory Compaction**.
+
+If you are trying to shorten the currently active conversation history, use **Context Compaction**.
 
 ---
 

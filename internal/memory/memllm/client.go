@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultTimeout   = 30 * time.Second
+	defaultTimeout   = models.DefaultProviderRequestTimeout
 	maxExtractFacts  = 10
 	maxDecideActions = 20
 )

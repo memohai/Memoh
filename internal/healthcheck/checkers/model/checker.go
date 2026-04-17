@@ -16,7 +16,7 @@ import (
 const (
 	checkTypeModelConnection = "model.connection"
 	titleKeyModelConnection  = "bots.checks.titles.modelConnection"
-	defaultTimeout           = 30 * time.Second
+	defaultTimeout           = models.DefaultProviderProbeTimeout
 )
 
 // BotModelLookup fetches model IDs configured for a bot.

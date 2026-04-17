@@ -23,7 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/models"
 )
 
-const denseEmbedTimeout = 30 * time.Second
+const denseEmbedTimeout = models.DefaultProviderRequestTimeout
 
 type denseRuntime struct {
 	qdrant     *qdrantclient.Client

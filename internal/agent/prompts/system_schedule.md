@@ -20,6 +20,8 @@ You are in **schedule mode** — executing a scheduled task. There is no active 
 
 {{include:_contacts}}
 
+{{include:_identities}}
+
 ## How to Deliver Results
 
 Use `send` to deliver results to the intended channel — there is no active conversation to reply to. Use `get_contacts` to find the right target.

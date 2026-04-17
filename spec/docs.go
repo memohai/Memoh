@@ -1508,7 +1508,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "List skills from data directory",
+                "summary": "List skills from the bot container",
                 "parameters": [
                     {
                         "type": "string",
@@ -1549,7 +1549,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Upload skills into data directory",
+                "summary": "Upload skills into Memoh-managed directory",
                 "parameters": [
                     {
                         "type": "string",
@@ -1599,7 +1599,7 @@ const docTemplate = `{
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Delete skills from data directory",
+                "summary": "Delete Memoh-managed skills",
                 "parameters": [
                     {
                         "type": "string",
@@ -1615,6 +1615,58 @@ const docTemplate = `{
                         "required": true,
                         "schema": {
                             "$ref": "#/definitions/handlers.SkillsDeleteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.skillsOpResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/skills/actions": {
+            "post": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Apply an action to a discovered or managed skill source",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Skill action payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SkillsActionRequest"
                         }
                     }
                 ],
@@ -4388,6 +4440,51 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/compact": {
+            "post": {
+                "description": "Run context compaction synchronously for a session",
+                "tags": [
+                    "compaction"
+                ],
+                "summary": "Trigger immediate context compaction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TriggerCompactResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -11064,6 +11161,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "managed": {
+                    "type": "boolean"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -11072,6 +11172,32 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "raw": {
+                    "type": "string"
+                },
+                "shadowed_by": {
+                    "type": "string"
+                },
+                "source_kind": {
+                    "type": "string"
+                },
+                "source_path": {
+                    "type": "string"
+                },
+                "source_root": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SkillsActionRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "target_path": {
                     "type": "string"
                 }
             }
@@ -11354,6 +11480,20 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
                     }
+                }
+            }
+        },
+        "handlers.TriggerCompactResponse": {
+            "type": "object",
+            "properties": {
+                "message_count": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
                 }
             }
         },
@@ -12678,9 +12818,6 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
-                "context_token_budget": {
-                    "type": "integer"
-                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -12747,9 +12884,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "compaction_threshold": {
-                    "type": "integer"
-                },
-                "context_token_budget": {
                     "type": "integer"
                 },
                 "discuss_probe_model_id": {

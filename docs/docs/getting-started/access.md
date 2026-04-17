@@ -4,11 +4,27 @@ Memoh uses an ACL (Access Control List) system to control who can interact with 
 
 ---
 
+## Quick Start: ACL Presets
+
+When you create a bot, Memoh lets you start from an **ACL preset**. Presets are just a shortcut for common access patterns.
+
+| Preset | Result |
+|--------|--------|
+| `allow_all` | Default effect is `allow`; anyone can chat unless you add deny rules later |
+| `private_only` | Default effect is `deny`; private conversations are allowed |
+| `group_only` | Default effect is `deny`; group conversations are allowed |
+| `group_and_thread_only` | Default effect is `deny`; groups and threads are allowed |
+| `deny_all` | Default effect is `deny`; nobody except the owner/admin path can chat until you add allow rules |
+
+These presets only define the starting point. After creation, you can refine everything from the **Access** tab.
+
+---
+
 ## Concepts
 
 ### Default Effect
 
-Each bot has a **default effect** (`allow` or `deny`) that applies when no ACL rule matches an incoming message. Configure this in the bot's **General** tab under **ACL Default Effect**.
+Each bot has a **default effect** (`allow` or `deny`) that applies when no ACL rule matches an incoming message. Configure this from the bot's **Access** tab.
 
 - **Allow**: Anyone can chat with the bot unless explicitly denied by a rule.
 - **Deny**: Only the bot owner, admins, and explicitly allowed subjects can chat.
@@ -47,6 +63,15 @@ This means rule ordering matters. A deny rule placed above an allow rule will ta
 
 Open a bot's **Access** tab to configure its access control.
 
+### Start With A Preset, Then Refine
+
+Recommended workflow:
+
+1. Pick an ACL preset when creating the bot.
+2. Open the **Access** tab.
+3. Confirm the resulting **Default Effect**.
+4. Add or reorder rules only where the preset is too broad or too narrow.
+
 ### Adding Rules
 
 1. Click **Add Rule**.
@@ -78,28 +103,42 @@ Scope fields form a hierarchy: **Channel → Conversation Type → Conversation 
 
 ---
 
+## What The Presets Actually Mean
+
+This is the most useful mental model:
+
+- `allow_all` is best for open bots and public demos.
+- `private_only` is best when the bot should only answer in direct chats.
+- `group_only` is best for bots intended to live only in shared rooms.
+- `group_and_thread_only` is best for bots that should work in group spaces and threaded sub-conversations, but not in private DMs.
+- `deny_all` is best for highly restricted bots where you want to add every allow rule manually.
+
+If you are unsure, start with `allow_all` for a personal test bot or `deny_all` for anything sensitive.
+
+---
+
 ## Examples
 
 ### Open Bot (Anyone Can Chat)
 
-1. Set **ACL Default Effect** to `allow` in the **General** tab.
+1. Choose preset `allow_all`, or set **ACL Default Effect** to `allow`.
 2. No rules needed — everyone is allowed by default.
 
 ### Private Bot with Selected Users
 
-1. Set **ACL Default Effect** to `deny`.
+1. Choose preset `deny_all`, or set **ACL Default Effect** to `deny`.
 2. Add **allow** rules for each authorized channel identity.
 3. Only listed subjects (plus the bot owner and admins) can trigger the bot.
 
 ### Open Bot with Blocked Users
 
-1. Set **ACL Default Effect** to `allow`.
+1. Choose preset `allow_all`, or set **ACL Default Effect** to `allow`.
 2. Add **deny** rules for problematic channel identities at the top of the list.
 3. Everyone except denied subjects can chat with the bot.
 
 ### Platform-Specific Access
 
-1. Set **ACL Default Effect** to `deny`.
+1. Start from preset `deny_all` or `private_only`, depending on your goal.
 2. Add an **allow** rule with subject type **Channel Type** set to `telegram`.
 3. Only Telegram users can chat with the bot — messages from other channels are denied.
 
@@ -108,3 +147,14 @@ Scope fields form a hierarchy: **Channel → Conversation Type → Conversation 
 1. Add an **allow** rule for a specific channel identity.
 2. Set the **Source Scope** channel to your Telegram channel config.
 3. The user can only chat with the bot via that specific Telegram channel.
+
+---
+
+## Debugging Access Decisions
+
+When ACL behavior is confusing, use:
+
+- the **Access** tab to inspect rule order and default effect
+- the `/access` slash command to inspect the current identity, role, and ACL evaluation context
+
+This is especially helpful when a user is linked across multiple channels or when group/thread scoping is involved.

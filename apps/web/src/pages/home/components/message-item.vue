@@ -192,7 +192,7 @@
 
           <!-- Tool call block -->
           <ToolCallBlock
-            v-else-if="block.type === 'tool' && !isHiddenToolMessage(block)"
+            v-else-if="block.type === 'tool'"
             :block="(block as ToolCallBlockType)"
           />
 
@@ -257,7 +257,6 @@ import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 // import { useI18n } from 'vue-i18n'
 import type {
   ChatMessage,
-  ContentBlock,
   ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
@@ -334,12 +333,6 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
   }
 })
 
-function isHiddenToolMessage(block: ContentBlock): boolean {
-  if (block.type !== 'tool') return false
-  const result = block.result as Record<string, unknown> | null
-  return !!result && typeof result === 'object' && result.delivered === 'current_conversation'
-}
-
 function hasLaterAssistantMessage(index: number): boolean {
   return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
 }
@@ -350,7 +343,7 @@ function isAssistantBlockStreaming(index: number): boolean {
 
 const hasVisibleAssistantBlocks = computed(() =>
   props.message.role === 'assistant'
-    && props.message.messages.some(block => block.type !== 'tool' || !isHiddenToolMessage(block)),
+    && props.message.messages.length > 0,
 )
 
 const relativeTimestamp = computed(() =>

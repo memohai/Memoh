@@ -299,6 +299,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				aborted = true
 			}
 
+		case *sdk.ToolInputStartPart:
+			if textLoopProbeBuffer != nil {
+				textLoopProbeBuffer.Flush()
+			}
+			if !sendEvent(ctx, ch, StreamEvent{
+				Type:       EventToolCallStart,
+				ToolName:   p.ToolName,
+				ToolCallID: p.ID,
+			}) {
+				aborted = true
+			}
+
 		case *sdk.StreamToolCallPart:
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
@@ -641,6 +653,7 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		skillsMap[s.Name] = tools.SkillDetail{
 			Description: s.Description,
 			Content:     s.Content,
+			Path:        s.Path,
 		}
 	}
 	session := tools.SessionContext{
@@ -965,6 +978,17 @@ func (a *Agent) runMidStreamRetry(
 				}
 				stepNumber++
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextEnd}) {
+					aborted = true
+				}
+			case *sdk.ToolInputStartPart:
+				if textLoopProbeBuffer != nil {
+					textLoopProbeBuffer.Flush()
+				}
+				if !sendEvent(ctx, ch, StreamEvent{
+					Type:       EventToolCallStart,
+					ToolName:   rp.ToolName,
+					ToolCallID: rp.ID,
+				}) {
 					aborted = true
 				}
 			case *sdk.StreamToolCallPart:

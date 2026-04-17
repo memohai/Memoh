@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Memoh is a multi-member, structured long-memory, containerized AI agent system platform. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), Email, and more. Every bot has an independent container and memory system, allowing it to edit files, execute commands, and build itself — providing a secure, flexible, and scalable solution for multi-bot management.
+Memoh is a multi-member, structured long-memory, containerized AI agent system platform. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Every bot has an independent container and memory system, allowing it to edit files, execute commands, and build itself — providing a secure, flexible, and scalable solution for multi-bot management.
 
 ## Architecture Overview
 
@@ -30,14 +30,17 @@ Infrastructure dependencies:
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
 - **Containers**: containerd v2 (Linux), Apple Virtualization (macOS)
+- **TUI**: Charm libraries (bubbletea, glamour, lipgloss) for CLI interactive mode
 
 ### Frontend (TypeScript)
 - **Framework**: Vue 3 (Composition API)
-- **Build Tool**: Vite
-- **State Management**: Pinia + Pinia Colada
+- **Build Tool**: Vite 8
+- **State Management**: Pinia 3 + Pinia Colada
 - **UI**: Tailwind CSS 4 + custom component library (`@memohai/ui`) + Reka UI
+- **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
+- **Desktop**: Tauri (wraps `@memohai/web`)
 - **Package Manager**: pnpm monorepo
 
 ### Browser Gateway (TypeScript)
@@ -51,7 +54,7 @@ Infrastructure dependencies:
 - **Linting**: golangci-lint (Go), ESLint + typescript-eslint + vue-eslint-parser (TypeScript)
 - **Testing**: Vitest
 - **Version Management**: bumpp
-- **SDK Generation**: @hey-api/openapi-ts
+- **SDK Generation**: @hey-api/openapi-ts (with `@hey-api/client-fetch` + `@pinia/colada` plugins)
 
 ## Project Structure
 
@@ -60,22 +63,29 @@ Memoh/
 ├── cmd/                        # Go application entry points
 │   ├── agent/                  #   Main backend server (main.go, FX wiring)
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers)
+│   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Unified binary wrapper (Cobra: serve, migrate, version)
+│   └── memoh/                  #   Unified CLI (Cobra: serve, migrate, chat, bots, compose, docker, login, install, support)
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
 │   ├── agent/                  #   In-process AI agent (Twilight AI SDK integration)
 │   │   ├── agent.go            #     Core agent: Stream() / Generate() via Twilight SDK
-│   │   ├── model.go            #     Model creation (OpenAI completions/responses, Anthropic, Google)
 │   │   ├── stream.go           #     Streaming event assembly
 │   │   ├── sential.go          #     Sential (sentinel) loop detection logic
-│   │   ├── tags.go             #     Tag extraction from streaming text (attachments, reactions, speech)
-│   │   ├── prompt.go           #     Prompt assembly (system, heartbeat, schedule, subagent)
-│   │   ├── config.go           #     Agent configuration types (RunConfig, ModelConfig)
+│   │   ├── prompt.go           #     Prompt assembly (system, heartbeat, schedule, subagent, discuss)
+│   │   ├── config.go           #     Agent service dependencies
 │   │   ├── types.go            #     Shared types (StreamEvent, GenerateResult, FileAttachment)
 │   │   ├── fs.go               #     Filesystem utilities
-│   │   ├── prompts/            #     Prompt templates (system.md, heartbeat.md, schedule.md, subagent.md)
+│   │   ├── guard_state.go      #     Guard state management
+│   │   ├── retry.go            #     Retry logic
+│   │   ├── read_media.go       #     Media reading utilities
+│   │   ├── spawn_adapter.go    #     Spawn adapter for sub-processes
+│   │   ├── prompts/            #     Prompt templates (Markdown, with partials prefixed by _)
+│   │   │   ├── system_chat.md, system_discuss.md, system_heartbeat.md, system_schedule.md, system_subagent.md
+│   │   │   ├── _tools.md, _memory.md, _contacts.md, _schedule_task.md, _subagent.md
+│   │   │   ├── heartbeat.md, schedule.md
+│   │   │   └── memory_extract.md, memory_update.md
 │   │   └── tools/              #     Tool providers (ToolProvider interface)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -84,26 +94,34 @@ Memoh/
 │   │       ├── web.go          #       Web search tool
 │   │       ├── webfetch.go     #       Web page fetch tool
 │   │       ├── container.go    #       Container file/exec tools
-│   │       ├── inbox.go        #       Inbox tool
+│   │       ├── fsops.go        #       Filesystem operations tool
 │   │       ├── email.go        #       Email send tool
 │   │       ├── subagent.go     #       Sub-agent invocation tool
 │   │       ├── skill.go        #       Skill activation tool
 │   │       ├── browser.go      #       Browser automation tool
 │   │       ├── tts.go          #       Text-to-speech tool
-│   │       └── federation.go   #       MCP federation tool
+│   │       ├── federation.go   #       MCP federation tool
+│   │       ├── image_gen.go    #       Image generation tool
+│   │       ├── prune.go        #       Pruning tool
+│   │       ├── history.go      #       History access tool
+│   │       └── read_media.go   #       Media reading tool
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── auth/                   #   JWT authentication middleware and utilities
 │   ├── bind/                   #   Channel identity-to-user binding code management
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
 │   ├── browsercontexts/        #   Browser context management (CRUD)
-│   ├── channel/                #   Channel adapter system (Telegram, Discord, Feishu, QQ, Local, Email)
+│   ├── channel/                #   Channel adapter system
+│   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, local
+│   │   └── identities/        #     Channel identity service
 │   ├── command/                #   Slash command system (extensible command handlers)
-│   ├── config/                 #   Configuration loading and parsing (TOML)
+│   ├── compaction/             #   Message history compaction service (LLM summarization)
+│   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
 │   ├── containerd/             #   Container runtime abstraction (containerd / Apple Virtualization)
 │   ├── conversation/           #   Conversation management and flow resolver
 │   │   ├── service.go          #     Conversation CRUD and routing
 │   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
+│   ├── copilot/                #   GitHub Copilot client integration
 │   ├── db/                     #   Database connection and migration utilities
 │   │   └── sqlc/               #   ⚠️ Auto-generated by sqlc — DO NOT modify manually
 │   ├── email/                  #   Email provider and outbox management (Mailgun, generic SMTP, OAuth)
@@ -112,55 +130,70 @@ Memoh/
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
 │   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
 │   ├── identity/               #   Identity type utilities (human vs bot)
-│   ├── inbox/                  #   Bot inbox service (notifications, triggers)
 │   ├── logger/                 #   Structured logging (slog)
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
-│   ├── workspace/              #   Workspace container lifecycle management
-│   │   ├── manager.go          #     Container reconciliation, gRPC connection pool
-│   │   ├── manager_lifecycle.go #    Container create/start/stop operations
-│   │   ├── bridge/             #     gRPC client for in-container bridge service
-│   │   └── bridgepb/           #     Protobuf definitions (bridge.proto)
 │   ├── media/                  #   Content-addressed media asset service
 │   ├── memory/                 #   Long-term memory system (multi-provider: Qdrant, BM25, LLM extraction)
 │   ├── message/                #   Message persistence and event publishing
-│   ├── models/                 #   LLM model management (CRUD, variants)
+│   ├── messaging/              #   Outbound message executor
+│   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
+│   ├── oauthctx/               #   OAuth context helpers
+│   ├── pipeline/               #   Discuss/chat pipeline (adapt, projection, rendering, driver)
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
+│   ├── registry/               #   Provider registry service (YAML provider templates)
 │   ├── schedule/               #   Scheduled task service (cron)
-│   ├── searchengines/          #   Search engine abstraction (reserved)
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
+│   ├── session/                #   Bot session management service
 │   ├── settings/               #   Bot settings management
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
-│   ├── subagent/               #   Sub-agent management (CRUD)
 │   ├── textutil/               #   UTF-8 safe text utilities
+│   ├── timezone/               #   Timezone utilities
 │   ├── tts/                    #   Text-to-speech provider management
-│   └── version/                #   Build-time version information
+│   ├── tui/                    #   Terminal UI (Charm stack for CLI interactive mode)
+│   ├── version/                #   Build-time version information
+│   └── workspace/              #   Workspace container lifecycle management
+│       ├── manager.go          #     Container reconciliation, gRPC connection pool
+│       ├── manager_lifecycle.go #    Container create/start/stop operations
+│       ├── bridge/             #     gRPC client for in-container bridge service
+│       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
 │   ├── browser/                #   Browser Gateway (Bun/Elysia/Playwright)
 │   │   └── src/
 │   │       ├── index.ts        #     Elysia server entry point
 │   │       ├── browser.ts      #     Playwright browser lifecycle
-│   │       ├── modules/        #     Route modules (action, context, devices)
+│   │       ├── modules/        #     Route modules (action, context, devices, session, cores)
 │   │       ├── middlewares/     #     CORS, error handling, bearer auth
 │   │       ├── types/          #     TypeScript type definitions
 │   │       ├── storage.ts      #     Browser context storage
 │   │       └── models.ts       #     Zod request schemas
-│   └── web/                    #   Main web app (@memohai/web, Vue 3)
+│   ├── desktop/                #   Tauri desktop app (@memohai/desktop, wraps @memohai/web)
+│   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
+│   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
-│   ├── migrations/             #   SQL migration files
+│   ├── migrations/             #   SQL migration files (0001–0067+)
 │   └── queries/                #   SQL query files (sqlc input)
-├── conf/                       # Configuration templates (app.example.toml, app.docker.toml, app.apple.toml, app.windows.toml)
-├── devenv/                     # Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh, server-entrypoint.sh)
+├── conf/                       # Configuration
+│   ├── providers/              #   Provider YAML templates (openai, anthropic, codex, github-copilot, etc.)
+│   ├── app.example.toml        #   Default config template
+│   ├── app.docker.toml         #   Docker deployment config
+│   ├── app.apple.toml          #   macOS (Apple Virtualization) config
+│   └── app.windows.toml        #   Windows config
+├── devenv/                     # Dev environment
+│   ├── docker-compose.yml      #   Main dev compose
+│   ├── docker-compose.minify.yml #  Minified services compose
+│   ├── docker-compose.selinux.yml # SELinux overlay compose
+│   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
-├── docs/                       # Documentation site
-├── scripts/                    # Utility scripts (db, release, install)
+├── docs/                       # Documentation site (VitePress)
+├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 ├── sqlc.yaml                   # sqlc code generation config
@@ -179,12 +212,15 @@ Memoh/
 2. Install toolchains and dependencies: `mise install`
 3. Initialize the project: `mise run setup`
 4. Start the dev environment: `mise run dev`
+5. Dev web UI: `http://localhost:18082` (server: `18080`, browser gateway: `18083`)
 
 ### Common Commands
 
 | Command | Description |
 |---------|-------------|
 | `mise run dev` | Start the containerized dev environment (all services) |
+| `mise run dev:minify` | Start dev environment with minified services |
+| `mise run dev:selinux` | Start dev environment on SELinux systems |
 | `mise run dev:down` | Stop the dev environment |
 | `mise run dev:logs` | View dev environment logs |
 | `mise run dev:restart` | Restart a service (e.g. `-- server`) |
@@ -192,11 +228,15 @@ Memoh/
 | `mise run sqlc-generate` | Regenerate Go code after modifying SQL files |
 | `mise run swagger-generate` | Generate Swagger documentation |
 | `mise run sdk-generate` | Generate TypeScript SDK (depends on swagger-generate) |
+| `mise run icons-generate` | Generate icon Vue components from SVG sources |
 | `mise run db-up` | Initialize and migrate the database |
 | `mise run db-down` | Drop the database |
+| `mise run docs` | Start documentation dev server |
 | `mise run build-embedded-assets` | Build and stage embedded web assets |
-| `mise run build-unified` | Build the memoh CLI locally |
+| `mise run build-unified` | Build memoh CLI locally |
 | `mise run bridge:build` | Rebuild bridge binary in dev container |
+| `mise run desktop:dev` | Start Tauri desktop app in dev mode |
+| `mise run desktop:build` | Build Tauri desktop app for release |
 | `mise run lint` | Run all linters (Go + ESLint) |
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
@@ -251,10 +291,13 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 - The AI agent runs **in-process** within the Go server — there is no separate agent gateway service.
 - Core agent logic lives in `internal/agent/`, powered by the [Twilight AI](https://github.com/memohai/twilight-ai) Go SDK.
 - `internal/agent/agent.go` provides `Stream()` (SSE streaming) and `Generate()` (non-streaming) methods.
-- Model creation (`internal/agent/model.go`) supports four client types: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`.
+- Model/client types are defined in `internal/models/types.go`: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `openai-codex`, `github-copilot`, `edge-speech`.
+- Model types: `chat`, `embedding`, `speech`.
 - Tools are implemented as `ToolProvider` instances in `internal/agent/tools/`, loaded via setter injection to avoid FX dependency cycles.
-- Prompt templates (system, heartbeat, schedule, subagent) are embedded Go Markdown files in `internal/agent/prompts/`.
+- Prompt templates are embedded Go Markdown files in `internal/agent/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_tools.md`, `_memory.md`). System prompts include `system_chat.md` (standard chat) and `system_discuss.md` (discuss mode).
 - The conversation flow resolver (`internal/conversation/flow/`) orchestrates message assembly, memory injection, history trimming, and agent invocation.
+- The discuss/chat pipeline (`internal/pipeline/`) provides an alternative orchestration path with adaptation, projection, rendering, and driver layers.
+- The compaction service (`internal/compaction/`) handles LLM-based conversation summarization.
 - Loop detection (text and tool loops) is built into the agent with configurable thresholds.
 - Tag extraction system processes inline tags in streaming output (attachments, reactions, speech/TTS).
 
@@ -265,12 +308,13 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 - API calls use the auto-generated `@memohai/sdk`.
 - State management uses Pinia; data fetching uses Pinia Colada.
 - i18n via vue-i18n.
+- See `apps/web/AGENTS.md` for detailed frontend conventions.
 
 ### Container / Workspace Management
 
 - Each bot can have an isolated **workspace container** for file editing, command execution, and MCP tool hosting.
 - Containers communicate with the host via a **gRPC bridge** over Unix Domain Sockets (UDS), not TCP.
-- The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`.
+- The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. Bridge prompt templates live in `cmd/bridge/template/`.
 - Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
 - `internal/workspace/` manages container lifecycle (create, start, stop, reconcile) and maintains a gRPC connection pool.
 - `internal/containerd/` provides the container runtime abstraction layer (containerd on Linux, Apple Virtualization on macOS, socktainer for socket-based management).
@@ -278,43 +322,61 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 
 ## Database Tables
 
-| Table | Description |
-|-------|-------------|
-| `users` | User accounts (username, email, role, display_name, avatar) |
-| `channel_identities` | Unified inbound identity subject (cross-platform) |
-| `user_channel_bindings` | Outbound delivery config per user/channel |
-| `llm_providers` | LLM provider configurations (name, base_url, api_key) |
-| `search_providers` | Search engine provider configurations |
-| `models` | Model definitions (chat/embedding types, modalities, reasoning) |
-| `model_variants` | Model variant definitions (weight, metadata) |
-| `bots` | Bot definitions with model references and settings |
-| `mcp_connections` | MCP connection configurations per bot |
-| `bot_channel_configs` | Per-bot channel configurations |
-| `bot_preauth_keys` | Bot pre-authentication keys |
-| `channel_identity_bind_codes` | One-time codes for channel identity → user linking |
-| `bot_channel_routes` | Conversation route mapping (inbound thread → bot history) |
-| `bot_history_messages` | Unified message history under bot scope |
-| `bot_history_message_assets` | Message → content_hash asset links (with name and metadata) |
-| `containers` | Bot container instances |
-| `snapshots` | Container snapshots |
-| `container_versions` | Container version tracking |
-| `lifecycle_events` | Container lifecycle events |
-| `schedule` | Scheduled tasks (cron) |
-| `subagents` | Sub-agent definitions |
-| `browser_contexts` | Browser context configurations (Playwright) |
-| `storage_providers` | Pluggable object storage backends |
-| `bot_storage_bindings` | Per-bot storage backend selection |
-| `bot_inbox` | Per-bot inbox (notifications, triggers) |
-| `bot_heartbeat_logs` | Heartbeat execution records |
-| `email_providers` | Pluggable email service backends (Mailgun, generic SMTP) |
-| `bot_email_bindings` | Per-bot email provider binding with permissions |
-| `email_outbox` | Outbound email audit log |
-| `email_oauth_tokens` | OAuth2 tokens for email providers (Gmail) |
-| `memory_providers` | Multi-provider memory adapter configurations |
-| `tts_providers` | Text-to-speech provider configurations |
-| `tts_models` | TTS model definitions |
-| `token_usage` | Per-message LLM token usage tracking |
-| `chat_acl` | Source-aware chat access control lists |
+The canonical source of truth for the full schema is `db/migrations/0001_init.up.sql`. Key tables grouped by domain:
+
+**Auth & Users**
+- `users` — User accounts (username, email, role, display_name, avatar)
+- `channel_identities` — Unified inbound identity subject (cross-platform)
+- `user_channel_bindings` — Outbound delivery config per user/channel
+- `channel_identity_bind_codes` — One-time codes for channel identity → user linking
+
+**Bots & Sessions**
+- `bots` — Bot definitions with model references and settings
+- `bot_sessions` — Bot conversation sessions
+- `bot_session_events` — Session event log
+- `bot_channel_configs` — Per-bot channel configurations
+- `bot_channel_routes` — Conversation route mapping (inbound thread → bot history)
+- `bot_acl_rules` — Source-aware chat access control lists
+
+**Messages & History**
+- `bot_history_messages` — Unified message history under bot scope
+- `bot_history_message_assets` — Message → content_hash asset links (with name and metadata)
+- `bot_history_message_compacts` — Compacted message summaries
+
+**Providers & Models**
+- `providers` — LLM provider configurations (name, base_url, api_key)
+- `provider_oauth_tokens` — Provider-level OAuth tokens
+- `user_provider_oauth_tokens` — Per-user provider OAuth tokens
+- `models` — Model definitions (chat/embedding/speech types, modalities, reasoning)
+- `model_variants` — Model variant definitions (weight, metadata)
+- `search_providers` — Search engine provider configurations
+- `memory_providers` — Multi-provider memory adapter configurations
+
+**MCP**
+- `mcp_connections` — MCP connection configurations per bot
+- `mcp_oauth_tokens` — MCP OAuth tokens
+
+**Containers**
+- `containers` — Bot container instances
+- `snapshots` — Container snapshots
+- `container_versions` — Container version tracking
+- `lifecycle_events` — Container lifecycle events
+
+**Email**
+- `email_providers` — Pluggable email service backends (Mailgun, generic SMTP)
+- `email_oauth_tokens` — OAuth2 tokens for email providers (Gmail)
+- `bot_email_bindings` — Per-bot email provider binding with permissions
+- `email_outbox` — Outbound email audit log
+
+**Scheduling & Automation**
+- `schedule` — Scheduled tasks (cron)
+- `schedule_logs` — Schedule execution logs
+- `bot_heartbeat_logs` — Heartbeat execution records
+- `browser_contexts` — Browser context configurations (Playwright)
+
+**Storage**
+- `storage_providers` — Pluggable object storage backends
+- `bot_storage_bindings` — Per-bot storage backend selection
 
 ## Configuration
 
@@ -331,6 +393,10 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[sparse]` — Sparse (BM25) search service connection
 - `[browser_gateway]` — Browser Gateway address
 - `[web]` — Web frontend address
+- `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
+- `[supermarket]` — Supermarket integration (base_url)
+
+Provider YAML templates in `conf/providers/` define preset configurations for various LLM providers (OpenAI, Anthropic, GitHub Copilot, etc.).
 
 Configuration templates available in `conf/`:
 - `app.example.toml` — Default template

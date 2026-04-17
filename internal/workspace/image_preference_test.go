@@ -119,3 +119,77 @@ func TestWithoutWorkspaceGPUPreferenceRemovesOnlyGPUKey(t *testing.T) {
 		t.Fatalf("expected unrelated workspace metadata to remain, got %#v", workspace)
 	}
 }
+
+func TestWorkspaceSkillDiscoveryRootsMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	metadata := map[string]any{
+		workspaceMetadataKey: map[string]any{
+			"keep": "value",
+		},
+	}
+
+	updated := withWorkspaceSkillDiscoveryRoots(metadata, []string{
+		" /custom/skills ",
+		"/root/.openclaw/skills",
+		"/custom/skills",
+		"/custom/./skills",
+		"/data/skills",
+		"relative/path",
+	})
+
+	roots, ok := workspaceSkillDiscoveryRootsFromMetadata(updated)
+	if !ok {
+		t.Fatal("expected skill discovery roots preference to be present")
+	}
+	if got, want := roots, []string{"/custom/skills", "/root/.openclaw/skills"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("expected normalized skill discovery roots %v, got %v", want, got)
+	}
+	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
+	if !ok {
+		t.Fatal("expected workspace metadata section")
+	}
+	if workspace["keep"] != "value" {
+		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
+	}
+}
+
+func TestWorkspaceSkillDiscoveryRootsExplicitDisableRemainsPresent(t *testing.T) {
+	t.Parallel()
+
+	metadata := withWorkspaceSkillDiscoveryRoots(map[string]any{}, []string{})
+
+	roots, ok := workspaceSkillDiscoveryRootsFromMetadata(metadata)
+	if !ok {
+		t.Fatal("expected skill discovery roots key to remain present")
+	}
+	if roots == nil {
+		t.Fatal("expected explicit disable to return a non-nil empty slice")
+	}
+	if len(roots) != 0 {
+		t.Fatalf("expected explicit disable with no roots, got %#v", roots)
+	}
+}
+
+func TestWithoutWorkspaceSkillDiscoveryRootsRemovesOnlyThatKey(t *testing.T) {
+	t.Parallel()
+
+	metadata := map[string]any{
+		workspaceMetadataKey: map[string]any{
+			workspaceSkillDiscoveryRootsMetadataKey: []any{"/data/.agents/skills"},
+			"keep":                                  true,
+		},
+	}
+
+	updated := withoutWorkspaceSkillDiscoveryRoots(metadata)
+	if _, ok := workspaceSkillDiscoveryRootsFromMetadata(updated); ok {
+		t.Fatal("expected skill discovery roots preference to be cleared")
+	}
+	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
+	if !ok {
+		t.Fatal("expected workspace metadata section to remain")
+	}
+	if workspace["keep"] != true {
+		t.Fatalf("expected unrelated workspace metadata to remain, got %#v", workspace)
+	}
+}

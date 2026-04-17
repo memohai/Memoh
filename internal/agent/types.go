@@ -30,6 +30,7 @@ type SkillEntry struct {
 	Name        string
 	Description string
 	Content     string
+	Path        string
 	Metadata    map[string]any
 }
 

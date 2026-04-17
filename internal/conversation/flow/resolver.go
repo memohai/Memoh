@@ -22,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
@@ -44,6 +45,7 @@ type SkillEntry struct {
 	Name        string
 	Description string
 	Content     string
+	Path        string
 	Metadata    map[string]any
 }
 
@@ -62,6 +64,10 @@ type gatewayAssetLoader interface {
 	OpenForGateway(ctx context.Context, botID, contentHash string) (reader io.ReadCloser, mime string, err error)
 }
 
+type botChannelConfigReader interface {
+	ListBotConfigs(ctx context.Context, botID string) ([]channel.ChannelConfig, error)
+}
+
 // Resolver orchestrates chat with the internal agent.
 type Resolver struct {
 	agent             *agentpkg.Agent
@@ -78,6 +84,7 @@ type Resolver struct {
 	eventPublisher    messageevent.Publisher
 	skillLoader       SkillLoader
 	assetLoader       gatewayAssetLoader
+	channelStore      botChannelConfigReader
 	pipeline          *pipelinepkg.Pipeline
 	streamHTTPClient  *http.Client
 	bgManager         *background.Manager
@@ -158,6 +165,12 @@ func (r *Resolver) SetSkillLoader(sl SkillLoader) {
 // attachments before calling the agent gateway.
 func (r *Resolver) SetGatewayAssetLoader(loader gatewayAssetLoader) {
 	r.assetLoader = loader
+}
+
+// SetChannelStore configures the bot channel config store used to load
+// platform identity metadata for system prompt generation.
+func (r *Resolver) SetChannelStore(store botChannelConfigReader) {
+	r.channelStore = store
 }
 
 // SetCompactionService configures the compaction service for context compaction.
@@ -287,10 +300,9 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		}
 	}
 
-	botSettings, _ := r.loadBotSettings(ctx, req.BotID)
 	contextTokenBudget := 0
-	if botSettings.ContextTokenBudget > 0 {
-		contextTokenBudget = botSettings.ContextTokenBudget
+	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
+		contextTokenBudget = *chatModel.Config.ContextWindow
 	}
 
 	var messages []conversation.ModelMessage
@@ -642,13 +654,26 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	if cfg.Identity.TimezoneLocation != nil {
 		now = now.In(cfg.Identity.TimezoneLocation)
 	}
+	platformIdentitiesSection := ""
+	if r.channelStore != nil {
+		channelConfigs, err := r.channelStore.ListBotConfigs(ctx, cfg.Identity.BotID)
+		if err != nil {
+			r.logger.Warn("load bot platform identities failed",
+				slog.String("bot_id", cfg.Identity.BotID),
+				slog.Any("error", err),
+			)
+		} else {
+			platformIdentitiesSection = buildPlatformIdentitiesSection(channelConfigs)
+		}
+	}
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
-		SessionType:        cfg.SessionType,
-		Skills:             cfg.Skills,
-		Files:              files,
-		Now:                now,
-		Timezone:           cfg.Identity.Timezone,
-		SupportsImageInput: supportsImageInput,
+		SessionType:               cfg.SessionType,
+		Skills:                    cfg.Skills,
+		Files:                     files,
+		Now:                       now,
+		Timezone:                  cfg.Identity.Timezone,
+		SupportsImageInput:        supportsImageInput,
+		PlatformIdentitiesSection: platformIdentitiesSection,
 	})
 
 	if cfg.Query != "" {
@@ -704,6 +729,7 @@ func normalizeGatewaySkill(entry SkillEntry) (agentpkg.SkillEntry, bool) {
 		Name:        name,
 		Description: description,
 		Content:     content,
+		Path:        strings.TrimSpace(entry.Path),
 		Metadata:    entry.Metadata,
 	}, true
 }

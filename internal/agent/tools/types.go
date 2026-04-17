@@ -15,6 +15,7 @@ import (
 type SkillDetail struct {
 	Description string
 	Content     string
+	Path        string
 }
 
 // StreamEventType identifies the kind of stream event emitted by tools.

@@ -1,114 +1,118 @@
 # About Memoh
 
-## What is Memoh?
+## What Is Memoh?
 
-Memoh is a multi-member, structured long-memory, containerized AI agent system platform. You can create your own AI bots and chat with them via Telegram, Discord, Lark (Feishu), QQ, Matrix, WeCom, WeChat, Email, or Web. Every bot has an independent container and memory system, allowing it to edit files, execute commands, and access the network within its own container — like having its own computer and brain.
+Memoh is a multi-member, structured long-memory, containerized AI agent platform. You can create multiple AI bots, give each bot its own isolated workspace and long-term memory, and interact with them through Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email, or the built-in Web UI.
 
-## Key Features
+Every bot has its own execution environment, tools, memory configuration, and channel integrations. In practice, that means each bot behaves more like its own computer-backed agent than a shared chat preset.
 
-### Multi-Bot Management
+## What Makes Memoh Different
 
-Create multiple bots. Humans and bots, or bots with each other, can chat privately, in groups, or collaborate. Build bot teams, or set up accounts for family members to manage daily tasks with bots.
+### Multi-Bot And Multi-User
 
-### Multi-User & Identity Recognition
+Memoh is built for real sharing and real separation at the same time:
 
-Bots can distinguish individual users in group chats, remember each person's context separately, and send direct messages to specific users. Cross-platform identity binding unifies the same person across Telegram, Discord, Lark, and Web.
+- create multiple bots for different roles or people
+- let humans and bots interact in private chats, groups, or delegated workflows
+- distinguish individual users in shared conversations
+- bind identities across channels so the same person can be recognized consistently
 
-### Containerized Isolation
+### Containerized Workspaces
 
-Each bot runs in its own isolated container (powered by Containerd) with a separate filesystem and network. Bots can freely read/write files and execute commands within their containers without interfering with each other. Supports container snapshots for save/restore, data export/import, and versioning.
+Each bot runs in its own isolated container workspace with a separate filesystem and network boundary. Bots can read and write files, run commands, and use tools inside that workspace without interfering with other bots.
 
-### Memory Engineering
+### Long-Term Memory And Context Management
 
-A deeply engineered memory layer:
+Memoh separates two different problems:
 
-- Automatically extracts key facts from each conversation turn and stores them as structured memories
-- Hybrid retrieval: semantic search (via Qdrant vector database) + keyword retrieval (BM25)
-- Loads the last 24 hours of conversation context by default
-- Automatic memory compaction and rebuild capabilities
-- Multi-language auto-detection
+- **Long-term memory** stores durable facts and recalls them across conversations through memory providers
+- **Session context compaction** reduces the prompt size of an active session when the current conversation gets too large
 
-### Multi-Platform Support
+This distinction is important: context compaction changes the active session window, while memory compaction rewrites stored memory entries.
 
-Unified channel adapter architecture for connecting to multiple messaging platforms:
+### Sessions And Discuss Mode
 
-- **Telegram** — Full support with streaming, Markdown, attachments, and replies
-- **Discord** — Full support
-- **Lark (Feishu)** — Full support
-- **QQ** — Full support
-- **Matrix** — Decentralized messaging protocol support
-- **WeCom (WeWork)** — Enterprise messaging integration
-- **WeChat** — Personal messaging via the WeChat AI bot platform
-- **Email** — Inbound webhook + outbound providers (Mailgun, generic SMTP, Gmail OAuth)
-- **Web** — Built-in web chat interface with streaming
+Each bot maintains independent **sessions** that preserve context. Memoh currently uses five session types:
 
-### Agent Capabilities
+- **Chat** — regular user-facing conversations
+- **Discuss** — deliberative sessions where the bot can think through work and decide what to send outward
+- **Heartbeat** — periodic autonomous sessions
+- **Schedule** — cron-triggered task sessions
+- **Subagent** — delegated task sessions
 
-Bots come with a rich set of built-in tools:
+You can start or route sessions with slash commands such as `/new`, and the Web UI exposes a session status panel with metrics like context usage, cache hit rate, and used skills.
 
-- **Web Search** — Configurable search providers (Brave, Bing, Google, Tavily, SearXNG, DuckDuckGo, and more) for real-time information
-- **Web Fetch** — Retrieve and parse web page content
-- **Browser Automation** — Use Playwright-powered browser tools for navigation, clicking, form filling, screenshots, PDF export, and rendered page inspection
-- **Subagents** — Create specialized subagents with independent context, assign skills, and delegate complex tasks in parallel
-- **Skills** — Define bot personality via IDENTITY.md, SOUL.md, and modular skill files that bots can enable/disable at runtime
-- **Container Operations** — Read/write files, edit code, and execute commands inside the container
-- **Memory Management** — Search and manage memories
-- **Messaging** — Send messages and reactions to specific users or channels
-- **Email** — Compose and send emails through configured email providers
-- **Text-to-Speech** — Synthesize spoken audio from text using configurable TTS providers
-- **MCP Federation** — Access external tools and resources via federated MCP connections
-- **Session History** — Access and manage conversation session history
+### Broad Channel Coverage
 
-### Sessions
+Memoh uses a unified channel adapter system so one bot can be reachable from many places at once.
 
-Each bot maintains **sessions** — independent conversation threads that preserve context. Sessions come in four types:
+Current user-facing integrations include:
 
-- **Chat** — Standard user conversations
-- **Heartbeat** — Periodic autonomous activity sessions
-- **Schedule** — Cron-triggered task execution sessions
-- **Subagent** — Delegated task sessions for sub-agents
+- **Telegram**
+- **Discord**
+- **Lark (Feishu)**
+- **QQ**
+- **Matrix**
+- **Misskey**
+- **DingTalk**
+- **WeCom**
+- **WeChat**
+- **WeChat Official Account**
+- **Email**
+- **Web**
 
-Users can start a new session at any time using the `/new` slash command in any channel, which resets the conversation context.
+Memoh also distinguishes between the personal **WeChat** QR-login integration and the webhook-based **WeChat Official Account** integration.
 
-### Slash Commands
+### Tools, Skills, MCP, And Supermarket
 
-Bots support a comprehensive set of slash commands that can be used directly in any channel:
+Bots can use a rich set of built-in capabilities, including:
 
-- `/help` — Show available commands
-- `/new` — Start a new conversation session
-- `/schedule` — Manage scheduled tasks
-- `/settings` — View and update bot settings
-- `/model` — Switch chat or heartbeat models
-- `/usage` — View token usage statistics
-- And more — see [Slash Commands](/getting-started/slash-commands) for the full reference.
+- web search and web fetch
+- browser automation
+- file editing and command execution inside the bot workspace
+- memory search and management
+- messaging, email, and TTS
+- subagents for delegated work
+- **skills** for reusable behavior modules
+- **MCP** connections for external tool servers
+- **Supermarket** for curated skill and MCP template installation
 
-### Multi-LLM Provider Support
+### Providers And Models
 
-Flexibly switch between a wide range of LLM providers via four client types:
+Memoh supports multiple provider client types, including:
 
-- OpenAI Responses API, OpenAI Chat Completions API (including compatible services)
-- Anthropic Messages API, Google Generative AI API
+- OpenAI-compatible chat completions
+- OpenAI Responses API
+- Anthropic Messages
+- Google Generative AI
+- OpenAI Codex
+- GitHub Copilot
+- Edge Speech / TTS
 
-Per-bot model assignment for chat, memory, and embedding. Providers support OAuth authentication and automatic model import.
+Models are also separated by role:
 
-### MCP Protocol Support
+- **chat** models for normal interaction
+- **embedding** models for vector memory and search
+- **speech** models for TTS
 
-Full MCP (Model Context Protocol) support via HTTP, SSE, and Stdio to connect external tool services. Built-in tools for container operations, memory search, web search, scheduling, messaging, and more. Each bot can have its own independent MCP connections with OAuth authentication support.
+Image generation is configured through compatible chat/image models rather than a separate image-provider system.
 
-### Scheduled Tasks
+### Operations And UI
 
-Configure scheduled tasks using cron expressions to automatically run commands at specified times. Supports max execution count limits and manual triggers.
+The Web UI is designed so you can manage the whole system without editing config files by hand every day. It includes:
 
-### Memory Compaction
+- bot configuration tabs for general settings, access, channels, heartbeat, compaction, and more
+- provider and model management with OAuth flows where supported
+- session-side controls such as immediate compaction and status inspection
+- skill management with effective / shadowed / disabled visibility
+- slash-command driven control from channels
 
-Automatic memory compaction reduces redundancy in the bot's memory pool over time. Configurable compaction ratios and decay windows keep the most relevant memories while optimizing storage and retrieval quality.
+## Where To Start
 
-### Graphical Configuration
-
-Modern web UI (Vue 3 + Tailwind CSS) with real-time streaming chat, tool call visualization, container filesystem browser, and visual configuration for bots, channels, providers, models, MCP, skills, and all other settings. Dark/light theme, i18n. No coding required to set up your own AI bot.
-
-## Installation
-
-To get Memoh running:
-
-- **[Docker](/installation/docker)** — Recommended. One-click or manual setup with Docker Compose. Includes all services (PostgreSQL, Qdrant, Containerd, server, web) — no extra dependencies on the host.
+- **[Docker Installation](/installation/docker)** — get the stack running
+- **[Providers And Models](/getting-started/provider-and-model)** — configure model access
+- **[Bot Setup](/getting-started/bot)** — create and configure a bot
+- **[Sessions](/getting-started/sessions)** — understand chat vs discuss behavior
+- **[Channels](/getting-started/channels)** — choose where bots are reachable
+- **[Skills](/getting-started/skills)** and **[Supermarket](/getting-started/supermarket)** — extend what bots can do
+- **[Slash Commands](/getting-started/slash-commands)** — operate bots directly from chat

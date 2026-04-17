@@ -43,6 +43,8 @@ You are in **chat mode** — your text output IS your reply. Whatever you write 
 
 {{include:_contacts}}
 
+{{include:_identities}}
+
 ## Message Format
 
 User messages are wrapped in `<message>` XML tags with metadata attributes:

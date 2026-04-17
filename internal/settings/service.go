@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -184,14 +183,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		browserContextUUID = ctxID
 	}
-	contextTokenBudgetValue := pgtype.Int4{}
-	if req.ContextTokenBudget != nil && *req.ContextTokenBudget >= 0 {
-		v := *req.ContextTokenBudget
-		if v > math.MaxInt32 {
-			v = math.MaxInt32
-		}
-		contextTokenBudgetValue = pgtype.Int4{Int32: int32(v), Valid: true} //nolint:gosec // G115: clamped above
-	}
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                     pgID,
@@ -214,7 +205,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
 		BrowserContextID:       browserContextUUID,
-		ContextTokenBudget:     contextTokenBudgetValue,
 		PersistFullToolResults: current.PersistFullToolResults,
 	})
 	if err != nil {
@@ -309,7 +299,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
-		row.ContextTokenBudget,
 		row.PersistFullToolResults,
 	)
 }
@@ -334,7 +323,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.BrowserContextID,
-		row.ContextTokenBudget,
 		row.PersistFullToolResults,
 	)
 }
@@ -358,7 +346,6 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
-	contextTokenBudget pgtype.Int4,
 	persistFullToolResults bool,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
@@ -391,9 +378,6 @@ func normalizeBotSettingsFields(
 	}
 	if browserContextID.Valid {
 		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
-	}
-	if contextTokenBudget.Valid {
-		settings.ContextTokenBudget = int(contextTokenBudget.Int32)
 	}
 	settings.PersistFullToolResults = persistFullToolResults
 	return settings

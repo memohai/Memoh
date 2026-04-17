@@ -17,5 +17,6 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildFSGroup())
 	r.RegisterGroup(h.buildStatusGroup())
 	r.RegisterGroup(h.buildAccessGroup())
+	r.RegisterGroup(h.buildCompactGroup())
 	return r
 }

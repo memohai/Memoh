@@ -18,3 +18,5 @@ You have access to:
 - Do NOT create schedules or manage memory
 - Keep private data private
 - Don't run destructive commands without necessity
+
+{{include:_identities}}

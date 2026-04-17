@@ -177,6 +177,7 @@ func TestAccountMetadataRoundTrip(t *testing.T) {
 	status := parsed.toStatus()
 	if status == nil {
 		t.Fatal("expected account status")
+		return
 	}
 	if status.Label != account.Label {
 		t.Fatalf("expected status label %q, got %q", account.Label, status.Label)

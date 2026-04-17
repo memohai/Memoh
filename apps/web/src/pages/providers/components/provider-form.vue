@@ -311,7 +311,7 @@ import StatusDot from '@/components/status-dot/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import { CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -407,7 +407,7 @@ watch(() => props.provider?.id, () => {
 })
 
 const clientTypeOptions = computed(() =>
-  CLIENT_TYPE_LIST.map((ct) => ({
+  LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
     description: ct.hint,

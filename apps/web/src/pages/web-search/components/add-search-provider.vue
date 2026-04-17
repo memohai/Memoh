@@ -14,9 +14,7 @@
           class="w-full shadow-none! text-muted-foreground mb-4"
           variant="outline"
         >
-          <Plus
-            class="mr-1"
-          /> {{ $t('webSearch.add') }}
+          <Plus class="mr-1" /> {{ $t('webSearch.add') }}
         </Button>
       </template>
       <template #body>
@@ -28,13 +26,13 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="componentField.id || 'search-provider-create-name'"
+                :for="'search-provider-create-name'"
               >
                 {{ $t('common.name') }}
               </Label>
               <FormControl>
                 <Input
-                  :id="componentField.id || 'search-provider-create-name'"
+                  :id="'search-provider-create-name'"
                   type="text"
                   :placeholder="$t('common.namePlaceholder')"
                   v-bind="componentField"
@@ -50,14 +48,14 @@
             <FormItem>
               <Label
                 class="mb-2"
-                :for="componentField.id || 'search-provider-create-type'"
+                :for="'search-provider-create-type'"
               >
                 {{ $t('webSearch.provider') }}
               </Label>
               <FormControl>
                 <Select v-bind="componentField">
                   <SelectTrigger
-                    :id="componentField.id || 'search-provider-create-type'"
+                    :id="'search-provider-create-type'"
                     class="w-full"
                     :aria-label="$t('webSearch.provider')"
                   >

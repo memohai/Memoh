@@ -4,7 +4,7 @@
       <!-- Header: Logo + Version + Check Button -->
       <div class="flex items-center gap-3">
         <img
-          src="/logo.png"
+          src="/logo.svg"
           alt="Memoh"
           class="size-10 shrink-0 rounded-lg"
         >

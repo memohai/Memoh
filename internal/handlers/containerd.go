@@ -175,6 +175,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/skills", h.ListSkills)
 	group.POST("/skills", h.UpsertSkills)
 	group.DELETE("/skills", h.DeleteSkills)
+	group.POST("/skills/actions", h.ApplySkillAction)
 	// Terminal routes
 	group.GET("/terminal", h.GetTerminalInfo)
 	group.GET("/terminal/ws", h.HandleTerminalWS)

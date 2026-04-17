@@ -27,7 +27,6 @@ type Settings struct {
 	CompactionRatio        int    `json:"compaction_ratio"`
 	CompactionModelID      string `json:"compaction_model_id,omitempty"`
 	DiscussProbeModelID    string `json:"discuss_probe_model_id,omitempty"`
-	ContextTokenBudget     int    `json:"context_token_budget"`
 	PersistFullToolResults bool   `json:"persist_full_tool_results"`
 }
 
@@ -52,6 +51,5 @@ type UpsertRequest struct {
 	CompactionRatio        *int    `json:"compaction_ratio,omitempty"`
 	CompactionModelID      *string `json:"compaction_model_id,omitempty"`
 	DiscussProbeModelID    string  `json:"discuss_probe_model_id,omitempty"`
-	ContextTokenBudget     *int    `json:"context_token_budget,omitempty"`
 	PersistFullToolResults *bool   `json:"persist_full_tool_results,omitempty"`
 }

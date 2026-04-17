@@ -43,6 +43,7 @@ func TestNewHTTPClientExplicitProxyOverridesEnvironment(t *testing.T) {
 	}
 	if proxyURL == nil {
 		t.Fatal("expected explicit proxy URL")
+		return
 	}
 	if proxyURL.Host != "config-proxy:3128" {
 		t.Fatalf("unexpected proxy host: %q", proxyURL.Host)

@@ -44,9 +44,6 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -82,29 +79,6 @@ jobs:
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
-
-      # macOS code signing with certificate secrets.
-      - name: Prepare macOS code signing
-        if: ${{ matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
-        run: |
-          set -euo pipefail
-          KEYCHAIN_PASSWORD="github-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import "$RUNNER_TEMP/certificate.p12" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
-          security add-certificates -k build.keychain "$RUNNER_TEMP/DeveloperIDG2CA.cer"
-          security find-identity -v -p codesigning build.keychain
-          IDENTITY=$(security find-identity -v -p codesigning build.keychain | awk -F'"' '/Developer ID Application/ { print $2; exit }')
-          if [[ -z "$IDENTITY" ]]; then
-            echo "No Developer ID Application identity in build keychain"
-            exit 1
-          fi
-          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

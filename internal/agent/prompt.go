@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	skillset "github.com/memohai/memoh/internal/skills"
 )
 
 //go:embed prompts/*.md
@@ -45,6 +47,7 @@ func init() {
 		"_memory":        mustReadPrompt("prompts/_memory.md"),
 		"_tools":         mustReadPrompt("prompts/_tools.md"),
 		"_contacts":      mustReadPrompt("prompts/_contacts.md"),
+		"_identities":    mustReadPrompt("prompts/_identities.md"),
 		"_schedule_task": mustReadPrompt("prompts/_schedule_task.md"),
 		"_subagent":      mustReadPrompt("prompts/_subagent.md"),
 	}
@@ -142,23 +145,25 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 	tmpl := selectSystemTemplate(params.SessionType)
 
 	return render(tmpl, map[string]string{
-		"home":          home,
-		"currentTime":   now.Format(time.RFC3339),
-		"timezone":      timezoneName,
-		"basicTools":    strings.Join(basicTools, "\n"),
-		"skillsSection": skillsSection,
-		"fileSections":  fileSections,
+		"home":                      home,
+		"currentTime":               now.Format(time.RFC3339),
+		"timezone":                  timezoneName,
+		"basicTools":                strings.Join(basicTools, "\n"),
+		"skillsSection":             skillsSection,
+		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
+		"fileSections":              fileSections,
 	})
 }
 
 // SystemPromptParams holds all inputs for system prompt generation.
 type SystemPromptParams struct {
-	SessionType        string
-	Skills             []SkillEntry
-	Files              []SystemFile
-	Now                time.Time
-	Timezone           string
-	SupportsImageInput bool
+	SessionType               string
+	Skills                    []SkillEntry
+	Files                     []SystemFile
+	Now                       time.Time
+	Timezone                  string
+	SupportsImageInput        bool
+	PlatformIdentitiesSection string
 }
 
 // GenerateSchedulePrompt builds the user message for a scheduled task trigger.
@@ -205,7 +210,8 @@ func buildSkillsSection(skills []SkillEntry) string {
 	})
 	var sb strings.Builder
 	sb.WriteString("## Skills\n\n")
-	sb.WriteString("Skills are stored in `{{home}}/skills/`. ")
+	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
+	sb.WriteString("Compatible external skill directories inside the bot container may also be discovered automatically. ")
 	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory.\n\n")
 	sb.WriteString("Call `use_skill` with the skill name to load its full instructions before following them. ")
 	sb.WriteString("Only activate a skill when it is relevant to the current task.\n\n")

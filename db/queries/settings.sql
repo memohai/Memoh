@@ -20,7 +20,6 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   browser_contexts.id AS browser_context_id,
-  bots.context_token_budget,
   bots.persist_full_tool_results
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
@@ -56,11 +55,10 @@ WITH updated AS (
       image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
       tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
       browser_context_id = COALESCE(sqlc.narg(browser_context_id)::uuid, bots.browser_context_id),
-      context_token_budget = COALESCE(sqlc.narg(context_token_budget)::integer, bots.context_token_budget),
       persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id, bots.context_token_budget, bots.persist_full_tool_results
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.browser_context_id, bots.persist_full_tool_results
 )
 SELECT
   updated.id AS bot_id,
@@ -83,7 +81,6 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   browser_contexts.id AS browser_context_id,
-  updated.context_token_budget,
   updated.persist_full_tool_results
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
@@ -116,7 +113,6 @@ SET language = 'auto',
     memory_provider_id = NULL,
     tts_model_id = NULL,
     browser_context_id = NULL,
-    context_token_budget = NULL,
     persist_full_tool_results = false,
     updated_at = now()
 WHERE id = $1;

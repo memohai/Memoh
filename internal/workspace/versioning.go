@@ -233,7 +233,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 	}
 
 	managedMeta := make(map[string]ManagedSnapshotMeta)
-	if m.queries != nil {
+	if m.db != nil && m.queries != nil {
 		rows, err := m.queries.ListSnapshotsWithVersionByContainerID(ctx, containerID)
 		if err != nil {
 			return nil, err
@@ -410,7 +410,7 @@ func (m *Manager) buildVersionSpec(ctx context.Context, botID string, cdiDevices
 		}
 		cdiDevices = gpu.Devices
 	}
-	return m.buildWorkspaceContainerSpec(botID, WorkspaceGPUConfig{Devices: cdiDevices})
+	return m.buildWorkspaceContainerSpec(ctx, botID, WorkspaceGPUConfig{Devices: cdiDevices})
 }
 
 func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {

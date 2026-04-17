@@ -20,7 +20,11 @@
 | Toast | vue-sonner |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
-| Utilities | @vueuse/core |
+| Charts | ECharts + vue-echarts |
+| Terminal | @xterm/xterm + @xterm/addon-fit + @xterm/addon-serialize |
+| Code Editor | Monaco Editor + stream-monaco |
+| Utilities | @vueuse/core, @vueuse/integrations |
+| Animation | animate.css + tw-animate-css |
 | TypeScript | ~5.9 (strict mode) |
 
 ## Directory Structure
@@ -32,7 +36,7 @@ src/
 ├── router.ts                  # Route definitions, auth guard, chunk error recovery
 ├── style.css                  # Tailwind imports (delegates to @memohai/ui/style.css)
 ├── i18n.ts                    # vue-i18n configuration
-├── assets/                    # Static assets (logo.png, vue.svg)
+├── assets/                    # Static assets (logo.svg)
 ├── components/                # Shared components
 │   ├── sidebar/               #   Bot list sidebar (collapsible, bot items, settings link)
 │   │   ├── index.vue          #     Sidebar with bot list + settings gear footer
@@ -45,14 +49,16 @@ src/
 │   ├── chat/                  #   Chat UI sub-components
 │   │   ├── chat-status/       #     Chat connection status indicator
 │   │   └── chat-step/         #     Chat processing step indicator
-│   ├── data-table/            #   TanStack table wrapper
-│   ├── file-manager/          #   File browser (list + viewer)
+│   ├── file-manager/          #   File browser (list + viewer + utils)
+│   ├── terminal/              #   Terminal emulator wrapper (xterm)
 │   ├── monaco-editor/         #   Monaco code editor wrapper
+│   ├── model-capabilities/    #   Model capabilities display
+│   ├── context-window-badge/  #   Context window size badge
+│   ├── bot-select/            #   Bot selection dropdown
 │   ├── form-dialog-shell/     #   Dialog wrapper for forms
 │   ├── confirm-popover/       #   Confirmation popover
 │   ├── loading-button/        #   Button with loading state
 │   ├── status-dot/            #   Status indicator dot
-│   ├── warning-banner/        #   Warning banner
 │   ├── channel-icon/          #   Channel platform icon
 │   ├── provider-icon/         #   LLM provider icon (icons.ts + index.vue)
 │   ├── search-provider-logo/  #   Search provider icons (custom-icons.ts + index.vue)
@@ -70,9 +76,10 @@ src/
 │   │   ├── useChat.chat-api.ts  #   Bot/session CRUD (fetchBots, fetchSessions, etc.)
 │   │   ├── useChat.message-api.ts  # Message fetch, SSE streaming, local channel
 │   │   ├── useChat.sse.ts     #     SSE stream reader and parser
-│   │   ├── useChat.ws.ts      #     WebSocket connection (send, abort, reconnect)
-│   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
 │   │   ├── useChat.sse.test.ts  #   SSE parser tests
+│   │   ├── useChat.ws.ts      #     WebSocket connection (send, abort, reconnect)
+│   │   ├── useChat.ws.test.ts #     WebSocket tests
+│   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
 │   │   ├── useContainerStream.ts  # Container creation SSE stream
 │   │   └── usePlatform.ts     #     Platform list query + create mutation
 │   ├── useDialogMutation.ts   #   Mutation wrapper with toast error handling
@@ -82,11 +89,13 @@ src/
 │   ├── useAvatarInitials.ts   #   Avatar initial generation
 │   ├── useClipboard.ts        #   Clipboard utilities
 │   ├── useKeyValueTags.ts     #   Tag management
+│   ├── usePinnedBots.ts       #   Pinned bots management
 │   ├── useShikiHighlighter.ts #   Shiki syntax highlighter singleton
 │   └── useTerminalCache.ts    #   Terminal output cache
 ├── constants/                 # Constants
 │   ├── client-types.ts        #   LLM client type definitions
-│   └── compatibilities.ts     #   Feature compatibility flags
+│   ├── compatibilities.ts     #   Feature compatibility flags
+│   └── acl-presets.ts         #   ACL preset configurations
 ├── i18n/locales/              # Translation files (en.json, zh.json)
 ├── layout/
 │   └── main-layout/           # Top-level layout (SidebarProvider)
@@ -101,18 +110,17 @@ src/
 │   │   ├── composables/       #     Page-specific composables
 │   │   │   ├── useFileManagerProvider.ts  # File manager context
 │   │   │   └── useMediaGallery.ts         # Media gallery state
-│   │   └── components/        #     Chat UI components (26 files)
+│   │   └── components/        #     Chat UI components (28 files)
 │   │       ├── chat-area.vue          # Main chat area (messages, input, attachments)
 │   │       ├── session-sidebar.vue    # Session list sidebar (search, filter, CRUD)
-│   │       ├── bot-sidebar.vue        # Alternative bot sidebar layout
+│   │       ├── session-info-panel.vue # Session info panel
 │   │       ├── chat-header.vue        # Chat top bar (status, step indicator)
 │   │       ├── message-item.vue       # Single message (user/assistant, markdown, blocks)
 │   │       ├── session-item.vue       # Session list row (avatar, title, timestamp)
-│   │       ├── session-metadata.vue   # Collapsible session metadata panel
-│   │       ├── bot-item.vue           # Bot item in sidebar
 │   │       ├── thinking-block.vue     # Collapsible thinking/reasoning block
 │   │       ├── attachment-block.vue   # Attachment grid (images, audio, files)
 │   │       ├── media-gallery-lightbox.vue  # Fullscreen media lightbox
+│   │       ├── tool-call-block.vue    # Generic tool call wrapper block
 │   │       ├── tool-call-generic.vue  # Generic tool call (name, status, JSON I/O)
 │   │       ├── tool-call-list.vue     # File listing tool display
 │   │       ├── tool-call-read.vue     # File read tool display
@@ -128,20 +136,51 @@ src/
 │   │       ├── tool-call-schedule.vue      # Schedule tool display
 │   │       ├── tool-call-contacts.vue      # Contacts tool display
 │   │       ├── tool-call-subagent.vue      # Sub-agent tool display
-│   │       └── tool-call-skill.vue         # Skill activation tool display
+│   │       ├── tool-call-skill.vue         # Skill activation tool display
+│   │       ├── schedule-trigger-block.vue  # Schedule trigger display
+│   │       └── heartbeat-trigger-block.vue # Heartbeat trigger display
 │   ├── bots/                  #   Bot list + detail (tabs: overview, memory, channels, etc.)
 │   │   ├── index.vue          #     Bot grid with create dialog
 │   │   ├── detail.vue         #     Bot detail with tabbed interface
-│   │   └── components/        #     Bot sub-components (25+ files)
-│   ├── models/                #   LLM provider & model management
-│   ├── search-providers/      #   Search provider management (12+ engine configs)
-│   ├── memory-providers/      #   Memory provider management
-│   ├── tts-providers/         #   TTS provider & model management
-│   ├── email-providers/       #   Email provider management
-│   ├── browser-contexts/      #   Browser context management
+│   │   └── components/        #     Bot sub-components (27 files)
+│   │       ├── bot-overview.vue       # Bot overview tab
+│   │       ├── bot-settings.vue       # Bot settings tab
+│   │       ├── bot-channels.vue       # Channel configuration tab
+│   │       ├── bot-memory.vue         # Memory configuration tab
+│   │       ├── bot-mcp.vue            # MCP connections tab
+│   │       ├── bot-schedule.vue       # Schedule management tab
+│   │       ├── bot-heartbeat.vue      # Heartbeat configuration tab
+│   │       ├── bot-email.vue          # Email configuration tab
+│   │       ├── bot-container.vue      # Container management tab
+│   │       ├── bot-files.vue          # File browser tab
+│   │       ├── bot-terminal.vue       # Terminal tab
+│   │       ├── bot-skills.vue         # Skills tab
+│   │       ├── bot-access.vue         # Access control tab
+│   │       ├── bot-compaction.vue     # Compaction settings tab
+│   │       ├── bot-card.vue           # Bot card component
+│   │       ├── create-bot.vue         # Create bot dialog
+│   │       ├── model-select.vue       # Model selection dropdown
+│   │       ├── model-options.vue      # Model options configuration
+│   │       ├── reasoning-effort-select.vue  # Reasoning effort selector
+│   │       ├── reasoning-effort.ts    # Reasoning effort constants
+│   │       ├── search-provider-select.vue   # Search provider selector
+│   │       ├── memory-provider-select.vue   # Memory provider selector
+│   │       ├── browser-context-select.vue   # Browser context selector
+│   │       ├── tts-model-select.vue         # TTS model selector
+│   │       ├── channel-settings-panel.vue   # Channel settings panel
+│   │       ├── container-create-progress.vue # Container creation progress
+│   │       └── weixin-qr-login.vue          # WeChat QR login
+│   ├── providers/             #   LLM provider & model management
+│   ├── web-search/            #   Web search provider management
+│   ├── memory/                #   Memory provider management
+│   ├── speech/                #   TTS / speech provider & model management
+│   ├── email/                 #   Email provider management
+│   ├── browser/               #   Browser context management
+│   ├── supermarket/           #   Supermarket (template/skill marketplace)
 │   ├── usage/                 #   Token usage statistics
-│   ├── settings/              #   User settings (profile, password, bind codes)
+│   ├── profile/               #   User profile settings (password, bind codes)
 │   ├── platform/              #   Platform management
+│   ├── about/                 #   About page
 │   └── oauth/                 #   OAuth callback pages
 │       └── mcp-callback.vue   #     MCP OAuth callback handler
 ├── store/                     # Pinia stores
@@ -149,12 +188,15 @@ src/
 │   ├── settings.ts            #   UI settings (theme, language)
 │   ├── capabilities.ts        #   Server capabilities (container backend)
 │   ├── chat-selection.ts      #   Current bot/session selection (localStorage persisted)
-│   └── chat-list.ts           #   Chat messages, streaming state, SSE/WS event processing
+│   ├── chat-list.ts           #   Chat messages, streaming state, SSE/WS event processing
+│   └── chat-list.utils.ts     #   Chat list utility functions (+ chat-list.utils.test.ts)
+├── stores/                    # Additional stores (non-core)
+│   └── supermarket-mcp-draft.ts #  Supermarket MCP draft state
 └── utils/                     # Utility functions
     ├── api-error.ts           #   API error message extraction
     ├── date-time.ts           #   Date/time formatting
     ├── date-time.test.ts      #   Date/time tests
-    ├── channel-icons.ts       #   Channel platform icons
+    ├── channel-type-label.ts  #   Channel type label utilities
     ├── key-value-tags.ts      #   Tag ↔ Record conversion
     ├── key-value-tags.test.ts #   Tag conversion tests
     ├── image-ref.ts           #   Image reference URL resolution
@@ -182,15 +224,17 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 |------|------|-----------|-------------|
 | `/settings/bots` | bots | `bots/index.vue` | Bot list grid |
 | `/settings/bots/:botId` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
-| `/settings/models` | models | `models/index.vue` | LLM provider & model management |
-| `/settings/search-providers` | search-providers | `search-providers/index.vue` | Search provider management |
-| `/settings/memory-providers` | memory-providers | `memory-providers/index.vue` | Memory provider management |
-| `/settings/tts-providers` | tts-providers | `tts-providers/index.vue` | TTS provider & model management |
-| `/settings/email-providers` | email-providers | `email-providers/index.vue` | Email provider management |
-| `/settings/browser-contexts` | browser-contexts | `browser-contexts/index.vue` | Browser context management |
+| `/settings/providers` | providers | `providers/index.vue` | LLM provider & model management |
+| `/settings/web-search` | web-search | `web-search/index.vue` | Web search provider management |
+| `/settings/memory` | memory | `memory/index.vue` | Memory provider management |
+| `/settings/speech` | speech | `speech/index.vue` | TTS / speech provider & model management |
+| `/settings/email` | email | `email/index.vue` | Email provider management |
+| `/settings/browser` | browser | `browser/index.vue` | Browser context management |
+| `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
 | `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
-| `/settings/profile` | settings | `settings/index.vue` | User profile settings |
+| `/settings/profile` | profile | `profile/index.vue` | User profile settings |
 | `/settings/platform` | platform | `platform/index.vue` | Platform management |
+| `/settings/about` | about | `about/index.vue` | About page |
 
 `/settings` redirects to `/settings/bots` by default.
 
@@ -206,7 +250,7 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 - All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
 - Logged-in users accessing `/login` are redirected to `/`.
 - Chunk load errors (dynamic import failures) trigger an automatic page reload.
-- Tauri integration: `afterEach` hook calls `resize_for_route` when running inside Tauri.
+- Tauri integration: `afterEach` hook calls `resize_for_route` via `@tauri-apps/api/core` when running inside Tauri.
 
 ## Layout System
 
@@ -219,15 +263,15 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
    - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
 
 3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:
-   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items: Bots, Models, Search Providers, Memory Providers, TTS Providers, Email Providers, Browser Contexts, Usage, Settings, Platform.
+   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items: Bots, Providers, Web Search, Memory, Speech, Email, Browser, Supermarket, Usage, Profile, About.
    - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
 
 4. **Home/Chat Page** (`pages/home/`) — Internal layout:
    - **SessionSidebar** — Left panel: session search, source filter, new session button, session list.
    - **ChatArea** — Center panel: message list with scroll, input area with attachments.
-   - **SessionMetadata** — Right panel (currently disabled): collapsible session metadata.
+   - **SessionInfoPanel** — Right panel: session info display.
 
-Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (models, search providers, email providers, memory providers, tts providers, browser contexts).
+Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, speech, browser).
 
 ## CSS & Theming
 
@@ -265,6 +309,7 @@ All UI primitives are provided by `@memohai/ui` (43 component groups built on Re
 
 ```
 style.css                    — Tailwind + theme tokens
+animate.css                  — Animation utilities
 markstream-vue/index.css     — Markdown rendering
 katex/dist/katex.min.css     — Math rendering
 vue-sonner/style.css         — Toast notifications (in App.vue)
@@ -377,7 +422,12 @@ SDK also generates colada helpers: `getBotsQuery()`, `postBotsMutation()`, query
 | `settings` | `settings` | Theme (dark/light), language (en/zh), synced with `useColorMode` and vue-i18n locale |
 | `capabilities` | `capabilities` | Server feature flags (container backend, snapshot support), loaded once from `getPing()` |
 | `chat-selection` | `chat-selection` | Current bot ID and session ID, persisted via `useStorage` to localStorage |
-| `chat-list` | `chat` | Chat messages, sessions, bots, streaming state, SSE/WS event processing. Depends on `chat-selection` store for current bot/session |
+| `chat-list` | `chat` | Chat messages, sessions, bots, streaming state, SSE/WS event processing. Depends on `chat-selection` store for current bot/session. Utility functions in `chat-list.utils.ts` |
+
+Additional stores in `stores/`:
+| Store | Purpose |
+|-------|---------|
+| `supermarket-mcp-draft` | Supermarket MCP draft state management |
 
 Stores use Composition API style (`defineStore(() => { ... })`), with persistence via `pinia-plugin-persistedstate` or `useStorage`.
 
@@ -410,7 +460,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 - Locales: `en` (English, default), `zh` (Chinese)
 - Files: `src/i18n/locales/en.json`, `src/i18n/locales/zh.json`
 - Usage: `const { t } = useI18n()` → `t('bots.title')`
-- Key namespaces: `common`, `auth`, `sidebar`, `settings`, `chat`, `models`, `provider`, `searchProvider`, `emailProvider`, `mcp`, `bots`, `home`
+- Key namespaces: `common`, `auth`, `sidebar`, `breadcrumb`, `settings`, `about`, `chat`, `models`, `provider`, `webSearch`, `memory`, `speech`, `email`, `browser`, `mcp`, `home`, `bots`, `usage`, `supermarket`
 
 ## Vite Configuration
 

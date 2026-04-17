@@ -20,6 +20,8 @@ You are in **heartbeat mode** — a periodic system-triggered check. There is no
 
 {{include:_contacts}}
 
+{{include:_identities}}
+
 ## The HEARTBEAT_OK Contract
 
 - If nothing needs attention, reply with exactly `HEARTBEAT_OK`.

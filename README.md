@@ -4,10 +4,8 @@
 </div>  
 
 <div align="center">
-  <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
-  <h1>Memoh</h1>
+  <img src="./assets/logo_title.png" alt="Memoh" height="100">
   <p>Self hosted, always-on AI agent platform run in containers.</p>
-  <p>📌 <a href="https://docs.memoh.ai/blogs/2026-02-16.html">Introduction to Memoh - The Case for an Always-On, Containerized Home Agent</a></p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />
@@ -28,7 +26,7 @@
   <hr>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), QQ, Matrix, WeCom, WeChat, Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -66,6 +64,17 @@ Visit <http://localhost:8082> after startup. Default login: `admin` / `admin123`
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup.
 
+Documentation entry points:
+
+- [About Memoh](https://docs.memoh.ai/about)
+- [Providers & Models](https://docs.memoh.ai/getting-started/provider-and-model)
+- [Bot Setup](https://docs.memoh.ai/getting-started/bot)
+- [Sessions & Discuss Mode](https://docs.memoh.ai/getting-started/sessions)
+- [Channels](https://docs.memoh.ai/getting-started/channels)
+- [Skills](https://docs.memoh.ai/getting-started/skills)
+- [Supermarket](https://docs.memoh.ai/getting-started/supermarket)
+- [Slash Commands](https://docs.memoh.ai/getting-started/slash-commands)
+
 ## Why Memoh?
 
 Memoh is built for **always-on continuity** — an AI that stays online, and a memory that stays yours.
@@ -82,21 +91,22 @@ Memoh is built for **always-on continuity** — an AI that stays online, and a m
 
 - 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats, remember each person's context, and support cross-platform identity binding.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container with a dedicated filesystem and network — like having its own computer. Supports snapshots, data export/import, and versioning.
-- 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), 24-hour context loading, memory compaction & rebuild. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.
-- 💬 **9 Channels**: Telegram, Discord, Lark (Feishu), QQ, Matrix, WeCom, WeChat, Email (Mailgun / SMTP / Gmail OAuth), and built-in Web UI — with unified streaming, rich text, and attachments.
+- 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), provider-based long-term memory, memory compaction, and separate session-level context compaction. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.
+- 💬 **Broad Channel Coverage**: Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email (Mailgun / SMTP / Gmail OAuth), and built-in Web UI.
 
 ### Agent Capabilities
 
 - 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio / OAuth). Connect external tool servers for extensibility; each bot manages its own independent MCP connections.
 - 🌐 **Browser Automation**: Headless Chromium/Firefox via Playwright — navigate, click, fill forms, screenshot, read accessibility trees, manage tabs.
-- 🎭 **Skills & Subagents**: Define bot personality via modular skill files; delegate complex tasks to sub-agents with independent context.
+- 🎭 **Skills, Supermarket & Subagents**: Define bot behavior through modular skills, install curated skills and MCP templates from Supermarket, and delegate complex tasks to sub-agents with independent context.
+- 💭 **Sessions & Discuss Mode**: Use chat, discuss, schedule, heartbeat, and subagent sessions with slash-command control and session status inspection.
 - ⏰ **Automation**: Cron-based scheduled tasks and periodic heartbeat for autonomous bot activity.
 
 ### Management
 
 - 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) — streaming chat, tool call visualization, file manager, visual configuration for all settings. Dark/light theme, i18n.
-- 🔐 **Access Control**: Priority-based ACL rules with allow/deny effects, scoped by channel identity, channel type, or conversation.
-- 🧪 **Multi-Model**: Any OpenAI-compatible, Anthropic, or Google provider. Per-bot model assignment, provider OAuth, and automatic model import.
+- 🔐 **Access Control**: Priority-based ACL rules with presets, allow/deny effects, and scope by channel identity, channel type, or conversation.
+- 🧪 **Multi-Model**: OpenAI-compatible, Anthropic, Google, OpenAI Codex, GitHub Copilot, and Edge TTS providers. Per-bot model assignment, provider OAuth, and automatic model import.
 - 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking.
 
 ## Memory System
@@ -144,7 +154,7 @@ Additional capabilities include memory compaction (merge redundant entries), reb
 flowchart TB
     subgraph Clients [" Clients "]
         direction LR
-        CH["Channels<br/>Telegram · Discord · Feishu · QQ<br/>Matrix · WeCom · WeChat · Email"]
+        CH["Channels<br/>Telegram · Discord · Feishu · QQ · Matrix · Misskey<br/>DingTalk · WeCom · WeChat · WeChat OA · Email"]
         WEB["Web UI (Vue 3 :8082)"]
     end
 

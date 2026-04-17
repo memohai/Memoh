@@ -1,0 +1,295 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing release tag to rebuild, e.g. v0.7.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag_name || github.ref_name }}
+
+jobs:
+  changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          registry-url: https://registry.npmjs.org/
+
+      - run: pnpm dlx changelogithub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cli-build:
+    name: Build CLI ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build release archive
+        shell: bash
+        env:
+          COMMIT_HASH: ${{ github.sha }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          bash scripts/release.sh \
+            --version "$VERSION" \
+            --commit-hash "$COMMIT_HASH" \
+            --os "$TARGET_OS" \
+            --arch "$TARGET_ARCH" \
+            --output-dir dist
+      - name: Upload CLI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  cli-upload:
+    name: Upload CLI artifacts
+    runs-on: ubuntu-latest
+    needs: [changelog, cli-build]
+    if: ${{ always() && needs.cli-build.result == 'success' && (needs.changelog.result == 'success' || needs.changelog.result == 'skipped') }}
+    steps:
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/cli
+          pattern: cli-*
+          merge-multiple: true
+      - name: Publish CLI assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release-artifacts/cli/*.tar.gz release-artifacts/cli/*.zip)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No CLI artifacts found" >&2
+            exit 1
+          fi
+          gh release upload "$TAG_NAME" "${files[@]}" --clobber --repo "$GH_REPO"
+
+  desktop-build:
+    name: Build desktop ${{ matrix.target }}
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync desktop version files
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          export VERSION
+          node <<'EOF'
+          const fs = require('fs');
+          const version = process.env.VERSION;
+          const packageJsonPath = 'apps/desktop/package.json';
+          const tauriConfPath = 'apps/desktop/src-tauri/tauri.conf.json';
+          const cargoTomlPath = 'apps/desktop/src-tauri/Cargo.toml';
+
+          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+          packageJson.version = version;
+          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
+          tauriConf.version = version;
+          fs.writeFileSync(tauriConfPath, `${JSON.stringify(tauriConf, null, 2)}\n`);
+
+          const cargoToml = fs
+            .readFileSync(cargoTomlPath, 'utf8')
+            .replace(/^version = ".*"$/m, `version = "${version}"`);
+          fs.writeFileSync(cargoTomlPath, cargoToml);
+          EOF
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare macOS code signing
+        if: ${{ matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASSWORD="github-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}"
+          python3 - <<'EOF'
+          import base64
+          import os
+          from pathlib import Path
+
+          target = Path(os.environ["RUNNER_TEMP"]) / "certificate.p12"
+          target.write_bytes(base64.b64decode(os.environ["APPLE_CERTIFICATE"]))
+          EOF
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import "$RUNNER_TEMP/certificate.p12" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security add-certificates -k build.keychain "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security find-identity -v -p codesigning build.keychain
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "No Developer ID Application identity in build keychain"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Build desktop bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(build --target "${{ matrix.target }}")
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            VERSION="${RELEASE_TAG#v}"
+            NUMERIC_VERSION="${VERSION%%-*}"
+            NUMERIC_VERSION="${NUMERIC_VERSION%%+*}"
+            ARGS+=(--config "{\"bundle\":{\"windows\":{\"wix\":{\"version\":\"${NUMERIC_VERSION}\"}}}}")
+          fi
+          pnpm --filter @memohai/desktop tauri "${ARGS[@]}"
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
+          if-no-files-found: error
+
+  desktop-upload:
+    name: Upload desktop artifacts
+    runs-on: ubuntu-latest
+    needs: [changelog, desktop-build]
+    if: ${{ always() && needs.desktop-build.result == 'success' && (needs.changelog.result == 'success' || needs.changelog.result == 'skipped') }}
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/desktop
+          pattern: desktop-*
+          merge-multiple: true
+      - name: Publish desktop assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          files=(
+            release-artifacts/desktop/**/*.AppImage
+            release-artifacts/desktop/**/*.app.tar.gz
+            release-artifacts/desktop/**/*.deb
+            release-artifacts/desktop/**/*.dmg
+            release-artifacts/desktop/**/*.exe
+            release-artifacts/desktop/**/*.msi
+            release-artifacts/desktop/**/*.rpm
+            release-artifacts/desktop/**/*.sig
+          )
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No desktop artifacts found" >&2
+            exit 1
+          fi
+          gh release upload "$TAG_NAME" "${files[@]}" --clobber --repo "$GH_REPO"

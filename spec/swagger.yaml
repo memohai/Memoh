@@ -1589,12 +1589,31 @@ definitions:
         type: string
       description:
         type: string
+      managed:
+        type: boolean
       metadata:
         additionalProperties: {}
         type: object
       name:
         type: string
       raw:
+        type: string
+      shadowed_by:
+        type: string
+      source_kind:
+        type: string
+      source_path:
+        type: string
+      source_root:
+        type: string
+      state:
+        type: string
+    type: object
+  handlers.SkillsActionRequest:
+    properties:
+      action:
+        type: string
+      target_path:
         type: string
     type: object
   handlers.SkillsDeleteRequest:
@@ -1779,6 +1798,15 @@ definitions:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
+    type: object
+  handlers.TriggerCompactResponse:
+    properties:
+      message_count:
+        type: integer
+      status:
+        type: string
+      summary:
+        type: string
     type: object
   handlers.createSessionRequest:
     properties:
@@ -2659,8 +2687,6 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
-      context_token_budget:
-        type: integer
       discuss_probe_model_id:
         type: string
       heartbeat_enabled:
@@ -2705,8 +2731,6 @@ definitions:
       compaction_ratio:
         type: integer
       compaction_threshold:
-        type: integer
-      context_token_budget:
         type: integer
       discuss_probe_model_id:
         type: string
@@ -3866,7 +3890,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete skills from data directory
+      summary: Delete Memoh-managed skills
       tags:
       - containerd
     get:
@@ -3893,7 +3917,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from data directory
+      summary: List skills from the bot container
       tags:
       - containerd
     post:
@@ -3926,7 +3950,41 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Upload skills into data directory
+      summary: Upload skills into Memoh-managed directory
+      tags:
+      - containerd
+  /bots/{bot_id}/container/skills/actions:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Skill action payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SkillsActionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.skillsOpResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Apply an action to a discovered or managed skill source
       tags:
       - containerd
   /bots/{bot_id}/container/snapshots:
@@ -5766,6 +5824,36 @@ paths:
       summary: Update a session
       tags:
       - sessions
+  /bots/{bot_id}/sessions/{session_id}/compact:
+    post:
+      description: Run context compaction synchronously for a session
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TriggerCompactResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Trigger immediate context compaction
+      tags:
+      - compaction
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,

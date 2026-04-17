@@ -6,6 +6,8 @@ Memoh fully supports the **Model Context Protocol (MCP)**, allowing you to conne
 
 MCP provides a standardized way for bots to access external data sources and tools. Each Bot can have its own independent set of MCP connections.
 
+You can configure connections manually from the **MCP** tab, or start from a curated template in **[Supermarket](/getting-started/supermarket.md)** and then review the prefilled draft in the bot editor.
+
 ---
 
 ## Connection Types

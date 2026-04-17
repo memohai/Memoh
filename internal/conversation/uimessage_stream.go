@@ -68,21 +68,32 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return nil
 
 	case "tool_call_start":
-		state := &uiToolStreamState{
-			Message: UIMessage{
-				ID:         c.nextMessageID(),
-				Type:       UIMessageTool,
-				Name:       strings.TrimSpace(event.ToolName),
-				Input:      event.Input,
-				ToolCallID: strings.TrimSpace(event.ToolCallID),
-				Running:    uiBoolPtr(true),
-			},
+		state := c.findToolState(event.ToolCallID, event.ToolName)
+		if state == nil {
+			state = &uiToolStreamState{
+				Message: UIMessage{
+					ID:         c.nextMessageID(),
+					Type:       UIMessageTool,
+					Name:       strings.TrimSpace(event.ToolName),
+					Input:      event.Input,
+					ToolCallID: strings.TrimSpace(event.ToolCallID),
+					Running:    uiBoolPtr(true),
+				},
+			}
 		}
-		if state.Message.ToolCallID != "" {
-			c.tools[state.Message.ToolCallID] = state
+		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
+			state.Message.Name = trimmed
 		}
+		if event.Input != nil {
+			state.Message.Input = event.Input
+		}
+		if trimmed := strings.TrimSpace(event.ToolCallID); trimmed != "" {
+			state.Message.ToolCallID = trimmed
+			c.tools[trimmed] = state
+		}
+		state.Message.Running = uiBoolPtr(true)
 		c.text = nil
-		return []UIMessage{state.Message}
+		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_call_progress":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
