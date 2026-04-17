@@ -28,7 +28,7 @@
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent class="@container/bots">
         <SidebarGroup class="px-2 py-0">
           <SidebarGroupContent>
             <SidebarMenu class="gap-1">
@@ -50,7 +50,7 @@
             </div>
             <div
               v-if="!isLoading && bots.length === 0"
-              class="px-3 py-6 text-center text-xs text-muted-foreground"
+              class="px-3 py-6 text-center text-xs text-muted-foreground @max-[50px]/bots:hidden"
             >
               {{ t('bots.emptyTitle') }}
             </div>

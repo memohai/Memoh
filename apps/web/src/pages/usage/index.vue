@@ -340,8 +340,8 @@ const { data: botData } = useQuery(getBotsQuery())
 const botList = computed(() => botData.value?.items ?? [])
 
 watch(botList, (list) => {
-  if (!selectedBotId.value && list.length > 0 && list[0].id) {
-    selectedBotId.value = list[0].id
+  if (!selectedBotId.value && list.length > 0 && list[0]!.id) {
+    selectedBotId.value = list[0]!.id
   }
 }, { immediate: true })
 

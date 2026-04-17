@@ -74,14 +74,16 @@ const openStatus = reactive({
               :model-value="selectContext(item.id as string).value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
-                  curContext.value = item
+                  curContext = item
                 }
               }"
             >
               <AppWindow
                 class="mr-2"
               />
-              {{ item.name }}
+              <span>
+                {{ item.name }}
+              </span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>
