@@ -259,6 +259,21 @@
         <div class="space-y-4 py-2">
           <div class="space-y-2">
             <Label class="text-xs font-medium">
+              {{ $t('bots.skills.managedPathLabel') }}
+            </Label>
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.skills.managedPathDescription') }}
+            </p>
+            <div class="rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs text-foreground break-all">
+              {{ MANAGED_SKILL_PATH }}
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.skills.managedPathHint') }}
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label class="text-xs font-medium">
               {{ $t('bots.skills.discoveryPathsLabel') }}
             </Label>
             <p class="text-xs text-muted-foreground">
@@ -354,6 +369,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
+const MANAGED_SKILL_PATH = '/data/skills'
 const DEFAULT_DISCOVERY_ROOTS = ['/data/.agents/skills', '/root/.agents/skills']
 const RESERVED_DISCOVERY_ROOTS = new Set(['/data/skills', '/data/.skills'])
 const WORKSPACE_METADATA_KEY = 'workspace'
