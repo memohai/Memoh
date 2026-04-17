@@ -984,7 +984,7 @@ func (a *Agent) runMidStreamRetry(
 				if textLoopProbeBuffer != nil {
 					textLoopProbeBuffer.Flush()
 				}
-				if !sendEvent(ctx, ch, StreamEvent{
+				if !sendEvent(sendCtx, ch, StreamEvent{
 					Type:       EventToolCallStart,
 					ToolName:   rp.ToolName,
 					ToolCallID: rp.ID,
