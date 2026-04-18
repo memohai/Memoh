@@ -114,6 +114,50 @@ func TestBuildTelegramAttachmentIncludesPlatformReference(t *testing.T) {
 	}
 }
 
+func TestTelegramNewBotDoesNotReusePollingInstance(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	cfg := Config{BotToken: "token"}
+
+	origGetBot := getOrCreateBotForTest
+	var created int
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		created++
+		return &tgbotapi.BotAPI{Token: fmt.Sprintf("token-%d", created)}, nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+	}()
+
+	cached1, err := adapter.getOrCreateBot(cfg, "cfg-1")
+	if err != nil {
+		t.Fatalf("getOrCreateBot first call: %v", err)
+	}
+	cached2, err := adapter.getOrCreateBot(cfg, "cfg-1")
+	if err != nil {
+		t.Fatalf("getOrCreateBot second call: %v", err)
+	}
+	if cached1 != cached2 {
+		t.Fatal("expected cached bot instance to be reused")
+	}
+
+	poll1, err := adapter.newBot(cfg, "cfg-1")
+	if err != nil {
+		t.Fatalf("newBot first call: %v", err)
+	}
+	poll2, err := adapter.newBot(cfg, "cfg-1")
+	if err != nil {
+		t.Fatalf("newBot second call: %v", err)
+	}
+	if poll1 == poll2 {
+		t.Fatal("expected polling bot instances to be distinct")
+	}
+	if got := len(adapter.bots); got != 1 {
+		t.Fatalf("expected one cached bot instance, got %d", got)
+	}
+}
+
 func TestBuildTelegramAttachmentInfersTypeFromMime(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 )
 
@@ -167,6 +168,7 @@ type BaseConnection struct {
 	botID       string
 	channelType ChannelType
 	stop        func(ctx context.Context) error
+	stopMu      sync.Mutex
 	running     atomic.Bool
 }
 
@@ -199,6 +201,11 @@ func (c *BaseConnection) ChannelType() ChannelType {
 
 // Stop gracefully shuts down the connection.
 func (c *BaseConnection) Stop(ctx context.Context) error {
+	c.stopMu.Lock()
+	defer c.stopMu.Unlock()
+	if !c.running.Load() {
+		return nil
+	}
 	if c.stop == nil {
 		return ErrStopNotSupported
 	}

@@ -94,11 +94,29 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tgbotapi.BotAPI, error)
 
-func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
+func (a *TelegramAdapter) newBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
 	channel.SetIMErrorSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
 	}
+	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error("create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
+		}
+		return nil, err
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient(cfg.BotToken, cfg.apiEndpoint(), httpClient)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error("create bot failed", slog.String("config_id", configID), slog.Any("error", err))
+		}
+		return nil, err
+	}
+	return bot, nil
+}
+
+func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi.BotAPI, error) {
 	cacheKey := strings.Join([]string{
 		cfg.BotToken,
 		cfg.baseURL(),
@@ -115,18 +133,9 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tgbotapi
 	if bot, ok := a.bots[cacheKey]; ok {
 		return bot, nil
 	}
-	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
+	var err error
+	bot, err = a.newBot(cfg, configID)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
-		return nil, err
-	}
-	bot, err = tgbotapi.NewBotAPIWithClient(cfg.BotToken, cfg.apiEndpoint(), httpClient)
-	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("create bot failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	a.bots[cacheKey] = bot
@@ -270,7 +279,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		}
 		return nil, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	// Long-polling uses a dedicated BotAPI instance because the Telegram SDK
+	// closes an internal shutdown channel on StopReceivingUpdates, making the
+	// instance unsafe to reuse across reconnects.
+	bot, err := a.newBot(telegramCfg, cfg.ID)
 	if err != nil {
 		if a.logger != nil {
 			a.logger.Error("create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
