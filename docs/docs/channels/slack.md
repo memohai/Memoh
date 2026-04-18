@@ -82,5 +82,3 @@ If the bot can send messages but cannot read uploaded images or files, check tha
 
 - **Direct Messages and Channels**: Support for DMs, public channels, private channels, and threads.
 - **Attachments**: Read uploaded images and files from Slack, and send files back.
-- **Streaming**: Responses can stream incrementally.
-- **Reactions**: Add and remove reactions on Slack messages.
