@@ -116,6 +116,32 @@ func TestSlackCollectAttachmentsOmitsPrivateURLForInboundFiles(t *testing.T) {
 	}
 }
 
+func TestResolveSlackEmoji(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "unicode", in: "👍", want: "+1"},
+		{name: "shortcode with colons", in: ":thumbsup:", want: "thumbsup"},
+		{name: "shortcode plain", in: "thumbsup", want: "thumbsup"},
+		{name: "skin tone unicode", in: "👍🏽", want: "+1::skin-tone-4"},
+		{name: "variation selector unicode", in: "✌️", want: "v"},
+		{name: "skin tone wave", in: "👋🏻", want: "wave::skin-tone-2"},
+		{name: "unknown passthrough", in: "not-an-emoji", want: "not-an-emoji"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSlackEmoji(tt.in); got != tt.want {
+				t.Fatalf("resolveSlackEmoji(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSlackConnectClearsCachedClientWhenAuthFails(t *testing.T) {
 	t.Parallel()
 
@@ -1128,6 +1154,92 @@ func TestSlackOpenStreamResolvesUserTargetToDMChannel(t *testing.T) {
 	}
 	if slackStream.target != "D999" {
 		t.Fatalf("expected resolved DM target, got %q", slackStream.target)
+	}
+}
+
+func TestSlackReactConvertsSkinToneEmojiToSlackName(t *testing.T) {
+	t.Parallel()
+
+	var gotName string
+	adapter := NewSlackAdapter(nil)
+	adapter.apiFactory = func(cfg Config, options ...slack.Option) *slack.Client {
+		return slack.New(
+			cfg.BotToken,
+			append(options,
+				slack.OptionAPIURL("https://slack.test/api/"),
+				slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.URL.String() != "https://slack.test/api/reactions.add" {
+						return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Fatalf("ParseForm: %v", err)
+					}
+					gotName = r.FormValue("name")
+					body, _ := json.Marshal(map[string]any{"ok": true})
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(string(body))),
+					}, nil
+				})}),
+			)...,
+		)
+	}
+
+	err := adapter.React(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"botToken": testShortBotToken,
+			"appToken": testAppToken,
+		},
+	}, "C123", "1710000000.000100", "👍🏽")
+	if err != nil {
+		t.Fatalf("React: %v", err)
+	}
+	if gotName != "+1::skin-tone-4" {
+		t.Fatalf("expected skin tone slack reaction name, got %q", gotName)
+	}
+}
+
+func TestSlackUnreactConvertsSkinToneEmojiToSlackName(t *testing.T) {
+	t.Parallel()
+
+	var gotName string
+	adapter := NewSlackAdapter(nil)
+	adapter.apiFactory = func(cfg Config, options ...slack.Option) *slack.Client {
+		return slack.New(
+			cfg.BotToken,
+			append(options,
+				slack.OptionAPIURL("https://slack.test/api/"),
+				slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.URL.String() != "https://slack.test/api/reactions.remove" {
+						return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("not found")), Header: make(http.Header)}, nil
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Fatalf("ParseForm: %v", err)
+					}
+					gotName = r.FormValue("name")
+					body, _ := json.Marshal(map[string]any{"ok": true})
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(string(body))),
+					}, nil
+				})}),
+			)...,
+		)
+	}
+
+	err := adapter.Unreact(context.Background(), channel.ChannelConfig{
+		Credentials: map[string]any{
+			"botToken": testShortBotToken,
+			"appToken": testAppToken,
+		},
+	}, "C123", "1710000000.000100", "👍🏽")
+	if err != nil {
+		t.Fatalf("Unreact: %v", err)
+	}
+	if gotName != "+1::skin-tone-4" {
+		t.Fatalf("expected skin tone slack reaction name, got %q", gotName)
 	}
 }
 

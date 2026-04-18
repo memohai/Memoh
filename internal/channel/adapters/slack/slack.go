@@ -801,8 +801,7 @@ func (a *SlackAdapter) React(ctx context.Context, cfg channel.ChannelConfig, tar
 		return err
 	}
 
-	// Slack reactions use emoji names without colons
-	emoji = strings.Trim(emoji, ":")
+	emoji = resolveSlackEmoji(emoji)
 
 	return api.AddReaction(emoji, slack.ItemRef{
 		Channel:   target,
@@ -821,7 +820,7 @@ func (a *SlackAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, t
 		return err
 	}
 
-	emoji = strings.Trim(emoji, ":")
+	emoji = resolveSlackEmoji(emoji)
 
 	return api.RemoveReaction(emoji, slack.ItemRef{
 		Channel:   target,
