@@ -1,9 +1,7 @@
 <template>
   <div class="p-4">
     <section class="flex items-center gap-3">
-      <Volume2
-        class="size-5"
-      />
+      <Volume2 class="size-5" />
       <div class="min-w-0">
         <h2 class="text-sm font-semibold truncate">
           {{ curProvider?.name }}
@@ -25,7 +23,106 @@
     </section>
     <Separator class="mt-4 mb-6" />
 
-    <!-- Models -->
+    <form
+      class="space-y-4"
+      @submit.prevent="handleSaveProvider"
+    >
+      <section class="space-y-2">
+        <Label for="speech-provider-name">{{ $t('common.name') }}</Label>
+        <Input
+          id="speech-provider-name"
+          v-model="providerName"
+          type="text"
+          :placeholder="$t('common.namePlaceholder')"
+        />
+      </section>
+
+      <section
+        v-for="field in orderedProviderFields"
+        :key="field.key"
+        class="space-y-2"
+      >
+        <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `speech-provider-${field.key}`">
+          {{ field.title || field.key }}
+        </Label>
+        <p
+          v-if="field.description"
+          class="text-xs text-muted-foreground"
+        >
+          {{ field.description }}
+        </p>
+        <div
+          v-if="field.type === 'secret'"
+          class="relative"
+        >
+          <Input
+            :id="`speech-provider-${field.key}`"
+            v-model="providerConfig[field.key] as string"
+            :type="visibleSecrets[field.key] ? 'text' : 'password'"
+            :placeholder="field.example ? String(field.example) : ''"
+          />
+          <button
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
+          >
+            <component
+              :is="visibleSecrets[field.key] ? EyeOff : Eye"
+              class="size-3.5"
+            />
+          </button>
+        </div>
+        <Switch
+          v-else-if="field.type === 'bool'"
+          :model-value="!!providerConfig[field.key]"
+          @update:model-value="(val) => providerConfig[field.key] = !!val"
+        />
+        <Input
+          v-else-if="field.type === 'number'"
+          :id="`speech-provider-${field.key}`"
+          v-model.number="providerConfig[field.key] as number"
+          type="number"
+          :placeholder="field.example ? String(field.example) : ''"
+        />
+        <Select
+          v-else-if="field.type === 'enum' && field.enum"
+          :model-value="String(providerConfig[field.key] ?? '')"
+          @update:model-value="(val) => providerConfig[field.key] = val"
+        >
+          <SelectTrigger>
+            <SelectValue :placeholder="field.title || field.key" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="opt in field.enum"
+              :key="opt"
+              :value="opt"
+            >
+              {{ opt }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          v-else
+          :id="`speech-provider-${field.key}`"
+          v-model="providerConfig[field.key] as string"
+          type="text"
+          :placeholder="field.example ? String(field.example) : ''"
+        />
+      </section>
+
+      <div class="flex justify-end">
+        <LoadingButton
+          type="submit"
+          :loading="saveLoading"
+        >
+          {{ $t('provider.saveChanges') }}
+        </LoadingButton>
+      </div>
+    </form>
+
+    <Separator class="mt-6 mb-6" />
+
     <section>
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-xs font-medium">
@@ -71,8 +168,9 @@
             :model-id="model.id ?? ''"
             :model-name="model.model_id ?? ''"
             :config="model.config || {}"
-            :capabilities="getModelCapabilities(model.model_id ?? '')"
-            @test="(text, cfg) => handleTestModel(model.id ?? '', text, cfg)"
+            :schema="getModelSchema(model.model_id ?? '')"
+            :on-test="(text, cfg) => handleTestModel(model.id ?? '', text, cfg)"
+            @save="(cfg) => handleSaveModel(model.id ?? '', cfg)"
           />
         </div>
       </div>
@@ -82,65 +180,122 @@
 
 <script setup lang="ts">
 import {
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Separator,
   Switch,
 } from '@memohai/ui'
 import ModelConfigEditor from './model-config-editor.vue'
-import { Volume2, ChevronUp, ChevronDown } from 'lucide-vue-next'
-import { computed, inject, ref } from 'vue'
+import { ChevronDown, ChevronUp, Eye, EyeOff, Volume2 } from 'lucide-vue-next'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechProvidersMeta, getSpeechModels, putProvidersById } from '@memohai/sdk'
-import type { TtsSpeechProviderResponse, TtsProviderMetaResponse, TtsModelInfo } from '@memohai/sdk'
+import { getSpeechModels, getSpeechProvidersMeta, putModelsById, putProvidersById } from '@memohai/sdk'
+import type { TtsSpeechModelResponse, TtsSpeechProviderResponse } from '@memohai/sdk'
+import LoadingButton from '@/components/loading-button/index.vue'
+
+interface SpeechFieldSchema {
+  key: string
+  type: string
+  title?: string
+  description?: string
+  required?: boolean
+  enum?: string[]
+  example?: unknown
+  order?: number
+}
+
+interface SpeechConfigSchema {
+  fields?: SpeechFieldSchema[]
+}
+
+interface SpeechModelMeta {
+  id: string
+  name: string
+  description?: string
+  config_schema?: SpeechConfigSchema
+  capabilities?: {
+    config_schema?: SpeechConfigSchema
+  }
+}
+
+interface SpeechProviderMeta {
+  provider: string
+  display_name: string
+  description?: string
+  config_schema?: SpeechConfigSchema
+  models?: SpeechModelMeta[]
+}
 
 const { t } = useI18n()
 const curProvider = inject('curTtsProvider', ref<TtsSpeechProviderResponse>())
 const curProviderId = computed(() => curProvider.value?.id)
+const providerName = ref('')
+const providerConfig = reactive<Record<string, unknown>>({})
+const visibleSecrets = reactive<Record<string, boolean>>({})
+const expandedModelId = ref('')
 const enableLoading = ref(false)
+const saveLoading = ref(false)
+const queryCache = useQueryCache()
 
 const { data: metaList } = useQuery({
   key: () => ['speech-providers-meta'],
   query: async () => {
     const { data } = await getSpeechProvidersMeta({ throwOnError: true })
-    return data
+    return (data ?? []) as SpeechProviderMeta[]
   },
 })
 
-const currentMeta = computed<TtsProviderMetaResponse | null>(() => {
+const currentMeta = computed(() => {
   if (!metaList.value || !curProvider.value?.client_type) return null
-  return (metaList.value as TtsProviderMetaResponse[]).find((m) => m.provider === curProvider.value?.client_type) ?? null
+  return (metaList.value as SpeechProviderMeta[]).find((m) => m.provider === curProvider.value?.client_type) ?? null
 })
 
-function getModelCapabilities(modelId: string) {
-  const meta = currentMeta.value
-  if (!meta?.models) return null
-  return meta.models.find((m: TtsModelInfo) => m.id === modelId)?.capabilities ?? null
-}
+const orderedProviderFields = computed(() => {
+  const fields = currentMeta.value?.config_schema?.fields ?? []
+  return [...fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+})
 
 const { data: allSpeechModels } = useQuery({
   key: () => ['speech-models'],
   query: async () => {
     const { data } = await getSpeechModels({ throwOnError: true })
-    return data
+    return data ?? []
   },
 })
 
 const providerModels = computed(() => {
   if (!allSpeechModels.value || !curProviderId.value) return []
-  return allSpeechModels.value.filter((m) => m.provider_id === curProviderId.value)
+  return (allSpeechModels.value as TtsSpeechModelResponse[]).filter((m) => m.provider_id === curProviderId.value)
 })
 
-const expandedModelId = ref('')
+watch(() => curProvider.value, (provider) => {
+  providerName.value = provider?.name ?? ''
+  Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
+  Object.assign(providerConfig, { ...(provider?.config ?? {}) })
+}, { immediate: true, deep: true })
+
+function getModelMeta(modelID: string): SpeechModelMeta | null {
+  return currentMeta.value?.models?.find((m) => m.id === modelID) ?? null
+}
+
+function getModelSchema(modelID: string): SpeechConfigSchema | null {
+  const meta = getModelMeta(modelID)
+  return meta?.config_schema ?? meta?.capabilities?.config_schema ?? null
+}
+
 function toggleModel(id: string) {
   expandedModelId.value = expandedModelId.value === id ? '' : id
 }
 
-const queryCache = useQueryCache()
-
 async function handleToggleEnable(value: boolean) {
   if (!curProviderId.value || !curProvider.value) return
-
   const prev = curProvider.value.enable ?? false
   curProvider.value = { ...curProvider.value, enable: value }
 
@@ -148,7 +303,12 @@ async function handleToggleEnable(value: boolean) {
   try {
     await putProvidersById({
       path: { id: curProviderId.value },
-      body: { enable: value },
+      body: {
+        name: providerName.value.trim() || curProvider.value.name,
+        client_type: curProvider.value.client_type,
+        enable: value,
+        config: sanitizeConfig(providerConfig),
+      },
       throwOnError: true,
     })
     queryCache.invalidateQueries({ key: ['speech-providers'] })
@@ -157,6 +317,51 @@ async function handleToggleEnable(value: boolean) {
     toast.error(t('common.saveFailed'))
   } finally {
     enableLoading.value = false
+  }
+}
+
+async function handleSaveProvider() {
+  if (!curProviderId.value || !curProvider.value) return
+  saveLoading.value = true
+  try {
+    await putProvidersById({
+      path: { id: curProviderId.value },
+      body: {
+        name: providerName.value.trim() || curProvider.value.name,
+        client_type: curProvider.value.client_type,
+        enable: curProvider.value.enable,
+        config: sanitizeConfig(providerConfig),
+      },
+      throwOnError: true,
+    })
+    toast.success(t('speech.saveSuccess'))
+    queryCache.invalidateQueries({ key: ['speech-providers'] })
+  } catch {
+    toast.error(t('common.saveFailed'))
+  } finally {
+    saveLoading.value = false
+  }
+}
+
+async function handleSaveModel(modelId: string, config: Record<string, unknown>) {
+  const model = providerModels.value.find((item) => item.id === modelId)
+  if (!model) return
+  try {
+    await putModelsById({
+      path: { id: modelId },
+      body: {
+        model_id: model.model_id,
+        name: model.name ?? model.model_id,
+        provider_id: model.provider_id,
+        type: 'speech',
+        config,
+      },
+      throwOnError: true,
+    })
+    toast.success(t('speech.saveSuccess'))
+    queryCache.invalidateQueries({ key: ['speech-models'] })
+  } catch {
+    toast.error(t('common.saveFailed'))
   }
 }
 
@@ -182,5 +387,14 @@ async function handleTestModel(modelId: string, text: string, config: Record<str
     throw new Error(msg)
   }
   return resp.blob()
+}
+
+function sanitizeConfig(input: Record<string, unknown>) {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    if (value === '' || value == null) continue
+    result[key] = value
+  }
+  return result
 }
 </script>

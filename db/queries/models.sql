@@ -18,7 +18,17 @@ SELECT * FROM providers WHERE name = sqlc.arg(name);
 
 -- name: ListProviders :many
 SELECT * FROM providers
-WHERE client_type NOT IN ('edge-speech')
+WHERE client_type NOT IN (
+  'edge-speech',
+  'openai-speech',
+  'openrouter-speech',
+  'elevenlabs-speech',
+  'deepgram-speech',
+  'minimax-speech',
+  'volcengine-speech',
+  'alibabacloud-speech',
+  'microsoft-speech'
+)
 ORDER BY created_at DESC;
 
 -- name: UpdateProvider :one
@@ -38,8 +48,19 @@ RETURNING *;
 DELETE FROM providers WHERE id = sqlc.arg(id);
 
 -- name: CountProviders :one
-SELECT COUNT(*) FROM providers
-WHERE client_type NOT IN ('edge-speech');
+SELECT COUNT(*)
+FROM providers
+WHERE client_type NOT IN (
+  'edge-speech',
+  'openai-speech',
+  'openrouter-speech',
+  'elevenlabs-speech',
+  'deepgram-speech',
+  'minimax-speech',
+  'volcengine-speech',
+  'alibabacloud-speech',
+  'microsoft-speech'
+);
 
 -- name: CreateModel :one
 INSERT INTO models (model_id, name, provider_id, type, config)
@@ -192,7 +213,17 @@ WHERE m.id = sqlc.arg(id)
 
 -- name: ListSpeechProviders :many
 SELECT * FROM providers
-WHERE client_type IN ('edge-speech')
+WHERE client_type IN (
+  'edge-speech',
+  'openai-speech',
+  'openrouter-speech',
+  'elevenlabs-speech',
+  'deepgram-speech',
+  'minimax-speech',
+  'volcengine-speech',
+  'alibabacloud-speech',
+  'microsoft-speech'
+)
 ORDER BY created_at DESC;
 
 -- name: ListSpeechModels :many

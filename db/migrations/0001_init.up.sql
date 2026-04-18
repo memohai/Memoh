@@ -68,7 +68,23 @@ CREATE TABLE IF NOT EXISTS providers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT providers_name_unique UNIQUE (name),
-  CONSTRAINT providers_client_type_check CHECK (client_type IN ('openai-responses', 'openai-completions', 'anthropic-messages', 'google-generative-ai', 'openai-codex', 'github-copilot', 'edge-speech'))
+  CONSTRAINT providers_client_type_check CHECK (client_type IN (
+    'openai-responses',
+    'openai-completions',
+    'anthropic-messages',
+    'google-generative-ai',
+    'openai-codex',
+    'github-copilot',
+    'edge-speech',
+    'openai-speech',
+    'openrouter-speech',
+    'elevenlabs-speech',
+    'deepgram-speech',
+    'minimax-speech',
+    'volcengine-speech',
+    'alibabacloud-speech',
+    'microsoft-speech'
+  ))
 );
 
 CREATE TABLE IF NOT EXISTS search_providers (

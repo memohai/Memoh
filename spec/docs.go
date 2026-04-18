@@ -12930,12 +12930,62 @@ const docTemplate = `{
                 }
             }
         },
+        "tts.ConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tts.FieldSchema"
+                    }
+                }
+            }
+        },
+        "tts.FieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "key": {
+                    "type": "string"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "tts.ModelCapabilities": {
             "type": "object",
             "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
+                },
                 "formats": {
                     "type": "array",
                     "items": {
+                        "type": "string"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
                         "type": "string"
                     }
                 },
@@ -12958,6 +13008,9 @@ const docTemplate = `{
             "properties": {
                 "capabilities": {
                     "$ref": "#/definitions/tts.ModelCapabilities"
+                },
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
                 },
                 "description": {
                     "type": "string"
@@ -12993,6 +13046,9 @@ const docTemplate = `{
         "tts.ProviderMetaResponse": {
             "type": "object",
             "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
+                },
                 "default_model": {
                     "type": "string"
                 },

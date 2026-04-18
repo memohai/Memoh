@@ -2761,12 +2761,45 @@ definitions:
       tts_model_id:
         type: string
     type: object
+  tts.ConfigSchema:
+    properties:
+      fields:
+        items:
+          $ref: '#/definitions/tts.FieldSchema'
+        type: array
+    type: object
+  tts.FieldSchema:
+    properties:
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      key:
+        type: string
+      order:
+        type: integer
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
   tts.ModelCapabilities:
     properties:
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
       formats:
         items:
           type: string
         type: array
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
       pitch:
         $ref: '#/definitions/tts.ParamConstraint'
       speed:
@@ -2780,6 +2813,8 @@ definitions:
     properties:
       capabilities:
         $ref: '#/definitions/tts.ModelCapabilities'
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
       description:
         type: string
       id:
@@ -2802,6 +2837,8 @@ definitions:
     type: object
   tts.ProviderMetaResponse:
     properties:
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
       default_model:
         type: string
       description:

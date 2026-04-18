@@ -87,7 +87,6 @@ import (
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	ttspkg "github.com/memohai/memoh/internal/tts"
-	ttsedge "github.com/memohai/memoh/internal/tts/adapter/edge"
 	"github.com/memohai/memoh/internal/version"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -514,10 +513,8 @@ func provideWebHandler(channelManager *channel.Manager, channelStore *channel.St
 	return h
 }
 
-func provideTtsRegistry(log *slog.Logger) *ttspkg.Registry {
-	reg := ttspkg.NewRegistry()
-	reg.Register(ttsedge.NewEdgeAdapter(log))
-	return reg
+func provideTtsRegistry() *ttspkg.Registry {
+	return ttspkg.NewRegistry()
 }
 
 func provideTtsTempStore() (*ttspkg.TempStore, error) {
@@ -677,6 +674,17 @@ func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, que
 				return nil
 			}
 			return registry.Sync(ctx, log, queries, defs)
+		},
+	})
+}
+
+func startSpeechProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries *dbsqlc.Queries, registry *ttspkg.Registry) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := ttspkg.SyncRegistry(ctx, log, queries, registry); err != nil {
+				log.Warn("speech registry bootstrap failed", slog.Any("error", err))
+			}
+			return nil
 		},
 	})
 }

@@ -1,32 +1,40 @@
 package tts
 
-import "github.com/go-playground/validator/v10"
-
-var validate = validator.New()
-
-// VoiceConfig identifies a TTS voice and its language.
-// Both fields are optional; adapters fill in their own defaults when empty.
+// VoiceConfig is kept for backward compatibility with the legacy Edge adapter tests.
 type VoiceConfig struct {
-	ID   string `json:"id"   validate:"omitempty"`
-	Lang string `json:"lang" validate:"omitempty"`
+	ID   string `json:"id"`
+	Lang string `json:"lang"`
 }
 
-// AudioConfig is the user-facing configuration for a TTS request.
+// AudioConfig is kept for backward compatibility with the legacy Edge adapter tests.
 type AudioConfig struct {
-	Format     string      `json:"format"      validate:"omitempty"`
-	SampleRate int         `json:"sample_rate"  validate:"omitempty,oneof=16000 24000 48000"`
-	Speed      float64     `json:"speed"        validate:"omitempty"`
-	Pitch      float64     `json:"pitch"        validate:"omitempty"`
+	Format     string      `json:"format"`
+	SampleRate int         `json:"sample_rate"`
+	Speed      float64     `json:"speed"`
+	Pitch      float64     `json:"pitch"`
 	Voice      VoiceConfig `json:"voice"`
 }
 
-func (c AudioConfig) Validate() error {
-	return validate.Struct(c)
+func (AudioConfig) Validate() error { return nil }
+
+// FieldSchema describes a single dynamic speech config field.
+type FieldSchema struct {
+	Key         string   `json:"key"`
+	Type        string   `json:"type"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Example     any      `json:"example,omitempty"`
+	Order       int      `json:"order"`
+}
+
+type ConfigSchema struct {
+	Fields []FieldSchema `json:"fields"`
 }
 
 // ParamConstraint describes valid values for a numeric parameter.
-// If Options is non-empty, only those discrete values are allowed (frontend renders a select).
-// Otherwise Min/Max define a continuous range (frontend renders a slider).
+// If Options is non-empty, only those discrete values are allowed.
 type ParamConstraint struct {
 	Options []float64 `json:"options,omitempty"`
 	Min     float64   `json:"min,omitempty"`
@@ -34,20 +42,22 @@ type ParamConstraint struct {
 	Default float64   `json:"default"`
 }
 
-// ModelCapabilities describes what a specific TTS model supports.
-// nil pointer means the parameter is not supported; frontend should hide it.
+// ModelCapabilities exposes optional UX hints for speech config forms.
 type ModelCapabilities struct {
-	Voices  []VoiceInfo      `json:"voices"`
-	Formats []string         `json:"formats"`
-	Speed   *ParamConstraint `json:"speed,omitempty"`
-	Pitch   *ParamConstraint `json:"pitch,omitempty"`
+	ConfigSchema ConfigSchema      `json:"config_schema,omitempty"`
+	Voices       []VoiceInfo       `json:"voices,omitempty"`
+	Formats      []string          `json:"formats,omitempty"`
+	Speed        *ParamConstraint  `json:"speed,omitempty"`
+	Pitch        *ParamConstraint  `json:"pitch,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
-// ModelInfo describes a single model exposed by a TTS adapter.
+// ModelInfo describes a single speech model exposed by a provider definition.
 type ModelInfo struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
 	Description  string            `json:"description,omitempty"`
+	ConfigSchema ConfigSchema      `json:"config_schema,omitempty"`
 	Capabilities ModelCapabilities `json:"capabilities"`
 }
 

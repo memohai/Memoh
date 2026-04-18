@@ -424,6 +424,7 @@
     "modelIdPlaceholder": "Enter model identifier (e.g. custom-voice)",
     "noModels": "No models found. Click \"Import Models\" to discover available models or \"Add Model\" to create one manually.",
     "noCapabilities": "No capabilities available for this model.",
+    "saveSuccess": "Speech configuration saved",
     "fields": {
       "language": "Language",
       "languagePlaceholder": "Select language...",

@@ -141,6 +141,7 @@ func options() fx.Option {
 		fx.Invoke(
 			injectToolProviders,
 			startRegistrySync,
+			startSpeechProviderBootstrap,
 			startMemoryProviderBootstrap,
 			startSearchProviderBootstrap,
 			startScheduleService,

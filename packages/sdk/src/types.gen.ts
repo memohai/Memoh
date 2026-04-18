@@ -1642,8 +1642,27 @@ export type SettingsUpsertRequest = {
     tts_model_id?: string;
 };
 
+export type TtsConfigSchema = {
+    fields?: Array<TtsFieldSchema>;
+};
+
+export type TtsFieldSchema = {
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key?: string;
+    order?: number;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
 export type TtsModelCapabilities = {
+    config_schema?: TtsConfigSchema;
     formats?: Array<string>;
+    metadata?: {
+        [key: string]: string;
+    };
     pitch?: TtsParamConstraint;
     speed?: TtsParamConstraint;
     voices?: Array<TtsVoiceInfo>;
@@ -1651,6 +1670,7 @@ export type TtsModelCapabilities = {
 
 export type TtsModelInfo = {
     capabilities?: TtsModelCapabilities;
+    config_schema?: TtsConfigSchema;
     description?: string;
     id?: string;
     name?: string;
@@ -1664,6 +1684,7 @@ export type TtsParamConstraint = {
 };
 
 export type TtsProviderMetaResponse = {
+    config_schema?: TtsConfigSchema;
     default_model?: string;
     description?: string;
     display_name?: string;

@@ -24,6 +24,14 @@ const (
 	ClientTypeOpenAICodex        ClientType = "openai-codex"
 	ClientTypeGitHubCopilot      ClientType = "github-copilot"
 	ClientTypeEdgeSpeech         ClientType = "edge-speech"
+	ClientTypeOpenAISpeech       ClientType = "openai-speech"
+	ClientTypeOpenRouterSpeech   ClientType = "openrouter-speech"
+	ClientTypeElevenLabsSpeech   ClientType = "elevenlabs-speech"
+	ClientTypeDeepgramSpeech     ClientType = "deepgram-speech"
+	ClientTypeMiniMaxSpeech      ClientType = "minimax-speech"
+	ClientTypeVolcengineSpeech   ClientType = "volcengine-speech"
+	ClientTypeAlibabaSpeech      ClientType = "alibabacloud-speech"
+	ClientTypeMicrosoftSpeech    ClientType = "microsoft-speech"
 )
 
 const (

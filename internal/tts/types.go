@@ -4,11 +4,12 @@ import "time"
 
 // ProviderMetaResponse exposes adapter metadata (from the registry, not DB).
 type ProviderMetaResponse struct {
-	Provider     string      `json:"provider"`
-	DisplayName  string      `json:"display_name"`
-	Description  string      `json:"description"`
-	DefaultModel string      `json:"default_model"`
-	Models       []ModelInfo `json:"models"`
+	Provider     string       `json:"provider"`
+	DisplayName  string       `json:"display_name"`
+	Description  string       `json:"description"`
+	ConfigSchema ConfigSchema `json:"config_schema,omitempty"`
+	DefaultModel string       `json:"default_model"`
+	Models       []ModelInfo  `json:"models"`
 }
 
 // SpeechProviderResponse represents a speech-capable provider from the unified providers table.

@@ -1,177 +1,84 @@
 <template>
   <div class="space-y-4">
-    <template v-if="caps">
-      <!-- Language -->
-      <div class="space-y-2">
-        <Label for="tts-lang">{{ $t('speech.fields.language') }}</Label>
-        <Select
-          :model-value="configData.voice_lang ?? ''"
-          @update:model-value="onLangChange"
-        >
-          <SelectTrigger
-            id="tts-lang"
-            class="w-full"
-          >
-            <SelectValue :placeholder="$t('speech.fields.languagePlaceholder')" />
-          </SelectTrigger>
-          <SelectContent class="max-h-60">
-            <SelectItem
-              v-for="lang in availableLanguages"
-              :key="lang"
-              :value="lang"
-            >
-              {{ lang }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <!-- Voice -->
-      <div class="space-y-2">
-        <Label for="tts-voice">{{ $t('speech.fields.voice') }}</Label>
-        <Select
-          :model-value="configData.voice_id ?? ''"
-          @update:model-value="(val) => configData.voice_id = val"
-        >
-          <SelectTrigger
-            id="tts-voice"
-            class="w-full"
-          >
-            <SelectValue :placeholder="$t('speech.fields.voicePlaceholder')" />
-          </SelectTrigger>
-          <SelectContent class="max-h-60">
-            <SelectItem
-              v-for="voice in filteredVoices"
-              :key="voice.id"
-              :value="voice.id!"
-            >
-              {{ voice.name }} ({{ voice.id }})
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <!-- Format -->
-      <div
-        v-if="caps.formats && caps.formats.length > 0"
+    <template v-if="orderedFields.length > 0">
+      <section
+        v-for="field in orderedFields"
+        :key="field.key"
         class="space-y-2"
       >
-        <Label for="tts-format">{{ $t('speech.fields.format') }}</Label>
-        <Select
-          :model-value="configData.format ?? ''"
-          @update:model-value="(val) => configData.format = val"
+        <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `tts-field-${field.key}`">
+          {{ field.title || field.key }}
+        </Label>
+        <p
+          v-if="field.description"
+          class="text-xs text-muted-foreground"
         >
-          <SelectTrigger
-            id="tts-format"
-            class="w-full"
+          {{ field.description }}
+        </p>
+
+        <div
+          v-if="field.type === 'secret'"
+          class="relative"
+        >
+          <Input
+            :id="`tts-field-${field.key}`"
+            v-model="configData[field.key] as string"
+            :type="visibleSecrets[field.key] ? 'text' : 'password'"
+            :placeholder="field.example ? String(field.example) : ''"
+          />
+          <button
+            type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="visibleSecrets[field.key] = !visibleSecrets[field.key]"
           >
-            <SelectValue :placeholder="$t('speech.fields.formatPlaceholder')" />
+            <component
+              :is="visibleSecrets[field.key] ? EyeOff : Eye"
+              class="size-3.5"
+            />
+          </button>
+        </div>
+
+        <Switch
+          v-else-if="field.type === 'bool'"
+          :model-value="!!configData[field.key]"
+          @update:model-value="(val) => configData[field.key] = !!val"
+        />
+
+        <Input
+          v-else-if="field.type === 'number'"
+          :id="`tts-field-${field.key}`"
+          v-model.number="configData[field.key] as number"
+          type="number"
+          :placeholder="field.example ? String(field.example) : ''"
+        />
+
+        <Select
+          v-else-if="field.type === 'enum' && field.enum"
+          :model-value="String(configData[field.key] ?? '')"
+          @update:model-value="(val) => configData[field.key] = val"
+        >
+          <SelectTrigger>
+            <SelectValue :placeholder="field.title || field.key" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem
-              v-for="fmt in caps.formats"
-              :key="fmt"
-              :value="fmt"
+              v-for="opt in field.enum"
+              :key="opt"
+              :value="opt"
             >
-              {{ fmt }}
+              {{ opt }}
             </SelectItem>
           </SelectContent>
         </Select>
-      </div>
 
-      <!-- Speed -->
-      <div
-        v-if="caps.speed"
-        class="space-y-2"
-      >
-        <Label>{{ $t('speech.fields.speed') }}</Label>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('speech.fields.speedDescription', { default: caps.speed.default ?? 1 }) }}
-        </p>
-        <div v-if="caps.speed.options && caps.speed.options.length > 0">
-          <Select
-            :model-value="String(configData.speed ?? caps.speed.default ?? 1)"
-            @update:model-value="(val) => configData.speed = Number(val)"
-          >
-            <SelectTrigger class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="opt in caps.speed.options"
-                :key="opt"
-                :value="String(opt)"
-              >
-                {{ opt }}x
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div
+        <Input
           v-else
-          class="flex items-center gap-3"
-        >
-          <Slider
-            :model-value="[Number(configData.speed ?? caps.speed.default ?? 1)]"
-            :min="caps.speed.min"
-            :max="caps.speed.max"
-            :step="0.1"
-            class="flex-1"
-            @update:model-value="(val) => configData.speed = val[0]"
-          />
-          <span class="text-xs text-muted-foreground w-12 text-right">
-            {{ Number(configData.speed ?? caps.speed.default ?? 1).toFixed(1) }}x
-          </span>
-        </div>
-      </div>
-
-      <!-- Pitch -->
-      <div
-        v-if="caps.pitch"
-        class="space-y-2"
-      >
-        <Label>{{ $t('speech.fields.pitch') }}</Label>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('speech.fields.pitchDescription', { default: caps.pitch.default ?? 0 }) }}
-        </p>
-        <div
-          v-if="caps.pitch.options && caps.pitch.options.length > 0"
-        >
-          <Select
-            :model-value="String(configData.pitch ?? caps.pitch.default ?? 0)"
-            @update:model-value="(val) => configData.pitch = Number(val)"
-          >
-            <SelectTrigger class="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="opt in caps.pitch.options"
-                :key="opt"
-                :value="String(opt)"
-              >
-                {{ opt }} Hz
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div
-          v-else
-          class="flex items-center gap-3"
-        >
-          <Slider
-            :model-value="[Number(configData.pitch ?? caps.pitch.default ?? 0)]"
-            :min="caps.pitch.min"
-            :max="caps.pitch.max"
-            :step="1"
-            class="flex-1"
-            @update:model-value="(val) => configData.pitch = val[0]"
-          />
-          <span class="text-xs text-muted-foreground w-16 text-right">
-            {{ Number(configData.pitch ?? caps.pitch.default ?? 0).toFixed(0) }} Hz
-          </span>
-        </div>
-      </div>
+          :id="`tts-field-${field.key}`"
+          v-model="configData[field.key] as string"
+          type="text"
+          :placeholder="field.example ? String(field.example) : ''"
+        />
+      </section>
     </template>
 
     <div
@@ -183,7 +90,6 @@
 
     <Separator class="my-3" />
 
-    <!-- Test Synthesis -->
     <div class="space-y-3">
       <h4 class="text-xs font-medium">
         {{ $t('speech.test.title') }}
@@ -209,9 +115,7 @@
           :disabled="!testText.trim() || testText.length > maxTestTextLen"
           @click="handleTest"
         >
-          <Play
-            class="mr-1.5"
-          />
+          <Play class="mr-1.5" />
           {{ $t('speech.test.generate') }}
         </LoadingButton>
         <span
@@ -251,104 +155,79 @@
 
 <script setup lang="ts">
 import {
+  Input,
   Label,
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
-  Slider,
-  Textarea,
+  SelectTrigger,
+  SelectValue,
   Separator,
+  Switch,
+  Textarea,
 } from '@memohai/ui'
-import { Play } from 'lucide-vue-next'
-import LoadingButton from '@/components/loading-button/index.vue'
-import type { TtsModelCapabilities, TtsVoiceInfo } from '@memohai/sdk'
+import { Eye, EyeOff, Play } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
+import LoadingButton from '@/components/loading-button/index.vue'
+
+interface SpeechFieldSchema {
+  key: string
+  type: string
+  title?: string
+  description?: string
+  required?: boolean
+  enum?: string[]
+  example?: unknown
+  order?: number
+}
+
+interface SpeechConfigSchema {
+  fields?: SpeechFieldSchema[]
+}
 
 const props = defineProps<{
   modelId: string
   modelName: string
   config: Record<string, unknown>
-  capabilities: TtsModelCapabilities | null
+  schema: SpeechConfigSchema | null
+  onTest: (text: string, config: Record<string, unknown>) => Promise<Blob>
 }>()
 
 const emit = defineEmits<{
   save: [config: Record<string, unknown>]
-  test: [text: string, config: Record<string, unknown>]
 }>()
 
 const { t } = useI18n()
-
-const caps = computed(() => props.capabilities)
-
 const configData = reactive<Record<string, unknown>>({})
-
-watch(() => props.config, (cfg) => {
-  Object.keys(configData).forEach((k) => delete configData[k])
-  if (cfg.voice && typeof cfg.voice === 'object') {
-    const voice = cfg.voice as Record<string, unknown>
-    configData.voice_id = voice.id ?? ''
-    configData.voice_lang = voice.lang ?? ''
-  }
-  if (cfg.format) configData.format = cfg.format
-  if (cfg.speed != null) configData.speed = cfg.speed
-  if (cfg.pitch != null) configData.pitch = cfg.pitch
-  if (cfg.sample_rate != null) configData.sample_rate = cfg.sample_rate
-}, { immediate: true })
-
-const availableLanguages = computed(() => {
-  if (!caps.value?.voices) return []
-  const langs = new Set(caps.value.voices.map((v: TtsVoiceInfo) => v.lang ?? '').filter(Boolean))
-  return [...langs].sort()
-})
-
-const filteredVoices = computed(() => {
-  if (!caps.value?.voices) return []
-  const lang = configData.voice_lang
-  if (!lang) return caps.value.voices
-  return caps.value.voices.filter((v: TtsVoiceInfo) => v.lang === lang)
-})
-
-function onLangChange(lang: string) {
-  configData.voice_lang = lang
-  const voices = caps.value?.voices?.filter((v: TtsVoiceInfo) => v.lang === lang)
-  if (voices && voices.length > 0 && !voices.some((v: TtsVoiceInfo) => v.id === configData.voice_id)) {
-    configData.voice_id = voices[0].id ?? ''
-  }
-}
-
-function buildConfig(): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
-  if (configData.voice_id || configData.voice_lang) {
-    result.voice = { id: configData.voice_id ?? '', lang: configData.voice_lang ?? '' }
-  }
-  if (configData.format) result.format = configData.format
-  if (configData.speed != null) result.speed = Number(configData.speed)
-  if (configData.pitch != null) result.pitch = Number(configData.pitch)
-  if (configData.sample_rate != null) result.sample_rate = Number(configData.sample_rate)
-  return result
-}
-
+const visibleSecrets = reactive<Record<string, boolean>>({})
 const saving = ref(false)
-async function handleSaveConfig() {
-  saving.value = true
-  try {
-    emit('save', buildConfig())
-  } finally {
-    saving.value = false
-  }
-}
-
-// Test synthesis
-const maxTestTextLen = 500
 const testText = ref('')
 const testLoading = ref(false)
 const testError = ref('')
 const audioUrl = ref('')
 const audioEl = ref<HTMLAudioElement>()
+const maxTestTextLen = 500
+
+const orderedFields = computed(() => {
+  const fields = props.schema?.fields ?? []
+  return [...fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+})
+
+watch(() => props.config, (cfg) => {
+  Object.keys(configData).forEach((key) => delete configData[key])
+  Object.assign(configData, { ...(cfg ?? {}) })
+}, { immediate: true, deep: true })
+
+function buildConfig(): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(configData)) {
+    if (value === '' || value == null) continue
+    result[key] = value
+  }
+  return result
+}
 
 function revokeAudio() {
   if (audioUrl.value) {
@@ -359,6 +238,15 @@ function revokeAudio() {
 
 onBeforeUnmount(revokeAudio)
 
+async function handleSaveConfig() {
+  saving.value = true
+  try {
+    emit('save', buildConfig())
+  } finally {
+    saving.value = false
+  }
+}
+
 async function handleTest() {
   if (!testText.value.trim()) return
   testLoading.value = true
@@ -366,39 +254,13 @@ async function handleTest() {
   revokeAudio()
 
   try {
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      const handler = async () => {
-        try {
-          const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-          const token = localStorage.getItem('token')
-          const resp = await fetch(`${apiBase}/speech-models/${props.modelId}/test`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ text: testText.value, config: buildConfig() }),
-          })
-          if (!resp.ok) {
-            const errBody = await resp.text()
-            let msg: string
-            try { msg = JSON.parse(errBody)?.message ?? errBody } catch { msg = errBody }
-            reject(new Error(msg))
-            return
-          }
-          resolve(await resp.blob())
-        } catch (e) {
-          reject(e)
-        }
-      }
-      handler()
-    })
+    const blob = await props.onTest(testText.value, buildConfig())
 
     audioUrl.value = URL.createObjectURL(blob)
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
     audioEl.value?.play()
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : t('speech.test.failed')
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : t('speech.test.failed')
     testError.value = msg
     toast.error(msg)
   } finally {
