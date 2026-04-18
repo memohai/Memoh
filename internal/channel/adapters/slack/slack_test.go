@@ -711,7 +711,7 @@ func TestSlackHandleAppMentionEventPreservesPrivateChannelType(t *testing.T) {
 	adapter.mu.Lock()
 	adapter.channelNames["cfg-private:C999"] = cachedSlackChannelName{
 		name:     "ops-private",
-		chatType: "private_channel",
+		chatType: channel.ConversationTypeGroup,
 		cachedAt: time.Now().UTC(),
 	}
 	adapter.mu.Unlock()
@@ -732,7 +732,7 @@ func TestSlackHandleAppMentionEventPreservesPrivateChannelType(t *testing.T) {
 
 	select {
 	case msg := <-msgCh:
-		if msg.Conversation.Type != "private_channel" {
+		if msg.Conversation.Type != channel.ConversationTypeGroup {
 			t.Fatalf("unexpected conversation type: %q", msg.Conversation.Type)
 		}
 	case <-time.After(time.Second):
@@ -1240,6 +1240,64 @@ func TestSlackUnreactConvertsSkinToneEmojiToSlackName(t *testing.T) {
 	}
 	if gotName != "+1::skin-tone-4" {
 		t.Fatalf("expected skin tone slack reaction name, got %q", gotName)
+	}
+}
+
+func TestSlackResolveUserDisplayNameScopesCacheByConfig(t *testing.T) {
+	t.Parallel()
+
+	newClient := func(apiURL, displayName string, calls *int) *slack.Client {
+		return slack.New(
+			testBotToken,
+			slack.OptionAPIURL(apiURL),
+			slack.OptionHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if !strings.HasSuffix(r.URL.String(), "/users.info") {
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader("not found")),
+					}, nil
+				}
+				*calls++
+				body, _ := json.Marshal(map[string]any{
+					"ok": true,
+					"user": map[string]any{
+						"id":   "U123",
+						"name": strings.ToLower(displayName),
+						"profile": map[string]any{
+							"display_name": displayName,
+						},
+					},
+				})
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(string(body))),
+				}, nil
+			})}),
+		)
+	}
+
+	var callsA, callsB int
+	adapter := NewSlackAdapter(nil)
+	apiA := newClient("https://slack-a.test/api/", "Alice A", &callsA)
+	apiB := newClient("https://slack-b.test/api/", "Alice B", &callsB)
+
+	if got := adapter.resolveUserDisplayName(apiA, "cfg-a", "U123"); got != "Alice A" {
+		t.Fatalf("cfg-a first lookup = %q", got)
+	}
+	if got := adapter.resolveUserDisplayName(apiB, "cfg-b", "U123"); got != "Alice B" {
+		t.Fatalf("cfg-b first lookup = %q", got)
+	}
+	if got := adapter.resolveUserDisplayName(apiA, "cfg-a", "U123"); got != "Alice A" {
+		t.Fatalf("cfg-a cached lookup = %q", got)
+	}
+
+	if callsA != 1 {
+		t.Fatalf("expected cfg-a to fetch once, got %d", callsA)
+	}
+	if callsB != 1 {
+		t.Fatalf("expected cfg-b to fetch once, got %d", callsB)
 	}
 }
 

@@ -44,12 +44,18 @@ type cachedSlackChannelName struct {
 	cachedAt time.Time
 }
 
+type cachedSlackUserName struct {
+	displayName string
+	cachedAt    time.Time
+}
+
 type SlackAdapter struct {
 	logger           *slog.Logger
 	mu               sync.RWMutex
 	connections      map[string]*slackConnection       // keyed by config ID
 	seenMessages     map[string]time.Time              // keyed by configID:messageTS
 	channelNames     map[string]cachedSlackChannelName // keyed by configID:channelID
+	userNames        map[string]cachedSlackUserName    // keyed by configID:userID
 	assets           assetOpener
 	apiFactory       func(Config, ...slack.Option) *slack.Client
 	authTest         func(*slack.Client) (*slack.AuthTestResponse, error)
@@ -60,8 +66,16 @@ type SlackAdapter struct {
 }
 
 var (
-	_ channel.Sender       = (*SlackAdapter)(nil)
-	_ channel.StreamSender = (*SlackAdapter)(nil)
+	_ channel.Sender                   = (*SlackAdapter)(nil)
+	_ channel.StreamSender             = (*SlackAdapter)(nil)
+	_ channel.Reactor                  = (*SlackAdapter)(nil)
+	_ channel.Receiver                 = (*SlackAdapter)(nil)
+	_ channel.AttachmentResolver       = (*SlackAdapter)(nil)
+	_ channel.SelfDiscoverer           = (*SlackAdapter)(nil)
+	_ channel.ConfigNormalizer         = (*SlackAdapter)(nil)
+	_ channel.TargetResolver           = (*SlackAdapter)(nil)
+	_ channel.BindingMatcher           = (*SlackAdapter)(nil)
+	_ channel.ProcessingStatusNotifier = (*SlackAdapter)(nil)
 )
 
 func NewSlackAdapter(log *slog.Logger) *SlackAdapter {
@@ -73,6 +87,7 @@ func NewSlackAdapter(log *slog.Logger) *SlackAdapter {
 		connections:  make(map[string]*slackConnection),
 		seenMessages: make(map[string]time.Time),
 		channelNames: make(map[string]cachedSlackChannelName),
+		userNames:    make(map[string]cachedSlackUserName),
 		apiFactory: func(cfg Config, options ...slack.Option) *slack.Client {
 			opts := []slack.Option{
 				slack.OptionRetry(3),
@@ -404,18 +419,18 @@ func (a *SlackAdapter) handleMessageEvent(
 		return
 	}
 
-	chatType := "channel"
+	chatType := channel.ConversationTypeGroup
 	switch ev.ChannelType {
 	case "im":
-		chatType = "direct"
+		chatType = channel.ConversationTypePrivate
 	case "mpim":
-		chatType = "group"
+		chatType = channel.ConversationTypeGroup
 	case "group":
-		chatType = "private_channel"
+		chatType = channel.ConversationTypeGroup
 	}
 
 	// Resolve user display name
-	displayName := a.resolveUserDisplayName(conn.api, ev.User)
+	displayName := a.resolveUserDisplayName(conn.api, cfg.ID, ev.User)
 
 	isMentioned := strings.Contains(ev.Text, "<@"+selfUserID+">")
 
@@ -495,12 +510,12 @@ func (a *SlackAdapter) handleAppMentionEvent(
 		return
 	}
 
-	displayName := a.resolveUserDisplayName(conn.api, ev.User)
+	displayName := a.resolveUserDisplayName(conn.api, cfg.ID, ev.User)
 
 	threadID := ev.ThreadTimeStamp
 	conversationName, conversationType := a.lookupConversationInfo(ctx, conn.api, cfg.ID, ev.Channel)
 	if conversationType == "" {
-		conversationType = "channel"
+		conversationType = channel.ConversationTypeGroup
 	}
 
 	msg := channel.InboundMessage{
@@ -646,17 +661,6 @@ func (a *SlackAdapter) ResolveAttachment(ctx context.Context, cfg channel.Channe
 	}
 
 	return a.resolveAttachmentWithClient(ctx, a.newAPIClient(slackCfg), attachment)
-}
-
-func (*SlackAdapter) CanResolve(_ channel.ChannelConfig, attachment channel.Attachment) bool {
-	if strings.TrimSpace(attachment.PlatformKey) != "" {
-		return true
-	}
-	if strings.EqualFold(strings.TrimSpace(attachment.SourcePlatform), Type.String()) {
-		return true
-	}
-	rawURL := strings.ToLower(strings.TrimSpace(attachment.URL))
-	return strings.Contains(rawURL, "files.slack.com/") || strings.Contains(rawURL, "/files-pri/")
 }
 
 func (*SlackAdapter) resolveAttachmentWithClient(ctx context.Context, api *slack.Client, attachment channel.Attachment) (channel.AttachmentPayload, error) {
@@ -855,13 +859,13 @@ func (a *SlackAdapter) resolveOutboundTarget(ctx context.Context, api *slack.Cli
 	return strings.TrimSpace(conversation.ID), nil
 }
 
-func (*SlackAdapter) DiscoverSelf(_ context.Context, credentials map[string]any) (map[string]any, string, error) {
+func (a *SlackAdapter) DiscoverSelf(_ context.Context, credentials map[string]any) (map[string]any, string, error) {
 	cfg, err := parseConfig(credentials)
 	if err != nil {
 		return nil, "", err
 	}
 
-	api := slack.New(cfg.BotToken)
+	api := a.newAPIClient(cfg)
 	resp, err := api.AuthTest()
 	if err != nil {
 		return nil, "", fmt.Errorf("slack auth test: %w", err)
@@ -938,16 +942,28 @@ func (a *SlackAdapter) clearConnection(appToken string) {
 	}
 }
 
-func (*SlackAdapter) resolveUserDisplayName(api *slack.Client, userID string) string {
-	displayName := strings.TrimSpace(userID)
-	if api == nil || displayName == "" {
-		return displayName
+func (a *SlackAdapter) resolveUserDisplayName(api *slack.Client, configID, userID string) string {
+	configID = strings.TrimSpace(configID)
+	userID = strings.TrimSpace(userID)
+	if api == nil || configID == "" || userID == "" {
+		return userID
 	}
+	cacheKey := configID + ":" + userID
+
+	expireBefore := time.Now().UTC().Add(-channelNameTTL)
+
+	a.mu.RLock()
+	cached, ok := a.userNames[cacheKey]
+	a.mu.RUnlock()
+	if ok && cached.cachedAt.After(expireBefore) {
+		return cached.displayName
+	}
+
 	userInfo, err := api.GetUserInfo(userID)
 	if err != nil {
-		return displayName
+		return userID
 	}
-	displayName = strings.TrimSpace(userInfo.Profile.DisplayName)
+	displayName := strings.TrimSpace(userInfo.Profile.DisplayName)
 	if displayName == "" {
 		displayName = strings.TrimSpace(userInfo.RealName)
 	}
@@ -955,8 +971,12 @@ func (*SlackAdapter) resolveUserDisplayName(api *slack.Client, userID string) st
 		displayName = strings.TrimSpace(userInfo.Name)
 	}
 	if displayName == "" {
-		displayName = strings.TrimSpace(userID)
+		displayName = userID
 	}
+
+	a.mu.Lock()
+	a.userNames[cacheKey] = cachedSlackUserName{displayName: displayName, cachedAt: time.Now().UTC()}
+	a.mu.Unlock()
 	return displayName
 }
 
@@ -1178,14 +1198,14 @@ func (*SlackAdapter) fetchConversationInfo(ctx context.Context, api *slack.Clien
 	if name == "" {
 		name = strings.TrimSpace(info.NameNormalized)
 	}
-	chatType := "channel"
+	chatType := channel.ConversationTypeGroup
 	switch {
 	case info.IsIM:
-		chatType = "direct"
+		chatType = channel.ConversationTypePrivate
 	case info.IsMpIM:
-		chatType = "group"
+		chatType = channel.ConversationTypeGroup
 	case info.IsPrivate:
-		chatType = "private_channel"
+		chatType = channel.ConversationTypeGroup
 	}
 	return name, chatType, nil
 }

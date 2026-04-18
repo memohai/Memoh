@@ -446,4 +446,5 @@ const (
 	ChannelTypeWeixin   ChannelType = "weixin"
 	ChannelTypeWeChatOA ChannelType = "wechatoa"
 	ChannelTypeLocal    ChannelType = "local"
+	ChannelTypeSlack    ChannelType = "slack"
 )
