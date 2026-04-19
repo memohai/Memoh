@@ -201,6 +201,22 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 	return err
 }
 
+const deleteModelByProviderIDAndModelID = `-- name: DeleteModelByProviderIDAndModelID :exec
+DELETE FROM models
+WHERE provider_id = $1
+  AND model_id = $2
+`
+
+type DeleteModelByProviderIDAndModelIDParams struct {
+	ProviderID pgtype.UUID `json:"provider_id"`
+	ModelID    string      `json:"model_id"`
+}
+
+func (q *Queries) DeleteModelByProviderIDAndModelID(ctx context.Context, arg DeleteModelByProviderIDAndModelIDParams) error {
+	_, err := q.db.Exec(ctx, deleteModelByProviderIDAndModelID, arg.ProviderID, arg.ModelID)
+	return err
+}
+
 const deleteProvider = `-- name: DeleteProvider :exec
 DELETE FROM providers WHERE id = $1
 `

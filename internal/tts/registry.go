@@ -29,6 +29,7 @@ type ProviderDefinition struct {
 	Description  string
 	ConfigSchema ConfigSchema
 	DefaultModel string
+	SupportsList bool
 	Models       []ModelInfo
 	Factory      ProviderFactory
 	Order        int
@@ -128,6 +129,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 			Description:  "Free Edge Read Aloud TTS",
 			ConfigSchema: ConfigSchema{Fields: []FieldSchema{stringField("base_url", "Base URL", "Override the Edge WebSocket endpoint", false, "", 10)}},
 			DefaultModel: "edge-read-aloud",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "edge-read-aloud",
 				Name:        "Edge Read Aloud",
@@ -172,6 +174,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.openai.com/v1", 20),
 			}},
 			DefaultModel: "gpt-4o-mini-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
 				ID:          "gpt-4o-mini-tts",
 				Name:        "gpt-4o-mini-tts",
@@ -214,17 +217,19 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://openrouter.ai/api/v1", 20),
 			}},
 			DefaultModel: "openrouter-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
-				ID:          "openrouter-tts",
-				Name:        "openrouter-tts",
-				Description: "Default OpenRouter speech wrapper model",
+				ID:           "openrouter-tts",
+				Name:         "openrouter-tts",
+				Description:  "Default OpenRouter speech wrapper model",
+				TemplateOnly: true,
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("model", "Model", "Underlying OpenRouter model ID", false, "openai/gpt-audio-mini", 10),
+					advancedStringField("model", "Model", "Underlying OpenRouter model ID", false, "openai/gpt-audio-mini", 10),
 					stringField("voice", "Voice", "Voice name", false, "coral", 20),
 					numberField("speed", "Speed", "Speech rate", false, 1.0, 30),
 				}},
 				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("model", "Model", "Underlying OpenRouter model ID", false, "openai/gpt-audio-mini", 10),
+					advancedStringField("model", "Model", "Underlying OpenRouter model ID", false, "openai/gpt-audio-mini", 10),
 					stringField("voice", "Voice", "Voice name", false, "coral", 20),
 					numberField("speed", "Speed", "Speech rate", false, 1.0, 30),
 				}}},
@@ -251,13 +256,15 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.elevenlabs.io", 20),
 			}},
 			DefaultModel: "elevenlabs-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
-				ID:          "elevenlabs-tts",
-				Name:        "elevenlabs-tts",
-				Description: "Default ElevenLabs speech wrapper model",
+				ID:           "elevenlabs-tts",
+				Name:         "elevenlabs-tts",
+				Description:  "Default ElevenLabs speech wrapper model",
+				TemplateOnly: true,
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
 					stringField("voice_id", "Voice ID", "ElevenLabs voice ID", true, "", 10),
-					stringField("model_id", "Model ID", "ElevenLabs model ID", false, "eleven_multilingual_v2", 20),
+					advancedStringField("model_id", "Model ID", "ElevenLabs model ID", false, "eleven_multilingual_v2", 20),
 					numberField("stability", "Stability", "Voice stability 0-1", false, 0.5, 30),
 					numberField("similarity_boost", "Similarity Boost", "Voice similarity boost 0-1", false, 0.75, 40),
 					numberField("style", "Style", "Speaking style intensity 0-1", false, 0, 50),
@@ -270,7 +277,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				}},
 				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
 					stringField("voice_id", "Voice ID", "ElevenLabs voice ID", true, "", 10),
-					stringField("model_id", "Model ID", "ElevenLabs model ID", false, "eleven_multilingual_v2", 20),
+					advancedStringField("model_id", "Model ID", "ElevenLabs model ID", false, "eleven_multilingual_v2", 20),
 					numberField("stability", "Stability", "Voice stability 0-1", false, 0.5, 30),
 					numberField("similarity_boost", "Similarity Boost", "Voice similarity boost 0-1", false, 0.75, 40),
 					numberField("style", "Style", "Speaking style intensity 0-1", false, 0, 50),
@@ -304,19 +311,20 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.deepgram.com", 20),
 			}},
 			DefaultModel: "deepgram-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "deepgram-tts",
 				Name:        "deepgram-tts",
 				Description: "Default Deepgram speech wrapper model",
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("model", "Model", "Deepgram voice model", false, "aura-2-asteria-en", 10),
+					advancedStringField("model", "Model", "Deepgram voice model", false, "aura-2-asteria-en", 10),
 					enumField("encoding", "Encoding", "Audio encoding", false, []string{"linear16", "mulaw", "alaw"}, 20),
 					numberField("sample_rate", "Sample Rate", "Audio sample rate in Hz", false, 24000, 30),
 					enumField("container", "Container", "Audio container", false, []string{"wav", "none"}, 40),
 				}},
 				Capabilities: ModelCapabilities{
 					ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-						stringField("model", "Model", "Deepgram voice model", false, "aura-2-asteria-en", 10),
+						advancedStringField("model", "Model", "Deepgram voice model", false, "aura-2-asteria-en", 10),
 						enumField("encoding", "Encoding", "Audio encoding", false, []string{"linear16", "mulaw", "alaw"}, 20),
 						numberField("sample_rate", "Sample Rate", "Audio sample rate in Hz", false, 24000, 30),
 						enumField("container", "Container", "Audio container", false, []string{"wav", "none"}, 40),
@@ -346,13 +354,14 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.minimax.io", 20),
 			}},
 			DefaultModel: "minimax-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "minimax-tts",
 				Name:        "minimax-tts",
 				Description: "Default MiniMax speech wrapper model",
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
 					stringField("voice_id", "Voice ID", "MiniMax voice ID", false, "English_expressive_narrator", 10),
-					stringField("model", "Model", "MiniMax model", false, "speech-2.8-hd", 20),
+					advancedStringField("model", "Model", "MiniMax model", false, "speech-2.8-hd", 20),
 					numberField("speed", "Speed", "Speech rate", false, 1.0, 30),
 					numberField("vol", "Volume", "Volume", false, 1.0, 40),
 					numberField("pitch", "Pitch", "Pitch adjustment", false, 0, 50),
@@ -362,7 +371,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				Capabilities: ModelCapabilities{
 					ConfigSchema: ConfigSchema{Fields: []FieldSchema{
 						stringField("voice_id", "Voice ID", "MiniMax voice ID", false, "English_expressive_narrator", 10),
-						stringField("model", "Model", "MiniMax model", false, "speech-2.8-hd", 20),
+						advancedStringField("model", "Model", "MiniMax model", false, "speech-2.8-hd", 20),
 						numberField("speed", "Speed", "Speech rate", false, 1.0, 30),
 						numberField("vol", "Volume", "Volume", false, 1.0, 40),
 						numberField("pitch", "Pitch", "Pitch adjustment", false, 0, 50),
@@ -396,6 +405,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://sami.bytedance.com", 40),
 			}},
 			DefaultModel: "sami-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "sami-tts",
 				Name:        "sami-tts",
@@ -446,12 +456,13 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Override the WebSocket endpoint", false, "wss://dashscope.aliyuncs.com/api-ws/v1/inference/", 20),
 			}},
 			DefaultModel: "cosyvoice-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "cosyvoice-tts",
 				Name:        "cosyvoice-tts",
 				Description: "Default DashScope CosyVoice wrapper model",
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("model", "Model", "DashScope model ID", false, "cosyvoice-v1", 10),
+					advancedStringField("model", "Model", "DashScope model ID", false, "cosyvoice-v1", 10),
 					stringField("voice", "Voice", "Voice or custom clone ID", true, "", 20),
 					enumField("format", "Format", "Audio format", false, []string{"mp3", "wav", "pcm", "opus"}, 30),
 					numberField("sample_rate", "Sample Rate", "Audio sample rate", false, 22050, 40),
@@ -461,7 +472,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				}},
 				Capabilities: ModelCapabilities{
 					ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-						stringField("model", "Model", "DashScope model ID", false, "cosyvoice-v1", 10),
+						advancedStringField("model", "Model", "DashScope model ID", false, "cosyvoice-v1", 10),
 						stringField("voice", "Voice", "Voice or custom clone ID", true, "", 20),
 						enumField("format", "Format", "Audio format", false, []string{"mp3", "wav", "pcm", "opus"}, 30),
 						numberField("sample_rate", "Sample Rate", "Audio sample rate", false, 22050, 40),
@@ -494,6 +505,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				stringField("base_url", "Base URL", "Optional full TTS endpoint override", false, "", 20),
 			}},
 			DefaultModel: "microsoft-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "microsoft-tts",
 				Name:        "microsoft-tts",
@@ -534,6 +546,10 @@ func defaultProviderDefinitions() []ProviderDefinition {
 
 func stringField(key, title, description string, required bool, example any, order int) FieldSchema {
 	return FieldSchema{Key: key, Type: "string", Title: title, Description: description, Required: required, Example: example, Order: order}
+}
+
+func advancedStringField(key, title, description string, required bool, example any, order int) FieldSchema {
+	return FieldSchema{Key: key, Type: "string", Title: title, Description: description, Required: required, Advanced: true, Example: example, Order: order}
 }
 
 func secretField(key, title, description string, required bool, order int) FieldSchema {

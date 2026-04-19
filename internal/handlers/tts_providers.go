@@ -1,31 +1,39 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/tts"
 )
 
 type SpeechHandler struct {
-	service *tts.Service
-	logger  *slog.Logger
+	service       *tts.Service
+	modelsService *models.Service
+	logger        *slog.Logger
 }
 
-func NewSpeechHandler(log *slog.Logger, service *tts.Service) *SpeechHandler {
+func NewSpeechHandler(log *slog.Logger, service *tts.Service, modelsService *models.Service) *SpeechHandler {
 	return &SpeechHandler{
-		service: service,
-		logger:  log.With(slog.String("handler", "speech")),
+		service:       service,
+		modelsService: modelsService,
+		logger:        log.With(slog.String("handler", "speech")),
 	}
 }
 
 func (h *SpeechHandler) Register(e *echo.Echo) {
 	pg := e.Group("/speech-providers")
 	pg.GET("", h.ListProviders)
+	pg.GET("/:id", h.GetProvider)
 	pg.GET("/meta", h.ListMeta)
+	pg.GET("/:id/models", h.ListModelsByProvider)
+	pg.POST("/:id/import-models", h.ImportModels)
 
 	mg := e.Group("/speech-models")
 	mg.GET("", h.ListModels)
@@ -58,6 +66,105 @@ func (h *SpeechHandler) ListProviders(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, items)
+}
+
+// GetProvider godoc
+// @Summary Get speech provider
+// @Description Get a speech provider with masked config values
+// @Tags speech-providers
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} tts.SpeechProviderResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /speech-providers/{id} [get].
+func (h *SpeechHandler) GetProvider(c echo.Context) error {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	item, err := h.service.GetSpeechProvider(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	return c.JSON(http.StatusOK, item)
+}
+
+// ListModelsByProvider godoc
+// @Summary List speech models by provider
+// @Description List models of type 'speech' for a specific speech provider
+// @Tags speech-providers
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {array} tts.SpeechModelResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /speech-providers/{id}/models [get].
+func (h *SpeechHandler) ListModelsByProvider(c echo.Context) error {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+	items, err := h.service.ListSpeechModelsByProvider(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, items)
+}
+
+// ImportModels godoc
+// @Summary Import speech models from provider
+// @Description Fetch models using the configured speech provider and import them into the unified models table
+// @Tags speech-providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} tts.ImportModelsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /speech-providers/{id}/import-models [post].
+func (h *SpeechHandler) ImportModels(c echo.Context) error {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	}
+
+	remoteModels, err := h.service.FetchRemoteModels(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote speech models: %v", err))
+	}
+
+	resp := tts.ImportModelsResponse{
+		Models: make([]string, 0, len(remoteModels)),
+	}
+
+	for _, model := range remoteModels {
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = model.ID
+		}
+
+		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
+			ModelID:    model.ID,
+			Name:       name,
+			ProviderID: id,
+			Type:       models.ModelTypeSpeech,
+			Config:     models.ModelConfig{},
+		})
+		if err != nil {
+			if errors.Is(err, models.ErrModelIDAlreadyExists) {
+				resp.Skipped++
+				continue
+			}
+			h.logger.Warn("failed to import speech model", slog.String("model_id", model.ID), slog.Any("error", err))
+			continue
+		}
+		resp.Created++
+		resp.Models = append(resp.Models, model.ID)
+	}
+
+	return c.JSON(http.StatusOK, resp)
 }
 
 // ListModels godoc

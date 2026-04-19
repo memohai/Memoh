@@ -14,13 +14,14 @@ type ProviderMetaResponse struct {
 
 // SpeechProviderResponse represents a speech-capable provider from the unified providers table.
 type SpeechProviderResponse struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	ClientType string    `json:"client_type"`
-	Icon       string    `json:"icon,omitempty"`
-	Enable     bool      `json:"enable"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	ClientType string         `json:"client_type"`
+	Icon       string         `json:"icon,omitempty"`
+	Enable     bool           `json:"enable"`
+	Config     map[string]any `json:"config,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
 }
 
 // SpeechModelResponse represents a speech model from the unified models table.
@@ -51,4 +52,11 @@ type UpdateSpeechModelRequest struct {
 type TestSynthesizeRequest struct {
 	Text   string         `json:"text"`
 	Config map[string]any `json:"config,omitempty"`
+}
+
+// ImportModelsResponse represents the response for importing speech models.
+type ImportModelsResponse struct {
+	Created int      `json:"created"`
+	Skipped int      `json:"skipped"`
+	Models  []string `json:"models"`
 }

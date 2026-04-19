@@ -425,6 +425,10 @@
     "noModels": "No models found. Click \"Import Models\" to discover available models or \"Add Model\" to create one manually.",
     "noCapabilities": "No capabilities available for this model.",
     "saveSuccess": "Speech configuration saved",
+    "advanced": {
+      "title": "Advanced Settings",
+      "description": "These fields usually map to underlying vendor implementation details. Most users can keep the defaults."
+    },
     "fields": {
       "language": "Language",
       "languagePlaceholder": "Select language...",

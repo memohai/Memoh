@@ -32,7 +32,17 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries *sqlc.Querie
 			return fmt.Errorf("upsert speech provider %s: %w", def.ClientType, err)
 		}
 
+		synced := 0
 		for _, model := range def.Models {
+			if shouldHideTemplateModel(def, model.ID) {
+				if err := queries.DeleteModelByProviderIDAndModelID(ctx, sqlc.DeleteModelByProviderIDAndModelIDParams{
+					ProviderID: provider.ID,
+					ModelID:    model.ID,
+				}); err != nil {
+					return fmt.Errorf("delete hidden speech template model %s: %w", model.ID, err)
+				}
+				continue
+			}
 			modelConfigJSON, err := json.Marshal(map[string]any{})
 			if err != nil {
 				return fmt.Errorf("marshal speech model config: %w", err)
@@ -47,10 +57,11 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries *sqlc.Querie
 			}); err != nil {
 				return fmt.Errorf("upsert speech model %s: %w", model.ID, err)
 			}
+			synced++
 		}
 
 		if logger != nil {
-			logger.Info("speech registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", len(def.Models)))
+			logger.Info("speech registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", synced))
 		}
 	}
 	return nil

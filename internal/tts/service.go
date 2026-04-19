@@ -46,6 +46,18 @@ func (s *Service) ListSpeechProviders(ctx context.Context) ([]SpeechProviderResp
 	return items, nil
 }
 
+func (s *Service) GetSpeechProvider(ctx context.Context, id string) (SpeechProviderResponse, error) {
+	pgID, err := db.ParseUUID(id)
+	if err != nil {
+		return SpeechProviderResponse{}, err
+	}
+	row, err := s.queries.GetProviderByID(ctx, pgID)
+	if err != nil {
+		return SpeechProviderResponse{}, fmt.Errorf("get speech provider: %w", err)
+	}
+	return toSpeechProviderResponse(row), nil
+}
+
 func (s *Service) ListSpeechModels(ctx context.Context) ([]SpeechModelResponse, error) {
 	rows, err := s.queries.ListSpeechModels(ctx)
 	if err != nil {
@@ -53,6 +65,9 @@ func (s *Service) ListSpeechModels(ctx context.Context) ([]SpeechModelResponse, 
 	}
 	items := make([]SpeechModelResponse, 0, len(rows))
 	for _, row := range rows {
+		if s.shouldHideModel(row.ProviderType, row.ModelID) {
+			continue
+		}
 		items = append(items, toSpeechModelFromListRow(row))
 	}
 	return items, nil
@@ -63,12 +78,23 @@ func (s *Service) ListSpeechModelsByProvider(ctx context.Context, providerID str
 	if err != nil {
 		return nil, err
 	}
+	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	if err != nil {
+		return nil, fmt.Errorf("get speech provider: %w", err)
+	}
+	def, err := s.registry.Get(models.ClientType(providerRow.ClientType))
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.queries.ListSpeechModelsByProviderID(ctx, pgID)
 	if err != nil {
 		return nil, fmt.Errorf("list speech models by provider: %w", err)
 	}
 	items := make([]SpeechModelResponse, 0, len(rows))
 	for _, row := range rows {
+		if shouldHideTemplateModel(def, row.ModelID) {
+			continue
+		}
 		items = append(items, toSpeechModelFromModel(row, ""))
 	}
 	return items, nil
@@ -138,16 +164,54 @@ func (s *Service) GetModelCapabilities(ctx context.Context, modelID string) (*Mo
 	if err != nil {
 		return nil, err
 	}
-	for _, model := range def.Models {
-		if model.ID == modelRow.ModelID {
-			caps := model.Capabilities
-			if len(caps.ConfigSchema.Fields) == 0 {
-				caps.ConfigSchema = model.ConfigSchema
-			}
-			return &caps, nil
-		}
+	template := findModelTemplate(def, modelRow.ModelID)
+	if template == nil {
+		return nil, fmt.Errorf("speech model capabilities not found: %s", modelRow.ModelID)
 	}
-	return nil, fmt.Errorf("speech model capabilities not found: %s", modelRow.ModelID)
+	caps := template.Capabilities
+	if len(caps.ConfigSchema.Fields) == 0 {
+		caps.ConfigSchema = template.ConfigSchema
+	}
+	return &caps, nil
+}
+
+func (s *Service) FetchRemoteModels(ctx context.Context, providerID string) ([]ModelInfo, error) {
+	pgID, err := db.ParseUUID(providerID)
+	if err != nil {
+		return nil, err
+	}
+
+	providerRow, err := s.queries.GetProviderByID(ctx, pgID)
+	if err != nil {
+		return nil, fmt.Errorf("get speech provider: %w", err)
+	}
+
+	def, err := s.registry.Get(models.ClientType(providerRow.ClientType))
+	if err != nil {
+		return nil, err
+	}
+	if !def.SupportsList || def.Factory == nil {
+		return nil, fmt.Errorf("speech provider does not support model discovery: %s", providerRow.ClientType)
+	}
+
+	provider, err := def.Factory(parseConfig(providerRow.Config))
+	if err != nil {
+		return nil, fmt.Errorf("build speech provider: %w", err)
+	}
+
+	remoteModels, err := provider.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list speech models: %w", err)
+	}
+
+	discovered := make([]ModelInfo, 0, len(remoteModels))
+	for _, remoteModel := range remoteModels {
+		if remoteModel == nil || remoteModel.ID == "" {
+			continue
+		}
+		discovered = append(discovered, mergeRemoteModelInfo(remoteModel.ID, def.Models))
+	}
+	return discovered, nil
 }
 
 type resolvedSpeechParams struct {
@@ -208,6 +272,57 @@ func mergeConfig(parts ...map[string]any) map[string]any {
 	return out
 }
 
+func mergeRemoteModelInfo(modelID string, defaults []ModelInfo) ModelInfo {
+	for _, model := range defaults {
+		if model.ID == modelID {
+			return model
+		}
+	}
+	return ModelInfo{
+		ID:   modelID,
+		Name: modelID,
+	}
+}
+
+func (s *Service) shouldHideModel(clientType string, modelID string) bool {
+	def, err := s.registry.Get(models.ClientType(clientType))
+	if err != nil {
+		return false
+	}
+	return shouldHideTemplateModel(def, modelID)
+}
+
+func shouldHideTemplateModel(def ProviderDefinition, modelID string) bool {
+	if !def.SupportsList {
+		return false
+	}
+	for _, model := range def.Models {
+		if model.ID == modelID {
+			return model.TemplateOnly
+		}
+	}
+	return false
+}
+
+func findModelTemplate(def ProviderDefinition, modelID string) *ModelInfo {
+	for i := range def.Models {
+		if def.Models[i].ID == modelID {
+			return &def.Models[i]
+		}
+	}
+	if def.DefaultModel != "" {
+		for i := range def.Models {
+			if def.Models[i].ID == def.DefaultModel {
+				return &def.Models[i]
+			}
+		}
+	}
+	if len(def.Models) > 0 {
+		return &def.Models[0]
+	}
+	return nil
+}
+
 func toSpeechProviderResponse(row sqlc.Provider) SpeechProviderResponse {
 	icon := ""
 	if row.Icon.Valid {
@@ -219,9 +334,41 @@ func toSpeechProviderResponse(row sqlc.Provider) SpeechProviderResponse {
 		ClientType: row.ClientType,
 		Icon:       icon,
 		Enable:     row.Enable,
+		Config:     maskSpeechProviderConfig(parseConfig(row.Config)),
 		CreatedAt:  row.CreatedAt.Time,
 		UpdatedAt:  row.UpdatedAt.Time,
 	}
+}
+
+func maskSpeechProviderConfig(cfg map[string]any) map[string]any {
+	if len(cfg) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(cfg))
+	for key, value := range cfg {
+		if s, ok := value.(string); ok && s != "" && isSpeechSecretKey(key) {
+			out[key] = maskSpeechSecret(s)
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func isSpeechSecretKey(key string) bool {
+	switch key {
+	case "api_key", "access_key", "secret_key", "app_key":
+		return true
+	default:
+		return false
+	}
+}
+
+func maskSpeechSecret(value string) string {
+	if len(value) <= 8 {
+		return "********"
+	}
+	return value[:4] + "****" + value[len(value)-4:]
 }
 
 func toSpeechModelFromListRow(row sqlc.ListSpeechModelsRow) SpeechModelResponse {

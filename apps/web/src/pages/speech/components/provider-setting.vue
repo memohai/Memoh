@@ -140,6 +140,16 @@
         <h3 class="text-xs font-medium">
           {{ $t('speech.models') }}
         </h3>
+        <LoadingButton
+          v-if="curProviderId"
+          type="button"
+          variant="outline"
+          size="sm"
+          :loading="importLoading"
+          @click="handleImportModels"
+        >
+          {{ $t('speech.importModels') }}
+        </LoadingButton>
       </div>
 
       <div
@@ -208,7 +218,7 @@ import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechModels, getSpeechProvidersMeta, putModelsById, putProvidersById } from '@memohai/sdk'
+import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechProvidersByIdImportModels, putModelsById, putProvidersById } from '@memohai/sdk'
 import type { TtsSpeechModelResponse, TtsSpeechProviderResponse } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -219,6 +229,7 @@ interface SpeechFieldSchema {
   title?: string
   description?: string
   required?: boolean
+  advanced?: boolean
   enum?: string[]
   example?: unknown
   order?: number
@@ -243,6 +254,7 @@ interface SpeechProviderMeta {
   display_name: string
   description?: string
   config_schema?: SpeechConfigSchema
+  default_model?: string
   models?: SpeechModelMeta[]
 }
 
@@ -260,7 +272,20 @@ const visibleSecrets = reactive<Record<string, boolean>>({})
 const expandedModelId = ref('')
 const enableLoading = ref(false)
 const saveLoading = ref(false)
+const importLoading = ref(false)
 const queryCache = useQueryCache()
+
+const { data: providerDetail } = useQuery({
+  key: () => ['speech-provider-detail', curProviderId.value],
+  query: async () => {
+    if (!curProviderId.value) return null
+    const { data } = await getSpeechProvidersById({
+      path: { id: curProviderId.value },
+      throwOnError: true,
+    })
+    return data ?? null
+  },
+})
 
 const { data: metaList } = useQuery({
   key: () => ['speech-providers-meta'],
@@ -280,27 +305,36 @@ const orderedProviderFields = computed(() => {
   return [...fields].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 })
 
-const { data: allSpeechModels } = useQuery({
-  key: () => ['speech-models'],
+const { data: providerSpeechModels } = useQuery({
+  key: () => ['speech-provider-models', curProviderId.value],
   query: async () => {
-    const { data } = await getSpeechModels({ throwOnError: true })
+    if (!curProviderId.value) return []
+    const { data } = await getSpeechProvidersByIdModels({
+      path: { id: curProviderId.value },
+      throwOnError: true,
+    })
     return data ?? []
   },
 })
 
 const providerModels = computed(() => {
-  if (!allSpeechModels.value || !curProviderId.value) return []
-  return (allSpeechModels.value as TtsSpeechModelResponse[]).filter((m) => m.provider_id === curProviderId.value)
+  return (providerSpeechModels.value as TtsSpeechModelResponse[] | undefined) ?? []
 })
 
-watch(() => curProvider.value, (provider) => {
-  providerName.value = provider?.name ?? ''
+watch(() => providerDetail.value, (provider) => {
+  providerName.value = provider?.name ?? curProvider.value?.name ?? ''
   Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
   Object.assign(providerConfig, { ...(provider?.config ?? {}) })
 }, { immediate: true, deep: true })
 
 function getModelMeta(modelID: string): SpeechModelMeta | null {
-  return currentMeta.value?.models?.find((m) => m.id === modelID) ?? null
+  const models = currentMeta.value?.models ?? []
+  const exact = models.find(m => m.id === modelID)
+  if (exact) return exact
+  if (currentMeta.value?.default_model) {
+    return models.find(m => m.id === currentMeta.value?.default_model) ?? null
+  }
+  return models[0] ?? null
 }
 
 function getModelSchema(modelID: string): SpeechConfigSchema | null {
@@ -330,6 +364,7 @@ async function handleToggleEnable(value: boolean) {
       throwOnError: true,
     })
     queryCache.invalidateQueries({ key: ['speech-providers'] })
+    queryCache.invalidateQueries({ key: ['speech-provider-detail', curProviderId.value] })
   } catch {
     curProvider.value = { ...curProvider.value, enable: prev }
     toast.error(t('common.saveFailed'))
@@ -354,6 +389,7 @@ async function handleSaveProvider() {
     })
     toast.success(t('speech.saveSuccess'))
     queryCache.invalidateQueries({ key: ['speech-providers'] })
+    queryCache.invalidateQueries({ key: ['speech-provider-detail', curProviderId.value] })
   } catch {
     toast.error(t('common.saveFailed'))
   } finally {
@@ -377,9 +413,32 @@ async function handleSaveModel(modelId: string, config: Record<string, unknown>)
       throwOnError: true,
     })
     toast.success(t('speech.saveSuccess'))
+    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
     queryCache.invalidateQueries({ key: ['speech-models'] })
   } catch {
     toast.error(t('common.saveFailed'))
+  }
+}
+
+async function handleImportModels() {
+  if (!curProviderId.value) return
+  importLoading.value = true
+  try {
+    const { data } = await postSpeechProvidersByIdImportModels({
+      path: { id: curProviderId.value },
+      throwOnError: true,
+    })
+    toast.success(t('speech.importSuccess', {
+      created: data?.created ?? 0,
+      skipped: data?.skipped ?? 0,
+    }))
+    queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
+    queryCache.invalidateQueries({ key: ['speech-models'] })
+    queryCache.invalidateQueries({ key: ['speech-providers-meta'] })
+  } catch {
+    toast.error(t('speech.importFailed'))
+  } finally {
+    importLoading.value = false
   }
 }
 

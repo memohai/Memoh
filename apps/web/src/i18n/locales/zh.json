@@ -421,6 +421,10 @@
     "noModels": "暂无模型，点击\"导入模型\"发现可用模型，或点击\"新建模型\"手动创建。",
     "noCapabilities": "该模型暂无可用能力信息。",
     "saveSuccess": "语音配置已保存",
+    "advanced": {
+      "title": "高级设置",
+      "description": "这些字段通常对应底层服务商实现细节。大多数情况下保留默认值即可。"
+    },
     "fields": {
       "language": "语言",
       "languagePlaceholder": "选择语言...",

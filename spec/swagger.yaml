@@ -2770,6 +2770,8 @@ definitions:
     type: object
   tts.FieldSchema:
     properties:
+      advanced:
+        type: boolean
       description:
         type: string
       enum:
@@ -2787,6 +2789,17 @@ definitions:
         type: string
       type:
         type: string
+    type: object
+  tts.ImportModelsResponse:
+    properties:
+      created:
+        type: integer
+      models:
+        items:
+          type: string
+        type: array
+      skipped:
+        type: integer
     type: object
   tts.ModelCapabilities:
     properties:
@@ -2876,6 +2889,9 @@ definitions:
     properties:
       client_type:
         type: string
+      config:
+        additionalProperties: {}
+        type: object
       created_at:
         type: string
       enable:
@@ -8266,6 +8282,96 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: List speech providers
+      tags:
+      - speech-providers
+  /speech-providers/{id}:
+    get:
+      description: Get a speech provider with masked config values
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.SpeechProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get speech provider
+      tags:
+      - speech-providers
+  /speech-providers/{id}/import-models:
+    post:
+      consumes:
+      - application/json
+      description: Fetch models using the configured speech provider and import them
+        into the unified models table
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/tts.ImportModelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import speech models from provider
+      tags:
+      - speech-providers
+  /speech-providers/{id}/models:
+    get:
+      description: List models of type 'speech' for a specific speech provider
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/tts.SpeechModelResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List speech models by provider
       tags:
       - speech-providers
   /speech-providers/meta:

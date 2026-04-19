@@ -24,6 +24,7 @@ type FieldSchema struct {
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Required    bool     `json:"required,omitempty"`
+	Advanced    bool     `json:"advanced,omitempty"`
 	Enum        []string `json:"enum,omitempty"`
 	Example     any      `json:"example,omitempty"`
 	Order       int      `json:"order"`
@@ -57,6 +58,7 @@ type ModelInfo struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
 	Description  string            `json:"description,omitempty"`
+	TemplateOnly bool              `json:"template_only,omitempty"`
 	ConfigSchema ConfigSchema      `json:"config_schema,omitempty"`
 	Capabilities ModelCapabilities `json:"capabilities"`
 }

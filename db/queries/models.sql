@@ -131,6 +131,11 @@ DELETE FROM models WHERE id = sqlc.arg(id);
 -- name: DeleteModelByModelID :exec
 DELETE FROM models WHERE model_id = sqlc.arg(model_id);
 
+-- name: DeleteModelByProviderIDAndModelID :exec
+DELETE FROM models
+WHERE provider_id = sqlc.arg(provider_id)
+  AND model_id = sqlc.arg(model_id);
+
 -- name: CountModels :one
 SELECT COUNT(*) FROM models
 WHERE type != 'speech';
