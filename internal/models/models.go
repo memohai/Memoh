@@ -446,19 +446,9 @@ func IsValidClientType(clientType ClientType) bool {
 }
 
 // IsLLMClientType returns true if the client type belongs to the LLM domain
-// (chat/embedding), excluding speech-only types like edge-speech.
+// (chat/embedding), excluding speech-only types (any type ending in "-speech").
 func IsLLMClientType(clientType ClientType) bool {
-	switch clientType {
-	case ClientTypeOpenAIResponses,
-		ClientTypeOpenAICompletions,
-		ClientTypeAnthropicMessages,
-		ClientTypeGoogleGenerativeAI,
-		ClientTypeOpenAICodex,
-		ClientTypeGitHubCopilot:
-		return true
-	default:
-		return false
-	}
+	return IsValidClientType(clientType) && !strings.HasSuffix(string(clientType), "-speech")
 }
 
 // SelectMemoryModel selects a chat model for memory operations.

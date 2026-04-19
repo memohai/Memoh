@@ -85,4 +85,4 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
 export const CLIENT_TYPE_LIST: ClientTypeMeta[] = Object.values(CLIENT_TYPE_META)
 
 export const LLM_CLIENT_TYPE_LIST: ClientTypeMeta[] = CLIENT_TYPE_LIST
-  .filter(ct => ct.value !== 'edge-speech')
+  .filter(ct => !ct.value.endsWith('-speech'))
