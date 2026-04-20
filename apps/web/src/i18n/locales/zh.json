@@ -253,6 +253,8 @@
       "vision": "视觉",
       "tool-call": "工具调用",
       "image-output": "图片生成",
+      "generate": "生成",
+      "edit": "编辑",
       "reasoning": "推理"
     },
     "contextWindow": "上下文窗口",
@@ -917,7 +919,7 @@
       "ttsModel": "语音合成模型",
       "ttsModelPlaceholder": "选择语音合成模型",
       "imageModel": "图片生成模型",
-      "imageModelDescription": "用于 generate_image 工具的模型，必须支持 image-output 兼容性。",
+      "imageModelDescription": "用于图片工具的模型。可选择支持 image-output 的 chat 模型，或支持 generate/edit 的 image 模型。",
       "imageModelPlaceholder": "选择图片模型（可选）",
       "language": "语言",
       "reasoningEnabled": "启用推理",

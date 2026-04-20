@@ -2261,11 +2261,13 @@ definitions:
     enum:
     - chat
     - embedding
+    - image
     - speech
     type: string
     x-enum-varnames:
     - ModelTypeChat
     - ModelTypeEmbedding
+    - ModelTypeImage
     - ModelTypeSpeech
   models.TestResponse:
     properties:
@@ -7286,7 +7288,7 @@ paths:
       description: Get a list of all configured models, optionally filtered by type
         or provider client type
       parameters:
-      - description: Model type (chat, embedding)
+      - description: Model type (chat, embedding, image, speech)
         in: query
         name: type
         type: string

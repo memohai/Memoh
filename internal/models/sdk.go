@@ -8,6 +8,7 @@ import (
 	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
 	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
+	openaiimages "github.com/memohai/twilight-ai/provider/openai/images"
 	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
@@ -118,6 +119,40 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		}
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
+	}
+}
+
+func NewSDKImageGenerationModel(cfg SDKModelConfig) *sdk.ImageGenerationModel {
+	opts := imageProviderOptions(cfg)
+	if opts == nil {
+		return nil
+	}
+	return openaiimages.New(opts...).GenerationModel(cfg.ModelID)
+}
+
+func NewSDKImageEditModel(cfg SDKModelConfig) *sdk.ImageEditModel {
+	opts := imageProviderOptions(cfg)
+	if opts == nil {
+		return nil
+	}
+	return openaiimages.New(opts...).EditModel(cfg.ModelID)
+}
+
+func imageProviderOptions(cfg SDKModelConfig) []openaiimages.Option {
+	switch ClientType(cfg.ClientType) {
+	case ClientTypeOpenAICompletions, ClientTypeOpenAIResponses:
+		opts := []openaiimages.Option{
+			openaiimages.WithAPIKey(cfg.APIKey),
+		}
+		if cfg.HTTPClient != nil {
+			opts = append(opts, openaiimages.WithHTTPClient(cfg.HTTPClient))
+		}
+		if cfg.BaseURL != "" {
+			opts = append(opts, openaiimages.WithBaseURL(cfg.BaseURL))
+		}
+		return opts
+	default:
+		return nil
 	}
 }
 

@@ -332,12 +332,20 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	for _, m := range remoteModels {
 		modelType := models.ModelTypeChat
-		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
+		switch strings.TrimSpace(m.Type) {
+		case string(models.ModelTypeEmbedding):
 			modelType = models.ModelTypeEmbedding
+		case string(models.ModelTypeImage):
+			modelType = models.ModelTypeImage
 		}
 		compatibilities := m.Compatibilities
 		if len(compatibilities) == 0 {
-			compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
+			switch modelType {
+			case models.ModelTypeImage:
+				compatibilities = []string{models.CompatGenerate, models.CompatEdit}
+			case models.ModelTypeChat:
+				compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
+			}
 		}
 		name := strings.TrimSpace(m.Name)
 		if name == "" {

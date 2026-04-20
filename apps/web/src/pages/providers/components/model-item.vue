@@ -101,7 +101,7 @@ import {
   Button,
   Spinner,
 } from '@memohai/ui'
-import { RefreshCw, Settings, Trash2, MessageSquare, Binary } from 'lucide-vue-next'
+import { RefreshCw, Settings, Trash2, MessageSquare, Binary, Image } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelCapabilities from '@/components/model-capabilities/index.vue'
 import ContextWindowBadge from '@/components/context-window-badge/index.vue'
@@ -128,7 +128,14 @@ const testResult = ref<ModelsTestResponse | null>(null)
 const reasoningEfforts = computed(() => ((props.model.config as ModelConfigWithReasoning | undefined)?.reasoning_efforts ?? []))
 
 const typeIcon = computed(() => {
-  return props.model.type === 'embedding' ? Binary : MessageSquare
+  switch (props.model.type) {
+    case 'embedding':
+      return Binary
+    case 'image':
+      return Image
+    default:
+      return MessageSquare
+  }
 })
 
 const statusDotClass = computed(() => {

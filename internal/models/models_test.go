@@ -51,6 +51,19 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "valid image model",
+			model: models.Model{
+				ModelID:    "gpt-image-1",
+				Name:       "GPT Image 1",
+				ProviderID: "11111111-1111-1111-1111-111111111111",
+				Type:       models.ModelTypeImage,
+				Config: models.ModelConfig{
+					Compatibilities: []string{models.CompatGenerate, models.CompatEdit},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "missing model_id",
 			model: models.Model{
 				ProviderID: "11111111-1111-1111-1111-111111111111",
@@ -129,12 +142,14 @@ func TestModel_HasCompatibility(t *testing.T) {
 	assert.True(t, m.HasCompatibility("tool-call"))
 	assert.True(t, m.HasCompatibility("reasoning"))
 	assert.False(t, m.HasCompatibility("image-output"))
+	assert.False(t, m.HasCompatibility("generate"))
 }
 
 func TestModelTypes(t *testing.T) {
 	t.Run("ModelType constants", func(t *testing.T) {
 		assert.Equal(t, models.ModelTypeChat, models.ModelType("chat"))
 		assert.Equal(t, models.ModelTypeEmbedding, models.ModelType("embedding"))
+		assert.Equal(t, models.ModelTypeImage, models.ModelType("image"))
 	})
 
 	t.Run("ClientType constants", func(t *testing.T) {

@@ -93,7 +93,7 @@ export interface ModelOption {
 const props = defineProps<{
   models: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
-  modelType: 'chat' | 'embedding'
+  modelType?: 'chat' | 'embedding' | 'image'
   open?: boolean
 }>()
 
@@ -118,7 +118,7 @@ const providerMap = computed(() => {
 })
 
 const typeFilteredModels = computed(() =>
-  props.models.filter((m) => m.type === props.modelType),
+  props.modelType ? props.models.filter((m) => m.type === props.modelType) : props.models,
 )
 
 const options = computed<ModelOption[]>(() =>

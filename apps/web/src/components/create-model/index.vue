@@ -41,6 +41,9 @@
                       <SelectItem value="embedding">
                         Embedding
                       </SelectItem>
+                      <SelectItem value="image">
+                        Image
+                      </SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
@@ -107,14 +110,14 @@
             </FormItem>
           </FormField>
 
-          <!-- Compatibilities (chat only) -->
-          <div v-if="selectedType === 'chat'">
+          <!-- Compatibilities -->
+          <div v-if="selectedCompatibilityOptions.length > 0">
             <Label class="mb-4">
               {{ $t('models.compatibilities') }}
             </Label>
             <div class="flex flex-wrap gap-3 mt-2">
               <label
-                v-for="opt in COMPATIBILITY_OPTIONS"
+                v-for="opt in selectedCompatibilityOptions"
                 :key="opt.value"
                 class="flex items-center gap-1.5 text-xs"
               >
@@ -177,7 +180,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsById, putModelsModelByModelId } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
+import { CHAT_COMPATIBILITY_OPTIONS, IMAGE_COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
@@ -201,6 +204,21 @@ const form = useForm({
 })
 
 const selectedType = computed(() => form.values.type || 'chat')
+const selectedCompatibilityOptions = computed(() => {
+  switch (selectedType.value) {
+    case 'chat':
+      return CHAT_COMPATIBILITY_OPTIONS
+    case 'image':
+      return IMAGE_COMPATIBILITY_OPTIONS
+    default:
+      return []
+  }
+})
+
+watch(selectedCompatibilityOptions, (options) => {
+  const allowed = new Set(options.map(option => option.value))
+  selectedCompat.value = selectedCompat.value.filter(value => allowed.has(value))
+}, { immediate: true })
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
@@ -288,8 +306,11 @@ async function addModel() {
     if (dim) config.dimensions = dim
   }
 
-  if (type === 'chat') {
+  if (type === 'chat' || type === 'image') {
     config.compatibilities = selectedCompat.value
+  }
+
+  if (type === 'chat') {
     const ctxWin = form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined)
     if (ctxWin) config.context_window = ctxWin
   }

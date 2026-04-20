@@ -257,6 +257,8 @@
       "vision": "Vision",
       "tool-call": "Tool Call",
       "image-output": "Image Output",
+      "generate": "Generate",
+      "edit": "Edit",
       "reasoning": "Reasoning"
     },
     "contextWindow": "Context Window",
@@ -921,7 +923,7 @@
       "ttsModel": "TTS Model",
       "ttsModelPlaceholder": "Select TTS model",
       "imageModel": "Image Generation Model",
-      "imageModelDescription": "Model used for the generate_image tool. Must support image-output compatibility.",
+      "imageModelDescription": "Model used for image tools. Supports chat models with image-output or image models with generate/edit compatibility.",
       "imageModelPlaceholder": "Select image model (optional)",
       "language": "Language",
       "reasoningEnabled": "Enable Reasoning",

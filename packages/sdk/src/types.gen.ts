@@ -1354,7 +1354,7 @@ export type ModelsModelConfig = {
     reasoning_efforts?: Array<string>;
 };
 
-export type ModelsModelType = 'chat' | 'embedding' | 'speech';
+export type ModelsModelType = 'chat' | 'embedding' | 'image' | 'speech';
 
 export type ModelsTestResponse = {
     latency_ms?: number;
@@ -7116,7 +7116,7 @@ export type GetModelsData = {
     path?: never;
     query?: {
         /**
-         * Model type (chat, embedding)
+         * Model type (chat, embedding, image, speech)
          */
         type?: string;
         /**

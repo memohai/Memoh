@@ -70,7 +70,7 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Summary List all models
 // @Description Get a list of all configured models, optionally filtered by type or provider client type
 // @Tags models
-// @Param type query string false "Model type (chat, embedding)"
+// @Param type query string false "Model type (chat, embedding, image, speech)"
 // @Param client_type query string false "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
 // @Success 200 {array} models.GetResponse
 // @Failure 400 {object} ErrorResponse

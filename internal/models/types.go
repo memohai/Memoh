@@ -11,6 +11,7 @@ type ModelType string
 const (
 	ModelTypeChat      ModelType = "chat"
 	ModelTypeEmbedding ModelType = "embedding"
+	ModelTypeImage     ModelType = "image"
 	ModelTypeSpeech    ModelType = "speech"
 )
 
@@ -38,6 +39,8 @@ const (
 	CompatVision      = "vision"
 	CompatToolCall    = "tool-call"
 	CompatImageOutput = "image-output"
+	CompatGenerate    = "generate"
+	CompatEdit        = "edit"
 	CompatReasoning   = "reasoning"
 )
 
@@ -51,7 +54,12 @@ const (
 
 // validCompatibilities enumerates accepted compatibility tokens.
 var validCompatibilities = map[string]struct{}{
-	CompatVision: {}, CompatToolCall: {}, CompatImageOutput: {}, CompatReasoning: {},
+	CompatVision:      {},
+	CompatToolCall:    {},
+	CompatImageOutput: {},
+	CompatGenerate:    {},
+	CompatEdit:        {},
+	CompatReasoning:   {},
 }
 
 var validReasoningEfforts = map[string]struct{}{
@@ -78,6 +86,15 @@ type Model struct {
 	Config     ModelConfig `json:"config"`
 }
 
+func IsValidModelType(modelType ModelType) bool {
+	switch modelType {
+	case ModelTypeChat, ModelTypeEmbedding, ModelTypeImage, ModelTypeSpeech:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Model) Validate() error {
 	if m.ModelID == "" {
 		return errors.New("model ID is required")
@@ -88,7 +105,7 @@ func (m *Model) Validate() error {
 	if _, err := uuid.Parse(m.ProviderID); err != nil {
 		return errors.New("provider ID must be a valid UUID")
 	}
-	if m.Type != ModelTypeChat && m.Type != ModelTypeEmbedding && m.Type != ModelTypeSpeech {
+	if !IsValidModelType(m.Type) {
 		return errors.New("invalid model type")
 	}
 	if m.Type == ModelTypeEmbedding {

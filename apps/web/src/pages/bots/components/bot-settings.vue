@@ -197,7 +197,6 @@
         v-model="form.image_model_id"
         :models="imageCapableModels"
         :providers="providers"
-        model-type="chat"
         :placeholder="$t('bots.settings.imageModelPlaceholder')"
       />
     </div>
@@ -488,7 +487,15 @@ const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 const imageCapableModels = computed(() =>
-  models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
+  models.value.filter((m) => {
+    if (m.type === 'chat') {
+      return m.config?.compatibilities?.includes('image-output')
+    }
+    if (m.type === 'image') {
+      return m.config?.compatibilities?.includes('generate') || m.config?.compatibilities?.includes('edit')
+    }
+    return false
+  }),
 )
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
