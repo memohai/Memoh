@@ -52,7 +52,7 @@ import { computed, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, AppWindow, ChartLine, User, Store, Info } from 'lucide-vue-next'
+import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, Mail, AppWindow, ChartLine, User, Store, Info } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
@@ -117,11 +117,6 @@ const navItems = computed<{ title: string; name: string; icon: Component }[]>(()
     title: t('sidebar.speech'),
     name: 'speech',
     icon: Volume2,
-  },
-  {
-    title: t('sidebar.transcription'),
-    name: 'transcription',
-    icon: AudioLines,
   },
   {
     title: t('sidebar.email'),

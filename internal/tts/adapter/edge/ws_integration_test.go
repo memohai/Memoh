@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/memohai/memoh/internal/tts"
 )
 
 // Real Edge TTS integration tests. Not compiled by default (requires -tags=integration).
@@ -17,14 +17,14 @@ import (
 //
 // Run:
 //
-//	go test -tags=integration ./internal/audio/adapter/edge/... -run TestRealEdgeTTS -v
+//	go test -tags=integration ./internal/tts/adapter/edge/... -run TestRealEdgeTTS -v
 
 func TestRealEdgeTTS_Synthesize(t *testing.T) {
 	client := NewEdgeWsClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, Speed: 1.0}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, Speed: 1.0}
 	audio, err := client.Synthesize(ctx, "Hello, this is a real Edge TTS test.", config)
 	if err != nil {
 		t.Fatalf("Synthesize: %v", err)
@@ -40,7 +40,7 @@ func TestRealEdgeTTS_Stream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}}
 	ch, errCh := client.Stream(ctx, "你好，这是流式测试。", config)
 	var total int
 	for b := range ch {
@@ -57,7 +57,7 @@ func TestRealEdgeTTS_Stream(t *testing.T) {
 
 // TestRealEdgeTTS_Formats tries every candidate format and reports which ones are supported.
 //
-//	go test -tags=integration ./internal/audio/adapter/edge/... -run TestRealEdgeTTS_Formats -v
+//	go test -tags=integration ./internal/tts/adapter/edge/... -run TestRealEdgeTTS_Formats -v
 func TestRealEdgeTTS_Formats(t *testing.T) {
 	formats := []string{
 		"audio-24khz-48kbitrate-mono-mp3",
@@ -71,8 +71,8 @@ func TestRealEdgeTTS_Formats(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			config := audio.AudioConfig{
-				Voice:  audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"},
+			config := tts.AudioConfig{
+				Voice:  tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"},
 				Format: fmt,
 				Speed:  1.0,
 			}
@@ -88,7 +88,7 @@ func TestRealEdgeTTS_Formats(t *testing.T) {
 
 // TestRealEdgeTTS_SaveAudio synthesizes speech and writes the result to a file for manual inspection.
 //
-//	go test -tags=integration ./internal/audio/adapter/edge/... -run TestRealEdgeTTS_SaveAudio -v
+//	go test -tags=integration ./internal/tts/adapter/edge/... -run TestRealEdgeTTS_SaveAudio -v
 func TestRealEdgeTTS_SaveAudio(t *testing.T) {
 	client := NewEdgeWsClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -97,11 +97,11 @@ func TestRealEdgeTTS_SaveAudio(t *testing.T) {
 	cases := []struct {
 		name  string
 		text  string
-		voice audio.VoiceConfig
+		voice tts.VoiceConfig
 		file  string
 	}{
-		{"en", "Hello, this is an Edge TTS audio save test.", audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, "test_en.mp3"},
-		{"zh", "你好，这是一段中文语音合成测试。", audio.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}, "test_zh.mp3"},
+		{"en", "Hello, this is an Edge TTS audio save test.", tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, "test_en.mp3"},
+		{"zh", "你好，这是一段中文语音合成测试。", tts.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}, "test_zh.mp3"},
 	}
 
 	outDir := filepath.Join(os.TempDir(), "edge_tts_test")
@@ -111,7 +111,7 @@ func TestRealEdgeTTS_SaveAudio(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			config := audio.AudioConfig{Voice: tc.voice, Speed: 1.0, Pitch: -10.0}
+			config := tts.AudioConfig{Voice: tc.voice, Speed: 1.0, Pitch: -10.0}
 			audio, err := client.Synthesize(ctx, tc.text, config)
 			if err != nil {
 				t.Fatalf("Synthesize: %v", err)

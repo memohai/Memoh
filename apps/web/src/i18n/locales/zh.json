@@ -64,7 +64,6 @@
     "webSearch": "搜索",
     "memory": "记忆",
     "speech": "语音",
-    "transcription": "转写",
     "email": "邮件",
     "profile": "用户",
     "home": "首页",
@@ -422,9 +421,6 @@
     "noModels": "暂无模型，点击\"导入模型\"发现可用模型，或点击\"新建模型\"手动创建。",
     "noCapabilities": "该模型暂无可用能力信息。",
     "saveSuccess": "语音配置已保存",
-    "synthesis": {
-      "models": "语音合成模型"
-    },
     "advanced": {
       "title": "高级设置",
       "description": "这些字段通常对应底层服务商实现细节。大多数情况下保留默认值即可。"
@@ -446,27 +442,6 @@
       "placeholder": "输入要合成的文本...",
       "generate": "生成",
       "failed": "合成失败"
-    }
-  },
-  "transcription": {
-    "title": "语音转写",
-    "emptyTitle": "暂无转写提供方",
-    "emptyDescription": "添加转写提供方以为 Bot 启用语音转文字功能",
-    "models": "语音识别模型",
-    "noModels": "暂无语音识别模型，可导入可用模型，或保留默认模板模型。",
-    "importModels": "导入模型",
-    "importSuccess": "识别模型导入成功",
-    "importFailed": "识别模型导入失败",
-    "saveSuccess": "转写配置已保存",
-    "noCapabilities": "该模型暂无可用能力信息。",
-    "advanced": {
-      "title": "高级设置",
-      "description": "这些字段通常对应底层服务商实现细节。大多数情况下保留默认值即可。"
-    },
-    "test": {
-      "title": "测试识别",
-      "run": "开始识别",
-      "failed": "识别失败"
     }
   },
   "email": {
@@ -941,8 +916,6 @@
       "memoryHealthUnavailable": "暂不可用",
       "ttsModel": "语音合成模型",
       "ttsModelPlaceholder": "选择语音合成模型",
-      "transcriptionModel": "转写模型",
-      "transcriptionModelPlaceholder": "选择语音转写模型",
       "imageModel": "图片生成模型",
       "imageModelDescription": "用于 generate_image 工具的模型，必须支持 image-output 兼容性。",
       "imageModelPlaceholder": "选择图片模型（可选）",

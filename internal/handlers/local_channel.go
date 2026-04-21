@@ -30,30 +30,30 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-// localSpeechSynthesizer synthesizes text to speech audio.
-type localSpeechSynthesizer interface {
+// localTtsSynthesizer synthesizes text to speech audio.
+type localTtsSynthesizer interface {
 	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
 }
 
-// localSpeechModelResolver resolves speech model IDs for bots.
-type localSpeechModelResolver interface {
-	ResolveSpeechModelID(ctx context.Context, botID string) (string, error)
+// localTtsModelResolver resolves TTS model IDs for bots.
+type localTtsModelResolver interface {
+	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
 // LocalChannelHandler handles local channel routes (WebUI / API) backed by bot history.
 type LocalChannelHandler struct {
-	channelType         channel.ChannelType
-	channelManager      *channel.Manager
-	channelStore        *channel.Store
-	chatService         *conversation.Service
-	routeHub            *local.RouteHub
-	botService          *bots.Service
-	accountService      *accounts.Service
-	resolver            *flow.Resolver
-	mediaService        *media.Service
-	speechService       localSpeechSynthesizer
-	speechModelResolver localSpeechModelResolver
-	logger              *slog.Logger
+	channelType      channel.ChannelType
+	channelManager   *channel.Manager
+	channelStore     *channel.Store
+	chatService      *conversation.Service
+	routeHub         *local.RouteHub
+	botService       *bots.Service
+	accountService   *accounts.Service
+	resolver         *flow.Resolver
+	mediaService     *media.Service
+	ttsService       localTtsSynthesizer
+	ttsModelResolver localTtsModelResolver
+	logger           *slog.Logger
 }
 
 // NewLocalChannelHandler creates a local channel handler.
@@ -80,10 +80,10 @@ func (h *LocalChannelHandler) SetMediaService(svc *media.Service) {
 	h.mediaService = svc
 }
 
-// SetSpeechService configures speech synthesis for handling speech_delta events.
-func (h *LocalChannelHandler) SetSpeechService(synth localSpeechSynthesizer, resolver localSpeechModelResolver) {
-	h.speechService = synth
-	h.speechModelResolver = resolver
+// SetTtsService configures TTS synthesis for handling speech_delta events.
+func (h *LocalChannelHandler) SetTtsService(synth localTtsSynthesizer, resolver localTtsModelResolver) {
+	h.ttsService = synth
+	h.ttsModelResolver = resolver
 }
 
 // Register registers the local channel routes.
@@ -719,12 +719,12 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID,
 // wsSynthesizeSpeech handles speech_delta events by synthesizing audio and
 // injecting attachment_delta events with the resulting voice attachments.
 func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID string, original json.RawMessage) []json.RawMessage {
-	if h.speechService == nil || h.speechModelResolver == nil {
+	if h.ttsService == nil || h.ttsModelResolver == nil {
 		h.logger.Warn("speech_delta received but TTS service not configured")
 		return nil
 	}
 
-	modelID, err := h.speechModelResolver.ResolveSpeechModelID(ctx, botID)
+	modelID, err := h.ttsModelResolver.ResolveTtsModelID(ctx, botID)
 	if err != nil || strings.TrimSpace(modelID) == "" {
 		h.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
 		return nil
@@ -746,7 +746,7 @@ func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID stri
 			continue
 		}
 
-		audioData, contentType, synthErr := h.speechService.Synthesize(ctx, modelID, text, nil)
+		audioData, contentType, synthErr := h.ttsService.Synthesize(ctx, modelID, text, nil)
 		if synthErr != nil {
 			h.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
 			continue

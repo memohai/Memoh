@@ -1,4 +1,4 @@
-package audio
+package tts
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 const (
 	defaultTTL      = 10 * time.Minute
 	cleanupInterval = 1 * time.Minute
-	tempDirName     = "audio_temp"
+	tempDirName     = "tts_temp"
 )
 
 // TempStore manages temporary audio files on disk with automatic TTL-based cleanup.
@@ -30,7 +30,7 @@ type TempStore struct {
 func NewTempStore(baseDir string) (*TempStore, error) {
 	dir := filepath.Join(baseDir, tempDirName)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, fmt.Errorf("create audio temp dir: %w", err)
+		return nil, fmt.Errorf("create tts temp dir: %w", err)
 	}
 	return &TempStore{
 		dir:     dir,

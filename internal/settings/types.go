@@ -12,7 +12,6 @@ type Settings struct {
 	SearchProviderID       string `json:"search_provider_id"`
 	MemoryProviderID       string `json:"memory_provider_id"`
 	TtsModelID             string `json:"tts_model_id"`
-	TranscriptionModelID   string `json:"transcription_model_id"`
 	BrowserContextID       string `json:"browser_context_id"`
 	Language               string `json:"language"`
 	AclDefaultEffect       string `json:"acl_default_effect"`
@@ -37,7 +36,6 @@ type UpsertRequest struct {
 	SearchProviderID       string  `json:"search_provider_id,omitempty"`
 	MemoryProviderID       string  `json:"memory_provider_id,omitempty"`
 	TtsModelID             string  `json:"tts_model_id,omitempty"`
-	TranscriptionModelID   string  `json:"transcription_model_id,omitempty"`
 	BrowserContextID       string  `json:"browser_context_id,omitempty"`
 	Language               string  `json:"language,omitempty"`
 	AclDefaultEffect       string  `json:"acl_default_effect,omitempty"`

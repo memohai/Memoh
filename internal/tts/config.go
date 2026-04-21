@@ -1,4 +1,4 @@
-package audio
+package tts
 
 // VoiceConfig is kept for backward compatibility with the legacy Edge adapter tests.
 type VoiceConfig struct {

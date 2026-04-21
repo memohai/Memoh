@@ -310,146 +310,6 @@ export type AdaptersUsageResponse = {
     total_text_bytes?: number;
 };
 
-export type AudioConfigSchema = {
-    fields?: Array<AudioFieldSchema>;
-};
-
-export type AudioFieldSchema = {
-    advanced?: boolean;
-    description?: string;
-    enum?: Array<string>;
-    example?: unknown;
-    key?: string;
-    order?: number;
-    required?: boolean;
-    title?: string;
-    type?: string;
-};
-
-export type AudioImportModelsResponse = {
-    created?: number;
-    models?: Array<string>;
-    skipped?: number;
-};
-
-export type AudioModelCapabilities = {
-    config_schema?: AudioConfigSchema;
-    formats?: Array<string>;
-    metadata?: {
-        [key: string]: string;
-    };
-    pitch?: AudioParamConstraint;
-    speed?: AudioParamConstraint;
-    voices?: Array<AudioVoiceInfo>;
-};
-
-export type AudioModelInfo = {
-    capabilities?: AudioModelCapabilities;
-    config_schema?: AudioConfigSchema;
-    description?: string;
-    id?: string;
-    name?: string;
-    template_only?: boolean;
-};
-
-export type AudioParamConstraint = {
-    default?: number;
-    max?: number;
-    min?: number;
-    options?: Array<number>;
-};
-
-export type AudioProviderMetaResponse = {
-    config_schema?: AudioConfigSchema;
-    default_model?: string;
-    default_synthesis_model?: string;
-    default_transcription_model?: string;
-    description?: string;
-    display_name?: string;
-    models?: Array<AudioModelInfo>;
-    provider?: string;
-    supports_synthesis_list?: boolean;
-    supports_transcription_list?: boolean;
-    synthesis_models?: Array<AudioModelInfo>;
-    transcription_models?: Array<AudioModelInfo>;
-};
-
-export type AudioSpeechModelResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    model_id?: string;
-    name?: string;
-    provider_id?: string;
-    provider_type?: string;
-    updated_at?: string;
-};
-
-export type AudioSpeechProviderResponse = {
-    client_type?: string;
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    enable?: boolean;
-    icon?: string;
-    id?: string;
-    name?: string;
-    updated_at?: string;
-};
-
-export type AudioTestSynthesizeRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    text?: string;
-};
-
-export type AudioTestTranscriptionResponse = {
-    duration_seconds?: number;
-    language?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    text?: string;
-    words?: Array<AudioTranscriptionWord>;
-};
-
-export type AudioTranscriptionModelResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    model_id?: string;
-    name?: string;
-    provider_id?: string;
-    provider_type?: string;
-    updated_at?: string;
-};
-
-export type AudioTranscriptionWord = {
-    end?: number;
-    speaker_id?: string;
-    start?: number;
-    text?: string;
-};
-
-export type AudioUpdateSpeechModelRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type AudioVoiceInfo = {
-    id?: string;
-    lang?: string;
-    name?: string;
-};
-
 export type BotsBot = {
     avatar_url?: string;
     check_issue_count?: number;
@@ -613,7 +473,7 @@ export type ChannelChannelIdentityBinding = {
     updated_at?: string;
 };
 
-export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local' | 'slack';
+export type ChannelChannelType = 'telegram' | 'feishu' | 'dingtalk' | 'matrix' | 'discord' | 'qq' | 'wecom' | 'weixin' | 'wechatoa' | 'local';
 
 export type ChannelConfigSchema = {
     fields?: {
@@ -1494,7 +1354,7 @@ export type ModelsModelConfig = {
     reasoning_efforts?: Array<string>;
 };
 
-export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription';
+export type ModelsModelType = 'chat' | 'embedding' | 'speech';
 
 export type ModelsTestResponse = {
     latency_ms?: number;
@@ -1755,7 +1615,6 @@ export type SettingsSettings = {
     search_provider_id?: string;
     timezone?: string;
     title_model_id?: string;
-    transcription_model_id?: string;
     tts_model_id?: string;
 };
 
@@ -1780,8 +1639,103 @@ export type SettingsUpsertRequest = {
     search_provider_id?: string;
     timezone?: string;
     title_model_id?: string;
-    transcription_model_id?: string;
     tts_model_id?: string;
+};
+
+export type TtsConfigSchema = {
+    fields?: Array<TtsFieldSchema>;
+};
+
+export type TtsFieldSchema = {
+    advanced?: boolean;
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    key?: string;
+    order?: number;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type TtsImportModelsResponse = {
+    created?: number;
+    models?: Array<string>;
+    skipped?: number;
+};
+
+export type TtsModelCapabilities = {
+    config_schema?: TtsConfigSchema;
+    formats?: Array<string>;
+    metadata?: {
+        [key: string]: string;
+    };
+    pitch?: TtsParamConstraint;
+    speed?: TtsParamConstraint;
+    voices?: Array<TtsVoiceInfo>;
+};
+
+export type TtsModelInfo = {
+    capabilities?: TtsModelCapabilities;
+    config_schema?: TtsConfigSchema;
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type TtsParamConstraint = {
+    default?: number;
+    max?: number;
+    min?: number;
+    options?: Array<number>;
+};
+
+export type TtsProviderMetaResponse = {
+    config_schema?: TtsConfigSchema;
+    default_model?: string;
+    description?: string;
+    display_name?: string;
+    models?: Array<TtsModelInfo>;
+    provider?: string;
+};
+
+export type TtsSpeechModelResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    model_id?: string;
+    name?: string;
+    provider_id?: string;
+    provider_type?: string;
+    updated_at?: string;
+};
+
+export type TtsSpeechProviderResponse = {
+    client_type?: string;
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    enable?: boolean;
+    icon?: string;
+    id?: string;
+    name?: string;
+    updated_at?: string;
+};
+
+export type TtsTestSynthesizeRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    text?: string;
+};
+
+export type TtsVoiceInfo = {
+    id?: string;
+    lang?: string;
+    name?: string;
 };
 
 export type PostAuthLoginData = {
@@ -8268,7 +8222,7 @@ export type GetSpeechModelsResponses = {
     /**
      * OK
      */
-    200: Array<AudioSpeechModelResponse>;
+    200: Array<TtsSpeechModelResponse>;
 };
 
 export type GetSpeechModelsResponse = GetSpeechModelsResponses[keyof GetSpeechModelsResponses];
@@ -8298,47 +8252,10 @@ export type GetSpeechModelsByIdResponses = {
     /**
      * OK
      */
-    200: AudioSpeechModelResponse;
+    200: TtsSpeechModelResponse;
 };
 
 export type GetSpeechModelsByIdResponse = GetSpeechModelsByIdResponses[keyof GetSpeechModelsByIdResponses];
-
-export type PutSpeechModelsByIdData = {
-    /**
-     * Model update payload
-     */
-    body: AudioUpdateSpeechModelRequest;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/speech-models/{id}';
-};
-
-export type PutSpeechModelsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutSpeechModelsByIdError = PutSpeechModelsByIdErrors[keyof PutSpeechModelsByIdErrors];
-
-export type PutSpeechModelsByIdResponses = {
-    /**
-     * OK
-     */
-    200: AudioSpeechModelResponse;
-};
-
-export type PutSpeechModelsByIdResponse = PutSpeechModelsByIdResponses[keyof PutSpeechModelsByIdResponses];
 
 export type GetSpeechModelsByIdCapabilitiesData = {
     body?: never;
@@ -8365,7 +8282,7 @@ export type GetSpeechModelsByIdCapabilitiesResponses = {
     /**
      * OK
      */
-    200: AudioModelCapabilities;
+    200: TtsModelCapabilities;
 };
 
 export type GetSpeechModelsByIdCapabilitiesResponse = GetSpeechModelsByIdCapabilitiesResponses[keyof GetSpeechModelsByIdCapabilitiesResponses];
@@ -8374,7 +8291,7 @@ export type PostSpeechModelsByIdTestData = {
     /**
      * Text to synthesize
      */
-    body: AudioTestSynthesizeRequest;
+    body: TtsTestSynthesizeRequest;
     path: {
         /**
          * Model ID
@@ -8425,7 +8342,7 @@ export type GetSpeechProvidersResponses = {
     /**
      * OK
      */
-    200: Array<AudioSpeechProviderResponse>;
+    200: Array<TtsSpeechProviderResponse>;
 };
 
 export type GetSpeechProvidersResponse = GetSpeechProvidersResponses[keyof GetSpeechProvidersResponses];
@@ -8441,7 +8358,7 @@ export type GetSpeechProvidersMetaResponses = {
     /**
      * OK
      */
-    200: Array<AudioProviderMetaResponse>;
+    200: Array<TtsProviderMetaResponse>;
 };
 
 export type GetSpeechProvidersMetaResponse = GetSpeechProvidersMetaResponses[keyof GetSpeechProvidersMetaResponses];
@@ -8475,7 +8392,7 @@ export type GetSpeechProvidersByIdResponses = {
     /**
      * OK
      */
-    200: AudioSpeechProviderResponse;
+    200: TtsSpeechProviderResponse;
 };
 
 export type GetSpeechProvidersByIdResponse = GetSpeechProvidersByIdResponses[keyof GetSpeechProvidersByIdResponses];
@@ -8513,7 +8430,7 @@ export type PostSpeechProvidersByIdImportModelsResponses = {
     /**
      * OK
      */
-    200: AudioImportModelsResponse;
+    200: TtsImportModelsResponse;
 };
 
 export type PostSpeechProvidersByIdImportModelsResponse = PostSpeechProvidersByIdImportModelsResponses[keyof PostSpeechProvidersByIdImportModelsResponses];
@@ -8547,7 +8464,7 @@ export type GetSpeechProvidersByIdModelsResponses = {
     /**
      * OK
      */
-    200: Array<AudioSpeechModelResponse>;
+    200: Array<TtsSpeechModelResponse>;
 };
 
 export type GetSpeechProvidersByIdModelsResponse = GetSpeechProvidersByIdModelsResponses[keyof GetSpeechProvidersByIdModelsResponses];
@@ -8732,318 +8649,6 @@ export type GetSupermarketTagsResponses = {
 };
 
 export type GetSupermarketTagsResponse = GetSupermarketTagsResponses[keyof GetSupermarketTagsResponses];
-
-export type GetTranscriptionModelsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/transcription-models';
-};
-
-export type GetTranscriptionModelsErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTranscriptionModelsError = GetTranscriptionModelsErrors[keyof GetTranscriptionModelsErrors];
-
-export type GetTranscriptionModelsResponses = {
-    /**
-     * OK
-     */
-    200: Array<AudioTranscriptionModelResponse>;
-};
-
-export type GetTranscriptionModelsResponse = GetTranscriptionModelsResponses[keyof GetTranscriptionModelsResponses];
-
-export type GetTranscriptionModelsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-models/{id}';
-};
-
-export type GetTranscriptionModelsByIdErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTranscriptionModelsByIdError = GetTranscriptionModelsByIdErrors[keyof GetTranscriptionModelsByIdErrors];
-
-export type GetTranscriptionModelsByIdResponses = {
-    /**
-     * OK
-     */
-    200: AudioTranscriptionModelResponse;
-};
-
-export type GetTranscriptionModelsByIdResponse = GetTranscriptionModelsByIdResponses[keyof GetTranscriptionModelsByIdResponses];
-
-export type PutTranscriptionModelsByIdData = {
-    /**
-     * Model update payload
-     */
-    body: AudioUpdateSpeechModelRequest;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-models/{id}';
-};
-
-export type PutTranscriptionModelsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutTranscriptionModelsByIdError = PutTranscriptionModelsByIdErrors[keyof PutTranscriptionModelsByIdErrors];
-
-export type PutTranscriptionModelsByIdResponses = {
-    /**
-     * OK
-     */
-    200: AudioTranscriptionModelResponse;
-};
-
-export type PutTranscriptionModelsByIdResponse = PutTranscriptionModelsByIdResponses[keyof PutTranscriptionModelsByIdResponses];
-
-export type GetTranscriptionModelsByIdCapabilitiesData = {
-    body?: never;
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-models/{id}/capabilities';
-};
-
-export type GetTranscriptionModelsByIdCapabilitiesErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTranscriptionModelsByIdCapabilitiesError = GetTranscriptionModelsByIdCapabilitiesErrors[keyof GetTranscriptionModelsByIdCapabilitiesErrors];
-
-export type GetTranscriptionModelsByIdCapabilitiesResponses = {
-    /**
-     * OK
-     */
-    200: AudioModelCapabilities;
-};
-
-export type GetTranscriptionModelsByIdCapabilitiesResponse = GetTranscriptionModelsByIdCapabilitiesResponses[keyof GetTranscriptionModelsByIdCapabilitiesResponses];
-
-export type PostTranscriptionModelsByIdTestData = {
-    body: {
-        /**
-         * Audio file
-         */
-        file: Blob | File;
-        /**
-         * Optional JSON config
-         */
-        config?: string;
-    };
-    path: {
-        /**
-         * Model ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-models/{id}/test';
-};
-
-export type PostTranscriptionModelsByIdTestErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTranscriptionModelsByIdTestError = PostTranscriptionModelsByIdTestErrors[keyof PostTranscriptionModelsByIdTestErrors];
-
-export type PostTranscriptionModelsByIdTestResponses = {
-    /**
-     * OK
-     */
-    200: AudioTestTranscriptionResponse;
-};
-
-export type PostTranscriptionModelsByIdTestResponse = PostTranscriptionModelsByIdTestResponses[keyof PostTranscriptionModelsByIdTestResponses];
-
-export type GetTranscriptionProvidersData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/transcription-providers';
-};
-
-export type GetTranscriptionProvidersErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTranscriptionProvidersError = GetTranscriptionProvidersErrors[keyof GetTranscriptionProvidersErrors];
-
-export type GetTranscriptionProvidersResponses = {
-    /**
-     * OK
-     */
-    200: Array<AudioSpeechProviderResponse>;
-};
-
-export type GetTranscriptionProvidersResponse = GetTranscriptionProvidersResponses[keyof GetTranscriptionProvidersResponses];
-
-export type GetTranscriptionProvidersMetaData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/transcription-providers/meta';
-};
-
-export type GetTranscriptionProvidersMetaResponses = {
-    /**
-     * OK
-     */
-    200: Array<AudioProviderMetaResponse>;
-};
-
-export type GetTranscriptionProvidersMetaResponse = GetTranscriptionProvidersMetaResponses[keyof GetTranscriptionProvidersMetaResponses];
-
-export type GetTranscriptionProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID (UUID)
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-providers/{id}';
-};
-
-export type GetTranscriptionProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetTranscriptionProvidersByIdError = GetTranscriptionProvidersByIdErrors[keyof GetTranscriptionProvidersByIdErrors];
-
-export type GetTranscriptionProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: AudioSpeechProviderResponse;
-};
-
-export type GetTranscriptionProvidersByIdResponse = GetTranscriptionProvidersByIdResponses[keyof GetTranscriptionProvidersByIdResponses];
-
-export type PostTranscriptionProvidersByIdImportModelsData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID (UUID)
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-providers/{id}/import-models';
-};
-
-export type PostTranscriptionProvidersByIdImportModelsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostTranscriptionProvidersByIdImportModelsError = PostTranscriptionProvidersByIdImportModelsErrors[keyof PostTranscriptionProvidersByIdImportModelsErrors];
-
-export type PostTranscriptionProvidersByIdImportModelsResponses = {
-    /**
-     * OK
-     */
-    200: AudioImportModelsResponse;
-};
-
-export type PostTranscriptionProvidersByIdImportModelsResponse = PostTranscriptionProvidersByIdImportModelsResponses[keyof PostTranscriptionProvidersByIdImportModelsResponses];
-
-export type GetTranscriptionProvidersByIdModelsData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID (UUID)
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/transcription-providers/{id}/models';
-};
-
-export type GetTranscriptionProvidersByIdModelsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetTranscriptionProvidersByIdModelsError = GetTranscriptionProvidersByIdModelsErrors[keyof GetTranscriptionProvidersByIdModelsErrors];
-
-export type GetTranscriptionProvidersByIdModelsResponses = {
-    /**
-     * OK
-     */
-    200: Array<AudioTranscriptionModelResponse>;
-};
-
-export type GetTranscriptionProvidersByIdModelsResponse = GetTranscriptionProvidersByIdModelsResponses[keyof GetTranscriptionProvidersByIdModelsResponses];
 
 export type GetUsersData = {
     body?: never;

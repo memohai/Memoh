@@ -84,7 +84,7 @@ func retryDelay(attempt int, cfg RetryConfig) time.Duration {
 	if backoffIdx > 20 {
 		backoffIdx = 20
 	}
-	delay := cfg.BaseDelay * time.Duration(1<<backoffIdx)
+	delay := cfg.BaseDelay * time.Duration(1<<uint(backoffIdx))
 	delay = min(delay, cfg.MaxDelay)
 	// Add jitter: random value in [0, delay/2), so final delay is in [delay/2, delay).
 	// math/rand is intentional here — cryptographic randomness is not needed for backoff jitter.

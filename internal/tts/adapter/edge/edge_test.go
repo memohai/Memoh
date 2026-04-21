@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/memohai/memoh/internal/tts"
 )
 
 func TestEdgeAdapter_TypeAndMeta(t *testing.T) {
@@ -37,7 +37,7 @@ func TestEdgeAdapter_Synthesize_WithMockServer(t *testing.T) {
 	adapter := NewEdgeAdapterWithClient(slog.Default(), client)
 
 	ctx := context.Background()
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
 	audio, err := adapter.Synthesize(ctx, "Hello", edgeModelReadAloud, config)
 	if err != nil {
 		t.Fatalf("Synthesize: %v", err)
@@ -61,7 +61,7 @@ func TestEdgeAdapter_Stream_WithMockServer(t *testing.T) {
 	adapter := NewEdgeAdapterWithClient(slog.Default(), client)
 
 	ctx := context.Background()
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
 	ch, errCh := adapter.Stream(ctx, "Hi", edgeModelReadAloud, config)
 	var chunks [][]byte
 	for b := range ch {
@@ -86,7 +86,7 @@ func TestEdgeAdapter_Synthesize_NotConnected(t *testing.T) {
 	adapter := NewEdgeAdapterWithClient(slog.Default(), client)
 
 	ctx := context.Background()
-	_, err := adapter.Synthesize(ctx, "x", edgeModelReadAloud, audio.AudioConfig{})
+	_, err := adapter.Synthesize(ctx, "x", edgeModelReadAloud, tts.AudioConfig{})
 	if err == nil {
 		t.Fatal("expected error when connection fails")
 	}

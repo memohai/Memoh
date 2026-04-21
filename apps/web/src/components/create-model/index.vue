@@ -18,7 +18,6 @@
         <div class="flex flex-col gap-3 mt-4">
           <!-- Type -->
           <FormField
-            v-if="!hideType"
             v-slot="{ componentField }"
             name="type"
           >
@@ -36,12 +35,11 @@
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem
-                        v-for="opt in typeOptions"
-                        :key="opt.value"
-                        :value="opt.value"
-                      >
-                        {{ opt.label }}
+                      <SelectItem value="chat">
+                        Chat
+                      </SelectItem>
+                      <SelectItem value="embedding">
+                        Embedding
                       </SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -183,11 +181,6 @@ import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 
-interface ModelTypeOption {
-  value: string
-  label: string
-}
-
 const selectedCompat = ref<string[]>([])
 const { t } = useI18n()
 const { run } = useDialogMutation()
@@ -200,30 +193,14 @@ const formSchema = toTypedSchema(z.object({
   context_window: z.coerce.number().min(1).optional(),
 }))
 
-const props = withDefaults(defineProps<{
-  id: string
-  typeOptions?: ModelTypeOption[]
-  defaultType?: string
-  hideType?: boolean
-  invalidateKeys?: string[]
-}>(), {
-  typeOptions: () => [
-    { value: 'chat', label: 'Chat' },
-    { value: 'embedding', label: 'Embedding' },
-  ],
-  defaultType: 'chat',
-  hideType: false,
-  invalidateKeys: () => ['provider-models'],
-})
-
 const form = useForm({
   validationSchema: formSchema,
   initialValues: {
-    type: props.defaultType,
+    type: 'chat',
   },
 })
 
-const selectedType = computed(() => form.values.type || props.defaultType)
+const selectedType = computed(() => form.values.type || 'chat')
 
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
@@ -260,19 +237,15 @@ function onNameInput(e: Event) {
   form.setFieldValue('name', (e.target as HTMLInputElement).value)
 }
 
-const queryCache = useQueryCache()
-function invalidateModelQueries() {
-  for (const key of props.invalidateKeys) {
-    queryCache.invalidateQueries({ key: [key] })
-  }
-}
+const { id } = defineProps<{ id: string }>()
 
+const queryCache = useQueryCache()
 const { mutateAsync: createModel, isLoading: createLoading } = useMutation({
   mutation: async (data: Record<string, unknown>) => {
     const { data: result } = await postModels({ body: data as ModelsAddRequest, throwOnError: true })
     return result
   },
-  onSettled: invalidateModelQueries,
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
 })
 const { mutateAsync: updateModel, isLoading: updateLoading } = useMutation({
   mutation: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
@@ -283,7 +256,7 @@ const { mutateAsync: updateModel, isLoading: updateLoading } = useMutation({
     })
     return result
   },
-  onSettled: invalidateModelQueries,
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
 })
 const { mutateAsync: updateModelByLegacyModelID, isLoading: updateLegacyLoading } = useMutation({
   mutation: async ({ modelId, data }: { modelId: string; data: Record<string, unknown> }) => {
@@ -294,7 +267,7 @@ const { mutateAsync: updateModelByLegacyModelID, isLoading: updateLegacyLoading 
     })
     return result
   },
-  onSettled: invalidateModelQueries,
+  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
 })
 const isLoading = computed(() => createLoading.value || updateLoading.value || updateLegacyLoading.value)
 
@@ -324,7 +297,7 @@ async function addModel() {
   const payload: Record<string, unknown> = {
     type,
     model_id,
-    provider_id: props.id,
+    provider_id: id,
     config,
   }
 
@@ -375,15 +348,7 @@ watch(open, async () => {
     selectedCompat.value = config?.compatibilities ?? []
     userEditedName.value = !!(name && name !== model_id)
   } else {
-    form.resetForm({
-      values: {
-        type: props.defaultType,
-        model_id: '',
-        name: '',
-        dimensions: undefined,
-        context_window: undefined,
-      },
-    })
+    form.resetForm({ values: { type: 'chat', model_id: '', name: '', dimensions: undefined, context_window: undefined } })
     selectedCompat.value = []
     userEditedName.value = false
   }

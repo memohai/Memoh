@@ -7,28 +7,28 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/tts"
 )
 
-// BotAudioHandler handles per-bot speech synthesis requests from the agent tool.
-type BotAudioHandler struct {
-	audioService    *audiopkg.Service
+// BotTtsHandler handles per-bot TTS synthesis requests from the agent tool.
+type BotTtsHandler struct {
+	ttsService      *tts.Service
 	settingsService *settings.Service
-	tempStore       *audiopkg.TempStore
+	tempStore       *tts.TempStore
 	logger          *slog.Logger
 }
 
-func NewBotAudioHandler(log *slog.Logger, audioService *audiopkg.Service, settingsService *settings.Service, tempStore *audiopkg.TempStore) *BotAudioHandler {
-	return &BotAudioHandler{
-		audioService:    audioService,
+func NewBotTtsHandler(log *slog.Logger, ttsService *tts.Service, settingsService *settings.Service, tempStore *tts.TempStore) *BotTtsHandler {
+	return &BotTtsHandler{
+		ttsService:      ttsService,
 		settingsService: settingsService,
 		tempStore:       tempStore,
-		logger:          log.With(slog.String("handler", "bot_audio")),
+		logger:          log.With(slog.String("handler", "bot_tts")),
 	}
 }
 
-func (h *BotAudioHandler) Register(e *echo.Echo) {
+func (h *BotTtsHandler) Register(e *echo.Echo) {
 	e.POST("/bots/:bot_id/tts/synthesize", h.Synthesize)
 }
 
@@ -54,7 +54,7 @@ type synthesizeResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/tts/synthesize [post].
-func (h *BotAudioHandler) Synthesize(c echo.Context) error {
+func (h *BotTtsHandler) Synthesize(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
@@ -88,10 +88,10 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create temp file")
 	}
 
-	contentType, streamErr := h.audioService.StreamToFile(c.Request().Context(), botSettings.TtsModelID, text, f)
+	contentType, streamErr := h.ttsService.StreamToFile(c.Request().Context(), botSettings.TtsModelID, text, f)
 	closeErr := f.Close()
 	if streamErr != nil {
-		h.logger.Error("speech synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
+		h.logger.Error("tts synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
 		h.tempStore.Delete(tempID)
 		return echo.NewHTTPError(http.StatusInternalServerError, streamErr.Error())
 	}

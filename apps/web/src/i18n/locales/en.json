@@ -63,7 +63,6 @@
     "webSearch": "Web Search",
     "memory": "Memory",
     "speech": "Speech",
-    "transcription": "Transcription",
     "email": "Email",
     "settings": "Settings",
     "profile": "Profile",
@@ -426,9 +425,6 @@
     "noModels": "No models found. Click \"Import Models\" to discover available models or \"Add Model\" to create one manually.",
     "noCapabilities": "No capabilities available for this model.",
     "saveSuccess": "Speech configuration saved",
-    "synthesis": {
-      "models": "Synthesis Models"
-    },
     "advanced": {
       "title": "Advanced Settings",
       "description": "These fields usually map to underlying vendor implementation details. Most users can keep the defaults."
@@ -450,27 +446,6 @@
       "placeholder": "Enter text to synthesize...",
       "generate": "Generate",
       "failed": "Synthesis failed"
-    }
-  },
-  "transcription": {
-    "title": "Transcription",
-    "emptyTitle": "No Transcription Providers",
-    "emptyDescription": "Add a transcription provider to enable speech-to-text for your bots",
-    "models": "Transcription Models",
-    "noModels": "No transcription models found. Import available models or keep the default template model.",
-    "noCapabilities": "No capabilities available for this model.",
-    "importModels": "Import Models",
-    "importSuccess": "Transcription models imported successfully",
-    "importFailed": "Failed to import transcription models",
-    "saveSuccess": "Transcription configuration saved",
-    "advanced": {
-      "title": "Advanced Settings",
-      "description": "These fields usually map to underlying vendor implementation details. Most users can keep the defaults."
-    },
-    "test": {
-      "title": "Test Transcription",
-      "run": "Transcribe",
-      "failed": "Transcription failed"
     }
   },
   "email": {
@@ -945,8 +920,6 @@
       "memoryHealthUnavailable": "Unavailable",
       "ttsModel": "TTS Model",
       "ttsModelPlaceholder": "Select TTS model",
-      "transcriptionModel": "Transcription Model",
-      "transcriptionModelPlaceholder": "Select transcription model",
       "imageModel": "Image Generation Model",
       "imageModelDescription": "Model used for the generate_image tool. Must support image-output compatibility.",
       "imageModelPlaceholder": "Select image model (optional)",

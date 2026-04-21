@@ -10,9 +10,9 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/settings"
+	ttspkg "github.com/memohai/memoh/internal/tts"
 )
 
 const ttsMaxTextLen = 500
@@ -30,26 +30,26 @@ type TTSChannelResolver interface {
 type TTSProvider struct {
 	logger   *slog.Logger
 	settings *settings.Service
-	audio    *audiopkg.Service
+	tts      *ttspkg.Service
 	sender   TTSSender
 	resolver TTSChannelResolver
 }
 
-func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, audioSvc *audiopkg.Service, sender TTSSender, resolver TTSChannelResolver) *TTSProvider {
+func NewTTSProvider(log *slog.Logger, settingsSvc *settings.Service, ttsSvc *ttspkg.Service, sender TTSSender, resolver TTSChannelResolver) *TTSProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &TTSProvider{
 		logger:   log.With(slog.String("tool", "tts")),
 		settings: settingsSvc,
-		audio:    audioSvc,
+		tts:      ttsSvc,
 		sender:   sender,
 		resolver: resolver,
 	}
 }
 
 func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
-	if session.IsSubagent || p.settings == nil || p.audio == nil || p.sender == nil || p.resolver == nil {
+	if session.IsSubagent || p.settings == nil || p.tts == nil || p.sender == nil || p.resolver == nil {
 		return nil, nil
 	}
 	botID := strings.TrimSpace(session.BotID)
@@ -115,7 +115,7 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, arg
 	if botSettings.TtsModelID == "" {
 		return nil, errors.New("bot has no TTS model configured")
 	}
-	audioData, contentType, synthErr := p.audio.Synthesize(ctx, botSettings.TtsModelID, text, nil)
+	audioData, contentType, synthErr := p.tts.Synthesize(ctx, botSettings.TtsModelID, text, nil)
 	if synthErr != nil {
 		return nil, fmt.Errorf("speech synthesis failed: %s", synthErr.Error())
 	}

@@ -295,7 +295,7 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 		content += "\n"
 	}
 
-	content = addLineNumbers(content, lineOffset)
+	content = addLineNumbers(content, int32(lineOffset))
 	return map[string]any{"content": content, "total_lines": totalLines}, nil
 }
 
@@ -757,7 +757,7 @@ func truncateStr(s string, n int) string {
 	return s[:n] + "..."
 }
 
-func addLineNumbers(content string, startLine int) string {
+func addLineNumbers(content string, startLine int32) string {
 	if content == "" {
 		return content
 	}
@@ -765,7 +765,7 @@ func addLineNumbers(content string, startLine int) string {
 	var out strings.Builder
 	out.Grow(len(content) + len(lines)*8)
 	for i, line := range lines {
-		fmt.Fprintf(&out, "%6d\t%s\n", startLine+i, line)
+		fmt.Fprintf(&out, "%6d\t%s\n", int(startLine)+i, line)
 	}
 	return out.String()
 }

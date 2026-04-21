@@ -13,7 +13,7 @@ import (
 
 const countModels = `-- name: CountModels :one
 SELECT COUNT(*) FROM models
-WHERE type NOT IN ('speech', 'transcription')
+WHERE type != 'speech'
 `
 
 func (q *Queries) CountModels(ctx context.Context) (int64, error) {
@@ -40,19 +40,13 @@ FROM providers
 WHERE client_type NOT IN (
   'edge-speech',
   'openai-speech',
-  'openai-transcription',
   'openrouter-speech',
-  'openrouter-transcription',
   'elevenlabs-speech',
-  'elevenlabs-transcription',
   'deepgram-speech',
-  'deepgram-transcription',
   'minimax-speech',
   'volcengine-speech',
   'alibabacloud-speech',
-  'microsoft-speech',
-  'google-speech',
-  'google-transcription'
+  'microsoft-speech'
 )
 `
 
@@ -207,24 +201,6 @@ func (q *Queries) DeleteModelByModelID(ctx context.Context, modelID string) erro
 	return err
 }
 
-const deleteModelByProviderAndType = `-- name: DeleteModelByProviderAndType :exec
-DELETE FROM models
-WHERE provider_id = $1
-  AND model_id = $2
-  AND type = $3
-`
-
-type DeleteModelByProviderAndTypeParams struct {
-	ProviderID pgtype.UUID `json:"provider_id"`
-	ModelID    string      `json:"model_id"`
-	Type       string      `json:"type"`
-}
-
-func (q *Queries) DeleteModelByProviderAndType(ctx context.Context, arg DeleteModelByProviderAndTypeParams) error {
-	_, err := q.db.Exec(ctx, deleteModelByProviderAndType, arg.ProviderID, arg.ModelID, arg.Type)
-	return err
-}
-
 const deleteModelByProviderIDAndModelID = `-- name: DeleteModelByProviderIDAndModelID :exec
 DELETE FROM models
 WHERE provider_id = $1
@@ -318,27 +294,6 @@ func (q *Queries) GetModelByProviderAndModelID(ctx context.Context, arg GetModel
 	return i, err
 }
 
-const getProviderByClientType = `-- name: GetProviderByClientType :one
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE client_type = $1
-`
-
-func (q *Queries) GetProviderByClientType(ctx context.Context, clientType string) (Provider, error) {
-	row := q.db.QueryRow(ctx, getProviderByClientType, clientType)
-	var i Provider
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.ClientType,
-		&i.Icon,
-		&i.Enable,
-		&i.Config,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getProviderByID = `-- name: GetProviderByID :one
 SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers WHERE id = $1
 `
@@ -420,51 +375,12 @@ func (q *Queries) GetSpeechModelWithProvider(ctx context.Context, id pgtype.UUID
 	return i, err
 }
 
-const getTranscriptionModelWithProvider = `-- name: GetTranscriptionModelWithProvider :one
-SELECT
-  m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at,
-  p.client_type AS provider_type
-FROM models m
-JOIN providers p ON p.id = m.provider_id
-WHERE m.id = $1
-  AND m.type = 'transcription'
-`
-
-type GetTranscriptionModelWithProviderRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	ModelID      string             `json:"model_id"`
-	Name         pgtype.Text        `json:"name"`
-	ProviderID   pgtype.UUID        `json:"provider_id"`
-	Type         string             `json:"type"`
-	Config       []byte             `json:"config"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	ProviderType string             `json:"provider_type"`
-}
-
-func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgtype.UUID) (GetTranscriptionModelWithProviderRow, error) {
-	row := q.db.QueryRow(ctx, getTranscriptionModelWithProvider, id)
-	var i GetTranscriptionModelWithProviderRow
-	err := row.Scan(
-		&i.ID,
-		&i.ModelID,
-		&i.Name,
-		&i.ProviderID,
-		&i.Type,
-		&i.Config,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.ProviderType,
-	)
-	return i, err
-}
-
 const listEnabledModels = `-- name: ListEnabledModels :many
 SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at
 FROM models m
 JOIN providers p ON m.provider_id = p.id
 WHERE p.enable = true
-  AND m.type NOT IN ('speech', 'transcription')
+  AND m.type != 'speech'
 ORDER BY m.created_at DESC
 `
 
@@ -609,7 +525,7 @@ func (q *Queries) ListModelVariantsByModelUUID(ctx context.Context, modelUuid pg
 
 const listModels = `-- name: ListModels :many
 SELECT id, model_id, name, provider_id, type, config, created_at, updated_at FROM models
-WHERE type NOT IN ('speech', 'transcription')
+WHERE type != 'speech'
 ORDER BY created_at DESC
 `
 
@@ -717,7 +633,7 @@ func (q *Queries) ListModelsByProviderClientType(ctx context.Context, clientType
 const listModelsByProviderID = `-- name: ListModelsByProviderID :many
 SELECT id, model_id, name, provider_id, type, config, created_at, updated_at FROM models
 WHERE provider_id = $1
-  AND type NOT IN ('speech', 'transcription')
+  AND type != 'speech'
 ORDER BY created_at DESC
 `
 
@@ -831,19 +747,13 @@ SELECT id, name, client_type, icon, enable, config, metadata, created_at, update
 WHERE client_type NOT IN (
   'edge-speech',
   'openai-speech',
-  'openai-transcription',
   'openrouter-speech',
-  'openrouter-transcription',
   'elevenlabs-speech',
-  'elevenlabs-transcription',
   'deepgram-speech',
-  'deepgram-transcription',
   'minimax-speech',
   'volcengine-speech',
   'alibabacloud-speech',
-  'microsoft-speech',
-  'google-speech',
-  'google-transcription'
+  'microsoft-speech'
 )
 ORDER BY created_at DESC
 `
@@ -983,135 +893,6 @@ ORDER BY created_at DESC
 
 func (q *Queries) ListSpeechProviders(ctx context.Context) ([]Provider, error) {
 	rows, err := q.db.Query(ctx, listSpeechProviders)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Provider
-	for rows.Next() {
-		var i Provider
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.ClientType,
-			&i.Icon,
-			&i.Enable,
-			&i.Config,
-			&i.Metadata,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTranscriptionModels = `-- name: ListTranscriptionModels :many
-SELECT m.id, m.model_id, m.name, m.provider_id, m.type, m.config, m.created_at, m.updated_at,
-  p.client_type AS provider_type
-FROM models m
-JOIN providers p ON p.id = m.provider_id
-WHERE m.type = 'transcription'
-ORDER BY m.created_at DESC
-`
-
-type ListTranscriptionModelsRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	ModelID      string             `json:"model_id"`
-	Name         pgtype.Text        `json:"name"`
-	ProviderID   pgtype.UUID        `json:"provider_id"`
-	Type         string             `json:"type"`
-	Config       []byte             `json:"config"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	ProviderType string             `json:"provider_type"`
-}
-
-func (q *Queries) ListTranscriptionModels(ctx context.Context) ([]ListTranscriptionModelsRow, error) {
-	rows, err := q.db.Query(ctx, listTranscriptionModels)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListTranscriptionModelsRow
-	for rows.Next() {
-		var i ListTranscriptionModelsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ModelID,
-			&i.Name,
-			&i.ProviderID,
-			&i.Type,
-			&i.Config,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ProviderType,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTranscriptionModelsByProviderID = `-- name: ListTranscriptionModelsByProviderID :many
-SELECT id, model_id, name, provider_id, type, config, created_at, updated_at FROM models
-WHERE provider_id = $1
-  AND type = 'transcription'
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListTranscriptionModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]Model, error) {
-	rows, err := q.db.Query(ctx, listTranscriptionModelsByProviderID, providerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Model
-	for rows.Next() {
-		var i Model
-		if err := rows.Scan(
-			&i.ID,
-			&i.ModelID,
-			&i.Name,
-			&i.ProviderID,
-			&i.Type,
-			&i.Config,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTranscriptionProviders = `-- name: ListTranscriptionProviders :many
-SELECT id, name, client_type, icon, enable, config, metadata, created_at, updated_at FROM providers
-WHERE client_type IN (
-  'openai-transcription',
-  'openrouter-transcription',
-  'elevenlabs-transcription',
-  'deepgram-transcription',
-  'google-transcription'
-)
-ORDER BY created_at DESC
-`
-
-func (q *Queries) ListTranscriptionProviders(ctx context.Context) ([]Provider, error) {
-	rows, err := q.db.Query(ctx, listTranscriptionProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -1281,6 +1062,11 @@ VALUES ($1, $2, $3, false, $4, '{}')
 ON CONFLICT (name) DO UPDATE SET
   icon = EXCLUDED.icon,
   client_type = EXCLUDED.client_type,
+  config = CASE
+    WHEN providers.config->>'api_key' IS NOT NULL AND providers.config->>'api_key' != ''
+    THEN jsonb_set(EXCLUDED.config, '{api_key}', providers.config->'api_key')
+    ELSE EXCLUDED.config
+  END,
   updated_at = now()
 RETURNING id, name, client_type, icon, enable, config, metadata, created_at, updated_at
 `

@@ -126,9 +126,9 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	return s.convertToGetResponseList(dbModels), nil
 }
 
-// ListByType returns models filtered by type.
+// ListByType returns models filtered by type (chat, embedding, or speech).
 func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech && modelType != ModelTypeTranscription {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
@@ -165,7 +165,7 @@ func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
 
 // ListEnabledByType returns models from enabled providers filtered by type.
 func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech && modelType != ModelTypeTranscription {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
@@ -206,7 +206,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 
 // ListByProviderIDAndType returns models filtered by provider ID and type.
 func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string, modelType ModelType) ([]GetResponse, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech && modelType != ModelTypeTranscription {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return nil, fmt.Errorf("invalid model type: %s", modelType)
 	}
 	if strings.TrimSpace(providerID) == "" {
@@ -361,7 +361,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 // CountByType returns the number of models of a specific type.
 func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, error) {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech && modelType != ModelTypeTranscription {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding && modelType != ModelTypeSpeech {
 		return 0, fmt.Errorf("invalid model type: %s", modelType)
 	}
 
@@ -432,19 +432,13 @@ func IsValidClientType(clientType ClientType) bool {
 		ClientTypeGitHubCopilot,
 		ClientTypeEdgeSpeech,
 		ClientTypeOpenAISpeech,
-		ClientTypeOpenAITranscription,
 		ClientTypeOpenRouterSpeech,
-		ClientTypeOpenRouterTranscription,
 		ClientTypeElevenLabsSpeech,
-		ClientTypeElevenLabsTranscription,
 		ClientTypeDeepgramSpeech,
-		ClientTypeDeepgramTranscription,
 		ClientTypeMiniMaxSpeech,
 		ClientTypeVolcengineSpeech,
 		ClientTypeAlibabaSpeech,
-		ClientTypeMicrosoftSpeech,
-		ClientTypeGoogleSpeech,
-		ClientTypeGoogleTranscription:
+		ClientTypeMicrosoftSpeech:
 		return true
 	default:
 		return false
@@ -454,9 +448,7 @@ func IsValidClientType(clientType ClientType) bool {
 // IsLLMClientType returns true if the client type belongs to the LLM domain
 // (chat/embedding), excluding speech-only types (any type ending in "-speech").
 func IsLLMClientType(clientType ClientType) bool {
-	return IsValidClientType(clientType) &&
-		!strings.HasSuffix(string(clientType), "-speech") &&
-		!strings.HasSuffix(string(clientType), "-transcription")
+	return IsValidClientType(clientType) && !strings.HasSuffix(string(clientType), "-speech")
 }
 
 // SelectMemoryModel selects a chat model for memory operations.

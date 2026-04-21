@@ -175,7 +175,6 @@ func withWorkspaceGPUPreference(metadata map[string]any, gpu WorkspaceGPUConfig)
 	return next
 }
 
-//nolint:unused // Kept for tests and upcoming metadata plumbing.
 func withWorkspaceSkillDiscoveryRoots(metadata map[string]any, roots []string) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
@@ -200,7 +199,6 @@ func withoutWorkspaceGPUPreference(metadata map[string]any) map[string]any {
 	return next
 }
 
-//nolint:unused // Kept for tests and upcoming metadata plumbing.
 func withoutWorkspaceSkillDiscoveryRoots(metadata map[string]any) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)

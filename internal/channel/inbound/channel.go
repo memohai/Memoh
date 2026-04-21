@@ -58,29 +58,14 @@ type mediaIngestor interface {
 	channel.ContainerAttachmentIngester
 }
 
-// speechSynthesizer synthesizes text to speech audio.
-type speechSynthesizer interface {
+// ttsSynthesizer synthesizes text to speech audio.
+type ttsSynthesizer interface {
 	Synthesize(ctx context.Context, modelID string, text string, overrideCfg map[string]any) ([]byte, string, error)
 }
 
-// speechModelResolver looks up the speech model ID configured for a bot.
-type speechModelResolver interface {
-	ResolveSpeechModelID(ctx context.Context, botID string) (string, error)
-}
-
-// TranscriptionResult is the minimal speech-to-text response shape needed by inbound routing.
-type TranscriptionResult interface {
-	GetText() string
-}
-
-// transcriptionRecognizer converts inbound audio to text using a configured model.
-type transcriptionRecognizer interface {
-	Transcribe(ctx context.Context, modelID string, audio []byte, filename string, contentType string, overrideCfg map[string]any) (TranscriptionResult, error)
-}
-
-// transcriptionModelResolver looks up the transcription model ID configured for a bot.
-type transcriptionModelResolver interface {
-	ResolveTranscriptionModelID(ctx context.Context, botID string) (string, error)
+// ttsModelResolver looks up the TTS model ID configured for a bot.
+type ttsModelResolver interface {
+	ResolveTtsModelID(ctx context.Context, botID string) (string, error)
 }
 
 // SessionEnsurer resolves or creates an active session for a route.
@@ -101,29 +86,27 @@ type SessionResult struct {
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
 type ChannelInboundProcessor struct {
-	runner              flow.Runner
-	routeResolver       RouteResolver
-	message             messagepkg.Writer
-	mediaService        mediaIngestor
-	reactor             channelReactor
-	commandHandler      *command.Handler
-	registry            *channel.Registry
-	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
-	identity            *IdentityResolver
-	policy              PolicyService
-	dispatcher          *RouteDispatcher
-	acl                 chatACL
-	observer            channel.StreamObserver
-	speechService       speechSynthesizer
-	speechModelResolver speechModelResolver
-	transcriber         transcriptionRecognizer
-	sttModelResolver    transcriptionModelResolver
-	sessionEnsurer      SessionEnsurer
-	pipeline            *pipelinepkg.Pipeline
-	eventStore          *pipelinepkg.EventStore
-	discussDriver       *pipelinepkg.DiscussDriver
+	runner           flow.Runner
+	routeResolver    RouteResolver
+	message          messagepkg.Writer
+	mediaService     mediaIngestor
+	reactor          channelReactor
+	commandHandler   *command.Handler
+	registry         *channel.Registry
+	logger           *slog.Logger
+	jwtSecret        string
+	tokenTTL         time.Duration
+	identity         *IdentityResolver
+	policy           PolicyService
+	dispatcher       *RouteDispatcher
+	acl              chatACL
+	observer         channel.StreamObserver
+	ttsService       ttsSynthesizer
+	ttsModelResolver ttsModelResolver
+	sessionEnsurer   SessionEnsurer
+	pipeline         *pipelinepkg.Pipeline
+	eventStore       *pipelinepkg.EventStore
+	discussDriver    *pipelinepkg.DiscussDriver
 
 	// activeStreams maps "botID:routeID" to a context.CancelFunc for the
 	// currently running agent stream. Used by /stop to abort generation
@@ -205,23 +188,14 @@ func (p *ChannelInboundProcessor) SetStreamObserver(observer channel.StreamObser
 	p.observer = observer
 }
 
-// SetSpeechService configures the speech synthesizer and settings reader for
-// handling <speech> tag events (speech_delta) that require server-side audio synthesis.
-func (p *ChannelInboundProcessor) SetSpeechService(synth speechSynthesizer, modelResolver speechModelResolver) {
+// SetTtsService configures the TTS synthesizer and settings reader for handling
+// <speech> tag events (speech_delta) that require server-side audio synthesis.
+func (p *ChannelInboundProcessor) SetTtsService(synth ttsSynthesizer, modelResolver ttsModelResolver) {
 	if p == nil {
 		return
 	}
-	p.speechService = synth
-	p.speechModelResolver = modelResolver
-}
-
-// SetTranscriptionService configures speech-to-text processing for inbound audio attachments.
-func (p *ChannelInboundProcessor) SetTranscriptionService(recognizer transcriptionRecognizer, modelResolver transcriptionModelResolver) {
-	if p == nil {
-		return
-	}
-	p.transcriber = recognizer
-	p.sttModelResolver = modelResolver
+	p.ttsService = synth
+	p.ttsModelResolver = modelResolver
 }
 
 // SetSessionEnsurer configures the session ensurer for auto-creating sessions on routes.
@@ -352,8 +326,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
-	msg.Message.Attachments = resolvedAttachments
-	hadVoiceAttachment := containsVoiceAttachment(resolvedAttachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
 	text = strings.TrimSpace(msg.Message.PlainText())
 
@@ -493,24 +465,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		activeChatID = strings.TrimSpace(resolved.ChatID)
 	}
 	shouldTrigger := shouldTriggerAssistantResponse(msg) || identity.ForceReply
-
-	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
-		if transcript := p.transcribeInboundAttachments(ctx, strings.TrimSpace(identity.BotID), resolvedAttachments); transcript != "" {
-			labeledTranscript := formatInboundTranscript(transcript)
-			if msg.Message.Metadata == nil {
-				msg.Message.Metadata = make(map[string]any)
-			}
-			msg.Message.Metadata["transcript"] = transcript
-			if plain := strings.TrimSpace(msg.Message.PlainText()); plain == "" {
-				msg.Message.Text = labeledTranscript
-			} else if !strings.Contains(plain, transcript) {
-				msg.Message.Text = plain + "\n\n" + labeledTranscript
-			}
-		} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
-			msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(resolvedAttachments)
-		}
-		text = strings.TrimSpace(msg.Message.PlainText())
-	}
 
 	if !shouldTrigger {
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
@@ -1946,97 +1900,6 @@ func (p *ChannelInboundProcessor) loadInboundAttachmentPayload(
 	}, nil
 }
 
-func (p *ChannelInboundProcessor) transcribeInboundAttachments(ctx context.Context, botID string, attachments []channel.Attachment) string {
-	if p == nil || p.transcriber == nil || p.sttModelResolver == nil || p.mediaService == nil || strings.TrimSpace(botID) == "" {
-		return ""
-	}
-	modelID, err := p.sttModelResolver.ResolveTranscriptionModelID(ctx, botID)
-	if err != nil || strings.TrimSpace(modelID) == "" {
-		return ""
-	}
-	transcripts := make([]string, 0, len(attachments))
-	for _, att := range attachments {
-		if att.Type != channel.AttachmentAudio && att.Type != channel.AttachmentVoice {
-			continue
-		}
-		if strings.TrimSpace(att.ContentHash) == "" {
-			continue
-		}
-		reader, asset, err := p.mediaService.Open(ctx, botID, strings.TrimSpace(att.ContentHash))
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Warn("open inbound audio for transcription failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
-			}
-			continue
-		}
-		audio, readErr := io.ReadAll(reader)
-		_ = reader.Close()
-		if readErr != nil || len(audio) == 0 {
-			if p.logger != nil {
-				p.logger.Warn("read inbound audio for transcription failed", slog.Any("error", readErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
-			}
-			continue
-		}
-		filename := strings.TrimSpace(att.Name)
-		if filename == "" {
-			filename = "audio" + filepath.Ext(asset.StorageKey)
-		}
-		contentType := strings.TrimSpace(att.Mime)
-		if contentType == "" {
-			contentType = strings.TrimSpace(asset.Mime)
-		}
-		result, txErr := p.transcriber.Transcribe(ctx, modelID, audio, filename, contentType, nil)
-		if txErr != nil {
-			if p.logger != nil {
-				p.logger.Warn("inbound attachment transcription failed", slog.Any("error", txErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
-			}
-			continue
-		}
-		text := strings.TrimSpace(result.GetText())
-		if text == "" {
-			continue
-		}
-		transcripts = append(transcripts, text)
-	}
-	if len(transcripts) == 0 {
-		return ""
-	}
-	return strings.Join(transcripts, "\n\n")
-}
-
-func formatInboundTranscript(transcript string) string {
-	transcript = strings.TrimSpace(transcript)
-	if transcript == "" {
-		return ""
-	}
-	return "[Voice message transcription]\n" + transcript
-}
-
-func containsVoiceAttachment(attachments []channel.Attachment) bool {
-	for _, att := range attachments {
-		if att.Type == channel.AttachmentAudio || att.Type == channel.AttachmentVoice {
-			return true
-		}
-	}
-	return false
-}
-
-func formatVoiceTranscriptionUnavailableNotice(attachments []channel.Attachment) string {
-	paths := make([]string, 0, len(attachments))
-	for _, att := range attachments {
-		if att.Type != channel.AttachmentAudio && att.Type != channel.AttachmentVoice {
-			continue
-		}
-		if ref := strings.TrimSpace(att.URL); ref != "" {
-			paths = append(paths, ref)
-		}
-	}
-	if len(paths) == 0 {
-		return "[User sent a voice message, but transcription is unavailable.]"
-	}
-	return "[User sent a voice message, but transcription is unavailable. Use transcribe_audio with one of these paths if needed: " + strings.Join(paths, ", ") + "]"
-}
-
 func openInboundAttachmentURL(ctx context.Context, rawURL string) (inboundAttachmentPayload, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -2227,9 +2090,6 @@ func mapChannelToChatAttachments(attachments []channel.Attachment) []conversatio
 	}
 	result := make([]conversation.ChatAttachment, 0, len(attachments))
 	for _, att := range attachments {
-		if att.Type == channel.AttachmentAudio || att.Type == channel.AttachmentVoice {
-			continue
-		}
 		ca := conversation.ChatAttachment{
 			Type:        string(att.Type),
 			PlatformKey: att.PlatformKey,
@@ -2304,13 +2164,13 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 	outboundAssetRefs *[]conversation.OutboundAssetRef,
 	assetMu *sync.Mutex,
 ) {
-	if p.speechService == nil || p.speechModelResolver == nil {
+	if p.ttsService == nil || p.ttsModelResolver == nil {
 		if p.logger != nil {
 			p.logger.Warn("speech_delta received but TTS service not configured")
 		}
 		return
 	}
-	modelID, err := p.speechModelResolver.ResolveSpeechModelID(ctx, botID)
+	modelID, err := p.ttsModelResolver.ResolveTtsModelID(ctx, botID)
 	if err != nil || strings.TrimSpace(modelID) == "" {
 		if p.logger != nil {
 			p.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
@@ -2322,7 +2182,7 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 		if text == "" {
 			continue
 		}
-		audioData, contentType, synthErr := p.speechService.Synthesize(ctx, modelID, text, nil)
+		audioData, contentType, synthErr := p.ttsService.Synthesize(ctx, modelID, text, nil)
 		if synthErr != nil {
 			if p.logger != nil {
 				p.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))

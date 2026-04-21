@@ -138,29 +138,18 @@
     <section>
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-xs font-medium">
-          {{ $t('speech.synthesis.models') }}
+          {{ $t('speech.models') }}
         </h3>
-        <div
+        <LoadingButton
           v-if="curProviderId"
-          class="flex items-center gap-2"
+          type="button"
+          variant="outline"
+          size="sm"
+          :loading="importLoading"
+          @click="handleImportModels"
         >
-          <LoadingButton
-            type="button"
-            variant="outline"
-            size="sm"
-            :loading="importLoading"
-            @click="handleImportModels"
-          >
-            {{ $t('speech.importModels') }}
-          </LoadingButton>
-          <CreateModel
-            :id="curProviderId"
-            default-type="speech"
-            hide-type
-            :type-options="speechTypeOptions"
-            :invalidate-keys="['speech-provider-models', 'speech-models']"
-          />
-        </div>
+          {{ $t('speech.importModels') }}
+        </LoadingButton>
       </div>
 
       <div
@@ -202,7 +191,7 @@
             :model-name="model.model_id ?? ''"
             :config="model.config || {}"
             :schema="getModelSchema(model.model_id ?? '')"
-            :on-test="(text, cfg) => handleTestModel(model.id ?? '', text as string, cfg)"
+            :on-test="(text, cfg) => handleTestModel(model.id ?? '', text, cfg)"
             @save="(cfg) => handleSaveModel(model.id ?? '', cfg)"
           />
         </div>
@@ -229,11 +218,10 @@ import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechProvidersByIdImportModels, putProvidersById } from '@memohai/sdk'
+import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechProvidersByIdImportModels, putModelsById, putProvidersById } from '@memohai/sdk'
 import type { TtsSpeechModelResponse, TtsSpeechProviderResponse } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
-import CreateModel from '@/components/create-model/index.vue'
 
 interface SpeechFieldSchema {
   key: string
@@ -268,8 +256,6 @@ interface SpeechProviderMeta {
   config_schema?: SpeechConfigSchema
   default_model?: string
   models?: SpeechModelMeta[]
-  default_synthesis_model?: string
-  synthesis_models?: SpeechModelMeta[]
 }
 
 function getInitials(name: string | undefined) {
@@ -288,9 +274,6 @@ const enableLoading = ref(false)
 const saveLoading = ref(false)
 const importLoading = ref(false)
 const queryCache = useQueryCache()
-const speechTypeOptions = [
-  { value: 'speech', label: 'Speech' },
-]
 
 const { data: providerDetail } = useQuery({
   key: () => ['speech-provider-detail', curProviderId.value],
@@ -314,7 +297,7 @@ const { data: metaList } = useQuery({
 
 const currentMeta = computed(() => {
   if (!metaList.value || !curProvider.value?.client_type) return null
-  return (metaList.value as SpeechProviderMeta[]).find(m => m.provider === curProvider.value?.client_type) ?? null
+  return (metaList.value as SpeechProviderMeta[]).find((m) => m.provider === curProvider.value?.client_type) ?? null
 })
 
 const orderedProviderFields = computed(() => {
@@ -334,7 +317,9 @@ const { data: providerSpeechModels } = useQuery({
   },
 })
 
-const providerModels = computed(() => ((providerSpeechModels.value as TtsSpeechModelResponse[] | undefined) ?? []))
+const providerModels = computed(() => {
+  return (providerSpeechModels.value as TtsSpeechModelResponse[] | undefined) ?? []
+})
 
 watch(() => providerDetail.value, (provider) => {
   providerName.value = provider?.name ?? curProvider.value?.name ?? ''
@@ -343,11 +328,12 @@ watch(() => providerDetail.value, (provider) => {
 }, { immediate: true, deep: true })
 
 function getModelMeta(modelID: string): SpeechModelMeta | null {
-  const models = currentMeta.value?.synthesis_models ?? currentMeta.value?.models ?? []
+  const models = currentMeta.value?.models ?? []
   const exact = models.find(m => m.id === modelID)
   if (exact) return exact
-  const defaultModel = currentMeta.value?.default_synthesis_model ?? currentMeta.value?.default_model
-  if (defaultModel) return models.find(m => m.id === defaultModel) ?? null
+  if (currentMeta.value?.default_model) {
+    return models.find(m => m.id === currentMeta.value?.default_model) ?? null
+  }
   return models[0] ?? null
 }
 
@@ -412,23 +398,20 @@ async function handleSaveProvider() {
 }
 
 async function handleSaveModel(modelId: string, config: Record<string, unknown>) {
-  const model = providerModels.value.find(item => item.id === modelId)
+  const model = providerModels.value.find((item) => item.id === modelId)
   if (!model) return
   try {
-    const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`${apiBase}/speech-models/${modelId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
+    await putModelsById({
+      path: { id: modelId },
+      body: {
+        model_id: model.model_id,
         name: model.name ?? model.model_id,
+        provider_id: model.provider_id,
+        type: 'speech',
         config,
-      }),
+      },
+      throwOnError: true,
     })
-    if (!resp.ok) throw new Error(await resp.text())
     toast.success(t('speech.saveSuccess'))
     queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
     queryCache.invalidateQueries({ key: ['speech-models'] })

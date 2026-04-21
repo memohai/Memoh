@@ -489,240 +489,6 @@ definitions:
       total_text_bytes:
         type: integer
     type: object
-  audio.ConfigSchema:
-    properties:
-      fields:
-        items:
-          $ref: '#/definitions/audio.FieldSchema'
-        type: array
-    type: object
-  audio.FieldSchema:
-    properties:
-      advanced:
-        type: boolean
-      description:
-        type: string
-      enum:
-        items:
-          type: string
-        type: array
-      example: {}
-      key:
-        type: string
-      order:
-        type: integer
-      required:
-        type: boolean
-      title:
-        type: string
-      type:
-        type: string
-    type: object
-  audio.ImportModelsResponse:
-    properties:
-      created:
-        type: integer
-      models:
-        items:
-          type: string
-        type: array
-      skipped:
-        type: integer
-    type: object
-  audio.ModelCapabilities:
-    properties:
-      config_schema:
-        $ref: '#/definitions/audio.ConfigSchema'
-      formats:
-        items:
-          type: string
-        type: array
-      metadata:
-        additionalProperties:
-          type: string
-        type: object
-      pitch:
-        $ref: '#/definitions/audio.ParamConstraint'
-      speed:
-        $ref: '#/definitions/audio.ParamConstraint'
-      voices:
-        items:
-          $ref: '#/definitions/audio.VoiceInfo'
-        type: array
-    type: object
-  audio.ModelInfo:
-    properties:
-      capabilities:
-        $ref: '#/definitions/audio.ModelCapabilities'
-      config_schema:
-        $ref: '#/definitions/audio.ConfigSchema'
-      description:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      template_only:
-        type: boolean
-    type: object
-  audio.ParamConstraint:
-    properties:
-      default:
-        type: number
-      max:
-        type: number
-      min:
-        type: number
-      options:
-        items:
-          type: number
-        type: array
-    type: object
-  audio.ProviderMetaResponse:
-    properties:
-      config_schema:
-        $ref: '#/definitions/audio.ConfigSchema'
-      default_model:
-        type: string
-      default_synthesis_model:
-        type: string
-      default_transcription_model:
-        type: string
-      description:
-        type: string
-      display_name:
-        type: string
-      models:
-        items:
-          $ref: '#/definitions/audio.ModelInfo'
-        type: array
-      provider:
-        type: string
-      supports_synthesis_list:
-        type: boolean
-      supports_transcription_list:
-        type: boolean
-      synthesis_models:
-        items:
-          $ref: '#/definitions/audio.ModelInfo'
-        type: array
-      transcription_models:
-        items:
-          $ref: '#/definitions/audio.ModelInfo'
-        type: array
-    type: object
-  audio.SpeechModelResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      model_id:
-        type: string
-      name:
-        type: string
-      provider_id:
-        type: string
-      provider_type:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  audio.SpeechProviderResponse:
-    properties:
-      client_type:
-        type: string
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      enable:
-        type: boolean
-      icon:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  audio.TestSynthesizeRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      text:
-        type: string
-    type: object
-  audio.TestTranscriptionResponse:
-    properties:
-      duration_seconds:
-        type: number
-      language:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      text:
-        type: string
-      words:
-        items:
-          $ref: '#/definitions/audio.TranscriptionWord'
-        type: array
-    type: object
-  audio.TranscriptionModelResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      model_id:
-        type: string
-      name:
-        type: string
-      provider_id:
-        type: string
-      provider_type:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  audio.TranscriptionWord:
-    properties:
-      end:
-        type: number
-      speaker_id:
-        type: string
-      start:
-        type: number
-      text:
-        type: string
-    type: object
-  audio.UpdateSpeechModelRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  audio.VoiceInfo:
-    properties:
-      id:
-        type: string
-      lang:
-        type: string
-      name:
-        type: string
-    type: object
   bots.Bot:
     properties:
       avatar_url:
@@ -1008,7 +774,6 @@ definitions:
     - weixin
     - wechatoa
     - local
-    - slack
     type: string
     x-enum-varnames:
     - ChannelTypeTelegram
@@ -1021,7 +786,6 @@ definitions:
     - ChannelTypeWeixin
     - ChannelTypeWeChatOA
     - ChannelTypeLocal
-    - ChannelTypeSlack
   channel.ConfigSchema:
     properties:
       fields:
@@ -2498,13 +2262,11 @@ definitions:
     - chat
     - embedding
     - speech
-    - transcription
     type: string
     x-enum-varnames:
     - ModelTypeChat
     - ModelTypeEmbedding
     - ModelTypeSpeech
-    - ModelTypeTranscription
   models.TestResponse:
     properties:
       latency_ms:
@@ -2951,8 +2713,6 @@ definitions:
         type: string
       title_model_id:
         type: string
-      transcription_model_id:
-        type: string
       tts_model_id:
         type: string
     type: object
@@ -2998,9 +2758,168 @@ definitions:
         type: string
       title_model_id:
         type: string
-      transcription_model_id:
-        type: string
       tts_model_id:
+        type: string
+    type: object
+  tts.ConfigSchema:
+    properties:
+      fields:
+        items:
+          $ref: '#/definitions/tts.FieldSchema'
+        type: array
+    type: object
+  tts.FieldSchema:
+    properties:
+      advanced:
+        type: boolean
+      description:
+        type: string
+      enum:
+        items:
+          type: string
+        type: array
+      example: {}
+      key:
+        type: string
+      order:
+        type: integer
+      required:
+        type: boolean
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  tts.ImportModelsResponse:
+    properties:
+      created:
+        type: integer
+      models:
+        items:
+          type: string
+        type: array
+      skipped:
+        type: integer
+    type: object
+  tts.ModelCapabilities:
+    properties:
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
+      formats:
+        items:
+          type: string
+        type: array
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      pitch:
+        $ref: '#/definitions/tts.ParamConstraint'
+      speed:
+        $ref: '#/definitions/tts.ParamConstraint'
+      voices:
+        items:
+          $ref: '#/definitions/tts.VoiceInfo'
+        type: array
+    type: object
+  tts.ModelInfo:
+    properties:
+      capabilities:
+        $ref: '#/definitions/tts.ModelCapabilities'
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  tts.ParamConstraint:
+    properties:
+      default:
+        type: number
+      max:
+        type: number
+      min:
+        type: number
+      options:
+        items:
+          type: number
+        type: array
+    type: object
+  tts.ProviderMetaResponse:
+    properties:
+      config_schema:
+        $ref: '#/definitions/tts.ConfigSchema'
+      default_model:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/tts.ModelInfo'
+        type: array
+      provider:
+        type: string
+    type: object
+  tts.SpeechModelResponse:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      model_id:
+        type: string
+      name:
+        type: string
+      provider_id:
+        type: string
+      provider_type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.SpeechProviderResponse:
+    properties:
+      client_type:
+        type: string
+      config:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      enable:
+        type: boolean
+      icon:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  tts.TestSynthesizeRequest:
+    properties:
+      config:
+        additionalProperties: {}
+        type: object
+      text:
+        type: string
+    type: object
+  tts.VoiceInfo:
+    properties:
+      id:
+        type: string
+      lang:
+        type: string
+      name:
         type: string
     type: object
 info:
@@ -8257,7 +8176,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/audio.SpeechModelResponse'
+              $ref: '#/definitions/tts.SpeechModelResponse'
             type: array
         "500":
           description: Internal Server Error
@@ -8280,45 +8199,12 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/audio.SpeechModelResponse'
+            $ref: '#/definitions/tts.SpeechModelResponse'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get a speech model
-      tags:
-      - speech-models
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Model update payload
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/audio.UpdateSpeechModelRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.SpeechModelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a speech model
       tags:
       - speech-models
   /speech-models/{id}/capabilities:
@@ -8335,7 +8221,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/audio.ModelCapabilities'
+            $ref: '#/definitions/tts.ModelCapabilities'
         "404":
           description: Not Found
           schema:
@@ -8359,7 +8245,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/audio.TestSynthesizeRequest'
+          $ref: '#/definitions/tts.TestSynthesizeRequest'
       produces:
       - application/octet-stream
       responses:
@@ -8389,7 +8275,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/audio.SpeechProviderResponse'
+              $ref: '#/definitions/tts.SpeechProviderResponse'
             type: array
         "500":
           description: Internal Server Error
@@ -8413,7 +8299,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/audio.SpeechProviderResponse'
+            $ref: '#/definitions/tts.SpeechProviderResponse'
         "400":
           description: Bad Request
           schema:
@@ -8443,7 +8329,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/audio.ImportModelsResponse'
+            $ref: '#/definitions/tts.ImportModelsResponse'
         "400":
           description: Bad Request
           schema:
@@ -8475,7 +8361,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/audio.SpeechModelResponse'
+              $ref: '#/definitions/tts.SpeechModelResponse'
             type: array
         "400":
           description: Bad Request
@@ -8496,7 +8382,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/audio.ProviderMetaResponse'
+              $ref: '#/definitions/tts.ProviderMetaResponse'
             type: array
       summary: List speech provider metadata
       tags:
@@ -8629,267 +8515,6 @@ paths:
       summary: List all tags from supermarket
       tags:
       - supermarket
-  /transcription-models:
-    get:
-      description: List all models of type 'transcription' (filtered view of unified
-        models table)
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/audio.TranscriptionModelResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all transcription models
-      tags:
-      - transcription-models
-  /transcription-models/{id}:
-    get:
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.TranscriptionModelResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a transcription model
-      tags:
-      - transcription-models
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Model update payload
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/audio.UpdateSpeechModelRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.TranscriptionModelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a transcription model
-      tags:
-      - transcription-models
-  /transcription-models/{id}/capabilities:
-    get:
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.ModelCapabilities'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get transcription model capabilities
-      tags:
-      - transcription-models
-  /transcription-models/{id}/test:
-    post:
-      consumes:
-      - multipart/form-data
-      description: Transcribe uploaded audio using a specific model's config and return
-        structured text output
-      parameters:
-      - description: Model ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Audio file
-        in: formData
-        name: file
-        required: true
-        type: file
-      - description: Optional JSON config
-        in: formData
-        name: config
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.TestTranscriptionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Test transcription model recognition
-      tags:
-      - transcription-models
-  /transcription-providers:
-    get:
-      description: List providers that support transcription (filtered view of unified
-        providers table)
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/audio.SpeechProviderResponse'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List transcription providers
-      tags:
-      - transcription-providers
-  /transcription-providers/{id}:
-    get:
-      description: Get a speech provider with masked config values
-      parameters:
-      - description: Provider ID (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.SpeechProviderResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get speech provider
-      tags:
-      - speech-providers
-  /transcription-providers/{id}/import-models:
-    post:
-      consumes:
-      - application/json
-      description: Fetch models using the configured transcription provider and import
-        them into the unified models table
-      parameters:
-      - description: Provider ID (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/audio.ImportModelsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import transcription models from provider
-      tags:
-      - transcription-providers
-  /transcription-providers/{id}/models:
-    get:
-      description: List models of type 'transcription' for a specific transcription
-        provider
-      parameters:
-      - description: Provider ID (UUID)
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/audio.TranscriptionModelResponse'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List transcription models by provider
-      tags:
-      - transcription-providers
-  /transcription-providers/meta:
-    get:
-      description: List available transcription provider types with their models and
-        capabilities
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/audio.ProviderMetaResponse'
-            type: array
-      summary: List transcription provider metadata
-      tags:
-      - transcription-providers
   /users:
     get:
       description: List users

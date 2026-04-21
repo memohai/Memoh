@@ -175,14 +175,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		ttsModelUUID = modelID
 	}
-	transcriptionModelUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.TranscriptionModelID); value != "" {
-		modelID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
-		}
-		transcriptionModelUUID = modelID
-	}
 	browserContextUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.BrowserContextID); value != "" {
 		ctxID, err := db.ParseUUID(value)
@@ -212,7 +204,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		SearchProviderID:       searchProviderUUID,
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
-		TranscriptionModelID:   transcriptionModelUUID,
 		BrowserContextID:       browserContextUUID,
 		PersistFullToolResults: current.PersistFullToolResults,
 	})
@@ -307,7 +298,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
-		row.TranscriptionModelID,
 		row.BrowserContextID,
 		row.PersistFullToolResults,
 	)
@@ -332,7 +322,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.SearchProviderID,
 		row.MemoryProviderID,
 		row.TtsModelID,
-		row.TranscriptionModelID,
 		row.BrowserContextID,
 		row.PersistFullToolResults,
 	)
@@ -356,7 +345,6 @@ func normalizeBotSettingsFields(
 	searchProviderID pgtype.UUID,
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
-	transcriptionModelID pgtype.UUID,
 	browserContextID pgtype.UUID,
 	persistFullToolResults bool,
 ) Settings {
@@ -387,9 +375,6 @@ func normalizeBotSettingsFields(
 	}
 	if ttsModelID.Valid {
 		settings.TtsModelID = uuid.UUID(ttsModelID.Bytes).String()
-	}
-	if transcriptionModelID.Valid {
-		settings.TranscriptionModelID = uuid.UUID(transcriptionModelID.Bytes).String()
 	}
 	if browserContextID.Valid {
 		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()

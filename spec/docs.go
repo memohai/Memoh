@@ -7914,7 +7914,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/audio.SpeechModelResponse"
+                                "$ref": "#/definitions/tts.SpeechModelResponse"
                             }
                         }
                     },
@@ -7949,61 +7949,11 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/audio.SpeechModelResponse"
+                            "$ref": "#/definitions/tts.SpeechModelResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "speech-models"
-                ],
-                "summary": "Update a speech model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Model update payload",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/audio.UpdateSpeechModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.SpeechModelResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8033,7 +7983,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/audio.ModelCapabilities"
+                            "$ref": "#/definitions/tts.ModelCapabilities"
                         }
                     },
                     "404": {
@@ -8072,7 +8022,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/audio.TestSynthesizeRequest"
+                            "$ref": "#/definitions/tts.TestSynthesizeRequest"
                         }
                     }
                 ],
@@ -8114,7 +8064,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/audio.SpeechProviderResponse"
+                                "$ref": "#/definitions/tts.SpeechProviderResponse"
                             }
                         }
                     },
@@ -8140,7 +8090,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/audio.ProviderMetaResponse"
+                                "$ref": "#/definitions/tts.ProviderMetaResponse"
                             }
                         }
                     }
@@ -8170,7 +8120,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/audio.SpeechProviderResponse"
+                            "$ref": "#/definitions/tts.SpeechProviderResponse"
                         }
                     },
                     "400": {
@@ -8214,7 +8164,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/audio.ImportModelsResponse"
+                            "$ref": "#/definitions/tts.ImportModelsResponse"
                         }
                     },
                     "400": {
@@ -8263,7 +8213,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/audio.SpeechModelResponse"
+                                "$ref": "#/definitions/tts.SpeechModelResponse"
                             }
                         }
                     },
@@ -8473,394 +8423,6 @@ const docTemplate = `{
                     },
                     "502": {
                         "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-models": {
-            "get": {
-                "description": "List all models of type 'transcription' (filtered view of unified models table)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-models"
-                ],
-                "summary": "List all transcription models",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/audio.TranscriptionModelResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-models/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-models"
-                ],
-                "summary": "Get a transcription model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.TranscriptionModelResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-models"
-                ],
-                "summary": "Update a transcription model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Model update payload",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/audio.UpdateSpeechModelRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.TranscriptionModelResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-models/{id}/capabilities": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-models"
-                ],
-                "summary": "Get transcription model capabilities",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.ModelCapabilities"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-models/{id}/test": {
-            "post": {
-                "description": "Transcribe uploaded audio using a specific model's config and return structured text output",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-models"
-                ],
-                "summary": "Test transcription model recognition",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Model ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "file",
-                        "description": "Audio file",
-                        "name": "file",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Optional JSON config",
-                        "name": "config",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.TestTranscriptionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-providers": {
-            "get": {
-                "description": "List providers that support transcription (filtered view of unified providers table)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-providers"
-                ],
-                "summary": "List transcription providers",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/audio.SpeechProviderResponse"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-providers/meta": {
-            "get": {
-                "description": "List available transcription provider types with their models and capabilities",
-                "tags": [
-                    "transcription-providers"
-                ],
-                "summary": "List transcription provider metadata",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/audio.ProviderMetaResponse"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-providers/{id}": {
-            "get": {
-                "description": "Get a speech provider with masked config values",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "speech-providers"
-                ],
-                "summary": "Get speech provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.SpeechProviderResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-providers/{id}/import-models": {
-            "post": {
-                "description": "Fetch models using the configured transcription provider and import them into the unified models table",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-providers"
-                ],
-                "summary": "Import transcription models from provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/audio.ImportModelsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/transcription-providers/{id}/models": {
-            "get": {
-                "description": "List models of type 'transcription' for a specific transcription provider",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "transcription-providers"
-                ],
-                "summary": "List transcription models by provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID (UUID)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/audio.TranscriptionModelResponse"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -10087,361 +9649,6 @@ const docTemplate = `{
                 }
             }
         },
-        "audio.ConfigSchema": {
-            "type": "object",
-            "properties": {
-                "fields": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.FieldSchema"
-                    }
-                }
-            }
-        },
-        "audio.FieldSchema": {
-            "type": "object",
-            "properties": {
-                "advanced": {
-                    "type": "boolean"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "enum": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "example": {},
-                "key": {
-                    "type": "string"
-                },
-                "order": {
-                    "type": "integer"
-                },
-                "required": {
-                    "type": "boolean"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.ImportModelsResponse": {
-            "type": "object",
-            "properties": {
-                "created": {
-                    "type": "integer"
-                },
-                "models": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "skipped": {
-                    "type": "integer"
-                }
-            }
-        },
-        "audio.ModelCapabilities": {
-            "type": "object",
-            "properties": {
-                "config_schema": {
-                    "$ref": "#/definitions/audio.ConfigSchema"
-                },
-                "formats": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "pitch": {
-                    "$ref": "#/definitions/audio.ParamConstraint"
-                },
-                "speed": {
-                    "$ref": "#/definitions/audio.ParamConstraint"
-                },
-                "voices": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.VoiceInfo"
-                    }
-                }
-            }
-        },
-        "audio.ModelInfo": {
-            "type": "object",
-            "properties": {
-                "capabilities": {
-                    "$ref": "#/definitions/audio.ModelCapabilities"
-                },
-                "config_schema": {
-                    "$ref": "#/definitions/audio.ConfigSchema"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "template_only": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "audio.ParamConstraint": {
-            "type": "object",
-            "properties": {
-                "default": {
-                    "type": "number"
-                },
-                "max": {
-                    "type": "number"
-                },
-                "min": {
-                    "type": "number"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "type": "number"
-                    }
-                }
-            }
-        },
-        "audio.ProviderMetaResponse": {
-            "type": "object",
-            "properties": {
-                "config_schema": {
-                    "$ref": "#/definitions/audio.ConfigSchema"
-                },
-                "default_model": {
-                    "type": "string"
-                },
-                "default_synthesis_model": {
-                    "type": "string"
-                },
-                "default_transcription_model": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "models": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.ModelInfo"
-                    }
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "supports_synthesis_list": {
-                    "type": "boolean"
-                },
-                "supports_transcription_list": {
-                    "type": "boolean"
-                },
-                "synthesis_models": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.ModelInfo"
-                    }
-                },
-                "transcription_models": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.ModelInfo"
-                    }
-                }
-            }
-        },
-        "audio.SpeechModelResponse": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "model_id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "provider_id": {
-                    "type": "string"
-                },
-                "provider_type": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.SpeechProviderResponse": {
-            "type": "object",
-            "properties": {
-                "client_type": {
-                    "type": "string"
-                },
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "enable": {
-                    "type": "boolean"
-                },
-                "icon": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.TestSynthesizeRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "text": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.TestTranscriptionResponse": {
-            "type": "object",
-            "properties": {
-                "duration_seconds": {
-                    "type": "number"
-                },
-                "language": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "text": {
-                    "type": "string"
-                },
-                "words": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/audio.TranscriptionWord"
-                    }
-                }
-            }
-        },
-        "audio.TranscriptionModelResponse": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "model_id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "provider_id": {
-                    "type": "string"
-                },
-                "provider_type": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.TranscriptionWord": {
-            "type": "object",
-            "properties": {
-                "end": {
-                    "type": "number"
-                },
-                "speaker_id": {
-                    "type": "string"
-                },
-                "start": {
-                    "type": "number"
-                },
-                "text": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.UpdateSpeechModelRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "audio.VoiceInfo": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "lang": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
         "bots.Bot": {
             "type": "object",
             "properties": {
@@ -10861,8 +10068,7 @@ const docTemplate = `{
                 "wecom",
                 "weixin",
                 "wechatoa",
-                "local",
-                "slack"
+                "local"
             ],
             "x-enum-varnames": [
                 "ChannelTypeTelegram",
@@ -10874,8 +10080,7 @@ const docTemplate = `{
                 "ChannelTypeWecom",
                 "ChannelTypeWeixin",
                 "ChannelTypeWeChatOA",
-                "ChannelTypeLocal",
-                "ChannelTypeSlack"
+                "ChannelTypeLocal"
             ]
         },
         "channel.ConfigSchema": {
@@ -13118,14 +12323,12 @@ const docTemplate = `{
             "enum": [
                 "chat",
                 "embedding",
-                "speech",
-                "transcription"
+                "speech"
             ],
             "x-enum-varnames": [
                 "ModelTypeChat",
                 "ModelTypeEmbedding",
-                "ModelTypeSpeech",
-                "ModelTypeTranscription"
+                "ModelTypeSpeech"
             ]
         },
         "models.TestResponse": {
@@ -13789,9 +12992,6 @@ const docTemplate = `{
                 "title_model_id": {
                     "type": "string"
                 },
-                "transcription_model_id": {
-                    "type": "string"
-                },
                 "tts_model_id": {
                     "type": "string"
                 }
@@ -13860,10 +13060,252 @@ const docTemplate = `{
                 "title_model_id": {
                     "type": "string"
                 },
-                "transcription_model_id": {
+                "tts_model_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.ConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tts.FieldSchema"
+                    }
+                }
+            }
+        },
+        "tts.FieldSchema": {
+            "type": "object",
+            "properties": {
+                "advanced": {
+                    "type": "boolean"
+                },
+                "description": {
                     "type": "string"
                 },
-                "tts_model_id": {
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "key": {
+                    "type": "string"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.ImportModelsResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "skipped": {
+                    "type": "integer"
+                }
+            }
+        },
+        "tts.ModelCapabilities": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
+                },
+                "formats": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "pitch": {
+                    "$ref": "#/definitions/tts.ParamConstraint"
+                },
+                "speed": {
+                    "$ref": "#/definitions/tts.ParamConstraint"
+                },
+                "voices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tts.VoiceInfo"
+                    }
+                }
+            }
+        },
+        "tts.ModelInfo": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "$ref": "#/definitions/tts.ModelCapabilities"
+                },
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.ParamConstraint": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "number"
+                },
+                "max": {
+                    "type": "number"
+                },
+                "min": {
+                    "type": "number"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "tts.ProviderMetaResponse": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/tts.ConfigSchema"
+                },
+                "default_model": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tts.ModelInfo"
+                    }
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.SpeechModelResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "provider_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.SpeechProviderResponse": {
+            "type": "object",
+            "properties": {
+                "client_type": {
+                    "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.TestSynthesizeRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "tts.VoiceInfo": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "lang": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

@@ -20,7 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/memohai/memoh/internal/tts"
 )
 
 // Edge TTS WebSocket client.
@@ -184,7 +184,7 @@ func (c *EdgeWsClient) sendFrame(path, contentType, body string, extraHeaders ma
 }
 
 // Configure sends the speech.config message (output format, etc.).
-func (c *EdgeWsClient) Configure(ctx context.Context, config audio.AudioConfig) error {
+func (c *EdgeWsClient) Configure(ctx context.Context, config tts.AudioConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn == nil {
@@ -207,7 +207,7 @@ func (c *EdgeWsClient) Configure(ctx context.Context, config audio.AudioConfig) 
 }
 
 // buildSSML builds SSML with rate and pitch for Edge TTS prosody.
-func buildSSML(text string, voice audio.VoiceConfig, speed, pitch float64) string {
+func buildSSML(text string, voice tts.VoiceConfig, speed, pitch float64) string {
 	voiceID := voice.ID
 	if voiceID == "" {
 		voiceID = DEFAULT_VOICE
@@ -241,7 +241,7 @@ func escapeSSML(s string) string {
 
 // Synthesize sends SSML and synchronously collects all audio data.
 // It handles the full lifecycle: connect → configure → send → receive → close.
-func (c *EdgeWsClient) Synthesize(ctx context.Context, text string, config audio.AudioConfig) ([]byte, error) {
+func (c *EdgeWsClient) Synthesize(ctx context.Context, text string, config tts.AudioConfig) ([]byte, error) {
 	if err := c.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func parseAudioChunk(data []byte) ([]byte, error) {
 
 // Stream sends SSML and returns audio chunks via channel.
 // It handles the full lifecycle: connect → configure → send → stream → close.
-func (c *EdgeWsClient) Stream(ctx context.Context, text string, config audio.AudioConfig) (ch chan []byte, errCh chan error) {
+func (c *EdgeWsClient) Stream(ctx context.Context, text string, config tts.AudioConfig) (ch chan []byte, errCh chan error) {
 	ch = make(chan []byte, 8)
 	errCh = make(chan error, 1)
 	go func() {

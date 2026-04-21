@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/memohai/memoh/internal/tts"
 )
 
 var upgrader = websocket.Upgrader{
@@ -95,7 +95,7 @@ func TestEdgeWsClient_ConnectAndSynthesize(t *testing.T) {
 	client := NewEdgeWsClient()
 	client.BaseURL = wsURL
 
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, Speed: 1.0}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}, Speed: 1.0}
 	audio, err := client.Synthesize(t.Context(), "Hello world", config)
 	if err != nil {
 		t.Fatalf("Synthesize: %v", err)
@@ -114,7 +114,7 @@ func TestEdgeWsClient_Stream(t *testing.T) {
 	client := NewEdgeWsClient()
 	client.BaseURL = wsURL
 
-	config := audio.AudioConfig{Voice: audio.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
+	config := tts.AudioConfig{Voice: tts.VoiceConfig{ID: "en-US-JennyNeural", Lang: "en-US"}}
 	ch, errCh := client.Stream(t.Context(), "Hi", config)
 	var chunks [][]byte
 	for b := range ch {
@@ -197,7 +197,7 @@ func TestParseAudioChunk_EmptyOrShort(t *testing.T) {
 
 func TestBuildSSML(t *testing.T) {
 	t.Parallel()
-	ssml := buildSSML("Hello", audio.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}, 1.0, 0)
+	ssml := buildSSML("Hello", tts.VoiceConfig{ID: "zh-CN-XiaoxiaoNeural", Lang: "zh-CN"}, 1.0, 0)
 	if !strings.Contains(ssml, "zh-CN-XiaoxiaoNeural") {
 		t.Errorf("ssml should contain voice: %s", ssml)
 	}

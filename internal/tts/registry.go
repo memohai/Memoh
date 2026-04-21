@@ -1,4 +1,4 @@
-package audio
+package tts
 
 import (
 	"fmt"
@@ -8,43 +8,31 @@ import (
 
 	alibabaspeech "github.com/memohai/twilight-ai/provider/alibabacloud/speech"
 	deepgramspeech "github.com/memohai/twilight-ai/provider/deepgram/speech"
-	deepgramtranscription "github.com/memohai/twilight-ai/provider/deepgram/transcription"
 	edgespeech "github.com/memohai/twilight-ai/provider/edge/speech"
 	elevenlabsspeech "github.com/memohai/twilight-ai/provider/elevenlabs/speech"
-	elevenlabstranscription "github.com/memohai/twilight-ai/provider/elevenlabs/transcription"
-	googletranscription "github.com/memohai/twilight-ai/provider/google/transcription"
 	microsoftspeech "github.com/memohai/twilight-ai/provider/microsoft/speech"
 	minimaxspeech "github.com/memohai/twilight-ai/provider/minimax/speech"
 	openaispeech "github.com/memohai/twilight-ai/provider/openai/speech"
-	openaitranscription "github.com/memohai/twilight-ai/provider/openai/transcription"
 	openrouterspeech "github.com/memohai/twilight-ai/provider/openrouter/speech"
-	openroutertranscription "github.com/memohai/twilight-ai/provider/openrouter/transcription"
 	volcenginespeech "github.com/memohai/twilight-ai/provider/volcengine/speech"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/models"
 )
 
-type (
-	ProviderFactory              func(config map[string]any) (sdk.SpeechProvider, error)
-	TranscriptionProviderFactory func(config map[string]any) (sdk.TranscriptionProvider, error)
-)
+type ProviderFactory func(config map[string]any) (sdk.SpeechProvider, error)
 
 type ProviderDefinition struct {
-	ClientType                models.ClientType
-	DisplayName               string
-	Icon                      string
-	Description               string
-	ConfigSchema              ConfigSchema
-	DefaultModel              string
-	SupportsList              bool
-	Models                    []ModelInfo
-	Factory                   ProviderFactory
-	DefaultTranscriptionModel string
-	SupportsTranscriptionList bool
-	TranscriptionModels       []ModelInfo
-	TranscriptionFactory      TranscriptionProviderFactory
-	Order                     int
+	ClientType   models.ClientType
+	DisplayName  string
+	Icon         string
+	Description  string
+	ConfigSchema ConfigSchema
+	DefaultModel string
+	SupportsList bool
+	Models       []ModelInfo
+	Factory      ProviderFactory
+	Order        int
 }
 
 type Registry struct {
@@ -53,60 +41,11 @@ type Registry struct {
 	ordered   []models.ClientType
 }
 
-func isTranscriptionClientType(clientType models.ClientType) bool {
-	switch clientType {
-	case
-		models.ClientTypeOpenAITranscription,
-		models.ClientTypeOpenRouterTranscription,
-		models.ClientTypeElevenLabsTranscription,
-		models.ClientTypeDeepgramTranscription,
-		models.ClientTypeGoogleTranscription:
-		return true
-	default:
-		return false
-	}
-}
-
-func speechToTranscriptionClientType(clientType models.ClientType) models.ClientType {
-	switch clientType {
-	case models.ClientTypeOpenAISpeech:
-		return models.ClientTypeOpenAITranscription
-	case models.ClientTypeOpenRouterSpeech:
-		return models.ClientTypeOpenRouterTranscription
-	case models.ClientTypeElevenLabsSpeech:
-		return models.ClientTypeElevenLabsTranscription
-	case models.ClientTypeDeepgramSpeech:
-		return models.ClientTypeDeepgramTranscription
-	case models.ClientTypeGoogleSpeech:
-		return models.ClientTypeGoogleTranscription
-	default:
-		return ""
-	}
-}
-
-func transcriptionDisplayName(displayName string) string {
-	displayName = strings.TrimSpace(displayName)
-	if displayName == "Google Speech" {
-		return "Google Transcription"
-	}
-	if strings.HasSuffix(displayName, " Speech") {
-		return strings.TrimSuffix(displayName, " Speech") + " Transcription"
-	}
-	return displayName + " Transcription"
-}
-
 func NewRegistry() *Registry {
 	r := &Registry{
 		providers: make(map[models.ClientType]ProviderDefinition),
 	}
-	baseDefs := defaultProviderDefinitions()
-	for _, def := range baseDefs {
-		if def.Factory == nil && def.TranscriptionFactory != nil {
-			continue
-		}
-		r.Register(def)
-	}
-	for _, def := range transcriptionProviderDefinitions(baseDefs) {
+	for _, def := range defaultProviderDefinitions() {
 		r.Register(def)
 	}
 	return r
@@ -155,96 +94,15 @@ func (r *Registry) ListMeta() []ProviderMetaResponse {
 	metas := make([]ProviderMetaResponse, 0, len(defs))
 	for _, def := range defs {
 		metas = append(metas, ProviderMetaResponse{
-			Provider:                  string(def.ClientType),
-			DisplayName:               def.DisplayName,
-			Description:               def.Description,
-			ConfigSchema:              def.ConfigSchema,
-			DefaultModel:              def.DefaultModel,
-			Models:                    def.Models,
-			DefaultSynthesisModel:     def.DefaultModel,
-			SynthesisModels:           def.Models,
-			SupportsSynthesisList:     def.SupportsList,
-			DefaultTranscriptionModel: def.DefaultTranscriptionModel,
-			TranscriptionModels:       def.TranscriptionModels,
-			SupportsTranscriptionList: def.SupportsTranscriptionList,
+			Provider:     string(def.ClientType),
+			DisplayName:  def.DisplayName,
+			Description:  def.Description,
+			ConfigSchema: def.ConfigSchema,
+			DefaultModel: def.DefaultModel,
+			Models:       def.Models,
 		})
 	}
 	return metas
-}
-
-func (r *Registry) ListSpeechMeta() []ProviderMetaResponse {
-	defs := r.List()
-	metas := make([]ProviderMetaResponse, 0, len(defs))
-	for _, def := range defs {
-		if def.Factory == nil {
-			continue
-		}
-		metas = append(metas, ProviderMetaResponse{
-			Provider:              string(def.ClientType),
-			DisplayName:           def.DisplayName,
-			Description:           def.Description,
-			ConfigSchema:          def.ConfigSchema,
-			DefaultModel:          def.DefaultModel,
-			Models:                def.Models,
-			DefaultSynthesisModel: def.DefaultModel,
-			SynthesisModels:       def.Models,
-			SupportsSynthesisList: def.SupportsList,
-		})
-	}
-	return metas
-}
-
-func (r *Registry) ListTranscriptionMeta() []ProviderMetaResponse {
-	defs := r.List()
-	metas := make([]ProviderMetaResponse, 0, len(defs))
-	for _, def := range defs {
-		if def.TranscriptionFactory == nil || !isTranscriptionClientType(def.ClientType) {
-			continue
-		}
-		modelsList := def.TranscriptionModels
-		if len(modelsList) == 0 {
-			modelsList = def.Models
-		}
-		metas = append(metas, ProviderMetaResponse{
-			Provider:                  string(def.ClientType),
-			DisplayName:               def.DisplayName,
-			Description:               def.Description,
-			ConfigSchema:              def.ConfigSchema,
-			DefaultModel:              def.DefaultTranscriptionModel,
-			Models:                    modelsList,
-			DefaultTranscriptionModel: def.DefaultTranscriptionModel,
-			TranscriptionModels:       modelsList,
-			SupportsTranscriptionList: def.SupportsTranscriptionList,
-		})
-	}
-	return metas
-}
-
-func transcriptionProviderDefinitions(base []ProviderDefinition) []ProviderDefinition {
-	out := make([]ProviderDefinition, 0, len(base))
-	for _, def := range base {
-		clientType := speechToTranscriptionClientType(def.ClientType)
-		if clientType == "" || def.TranscriptionFactory == nil {
-			continue
-		}
-		modelsList := def.TranscriptionModels
-		out = append(out, ProviderDefinition{
-			ClientType:                clientType,
-			DisplayName:               transcriptionDisplayName(def.DisplayName),
-			Icon:                      def.Icon,
-			Description:               strings.TrimSpace(def.Description),
-			ConfigSchema:              def.ConfigSchema,
-			DefaultModel:              def.DefaultTranscriptionModel,
-			SupportsList:              def.SupportsTranscriptionList,
-			Models:                    modelsList,
-			DefaultTranscriptionModel: def.DefaultTranscriptionModel,
-			SupportsTranscriptionList: def.SupportsTranscriptionList,
-			TranscriptionModels:       modelsList,
-			TranscriptionFactory:      def.TranscriptionFactory,
-			Order:                     def.Order + 1,
-		})
-	}
-	return out
 }
 
 func defaultProviderDefinitions() []ProviderDefinition {
@@ -315,10 +173,8 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				secretField("api_key", "API Key", "Bearer API key", true, 10),
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.openai.com/v1", 20),
 			}},
-			DefaultModel:              "gpt-4o-mini-tts",
-			SupportsList:              true,
-			DefaultTranscriptionModel: "gpt-4o-mini-transcribe",
-			SupportsTranscriptionList: true,
+			DefaultModel: "gpt-4o-mini-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
 				ID:          "gpt-4o-mini-tts",
 				Name:        "gpt-4o-mini-tts",
@@ -339,23 +195,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					Formats: []string{"mp3", "opus", "pcm", "wav"},
 				},
 			}},
-			TranscriptionModels: []ModelInfo{{
-				ID:          "gpt-4o-mini-transcribe",
-				Name:        "gpt-4o-mini-transcribe",
-				Description: "Default OpenAI transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
-				}}},
-			}},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
 				opts := []openaispeech.Option{}
 				if v := configString(config, "api_key"); v != "" {
@@ -365,16 +204,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					opts = append(opts, openaispeech.WithBaseURL(v))
 				}
 				return openaispeech.New(opts...), nil
-			},
-			TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
-				opts := []openaitranscription.Option{}
-				if v := configString(config, "api_key"); v != "" {
-					opts = append(opts, openaitranscription.WithAPIKey(v))
-				}
-				if v := configString(config, "base_url"); v != "" {
-					opts = append(opts, openaitranscription.WithBaseURL(v))
-				}
-				return openaitranscription.New(opts...), nil
 			},
 			Order: 20,
 		},
@@ -387,10 +216,8 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				secretField("api_key", "API Key", "OpenRouter API key", true, 10),
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://openrouter.ai/api/v1", 20),
 			}},
-			DefaultModel:              "openrouter-tts",
-			SupportsList:              true,
-			DefaultTranscriptionModel: "openai/gpt-4o-mini-transcribe",
-			SupportsTranscriptionList: true,
+			DefaultModel: "openrouter-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
 				ID:           "openrouter-tts",
 				Name:         "openrouter-tts",
@@ -407,17 +234,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					numberField("speed", "Speed", "Speech rate", false, 1.0, 30),
 				}}},
 			}},
-			TranscriptionModels: []ModelInfo{{
-				ID:          "openai/gpt-4o-mini-transcribe",
-				Name:        "openai/gpt-4o-mini-transcribe",
-				Description: "Default OpenRouter transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					advancedStringField("prompt", "Prompt", "Prompt passed to the model before audio input", false, "", 10),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					advancedStringField("prompt", "Prompt", "Prompt passed to the model before audio input", false, "", 10),
-				}}},
-			}},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
 				opts := []openrouterspeech.Option{}
 				if v := configString(config, "api_key"); v != "" {
@@ -427,16 +243,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					opts = append(opts, openrouterspeech.WithBaseURL(v))
 				}
 				return openrouterspeech.New(opts...), nil
-			},
-			TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
-				opts := []openroutertranscription.Option{}
-				if v := configString(config, "api_key"); v != "" {
-					opts = append(opts, openroutertranscription.WithAPIKey(v))
-				}
-				if v := configString(config, "base_url"); v != "" {
-					opts = append(opts, openroutertranscription.WithBaseURL(v))
-				}
-				return openroutertranscription.New(opts...), nil
 			},
 			Order: 30,
 		},
@@ -449,10 +255,8 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				secretField("api_key", "API Key", "ElevenLabs API key", true, 10),
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.elevenlabs.io", 20),
 			}},
-			DefaultModel:              "elevenlabs-tts",
-			SupportsList:              true,
-			DefaultTranscriptionModel: "scribe_v2",
-			SupportsTranscriptionList: true,
+			DefaultModel: "elevenlabs-tts",
+			SupportsList: true,
 			Models: []ModelInfo{{
 				ID:           "elevenlabs-tts",
 				Name:         "elevenlabs-tts",
@@ -485,25 +289,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					stringField("language_code", "Language Code", "Optional BCP-47 language code", false, "en-US", 110),
 				}}},
 			}},
-			TranscriptionModels: []ModelInfo{{
-				ID:          "scribe_v2",
-				Name:        "scribe_v2",
-				Description: "Default ElevenLabs transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language_code", "Language Code", "Optional BCP-47 language code", false, "", 10),
-					boolField("tag_audio_events", "Tag Audio Events", "Include non-speech events in timestamps", false, 20),
-					boolField("diarize", "Diarize", "Enable speaker diarization", false, 30),
-					numberField("num_speakers", "Number of Speakers", "Optional expected speaker count", false, 0, 40),
-					enumField("timestamps_granularity", "Timestamps Granularity", "Timestamps granularity", false, []string{"word", "character"}, 50),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language_code", "Language Code", "Optional BCP-47 language code", false, "", 10),
-					boolField("tag_audio_events", "Tag Audio Events", "Include non-speech events in timestamps", false, 20),
-					boolField("diarize", "Diarize", "Enable speaker diarization", false, 30),
-					numberField("num_speakers", "Number of Speakers", "Optional expected speaker count", false, 0, 40),
-					enumField("timestamps_granularity", "Timestamps Granularity", "Timestamps granularity", false, []string{"word", "character"}, 50),
-				}}},
-			}},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
 				opts := []elevenlabsspeech.Option{}
 				if v := configString(config, "api_key"); v != "" {
@@ -514,51 +299,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				}
 				return elevenlabsspeech.New(opts...), nil
 			},
-			TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
-				opts := []elevenlabstranscription.Option{}
-				if v := configString(config, "api_key"); v != "" {
-					opts = append(opts, elevenlabstranscription.WithAPIKey(v))
-				}
-				if v := configString(config, "base_url"); v != "" {
-					opts = append(opts, elevenlabstranscription.WithBaseURL(v))
-				}
-				return elevenlabstranscription.New(opts...), nil
-			},
 			Order: 40,
-		},
-		{
-			ClientType:  models.ClientTypeGoogleSpeech,
-			DisplayName: "Google Speech",
-			Icon:        "google-color",
-			Description: "Google Gemini speech transcription",
-			ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-				secretField("api_key", "API Key", "Google API key", true, 10),
-				stringField("base_url", "Base URL", "Override the API base URL", false, "https://generativelanguage.googleapis.com/v1beta", 20),
-			}},
-			DefaultTranscriptionModel: "gemini-2.5-flash",
-			SupportsTranscriptionList: true,
-			TranscriptionModels: []ModelInfo{{
-				ID:          "gemini-2.5-flash",
-				Name:        "gemini-2.5-flash",
-				Description: "Default Google transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					advancedStringField("prompt", "Prompt", "Prompt passed alongside audio", false, "", 10),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					advancedStringField("prompt", "Prompt", "Prompt passed alongside audio", false, "", 10),
-				}}},
-			}},
-			TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
-				opts := []googletranscription.Option{}
-				if v := configString(config, "api_key"); v != "" {
-					opts = append(opts, googletranscription.WithAPIKey(v))
-				}
-				if v := configString(config, "base_url"); v != "" {
-					opts = append(opts, googletranscription.WithBaseURL(v))
-				}
-				return googletranscription.New(opts...), nil
-			},
-			Order: 45,
 		},
 		{
 			ClientType:  models.ClientTypeDeepgramSpeech,
@@ -569,10 +310,8 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				secretField("api_key", "API Key", "Deepgram API key", true, 10),
 				stringField("base_url", "Base URL", "Override the API base URL", false, "https://api.deepgram.com", 20),
 			}},
-			DefaultModel:              "deepgram-tts",
-			SupportsList:              false,
-			DefaultTranscriptionModel: "nova-3",
-			SupportsTranscriptionList: false,
+			DefaultModel: "deepgram-tts",
+			SupportsList: false,
 			Models: []ModelInfo{{
 				ID:          "deepgram-tts",
 				Name:        "deepgram-tts",
@@ -593,25 +332,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					Formats: []string{"wav", "none"},
 				},
 			}},
-			TranscriptionModels: []ModelInfo{{
-				ID:          "nova-3",
-				Name:        "nova-3",
-				Description: "Default Deepgram transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional language hint", false, "", 10),
-					boolField("smart_format", "Smart Format", "Enable smart formatting", false, 20),
-					boolField("detect_language", "Detect Language", "Enable automatic language detection", false, 30),
-					boolField("diarize", "Diarize", "Enable speaker diarization", false, 40),
-					boolField("punctuate", "Punctuate", "Enable punctuation", false, 50),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional language hint", false, "", 10),
-					boolField("smart_format", "Smart Format", "Enable smart formatting", false, 20),
-					boolField("detect_language", "Detect Language", "Enable automatic language detection", false, 30),
-					boolField("diarize", "Diarize", "Enable speaker diarization", false, 40),
-					boolField("punctuate", "Punctuate", "Enable punctuation", false, 50),
-				}}},
-			}},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
 				opts := []deepgramspeech.Option{}
 				if v := configString(config, "api_key"); v != "" {
@@ -621,16 +341,6 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					opts = append(opts, deepgramspeech.WithBaseURL(v))
 				}
 				return deepgramspeech.New(opts...), nil
-			},
-			TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
-				opts := []deepgramtranscription.Option{}
-				if v := configString(config, "api_key"); v != "" {
-					opts = append(opts, deepgramtranscription.WithAPIKey(v))
-				}
-				if v := configString(config, "base_url"); v != "" {
-					opts = append(opts, deepgramtranscription.WithBaseURL(v))
-				}
-				return deepgramtranscription.New(opts...), nil
 			},
 			Order: 50,
 		},
