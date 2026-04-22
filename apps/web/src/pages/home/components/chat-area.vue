@@ -736,20 +736,14 @@ function handlePaste(e: ClipboardEvent) {
   }
 }
 
-async function fileToAttachment(file: File): Promise<ChatAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      resolve({
-        type: file.type.startsWith('image/') ? 'image' : 'file',
-        base64: reader.result as string,
-        mime: file.type || 'application/octet-stream',
-        name: file.name,
-      })
-    }
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsDataURL(file)
-  })
+function fileToAttachment(file: File): ChatAttachment {
+  return {
+    type: file.type.startsWith('image/') ? 'image' : 'file',
+    mime: file.type || 'application/octet-stream',
+    name: file.name,
+    previewUrl: URL.createObjectURL(file),
+    file,
+  }
 }
 
 async function handleSend() {
@@ -761,11 +755,8 @@ async function handleSend() {
   inputText.value = ''
   pendingFiles.value = []
 
-  let attachments: ChatAttachment[] | undefined
-  if (files.length) {
-    attachments = await Promise.all(files.map(fileToAttachment))
-  }
+  const attachments = files.length ? files.map(fileToAttachment) : undefined
 
-  chatStore.sendMessage(text, attachments)
+  void chatStore.sendMessage(text, attachments)
 }
 </script>

@@ -24,6 +24,7 @@ import {
   type UIStreamEvent,
   fetchBots,
   fetchMessagesUI,
+  materializeChatAttachments,
   sendLocalChannelMessage,
   streamMessageEvents,
   connectWebSocket,
@@ -226,6 +227,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function replaceMessages(items: UITurn[]) {
     const normalized = items.map(normalizeTurn)
+    revokeMessagePreviewUrls(messages)
     messages.splice(0, messages.length, ...normalized)
     updateSinceFromMessages(normalized)
   }
@@ -258,7 +260,7 @@ export const useChatStore = defineStore('chat', () => {
       text,
       attachments: (attachments ?? []).map((attachment) => ({
         type: attachment.type,
-        url: attachment.base64,
+        url: resolveAttachmentPreviewUrl(attachment),
         base64: attachment.base64,
         name: attachment.name ?? '',
         mime: attachment.mime ?? '',
@@ -285,6 +287,44 @@ export const useChatStore = defineStore('chat', () => {
     session.done = true
     pendingAssistantStream = null
     session.reject(err)
+  }
+
+  function resolveAttachmentPreviewUrl(attachment: ChatAttachment): string {
+    const previewUrl = String(attachment.previewUrl ?? '').trim()
+    if (previewUrl) return previewUrl
+    return String(attachment.base64 ?? '').trim()
+  }
+
+  function revokeObjectUrl(value?: string) {
+    const url = String(value ?? '').trim()
+    if (!url.startsWith('blob:')) return
+    URL.revokeObjectURL(url)
+  }
+
+  function revokeAttachmentPreviewUrls(attachments?: ChatAttachment[]) {
+    for (const attachment of attachments ?? []) {
+      revokeObjectUrl(attachment.previewUrl)
+    }
+  }
+
+  function revokeMessagePreviewUrls(items: ChatMessage[]) {
+    for (const item of items) {
+      if (item.role === 'user') {
+        for (const attachment of item.attachments) {
+          revokeObjectUrl(attachment.url)
+          revokeObjectUrl(attachment.base64)
+        }
+        continue
+      }
+
+      for (const block of item.messages) {
+        if (block.type !== 'attachments') continue
+        for (const attachment of block.attachments) {
+          revokeObjectUrl(String(attachment.url ?? ''))
+          revokeObjectUrl(String(attachment.base64 ?? ''))
+        }
+      }
+    }
   }
 
   function ensureDiscussStream(): PendingAssistantStream {
@@ -657,6 +697,7 @@ export const useChatStore = defineStore('chat', () => {
       const modelId = overrideModelId.value || undefined
       const effort = overrideReasoningEffort.value
       const reasoningEffort = effort && effort !== 'off' ? effort : undefined
+      const resolvedAttachments = await materializeChatAttachments(attachments)
 
       const ws = ensureWebSocket(bid)
       if (ws) {
@@ -671,7 +712,7 @@ export const useChatStore = defineStore('chat', () => {
           type: 'message',
           text: trimmed,
           session_id: sid,
-          attachments,
+          attachments: resolvedAttachments,
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
@@ -679,7 +720,7 @@ export const useChatStore = defineStore('chat', () => {
         await refreshCurrentSession(bid, sid)
       } else {
         void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
-        await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
+        await sendLocalChannelMessage(bid, trimmed, resolvedAttachments, { modelId, reasoningEffort })
         await refreshCurrentSession(bid, sid)
       }
 
@@ -688,7 +729,9 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = false
       abortFn = null
       touchSession(sid)
+      revokeAttachmentPreviewUrls(attachments)
     } catch (error) {
+      revokeAttachmentPreviewUrls(attachments)
       const isAbort = error instanceof Error && error.name === 'AbortError'
       const reason = error instanceof Error ? error.message : 'Unknown error'
       if (!isAbort && assistantTurn) {
@@ -759,4 +802,3 @@ export const useChatStore = defineStore('chat', () => {
     abort,
   }
 })
-

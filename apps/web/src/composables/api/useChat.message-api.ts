@@ -54,6 +54,36 @@ export interface SendMessageOverrides {
   reasoningEffort?: string
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`))
+    reader.readAsDataURL(file)
+  })
+}
+
+export async function materializeChatAttachments(
+  attachments?: ChatAttachment[],
+): Promise<ChatAttachment[] | undefined> {
+  if (!attachments?.length) return attachments
+
+  return Promise.all(attachments.map(async (item) => {
+    const base64 = String(item.base64 ?? '').trim() || (item.file ? await readFileAsDataUrl(item.file) : '')
+    if (!base64) {
+      const label = item.name?.trim() || 'attachment'
+      throw new Error(`Missing attachment payload: ${label}`)
+    }
+
+    return {
+      type: item.type,
+      base64,
+      mime: item.mime ?? '',
+      name: item.name ?? '',
+    } satisfies ChatAttachment
+  }))
+}
+
 export async function sendLocalChannelMessage(
   botId: string,
   text: string,
@@ -62,13 +92,14 @@ export async function sendLocalChannelMessage(
 ): Promise<void> {
   const msg: ChannelMessage = {}
   const trimmedText = text.trim()
+  const resolvedAttachments = await materializeChatAttachments(attachments)
   if (trimmedText) {
     msg.text = trimmedText
   }
-  if (attachments?.length) {
-    msg.attachments = attachments.map((item): ChannelAttachment => ({
+  if (resolvedAttachments?.length) {
+    msg.attachments = resolvedAttachments.map((item): ChannelAttachment => ({
       type: item.type as ChannelAttachment['type'],
-      base64: item.base64,
+      base64: item.base64 ?? '',
       mime: item.mime ?? '',
       name: item.name ?? '',
     }))

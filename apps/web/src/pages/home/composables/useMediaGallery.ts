@@ -13,7 +13,7 @@ function isMediaType(att: Record<string, unknown>): boolean {
 function isBrowserAccessibleUrl(url: string): boolean {
   if (!url) return false
   const lower = url.toLowerCase()
-  return lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('data:')
+  return lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('data:') || lower.startsWith('blob:')
 }
 
 function resolveBotId(att: Record<string, unknown>): string {

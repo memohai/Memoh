@@ -85,9 +85,11 @@ export interface FetchMessagesOptions {
 
 export interface ChatAttachment {
   type: string
-  base64: string
+  base64?: string
   mime?: string
   name?: string
+  previewUrl?: string
+  file?: File
 }
 
 export interface UIAttachment {
