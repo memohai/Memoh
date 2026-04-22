@@ -327,6 +327,20 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function removeMessageById(targetId?: string | null) {
+    const id = String(targetId ?? '').trim()
+    if (!id) return
+    const index = messages.findIndex(message => message.id === id)
+    if (index >= 0) {
+      messages.splice(index, 1)
+    }
+  }
+
+  function removeOptimisticSend(userTurn?: ChatUserTurn | null, assistantTurn?: ChatAssistantTurn | null) {
+    removeMessageById(assistantTurn?.id)
+    removeMessageById(userTurn?.id)
+  }
+
   function ensureDiscussStream(): PendingAssistantStream {
     if (pendingAssistantStream && !pendingAssistantStream.done) {
       return pendingAssistantStream
@@ -681,7 +695,9 @@ export const useChatStore = defineStore('chat', () => {
     if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return
 
     loading.value = true
+    let userTurn: ChatUserTurn | null = null
     let assistantTurn: ChatAssistantTurn | null = null
+    let messageDispatched = false
 
     try {
       await ensureActiveSession()
@@ -690,7 +706,8 @@ export const useChatStore = defineStore('chat', () => {
       const sid = sessionId.value!
       streamingSessionId.value = sid
 
-      messages.push(createOptimisticUserTurn(trimmed, attachments))
+      userTurn = createOptimisticUserTurn(trimmed, attachments)
+      messages.push(userTurn)
       messages.push(createOptimisticAssistantTurn())
       assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
 
@@ -716,11 +733,13 @@ export const useChatStore = defineStore('chat', () => {
           model_id: modelId,
           reasoning_effort: reasoningEffort,
         })
+        messageDispatched = true
         await completion
         await refreshCurrentSession(bid, sid)
       } else {
         void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
         await sendLocalChannelMessage(bid, trimmed, resolvedAttachments, { modelId, reasoningEffort })
+        messageDispatched = true
         await refreshCurrentSession(bid, sid)
       }
 
@@ -729,12 +748,23 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = false
       abortFn = null
       touchSession(sid)
-      revokeAttachmentPreviewUrls(attachments)
     } catch (error) {
-      revokeAttachmentPreviewUrls(attachments)
-      const isAbort = error instanceof Error && error.name === 'AbortError'
-      const reason = error instanceof Error ? error.message : 'Unknown error'
-      if (!isAbort && assistantTurn) {
+      const failure = error instanceof Error ? error : new Error('Unknown error')
+      const isAbort = failure.name === 'AbortError'
+      const reason = failure.message || 'Unknown error'
+
+      if (!isAbort && pendingAssistantStream) {
+        rejectPendingAssistantStream(failure)
+      }
+
+      if (!messageDispatched) {
+        removeOptimisticSend(userTurn, assistantTurn)
+        revokeAttachmentPreviewUrls(attachments)
+        assistantTurn = null
+        userTurn = null
+      }
+
+      if (!isAbort && messageDispatched && assistantTurn) {
         assistantTurn.messages = [{
           id: 0,
           type: 'text',
