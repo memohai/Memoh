@@ -1110,7 +1110,7 @@
         "web": "Web",
         "cli": "CLI",
         "local": "Local"
-      },
+      }
     },
     "memory": {
       "title": "Here lie the memories.",
