@@ -1106,7 +1106,7 @@
         "web": "Web",
         "cli": "本地 CLI",
         "local": "本地"
-      },
+      }
     },
     "memory": {
       "title": "所忆皆在此间",
