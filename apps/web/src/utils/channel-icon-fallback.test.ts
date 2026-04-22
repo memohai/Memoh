@@ -8,7 +8,7 @@ describe('channelIconFallbackText', () => {
   })
 
   it('uses explicit built-in fallbacks for non-brand channels', () => {
-    expect(channelIconFallbackText('local')).toBe('CLI')
+    expect(channelIconFallbackText('local')).toBe('LC')
     expect(channelIconFallbackText('cli')).toBe('CLI')
     expect(channelIconFallbackText('web')).toBe('Web')
   })

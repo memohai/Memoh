@@ -1,6 +1,6 @@
 const explicitChannelFallbacks: Record<string, string> = {
   cli: 'CLI',
-  local: 'CLI',
+  local: 'LC',
   web: 'Web',
 }
 

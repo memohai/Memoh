@@ -63,7 +63,7 @@ const iconComponent = computed<Component | undefined>(() =>
 )
 
 const fallback = computed(() =>
-  channelIconFallbackText(normalizedChannel.value),
+  channelIconFallbackText(props.channel),
 )
 
 const fallbackStyle = computed(() => ({
