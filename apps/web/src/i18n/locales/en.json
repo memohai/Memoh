@@ -1111,23 +1111,6 @@
         "cli": "CLI",
         "local": "Local"
       },
-      "typesShort": {
-        "feishu": "FS",
-        "discord": "DC",
-        "qq": "QQ",
-        "matrix": "MX",
-        "misskey": "MK",
-        "telegram": "TG",
-        "weixin": "WX",
-        "wechatoa": "OA",
-        "wecom": "WC",
-        "dingtalk": "DT",
-        "slack": "SK",
-        "web": "Web",
-        "cli": "CLI",
-        "local": "LC"
-      }
-    },
     "memory": {
       "title": "Here lie the memories.",
       "files": "Memory Files",
