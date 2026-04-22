@@ -1107,22 +1107,6 @@
         "cli": "本地 CLI",
         "local": "本地"
       },
-      "typesShort": {
-        "feishu": "飞",
-        "discord": "DC",
-        "qq": "QQ",
-        "matrix": "MX",
-        "misskey": "MK",
-        "telegram": "TG",
-        "weixin": "WX",
-        "wechatoa": "OA",
-        "wecom": "企微",
-        "dingtalk": "钉",
-        "slack": "SK",
-        "web": "Web",
-        "cli": "CLI",
-        "local": "本地"
-      }
     },
     "memory": {
       "title": "所忆皆在此间",
