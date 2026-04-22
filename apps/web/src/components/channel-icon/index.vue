@@ -7,6 +7,8 @@
   />
   <span
     v-else
+    class="inline-flex items-center justify-center font-medium leading-none"
+    :style="fallbackStyle"
     v-bind="$attrs"
   >{{ fallback }}</span>
 </template>
@@ -24,7 +26,9 @@ import {
   Wechatoa,
   Wecom,
   Matrix,
+  Misskey,
 } from '@memohai/icon'
+import { channelIconFallbackText } from '@/utils/channel-icon-fallback'
 
 const channelIcons: Record<string, Component> = {
   qq: Qq,
@@ -37,7 +41,7 @@ const channelIcons: Record<string, Component> = {
   wechatoa: Wechatoa,
   wecom: Wecom,
   matrix: Matrix,
-  // misskey: Misskey,
+  misskey: Misskey,
   dingtalk: Dingtalk,
 }
 
@@ -50,11 +54,19 @@ const props = withDefaults(defineProps<{
 
 defineOptions({ inheritAttrs: false })
 
+const normalizedChannel = computed(() =>
+  props.channel.trim().toLowerCase(),
+)
+
 const iconComponent = computed<Component | undefined>(() =>
-  channelIcons[props.channel],
+  channelIcons[normalizedChannel.value],
 )
 
 const fallback = computed(() =>
-  props.channel.slice(0, 2).toUpperCase(),
+  channelIconFallbackText(normalizedChannel.value),
 )
+
+const fallbackStyle = computed(() => ({
+  fontSize: typeof props.size === 'number' ? `${props.size}px` : props.size,
+}))
 </script>

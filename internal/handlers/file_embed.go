@@ -23,9 +23,7 @@ var embeddedStaticRoutes = map[string]struct {
 	assetPath   string
 	contentType string
 }{
-	"/logo.png":               {assetPath: "logo.png", contentType: "image/png"},
-	"/channels/telegram.webp": {assetPath: "channels/telegram.webp", contentType: "image/webp"},
-	"/channels/feishu.png":    {assetPath: "channels/feishu.png", contentType: "image/png"},
+	"/logo.png": {assetPath: "logo.png", contentType: "image/png"},
 }
 
 func NewEmbeddedWebHandler(log *slog.Logger) (*EmbeddedWebHandler, error) {
