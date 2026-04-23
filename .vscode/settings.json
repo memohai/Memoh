@@ -1,8 +1,6 @@
 {
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
-  "editor.formatOnSave": true,
-  "prettier.enable": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
     "source.organizeImports": "never"
@@ -10,12 +8,10 @@
   "editor.tabSize": 2,
 
   "[typescript]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[javascript]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[typescriptreact]": {
     "editor.tabSize": 2,
@@ -26,8 +22,7 @@
     "editor.insertSpaces": true
   },
   "[vue]": {
-    "editor.tabSize": 2,
-    "editor.insertSpaces": true
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
   "[go]": {
     "editor.tabSize": 4,
