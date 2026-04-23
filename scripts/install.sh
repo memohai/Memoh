@@ -10,7 +10,44 @@ NC='\033[0m'
 GITHUB_REPO="memohai/Memoh"
 REPO="https://github.com/${GITHUB_REPO}.git"
 DIR="Memoh"
+COMPOSE_PROJECT_NAME="memoh"
 SILENT=false
+
+# Track whether the user explicitly set environment-backed options so upgrades
+# can reuse prior install values by default.
+if [ "${MEMOH_INSTALL_MODE+x}" = x ]; then
+  INSTALL_MODE="$MEMOH_INSTALL_MODE"
+else
+  INSTALL_MODE="auto"
+fi
+if [ "${USE_CN_MIRROR+x}" = x ]; then
+  USE_CN_MIRROR_SET=true
+else
+  USE_CN_MIRROR_SET=false
+fi
+if [ "${USE_SPARSE+x}" = x ]; then
+  USE_SPARSE_SET=true
+else
+  USE_SPARSE_SET=false
+fi
+if [ "${BROWSER_CORE+x}" = x ]; then
+  BROWSER_CORE_SET=true
+else
+  BROWSER_CORE_SET=false
+fi
+
+POSTGRES_VOLUME="${COMPOSE_PROJECT_NAME}_postgres_data"
+NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
+PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-browser"
+PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
+
+EXISTING_CONFIG_SOURCE=""
+EXISTING_ENV_SOURCE=""
+EXISTING_INSTALL_STATE=false
+EXISTING_DOCKER_STATE=false
+EXISTING_POSTGRES_VOLUME=false
+EXISTING_WORKSPACE_FILES=false
+EXISTING_REPO_DIR=false
 
 # Parse flags
 while [ $# -gt 0 ]; do
@@ -23,6 +60,13 @@ while [ $# -gt 0 ]; do
     --version=*)
       MEMOH_VERSION="${1#--version=}"
       ;;
+    --install-mode)
+      shift
+      INSTALL_MODE="$1"
+      ;;
+    --install-mode=*)
+      INSTALL_MODE="${1#--install-mode=}"
+      ;;
   esac
   shift
 done
@@ -33,6 +77,246 @@ if [ "$SILENT" = false ] && ! [ -e /dev/tty ]; then
 fi
 
 echo "${PURPLE}Memoh One-Click Install${NC}"
+
+read_env_file_value() {
+  file="$1"
+  key="$2"
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+  value=$(grep "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d '=' -f 2-)
+  if [ -z "$value" ]; then
+    return 1
+  fi
+  printf '%s' "$value"
+}
+
+read_toml_value() {
+  file="$1"
+  section="$2"
+  key="$3"
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+  awk -v target_section="[$section]" -v target_key="$key" '
+    /^\[[^]]+\]/ {
+      in_section = ($0 == target_section)
+      next
+    }
+    in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
+      value = substr($0, index($0, "=") + 1)
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      if (value ~ /^".*"$/) {
+        sub(/^"/, "", value)
+        sub(/"$/, "", value)
+      }
+      print value
+      exit
+    }
+  ' "$file"
+}
+
+browser_core_from_cores() {
+  case "$1" in
+    firefox) printf '%s' "firefox" ;;
+    all|chromium,firefox|firefox,chromium) printf '%s' "all" ;;
+    *) printf '%s' "chromium" ;;
+  esac
+}
+
+fetch_latest_version() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
+  else
+    echo "${RED}Error: curl or wget is required${NC}" >&2
+    exit 1
+  fi
+}
+
+detect_existing_installation() {
+  EXISTING_CONFIG_SOURCE=""
+  EXISTING_ENV_SOURCE=""
+  EXISTING_INSTALL_STATE=false
+  EXISTING_DOCKER_STATE=false
+  EXISTING_POSTGRES_VOLUME=false
+  EXISTING_WORKSPACE_FILES=false
+  EXISTING_REPO_DIR=false
+
+  if [ -d "$WORKSPACE/$DIR" ]; then
+    EXISTING_REPO_DIR=true
+    EXISTING_INSTALL_STATE=true
+  fi
+
+  if [ -f "$WORKSPACE/config.toml" ]; then
+    EXISTING_CONFIG_SOURCE="$WORKSPACE/config.toml"
+    EXISTING_WORKSPACE_FILES=true
+    EXISTING_INSTALL_STATE=true
+    if [ -f "$WORKSPACE/.env" ]; then
+      EXISTING_ENV_SOURCE="$WORKSPACE/.env"
+    fi
+  elif [ -f "$WORKSPACE/$DIR/config.toml" ]; then
+    EXISTING_CONFIG_SOURCE="$WORKSPACE/$DIR/config.toml"
+    EXISTING_INSTALL_STATE=true
+    if [ -f "$WORKSPACE/$DIR/.env" ]; then
+      EXISTING_ENV_SOURCE="$WORKSPACE/$DIR/.env"
+    fi
+  fi
+
+  if [ -f "$WORKSPACE/docker-compose.yml" ] || [ -f "$WORKSPACE/.env" ]; then
+    EXISTING_WORKSPACE_FILES=true
+    EXISTING_INSTALL_STATE=true
+    if [ -z "$EXISTING_ENV_SOURCE" ] && [ -f "$WORKSPACE/.env" ]; then
+      EXISTING_ENV_SOURCE="$WORKSPACE/.env"
+    fi
+  fi
+
+  if $DOCKER volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1; then
+    EXISTING_DOCKER_STATE=true
+    EXISTING_POSTGRES_VOLUME=true
+    EXISTING_INSTALL_STATE=true
+  fi
+
+  for container in $PROJECT_CONTAINERS; do
+    if $DOCKER container inspect "$container" >/dev/null 2>&1; then
+      EXISTING_DOCKER_STATE=true
+      EXISTING_INSTALL_STATE=true
+      break
+    fi
+  done
+}
+
+load_existing_settings() {
+  if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
+    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "admin" "username" || true)
+    [ -n "$value" ] && ADMIN_USER="$value"
+
+    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "admin" "password" || true)
+    [ -n "$value" ] && ADMIN_PASS="$value"
+
+    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "auth" "jwt_secret" || true)
+    [ -n "$value" ] && JWT_SECRET="$value"
+
+    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "postgres" "password" || true)
+    [ -n "$value" ] && PG_PASS="$value"
+
+    if [ "$USE_CN_MIRROR_SET" = false ]; then
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "workspace" "registry" || true)
+      if [ "$value" = "memoh.cn" ]; then
+        USE_CN_MIRROR=true
+      fi
+    fi
+  fi
+
+  if [ -n "$EXISTING_ENV_SOURCE" ]; then
+    if [ "$USE_SPARSE_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "USE_SPARSE" || true)
+      [ -n "$value" ] && USE_SPARSE="$value"
+    fi
+
+    if [ "$BROWSER_CORE_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "BROWSER_CORES" || true)
+      [ -n "$value" ] && BROWSER_CORE=$(browser_core_from_cores "$value")
+    fi
+
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "POSTGRES_PASSWORD" || true)
+    [ -n "$value" ] && PG_PASS="$value"
+
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_DATA_DIR" || true)
+    [ -n "$value" ] && MEMOH_DATA_DIR="$value"
+  fi
+}
+
+prompt_install_mode() {
+  if [ "$SILENT" = true ]; then
+    if [ "$EXISTING_INSTALL_STATE" = false ]; then
+      INSTALL_MODE="fresh"
+      return
+    fi
+    if [ "$INSTALL_MODE" = "auto" ]; then
+      if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
+        INSTALL_MODE="upgrade"
+        echo "${YELLOW}ℹ Existing Memoh installation detected. Reusing existing configuration in silent mode.${NC}"
+      else
+        echo "${RED}Error: Existing Memoh Docker state detected but no reusable config.toml was found.${NC}"
+        echo "Run again with MEMOH_INSTALL_MODE=reinstall to wipe Docker data, or restore the previous config.toml."
+        exit 1
+      fi
+    fi
+    return
+  fi
+
+  if [ "$INSTALL_MODE" != "auto" ]; then
+    return
+  fi
+
+  if [ "$EXISTING_INSTALL_STATE" = false ]; then
+    INSTALL_MODE="fresh"
+    return
+  fi
+
+  echo "${YELLOW}Detected existing Memoh installation state:${NC}" > /dev/tty
+  if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
+    echo "  - Config: ${EXISTING_CONFIG_SOURCE}" > /dev/tty
+  fi
+  if [ -n "$EXISTING_ENV_SOURCE" ]; then
+    echo "  - Env: ${EXISTING_ENV_SOURCE}" > /dev/tty
+  fi
+  if [ "$EXISTING_REPO_DIR" = true ]; then
+    echo "  - Repository checkout: ${WORKSPACE}/${DIR}" > /dev/tty
+  fi
+  if [ "$EXISTING_POSTGRES_VOLUME" = true ]; then
+    echo "  - Docker volume: ${POSTGRES_VOLUME}" > /dev/tty
+  fi
+  if [ "$EXISTING_DOCKER_STATE" = true ] && [ "$EXISTING_POSTGRES_VOLUME" = false ]; then
+    echo "  - Existing Memoh containers or networks" > /dev/tty
+  fi
+  echo "" > /dev/tty
+
+  if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
+    echo "Choose install mode:" > /dev/tty
+    echo "  1) Upgrade existing installation (recommended, reuses config and DB password)" > /dev/tty
+    echo "  2) Reinstall from scratch (removes Memoh Docker data)" > /dev/tty
+    echo "  3) Abort" > /dev/tty
+    printf "  Install mode [1]: " > /dev/tty
+    read -r input < /dev/tty || true
+    case "$input" in
+      2) INSTALL_MODE="reinstall" ;;
+      3) INSTALL_MODE="abort" ;;
+      *) INSTALL_MODE="upgrade" ;;
+    esac
+  else
+    echo "No reusable config.toml was found for a safe upgrade." > /dev/tty
+    echo "Choose install mode:" > /dev/tty
+    echo "  1) Reinstall from scratch (removes Memoh Docker data)" > /dev/tty
+    echo "  2) Abort" > /dev/tty
+    printf "  Install mode [2]: " > /dev/tty
+    read -r input < /dev/tty || true
+    case "$input" in
+      1) INSTALL_MODE="reinstall" ;;
+      *) INSTALL_MODE="abort" ;;
+    esac
+  fi
+}
+
+cleanup_existing_installation() {
+  echo "${YELLOW}Removing existing Memoh Docker containers, volumes, and network...${NC}"
+  for container in $PROJECT_CONTAINERS; do
+    $DOCKER rm -f "$container" >/dev/null 2>&1 || true
+  done
+  for volume in $PROJECT_VOLUMES; do
+    $DOCKER volume rm -f "$volume" >/dev/null 2>&1 || true
+  done
+  $DOCKER network rm "$NETWORK_NAME" >/dev/null 2>&1 || true
+}
+
+show_failure_logs() {
+  echo ""
+  echo "${RED}Startup failed. Recent PostgreSQL and migration logs:${NC}"
+  $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 postgres migrate || true
+}
 
 # Check Docker and determine if sudo is needed
 DOCKER="docker"
@@ -61,16 +345,6 @@ echo "${GREEN}✓ Docker and Docker Compose detected${NC}"
 if [ -n "$MEMOH_VERSION" ]; then
     echo "${GREEN}✓ Using specified version: ${MEMOH_VERSION}${NC}"
 else
-    fetch_latest_version() {
-      if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
-      elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null
-      else
-        echo "${RED}Error: curl or wget is required${NC}" >&2
-        exit 1
-      fi
-    }
     MEMOH_VERSION=$(fetch_latest_version | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
     if [ -n "$MEMOH_VERSION" ]; then
         echo "${GREEN}✓ Latest release: ${MEMOH_VERSION}${NC}"
@@ -122,17 +396,47 @@ if [ "$SILENT" = false ]; then
       *) WORKSPACE="$input" ;;
     esac
   fi
+fi
 
-  printf "  Data directory (bind mount for server container data) [%s]: " "$WORKSPACE/data" > /dev/tty
+mkdir -p "$WORKSPACE"
+WORKSPACE=$(cd "$WORKSPACE" && pwd)
+
+detect_existing_installation
+load_existing_settings
+prompt_install_mode
+
+case "$INSTALL_MODE" in
+  auto) INSTALL_MODE="fresh" ;;
+  fresh|upgrade|reinstall) ;;
+  abort)
+    echo "Installation aborted."
+    exit 0
+    ;;
+  *)
+    echo "${RED}Error: Unknown install mode '${INSTALL_MODE}'. Use fresh, upgrade, reinstall, or auto.${NC}"
+    exit 1
+    ;;
+esac
+
+if [ "$INSTALL_MODE" = "upgrade" ] && [ -z "$EXISTING_CONFIG_SOURCE" ]; then
+  echo "${RED}Error: Upgrade mode requires an existing config.toml to reuse.${NC}"
+  exit 1
+fi
+
+if [ "$INSTALL_MODE" = "fresh" ] && [ "$EXISTING_INSTALL_STATE" = true ]; then
+  echo "${RED}Error: Existing Memoh state was detected. Use upgrade or reinstall instead of fresh.${NC}"
+  exit 1
+fi
+
+if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
+  printf "  Data directory (reserved for future bind-mount support) [%s]: " "$MEMOH_DATA_DIR" > /dev/tty
   read -r input < /dev/tty || true
   if [ -n "$input" ]; then
     case "$input" in
-      ~) MEMOH_DATA_DIR="${HOME:-/tmp}" ;;
-      ~/*) MEMOH_DATA_DIR="${HOME:-/tmp}${input#\~}" ;;
+      "~") MEMOH_DATA_DIR="${HOME:-/tmp}" ;;
+      "~"/*) MEMOH_DATA_DIR="${HOME:-/tmp}${input#\~}" ;;
       *) MEMOH_DATA_DIR="$input" ;;
     esac
-  else
-    MEMOH_DATA_DIR="$WORKSPACE/data"
   fi
 
   printf "  Admin username [%s]: " "$ADMIN_USER" > /dev/tty
@@ -143,7 +447,7 @@ if [ "$SILENT" = false ]; then
   read -r input < /dev/tty || true
   [ -n "$input" ] && ADMIN_PASS="$input"
 
-  printf "  JWT secret [auto-generated]: " > /dev/tty
+  printf "  JWT secret [current/default value retained]: " > /dev/tty
   read -r input < /dev/tty || true
   [ -n "$input" ] && JWT_SECRET="$input"
 
@@ -151,10 +455,11 @@ if [ "$SILENT" = false ]; then
   read -r input < /dev/tty || true
   [ -n "$input" ] && PG_PASS="$input"
 
-  printf "  Enable sparse memory service? [y/N]: " > /dev/tty
+  printf "  Enable sparse memory service? [%s]: " "$( [ "$USE_SPARSE" = true ] && printf 'Y/n' || printf 'y/N' )" > /dev/tty
   read -r input < /dev/tty || true
   case "$input" in
     y|Y|yes|YES) USE_SPARSE=true ;;
+    n|N|no|NO) USE_SPARSE=false ;;
   esac
 
   echo "" > /dev/tty
@@ -162,19 +467,32 @@ if [ "$SILENT" = false ]; then
   echo "    1) Chromium only (default, smaller image)" > /dev/tty
   echo "    2) Firefox only" > /dev/tty
   echo "    3) Both Chromium and Firefox" > /dev/tty
-  printf "  Browser core [1]: " > /dev/tty
+  case "$BROWSER_CORE" in
+    firefox) browser_default="2" ;;
+    all) browser_default="3" ;;
+    *) browser_default="1" ;;
+  esac
+  printf "  Browser core [%s]: " "$browser_default" > /dev/tty
   read -r input < /dev/tty || true
   case "$input" in
     2) BROWSER_CORE="firefox" ;;
     3) BROWSER_CORE="all" ;;
+    "") 
+      case "$browser_default" in
+        2) BROWSER_CORE="firefox" ;;
+        3) BROWSER_CORE="all" ;;
+        *) BROWSER_CORE="chromium" ;;
+      esac
+      ;;
     *) BROWSER_CORE="chromium" ;;
   esac
 
   echo "" > /dev/tty
+elif [ "$INSTALL_MODE" = "upgrade" ]; then
+  echo "${GREEN}✓ Upgrade mode: reusing existing configuration and database credentials${NC}"
 fi
 
 # Enter workspace (all operations run here)
-mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 
 # Clone or update
@@ -211,23 +529,28 @@ if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
     echo "${GREEN}✓ Docker images pinned to ${MEMOH_DOCKER_VERSION}${NC}"
 fi
 
-# Generate config.toml from template
-cp conf/app.docker.toml config.toml
-sed -i.bak "s|username = \"admin\"|username = \"${ADMIN_USER}\"|" config.toml
-sed -i.bak "s|password = \"admin123\"|password = \"${ADMIN_PASS}\"|" config.toml
-sed -i.bak "s|jwt_secret = \".*\"|jwt_secret = \"${JWT_SECRET}\"|" config.toml
-sed -i.bak "s|password = \"memoh123\"|password = \"${PG_PASS}\"|" config.toml
-export POSTGRES_PASSWORD="${PG_PASS}"
-if [ "$USE_CN_MIRROR" = true ]; then
-  sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
+if [ "$INSTALL_MODE" = "upgrade" ]; then
+  if [ "$EXISTING_CONFIG_SOURCE" != "$PWD/config.toml" ]; then
+    cp "$EXISTING_CONFIG_SOURCE" ./config.toml
+  fi
+else
+  cp conf/app.docker.toml config.toml
+  sed -i.bak "s|username = \"admin\"|username = \"${ADMIN_USER}\"|" config.toml
+  sed -i.bak "s|password = \"admin123\"|password = \"${ADMIN_PASS}\"|" config.toml
+  sed -i.bak "s|jwt_secret = \".*\"|jwt_secret = \"${JWT_SECRET}\"|" config.toml
+  sed -i.bak "s|password = \"memoh123\"|password = \"${PG_PASS}\"|" config.toml
+  if [ "$USE_CN_MIRROR" = true ]; then
+    sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
+  fi
+  rm -f config.toml.bak
 fi
-rm -f config.toml.bak
 
-# Use generated config and data dir
 INSTALL_DIR="$(pwd)"
+mkdir -p "$MEMOH_DATA_DIR"
+MEMOH_DATA_DIR=$(cd "$MEMOH_DATA_DIR" && pwd)
 export MEMOH_CONFIG=./config.toml
 export MEMOH_DATA_DIR
-mkdir -p "$MEMOH_DATA_DIR"
+export POSTGRES_PASSWORD="${PG_PASS}"
 
 # Resolve browser tag and cores from BROWSER_CORE selection
 case "$BROWSER_CORE" in
@@ -268,13 +591,19 @@ if [ "$USE_CN_MIRROR" = true ]; then
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
 fi
 
-echo POSTGRES_PASSWORD="${PG_PASS}" >> .env
-echo MEMOH_CONFIG=./config.toml >> .env
-echo MEMOH_DATA_DIR="${MEMOH_DATA_DIR}" >> .env
-echo USE_SPARSE="${USE_SPARSE}" >> .env
-echo BROWSER_TAG="${BROWSER_TAG}" >> .env
-echo BROWSER_CORES="${BROWSER_CORES}" >> .env
+cat > .env <<EOF
+POSTGRES_PASSWORD=${PG_PASS}
+MEMOH_CONFIG=./config.toml
+MEMOH_DATA_DIR=${MEMOH_DATA_DIR}
+USE_SPARSE=${USE_SPARSE}
+BROWSER_TAG=${BROWSER_TAG}
+BROWSER_CORES=${BROWSER_CORES}
+EOF
 echo "${GREEN}✓ Browser: ${BROWSER_CORE} (image tag: ${BROWSER_TAG})${NC}"
+
+if [ "$INSTALL_MODE" = "reinstall" ]; then
+  cleanup_existing_installation
+fi
 
 echo ""
 echo "${GREEN}Pulling Docker images...${NC}"
@@ -282,7 +611,10 @@ $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES pull
 
 echo ""
 echo "${GREEN}Starting services (first startup may take a few minutes)...${NC}"
-$DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d
+if ! $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES up -d; then
+  show_failure_logs
+  exit 1
+fi
 
 # After fresh clone: copy minimal files to workspace and remove clone directory
 if [ "$CLONED_FRESH" = true ]; then
@@ -316,5 +648,8 @@ echo "📋 Commands:"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps       # Status"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f   # Logs"
 echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} down      # Stop"
+if [ "$INSTALL_MODE" != "fresh" ]; then
+  echo "  cd ${INSTALL_DIR} && ${COMPOSE_CMD} down -v   # Remove containers and Docker data"
+fi
 echo ""
 echo "${YELLOW}⏳ First startup may take 1-2 minutes, please be patient.${NC}"

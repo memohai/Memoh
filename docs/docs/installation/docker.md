@@ -58,11 +58,15 @@ curl -fsSL https://memoh.sh | sudo sh
 The script will:
 
 1. Check for Docker and Docker Compose
-2. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, Postgres password, sparse service toggle, browser core selection)
-3. Fetch the latest release tag from GitHub and clone the repository
-4. Generate `config.toml` from the Docker template with your settings
-5. Pin Docker image versions to the release
-6. Build the browser image with selected cores and start all services
+2. Detect whether this is a first-time install, an upgrade, or a reinstall
+3. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, Postgres password, sparse service toggle, browser core selection)
+4. Reuse the existing `config.toml` automatically during upgrades so database credentials stay aligned with the persisted PostgreSQL volume
+5. Offer a clean reinstall mode that removes Memoh Docker containers, volumes, and network before starting again
+6. Fetch the latest release tag from GitHub and clone the repository
+7. Generate `config.toml` from the Docker template with your settings when needed
+8. Pin Docker image versions to the release
+9. Build the browser image with selected cores and start all services
+10. Print recent `postgres` and `migrate` logs automatically if startup fails
 
 **Silent install** (use all defaults, no prompts):
 
@@ -77,6 +81,20 @@ Defaults when running silently:
 - Admin: `admin` / `admin123`
 - JWT secret: auto-generated
 - Postgres password: `memoh123`
+
+If the script detects an existing Memoh installation in silent mode, it defaults to **upgrade** and reuses the previous `config.toml`. If Docker state exists but no reusable `config.toml` can be found, the script exits and asks you to choose an explicit reinstall.
+
+**Force a clean reinstall** (removes Memoh Docker data before starting again):
+
+```bash
+curl -fsSL https://memoh.sh | sudo MEMOH_INSTALL_MODE=reinstall sh
+```
+
+You can also pass the install mode as an argument:
+
+```bash
+curl -fsSL https://memoh.sh | sudo sh -s -- --install-mode reinstall
+```
 
 **Install a specific version:**
 
@@ -187,6 +205,7 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 ```bash
 docker compose up -d           # Start
 docker compose down            # Stop
+docker compose down -v         # Stop and remove Memoh Docker data
 docker compose logs -f         # View logs
 docker compose ps              # Status
 docker compose pull && docker compose up -d  # Update to latest images
@@ -199,6 +218,7 @@ docker compose pull && docker compose up -d  # Update to latest images
 | `POSTGRES_PASSWORD`| `memoh123`         | PostgreSQL password (must match `postgres.password` in `config.toml`) |
 | `MEMOH_CONFIG`     | `./config.toml`    | Path to the configuration file               |
 | `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v0.6.0`). Also pins Docker image versions. |
+| `MEMOH_INSTALL_MODE` | `auto`           | Install mode: `auto`, `fresh`, `upgrade`, or `reinstall` |
 | `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland image mirrors |
 | `BROWSER_CORES`    | `chromium,firefox`  | Browser engines to include in the browser image |
 | `BROWSER_TAG`      | `latest`           | Docker tag for the browser image |
