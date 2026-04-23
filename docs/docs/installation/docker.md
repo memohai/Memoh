@@ -65,7 +65,7 @@ The script will:
 6. Fetch the latest release tag from GitHub and clone the repository
 7. Generate `config.toml` from the Docker template with your settings when needed
 8. Pin Docker image versions to the release
-9. Build the browser image with selected cores and start all services
+9. Select and pull the prebuilt browser image for the chosen cores and start all services
 10. Print recent `postgres` and `migrate` logs automatically if startup fails
 
 **Silent install** (use all defaults, no prompts):

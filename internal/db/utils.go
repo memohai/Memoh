@@ -3,6 +3,9 @@ package db
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,15 +18,16 @@ import (
 
 // DSN builds a PostgreSQL connection string from config.
 func DSN(cfg config.PostgresConfig) string {
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		cfg.User,
-		cfg.Password,
-		cfg.Host,
-		cfg.Port,
-		cfg.Database,
-		cfg.SSLMode,
-	)
+	dsn := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(cfg.User, cfg.Password),
+		Host:   net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
+		Path:   cfg.Database,
+	}
+	query := dsn.Query()
+	query.Set("sslmode", cfg.SSLMode)
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
 }
 
 // ParseUUID converts a string UUID to pgtype.UUID.

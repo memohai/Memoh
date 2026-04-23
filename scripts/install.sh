@@ -36,7 +36,6 @@ else
   BROWSER_CORE_SET=false
 fi
 
-POSTGRES_VOLUME="${COMPOSE_PROJECT_NAME}_postgres_data"
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
 PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-browser"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
@@ -45,7 +44,9 @@ EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
 EXISTING_INSTALL_STATE=false
 EXISTING_DOCKER_STATE=false
-EXISTING_POSTGRES_VOLUME=false
+EXISTING_DOCKER_VOLUMES=""
+EXISTING_DOCKER_CONTAINERS=false
+EXISTING_DOCKER_NETWORK=false
 EXISTING_WORKSPACE_FILES=false
 EXISTING_REPO_DIR=false
 
@@ -88,6 +89,13 @@ read_env_file_value() {
   if [ -z "$value" ]; then
     return 1
   fi
+  case "$value" in
+    \'*\')
+      value=${value#\'}
+      value=${value%\'}
+      value=$(printf '%s' "$value" | sed "s/\\\\'/'/g")
+      ;;
+  esac
   printf '%s' "$value"
 }
 
@@ -98,7 +106,7 @@ read_toml_value() {
   if [ ! -f "$file" ]; then
     return 1
   fi
-  awk -v target_section="[$section]" -v target_key="$key" '
+  value=$(awk -v target_section="[$section]" -v target_key="$key" '
     /^\[[^]]+\]/ {
       in_section = ($0 == target_section)
       next
@@ -114,7 +122,11 @@ read_toml_value() {
       print value
       exit
     }
-  ' "$file"
+  ' "$file")
+  if [ -z "$value" ]; then
+    return 1
+  fi
+  printf '%s' "$value" | sed 's/\\"/"/g; s/\\\\/\\/g'
 }
 
 browser_core_from_cores() {
@@ -123,6 +135,44 @@ browser_core_from_cores() {
     all|chromium,firefox|firefox,chromium) printf '%s' "all" ;;
     *) printf '%s' "chromium" ;;
   esac
+}
+
+escape_toml_string() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+set_toml_string_value() {
+  file="$1"
+  section="$2"
+  key="$3"
+  value=$(escape_toml_string "$4")
+  tmp="${file}.tmp.$$"
+  if TOML_VALUE="$value" awk -v target_section="[$section]" -v target_key="$key" '
+    BEGIN {
+      target_value = ENVIRON["TOML_VALUE"]
+    }
+    /^\[[^]]+\]/ {
+      in_section = ($0 == target_section)
+    }
+    in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
+      indent = $0
+      sub(/[^[:space:]].*/, "", indent)
+      print indent target_key " = \"" target_value "\""
+      next
+    }
+    { print }
+  ' "$file" > "$tmp"; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+write_env_value() {
+  key="$1"
+  value=$(printf '%s' "$2" | sed "s/'/\\\\'/g")
+  printf "%s='%s'\n" "$key" "$value" >> .env
 }
 
 fetch_latest_version() {
@@ -141,7 +191,9 @@ detect_existing_installation() {
   EXISTING_ENV_SOURCE=""
   EXISTING_INSTALL_STATE=false
   EXISTING_DOCKER_STATE=false
-  EXISTING_POSTGRES_VOLUME=false
+  EXISTING_DOCKER_VOLUMES=""
+  EXISTING_DOCKER_CONTAINERS=false
+  EXISTING_DOCKER_NETWORK=false
   EXISTING_WORKSPACE_FILES=false
   EXISTING_REPO_DIR=false
 
@@ -173,19 +225,28 @@ detect_existing_installation() {
     fi
   fi
 
-  if $DOCKER volume inspect "$POSTGRES_VOLUME" >/dev/null 2>&1; then
-    EXISTING_DOCKER_STATE=true
-    EXISTING_POSTGRES_VOLUME=true
-    EXISTING_INSTALL_STATE=true
-  fi
+  for volume in $PROJECT_VOLUMES; do
+    if $DOCKER volume inspect "$volume" >/dev/null 2>&1; then
+      EXISTING_DOCKER_STATE=true
+      EXISTING_INSTALL_STATE=true
+      EXISTING_DOCKER_VOLUMES="${EXISTING_DOCKER_VOLUMES} ${volume}"
+    fi
+  done
 
   for container in $PROJECT_CONTAINERS; do
     if $DOCKER container inspect "$container" >/dev/null 2>&1; then
       EXISTING_DOCKER_STATE=true
+      EXISTING_DOCKER_CONTAINERS=true
       EXISTING_INSTALL_STATE=true
       break
     fi
   done
+
+  if $DOCKER network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
+    EXISTING_DOCKER_STATE=true
+    EXISTING_DOCKER_NETWORK=true
+    EXISTING_INSTALL_STATE=true
+  fi
 }
 
 load_existing_settings() {
@@ -231,18 +292,19 @@ load_existing_settings() {
 
 prompt_install_mode() {
   if [ "$SILENT" = true ]; then
-    if [ "$EXISTING_INSTALL_STATE" = false ]; then
-      INSTALL_MODE="fresh"
-      return
-    fi
     if [ "$INSTALL_MODE" = "auto" ]; then
       if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
         INSTALL_MODE="upgrade"
         echo "${YELLOW}ℹ Existing Memoh installation detected. Reusing existing configuration in silent mode.${NC}"
-      else
-        echo "${RED}Error: Existing Memoh Docker state detected but no reusable config.toml was found.${NC}"
+      elif [ "$EXISTING_DOCKER_STATE" = true ]; then
+        echo "${RED}Error: Existing Memoh Docker state was detected but no reusable config.toml was found.${NC}"
         echo "Run again with MEMOH_INSTALL_MODE=reinstall to wipe Docker data, or restore the previous config.toml."
         exit 1
+      else
+        INSTALL_MODE="fresh"
+        if [ "$EXISTING_INSTALL_STATE" = true ]; then
+          echo "${YELLOW}ℹ Existing Memoh files were detected, but no Docker state or reusable config.toml was found. Proceeding with a fresh install in silent mode.${NC}"
+        fi
       fi
     fi
     return
@@ -267,11 +329,14 @@ prompt_install_mode() {
   if [ "$EXISTING_REPO_DIR" = true ]; then
     echo "  - Repository checkout: ${WORKSPACE}/${DIR}" > /dev/tty
   fi
-  if [ "$EXISTING_POSTGRES_VOLUME" = true ]; then
-    echo "  - Docker volume: ${POSTGRES_VOLUME}" > /dev/tty
+  if [ -n "$EXISTING_DOCKER_VOLUMES" ]; then
+    echo "  - Docker volumes:${EXISTING_DOCKER_VOLUMES}" > /dev/tty
   fi
-  if [ "$EXISTING_DOCKER_STATE" = true ] && [ "$EXISTING_POSTGRES_VOLUME" = false ]; then
-    echo "  - Existing Memoh containers or networks" > /dev/tty
+  if [ "$EXISTING_DOCKER_CONTAINERS" = true ]; then
+    echo "  - Existing Memoh containers" > /dev/tty
+  fi
+  if [ "$EXISTING_DOCKER_NETWORK" = true ]; then
+    echo "  - Docker network: ${NETWORK_NAME}" > /dev/tty
   fi
   echo "" > /dev/tty
 
@@ -287,7 +352,7 @@ prompt_install_mode() {
       3) INSTALL_MODE="abort" ;;
       *) INSTALL_MODE="upgrade" ;;
     esac
-  else
+  elif [ "$EXISTING_DOCKER_STATE" = true ]; then
     echo "No reusable config.toml was found for a safe upgrade." > /dev/tty
     echo "Choose install mode:" > /dev/tty
     echo "  1) Reinstall from scratch (removes Memoh Docker data)" > /dev/tty
@@ -297,6 +362,17 @@ prompt_install_mode() {
     case "$input" in
       1) INSTALL_MODE="reinstall" ;;
       *) INSTALL_MODE="abort" ;;
+    esac
+  else
+    echo "No reusable config.toml or Docker state was found." > /dev/tty
+    echo "Choose install mode:" > /dev/tty
+    echo "  1) Continue fresh install (recommended)" > /dev/tty
+    echo "  2) Abort" > /dev/tty
+    printf "  Install mode [1]: " > /dev/tty
+    read -r input < /dev/tty || true
+    case "$input" in
+      2) INSTALL_MODE="abort" ;;
+      *) INSTALL_MODE="fresh" ;;
     esac
   fi
 }
@@ -423,8 +499,8 @@ if [ "$INSTALL_MODE" = "upgrade" ] && [ -z "$EXISTING_CONFIG_SOURCE" ]; then
   exit 1
 fi
 
-if [ "$INSTALL_MODE" = "fresh" ] && [ "$EXISTING_INSTALL_STATE" = true ]; then
-  echo "${RED}Error: Existing Memoh state was detected. Use upgrade or reinstall instead of fresh.${NC}"
+if [ "$INSTALL_MODE" = "fresh" ] && [ "$EXISTING_DOCKER_STATE" = true ]; then
+  echo "${RED}Error: Existing Memoh Docker state was detected. Use upgrade or reinstall instead of fresh.${NC}"
   exit 1
 fi
 
@@ -535,10 +611,10 @@ if [ "$INSTALL_MODE" = "upgrade" ]; then
   fi
 else
   cp conf/app.docker.toml config.toml
-  sed -i.bak "s|username = \"admin\"|username = \"${ADMIN_USER}\"|" config.toml
-  sed -i.bak "s|password = \"admin123\"|password = \"${ADMIN_PASS}\"|" config.toml
-  sed -i.bak "s|jwt_secret = \".*\"|jwt_secret = \"${JWT_SECRET}\"|" config.toml
-  sed -i.bak "s|password = \"memoh123\"|password = \"${PG_PASS}\"|" config.toml
+  set_toml_string_value config.toml "admin" "username" "$ADMIN_USER"
+  set_toml_string_value config.toml "admin" "password" "$ADMIN_PASS"
+  set_toml_string_value config.toml "auth" "jwt_secret" "$JWT_SECRET"
+  set_toml_string_value config.toml "postgres" "password" "$PG_PASS"
   if [ "$USE_CN_MIRROR" = true ]; then
     sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
   fi
@@ -591,14 +667,13 @@ if [ "$USE_CN_MIRROR" = true ]; then
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
 fi
 
-cat > .env <<EOF
-POSTGRES_PASSWORD=${PG_PASS}
-MEMOH_CONFIG=./config.toml
-MEMOH_DATA_DIR=${MEMOH_DATA_DIR}
-USE_SPARSE=${USE_SPARSE}
-BROWSER_TAG=${BROWSER_TAG}
-BROWSER_CORES=${BROWSER_CORES}
-EOF
+: > .env
+write_env_value "POSTGRES_PASSWORD" "$PG_PASS"
+write_env_value "MEMOH_CONFIG" "./config.toml"
+write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
+write_env_value "USE_SPARSE" "$USE_SPARSE"
+write_env_value "BROWSER_TAG" "$BROWSER_TAG"
+write_env_value "BROWSER_CORES" "$BROWSER_CORES"
 echo "${GREEN}✓ Browser: ${BROWSER_CORE} (image tag: ${BROWSER_TAG})${NC}"
 
 if [ "$INSTALL_MODE" = "reinstall" ]; then
