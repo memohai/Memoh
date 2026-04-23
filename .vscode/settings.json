@@ -1,12 +1,12 @@
 {
   "editor.insertSpaces": true,
   "editor.detectIndentation": false,
-  "editor.formatOnSave": false,
+  "editor.formatOnSave": true,
+  "prettier.enable": true,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
     "source.organizeImports": "never"
   },
-
   "editor.tabSize": 2,
 
   "[typescript]": {
@@ -41,5 +41,4 @@
     "editor.tabSize": 4,
     "editor.insertSpaces": true
   }
-
 }

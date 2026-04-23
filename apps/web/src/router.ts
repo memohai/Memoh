@@ -52,7 +52,8 @@ const routes = [
             path: ':botId',
             component: () => import('@/pages/bots/detail.vue'),
             meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.botId,
+              breadcrumb: (route: RouteLocationNormalized) =>
+                route.params.botId,
             },
           },
         ],
@@ -203,7 +204,9 @@ router.afterEach(async (to) => {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     invoke('resize_for_route', { route: to.path })
-  } catch { /* not in Tauri */ }
+  } catch {
+    /* not in Tauri */
+  }
 })
 
 export default router

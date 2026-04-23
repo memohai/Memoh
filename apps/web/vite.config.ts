@@ -11,8 +11,12 @@ export default defineConfig(({ command }) => {
   const defaultHost = '127.0.0.1'
   const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
-  const configuredPath = process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
-  const configPath = configuredPath && configuredPath.length > 0 ? configuredPath : '../../config.toml'
+  const configuredPath =
+    process.env.MEMOH_CONFIG_PATH?.trim() || process.env.CONFIG_PATH?.trim()
+  const configPath =
+    configuredPath && configuredPath.length > 0
+      ? configuredPath
+      : '../../config.toml'
 
   let port = defaultPort
   let host = defaultHost
@@ -41,10 +45,7 @@ export default defineConfig(({ command }) => {
   }
 
   return {
-    plugins: [
-      vue(),
-      tailwindcss(),
-    ],
+    plugins: [vue(), tailwindcss()],
     optimizeDeps: {
       // Pre-bundle deps for route pages to avoid slow first load / navigation
       entries: ['src/main.ts', 'src/pages/**/*.vue'],
@@ -58,7 +59,7 @@ export default defineConfig(({ command }) => {
           changeOrigin: true,
           rewrite: (path: string) => path.replace(/^\/api/, ''),
           ws: true,
-        }
+        },
       },
     },
     preview: {
@@ -70,14 +71,14 @@ export default defineConfig(({ command }) => {
           changeOrigin: true,
           rewrite: (path: string) => path.replace(/^\/api/, ''),
           ws: true,
-        }
+        },
       },
       allowedHosts: true,
     },
     resolve: {
       alias: {
         '#': fileURLToPath(new URL('../../packages/ui/src', import.meta.url)),
-        '@': fileURLToPath(new URL('./src', import.meta.url))
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
   }

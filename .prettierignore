@@ -1,0 +1,10 @@
+**/*.go
+**/*.md
+**/*.yml
+**/*.toml
+go.mod
+go.sum
+.gitignore
+.npmignore
+.prettierignore
+.DS_Store
