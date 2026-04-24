@@ -198,12 +198,4 @@ router.beforeEach((to) => {
   return token ? true : { name: 'Login' }
 })
 
-router.afterEach(async (to) => {
-  if (!('__TAURI_INTERNALS__' in window)) return
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    invoke('resize_for_route', { route: to.path })
-  } catch { /* not in Tauri */ }
-})
-
 export default router

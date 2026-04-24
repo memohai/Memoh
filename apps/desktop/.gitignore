@@ -1,24 +1,17 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
 node_modules
+out
 dist
-dist-ssr
-*.local
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
 
-# Editor directories and files
+# bundle assets (icons etc.) — root .gitignore has `build/`, re-include here.
+!build/
+!build/**
+
+# editor
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?

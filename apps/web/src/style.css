@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "@memohai/ui/style.css";
 
+/* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
+ * auto-detection anchors on the Vite project root, so when a consumer
+ * (e.g. @memohai/desktop) imports this stylesheet from a different root,
+ * it needs these hints to still scan our templates. */
+@source "./";
 @source "../../../packages/ui/src";
 
 @layer components {

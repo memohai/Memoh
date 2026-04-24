@@ -250,7 +250,6 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 - All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
 - Logged-in users accessing `/login` are redirected to `/`.
 - Chunk load errors (dynamic import failures) trigger an automatic page reload.
-- Tauri integration: `afterEach` hook calls `resize_for_route` via `@tauri-apps/api/core` when running inside Tauri.
 
 ## Layout System
 

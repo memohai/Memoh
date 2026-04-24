@@ -3,16 +3,41 @@
   "private": true,
   "version": "0.7.1",
   "type": "module",
+  "description": "Memoh Electron desktop application (thin shell reusing @memohai/web)",
+  "main": "./out/main/index.js",
   "scripts": {
-    "dev": "tauri dev",
-    "build": "tauri build",
-    "tauri": "tauri"
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build && electron-builder",
+    "build:dir": "electron-vite build && electron-builder --dir",
+    "build:unpack": "electron-vite build && electron-builder --dir",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:win": "electron-vite build && electron-builder --win",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@memohai/icon": "workspace:*",
+    "@memohai/sdk": "workspace:*",
+    "@memohai/ui": "workspace:*",
+    "@memohai/web": "workspace:*"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@memohai/config": "workspace:*",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "electron": "^34.5.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1",
+    "vue": "^3.5.24",
+    "vue-tsc": "^3.1.4"
   }
 }

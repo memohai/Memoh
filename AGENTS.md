@@ -40,7 +40,7 @@ Infrastructure dependencies:
 - **Icons**: lucide-vue-next + `@memohai/icon` (brand/provider icons)
 - **i18n**: vue-i18n
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
-- **Desktop**: Tauri (wraps `@memohai/web`)
+- **Desktop**: Electron + [electron-vite](https://electron-vite.github.io/) (thin shell whose renderer imports `@memohai/web`'s bootstrap)
 - **Package Manager**: pnpm monorepo
 
 ### Browser Gateway (TypeScript)
@@ -169,7 +169,7 @@ Memoh/
 │   │       ├── types/          #     TypeScript type definitions
 │   │       ├── storage.ts      #     Browser context storage
 │   │       └── models.ts       #     Zod request schemas
-│   ├── desktop/                #   Tauri desktop app (@memohai/desktop, wraps @memohai/web)
+│   ├── desktop/                #   Electron desktop app (@memohai/desktop, electron-vite; renderer imports @memohai/web)
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
 │   ├── ui/                     #   Shared UI component library (@memohai/ui)
@@ -235,8 +235,8 @@ Memoh/
 | `mise run build-embedded-assets` | Build and stage embedded web assets |
 | `mise run build-unified` | Build memoh CLI locally |
 | `mise run bridge:build` | Rebuild bridge binary in dev container |
-| `mise run desktop:dev` | Start Tauri desktop app in dev mode |
-| `mise run desktop:build` | Build Tauri desktop app for release |
+| `mise run desktop:dev` | Start Electron desktop app in dev mode (renderer reuses @memohai/web) |
+| `mise run desktop:build` | Build Electron desktop app for release (electron-builder) |
 | `mise run lint` | Run all linters (Go + ESLint) |
 | `mise run lint:fix` | Run all linters with auto-fix |
 | `mise run release` | Release new version (bumpp) |
@@ -309,6 +309,15 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 - State management uses Pinia; data fetching uses Pinia Colada.
 - i18n via vue-i18n.
 - See `apps/web/AGENTS.md` for detailed frontend conventions.
+
+### Desktop App
+
+- `apps/desktop/` is an [electron-vite](https://electron-vite.github.io/) project (`@memohai/desktop`).
+- The renderer is intentionally a **thin shell**: `src/renderer/src/main.ts` is a single-line `import '@memohai/web/main'` that defers the full bootstrap (router, Pinia, api-client, `App.vue`) to `@memohai/web`.
+- `@memohai/web`'s `package.json` exposes an `exports` map (`./main`, `./App.vue`, `./style.css`, `./*`) so downstream consumers can reuse web modules.
+- `electron.vite.config.ts` mirrors `apps/web/vite.config.ts`: same `@` / `#` path aliases, same `/api` proxy (driven by `MEMOH_WEB_PROXY_TARGET` / `config.toml` via `@memohai/config`).
+- Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`.
+- When desktop needs to diverge from the web experience, replace the re-export in `renderer/src/main.ts` with an inline copy of web's `main.ts` and customize from there — do **not** fork `apps/web` itself.
 
 ### Container / Workspace Management
 
