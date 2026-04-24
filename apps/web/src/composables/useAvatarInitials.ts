@@ -1,6 +1,9 @@
 import { computed } from 'vue'
 
-export function useAvatarInitials(getLabel: () => string | null | undefined, fallback = '') {
+export function useAvatarInitials(
+  getLabel: () => string | null | undefined,
+  fallback = ''
+) {
   return computed(() => {
     const label = getLabel()?.trim() ?? ''
     if (!label) {

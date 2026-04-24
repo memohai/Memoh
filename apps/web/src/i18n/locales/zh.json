@@ -57,7 +57,7 @@
     "retryHint": "请检查后重新输入"
   },
   "sidebar": {
-    "session":"会话",
+    "session": "会话",
     "chat": "对话",
     "bots": "Bots",
     "providers": "模型",

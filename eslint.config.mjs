@@ -2,11 +2,21 @@
 import vueParser from 'vue-eslint-parser'
 import tseslint from 'typescript-eslint'
 import vue from 'eslint-plugin-vue'
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
 
 export default [
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/cache/**', '**/target/**', 'packages/sdk/src/**'] },
+  eslintPluginPrettierRecommended,
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cache/**',
+      '**/target/**',
+      'packages/sdk/src/**',
+    ],
+  },
   {
     files: ['packages/**/*.{js,jsx,ts,tsx}', 'apps/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
@@ -17,13 +27,15 @@ export default [
       },
     },
     rules: {
-      quotes: ['error', 'single'],
       semi: ['error', 'never'],
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        destructuredArrayIgnorePattern: '^_',
-      }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
     },
   },
   {
@@ -40,16 +52,18 @@ export default [
       },
     },
     rules: {
-      quotes: ['error', 'single'],
       semi: ['error', 'never'],
       'vue/multi-word-component-names': 'off',
       'vue/require-default-prop': 'off',
-      'vue/no-required-prop-with-default':'error',
-      '@typescript-eslint/no-unused-vars': ['error', {
-        argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_',
-        destructuredArrayIgnorePattern: '^_',
-      }],
+      'vue/no-required-prop-with-default': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
     },
   },
   {
