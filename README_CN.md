@@ -6,7 +6,6 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
   <h1>Memoh</h1>
-  <p>自托管、常驻运行的容器化 AI Agent 平台。</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />

@@ -4,7 +4,8 @@
 </div>  
 
 <div align="center">
-  <img src="./assets/logo_title.png" alt="Memoh" height="100">
+  <img src="./assets/logo.png" alt="Memoh" height="80">
+  <h1>Memoh</h1>
   <p>Self hosted, always-on AI agent platform run in containers.</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
@@ -23,7 +24,6 @@
     [<a href="https://docs.memoh.ai">Documentation</a>]
     [<a href="mailto:business@memoh.net">Cooperation</a>]
   </div>
-  <hr>
 </div>
 
 Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
