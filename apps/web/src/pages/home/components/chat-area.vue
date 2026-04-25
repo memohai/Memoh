@@ -1,6 +1,21 @@
 <template>
   <div class="flex-1 flex h-full min-w-0">
-    <div class="flex-1 flex flex-col h-full min-w-0">
+    <div class="flex-1 flex flex-col h-full min-w-0 relative">
+      <!-- Desktop floating title bar (overlays the chat area, fades into messages
+           via a bottom shadow gradient — pointer-events:none lets scroll/clicks
+           fall through). -->
+      <header
+        v-if="topInset && currentBotId"
+        class="pointer-events-none absolute top-0 left-0 right-0 z-10 select-none"
+      >
+        <div class="h-10 flex items-center justify-center bg-background px-12">
+          <span class="text-xs font-medium text-foreground truncate">
+            {{ desktopTitle }}
+          </span>
+        </div>
+        <div class="h-5 bg-linear-to-b from-background to-transparent" />
+      </header>
+
       <!-- No bot selected -->
       <div
         v-if="!currentBotId"
@@ -24,7 +39,10 @@
               ref="scrollContainer"
               class="h-full"
             >
-              <div class="w-full max-w-4xl mx-auto px-10 py-6 space-y-6">
+              <div
+                class="w-full max-w-4xl mx-auto px-10 pb-6 space-y-6"
+                :class="topInset ? 'pt-15' : 'pt-6'"
+              >
                 <!-- Load older indicator -->
                 <div
                   v-if="loadingOlder"
@@ -380,7 +398,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, provide, useTemplateRef, watchEffect, watch, type Component } from 'vue'
+import { ref, computed, inject, nextTick, onMounted, onBeforeUnmount, provide, useTemplateRef, watchEffect, watch, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, FolderOpen, Send, ChevronDown, Lightbulb, TerminalSquare, BarChart3, Trash2 } from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@memohai/ui'
@@ -397,6 +415,7 @@ import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import type { ChatAttachment } from '@/composables/api/useChat'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import { useScroll, useElementBounding } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
@@ -544,7 +563,18 @@ const {
   hasMoreOlder,
   overrideModelId,
   overrideReasoningEffort,
+  bots,
 } = storeToRefs(chatStore)
+
+const topInset = inject(DesktopShellKey, false)
+
+const desktopTitle = computed(() => {
+  const sessionTitle = (activeSession.value?.title ?? '').trim()
+  const bot = bots.value.find((b) => b.id === currentBotId.value)
+  const botName = (bot?.display_name ?? bot?.id ?? '').trim()
+  if (sessionTitle && botName) return `${sessionTitle} - ${botName}`
+  return sessionTitle || botName
+})
 
 // ---- Model / provider queries ----
 

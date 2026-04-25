@@ -10,6 +10,7 @@
     "./router": "./src/router.ts",
     "./i18n": "./src/i18n.ts",
     "./api-client": "./src/lib/api-client.ts",
+    "./lib/desktop-shell": "./src/lib/desktop-shell.ts",
     "./style.css": "./src/style.css",
     "./*": "./src/*"
   },

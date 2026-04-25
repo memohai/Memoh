@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { provide } from 'vue'
 import { Toaster, SidebarInset } from '@memohai/ui'
 import 'vue-sonner/style.css'
 import MainLayout from '@memohai/web/layout/main-layout/index.vue'
 import SettingsSidebar from '@memohai/web/components/settings-sidebar/index.vue'
 import { useSettingsStore } from '@memohai/web/store/settings'
+import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'
 
+provide(DesktopShellKey, true)
 useSettingsStore()
 </script>
 

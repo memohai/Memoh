@@ -1,7 +1,30 @@
 <template>
-  <aside>
-    <Sidebar collapsible="icon">
-      <SidebarHeader class="p-0 border-0">
+  <aside class="relative h-full">
+    <header
+      v-if="topInset"
+      class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) flex items-center pl-[78px] pr-2 gap-1 bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
+    >
+      <div class="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-6 text-muted-foreground hover:text-foreground shrink-0"
+          :aria-label="t('bots.createBot')"
+          @click="router.push('/settings/bots')"
+        >
+          <Plus class="size-3.5" />
+        </Button>
+      </div>
+    </header>
+
+    <Sidebar
+      :collapsible="topInset ? 'none' : 'icon'"
+      :class="topInset ? 'pt-9 h-dvh border-r border-sidebar-border' : ''"
+    >
+      <SidebarHeader
+        v-if="!topInset"
+        class="p-0 border-0"
+      >
         <div class="h-10 flex items-center pl-2 group-data-[collapsible=icon]:pl-3 transition-[padding] duration-200 ease-linear">
           <Button
             variant="ghost"
@@ -58,33 +81,9 @@
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarRail />
-
       <SidebarFooter class="relative border-0 px-2 pb-3.5 pt-2.5">
         <div class="pointer-events-none absolute -top-30 left-0 h-38.25 w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
         <SidebarMenu class="gap-2.5">
-          <!-- <SidebarMenuItem>
-            <SidebarMenuButton
-              :tooltip="displayTitle"
-              class="h-10 px-2.5"
-              @click="router.push({ name: 'profile' })"
-            >
-              <div class="size-9 shrink-0 rounded-full border border-border bg-accent overflow-hidden p-[1.385px]">
-                <img
-                  v-if="userInfo.avatarUrl"
-                  :src="userInfo.avatarUrl"
-                  :alt="displayTitle"
-                  class="size-full rounded-full object-cover"
-                >
-                <span
-                  v-else
-                  class="size-full flex items-center justify-center text-[10px] font-medium text-muted-foreground"
-                >
-                  {{ avatarFallback }}
-                </span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem> -->
           <SidebarMenuItem>
             <SidebarMenuButton
               :tooltip="t('sidebar.settings')"
@@ -100,19 +99,19 @@
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+
+      <SidebarRail v-if="!topInset" />
     </Sidebar>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import type { BotsBot } from '@memohai/sdk'
-// import { useUserStore } from '@/store/user'
-// import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import {
   Button,
   Sidebar,
@@ -130,21 +129,17 @@ import {
 import { Plus, LoaderCircle, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import BotItem from './bot-item.vue'
 import { usePinnedBots } from '@/composables/usePinnedBots'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
 const { toggleSidebar } = useSidebar()
-// const { userInfo } = useUserStore()
+const topInset = inject(DesktopShellKey, false)
 const { sortBots } = usePinnedBots()
 
 const { data: botData, isLoading } = useQuery(getBotsQuery())
 const bots = computed<BotsBot[]>(() => sortBots(botData.value?.items ?? []))
 
 const isSettingsActive = computed(() => route.path.startsWith('/settings'))
-
-// const displayTitle = computed(() =>
-//   userInfo.displayName || userInfo.username || userInfo.id || t('settings.user'),
-// )
-// const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
 </script>

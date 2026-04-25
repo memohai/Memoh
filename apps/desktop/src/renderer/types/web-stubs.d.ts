@@ -34,6 +34,11 @@ declare module '@memohai/web/store/settings' {
   export function useSettingsStore(): unknown
 }
 
+declare module '@memohai/web/lib/desktop-shell' {
+  import type { InjectionKey } from 'vue'
+  export const DesktopShellKey: InjectionKey<boolean>
+}
+
 declare module '@memohai/web/style.css'
 
 // Fallback for every Vue SFC reachable through the @memohai/web/* wildcard

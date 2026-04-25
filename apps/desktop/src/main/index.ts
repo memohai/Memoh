@@ -33,9 +33,17 @@ function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings'): 
 // output is what wires the IPC bridge into the renderer.
 const PRELOAD_FILE = '../preload/index.mjs'
 
+// On macOS we hide the system titlebar but keep the native traffic lights
+// (`hiddenInset`). Renderers reserve space for them via a custom TopBar.
+const macTitleBarOptions: Partial<Electron.BrowserWindowConstructorOptions>
+  = process.platform === 'darwin'
+    ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 12 } }
+    : {}
+
 function createChatWindow(): BrowserWindow {
   const window = new BrowserWindow({
     ...CHAT_DEFAULTS,
+    ...macTitleBarOptions,
     show: false,
     autoHideMenuBar: true,
     title: 'Memoh',
@@ -63,6 +71,7 @@ function createChatWindow(): BrowserWindow {
 function createSettingsWindow(parent: BrowserWindow | null): BrowserWindow {
   const window = new BrowserWindow({
     ...SETTINGS_DEFAULTS,
+    ...macTitleBarOptions,
     show: false,
     autoHideMenuBar: true,
     title: 'Memoh · Settings',
