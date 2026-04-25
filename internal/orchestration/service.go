@@ -25,9 +25,10 @@ import (
 )
 
 type Service struct {
-	pool    *pgxpool.Pool
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	pool               *pgxpool.Pool
+	queries            *sqlc.Queries
+	logger             *slog.Logger
+	attemptAssignments AttemptAssignmentPublisher
 }
 
 func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Service {
@@ -35,9 +36,10 @@ func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Se
 		log = slog.Default()
 	}
 	return &Service{
-		pool:    pool,
-		queries: queries,
-		logger:  log.With(slog.String("service", "orchestration")),
+		pool:               pool,
+		queries:            queries,
+		logger:             log.With(slog.String("service", "orchestration")),
+		attemptAssignments: noopAttemptAssignmentPublisher{},
 	}
 }
 
@@ -97,7 +99,7 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		TenantID:               caller.TenantID,
 		OwnerSubject:           caller.Subject,
 		LifecycleStatus:        LifecycleStatusCreated,
-		PlanningStatus:         PlanningStatusIdle,
+		PlanningStatus:         PlanningStatusActive,
 		StatusVersion:          1,
 		PlannerEpoch:           1,
 		LastEventSeq:           0,
@@ -143,7 +145,7 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		Goal:                 normalizedGoal,
 		Inputs:               marshalObject(req.Input),
 		PlannerEpoch:         1,
-		WorkerProfile:        "",
+		WorkerProfile:        DefaultRootWorkerProfile,
 		Priority:             0,
 		RetryPolicy:          marshalObject(nil),
 		VerificationPolicy:   marshalObject(nil),
@@ -179,52 +181,49 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		return RunHandle{}, err
 	}
 
-	readyTask, err := qtx.MarkOrchestrationTaskReadyFromCheckpoint(ctx, rootTaskUUID)
+	planningIntentID, planningIntentUUID, err := newPGUUID()
 	if err != nil {
-		return RunHandle{}, fmt.Errorf("mark root task ready: %w", err)
-	}
-	if _, err := s.appendEvent(ctx, qtx, runUUID, eventSpec{
-		TaskID:           readyTask.ID,
-		CheckpointID:     pgtype.UUID{},
-		AggregateType:    "task",
-		AggregateID:      readyTask.ID,
-		AggregateVersion: readyTask.StatusVersion,
-		Type:             "run.event.task.ready",
-		IdempotencyKey:   normalizedIdempotencyKey,
-		Payload: map[string]any{
-			"task_id":         readyTask.ID.String(),
-			"previous_status": taskRow.Status,
-			"new_status":      readyTask.Status,
-			"ready_reason":    "start_run",
-		},
-	}); err != nil {
 		return RunHandle{}, err
 	}
-
-	runningRun, err := qtx.MarkOrchestrationRunRunning(ctx, runUUID)
-	if err != nil {
-		return RunHandle{}, fmt.Errorf("mark run running: %w", err)
-	}
-	runRunningEvent, err := s.appendEvent(ctx, qtx, runUUID, eventSpec{
-		TaskID:           pgtype.UUID{},
+	if _, err := qtx.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               planningIntentUUID,
+		RunID:            runUUID,
+		TaskID:           rootTaskUUID,
 		CheckpointID:     pgtype.UUID{},
-		AggregateType:    "run",
-		AggregateID:      runningRun.ID,
-		AggregateVersion: runningRun.StatusVersion,
-		Type:             "run.event.running",
+		Kind:             PlanningIntentKindStartRun,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runRow.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":     runID,
+			"task_id":    rootTaskID,
+			"reason":     "start_run",
+			"goal":       normalizedGoal,
+			"created_by": caller.Subject,
+		}),
+	}); err != nil {
+		return RunHandle{}, fmt.Errorf("create orchestration planning intent: %w", err)
+	}
+	planningEvent, err := s.appendEvent(ctx, qtx, runUUID, eventSpec{
+		TaskID:           rootTaskUUID,
+		CheckpointID:     pgtype.UUID{},
+		AggregateType:    "planning_intent",
+		AggregateID:      planningIntentUUID,
+		AggregateVersion: 1,
+		Type:             "run.event.planning_intent.enqueued",
 		IdempotencyKey:   normalizedIdempotencyKey,
 		Payload: map[string]any{
-			"run_id":          runID,
-			"previous_status": runRow.LifecycleStatus,
-			"new_status":      runningRun.LifecycleStatus,
-			"entry_reason":    "start_run",
+			"planning_intent_id": planningIntentID,
+			"run_id":             runID,
+			"task_id":            rootTaskID,
+			"kind":               PlanningIntentKindStartRun,
+			"status":             PlanningIntentStatusPending,
 		},
 	})
 	if err != nil {
 		return RunHandle{}, err
 	}
 
-	snapshotSeq, err := uint64FromInt64(runRunningEvent.Seq, "run event seq")
+	snapshotSeq, err := uint64FromInt64(planningEvent.Seq, "run event seq")
 	if err != nil {
 		return RunHandle{}, err
 	}
@@ -243,7 +242,6 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 	}); err != nil {
 		return RunHandle{}, fmt.Errorf("complete orchestration start idempotency: %w", err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return RunHandle{}, fmt.Errorf("commit orchestration start tx: %w", err)
 	}
@@ -251,6 +249,10 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 }
 
 func (s *Service) GetRunSnapshot(ctx context.Context, caller ControlIdentity, runID string) (*RunSnapshot, error) {
+	return s.GetRunSnapshotAtSeq(ctx, caller, runID, 0)
+}
+
+func (s *Service) GetRunSnapshotAtSeq(ctx context.Context, caller ControlIdentity, runID string, asOfSeq uint64) (*RunSnapshot, error) {
 	var err error
 	caller, err = normalizeControlIdentity(caller)
 	if err != nil {
@@ -264,11 +266,25 @@ func (s *Service) GetRunSnapshot(ctx context.Context, caller ControlIdentity, ru
 	if err != nil {
 		return nil, err
 	}
-	snapshot := &RunSnapshot{
-		Run:         toRun(row),
-		SnapshotSeq: lastEventSeq,
+	resolvedSeq := lastEventSeq
+	if asOfSeq != 0 {
+		if asOfSeq > lastEventSeq {
+			return nil, fmt.Errorf("%w: as_of_seq exceeds current snapshot", ErrInvalidArgument)
+		}
+		resolvedSeq = asOfSeq
 	}
-	return snapshot, nil
+	runSnapshot, snapshotSeq, err := s.loadRunSnapshot(ctx, row.ID, resolvedSeq)
+	if err != nil {
+		return nil, err
+	}
+	if snapshotSeq == 0 {
+		runSnapshot = toRun(row)
+		snapshotSeq = lastEventSeq
+	}
+	return &RunSnapshot{
+		Run:         runSnapshot,
+		SnapshotSeq: snapshotSeq,
+	}, nil
 }
 
 func (s *Service) ListRunTasks(ctx context.Context, caller ControlIdentity, runID string, req ListRunTasksRequest) (*TaskPage, error) {
@@ -361,8 +377,12 @@ func (s *Service) ListRunArtifacts(ctx context.Context, caller ControlIdentity, 
 	if err != nil {
 		return nil, err
 	}
-	items = filterArtifacts(items, req.TaskID, req.Kind)
-	pageItems, nextAfter, err := paginateArtifacts(items, req.After, normalizedListLimit(req.Limit), snapshotSeq, filterHash([]string{strings.TrimSpace(req.TaskID)}, req.Kind))
+	normalizedTaskID, err := normalizeOptionalUUID(req.TaskID, "task id")
+	if err != nil {
+		return nil, err
+	}
+	items = filterArtifacts(items, normalizedTaskID, req.Kind)
+	pageItems, nextAfter, err := paginateArtifacts(items, req.After, normalizedListLimit(req.Limit), snapshotSeq, filterHash([]string{normalizedTaskID}, req.Kind))
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +489,7 @@ func (s *Service) ResolveCheckpoint(ctx context.Context, caller ControlIdentity,
 		return nil, fmt.Errorf("lock checkpoint run: %w", err)
 	}
 	if err := authorizeRun(caller, lockedRun); err != nil {
-		return nil, err
+		return nil, ErrCheckpointNotFound
 	}
 
 	normalized, hash, err := normalizeCheckpointResolution(lockedCheckpoint, input)
@@ -534,7 +554,7 @@ func (s *Service) ResolveCheckpoint(ctx context.Context, caller ControlIdentity,
 		return nil, fmt.Errorf("resolve checkpoint: %w", err)
 	}
 
-	lastEvent, err := s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+	_, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
 		TaskID:           lockedCheckpoint.TaskID,
 		CheckpointID:     lockedCheckpoint.ID,
 		AggregateType:    "checkpoint",
@@ -560,142 +580,60 @@ func (s *Service) ResolveCheckpoint(ctx context.Context, caller ControlIdentity,
 		return nil, err
 	}
 
-	if lockedTask.Status == TaskStatusWaitingHuman && lockedTask.WaitingCheckpointID.Valid && lockedTask.WaitingCheckpointID == lockedCheckpoint.ID {
-		openBarrier, hasOpenBarrier, err := findOpenRunBlockingCheckpoint(ctx, qtx, lockedRun.ID)
-		if err != nil {
-			return nil, fmt.Errorf("find open run blocking checkpoint: %w", err)
-		}
-		if hasOpenBarrier {
-			waitingTask, err := qtx.MarkOrchestrationTaskWaitingHuman(ctx, sqlc.MarkOrchestrationTaskWaitingHumanParams{
-				ID:                  lockedTask.ID,
-				WaitingCheckpointID: openBarrier.ID,
-				WaitingScope:        "run",
-			})
-			if err != nil {
-				return nil, fmt.Errorf("rebind task to open run checkpoint: %w", err)
-			}
-			lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
-				TaskID:           waitingTask.ID,
-				CheckpointID:     openBarrier.ID,
-				AggregateType:    "task",
-				AggregateID:      waitingTask.ID,
-				AggregateVersion: waitingTask.StatusVersion,
-				Type:             "run.event.task.waiting_human",
-				IdempotencyKey:   normalizedIdempotencyKey,
-				Payload: map[string]any{
-					"task_id":                        waitingTask.ID.String(),
-					"previous_status":                lockedTask.Status,
-					"new_status":                     waitingTask.Status,
-					"waiting_scope":                  waitingTask.WaitingScope,
-					"previous_waiting_scope":         lockedTask.WaitingScope,
-					"previous_waiting_checkpoint_id": lockedCheckpoint.ID.String(),
-					"waiting_checkpoint_id":          openBarrier.ID.String(),
-				},
-			})
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			readyTask, err := qtx.MarkOrchestrationTaskReadyFromCheckpoint(ctx, lockedTask.ID)
-			if err != nil {
-				return nil, fmt.Errorf("mark task ready from checkpoint: %w", err)
-			}
-			lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
-				TaskID:           readyTask.ID,
-				CheckpointID:     resolvedCheckpoint.ID,
-				AggregateType:    "task",
-				AggregateID:      readyTask.ID,
-				AggregateVersion: readyTask.StatusVersion,
-				Type:             "run.event.task.ready",
-				IdempotencyKey:   normalizedIdempotencyKey,
-				Payload: map[string]any{
-					"task_id":         readyTask.ID.String(),
-					"previous_status": lockedTask.Status,
-					"new_status":      readyTask.Status,
-					"ready_reason":    "checkpoint_resolved",
-					"waiting_scope":   lockedTask.WaitingScope,
-					"checkpoint_id":   resolvedCheckpoint.ID.String(),
-				},
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
+	_, planningIntentUUID, err := newPGUUID()
+	if err != nil {
+		return nil, err
+	}
+	planningIntent, err := qtx.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               planningIntentUUID,
+		RunID:            lockedRun.ID,
+		TaskID:           lockedTask.ID,
+		CheckpointID:     resolvedCheckpoint.ID,
+		Kind:             PlanningIntentKindCheckpointResume,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: lockedRun.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":              lockedRun.ID.String(),
+			"task_id":             lockedTask.ID.String(),
+			"checkpoint_id":       resolvedCheckpoint.ID.String(),
+			"checkpoint_blocking": resolvedCheckpoint.BlocksRun,
+			"resolved_by":         caller.Subject,
+			"resolved_mode":       normalized.Mode,
+			"resolution_metadata": normalized.Metadata,
+		}),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create checkpoint resume planning intent: %w", err)
+	}
+	_, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+		TaskID:           lockedTask.ID,
+		CheckpointID:     resolvedCheckpoint.ID,
+		AggregateType:    "planning_intent",
+		AggregateID:      planningIntent.ID,
+		AggregateVersion: 1,
+		Type:             "run.event.planning_intent.enqueued",
+		IdempotencyKey:   normalizedIdempotencyKey,
+		Payload: map[string]any{
+			"planning_intent_id": planningIntent.ID.String(),
+			"run_id":             lockedRun.ID.String(),
+			"task_id":            lockedTask.ID.String(),
+			"checkpoint_id":      resolvedCheckpoint.ID.String(),
+			"kind":               planningIntent.Kind,
+			"status":             planningIntent.Status,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.syncRunPlanningStatus(ctx, qtx, lockedRun.ID); err != nil {
+		return nil, err
+	}
+	lockedRun, err = qtx.GetOrchestrationRunByIDForUpdate(ctx, lockedRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lock run after checkpoint resolve: %w", err)
 	}
 
-	if resolvedCheckpoint.BlocksRun && lockedRun.LifecycleStatus == LifecycleStatusWaitingHuman {
-		openBlockingCount, err := qtx.CountOpenRunBlockingCheckpointsByRun(ctx, lockedRun.ID)
-		if err != nil {
-			return nil, fmt.Errorf("count open run blocking checkpoints: %w", err)
-		}
-		if openBlockingCount == 0 {
-			siblingTasks, err := qtx.ListCurrentOrchestrationTasksByRun(ctx, lockedRun.ID)
-			if err != nil {
-				return nil, fmt.Errorf("list sibling tasks for run barrier release: %w", err)
-			}
-			for _, sibling := range siblingTasks {
-				if !taskWaitingOnRunBarrier(sibling, resolvedCheckpoint.ID) {
-					continue
-				}
-				lockedSibling, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, sibling.ID)
-				if err != nil {
-					return nil, fmt.Errorf("lock sibling task for run barrier release: %w", err)
-				}
-				if !taskWaitingOnRunBarrier(lockedSibling, resolvedCheckpoint.ID) {
-					continue
-				}
-				readySibling, err := qtx.MarkOrchestrationTaskReadyFromCheckpoint(ctx, lockedSibling.ID)
-				if err != nil {
-					return nil, fmt.Errorf("mark sibling task ready from run barrier: %w", err)
-				}
-				lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
-					TaskID:           readySibling.ID,
-					CheckpointID:     resolvedCheckpoint.ID,
-					AggregateType:    "task",
-					AggregateID:      readySibling.ID,
-					AggregateVersion: readySibling.StatusVersion,
-					Type:             "run.event.task.ready",
-					IdempotencyKey:   normalizedIdempotencyKey,
-					Payload: map[string]any{
-						"task_id":         readySibling.ID.String(),
-						"previous_status": lockedSibling.Status,
-						"new_status":      readySibling.Status,
-						"ready_reason":    "run_checkpoint_resolved",
-						"waiting_scope":   lockedSibling.WaitingScope,
-						"checkpoint_id":   resolvedCheckpoint.ID.String(),
-					},
-				})
-				if err != nil {
-					return nil, err
-				}
-			}
-			runningRun, err := qtx.MarkOrchestrationRunRunning(ctx, lockedRun.ID)
-			if err != nil {
-				return nil, fmt.Errorf("mark run running: %w", err)
-			}
-			lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
-				TaskID:           pgtype.UUID{},
-				CheckpointID:     resolvedCheckpoint.ID,
-				AggregateType:    "run",
-				AggregateID:      runningRun.ID,
-				AggregateVersion: runningRun.StatusVersion,
-				Type:             "run.event.running",
-				IdempotencyKey:   normalizedIdempotencyKey,
-				Payload: map[string]any{
-					"run_id":          runningRun.ID.String(),
-					"previous_status": lockedRun.LifecycleStatus,
-					"new_status":      runningRun.LifecycleStatus,
-					"entry_reason":    "checkpoint_resolved",
-					"checkpoint_id":   resolvedCheckpoint.ID.String(),
-				},
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	snapshotSeq, err := uint64FromInt64(lastEvent.Seq, "checkpoint resolve event seq")
+	snapshotSeq, err := uint64FromInt64(lockedRun.LastEventSeq, "checkpoint resolve event seq")
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +651,6 @@ func (s *Service) ResolveCheckpoint(ctx context.Context, caller ControlIdentity,
 	}); err != nil {
 		return nil, fmt.Errorf("complete resolve checkpoint idempotency: %w", err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit resolve checkpoint tx: %w", err)
 	}
@@ -764,7 +701,7 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 		return nil, fmt.Errorf("lock run for checkpoint create: %w", err)
 	}
 	if err := authorizeRun(caller, lockedRun); err != nil {
-		return nil, err
+		return nil, ErrRunNotFound
 	}
 	lockedTask, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, pgTaskID)
 	if err != nil {
@@ -774,7 +711,7 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 		return nil, fmt.Errorf("lock task for checkpoint create: %w", err)
 	}
 	if lockedTask.RunID != lockedRun.ID {
-		return nil, fmt.Errorf("%w: task does not belong to run", ErrInvalidArgument)
+		return nil, ErrTaskNotFound
 	}
 	if !runAcceptsExternalMutations(lockedRun.LifecycleStatus) && lockedRun.LifecycleStatus != LifecycleStatusWaitingHuman {
 		return nil, ErrRunImmutable
@@ -946,6 +883,9 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 				continue
 			}
 			if !taskPauseableByRunBarrier(sibling) {
+				if taskBlocksRunBarrier(sibling) {
+					return nil, ErrRunBarrierUnsupported
+				}
 				continue
 			}
 			lockedSibling, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, sibling.ID)
@@ -953,6 +893,9 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 				return nil, fmt.Errorf("lock sibling task for run barrier: %w", err)
 			}
 			if !taskPauseableByRunBarrier(lockedSibling) {
+				if taskBlocksRunBarrier(lockedSibling) {
+					return nil, ErrRunBarrierUnsupported
+				}
 				continue
 			}
 			waitingSibling, err := qtx.MarkOrchestrationTaskWaitingHuman(ctx, sqlc.MarkOrchestrationTaskWaitingHumanParams{
@@ -1024,7 +967,6 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 	}); err != nil {
 		return nil, fmt.Errorf("complete create checkpoint idempotency: %w", err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit create checkpoint tx: %w", err)
 	}
@@ -1079,7 +1021,7 @@ func (s *Service) CommitArtifact(ctx context.Context, caller ControlIdentity, re
 		return nil, fmt.Errorf("lock run for artifact commit: %w", err)
 	}
 	if err := authorizeRun(caller, lockedRun); err != nil {
-		return nil, err
+		return nil, ErrRunNotFound
 	}
 	if !runAcceptsExternalMutations(lockedRun.LifecycleStatus) {
 		return nil, ErrRunImmutable
@@ -1092,7 +1034,19 @@ func (s *Service) CommitArtifact(ctx context.Context, caller ControlIdentity, re
 		return nil, fmt.Errorf("lock task for artifact commit: %w", err)
 	}
 	if lockedTask.RunID != lockedRun.ID {
-		return nil, fmt.Errorf("%w: task does not belong to run", ErrInvalidArgument)
+		return nil, ErrTaskNotFound
+	}
+	if attemptID.Valid {
+		attemptRow, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, attemptID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrAttemptNotFound
+			}
+			return nil, fmt.Errorf("lock attempt for artifact commit: %w", err)
+		}
+		if attemptRow.RunID != lockedRun.ID || attemptRow.TaskID != lockedTask.ID {
+			return nil, ErrAttemptNotFound
+		}
 	}
 
 	requestHash, err := commitArtifactRequestHash(req, normalizedIdempotencyKey)
@@ -1200,7 +1154,6 @@ func (s *Service) CommitArtifact(ctx context.Context, caller ControlIdentity, re
 	}); err != nil {
 		return nil, fmt.Errorf("complete artifact idempotency: %w", err)
 	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit artifact tx: %w", err)
 	}
@@ -1209,6 +1162,7 @@ func (s *Service) CommitArtifact(ctx context.Context, caller ControlIdentity, re
 
 type eventSpec struct {
 	TaskID           pgtype.UUID
+	AttemptID        pgtype.UUID
 	CheckpointID     pgtype.UUID
 	AggregateType    string
 	AggregateID      pgtype.UUID
@@ -1229,7 +1183,7 @@ func (*Service) appendEvent(ctx context.Context, qtx *sqlc.Queries, runID pgtype
 	row, err := qtx.CreateOrchestrationEvent(ctx, sqlc.CreateOrchestrationEventParams{
 		RunID:            runID,
 		TaskID:           event.TaskID,
-		AttemptID:        pgtype.UUID{},
+		AttemptID:        event.AttemptID,
 		CheckpointID:     event.CheckpointID,
 		Seq:              lastSeq,
 		AggregateType:    event.AggregateType,
@@ -1283,6 +1237,19 @@ func recordProjectionSnapshotAtSeq(ctx context.Context, qtx *sqlc.Queries, runID
 	for _, item := range artifacts {
 		artifactItems = append(artifactItems, toArtifact(item))
 	}
+	runRow, err := qtx.GetOrchestrationRunByID(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("load run for projection snapshot: %w", err)
+	}
+	runItem := toRun(runRow)
+	if _, err := qtx.CreateOrchestrationProjectionSnapshot(ctx, sqlc.CreateOrchestrationProjectionSnapshotParams{
+		RunID:          runID,
+		ProjectionKind: ProjectionKindRun,
+		Seq:            seqInt64,
+		Payload:        marshalJSON(runItem),
+	}); err != nil {
+		return fmt.Errorf("write run projection snapshot at seq %d: %w", seq, err)
+	}
 	if _, err := qtx.CreateOrchestrationProjectionSnapshot(ctx, sqlc.CreateOrchestrationProjectionSnapshotParams{
 		RunID:          runID,
 		ProjectionKind: ProjectionKindTasks,
@@ -1308,6 +1275,33 @@ func recordProjectionSnapshotAtSeq(ctx context.Context, qtx *sqlc.Queries, runID
 		return fmt.Errorf("write artifact projection snapshot at seq %d: %w", seq, err)
 	}
 	return nil
+}
+
+func (s *Service) loadRunSnapshot(ctx context.Context, runID pgtype.UUID, asOfSeq uint64) (Run, uint64, error) {
+	asOfSeqInt64, err := int64FromUint64(asOfSeq, "run snapshot seq")
+	if err != nil {
+		return Run{}, 0, err
+	}
+	row, err := s.queries.GetOrchestrationProjectionSnapshotAtOrBeforeSeq(ctx, sqlc.GetOrchestrationProjectionSnapshotAtOrBeforeSeqParams{
+		RunID:          runID,
+		ProjectionKind: ProjectionKindRun,
+		Seq:            asOfSeqInt64,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Run{}, 0, nil
+		}
+		return Run{}, 0, fmt.Errorf("load run projection snapshot: %w", err)
+	}
+	var item Run
+	if err := unmarshalJSON(row.Payload, &item); err != nil {
+		return Run{}, 0, fmt.Errorf("decode run projection snapshot: %w", err)
+	}
+	seq, err := uint64FromInt64(row.Seq, "run snapshot seq")
+	if err != nil {
+		return Run{}, 0, err
+	}
+	return item, seq, nil
 }
 
 func (s *Service) loadTaskSnapshot(ctx context.Context, runID pgtype.UUID, asOfSeq uint64) ([]Task, uint64, error) {
@@ -1409,7 +1403,7 @@ func (s *Service) getAuthorizedRun(ctx context.Context, caller ControlIdentity, 
 		return sqlc.OrchestrationRun{}, fmt.Errorf("get orchestration run: %w", err)
 	}
 	if err := authorizeRun(caller, row); err != nil {
-		return sqlc.OrchestrationRun{}, err
+		return sqlc.OrchestrationRun{}, ErrRunNotFound
 	}
 	return row, nil
 }
@@ -1453,6 +1447,25 @@ func runAcceptsExternalMutations(status string) bool {
 	default:
 		return false
 	}
+}
+
+func runAcceptsPlanningIntent(status string, basePlannerEpoch, currentPlannerEpoch int64) bool {
+	if !runAcceptsExternalMutations(status) {
+		return false
+	}
+	return basePlannerEpoch == currentPlannerEpoch
+}
+
+func normalizeOptionalUUID(raw string, field string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	parsed, err := db.ParseUUID(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("%w: invalid %s", ErrInvalidArgument, field)
+	}
+	return parsed.String(), nil
 }
 
 func taskAcceptsHumanCheckpoint(status string) bool {
@@ -1521,6 +1534,14 @@ func createHumanCheckpointRequestHash(
 	resumePolicy *CheckpointResumePolicy,
 	idempotencyKey string,
 ) (string, error) {
+	runID, err := normalizeOptionalUUID(req.RunID, "run_id")
+	if err != nil {
+		return "", err
+	}
+	taskID, err := normalizeOptionalUUID(req.TaskID, "task_id")
+	if err != nil {
+		return "", err
+	}
 	var timeoutAt *time.Time
 	if !req.TimeoutAt.IsZero() {
 		value := req.TimeoutAt.UTC()
@@ -1538,8 +1559,8 @@ func createHumanCheckpointRequestHash(
 		Metadata       map[string]any           `json:"metadata"`
 		IdempotencyKey string                   `json:"idempotency_key"`
 	}{
-		RunID:          strings.TrimSpace(req.RunID),
-		TaskID:         strings.TrimSpace(req.TaskID),
+		RunID:          runID,
+		TaskID:         taskID,
 		BlocksRun:      req.BlocksRun,
 		Question:       strings.TrimSpace(req.Question),
 		Options:        options,
@@ -1553,6 +1574,18 @@ func createHumanCheckpointRequestHash(
 }
 
 func commitArtifactRequestHash(req CommitArtifactRequest, idempotencyKey string) (string, error) {
+	runID, err := normalizeOptionalUUID(req.RunID, "run_id")
+	if err != nil {
+		return "", err
+	}
+	taskID, err := normalizeOptionalUUID(req.TaskID, "task_id")
+	if err != nil {
+		return "", err
+	}
+	attemptID, err := normalizeOptionalUUID(req.AttemptID, "attempt_id")
+	if err != nil {
+		return "", err
+	}
 	normalized := struct {
 		RunID          string         `json:"run_id"`
 		TaskID         string         `json:"task_id"`
@@ -1566,9 +1599,9 @@ func commitArtifactRequestHash(req CommitArtifactRequest, idempotencyKey string)
 		Metadata       map[string]any `json:"metadata"`
 		IdempotencyKey string         `json:"idempotency_key"`
 	}{
-		RunID:          strings.TrimSpace(req.RunID),
-		TaskID:         strings.TrimSpace(req.TaskID),
-		AttemptID:      strings.TrimSpace(req.AttemptID),
+		RunID:          runID,
+		TaskID:         taskID,
+		AttemptID:      attemptID,
 		Kind:           strings.TrimSpace(req.Kind),
 		URI:            strings.TrimSpace(req.URI),
 		Version:        strings.TrimSpace(req.Version),

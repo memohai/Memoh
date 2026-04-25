@@ -14,6 +14,28 @@ const (
 	PlanningStatusIdle   = "idle"
 	PlanningStatusActive = "active"
 
+	PlanningIntentKindStartRun         = "start_run"
+	PlanningIntentKindCheckpointResume = "checkpoint_resume"
+	PlanningIntentKindAttemptFinalize  = "attempt_finalize"
+	PlanningIntentKindReplan           = "replan"
+	PlanningIntentStatusPending        = "pending"
+	PlanningIntentStatusProcessing     = "processing"
+	PlanningIntentStatusCompleted      = "completed"
+	PlanningIntentStatusFailed         = "failed"
+	PlanningIntentDefaultLeaseTTL      = 30 * time.Second
+	TaskAttemptStatusCreated           = "created"
+	TaskAttemptStatusClaimed           = "claimed"
+	TaskAttemptStatusRunning           = "running"
+	TaskAttemptStatusCompleted         = "completed"
+	TaskAttemptStatusFailed            = "failed"
+	TaskAttemptStatusLost              = "lost"
+	TaskAttemptDefaultLeaseTTL         = 30 * time.Second
+	WorkerStatusActive                 = "active"
+	WorkerStatusUnavailable            = "unavailable"
+	DefaultWorkerExecutorID            = "builtin.workerd"
+	DefaultWorkerDisplayName           = "Builtin Workerd"
+	DefaultRootWorkerProfile           = "builtin.echo"
+
 	TaskStatusCreated      = "created"
 	TaskStatusReady        = "ready"
 	TaskStatusDispatching  = "dispatching"
@@ -46,6 +68,7 @@ const (
 	ProjectionKindTasks       = "tasks"
 	ProjectionKindCheckpoints = "checkpoints"
 	ProjectionKindArtifacts   = "artifacts"
+	ProjectionKindRun         = "run"
 
 	defaultListLimit  = 50
 	maxListLimit      = 200
@@ -56,6 +79,8 @@ const (
 	methodCreateHumanCheckpoint = "CreateHumanCheckpoint"
 	methodCommitArtifact        = "CommitArtifact"
 	methodResolveCheckpoint     = "ResolveCheckpoint"
+	methodCompleteAttempt       = "CompleteAttempt"
+	methodFailAttempt           = "FailAttempt"
 )
 
 type ControlIdentity struct {
@@ -187,6 +212,118 @@ type Task struct {
 	BlackboardScope          string         `json:"blackboard_scope,omitempty"`
 	CreatedAt                time.Time      `json:"created_at"`
 	UpdatedAt                time.Time      `json:"updated_at"`
+}
+
+type PlanningIntent struct {
+	ID               string         `json:"id"`
+	RunID            string         `json:"run_id"`
+	TaskID           string         `json:"task_id,omitempty"`
+	CheckpointID     string         `json:"checkpoint_id,omitempty"`
+	Kind             string         `json:"kind"`
+	Status           string         `json:"status"`
+	BasePlannerEpoch uint64         `json:"base_planner_epoch"`
+	ClaimEpoch       uint64         `json:"claim_epoch"`
+	ClaimToken       string         `json:"claim_token,omitempty"`
+	ClaimedBy        string         `json:"claimed_by,omitempty"`
+	LeaseExpiresAt   time.Time      `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  time.Time      `json:"last_heartbeat_at,omitempty"`
+	FailureReason    string         `json:"failure_reason,omitempty"`
+	Payload          map[string]any `json:"payload"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
+
+type InputManifest struct {
+	ID                          string           `json:"id"`
+	RunID                       string           `json:"run_id"`
+	TaskID                      string           `json:"task_id"`
+	CapturedTaskInputs          map[string]any   `json:"captured_task_inputs"`
+	CapturedArtifactVersions    []map[string]any `json:"captured_artifact_versions"`
+	CapturedBlackboardRevisions []map[string]any `json:"captured_blackboard_revisions"`
+	ProjectionHash              string           `json:"projection_hash"`
+	CreatedAt                   time.Time        `json:"created_at"`
+}
+
+type TaskAttempt struct {
+	ID               string    `json:"id"`
+	RunID            string    `json:"run_id"`
+	TaskID           string    `json:"task_id"`
+	AttemptNo        int       `json:"attempt_no"`
+	WorkerID         string    `json:"worker_id,omitempty"`
+	ExecutorID       string    `json:"executor_id,omitempty"`
+	Status           string    `json:"status"`
+	ClaimEpoch       uint64    `json:"claim_epoch"`
+	ClaimToken       string    `json:"claim_token,omitempty"`
+	LeaseExpiresAt   time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  time.Time `json:"last_heartbeat_at,omitempty"`
+	InputManifestID  string    `json:"input_manifest_id,omitempty"`
+	ParkCheckpointID string    `json:"park_checkpoint_id,omitempty"`
+	FailureClass     string    `json:"failure_class,omitempty"`
+	TerminalReason   string    `json:"terminal_reason,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	FinishedAt       time.Time `json:"finished_at,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type WorkerRegistration struct {
+	WorkerID        string         `json:"worker_id"`
+	ExecutorID      string         `json:"executor_id"`
+	DisplayName     string         `json:"display_name"`
+	Capabilities    map[string]any `json:"capabilities"`
+	LeaseToken      string         `json:"lease_token,omitempty"`
+	LeaseTTLSeconds int            `json:"lease_ttl_seconds"`
+}
+
+type AttemptClaim struct {
+	WorkerID        string   `json:"worker_id"`
+	ExecutorID      string   `json:"executor_id"`
+	WorkerProfiles  []string `json:"worker_profiles"`
+	LeaseToken      string   `json:"lease_token,omitempty"`
+	LeaseTTLSeconds int      `json:"lease_ttl_seconds"`
+}
+
+type AttemptHeartbeat struct {
+	AttemptID       string `json:"attempt_id"`
+	ClaimToken      string `json:"claim_token"`
+	LeaseTTLSeconds int    `json:"lease_ttl_seconds"`
+}
+
+type AttemptArtifactIntent struct {
+	Kind        string         `json:"kind"`
+	URI         string         `json:"uri"`
+	Version     string         `json:"version"`
+	Digest      string         `json:"digest"`
+	ContentType string         `json:"content_type,omitempty"`
+	Summary     string         `json:"summary,omitempty"`
+	Metadata    map[string]any `json:"metadata"`
+}
+
+type AttemptCompletion struct {
+	AttemptID          string                  `json:"attempt_id"`
+	ClaimToken         string                  `json:"claim_token"`
+	Status             string                  `json:"status"`
+	Summary            string                  `json:"summary"`
+	StructuredOutput   map[string]any          `json:"structured_output"`
+	FailureClass       string                  `json:"failure_class"`
+	TerminalReason     string                  `json:"terminal_reason"`
+	RequestReplan      bool                    `json:"request_replan"`
+	ArtifactIntents    []AttemptArtifactIntent `json:"artifact_intents"`
+	CompletionMetadata map[string]any          `json:"completion_metadata"`
+	IdempotencyKey     string                  `json:"idempotency_key"`
+}
+
+type WorkerLease struct {
+	ID              string         `json:"id"`
+	ExecutorID      string         `json:"executor_id"`
+	DisplayName     string         `json:"display_name"`
+	Capabilities    map[string]any `json:"capabilities"`
+	Status          string         `json:"status"`
+	LeaseToken      string         `json:"lease_token,omitempty"`
+	LastHeartbeatAt time.Time      `json:"last_heartbeat_at"`
+	LeaseExpiresAt  time.Time      `json:"lease_expires_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 type CheckpointOption struct {

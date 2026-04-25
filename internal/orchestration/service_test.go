@@ -217,6 +217,62 @@ func TestResolvePageAsOfSeqRejectsSnapshotMismatch(t *testing.T) {
 	}
 }
 
+func TestDecodePlannedChildTasksNormalizesMinimalPlan(t *testing.T) {
+	t.Parallel()
+
+	plans := decodePlannedChildTasks(map[string]any{
+		"child_tasks": []any{
+			map[string]any{
+				"id":             "first",
+				"goal":           " first child ",
+				"worker_profile": " " + DefaultRootWorkerProfile + " ",
+				"priority":       float64(2),
+				"inputs":         map[string]any{"step": "one"},
+				"retry_policy":   map[string]any{"max_attempts": float64(3)},
+				"verification_policy": map[string]any{
+					"mode": "strict",
+				},
+				"blackboard_scope": " scope.one ",
+			},
+			map[string]any{
+				"goal":       "second child",
+				"depends_on": []any{"first"},
+			},
+			map[string]any{
+				"goal": "   ",
+			},
+		},
+	})
+
+	if len(plans) != 2 {
+		t.Fatalf("decodePlannedChildTasks() len = %d, want 2", len(plans))
+	}
+	if plans[0].Goal != "first child" {
+		t.Fatalf("first child goal = %q, want %q", plans[0].Goal, "first child")
+	}
+	if plans[0].Alias != "first" {
+		t.Fatalf("first child alias = %q, want %q", plans[0].Alias, "first")
+	}
+	if plans[0].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("first child worker_profile = %q, want %q", plans[0].WorkerProfile, DefaultRootWorkerProfile)
+	}
+	if plans[0].Priority != 2 {
+		t.Fatalf("first child priority = %d, want 2", plans[0].Priority)
+	}
+	if plans[0].BlackboardScope != "scope.one" {
+		t.Fatalf("first child blackboard_scope = %q, want %q", plans[0].BlackboardScope, "scope.one")
+	}
+	if plans[1].Kind != "child" {
+		t.Fatalf("second child kind = %q, want %q", plans[1].Kind, "child")
+	}
+	if plans[1].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("second child worker_profile = %q, want %q", plans[1].WorkerProfile, DefaultRootWorkerProfile)
+	}
+	if len(plans[1].DependsOnAliases) != 1 || plans[1].DependsOnAliases[0] != "first" {
+		t.Fatalf("second child depends_on = %#v, want [first]", plans[1].DependsOnAliases)
+	}
+}
+
 func TestResolveEventUntilSeqDefaultsToCurrentAndRejectsInvalidBounds(t *testing.T) {
 	t.Parallel()
 

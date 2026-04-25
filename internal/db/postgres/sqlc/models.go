@@ -466,6 +466,36 @@ type OrchestrationIdempotencyRecord struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrchestrationInputManifest struct {
+	ID                          pgtype.UUID        `json:"id"`
+	RunID                       pgtype.UUID        `json:"run_id"`
+	TaskID                      pgtype.UUID        `json:"task_id"`
+	CapturedTaskInputs          []byte             `json:"captured_task_inputs"`
+	CapturedArtifactVersions    []byte             `json:"captured_artifact_versions"`
+	CapturedBlackboardRevisions []byte             `json:"captured_blackboard_revisions"`
+	ProjectionHash              string             `json:"projection_hash"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+}
+
+type OrchestrationPlanningIntent struct {
+	ID               pgtype.UUID        `json:"id"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	CheckpointID     pgtype.UUID        `json:"checkpoint_id"`
+	Kind             string             `json:"kind"`
+	Status           string             `json:"status"`
+	BasePlannerEpoch int64              `json:"base_planner_epoch"`
+	ClaimEpoch       int64              `json:"claim_epoch"`
+	ClaimToken       string             `json:"claim_token"`
+	ClaimedBy        string             `json:"claimed_by"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
+	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
+	FailureReason    string             `json:"failure_reason"`
+	Payload          []byte             `json:"payload"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OrchestrationProjectionSnapshot struct {
 	ID             pgtype.UUID        `json:"id"`
 	RunID          pgtype.UUID        `json:"run_id"`
@@ -525,6 +555,39 @@ type OrchestrationTask struct {
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrchestrationTaskAttempt struct {
+	ID               pgtype.UUID        `json:"id"`
+	RunID            pgtype.UUID        `json:"run_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	AttemptNo        int32              `json:"attempt_no"`
+	WorkerID         string             `json:"worker_id"`
+	ExecutorID       string             `json:"executor_id"`
+	Status           string             `json:"status"`
+	ClaimEpoch       int64              `json:"claim_epoch"`
+	ClaimToken       string             `json:"claim_token"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
+	LastHeartbeatAt  pgtype.Timestamptz `json:"last_heartbeat_at"`
+	InputManifestID  pgtype.UUID        `json:"input_manifest_id"`
+	ParkCheckpointID pgtype.UUID        `json:"park_checkpoint_id"`
+	FailureClass     string             `json:"failure_class"`
+	TerminalReason   string             `json:"terminal_reason"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationTaskDependency struct {
+	ID                       pgtype.UUID        `json:"id"`
+	RunID                    pgtype.UUID        `json:"run_id"`
+	PredecessorTaskID        pgtype.UUID        `json:"predecessor_task_id"`
+	SuccessorTaskID          pgtype.UUID        `json:"successor_task_id"`
+	PlannerEpoch             int64              `json:"planner_epoch"`
+	SupersededByPlannerEpoch pgtype.Int8        `json:"superseded_by_planner_epoch"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OrchestrationTaskResult struct {
 	ID               pgtype.UUID        `json:"id"`
 	RunID            pgtype.UUID        `json:"run_id"`
@@ -538,6 +601,19 @@ type OrchestrationTaskResult struct {
 	StructuredOutput []byte             `json:"structured_output"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationWorker struct {
+	ID              string             `json:"id"`
+	ExecutorID      string             `json:"executor_id"`
+	DisplayName     string             `json:"display_name"`
+	Capabilities    []byte             `json:"capabilities"`
+	Status          string             `json:"status"`
+	LeaseToken      string             `json:"lease_token"`
+	LastHeartbeatAt pgtype.Timestamptz `json:"last_heartbeat_at"`
+	LeaseExpiresAt  pgtype.Timestamptz `json:"lease_expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Provider struct {

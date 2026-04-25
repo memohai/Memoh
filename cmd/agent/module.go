@@ -168,6 +168,7 @@ func options() fx.Option {
 			startBackgroundTaskCleanup,
 			startAudioTempStoreCleanup,
 			startServer,
+			startOrchestrationRuntime,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
 			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}

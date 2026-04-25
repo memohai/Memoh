@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,8 +14,20 @@ import (
 	"github.com/memohai/memoh/internal/orchestration"
 )
 
+type orchestrationAPI interface {
+	StartRun(context.Context, orchestration.ControlIdentity, orchestration.StartRunRequest) (orchestration.RunHandle, error)
+	GetRunSnapshot(context.Context, orchestration.ControlIdentity, string) (*orchestration.RunSnapshot, error)
+	GetRunSnapshotAtSeq(context.Context, orchestration.ControlIdentity, string, uint64) (*orchestration.RunSnapshot, error)
+	ListRunTasks(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error)
+	CreateHumanCheckpoint(context.Context, orchestration.ControlIdentity, orchestration.CreateHumanCheckpointRequest) (*orchestration.CreateHumanCheckpointResult, error)
+	ListRunCheckpoints(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
+	ListRunArtifacts(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunArtifactsRequest) (*orchestration.ArtifactPage, error)
+	ListRunEvents(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error)
+	ResolveCheckpoint(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error)
+}
+
 type OrchestrationHandler struct {
-	service *orchestration.Service
+	service orchestrationAPI
 	logger  *slog.Logger
 }
 
@@ -46,7 +59,6 @@ func (h *OrchestrationHandler) Register(e *echo.Echo) {
 // @Success 201 {object} orchestration.RunHandle
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs [post].
@@ -72,10 +84,10 @@ func (h *OrchestrationHandler) StartRun(c echo.Context) error {
 // @Tags orchestration
 // @Security BearerAuth
 // @Param run_id path string true "Run ID"
+// @Param as_of_seq query int false "Committed snapshot sequence"
 // @Success 200 {object} orchestration.RunSnapshot
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs/{run_id}/snapshot [get].
@@ -84,7 +96,17 @@ func (h *OrchestrationHandler) GetRunSnapshot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := h.service.GetRunSnapshot(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")))
+	asOfSeq, err := parseUint64Query(c, "as_of_seq")
+	if err != nil {
+		return err
+	}
+	runID := strings.TrimSpace(c.Param("run_id"))
+	var snapshot *orchestration.RunSnapshot
+	if asOfSeq == 0 {
+		snapshot, err = h.service.GetRunSnapshot(c.Request().Context(), caller, runID)
+	} else {
+		snapshot, err = h.service.GetRunSnapshotAtSeq(c.Request().Context(), caller, runID, asOfSeq)
+	}
 	if err != nil {
 		return h.httpError(err)
 	}
@@ -104,7 +126,6 @@ func (h *OrchestrationHandler) GetRunSnapshot(c echo.Context) error {
 // @Success 200 {object} orchestration.TaskPage
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs/{run_id}/tasks [get].
@@ -141,7 +162,6 @@ func (h *OrchestrationHandler) ListRunTasks(c echo.Context) error {
 // @Success 201 {object} orchestration.CreateHumanCheckpointResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -185,7 +205,6 @@ func (h *OrchestrationHandler) CreateHumanCheckpoint(c echo.Context) error {
 // @Success 200 {object} orchestration.HumanCheckpointPage
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs/{run_id}/checkpoints [get].
@@ -225,7 +244,6 @@ func (h *OrchestrationHandler) ListRunCheckpoints(c echo.Context) error {
 // @Success 200 {object} orchestration.ArtifactPage
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs/{run_id}/artifacts [get].
@@ -264,7 +282,6 @@ func (h *OrchestrationHandler) ListRunArtifacts(c echo.Context) error {
 // @Success 200 {object} orchestration.RunEventPage
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs/{run_id}/events [get].
@@ -303,7 +320,6 @@ func (h *OrchestrationHandler) ListRunEvents(c echo.Context) error {
 // @Success 200 {object} orchestration.ResolveCheckpointResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -386,7 +402,7 @@ func (h *OrchestrationHandler) httpError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	default:
 		h.logger.Error("orchestration handler error", slog.String("error", err.Error()))
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal orchestration error")
 	}
 }
 
