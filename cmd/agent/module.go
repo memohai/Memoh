@@ -26,6 +26,7 @@ import (
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/orchestration"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
@@ -76,6 +77,7 @@ func options() fx.Option {
 			provideAudioRegistry,
 			audiopkg.NewService,
 			provideAudioTempStore,
+			orchestration.NewService,
 			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
 			emailpkg.NewService,
@@ -147,6 +149,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewSessionInfoHandler),
 			provideServerHandler(handlers.NewBrowserContextsHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
+			provideServerHandler(handlers.NewOrchestrationHandler),
 			provideServerHandler(provideWebHandler),
 			provideServer,
 		),

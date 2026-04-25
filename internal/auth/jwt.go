@@ -16,12 +16,14 @@ import (
 const (
 	claimSubject           = "sub"
 	claimUserID            = "user_id"
+	claimTenantID          = "tenant_id"
 	claimChannelIdentityID = "channel_identity_id"
 	claimType              = "typ"
 	claimBotID             = "bot_id"
 	claimChatID            = "chat_id"
 	claimRouteID           = "route_id"
 	chatTokenType          = "chat_route"
+	serviceTokenType       = "service"
 )
 
 // JWTMiddleware returns a JWT auth middleware configured for HS256 tokens.
@@ -47,6 +49,9 @@ func UserIDFromContext(c echo.Context) (string, error) {
 	if !ok {
 		return "", echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
 	}
+	if err := requireInteractiveUserToken(claims); err != nil {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "user token required")
+	}
 	if userID := claimString(claims, claimUserID); userID != "" {
 		return userID, nil
 	}
@@ -56,8 +61,58 @@ func UserIDFromContext(c echo.Context) (string, error) {
 	return "", echo.NewHTTPError(http.StatusUnauthorized, "user id missing")
 }
 
+// TenantIDFromContext extracts the tenant id from JWT claims.
+func TenantIDFromContext(c echo.Context) (string, error) {
+	token, ok := c.Get("user").(*jwt.Token)
+	if !ok || token == nil || !token.Valid {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
+	}
+	if err := requireInteractiveUserToken(claims); err != nil {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "user token required")
+	}
+	if tenantID := claimString(claims, claimTenantID); tenantID != "" {
+		return tenantID, nil
+	}
+	return "", echo.NewHTTPError(http.StatusUnauthorized, "tenant id missing")
+}
+
+// TokenTypeFromContext extracts the custom token type from JWT claims.
+// An empty string means the token is an unscoped user token.
+func TokenTypeFromContext(c echo.Context) (string, error) {
+	token, ok := c.Get("user").(*jwt.Token)
+	if !ok || token == nil || !token.Valid {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
+	}
+	return strings.TrimSpace(claimString(claims, claimType)), nil
+}
+
+func requireInteractiveUserToken(claims jwt.MapClaims) error {
+	if strings.TrimSpace(claimString(claims, claimType)) != "" {
+		return errors.New("interactive user token required")
+	}
+	return nil
+}
+
 // GenerateToken creates a signed JWT for the user.
 func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time.Time, error) {
+	return generateToken(userID, secret, expiresIn, "")
+}
+
+// GenerateServiceToken creates a signed JWT for internal service-triggered flows.
+// Service tokens carry a non-empty type so user-only endpoints can reject them.
+func GenerateServiceToken(userID, secret string, expiresIn time.Duration) (string, time.Time, error) {
+	return generateToken(userID, secret, expiresIn, serviceTokenType)
+}
+
+func generateToken(userID, secret string, expiresIn time.Duration, tokenType string) (string, time.Time, error) {
 	if strings.TrimSpace(userID) == "" {
 		return "", time.Time{}, errors.New("user id is required")
 	}
@@ -71,10 +126,14 @@ func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time
 	now := time.Now().UTC()
 	expiresAt := now.Add(expiresIn)
 	claims := jwt.MapClaims{
-		claimSubject: userID,
-		claimUserID:  userID,
-		"iat":        now.Unix(),
-		"exp":        expiresAt.Unix(),
+		claimSubject:  userID,
+		claimUserID:   userID,
+		claimTenantID: userID,
+		"iat":         now.Unix(),
+		"exp":         expiresAt.Unix(),
+	}
+	if strings.TrimSpace(tokenType) != "" {
+		claims[claimType] = strings.TrimSpace(tokenType)
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(secret))
@@ -172,6 +231,9 @@ func RefreshTokenFromContext(c echo.Context, secret string, defaultExpiresIn tim
 	if !ok {
 		return "", time.Time{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
 	}
+	if strings.TrimSpace(claimString(claims, claimType)) != "" {
+		return "", time.Time{}, echo.NewHTTPError(http.StatusUnauthorized, "user token required")
+	}
 
 	// Calculate original duration if possible
 	expiresIn := defaultExpiresIn
@@ -194,6 +256,13 @@ func RefreshTokenFromContext(c echo.Context, secret string, defaultExpiresIn tim
 	}
 	newClaims["iat"] = now.Unix()
 	newClaims["exp"] = expiresAt.Unix()
+	if strings.TrimSpace(claimString(newClaims, claimTenantID)) == "" {
+		if tenantID := strings.TrimSpace(claimString(newClaims, claimUserID)); tenantID != "" {
+			newClaims[claimTenantID] = tenantID
+		} else if tenantID := strings.TrimSpace(claimString(newClaims, claimSubject)); tenantID != "" {
+			newClaims[claimTenantID] = tenantID
+		}
+	}
 
 	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, newClaims)
 	signed, err := newToken.SignedString([]byte(secret))

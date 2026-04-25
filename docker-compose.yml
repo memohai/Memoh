@@ -21,6 +21,26 @@ services:
     networks:
       - memoh-network
 
+  nats:
+    image: nats:2-alpine
+    container_name: memoh-nats
+    user: "0:0"
+    command: ["-js", "-sd", "/opt/memoh/data/nats/jetstream", "-m", "8222"]
+    volumes:
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "4222"
+      - "8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   migrate:
     image: memohai/server:latest
     container_name: memoh-migrate
