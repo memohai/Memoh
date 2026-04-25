@@ -1,17 +1,19 @@
 {
-  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
   "include": [
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.vue",
+    "src/renderer/types/**/*.d.ts",
     "src/preload/*.d.ts"
   ],
   "compilerOptions": {
     "composite": true,
+    "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
       "@renderer/*": ["src/renderer/src/*"],
-      "@/*": ["../web/src/*"],
-      "#/*": ["../../packages/ui/src/*"]
+      "@memohai/web/*": ["src/renderer/types/web-stubs.d.ts"],
+      "@memohai/ui": ["src/renderer/types/ui-stubs.d.ts"]
     }
   }
 }

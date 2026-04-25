@@ -1,6 +1,6 @@
-// Chat-window renderer entry. Owns its bootstrap chain so desktop can layer
-// on Electron-specific plugins / stores / providers without touching
-// @memohai/web. Pairs with `src/renderer/index.html`.
+// Settings-window renderer entry. Loaded by the secondary BrowserWindow
+// created on demand from the chat window. Shares Pinia-persisted state with
+// the chat window via localStorage. Pairs with `src/renderer/settings.html`.
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -15,11 +15,15 @@ import 'animate.css'
 import 'markstream-vue/index.css'
 import 'katex/dist/katex.min.css'
 
-import App from './chat/App.vue'
-import router from './chat/router'
+import App from './settings/App.vue'
+import router from './settings/router'
 
 setupApiClient({
-  onUnauthorized: () => router.replace({ name: 'Login' }),
+  // Settings is a satellite window — it doesn't host the login screen.
+  // On 401 we close ourselves and let the chat window route to login.
+  onUnauthorized: () => {
+    void window.api.window.closeSelf()
+  },
 })
 
 createApp(App)

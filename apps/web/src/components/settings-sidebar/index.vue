@@ -1,7 +1,10 @@
 <template>
   <aside>
     <Sidebar collapsible="icon">
-      <SidebarHeader class="p-0 border-0">
+      <SidebarHeader
+        v-if="!hideHeader"
+        class="p-0 border-0"
+      >
         <button
           class="h-[53px] flex items-center gap-2.5 px-3.5 w-full border-b border-border text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
           @click="router.push(backToChatRoute)"
@@ -65,6 +68,15 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@memohai/ui'
+
+withDefaults(defineProps<{
+  // When true, the back-to-chat button in the sidebar header is hidden.
+  // Used by the desktop shell where settings lives in a dedicated window
+  // and "back to chat" is not a meaningful action.
+  hideHeader?: boolean
+}>(), {
+  hideHeader: false,
+})
 
 const router = useRouter()
 const route = useRoute()

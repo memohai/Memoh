@@ -1,10 +1,17 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
-// Renderer-facing API surface. Intentionally minimal for now — extend here when
-// the desktop shell needs to expose native capabilities (window control, file
-// dialogs, deep links, etc.).
-const api = {}
+// Renderer-facing API surface. Keep this intentionally small — it is the
+// full security boundary between chromium renderer processes and the
+// node-privileged main process.
+const api = {
+  window: {
+    openSettings: (): Promise<void> => ipcRenderer.invoke('window:open-settings'),
+    closeSelf: (): Promise<void> => ipcRenderer.invoke('window:close-self'),
+  },
+}
+
+export type MemohApi = typeof api
 
 if (process.contextIsolated) {
   try {
@@ -14,8 +21,6 @@ if (process.contextIsolated) {
     console.error(error)
   }
 } else {
-  // @ts-expect-error — fall-through for sandbox-less builds
   window.electron = electronAPI
-  // @ts-expect-error — fall-through for sandbox-less builds
   window.api = api
 }
