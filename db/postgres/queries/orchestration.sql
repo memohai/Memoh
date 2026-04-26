@@ -320,6 +320,8 @@ UPDATE orchestration_tasks
 SET status = 'verifying',
     status_version = status_version + 1,
     latest_result_id = sqlc.arg(latest_result_id),
+    waiting_checkpoint_id = NULL,
+    waiting_scope = '',
     terminal_reason = '',
     updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -642,6 +644,21 @@ WHERE id = sqlc.arg(id)
   AND claim_token = sqlc.arg(claim_token)
 RETURNING *;
 
+-- name: RequeueOrchestrationTaskVerification :one
+UPDATE orchestration_task_verifications
+SET status = 'created',
+    worker_id = '',
+    executor_id = '',
+    claim_token = '',
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    started_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'running')
+  AND claim_epoch = sqlc.arg(claim_epoch)
+RETURNING *;
+
 -- name: MarkOrchestrationTaskVerificationLost :one
 UPDATE orchestration_task_verifications
 SET status = 'lost',
@@ -772,6 +789,31 @@ WHERE id = sqlc.arg(id)
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: RetireCreatedOrchestrationTaskAttemptFailed :one
+UPDATE orchestration_task_attempts
+SET status = 'failed',
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    finished_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'created'
+RETURNING *;
+
+-- name: PreemptRunningOrchestrationTaskAttemptFailed :one
+UPDATE orchestration_task_attempts
+SET status = 'failed',
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    claim_token = '',
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'running'
+  AND claim_epoch = sqlc.arg(claim_epoch)
 RETURNING *;
 
 -- name: ReleaseOrchestrationTaskAttemptClaim :one

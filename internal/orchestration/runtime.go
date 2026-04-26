@@ -2804,6 +2804,10 @@ func (s *Service) releaseRunBarrierAfterCheckpointClosure(
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("find open run blocking checkpoint: %w", err)
 	}
+	verifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, fmt.Errorf("list task verifications for run barrier release: %w", err)
+	}
 	siblingTasks, err := qtx.ListCurrentOrchestrationTasksByRun(ctx, runRow.ID)
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("list sibling tasks for run barrier release: %w", err)
@@ -2845,6 +2849,38 @@ func (s *Service) releaseRunBarrierAfterCheckpointClosure(
 					"previous_waiting_checkpoint_id": closedCheckpoint.ID.String(),
 					"waiting_checkpoint_id":          openBarrier.ID.String(),
 					"waiting_reason":                 strings.TrimSpace(reason),
+				},
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, err
+			}
+			continue
+		}
+		if restoredVerifying, verificationRow := findRestorableRunBarrierVerification(verifications, lockedSibling.ID); restoredVerifying {
+			verifyingTask, err := qtx.MarkOrchestrationTaskVerifying(ctx, sqlc.MarkOrchestrationTaskVerifyingParams{
+				ID:             lockedSibling.ID,
+				LatestResultID: verificationRow.ResultID,
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, fmt.Errorf("mark sibling task verifying from run barrier: %w", err)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           verifyingTask.ID,
+				CheckpointID:     closedCheckpoint.ID,
+				AttemptID:        attemptID,
+				AggregateType:    "task",
+				AggregateID:      verifyingTask.ID,
+				AggregateVersion: verifyingTask.StatusVersion,
+				Type:             "run.event.task.verifying",
+				Payload: map[string]any{
+					"task_id":           verifyingTask.ID.String(),
+					"previous_status":   lockedSibling.Status,
+					"new_status":        verifyingTask.Status,
+					"latest_result_id":  verificationRow.ResultID.String(),
+					"verification_id":   verificationRow.ID.String(),
+					"completion_reason": strings.TrimSpace(reason),
+					"waiting_scope":     lockedSibling.WaitingScope,
+					"checkpoint_id":     closedCheckpoint.ID.String(),
 				},
 			})
 			if err != nil {
@@ -2950,6 +2986,15 @@ func decodePlannedChildTasks(structuredOutput map[string]any) []plannedChildTask
 		plans = append(plans, plan)
 	}
 	return plans
+}
+
+func findRestorableRunBarrierVerification(verifications []sqlc.OrchestrationTaskVerification, taskID pgtype.UUID) (bool, sqlc.OrchestrationTaskVerification) {
+	for _, verification := range verifications {
+		if verification.TaskID == taskID && !isTerminalVerificationStatus(verification.Status) {
+			return true, verification
+		}
+	}
+	return false, sqlc.OrchestrationTaskVerification{}
 }
 
 func stringValue(raw any) string {

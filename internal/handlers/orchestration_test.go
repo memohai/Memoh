@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/orchestration"
 )
 
@@ -116,6 +118,34 @@ func newAuthedEcho(method, path string, body string) (*echo.Echo, *httptest.Resp
 	}
 	rec := httptest.NewRecorder()
 	return e, rec, req
+}
+
+func newJWTProtectedEcho(method, path string, body string, secret string) (*echo.Echo, *httptest.ResponseRecorder, *http.Request) {
+	e := echo.New()
+	e.Use(auth.JWTMiddleware(secret, func(echo.Context) bool { return false }))
+	req := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	}
+	rec := httptest.NewRecorder()
+	return e, rec, req
+}
+
+func signJWTForTest(t *testing.T, secret string, claims jwt.MapClaims) string {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, ok := claims["iat"]; !ok {
+		claims["iat"] = now.Unix()
+	}
+	if _, ok := claims["exp"]; !ok {
+		claims["exp"] = now.Add(time.Hour).Unix()
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
 }
 
 func TestOrchestrationControlIdentityRejectsScopedChatToken(t *testing.T) {
@@ -229,6 +259,58 @@ func TestOrchestrationControlIdentityRejectsQueryTokenTransport(t *testing.T) {
 	}
 	if httpErr.Message != "authorization header required" {
 		t.Fatalf("controlIdentity(query token) message = %v, want %q", httpErr.Message, "authorization header required")
+	}
+}
+
+func TestOrchestrationControlIdentityRejectsMissingTenantID(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/orchestration/runs/run-1/snapshot", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("user", &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			"user_id": "user-123",
+		},
+	})
+
+	_, err := controlIdentity(c)
+	if err == nil {
+		t.Fatal("controlIdentity(missing tenant) error = nil, want unauthorized")
+	}
+
+	httpErr := &echo.HTTPError{}
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("controlIdentity(missing tenant) error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusUnauthorized {
+		t.Fatalf("controlIdentity(missing tenant) status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestOrchestrationControlIdentityRejectsMissingUserID(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/orchestration/runs/run-1/snapshot", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("user", &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			"tenant_id": "tenant-123",
+		},
+	})
+
+	_, err := controlIdentity(c)
+	if err == nil {
+		t.Fatal("controlIdentity(missing user) error = nil, want unauthorized")
+	}
+
+	httpErr := &echo.HTTPError{}
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("controlIdentity(missing user) error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusUnauthorized {
+		t.Fatalf("controlIdentity(missing user) status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -411,5 +493,594 @@ func TestOrchestrationGetRunSnapshotPassesAsOfSeq(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("GetRunSnapshotAtSeq was not called")
+	}
+}
+
+func TestOrchestrationStartRunReturnsCreatedHandle(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/runs", `{"goal":"ship runtime loop","idempotency_key":"run-1","input":{"k":"v"}}`)
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.startRun = func(_ context.Context, caller orchestration.ControlIdentity, req orchestration.StartRunRequest) (orchestration.RunHandle, error) {
+		called = true
+		if caller != (orchestration.ControlIdentity{TenantID: "tenant-123", Subject: "user-123"}) {
+			t.Fatalf("caller = %+v", caller)
+		}
+		if req.Goal != "ship runtime loop" {
+			t.Fatalf("goal = %q, want %q", req.Goal, "ship runtime loop")
+		}
+		if req.IdempotencyKey != "run-1" {
+			t.Fatalf("idempotency_key = %q, want %q", req.IdempotencyKey, "run-1")
+		}
+		return orchestration.RunHandle{RunID: "run-1", RootTaskID: "task-root", SnapshotSeq: 7}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /runs status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+	if !called {
+		t.Fatal("StartRun was not called")
+	}
+	var body orchestration.RunHandle
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.RunID != "run-1" || body.RootTaskID != "task-root" || body.SnapshotSeq != 7 {
+		t.Fatalf("response = %+v", body)
+	}
+}
+
+func TestOrchestrationStartRunMapsIdempotencyConflicts(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{name: "conflict", err: orchestration.ErrIdempotencyConflict},
+		{name: "incomplete", err: orchestration.ErrIdempotencyIncomplete},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/runs", `{"goal":"ship runtime loop","idempotency_key":"run-1"}`)
+			svc := newNoopOrchestrationService()
+			svc.startRun = func(context.Context, orchestration.ControlIdentity, orchestration.StartRunRequest) (orchestration.RunHandle, error) {
+				return orchestration.RunHandle{}, tc.err
+			}
+			handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("POST /runs status = %d, want %d", rec.Code, http.StatusConflict)
+			}
+		})
+	}
+}
+
+func TestOrchestrationListRunTasksPassesFilters(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/tasks?status=ready,%20waiting_human,,&after=%20cursor-1%20&limit=abc&as_of_seq=42", "")
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.listRunTasks = func(_ context.Context, _ orchestration.ControlIdentity, runID string, req orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error) {
+		called = true
+		if runID != "run-1" {
+			t.Fatalf("runID = %q, want %q", runID, "run-1")
+		}
+		if got, want := req.Status, []string{"ready", "waiting_human"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("status = %#v, want %#v", got, want)
+		}
+		if req.After != "cursor-1" {
+			t.Fatalf("after = %q, want %q", req.After, "cursor-1")
+		}
+		if req.Limit != 0 {
+			t.Fatalf("limit = %d, want 0 for invalid limit fallback", req.Limit)
+		}
+		if req.AsOfSeq != 42 {
+			t.Fatalf("as_of_seq = %d, want %d", req.AsOfSeq, 42)
+		}
+		return &orchestration.TaskPage{SnapshotSeq: 42}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /tasks status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("ListRunTasks was not called")
+	}
+}
+
+func TestOrchestrationListRunTasksRejectsInvalidAsOfSeq(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/tasks?as_of_seq=nope", "")
+	handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /tasks invalid as_of_seq status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestOrchestrationListRunCheckpointsPassesFilters(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/checkpoints?status=open,%20resolved&after=%20cursor-2%20&limit=15&as_of_seq=24", "")
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.listRunCheckpoints = func(_ context.Context, _ orchestration.ControlIdentity, runID string, req orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error) {
+		called = true
+		if runID != "run-1" {
+			t.Fatalf("runID = %q, want %q", runID, "run-1")
+		}
+		if got, want := req.Status, []string{"open", "resolved"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("status = %#v, want %#v", got, want)
+		}
+		if req.After != "cursor-2" || req.Limit != 15 || req.AsOfSeq != 24 {
+			t.Fatalf("req = %+v", req)
+		}
+		return &orchestration.HumanCheckpointPage{SnapshotSeq: 24}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /checkpoints status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("ListRunCheckpoints was not called")
+	}
+}
+
+func TestOrchestrationListRunArtifactsPassesFilters(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/artifacts?task_id=%20task-1%20&kind=file,%20report&after=%20cursor-3%20&limit=8&as_of_seq=31", "")
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.listRunArtifacts = func(_ context.Context, _ orchestration.ControlIdentity, runID string, req orchestration.ListRunArtifactsRequest) (*orchestration.ArtifactPage, error) {
+		called = true
+		if runID != "run-1" {
+			t.Fatalf("runID = %q, want %q", runID, "run-1")
+		}
+		if req.TaskID != "task-1" {
+			t.Fatalf("task_id = %q, want %q", req.TaskID, "task-1")
+		}
+		if got, want := req.Kind, []string{"file", "report"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("kind = %#v, want %#v", got, want)
+		}
+		if req.After != "cursor-3" || req.Limit != 8 || req.AsOfSeq != 31 {
+			t.Fatalf("req = %+v", req)
+		}
+		return &orchestration.ArtifactPage{SnapshotSeq: 31}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /artifacts status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("ListRunArtifacts was not called")
+	}
+}
+
+func TestOrchestrationListRunEventsPassesFilters(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/events?after_seq=10&until_seq=20&limit=12", "")
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.listRunEvents = func(_ context.Context, _ orchestration.ControlIdentity, runID string, req orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error) {
+		called = true
+		if runID != "run-1" {
+			t.Fatalf("runID = %q, want %q", runID, "run-1")
+		}
+		if req.AfterSeq != 10 || req.UntilSeq != 20 || req.Limit != 12 {
+			t.Fatalf("req = %+v", req)
+		}
+		return &orchestration.RunEventPage{UntilSeq: 20}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /events status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("ListRunEvents was not called")
+	}
+}
+
+func TestOrchestrationListRunCheckpointsMapsInvalidCursor(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/checkpoints?after=bad-cursor", "")
+	svc := newNoopOrchestrationService()
+	svc.listRunCheckpoints = func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error) {
+		return nil, orchestration.ErrInvalidCursor
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /checkpoints invalid cursor status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestOrchestrationListRunArtifactsMapsInvalidCursor(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/artifacts?after=bad-cursor", "")
+	svc := newNoopOrchestrationService()
+	svc.listRunArtifacts = func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunArtifactsRequest) (*orchestration.ArtifactPage, error) {
+		return nil, orchestration.ErrInvalidCursor
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /artifacts invalid cursor status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestOrchestrationListRunEventsRejectsInvalidSeqBounds(t *testing.T) {
+	testCases := []struct {
+		name string
+		path string
+	}{
+		{name: "invalid after_seq", path: "/orchestration/runs/run-1/events?after_seq=nope"},
+		{name: "invalid until_seq", path: "/orchestration/runs/run-1/events?until_seq=nope"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, rec, req := newAuthedEcho(http.MethodGet, tc.path, "")
+			handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("GET /events invalid seq status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestOrchestrationListRunEventsMapsInvalidArgument(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/events?after_seq=20&until_seq=10", "")
+	svc := newNoopOrchestrationService()
+	svc.listRunEvents = func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error) {
+		return nil, orchestration.ErrInvalidArgument
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /events invalid bounds status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestOrchestrationResolveCheckpointPassesResolution(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/checkpoints/checkpoint-1/resolve", `{"mode":"select_option","option_id":"approve","idempotency_key":"resolve-1","metadata":{"approved":true}}`)
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.resolveCheckpoint = func(_ context.Context, _ orchestration.ControlIdentity, checkpointID string, req orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error) {
+		called = true
+		if checkpointID != "checkpoint-1" {
+			t.Fatalf("checkpointID = %q, want %q", checkpointID, "checkpoint-1")
+		}
+		if req.Mode != "select_option" || req.OptionID != "approve" || req.IdempotencyKey != "resolve-1" {
+			t.Fatalf("req = %+v", req)
+		}
+		if approved, ok := req.Metadata["approved"].(bool); !ok || !approved {
+			t.Fatalf("metadata = %#v, want approved=true", req.Metadata)
+		}
+		return &orchestration.ResolveCheckpointResult{CheckpointID: checkpointID, SnapshotSeq: 55}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /resolve status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("ResolveCheckpoint was not called")
+	}
+}
+
+func TestOrchestrationResolveCheckpointMapsErrorContract(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "hidden", err: orchestration.ErrCheckpointNotFound, want: http.StatusNotFound},
+		{name: "not-open", err: orchestration.ErrCheckpointNotOpen, want: http.StatusConflict},
+		{name: "invalid-resolution", err: orchestration.ErrInvalidCheckpointResolution, want: http.StatusBadRequest},
+		{name: "internal", err: errors.New("write failed"), want: http.StatusInternalServerError},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/checkpoints/checkpoint-1/resolve", `{"mode":"select_option","option_id":"approve","idempotency_key":"resolve-1"}`)
+			svc := newNoopOrchestrationService()
+			svc.resolveCheckpoint = func(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error) {
+				return nil, tc.err
+			}
+			handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tc.want {
+				t.Fatalf("POST /resolve status = %d, want %d", rec.Code, tc.want)
+			}
+			if tc.want == http.StatusInternalServerError {
+				var body map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode error body: %v", err)
+				}
+				if body["message"] != "internal orchestration error" {
+					t.Fatalf("internal body message = %v", body["message"])
+				}
+			}
+		})
+	}
+}
+
+func TestOrchestrationJWTMiddlewareRejectsQueryTokenOnSnapshot(t *testing.T) {
+	const secret = "test-secret"
+	token := signJWTForTest(t, secret, jwt.MapClaims{
+		"user_id":   "user-123",
+		"tenant_id": "tenant-123",
+	})
+	e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot?token="+token, "", secret)
+	handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET snapshot query token status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestOrchestrationJWTMiddlewareRejectsMissingOrMalformedBearerOnSnapshot(t *testing.T) {
+	testCases := []struct {
+		name       string
+		header     string
+		wantStatus int
+	}{
+		{name: "missing authorization", header: "", wantStatus: http.StatusUnauthorized},
+		{name: "malformed bearer", header: "Bearer", wantStatus: http.StatusUnauthorized},
+		{name: "non-jwt bearer", header: "Bearer not-a-jwt", wantStatus: http.StatusUnauthorized},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			const secret = "test-secret"
+			e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+			if tc.header != "" {
+				req.Header.Set(echo.HeaderAuthorization, tc.header)
+			}
+			called := false
+			svc := newNoopOrchestrationService()
+			svc.getRunSnapshot = func(context.Context, orchestration.ControlIdentity, string) (*orchestration.RunSnapshot, error) {
+				called = true
+				return &orchestration.RunSnapshot{SnapshotSeq: 1}, nil
+			}
+			handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("GET snapshot status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if called {
+				t.Fatal("service should not be called for rejected bearer input")
+			}
+		})
+	}
+}
+
+func TestOrchestrationJWTMiddlewareRejectsScopedTokensOnSnapshot(t *testing.T) {
+	testCases := []struct {
+		name   string
+		claims jwt.MapClaims
+	}{
+		{
+			name: "chat-route",
+			claims: jwt.MapClaims{
+				"typ":       "chat_route",
+				"user_id":   "user-123",
+				"tenant_id": "tenant-123",
+			},
+		},
+		{
+			name: "service",
+			claims: jwt.MapClaims{
+				"typ":       "service",
+				"user_id":   "user-123",
+				"tenant_id": "tenant-123",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			const secret = "test-secret"
+			token := signJWTForTest(t, secret, tc.claims)
+			e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+			handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("GET snapshot status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+func TestOrchestrationJWTMiddlewareRejectsMissingTenantClaimOnSnapshot(t *testing.T) {
+	const secret = "test-secret"
+	token := signJWTForTest(t, secret, jwt.MapClaims{
+		"user_id": "user-123",
+	})
+	e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET snapshot missing tenant status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestOrchestrationJWTMiddlewareRejectsExpiredOrWronglySignedTokenOnSnapshot(t *testing.T) {
+	testCases := []struct {
+		name   string
+		token  string
+		status int
+	}{
+		{
+			name: "expired",
+			token: signJWTForTest(t, "test-secret", jwt.MapClaims{
+				"user_id":   "user-123",
+				"tenant_id": "tenant-123",
+				"exp":       time.Now().UTC().Add(-time.Minute).Unix(),
+			}),
+			status: http.StatusUnauthorized,
+		},
+		{
+			name: "wrong signature",
+			token: signJWTForTest(t, "other-secret", jwt.MapClaims{
+				"user_id":   "user-123",
+				"tenant_id": "tenant-123",
+			}),
+			status: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			const secret = "test-secret"
+			e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+tc.token)
+			called := false
+			svc := newNoopOrchestrationService()
+			svc.getRunSnapshot = func(context.Context, orchestration.ControlIdentity, string) (*orchestration.RunSnapshot, error) {
+				called = true
+				return &orchestration.RunSnapshot{SnapshotSeq: 1}, nil
+			}
+			handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tc.status {
+				t.Fatalf("GET snapshot status = %d, want %d", rec.Code, tc.status)
+			}
+			if called {
+				t.Fatal("service should not be called for rejected token")
+			}
+		})
+	}
+}
+
+func TestOrchestrationJWTMiddlewarePassesTenantAndSubjectToService(t *testing.T) {
+	const secret = "test-secret"
+	token := signJWTForTest(t, secret, jwt.MapClaims{
+		"user_id":   "user-123",
+		"tenant_id": "tenant-123",
+	})
+	e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.getRunSnapshot = func(_ context.Context, caller orchestration.ControlIdentity, runID string) (*orchestration.RunSnapshot, error) {
+		called = true
+		if caller != (orchestration.ControlIdentity{TenantID: "tenant-123", Subject: "user-123"}) {
+			t.Fatalf("caller = %+v", caller)
+		}
+		if runID != "run-1" {
+			t.Fatalf("runID = %q, want %q", runID, "run-1")
+		}
+		return &orchestration.RunSnapshot{SnapshotSeq: 9}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET snapshot status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("GetRunSnapshot was not called")
+	}
+}
+
+func TestOrchestrationJWTMiddlewareAllowsHiddenRunAsNotFound(t *testing.T) {
+	const secret = "test-secret"
+	testCases := []struct {
+		name   string
+		claims jwt.MapClaims
+	}{
+		{
+			name: "cross-tenant same-subject",
+			claims: jwt.MapClaims{
+				"user_id":   "user-123",
+				"tenant_id": "tenant-other",
+			},
+		},
+		{
+			name: "same-tenant non-owner",
+			claims: jwt.MapClaims{
+				"user_id":   "user-other",
+				"tenant_id": "tenant-123",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			token := signJWTForTest(t, secret, tc.claims)
+			e, rec, req := newJWTProtectedEcho(http.MethodGet, "/orchestration/runs/run-1/snapshot", "", secret)
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+			svc := newNoopOrchestrationService()
+			svc.getRunSnapshot = func(_ context.Context, caller orchestration.ControlIdentity, _ string) (*orchestration.RunSnapshot, error) {
+				if caller.TenantID == "tenant-123" && caller.Subject == "user-123" {
+					return &orchestration.RunSnapshot{SnapshotSeq: 1}, nil
+				}
+				return nil, orchestration.ErrRunNotFound
+			}
+			handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("GET snapshot status = %d, want %d", rec.Code, http.StatusNotFound)
+			}
+		})
 	}
 }

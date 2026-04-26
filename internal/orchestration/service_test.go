@@ -400,8 +400,14 @@ func TestTaskPauseableByRunBarrier(t *testing.T) {
 	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusReady}) {
 		t.Fatal("taskPauseableByRunBarrier(ready) = false, want true")
 	}
-	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusRunning}) {
-		t.Fatal("taskPauseableByRunBarrier(running) = true, want false")
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusDispatching}) {
+		t.Fatal("taskPauseableByRunBarrier(dispatching) = false, want true")
+	}
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusRunning}) {
+		t.Fatal("taskPauseableByRunBarrier(running) = false, want true")
+	}
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusVerifying}) {
+		t.Fatal("taskPauseableByRunBarrier(verifying) = false, want true")
 	}
 	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusWaitingHuman}) {
 		t.Fatal("taskPauseableByRunBarrier(waiting_human) = true, want false")
@@ -410,7 +416,7 @@ func TestTaskPauseableByRunBarrier(t *testing.T) {
 		t.Fatal("taskPauseableByRunBarrier(completed) = true, want false")
 	}
 	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{
-		Status:              TaskStatusRunning,
+		Status:              TaskStatusVerifying,
 		WaitingCheckpointID: mustUUID(t, "550e8400-e29b-41d4-a716-446655440012"),
 	}) {
 		t.Fatal("taskPauseableByRunBarrier(waiting_checkpoint_id) = true, want false")
@@ -535,6 +541,69 @@ func TestFilterArtifactsByTaskAndKind(t *testing.T) {
 	}
 	if len(page) != 1 || page[0].ID != "a3" || after != "" {
 		t.Fatalf("paginateArtifacts(page2) = %+v, after=%q", page, after)
+	}
+}
+
+func TestPaginateCheckpointsRejectsFilterMismatchAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []HumanCheckpoint{
+		{ID: "cp-1", CreatedAt: base},
+		{ID: "cp-2", CreatedAt: base.Add(time.Second)},
+		{ID: "cp-3", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	_, after, err := paginateCheckpoints(items, "", 2, 41, filterHash([]string{"open"}))
+	if err != nil {
+		t.Fatalf("paginateCheckpoints(page1) error = %v", err)
+	}
+
+	_, _, err = paginateCheckpoints(items, after, 2, 41, filterHash([]string{"resolved"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateCheckpoints(filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestPaginateArtifactsRejectsFilterMismatchAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []Artifact{
+		{ID: "a1", TaskID: "task-1", Kind: "image", CreatedAt: base},
+		{ID: "a2", TaskID: "task-1", Kind: "text", CreatedAt: base.Add(time.Second)},
+		{ID: "a3", TaskID: "task-1", Kind: "report", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	_, after, err := paginateArtifacts(items, "", 2, 12, filterHash([]string{"task-1"}, []string{"image", "text"}))
+	if err != nil {
+		t.Fatalf("paginateArtifacts(page1) error = %v", err)
+	}
+
+	_, _, err = paginateArtifacts(items, after, 2, 12, filterHash([]string{"task-2"}, []string{"image", "text"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateArtifacts(task filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+
+	_, _, err = paginateArtifacts(items, after, 2, 12, filterHash([]string{"task-1"}, []string{"report"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateArtifacts(kind filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestFilterHashDeduplicatesEquivalentFilters(t *testing.T) {
+	t.Parallel()
+
+	taskStatusSingle := filterHash([]string{"ready"})
+	taskStatusDup := filterHash([]string{" ready ", "ready", "ready"})
+	if taskStatusSingle != taskStatusDup {
+		t.Fatalf("filterHash duplicate status mismatch: %q != %q", taskStatusSingle, taskStatusDup)
+	}
+
+	artifactSingle := filterHash([]string{"task-1"}, []string{"report"})
+	artifactDup := filterHash([]string{" task-1 ", "task-1"}, []string{"report", "report"})
+	if artifactSingle != artifactDup {
+		t.Fatalf("filterHash duplicate artifact filter mismatch: %q != %q", artifactSingle, artifactDup)
 	}
 }
 
