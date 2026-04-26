@@ -60,6 +60,18 @@ func cleanupOrchestrationIntegrationIdempotency(t *testing.T, ctx context.Contex
 	}
 }
 
+func setIntegrationTaskVerificationPolicy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, taskID string, policy map[string]any) {
+	t.Helper()
+
+	pgTaskID, err := db.ParseUUID(taskID)
+	if err != nil {
+		t.Fatalf("parse task uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_tasks SET verification_policy = $2::jsonb, updated_at = now() WHERE id = $1", pgTaskID, marshalJSON(policy)); err != nil {
+		t.Fatalf("update task verification policy: %v", err)
+	}
+}
+
 func processRunPlanningIntent(t *testing.T, ctx context.Context, svc *Service) {
 	t.Helper()
 
@@ -715,6 +727,950 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 	}
 	if readyChildren != 2 {
 		t.Fatalf("ready child task count = %d, want 2", readyChildren)
+	}
+}
+
+func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "verify task output before completing run",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root task produced structured output",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(verifying) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 {
+		t.Fatalf("ListRunTasks(verifying) len = %d, want 1", len(taskPage.Items))
+	}
+	if taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("root task status = %q, want %q", taskPage.Items[0].Status, TaskStatusVerifying)
+	}
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "verified",
+	})
+	if err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	if completedVerification.Status != TaskVerificationStatusCompleted {
+		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusCompleted)
+	}
+	if completedVerification.Verdict != VerificationVerdictAccepted {
+		t.Fatalf("verification verdict = %q, want %q", completedVerification.Verdict, VerificationVerdictAccepted)
+	}
+	if completedVerification.FinishedAt.IsZero() {
+		t.Fatal("verification finished_at = zero, want non-zero")
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(completed) error = %v", err)
+	}
+	if taskPage.Items[0].Status != TaskStatusCompleted {
+		t.Fatalf("root task final status = %q, want %q", taskPage.Items[0].Status, TaskStatusCompleted)
+	}
+}
+
+func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "fail run when verification rejects output",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root task produced invalid output",
+		StructuredOutput: map[string]any{},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusFailed,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "structured_output is required",
+		FailureClass:   "verification_rejected",
+		TerminalReason: "structured_output is required",
+	})
+	if err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	if completedVerification.Status != TaskVerificationStatusFailed {
+		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusFailed)
+	}
+	if completedVerification.Verdict != VerificationVerdictRejected {
+		t.Fatalf("verification verdict = %q, want %q", completedVerification.Verdict, VerificationVerdictRejected)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusFailed {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusFailed)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if taskPage.Items[0].Status != TaskStatusFailed {
+		t.Fatalf("root task status = %q, want %q", taskPage.Items[0].Status, TaskStatusFailed)
+	}
+}
+
+func TestIntegrationVerificationRejectRequestReplanEnqueuesReplan(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "replan after verification rejection",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"required_artifact_kinds": []any{"report"},
+		"on_reject":               VerificationRejectActionReplan,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "root task needs replan",
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"goal":           "replacement child",
+					"worker_profile": DefaultRootWorkerProfile,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "artifact kind report is required",
+		FailureClass:   "verification_requested_replan",
+		TerminalReason: "artifact kind report is required",
+		RequestReplan:  true,
+	})
+	if err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	if completedVerification.Status != TaskVerificationStatusCompleted {
+		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusCompleted)
+	}
+	if completedVerification.Verdict != VerificationVerdictRejected {
+		t.Fatalf("verification verdict = %q, want %q", completedVerification.Verdict, VerificationVerdictRejected)
+	}
+
+	intermediateSnapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(intermediate) error = %v", err)
+	}
+	if intermediateSnapshot.Run.PlanningStatus != PlanningStatusActive {
+		t.Fatalf("intermediate planning_status = %q, want %q", intermediateSnapshot.Run.PlanningStatus, PlanningStatusActive)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	rootTaskUUID, err := db.ParseUUID(handle.RootTaskID)
+	if err != nil {
+		t.Fatalf("parse root task uuid: %v", err)
+	}
+	rootTaskRow, err := svc.queries.GetOrchestrationTaskByID(ctx, rootTaskUUID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(root) error = %v", err)
+	}
+	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
+		t.Fatal("root task superseded_by_planner_epoch = null, want non-null")
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	replacementReady := false
+	replacementTaskID := ""
+	for _, task := range taskPage.Items {
+		if task.ID == handle.RootTaskID {
+			continue
+		}
+		if task.Goal == "replacement child" && task.Status == TaskStatusReady {
+			replacementReady = true
+			replacementTaskID = task.ID
+		}
+	}
+	if !replacementReady {
+		t.Fatal("replacement child task not found in ready state after verifier-triggered replan")
+	}
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(final) error = %v", err)
+	}
+	if snapshot.Run.PlanningStatus != PlanningStatusIdle {
+		t.Fatalf("final planning_status = %q, want %q", snapshot.Run.PlanningStatus, PlanningStatusIdle)
+	}
+
+	verificationRunID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run uuid: %v", err)
+	}
+	verificationRows, err := svc.queries.ListCurrentOrchestrationTaskVerificationsByRun(ctx, verificationRunID)
+	if err != nil {
+		t.Fatalf("ListCurrentOrchestrationTaskVerificationsByRun() error = %v", err)
+	}
+	if len(verificationRows) != 1 {
+		t.Fatalf("verification row count = %d, want 1", len(verificationRows))
+	}
+	if verificationRows[0].Status != TaskVerificationStatusCompleted {
+		t.Fatalf("verification row status = %q, want %q", verificationRows[0].Status, TaskVerificationStatusCompleted)
+	}
+
+	replacementAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt(replacement) error = %v", err)
+	}
+	if replacementAttempt.TaskID != replacementTaskID {
+		t.Fatalf("replacement attempt task_id = %q, want %q", replacementAttempt.TaskID, replacementTaskID)
+	}
+	runningReplacementAttempt, err := svc.StartAttempt(ctx, replacementAttempt.ID, replacementAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(replacement) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningReplacementAttempt.ID,
+		ClaimToken:       runningReplacementAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "replacement child done",
+		StructuredOutput: map[string]any{"summary": "replacement done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(replacement) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err = svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(after replacement) error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status after replacement = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+}
+
+func TestIntegrationProcessNextVerificationExecutesCreatedVerification(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "server verifier loop should process created verification",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root task produced structured output",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(before verification) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 {
+		t.Fatalf("ListRunTasks(before verification) len = %d, want 1", len(taskPage.Items))
+	}
+	if taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("root task status before verification = %q, want %q", taskPage.Items[0].Status, TaskStatusVerifying)
+	}
+
+	runUUID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run uuid: %v", err)
+	}
+	verificationRows, err := svc.queries.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runUUID)
+	if err != nil {
+		t.Fatalf("ListCurrentOrchestrationTaskVerificationsByRun(before) error = %v", err)
+	}
+	if len(verificationRows) != 1 {
+		t.Fatalf("verification row count before processing = %d, want 1", len(verificationRows))
+	}
+	if verificationRows[0].Status != TaskVerificationStatusCreated {
+		t.Fatalf("verification row status before processing = %q, want %q", verificationRows[0].Status, TaskVerificationStatusCreated)
+	}
+	if int(verificationRows[0].AttemptNo) != runningAttempt.AttemptNo {
+		t.Fatalf("verification row attempt_no before processing = %d, want %d", verificationRows[0].AttemptNo, runningAttempt.AttemptNo)
+	}
+
+	processed, err := svc.ProcessNextVerification(ctx, "server-verifier-"+uuid.NewString(), "lease-"+uuid.NewString(), []string{DefaultVerifierProfile}, 30)
+	if err != nil {
+		t.Fatalf("ProcessNextVerification() error = %v", err)
+	}
+	if !processed {
+		t.Fatal("ProcessNextVerification() = false, want true")
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+
+	verificationRows, err = svc.queries.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runUUID)
+	if err != nil {
+		t.Fatalf("ListCurrentOrchestrationTaskVerificationsByRun(after) error = %v", err)
+	}
+	if len(verificationRows) != 1 {
+		t.Fatalf("verification row count after processing = %d, want 1", len(verificationRows))
+	}
+	if verificationRows[0].Status != TaskVerificationStatusCompleted {
+		t.Fatalf("verification row status after processing = %q, want %q", verificationRows[0].Status, TaskVerificationStatusCompleted)
+	}
+	if verificationRows[0].Verdict != VerificationVerdictAccepted {
+		t.Fatalf("verification row verdict after processing = %q, want %q", verificationRows[0].Verdict, VerificationVerdictAccepted)
+	}
+}
+
+func TestIntegrationVerificationAcceptedRequestReplanEnqueuesReplan(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "verified request_replan should still enqueue replacement plan",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     runningAttempt.ID,
+		ClaimToken:    runningAttempt.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "root task completed with replacement plan",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"summary": "done",
+			"child_tasks": []any{
+				map[string]any{
+					"goal":           "replacement child",
+					"worker_profile": DefaultRootWorkerProfile,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "verified",
+	}); err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(after verification) error = %v", err)
+	}
+	if snapshot.Run.PlanningStatus != PlanningStatusActive {
+		t.Fatalf("planning_status after accepted request_replan = %q, want %q", snapshot.Run.PlanningStatus, PlanningStatusActive)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	var replacementReady bool
+	for _, task := range taskPage.Items {
+		if task.ID == handle.RootTaskID {
+			if task.SupersededByPlannerEpoch == 0 {
+				t.Fatal("root task superseded_by_planner_epoch = 0, want non-zero")
+			}
+			continue
+		}
+		if task.Status == TaskStatusReady {
+			replacementReady = true
+		}
+	}
+	if !replacementReady {
+		t.Fatal("replacement child task not found in ready state after accepted request_replan")
+	}
+}
+
+func TestIntegrationCompleteVerificationRejectsUnauthorizedRequestReplan(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "verification policy should fence request_replan",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"required_artifact_kinds": []any{"report"},
+		"on_reject":               VerificationRejectActionFailTask,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "root task needs report artifact",
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"goal":           "replacement child",
+					"worker_profile": DefaultRootWorkerProfile,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "artifact kind report is required",
+		FailureClass:   "verification_requested_replan",
+		TerminalReason: "artifact kind report is required",
+		RequestReplan:  true,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("CompleteVerification(unauthorized request_replan) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestIntegrationCompleteVerificationRejectsAcceptedFailedCombination(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject contradictory verification completion",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root task produced structured output",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusFailed,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "contradictory",
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("CompleteVerification(contradictory) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestIntegrationVerificationLeaseExpiryRecoveryFailsRunOnce(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "recover expired verification lease exactly once",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root task produced structured output",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	pgVerificationID, err := db.ParseUUID(runningVerification.ID)
+	if err != nil {
+		t.Fatalf("parse verification uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_verifications SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", pgVerificationID); err != nil {
+		t.Fatalf("expire verification lease: %v", err)
+	}
+
+	if _, err := svc.HeartbeatVerification(ctx, VerificationHeartbeat{
+		VerificationID:  runningVerification.ID,
+		ClaimToken:      runningVerification.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("HeartbeatVerification(expired lease) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "verified",
+	}); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("CompleteVerification(expired lease) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+
+	recovered, err := svc.RecoverExpiredVerifications(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredVerifications(first) error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredVerifications(first) = %d, want 1", recovered)
+	}
+	recovered, err = svc.RecoverExpiredVerifications(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredVerifications(second) error = %v", err)
+	}
+	if recovered != 0 {
+		t.Fatalf("RecoverExpiredVerifications(second) = %d, want 0", recovered)
+	}
+
+	verificationRow, err := svc.queries.GetOrchestrationTaskVerificationByID(ctx, pgVerificationID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskVerificationByID() error = %v", err)
+	}
+	if verificationRow.Status != TaskVerificationStatusLost {
+		t.Fatalf("verification row status = %q, want %q", verificationRow.Status, TaskVerificationStatusLost)
+	}
+	if verificationRow.TerminalReason != "verification lease expired" {
+		t.Fatalf("verification row terminal_reason = %q, want %q", verificationRow.TerminalReason, "verification lease expired")
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusFailed {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusFailed)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if taskPage.Items[0].Status != TaskStatusFailed {
+		t.Fatalf("root task status = %q, want %q", taskPage.Items[0].Status, TaskStatusFailed)
 	}
 }
 

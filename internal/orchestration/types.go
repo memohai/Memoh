@@ -30,11 +30,26 @@ const (
 	TaskAttemptStatusFailed            = "failed"
 	TaskAttemptStatusLost              = "lost"
 	TaskAttemptDefaultLeaseTTL         = 30 * time.Second
+	TaskVerificationStatusCreated      = "created"
+	TaskVerificationStatusClaimed      = "claimed"
+	TaskVerificationStatusRunning      = "running"
+	TaskVerificationStatusCompleted    = "completed"
+	TaskVerificationStatusFailed       = "failed"
+	TaskVerificationStatusLost         = "lost"
+	TaskVerificationDefaultLeaseTTL    = 30 * time.Second
+	VerificationVerdictAccepted        = "accepted"
+	VerificationVerdictRejected        = "rejected"
+	VerificationModeBuiltinBasic       = "builtin_basic"
+	VerificationRejectActionFailTask   = "fail_task"
+	VerificationRejectActionReplan     = "request_replan"
 	WorkerStatusActive                 = "active"
 	WorkerStatusUnavailable            = "unavailable"
 	DefaultWorkerExecutorID            = "builtin.workerd"
 	DefaultWorkerDisplayName           = "Builtin Workerd"
 	DefaultRootWorkerProfile           = "builtin.echo"
+	DefaultVerifierExecutorID          = "builtin.verifyd"
+	DefaultVerifierDisplayName         = "Builtin Verifyd"
+	DefaultVerifierProfile             = "builtin.basic"
 
 	TaskStatusCreated      = "created"
 	TaskStatusReady        = "ready"
@@ -81,6 +96,7 @@ const (
 	methodResolveCheckpoint     = "ResolveCheckpoint"
 	methodCompleteAttempt       = "CompleteAttempt"
 	methodFailAttempt           = "FailAttempt"
+	methodCompleteVerification  = "CompleteVerification"
 )
 
 type ControlIdentity struct {
@@ -324,6 +340,55 @@ type WorkerLease struct {
 	LeaseExpiresAt  time.Time      `json:"lease_expires_at"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+type TaskVerification struct {
+	ID              string    `json:"id"`
+	RunID           string    `json:"run_id"`
+	TaskID          string    `json:"task_id"`
+	ResultID        string    `json:"result_id"`
+	AttemptNo       int       `json:"attempt_no"`
+	WorkerID        string    `json:"worker_id,omitempty"`
+	ExecutorID      string    `json:"executor_id,omitempty"`
+	VerifierProfile string    `json:"verifier_profile,omitempty"`
+	Status          string    `json:"status"`
+	ClaimEpoch      uint64    `json:"claim_epoch"`
+	ClaimToken      string    `json:"claim_token,omitempty"`
+	LeaseExpiresAt  time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt time.Time `json:"last_heartbeat_at,omitempty"`
+	Verdict         string    `json:"verdict,omitempty"`
+	Summary         string    `json:"summary,omitempty"`
+	FailureClass    string    `json:"failure_class,omitempty"`
+	TerminalReason  string    `json:"terminal_reason,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	FinishedAt      time.Time `json:"finished_at,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type VerificationClaim struct {
+	WorkerID         string   `json:"worker_id"`
+	ExecutorID       string   `json:"executor_id"`
+	VerifierProfiles []string `json:"verifier_profiles"`
+	LeaseToken       string   `json:"lease_token,omitempty"`
+	LeaseTTLSeconds  int      `json:"lease_ttl_seconds"`
+}
+
+type VerificationHeartbeat struct {
+	VerificationID  string `json:"verification_id"`
+	ClaimToken      string `json:"claim_token"`
+	LeaseTTLSeconds int    `json:"lease_ttl_seconds"`
+}
+
+type VerificationCompletion struct {
+	VerificationID string `json:"verification_id"`
+	ClaimToken     string `json:"claim_token"`
+	Status         string `json:"status"`
+	Verdict        string `json:"verdict"`
+	Summary        string `json:"summary"`
+	FailureClass   string `json:"failure_class"`
+	TerminalReason string `json:"terminal_reason"`
+	RequestReplan  bool   `json:"request_replan"`
 }
 
 type CheckpointOption struct {

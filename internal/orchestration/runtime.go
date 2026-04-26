@@ -504,6 +504,72 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 	switch completionStatus {
 	case TaskAttemptStatusCompleted:
 		if taskRow.Status == TaskStatusRunning {
+			verificationPolicy := decodeJSONObject(taskRow.VerificationPolicy)
+			if requiresTaskVerification(verificationPolicy) {
+				verifyingTask, err := qtx.MarkOrchestrationTaskVerifying(ctx, sqlc.MarkOrchestrationTaskVerifyingParams{
+					ID:             taskRow.ID,
+					LatestResultID: resultUUID,
+				})
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task verifying from attempt_finalize: %w", err)
+				}
+				lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+					TaskID:           verifyingTask.ID,
+					AttemptID:        attemptRow.ID,
+					AggregateType:    "task",
+					AggregateID:      verifyingTask.ID,
+					AggregateVersion: verifyingTask.StatusVersion,
+					Type:             "run.event.task.verifying",
+					Payload: map[string]any{
+						"task_id":             verifyingTask.ID.String(),
+						"attempt_id":          attemptRow.ID.String(),
+						"previous_status":     taskRow.Status,
+						"new_status":          verifyingTask.Status,
+						"latest_result_id":    resultID,
+						"verification_policy": verificationPolicy,
+					},
+				})
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				_, verificationUUID, err := newPGUUID()
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				verificationRow, err := qtx.CreateOrchestrationTaskVerification(ctx, sqlc.CreateOrchestrationTaskVerificationParams{
+					ID:              verificationUUID,
+					RunID:           runRow.ID,
+					TaskID:          taskRow.ID,
+					ResultID:        resultUUID,
+					AttemptNo:       attemptRow.AttemptNo,
+					VerifierProfile: verifierProfileForTaskPolicy(verificationPolicy),
+					Status:          TaskVerificationStatusCreated,
+				})
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, fmt.Errorf("create task verification from attempt_finalize: %w", err)
+				}
+				lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+					TaskID:           verificationRow.TaskID,
+					AttemptID:        attemptRow.ID,
+					AggregateType:    "verification",
+					AggregateID:      verificationRow.ID,
+					AggregateVersion: 1,
+					Type:             "run.event.verification.created",
+					Payload: map[string]any{
+						"verification_id":  verificationRow.ID.String(),
+						"task_id":          verificationRow.TaskID.String(),
+						"result_id":        verificationRow.ResultID.String(),
+						"attempt_id":       attemptRow.ID.String(),
+						"status":           verificationRow.Status,
+						"verifier_profile": verificationRow.VerifierProfile,
+					},
+				})
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				break
+			}
+
 			completedTask, err := qtx.MarkOrchestrationTaskCompleted(ctx, sqlc.MarkOrchestrationTaskCompletedParams{
 				ID:             taskRow.ID,
 				LatestResultID: resultUUID,
@@ -766,7 +832,7 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 		if _, ok := subtreeTaskIDs[task.ID.String()]; !ok {
 			continue
 		}
-		if task.SupersededByPlannerEpoch.Valid || isTerminalTaskStatus(task.Status) {
+		if task.SupersededByPlannerEpoch.Valid {
 			continue
 		}
 		supersededTask, err := qtx.MarkOrchestrationTaskSuperseded(ctx, sqlc.MarkOrchestrationTaskSupersededParams{
@@ -2203,15 +2269,19 @@ func normalizeWorkerProfiles(raw []string) []string {
 }
 
 func workerCapabilities(workerProfiles []string) map[string]any {
-	if len(workerProfiles) == 0 {
+	return profileCapabilities("worker_profiles", workerProfiles)
+}
+
+func profileCapabilities(capabilityKey string, profiles []string) map[string]any {
+	if len(profiles) == 0 {
 		return map[string]any{}
 	}
-	items := make([]any, 0, len(workerProfiles))
-	for _, profile := range workerProfiles {
+	items := make([]any, 0, len(profiles))
+	for _, profile := range profiles {
 		items = append(items, profile)
 	}
 	return map[string]any{
-		"worker_profiles": items,
+		capabilityKey: items,
 	}
 }
 
@@ -2451,15 +2521,6 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 		}
 	}
 	return nil
-}
-
-func isTerminalTaskStatus(status string) bool {
-	switch status {
-	case TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
-		return true
-	default:
-		return false
-	}
 }
 
 func isActiveExecutionTaskStatus(status string) bool {

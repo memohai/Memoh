@@ -291,6 +291,7 @@ RETURNING *;
 -- name: MarkOrchestrationTaskSuperseded :one
 UPDATE orchestration_tasks
 SET superseded_by_planner_epoch = sqlc.arg(superseded_by_planner_epoch),
+    status_version = status_version + 1,
     waiting_checkpoint_id = NULL,
     waiting_scope = '',
     updated_at = now()
@@ -310,6 +311,16 @@ RETURNING *;
 UPDATE orchestration_tasks
 SET status = 'running',
     status_version = status_version + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkOrchestrationTaskVerifying :one
+UPDATE orchestration_tasks
+SET status = 'verifying',
+    status_version = status_version + 1,
+    latest_result_id = sqlc.arg(latest_result_id),
+    terminal_reason = '',
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
@@ -493,6 +504,167 @@ SELECT *
 FROM orchestration_task_attempts
 WHERE run_id = sqlc.arg(run_id)
 ORDER BY created_at ASC, id ASC;
+
+-- name: CreateOrchestrationTaskVerification :one
+INSERT INTO orchestration_task_verifications (
+  id,
+  run_id,
+  task_id,
+  result_id,
+  attempt_no,
+  verifier_profile,
+  status
+) VALUES (
+  sqlc.arg(id),
+  sqlc.arg(run_id),
+  sqlc.arg(task_id),
+  sqlc.arg(result_id),
+  sqlc.arg(attempt_no),
+  sqlc.arg(verifier_profile),
+  sqlc.arg(status)
+) RETURNING *;
+
+-- name: GetOrchestrationTaskVerificationByID :one
+SELECT *
+FROM orchestration_task_verifications
+WHERE id = sqlc.arg(id);
+
+-- name: GetOrchestrationTaskVerificationByIDForUpdate :one
+SELECT *
+FROM orchestration_task_verifications
+WHERE id = sqlc.arg(id)
+FOR UPDATE;
+
+-- name: ListCurrentOrchestrationTaskVerificationsByRun :many
+SELECT *
+FROM orchestration_task_verifications
+WHERE run_id = sqlc.arg(run_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ClaimNextCreatedOrchestrationTaskVerification :one
+WITH next_verification AS (
+  SELECT verifications.id
+  FROM orchestration_task_verifications AS verifications
+  JOIN orchestration_tasks AS tasks
+    ON tasks.id = verifications.task_id
+  JOIN orchestration_runs AS runs
+    ON runs.id = verifications.run_id
+  WHERE verifications.status = 'created'
+    AND tasks.status = 'verifying'
+    AND tasks.superseded_by_planner_epoch IS NULL
+    AND runs.lifecycle_status = 'running'
+    AND verifications.verifier_profile = ANY(sqlc.arg(verifier_profiles)::text[])
+  ORDER BY verifications.created_at ASC, verifications.id ASC
+  LIMIT 1
+  FOR UPDATE OF verifications, tasks, runs SKIP LOCKED
+)
+UPDATE orchestration_task_verifications
+SET status = 'claimed',
+    worker_id = sqlc.arg(worker_id),
+    executor_id = sqlc.arg(executor_id),
+    claim_epoch = claim_epoch + 1,
+    claim_token = sqlc.arg(claim_token),
+    lease_expires_at = sqlc.arg(lease_expires_at),
+    last_heartbeat_at = now(),
+    updated_at = now()
+WHERE id = (SELECT id FROM next_verification)
+RETURNING *;
+
+-- name: HeartbeatOrchestrationTaskVerification :one
+UPDATE orchestration_task_verifications
+SET lease_expires_at = sqlc.arg(lease_expires_at),
+    last_heartbeat_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'running')
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING *;
+
+-- name: MarkOrchestrationTaskVerificationRunning :one
+UPDATE orchestration_task_verifications
+SET status = 'running',
+    started_at = COALESCE(started_at, now()),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'claimed'
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING *;
+
+-- name: MarkOrchestrationTaskVerificationCompleted :one
+UPDATE orchestration_task_verifications
+SET status = 'completed',
+    verdict = sqlc.arg(verdict),
+    summary = sqlc.arg(summary),
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'running')
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING *;
+
+-- name: MarkOrchestrationTaskVerificationFailed :one
+UPDATE orchestration_task_verifications
+SET status = 'failed',
+    verdict = sqlc.arg(verdict),
+    summary = sqlc.arg(summary),
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'running')
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING *;
+
+-- name: ReleaseOrchestrationTaskVerificationClaim :one
+UPDATE orchestration_task_verifications
+SET status = 'created',
+    worker_id = '',
+    executor_id = '',
+    claim_token = '',
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'claimed'
+  AND claim_token = sqlc.arg(claim_token)
+RETURNING *;
+
+-- name: MarkOrchestrationTaskVerificationLost :one
+UPDATE orchestration_task_verifications
+SET status = 'lost',
+    claim_token = '',
+    verdict = sqlc.arg(verdict),
+    summary = sqlc.arg(summary),
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    lease_expires_at = NULL,
+    finished_at = COALESCE(finished_at, now()),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'running')
+  AND claim_epoch = sqlc.arg(claim_epoch)
+RETURNING *;
+
+-- name: ListExpiredOrchestrationTaskVerifications :many
+SELECT *
+FROM orchestration_task_verifications
+WHERE status IN ('claimed', 'running')
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= now()
+ORDER BY lease_expires_at ASC, id ASC;
 
 -- name: ClaimNextCreatedOrchestrationTaskAttempt :one
 WITH next_attempt AS (
@@ -692,10 +864,21 @@ SET run_id = EXCLUDED.run_id,
     updated_at = now()
 RETURNING *;
 
+-- name: GetOrchestrationTaskResultByID :one
+SELECT *
+FROM orchestration_task_results
+WHERE id = sqlc.arg(id);
+
 -- name: ListCurrentOrchestrationArtifactsByRun :many
 SELECT *
 FROM orchestration_artifacts
 WHERE run_id = sqlc.arg(run_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListOrchestrationArtifactsByTask :many
+SELECT *
+FROM orchestration_artifacts
+WHERE task_id = sqlc.arg(task_id)
 ORDER BY created_at ASC, id ASC;
 
 -- name: CreateOrchestrationArtifact :one

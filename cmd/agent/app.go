@@ -905,9 +905,14 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 func startOrchestrationRuntime(lc fx.Lifecycle, orchestrationService *orchestration.Service) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
+	builtinVerifierEnabled := orchestrationBuiltinVerifierEnabled()
 	lc.Append(fx.Hook{
 		OnStart: func(_ context.Context) error {
-			wg.Add(3)
+			workerCount := 4
+			if builtinVerifierEnabled {
+				workerCount++
+			}
+			wg.Add(workerCount)
 			go func() {
 				defer wg.Done()
 				orchestrationService.RunPlannerLoop(ctx)
@@ -920,6 +925,16 @@ func startOrchestrationRuntime(lc fx.Lifecycle, orchestrationService *orchestrat
 				defer wg.Done()
 				orchestrationService.RunRecoveryLoop(ctx)
 			}()
+			go func() {
+				defer wg.Done()
+				orchestrationService.RunVerificationRecoveryLoop(ctx)
+			}()
+			if builtinVerifierEnabled {
+				go func() {
+					defer wg.Done()
+					orchestrationService.RunVerifierLoop(ctx)
+				}()
+			}
 			return nil
 		},
 		OnStop: func(stopCtx context.Context) error {
@@ -937,6 +952,18 @@ func startOrchestrationRuntime(lc fx.Lifecycle, orchestrationService *orchestrat
 			}
 		},
 	})
+}
+
+func orchestrationBuiltinVerifierEnabled() bool {
+	value := strings.TrimSpace(os.Getenv("MEMOH_ORCHESTRATION_BUILTIN_VERIFYD"))
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return false
+	}
 }
 
 func wireResolverOutbound(resolver *flow.Resolver, channelManager *channel.Manager) {

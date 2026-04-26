@@ -140,6 +140,79 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskAttempt(ctx context.Context, 
 	return i, err
 }
 
+const claimNextCreatedOrchestrationTaskVerification = `-- name: ClaimNextCreatedOrchestrationTaskVerification :one
+WITH next_verification AS (
+  SELECT verifications.id
+  FROM orchestration_task_verifications AS verifications
+  JOIN orchestration_tasks AS tasks
+    ON tasks.id = verifications.task_id
+  JOIN orchestration_runs AS runs
+    ON runs.id = verifications.run_id
+  WHERE verifications.status = 'created'
+    AND tasks.status = 'verifying'
+    AND tasks.superseded_by_planner_epoch IS NULL
+    AND runs.lifecycle_status = 'running'
+    AND verifications.verifier_profile = ANY($5::text[])
+  ORDER BY verifications.created_at ASC, verifications.id ASC
+  LIMIT 1
+  FOR UPDATE OF verifications, tasks, runs SKIP LOCKED
+)
+UPDATE orchestration_task_verifications
+SET status = 'claimed',
+    worker_id = $1,
+    executor_id = $2,
+    claim_epoch = claim_epoch + 1,
+    claim_token = $3,
+    lease_expires_at = $4,
+    last_heartbeat_at = now(),
+    updated_at = now()
+WHERE id = (SELECT id FROM next_verification)
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type ClaimNextCreatedOrchestrationTaskVerificationParams struct {
+	WorkerID         string             `json:"worker_id"`
+	ExecutorID       string             `json:"executor_id"`
+	ClaimToken       string             `json:"claim_token"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
+	VerifierProfiles []string           `json:"verifier_profiles"`
+}
+
+func (q *Queries) ClaimNextCreatedOrchestrationTaskVerification(ctx context.Context, arg ClaimNextCreatedOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, claimNextCreatedOrchestrationTaskVerification,
+		arg.WorkerID,
+		arg.ExecutorID,
+		arg.ClaimToken,
+		arg.LeaseExpiresAt,
+		arg.VerifierProfiles,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimNextOrchestrationPlanningIntent = `-- name: ClaimNextOrchestrationPlanningIntent :one
 WITH next_intent AS (
   SELECT id
@@ -1199,6 +1272,73 @@ func (q *Queries) CreateOrchestrationTaskResult(ctx context.Context, arg CreateO
 	return i, err
 }
 
+const createOrchestrationTaskVerification = `-- name: CreateOrchestrationTaskVerification :one
+INSERT INTO orchestration_task_verifications (
+  id,
+  run_id,
+  task_id,
+  result_id,
+  attempt_no,
+  verifier_profile,
+  status
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7
+) RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type CreateOrchestrationTaskVerificationParams struct {
+	ID              pgtype.UUID `json:"id"`
+	RunID           pgtype.UUID `json:"run_id"`
+	TaskID          pgtype.UUID `json:"task_id"`
+	ResultID        pgtype.UUID `json:"result_id"`
+	AttemptNo       int32       `json:"attempt_no"`
+	VerifierProfile string      `json:"verifier_profile"`
+	Status          string      `json:"status"`
+}
+
+func (q *Queries) CreateOrchestrationTaskVerification(ctx context.Context, arg CreateOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, createOrchestrationTaskVerification,
+		arg.ID,
+		arg.RunID,
+		arg.TaskID,
+		arg.ResultID,
+		arg.AttemptNo,
+		arg.VerifierProfile,
+		arg.Status,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const failOrchestrationPlanningIntent = `-- name: FailOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
 SET status = 'failed',
@@ -1668,6 +1808,103 @@ func (q *Queries) GetOrchestrationTaskByIDForUpdate(ctx context.Context, id pgty
 	return i, err
 }
 
+const getOrchestrationTaskResultByID = `-- name: GetOrchestrationTaskResultByID :one
+SELECT id, run_id, task_id, attempt_id, status, summary, failure_class, request_replan, artifact_intents, structured_output, created_at, updated_at
+FROM orchestration_task_results
+WHERE id = $1
+`
+
+func (q *Queries) GetOrchestrationTaskResultByID(ctx context.Context, id pgtype.UUID) (OrchestrationTaskResult, error) {
+	row := q.db.QueryRow(ctx, getOrchestrationTaskResultByID, id)
+	var i OrchestrationTaskResult
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.Status,
+		&i.Summary,
+		&i.FailureClass,
+		&i.RequestReplan,
+		&i.ArtifactIntents,
+		&i.StructuredOutput,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOrchestrationTaskVerificationByID = `-- name: GetOrchestrationTaskVerificationByID :one
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+FROM orchestration_task_verifications
+WHERE id = $1
+`
+
+func (q *Queries) GetOrchestrationTaskVerificationByID(ctx context.Context, id pgtype.UUID) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, getOrchestrationTaskVerificationByID, id)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOrchestrationTaskVerificationByIDForUpdate = `-- name: GetOrchestrationTaskVerificationByIDForUpdate :one
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+FROM orchestration_task_verifications
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetOrchestrationTaskVerificationByIDForUpdate(ctx context.Context, id pgtype.UUID) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, getOrchestrationTaskVerificationByIDForUpdate, id)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const heartbeatOrchestrationPlanningIntent = `-- name: HeartbeatOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
 SET lease_expires_at = $1,
@@ -1747,6 +1984,54 @@ func (q *Queries) HeartbeatOrchestrationTaskAttempt(ctx context.Context, arg Hea
 		&i.LastHeartbeatAt,
 		&i.InputManifestID,
 		&i.ParkCheckpointID,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const heartbeatOrchestrationTaskVerification = `-- name: HeartbeatOrchestrationTaskVerification :one
+UPDATE orchestration_task_verifications
+SET lease_expires_at = $1,
+    last_heartbeat_at = now(),
+    updated_at = now()
+WHERE id = $2
+  AND status IN ('claimed', 'running')
+  AND claim_token = $3
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type HeartbeatOrchestrationTaskVerificationParams struct {
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	ID             pgtype.UUID        `json:"id"`
+	ClaimToken     string             `json:"claim_token"`
+}
+
+func (q *Queries) HeartbeatOrchestrationTaskVerification(ctx context.Context, arg HeartbeatOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, heartbeatOrchestrationTaskVerification, arg.LeaseExpiresAt, arg.ID, arg.ClaimToken)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
 		&i.FailureClass,
 		&i.TerminalReason,
 		&i.StartedAt,
@@ -2044,6 +2329,55 @@ func (q *Queries) ListCurrentOrchestrationTaskDependenciesByRun(ctx context.Cont
 	return items, nil
 }
 
+const listCurrentOrchestrationTaskVerificationsByRun = `-- name: ListCurrentOrchestrationTaskVerificationsByRun :many
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+FROM orchestration_task_verifications
+WHERE run_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListCurrentOrchestrationTaskVerificationsByRun(ctx context.Context, runID pgtype.UUID) ([]OrchestrationTaskVerification, error) {
+	rows, err := q.db.Query(ctx, listCurrentOrchestrationTaskVerificationsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationTaskVerification
+	for rows.Next() {
+		var i OrchestrationTaskVerification
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.ResultID,
+			&i.AttemptNo,
+			&i.WorkerID,
+			&i.ExecutorID,
+			&i.VerifierProfile,
+			&i.Status,
+			&i.ClaimEpoch,
+			&i.ClaimToken,
+			&i.LeaseExpiresAt,
+			&i.LastHeartbeatAt,
+			&i.Verdict,
+			&i.Summary,
+			&i.FailureClass,
+			&i.TerminalReason,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCurrentOrchestrationTasksByRun = `-- name: ListCurrentOrchestrationTasksByRun :many
 SELECT id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
 FROM orchestration_tasks
@@ -2187,6 +2521,97 @@ func (q *Queries) ListExpiredOrchestrationTaskAttempts(ctx context.Context) ([]O
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiredOrchestrationTaskVerifications = `-- name: ListExpiredOrchestrationTaskVerifications :many
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+FROM orchestration_task_verifications
+WHERE status IN ('claimed', 'running')
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= now()
+ORDER BY lease_expires_at ASC, id ASC
+`
+
+func (q *Queries) ListExpiredOrchestrationTaskVerifications(ctx context.Context) ([]OrchestrationTaskVerification, error) {
+	rows, err := q.db.Query(ctx, listExpiredOrchestrationTaskVerifications)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationTaskVerification
+	for rows.Next() {
+		var i OrchestrationTaskVerification
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.ResultID,
+			&i.AttemptNo,
+			&i.WorkerID,
+			&i.ExecutorID,
+			&i.VerifierProfile,
+			&i.Status,
+			&i.ClaimEpoch,
+			&i.ClaimToken,
+			&i.LeaseExpiresAt,
+			&i.LastHeartbeatAt,
+			&i.Verdict,
+			&i.Summary,
+			&i.FailureClass,
+			&i.TerminalReason,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrchestrationArtifactsByTask = `-- name: ListOrchestrationArtifactsByTask :many
+SELECT id, run_id, task_id, attempt_id, kind, uri, version, digest, content_type, summary, metadata, created_at
+FROM orchestration_artifacts
+WHERE task_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListOrchestrationArtifactsByTask(ctx context.Context, taskID pgtype.UUID) ([]OrchestrationArtifact, error) {
+	rows, err := q.db.Query(ctx, listOrchestrationArtifactsByTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationArtifact
+	for rows.Next() {
+		var i OrchestrationArtifact
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.AttemptID,
+			&i.Kind,
+			&i.Uri,
+			&i.Version,
+			&i.Digest,
+			&i.ContentType,
+			&i.Summary,
+			&i.Metadata,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3082,6 +3507,7 @@ func (q *Queries) MarkOrchestrationTaskRunning(ctx context.Context, id pgtype.UU
 const markOrchestrationTaskSuperseded = `-- name: MarkOrchestrationTaskSuperseded :one
 UPDATE orchestration_tasks
 SET superseded_by_planner_epoch = $1,
+    status_version = status_version + 1,
     waiting_checkpoint_id = NULL,
     waiting_scope = '',
     updated_at = now()
@@ -3097,6 +3523,288 @@ type MarkOrchestrationTaskSupersededParams struct {
 
 func (q *Queries) MarkOrchestrationTaskSuperseded(ctx context.Context, arg MarkOrchestrationTaskSupersededParams) (OrchestrationTask, error) {
 	row := q.db.QueryRow(ctx, markOrchestrationTaskSuperseded, arg.SupersededByPlannerEpoch, arg.ID)
+	var i OrchestrationTask
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.DecomposedFromTaskID,
+		&i.Kind,
+		&i.Goal,
+		&i.Inputs,
+		&i.PlannerEpoch,
+		&i.SupersededByPlannerEpoch,
+		&i.WorkerProfile,
+		&i.Priority,
+		&i.RetryPolicy,
+		&i.VerificationPolicy,
+		&i.Status,
+		&i.StatusVersion,
+		&i.WaitingCheckpointID,
+		&i.WaitingScope,
+		&i.LatestResultID,
+		&i.ReadyAt,
+		&i.BlockedReason,
+		&i.TerminalReason,
+		&i.BlackboardScope,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskVerificationCompleted = `-- name: MarkOrchestrationTaskVerificationCompleted :one
+UPDATE orchestration_task_verifications
+SET status = 'completed',
+    verdict = $1,
+    summary = $2,
+    failure_class = $3,
+    terminal_reason = $4,
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = $5
+  AND status IN ('claimed', 'running')
+  AND claim_token = $6
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type MarkOrchestrationTaskVerificationCompletedParams struct {
+	Verdict        string      `json:"verdict"`
+	Summary        string      `json:"summary"`
+	FailureClass   string      `json:"failure_class"`
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+	ClaimToken     string      `json:"claim_token"`
+}
+
+func (q *Queries) MarkOrchestrationTaskVerificationCompleted(ctx context.Context, arg MarkOrchestrationTaskVerificationCompletedParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskVerificationCompleted,
+		arg.Verdict,
+		arg.Summary,
+		arg.FailureClass,
+		arg.TerminalReason,
+		arg.ID,
+		arg.ClaimToken,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskVerificationFailed = `-- name: MarkOrchestrationTaskVerificationFailed :one
+UPDATE orchestration_task_verifications
+SET status = 'failed',
+    verdict = $1,
+    summary = $2,
+    failure_class = $3,
+    terminal_reason = $4,
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = $5
+  AND status IN ('claimed', 'running')
+  AND claim_token = $6
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type MarkOrchestrationTaskVerificationFailedParams struct {
+	Verdict        string      `json:"verdict"`
+	Summary        string      `json:"summary"`
+	FailureClass   string      `json:"failure_class"`
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+	ClaimToken     string      `json:"claim_token"`
+}
+
+func (q *Queries) MarkOrchestrationTaskVerificationFailed(ctx context.Context, arg MarkOrchestrationTaskVerificationFailedParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskVerificationFailed,
+		arg.Verdict,
+		arg.Summary,
+		arg.FailureClass,
+		arg.TerminalReason,
+		arg.ID,
+		arg.ClaimToken,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskVerificationLost = `-- name: MarkOrchestrationTaskVerificationLost :one
+UPDATE orchestration_task_verifications
+SET status = 'lost',
+    claim_token = '',
+    verdict = $1,
+    summary = $2,
+    failure_class = $3,
+    terminal_reason = $4,
+    lease_expires_at = NULL,
+    finished_at = COALESCE(finished_at, now()),
+    updated_at = now()
+WHERE id = $5
+  AND status IN ('claimed', 'running')
+  AND claim_epoch = $6
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type MarkOrchestrationTaskVerificationLostParams struct {
+	Verdict        string      `json:"verdict"`
+	Summary        string      `json:"summary"`
+	FailureClass   string      `json:"failure_class"`
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+	ClaimEpoch     int64       `json:"claim_epoch"`
+}
+
+func (q *Queries) MarkOrchestrationTaskVerificationLost(ctx context.Context, arg MarkOrchestrationTaskVerificationLostParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskVerificationLost,
+		arg.Verdict,
+		arg.Summary,
+		arg.FailureClass,
+		arg.TerminalReason,
+		arg.ID,
+		arg.ClaimEpoch,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskVerificationRunning = `-- name: MarkOrchestrationTaskVerificationRunning :one
+UPDATE orchestration_task_verifications
+SET status = 'running',
+    started_at = COALESCE(started_at, now()),
+    updated_at = now()
+WHERE id = $1
+  AND status = 'claimed'
+  AND claim_token = $2
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > now()
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type MarkOrchestrationTaskVerificationRunningParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ClaimToken string      `json:"claim_token"`
+}
+
+func (q *Queries) MarkOrchestrationTaskVerificationRunning(ctx context.Context, arg MarkOrchestrationTaskVerificationRunningParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskVerificationRunning, arg.ID, arg.ClaimToken)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskVerifying = `-- name: MarkOrchestrationTaskVerifying :one
+UPDATE orchestration_tasks
+SET status = 'verifying',
+    status_version = status_version + 1,
+    latest_result_id = $1,
+    terminal_reason = '',
+    updated_at = now()
+WHERE id = $2
+RETURNING id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
+`
+
+type MarkOrchestrationTaskVerifyingParams struct {
+	LatestResultID pgtype.UUID `json:"latest_result_id"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) MarkOrchestrationTaskVerifying(ctx context.Context, arg MarkOrchestrationTaskVerifyingParams) (OrchestrationTask, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskVerifying, arg.LatestResultID, arg.ID)
 	var i OrchestrationTask
 	err := row.Scan(
 		&i.ID,
@@ -3211,6 +3919,55 @@ func (q *Queries) ReleaseOrchestrationTaskAttemptClaim(ctx context.Context, arg 
 		&i.LastHeartbeatAt,
 		&i.InputManifestID,
 		&i.ParkCheckpointID,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const releaseOrchestrationTaskVerificationClaim = `-- name: ReleaseOrchestrationTaskVerificationClaim :one
+UPDATE orchestration_task_verifications
+SET status = 'created',
+    worker_id = '',
+    executor_id = '',
+    claim_token = '',
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'claimed'
+  AND claim_token = $2
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type ReleaseOrchestrationTaskVerificationClaimParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ClaimToken string      `json:"claim_token"`
+}
+
+func (q *Queries) ReleaseOrchestrationTaskVerificationClaim(ctx context.Context, arg ReleaseOrchestrationTaskVerificationClaimParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, releaseOrchestrationTaskVerificationClaim, arg.ID, arg.ClaimToken)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
 		&i.FailureClass,
 		&i.TerminalReason,
 		&i.StartedAt,

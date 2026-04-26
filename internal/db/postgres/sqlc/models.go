@@ -603,6 +603,30 @@ type OrchestrationTaskResult struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OrchestrationTaskVerification struct {
+	ID              pgtype.UUID        `json:"id"`
+	RunID           pgtype.UUID        `json:"run_id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	ResultID        pgtype.UUID        `json:"result_id"`
+	AttemptNo       int32              `json:"attempt_no"`
+	WorkerID        string             `json:"worker_id"`
+	ExecutorID      string             `json:"executor_id"`
+	VerifierProfile string             `json:"verifier_profile"`
+	Status          string             `json:"status"`
+	ClaimEpoch      int64              `json:"claim_epoch"`
+	ClaimToken      string             `json:"claim_token"`
+	LeaseExpiresAt  pgtype.Timestamptz `json:"lease_expires_at"`
+	LastHeartbeatAt pgtype.Timestamptz `json:"last_heartbeat_at"`
+	Verdict         string             `json:"verdict"`
+	Summary         string             `json:"summary"`
+	FailureClass    string             `json:"failure_class"`
+	TerminalReason  string             `json:"terminal_reason"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OrchestrationWorker struct {
 	ID              string             `json:"id"`
 	ExecutorID      string             `json:"executor_id"`
