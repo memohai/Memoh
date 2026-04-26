@@ -25,6 +25,7 @@ const (
 	PlanningIntentDefaultLeaseTTL      = 30 * time.Second
 	TaskAttemptStatusCreated           = "created"
 	TaskAttemptStatusClaimed           = "claimed"
+	TaskAttemptStatusBinding           = "binding"
 	TaskAttemptStatusRunning           = "running"
 	TaskAttemptStatusCompleted         = "completed"
 	TaskAttemptStatusFailed            = "failed"

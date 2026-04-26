@@ -3454,7 +3454,276 @@ func TestIntegrationCompleteAttemptRejectsExpiredLeaseAndRecoveryFailsRunOnce(t 
 	}
 }
 
-func TestIntegrationStartAttemptReleasesClaimWhenRunBecomesImmutable(t *testing.T) {
+func TestIntegrationStartAttemptEmitsBindingBeforeRunning(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "attempt start should emit binding before running",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if runningAttempt.Status != TaskAttemptStatusRunning {
+		t.Fatalf("StartAttempt() status = %q, want %q", runningAttempt.Status, TaskAttemptStatusRunning)
+	}
+
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	bindingIndex := -1
+	runningIndex := -1
+	for i, event := range eventPage.Items {
+		switch event.Type {
+		case "run.event.attempt.binding":
+			if attemptID, _ := event.Payload["attempt_id"].(string); attemptID == attempt.ID {
+				bindingIndex = i
+			}
+		case "run.event.attempt.running":
+			if attemptID, _ := event.Payload["attempt_id"].(string); attemptID == attempt.ID {
+				runningIndex = i
+			}
+		}
+	}
+	if bindingIndex < 0 {
+		t.Fatal("ListRunEvents() missing run.event.attempt.binding")
+	}
+	if runningIndex < 0 {
+		t.Fatal("ListRunEvents() missing run.event.attempt.running")
+	}
+	if bindingIndex >= runningIndex {
+		t.Fatalf("attempt binding/running event order = (%d, %d), want binding before running", bindingIndex, runningIndex)
+	}
+}
+
+func TestIntegrationStartAttemptReplayPreservesRunningAttempt(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "start attempt replay should preserve running attempt",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(first) error = %v", err)
+	}
+	replayedAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(replay) error = %v", err)
+	}
+	if replayedAttempt.Status != TaskAttemptStatusRunning {
+		t.Fatalf("StartAttempt(replay) status = %q, want %q", replayedAttempt.Status, TaskAttemptStatusRunning)
+	}
+	if replayedAttempt.ID != runningAttempt.ID {
+		t.Fatalf("StartAttempt(replay) id = %q, want %q", replayedAttempt.ID, runningAttempt.ID)
+	}
+
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	attemptRow, err := svc.queries.GetOrchestrationTaskAttemptByID(ctx, pgAttemptID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
+	}
+	if attemptRow.Status != TaskAttemptStatusRunning {
+		t.Fatalf("attempt row status after replay = %q, want %q", attemptRow.Status, TaskAttemptStatusRunning)
+	}
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	bindingCount := 0
+	runningCount := 0
+	taskRunningCount := 0
+	for _, event := range eventPage.Items {
+		attemptID, _ := event.Payload["attempt_id"].(string)
+		if attemptID != attempt.ID {
+			continue
+		}
+		switch event.Type {
+		case "run.event.attempt.binding":
+			bindingCount++
+		case "run.event.attempt.running":
+			runningCount++
+		case "run.event.task.running":
+			taskRunningCount++
+		}
+	}
+	if bindingCount != 1 || runningCount != 1 || taskRunningCount != 1 {
+		t.Fatalf("replay emitted duplicate events: binding=%d running=%d task_running=%d, want 1/1/1", bindingCount, runningCount, taskRunningCount)
+	}
+}
+
+func TestIntegrationBindingAttemptHeartbeatAndRecovery(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "binding attempt should heartbeat and recover",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET status = 'binding', updated_at = now() WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("mark attempt binding: %v", err)
+	}
+
+	heartbeatAttempt, err := svc.HeartbeatAttempt(ctx, AttemptHeartbeat{
+		AttemptID:       attempt.ID,
+		ClaimToken:      attempt.ClaimToken,
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("HeartbeatAttempt(binding) error = %v", err)
+	}
+	if heartbeatAttempt.Status != TaskAttemptStatusBinding {
+		t.Fatalf("HeartbeatAttempt(binding) status = %q, want %q", heartbeatAttempt.Status, TaskAttemptStatusBinding)
+	}
+
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("expire binding attempt lease: %v", err)
+	}
+
+	recovered, err := svc.RecoverExpiredAttempts(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredAttempts() error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredAttempts() = %d, want 1", recovered)
+	}
+
+	attemptRow, err := svc.queries.GetOrchestrationTaskAttemptByID(ctx, pgAttemptID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
+	}
+	if attemptRow.Status != TaskAttemptStatusCreated {
+		t.Fatalf("attempt row status = %q, want %q", attemptRow.Status, TaskAttemptStatusCreated)
+	}
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	var foundRequeued bool
+	for _, event := range eventPage.Items {
+		if event.Type != "run.event.attempt.requeued" {
+			continue
+		}
+		if attemptID, _ := event.Payload["attempt_id"].(string); attemptID == attempt.ID {
+			foundRequeued = true
+			break
+		}
+	}
+	if !foundRequeued {
+		t.Fatal("ListRunEvents() missing run.event.attempt.requeued for recovered binding attempt")
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+}
+
+func TestIntegrationStartAttemptRetiresClaimWhenRunBecomesImmutable(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
 
@@ -3512,11 +3781,233 @@ func TestIntegrationStartAttemptReleasesClaimWhenRunBecomesImmutable(t *testing.
 	if err != nil {
 		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
 	}
-	if attemptRow.Status != TaskAttemptStatusCreated {
-		t.Fatalf("attempt status after released claim = %q, want %q", attemptRow.Status, TaskAttemptStatusCreated)
+	if attemptRow.Status != TaskAttemptStatusFailed {
+		t.Fatalf("attempt status after retirement = %q, want %q", attemptRow.Status, TaskAttemptStatusFailed)
 	}
-	if strings.TrimSpace(attemptRow.ClaimToken) != "" {
-		t.Fatalf("attempt claim_token after released claim = %q, want empty", attemptRow.ClaimToken)
+	if attemptRow.FailureClass != "attempt_immutable" {
+		t.Fatalf("attempt failure_class after retirement = %q, want %q", attemptRow.FailureClass, "attempt_immutable")
+	}
+	if attemptRow.TerminalReason != "attempt invalidated before start" {
+		t.Fatalf("attempt terminal_reason after retirement = %q, want %q", attemptRow.TerminalReason, "attempt invalidated before start")
+	}
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	var foundFailed bool
+	for _, event := range eventPage.Items {
+		if event.Type != "run.event.attempt.failed" {
+			continue
+		}
+		if attemptID, _ := event.Payload["attempt_id"].(string); attemptID == attempt.ID {
+			foundFailed = true
+			break
+		}
+	}
+	if !foundFailed {
+		t.Fatal("ListRunEvents() missing run.event.attempt.failed for immutable run retirement")
+	}
+}
+
+func TestIntegrationStartAttemptAdvancesPersistedBindingToRunning(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "persisted binding should advance to running",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET status = 'binding', updated_at = now() WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("mark attempt binding: %v", err)
+	}
+
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(binding replay) error = %v", err)
+	}
+	if runningAttempt.Status != TaskAttemptStatusRunning {
+		t.Fatalf("StartAttempt(binding replay) status = %q, want %q", runningAttempt.Status, TaskAttemptStatusRunning)
+	}
+}
+
+func TestIntegrationStartAttemptRetiresBoundAttemptWhenRunBecomesImmutable(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "bound attempt should retire when run becomes immutable",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET status = 'binding', updated_at = now() WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("mark attempt binding: %v", err)
+	}
+
+	pgRunID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_runs SET lifecycle_status = 'failed', updated_at = now() WHERE id = $1", pgRunID); err != nil {
+		t.Fatalf("mark run failed: %v", err)
+	}
+
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
+		t.Fatalf("StartAttempt(bound immutable run) error = %v, want %v", err, ErrAttemptImmutable)
+	}
+
+	attemptRow, err := svc.queries.GetOrchestrationTaskAttemptByID(ctx, pgAttemptID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
+	}
+	if attemptRow.Status != TaskAttemptStatusFailed {
+		t.Fatalf("attempt status after bound immutable retirement = %q, want %q", attemptRow.Status, TaskAttemptStatusFailed)
+	}
+}
+
+func TestIntegrationStartAttemptRetiresClaimWhenTaskBecomesImmutable(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "claim should retire when task becomes immutable",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+
+	pgTaskID, err := db.ParseUUID(handle.RootTaskID)
+	if err != nil {
+		t.Fatalf("parse task uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_tasks SET status = 'blocked', updated_at = now() WHERE id = $1", pgTaskID); err != nil {
+		t.Fatalf("mark task blocked: %v", err)
+	}
+
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
+		t.Fatalf("StartAttempt(immutable task) error = %v, want %v", err, ErrAttemptImmutable)
+	}
+
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	attemptRow, err := svc.queries.GetOrchestrationTaskAttemptByID(ctx, pgAttemptID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
+	}
+	if attemptRow.Status != TaskAttemptStatusFailed {
+		t.Fatalf("attempt status after immutable task retirement = %q, want %q", attemptRow.Status, TaskAttemptStatusFailed)
+	}
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	var foundFailed bool
+	for _, event := range eventPage.Items {
+		if event.Type != "run.event.attempt.failed" {
+			continue
+		}
+		if attemptID, _ := event.Payload["attempt_id"].(string); attemptID == attempt.ID {
+			foundFailed = true
+			break
+		}
+	}
+	if !foundFailed {
+		t.Fatal("ListRunEvents() missing run.event.attempt.failed for immutable task retirement")
 	}
 }
 

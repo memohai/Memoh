@@ -219,11 +219,11 @@ WITH next_intent AS (
   FROM orchestration_planning_intents
   WHERE (
       status = 'pending'
-      AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+      AND (lease_expires_at IS NULL OR lease_expires_at <= clock_timestamp())
     ) OR (
       status = 'processing'
       AND lease_expires_at IS NOT NULL
-      AND lease_expires_at <= now()
+      AND lease_expires_at <= clock_timestamp()
     )
   ORDER BY created_at ASC, id ASC
   LIMIT 1
@@ -330,7 +330,7 @@ WHERE id = $1
   AND status = 'processing'
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, claim_epoch, claim_token, claimed_by, lease_expires_at, last_heartbeat_at, failure_reason, payload, created_at, updated_at
 `
 
@@ -381,7 +381,7 @@ const countActiveOrchestrationTaskAttemptsByRun = `-- name: CountActiveOrchestra
 SELECT COUNT(*)
 FROM orchestration_task_attempts
 WHERE run_id = $1
-  AND status IN ('created', 'claimed', 'running')
+  AND status IN ('created', 'claimed', 'binding', 'running')
 `
 
 func (q *Queries) CountActiveOrchestrationTaskAttemptsByRun(ctx context.Context, runID pgtype.UUID) (int64, error) {
@@ -395,7 +395,7 @@ const countActiveOrchestrationTaskAttemptsByTask = `-- name: CountActiveOrchestr
 SELECT COUNT(*)
 FROM orchestration_task_attempts
 WHERE task_id = $1
-  AND status IN ('created', 'claimed', 'running')
+  AND status IN ('created', 'claimed', 'binding', 'running')
 `
 
 func (q *Queries) CountActiveOrchestrationTaskAttemptsByTask(ctx context.Context, taskID pgtype.UUID) (int64, error) {
@@ -1351,7 +1351,7 @@ WHERE id = $2
   AND status = 'processing'
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, claim_epoch, claim_token, claimed_by, lease_expires_at, last_heartbeat_at, failure_reason, payload, created_at, updated_at
 `
 
@@ -1914,7 +1914,7 @@ WHERE id = $2
   AND status = 'processing'
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, claim_epoch, claim_token, claimed_by, lease_expires_at, last_heartbeat_at, failure_reason, payload, created_at, updated_at
 `
 
@@ -1954,10 +1954,10 @@ SET lease_expires_at = $1,
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = $2
-  AND status IN ('claimed', 'running')
+  AND status IN ('claimed', 'binding', 'running')
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -2003,7 +2003,7 @@ WHERE id = $2
   AND status IN ('claimed', 'running')
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -2486,9 +2486,9 @@ func (q *Queries) ListDependencyBlockedOrchestrationTasks(ctx context.Context) (
 const listExpiredOrchestrationTaskAttempts = `-- name: ListExpiredOrchestrationTaskAttempts :many
 SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
-WHERE status IN ('claimed', 'running')
+WHERE status IN ('claimed', 'binding', 'running')
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at <= now()
+  AND lease_expires_at <= clock_timestamp()
 ORDER BY lease_expires_at ASC, id ASC
 `
 
@@ -2537,7 +2537,7 @@ SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verif
 FROM orchestration_task_verifications
 WHERE status IN ('claimed', 'running')
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at <= now()
+  AND lease_expires_at <= clock_timestamp()
 ORDER BY lease_expires_at ASC, id ASC
 `
 
@@ -3017,6 +3017,50 @@ func (q *Queries) MarkOrchestrationRunWaitingHuman(ctx context.Context, id pgtyp
 	return i, err
 }
 
+const markOrchestrationTaskAttemptBinding = `-- name: MarkOrchestrationTaskAttemptBinding :one
+UPDATE orchestration_task_attempts
+SET status = 'binding',
+    updated_at = now()
+WHERE id = $1
+  AND status = 'claimed'
+  AND claim_token = $2
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > clock_timestamp()
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type MarkOrchestrationTaskAttemptBindingParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ClaimToken string      `json:"claim_token"`
+}
+
+func (q *Queries) MarkOrchestrationTaskAttemptBinding(ctx context.Context, arg MarkOrchestrationTaskAttemptBindingParams) (OrchestrationTaskAttempt, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskAttemptBinding, arg.ID, arg.ClaimToken)
+	var i OrchestrationTaskAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.InputManifestID,
+		&i.ParkCheckpointID,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markOrchestrationTaskAttemptCompleted = `-- name: MarkOrchestrationTaskAttemptCompleted :one
 UPDATE orchestration_task_attempts
 SET status = 'completed',
@@ -3024,10 +3068,10 @@ SET status = 'completed',
     finished_at = now(),
     updated_at = now()
 WHERE id = $1
-  AND status IN ('claimed', 'running')
+  AND status = 'running'
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3072,10 +3116,10 @@ SET status = 'failed',
     finished_at = now(),
     updated_at = now()
 WHERE id = $3
-  AND status IN ('claimed', 'running')
+  AND status = 'running'
   AND claim_token = $4
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3127,7 +3171,7 @@ SET status = 'lost',
     finished_at = COALESCE(finished_at, now()),
     updated_at = now()
 WHERE id = $2
-  AND status IN ('claimed', 'running')
+  AND status IN ('claimed', 'binding', 'running')
   AND claim_epoch = $3
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
@@ -3171,10 +3215,10 @@ SET status = 'running',
     started_at = COALESCE(started_at, now()),
     updated_at = now()
 WHERE id = $1
-  AND status = 'claimed'
+  AND status = 'binding'
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3566,7 +3610,7 @@ WHERE id = $5
   AND status IN ('claimed', 'running')
   AND claim_token = $6
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3629,7 +3673,7 @@ WHERE id = $5
   AND status IN ('claimed', 'running')
   AND claim_token = $6
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3749,7 +3793,7 @@ WHERE id = $1
   AND status = 'claimed'
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
@@ -3892,7 +3936,7 @@ SET status = 'created',
     last_heartbeat_at = NULL,
     updated_at = now()
 WHERE id = $1
-  AND status = 'claimed'
+  AND status IN ('claimed', 'binding')
   AND claim_token = $2
 RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
@@ -4029,6 +4073,61 @@ func (q *Queries) ResolveOrchestrationHumanCheckpoint(ctx context.Context, arg R
 		&i.ResolvedFreeformInput,
 		&i.ResolvedAt,
 		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const retireOrchestrationTaskAttemptFailed = `-- name: RetireOrchestrationTaskAttemptFailed :one
+UPDATE orchestration_task_attempts
+SET status = 'failed',
+    failure_class = $1,
+    terminal_reason = $2,
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = $3
+  AND status IN ('claimed', 'binding')
+  AND claim_token = $4
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > clock_timestamp()
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type RetireOrchestrationTaskAttemptFailedParams struct {
+	FailureClass   string      `json:"failure_class"`
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+	ClaimToken     string      `json:"claim_token"`
+}
+
+func (q *Queries) RetireOrchestrationTaskAttemptFailed(ctx context.Context, arg RetireOrchestrationTaskAttemptFailedParams) (OrchestrationTaskAttempt, error) {
+	row := q.db.QueryRow(ctx, retireOrchestrationTaskAttemptFailed,
+		arg.FailureClass,
+		arg.TerminalReason,
+		arg.ID,
+		arg.ClaimToken,
+	)
+	var i OrchestrationTaskAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.InputManifestID,
+		&i.ParkCheckpointID,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
