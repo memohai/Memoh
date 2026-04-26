@@ -3,10 +3,11 @@
 ## One-Click Install
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sh
 ```
 
 The script prompts for configuration, generates `config.toml`, and starts all services.
+Run it as your normal user. The script will use `sudo docker` internally only when Docker requires it.
 
 ## Manual Install
 
@@ -24,13 +25,13 @@ nano config.toml   # Change passwords and JWT secret
 ### Standard startup (with Qdrant + Browser)
 
 ```bash
-sudo docker compose --profile qdrant --profile browser up -d
+docker compose --profile qdrant --profile browser up -d
 ```
 
 ### Minimal startup (core only)
 
 ```bash
-sudo docker compose up -d
+docker compose up -d
 ```
 
 Access:
@@ -69,7 +70,7 @@ For Mem0 or OpenViking SaaS, no profile is needed. Configure the provider direct
 Uncomment `registry = "memoh.cn"` in `config.toml` under `[workspace]`, then add the CN overlay:
 
 ```bash
-sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
+docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
   --profile qdrant --profile browser up -d
 ```
 

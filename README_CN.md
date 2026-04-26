@@ -33,10 +33,10 @@ Memoh 是一个常驻运行的容器化 AI Agent 系统。你可以创建多个 
 一键安装（**需先安装 [Docker](https://www.docker.com/get-started/)**）：
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sh
 ```
 
-*静默安装（全部默认）：`curl -fsSL ... | sudo sh -s -- -y`*
+*静默安装（全部默认）：`curl -fsSL ... | sh -s -- -y`*
 
 或手动部署：
 
@@ -45,20 +45,22 @@ git clone --depth 1 https://github.com/memohai/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # 编辑 config.toml
-sudo docker compose up -d
+docker compose up -d
 ```
 
 > **安装指定版本：**
 > ```bash
-> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
+> curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
 > ```
 >
 > **使用中国大陆镜像加速：**
 > ```bash
-> curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
+> curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 > ```
 >
-> macOS 或用户已在 `docker` 用户组中时，无需 `sudo`。
+> 不要用 `sudo` 运行整个安装脚本。脚本会在 Docker 需要时只对
+> `docker` 命令使用 `sudo`。macOS 或用户已在 `docker` 用户组中时，
+> Docker 命令通常也无需 `sudo`。
 
 启动后访问 <http://localhost:8082>。默认登录：`admin` / `admin123`
 

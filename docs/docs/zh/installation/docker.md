@@ -52,15 +52,19 @@ docker compose --profile qdrant --profile sparse --profile browser up -d
 官方脚本（本机已装好 Docker 与 Compose）：
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sh
 ```
+
+请用普通用户运行安装脚本，不要给整个脚本套 `sudo`。如果 Docker
+需要提权，脚本会只对 `docker` 命令使用 `sudo`。如果确实要以 root
+运行整个安装脚本，需要显式设置 `MEMOH_ALLOW_ROOT_INSTALL=true`。
 
 脚本会：检查 Docker/Compose；交互问配置（工作区、数据目录、管理员、JWT、Postgres 密码、是否开 sparse、浏览器核等）；从 GitHub 取最新发布并克隆；按 Docker 模板生成 `config.toml`；钉死镜像版本；按选的核编浏览器镜像并拉齐服务。
 
 **静默安装**（全默认、无提问）：
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- -y
+curl -fsSL https://memoh.sh | sh -s -- -y
 ```
 
 静默时默认大概：工作区 `~/memoh`；数据 `~/memoh/data`；管理员 `admin` / `admin123`；JWT 随机；Postgres 密码 `memoh123`。
@@ -68,19 +72,19 @@ curl -fsSL https://memoh.sh | sudo sh -s -- -y
 **指定版本：**
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- --version v0.6.0
+curl -fsSL https://memoh.sh | sh -s -- --version v0.6.0
 ```
 
 或：
 
 ```bash
-curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
+curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
 ```
 
 **大陆镜像**（拉镜像慢时）：
 
 ```bash
-curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
+curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 ```
 
 > 环境变量可组合，例如 `MEMOH_VERSION=v0.6.0 USE_CN_MIRROR=true`。
@@ -102,13 +106,13 @@ cp conf/app.docker.toml config.toml
 然后（推荐开 Qdrant、浏览器、sparse）：
 
 ```bash
-sudo POSTGRES_PASSWORD=你的库密码 docker compose --profile qdrant --profile browser --profile sparse up -d
+POSTGRES_PASSWORD=你的库密码 docker compose --profile qdrant --profile browser --profile sparse up -d
 ```
 
 只跑核心（无向量、无浏览器）：
 
 ```bash
-sudo POSTGRES_PASSWORD=你的库密码 docker compose up -d
+POSTGRES_PASSWORD=你的库密码 docker compose up -d
 ```
 
 > macOS 或用户已在 `docker` 组里，一般不必 `sudo`。
@@ -127,7 +131,7 @@ registry = "memoh.cn"
 并叠加国内 overlay：
 
 ```bash
-sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
+docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
   --profile qdrant --profile browser up -d
 ```
 
@@ -184,6 +188,7 @@ docker compose pull && docker compose up -d  # 更新镜像再起
 | `POSTGRES_PASSWORD` | `memoh123` | 须与 `config.toml` 里 `postgres.password` 一致 |
 | `MEMOH_CONFIG` | `./config.toml` | 配置文件路径 |
 | `MEMOH_VERSION` | 最新发版 | 要装的 git 标签，也用于钉死镜像 |
+| `MEMOH_ALLOW_ROOT_INSTALL` | `false` | 允许以 root 运行安装脚本本身。建议保持未设置，用普通用户运行安装脚本。 |
 | `USE_CN_MIRROR` | `false` | 是否用大陆镜像 |
 | `BROWSER_CORES` | `chromium,firefox` | 浏览器镜像里包含的引擎 |
 | `BROWSER_TAG` | `latest` | 浏览器镜像 tag |

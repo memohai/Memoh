@@ -33,10 +33,10 @@ Memoh is an always-on, containerized AI agent system. Create multiple AI bots, e
 One-click install (**requires [Docker](https://www.docker.com/get-started/)**):
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sh
 ```
 
-*Silent install with all defaults: `curl -fsSL ... | sudo sh -s -- -y`*
+*Silent install with all defaults: `curl -fsSL ... | sh -s -- -y`*
 
 Or manually:
 
@@ -45,20 +45,22 @@ git clone --depth 1 https://github.com/memohai/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml
-sudo docker compose up -d
+docker compose up -d
 ```
 
 > **Install a specific version:**
 > ```bash
-> curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
+> curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
 > ```
 >
 > **Use CN mirror for slow image pulls:**
 > ```bash
-> curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
+> curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 > ```
 >
-> On macOS or if your user is in the `docker` group, `sudo` is not required.
+> Do not run the whole installer with `sudo`. The installer will use `sudo docker`
+> internally if Docker requires it. On macOS or if your user is in the `docker`
+> group, `sudo` is not required for Docker either.
 
 Visit <http://localhost:8082> after startup. Default login: `admin` / `admin123`
 

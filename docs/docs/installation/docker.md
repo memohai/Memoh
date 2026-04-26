@@ -52,8 +52,13 @@ For more details on memory modes, see [Built-in Memory Provider](/memory-provide
 Run the official install script (requires Docker and Docker Compose):
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh
+curl -fsSL https://memoh.sh | sh
 ```
+
+Run the installer as your normal user. Do not wrap the whole script in `sudo`;
+the script will use `sudo docker` internally only if Docker requires it. If you
+intentionally need to run the whole installer as root, set
+`MEMOH_ALLOW_ROOT_INSTALL=true` explicitly.
 
 The script will:
 
@@ -71,7 +76,7 @@ The script will:
 **Silent install** (use all defaults, no prompts):
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- -y
+curl -fsSL https://memoh.sh | sh -s -- -y
 ```
 
 Defaults when running silently:
@@ -87,34 +92,34 @@ If the script detects an existing Memoh installation in silent mode, it defaults
 **Force a clean reinstall** (removes Memoh Docker data before starting again):
 
 ```bash
-curl -fsSL https://memoh.sh | sudo MEMOH_INSTALL_MODE=reinstall sh
+curl -fsSL https://memoh.sh | MEMOH_INSTALL_MODE=reinstall sh
 ```
 
 You can also pass the install mode as an argument:
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- --install-mode reinstall
+curl -fsSL https://memoh.sh | sh -s -- --install-mode reinstall
 ```
 
 **Install a specific version:**
 
 ```bash
-curl -fsSL https://memoh.sh | sudo sh -s -- --version v0.6.0
+curl -fsSL https://memoh.sh | sh -s -- --version v0.6.0
 ```
 
 Or using the environment variable:
 
 ```bash
-curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 sh
+curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
 ```
 
 **Use China mainland mirror** (for slow image pulls):
 
 ```bash
-curl -fsSL https://memoh.sh | sudo USE_CN_MIRROR=true sh
+curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 ```
 
-> Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | sudo MEMOH_VERSION=v0.6.0 USE_CN_MIRROR=true sh`
+> Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 USE_CN_MIRROR=true sh`
 
 ## Manual Install
 
@@ -133,13 +138,13 @@ Edit `config.toml` — at minimum change:
 Then start (recommended — with Qdrant, Browser, and Sparse):
 
 ```bash
-sudo POSTGRES_PASSWORD=your-db-password docker compose --profile qdrant --profile browser --profile sparse up -d
+POSTGRES_PASSWORD=your-db-password docker compose --profile qdrant --profile browser --profile sparse up -d
 ```
 
 Or start core services only (no vector DB or browser automation):
 
 ```bash
-sudo POSTGRES_PASSWORD=your-db-password docker compose up -d
+POSTGRES_PASSWORD=your-db-password docker compose up -d
 ```
 
 > On macOS or if your user is in the `docker` group, `sudo` is not required.
@@ -158,7 +163,7 @@ registry = "memoh.cn"
 And add the China mirror compose overlay:
 
 ```bash
-sudo docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
+docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
   --profile qdrant --profile browser up -d
 ```
 
@@ -219,6 +224,7 @@ docker compose pull && docker compose up -d  # Update to latest images
 | `MEMOH_CONFIG`     | `./config.toml`    | Path to the configuration file               |
 | `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v0.6.0`). Also pins Docker image versions. |
 | `MEMOH_INSTALL_MODE` | `auto`           | Install mode: `auto`, `fresh`, `upgrade`, or `reinstall` |
+| `MEMOH_ALLOW_ROOT_INSTALL` | `false` | Allow running the installer shell itself as root. Prefer leaving this unset and running the installer as a normal user. |
 | `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland image mirrors |
 | `BROWSER_CORES`    | `chromium,firefox`  | Browser engines to include in the browser image |
 | `BROWSER_TAG`      | `latest`           | Docker tag for the browser image |
