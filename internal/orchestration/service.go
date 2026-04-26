@@ -278,6 +278,9 @@ func (s *Service) GetRunSnapshotAtSeq(ctx context.Context, caller ControlIdentit
 		return nil, err
 	}
 	if snapshotSeq == 0 {
+		if asOfSeq != 0 {
+			return nil, fmt.Errorf("%w: run snapshot unavailable at as_of_seq", ErrInvalidArgument)
+		}
 		runSnapshot = toRun(row)
 		snapshotSeq = lastEventSeq
 	}
@@ -751,6 +754,9 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 		return &result, nil
 	}
 
+	if taskSuperseded(lockedTask) {
+		return nil, ErrTaskImmutable
+	}
 	if lockedTask.Status == TaskStatusWaitingHuman || lockedTask.WaitingCheckpointID.Valid {
 		return nil, ErrTaskAlreadyWaitingHuman
 	}
@@ -878,6 +884,14 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 		if err != nil {
 			return nil, fmt.Errorf("list sibling tasks for run barrier: %w", err)
 		}
+		runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, pgRunID)
+		if err != nil {
+			return nil, fmt.Errorf("list run attempts for run barrier: %w", err)
+		}
+		runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, pgRunID)
+		if err != nil {
+			return nil, fmt.Errorf("list run verifications for run barrier: %w", err)
+		}
 		for _, sibling := range siblingTasks {
 			if sibling.ID == lockedTask.ID {
 				continue
@@ -897,6 +911,9 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 					return nil, ErrRunBarrierUnsupported
 				}
 				continue
+			}
+			if err := s.pauseRunBarrierSiblingWork(ctx, qtx, pgRunID, checkpointUUID, lockedSibling, runAttempts, runVerifications); err != nil {
+				return nil, err
 			}
 			waitingSibling, err := qtx.MarkOrchestrationTaskWaitingHuman(ctx, sqlc.MarkOrchestrationTaskWaitingHumanParams{
 				ID:                  lockedSibling.ID,
@@ -1120,9 +1137,9 @@ func (s *Service) CommitArtifact(ctx context.Context, caller ControlIdentity, re
 		IdempotencyKey:   normalizedIdempotencyKey,
 		Payload: map[string]any{
 			"artifact_id":  artifactID,
-			"run_id":       req.RunID,
-			"task_id":      req.TaskID,
-			"attempt_id":   strings.TrimSpace(req.AttemptID),
+			"run_id":       pgRunID.String(),
+			"task_id":      pgTaskID.String(),
+			"attempt_id":   attemptID.String(),
 			"kind":         artifactRow.Kind,
 			"uri":          artifactRow.Uri,
 			"version":      artifactRow.Version,
@@ -1483,19 +1500,34 @@ func taskSupportsHumanCheckpoint(status string) bool {
 	return status == TaskStatusReady
 }
 
+func taskSuperseded(task sqlc.OrchestrationTask) bool {
+	return task.SupersededByPlannerEpoch.Valid
+}
+
 func taskPauseableByRunBarrier(task sqlc.OrchestrationTask) bool {
+	if taskSuperseded(task) {
+		return false
+	}
 	if task.WaitingCheckpointID.Valid {
 		return false
 	}
-	return task.Status == TaskStatusReady
+	switch task.Status {
+	case TaskStatusReady, TaskStatusDispatching, TaskStatusRunning, TaskStatusVerifying:
+		return true
+	default:
+		return false
+	}
 }
 
 func taskBlocksRunBarrier(task sqlc.OrchestrationTask) bool {
+	if taskSuperseded(task) {
+		return false
+	}
 	switch task.Status {
 	case TaskStatusWaitingHuman:
 		return true
 	case TaskStatusDispatching, TaskStatusRunning, TaskStatusVerifying:
-		return true
+		return false
 	case TaskStatusCreated, TaskStatusReady, TaskStatusBlocked, TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
 		return false
 	default:
@@ -1508,6 +1540,156 @@ func taskWaitingOnRunBarrier(task sqlc.OrchestrationTask, checkpointID pgtype.UU
 		task.WaitingScope == "run" &&
 		task.WaitingCheckpointID.Valid &&
 		task.WaitingCheckpointID == checkpointID
+}
+
+func (s *Service) pauseRunBarrierSiblingWork(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runID pgtype.UUID,
+	checkpointID pgtype.UUID,
+	taskRow sqlc.OrchestrationTask,
+	runAttempts []sqlc.OrchestrationTaskAttempt,
+	runVerifications []sqlc.OrchestrationTaskVerification,
+) error {
+	if taskRow.Status == TaskStatusReady {
+		return nil
+	}
+	if taskRow.Status == TaskStatusVerifying {
+		return s.pauseRunBarrierSiblingVerification(ctx, qtx, runID, checkpointID, taskRow, runVerifications)
+	}
+	pausedAttempt := false
+	for _, attempt := range runAttempts {
+		if attempt.TaskID != taskRow.ID || isTerminalAttemptStatus(attempt.Status) {
+			continue
+		}
+		pausedAttempt = true
+		lockedAttempt, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, attempt.ID)
+		if err != nil {
+			return fmt.Errorf("lock sibling attempt for run barrier: %w", err)
+		}
+		if isTerminalAttemptStatus(lockedAttempt.Status) {
+			continue
+		}
+		var finalAttempt sqlc.OrchestrationTaskAttempt
+		switch lockedAttempt.Status {
+		case TaskAttemptStatusCreated:
+			finalAttempt, err = qtx.RetireCreatedOrchestrationTaskAttemptFailed(ctx, sqlc.RetireCreatedOrchestrationTaskAttemptFailedParams{
+				ID:             lockedAttempt.ID,
+				FailureClass:   "run_barrier_paused",
+				TerminalReason: "attempt paused by run barrier before execution start",
+			})
+			if err == nil {
+				_, err = s.appendEvent(ctx, qtx, runID, eventSpec{
+					TaskID:           finalAttempt.TaskID,
+					AttemptID:        finalAttempt.ID,
+					CheckpointID:     checkpointID,
+					AggregateType:    "attempt",
+					AggregateID:      finalAttempt.ID,
+					AggregateVersion: finalAttempt.ClaimEpoch,
+					Type:             "run.event.attempt.failed",
+					Payload: map[string]any{
+						"attempt_id":      finalAttempt.ID.String(),
+						"task_id":         finalAttempt.TaskID.String(),
+						"previous_status": lockedAttempt.Status,
+						"new_status":      finalAttempt.Status,
+						"failure_class":   finalAttempt.FailureClass,
+						"terminal_reason": finalAttempt.TerminalReason,
+					},
+				})
+			}
+		case TaskAttemptStatusRunning:
+			finalAttempt, err = qtx.PreemptRunningOrchestrationTaskAttemptFailed(ctx, sqlc.PreemptRunningOrchestrationTaskAttemptFailedParams{
+				ID:             lockedAttempt.ID,
+				ClaimEpoch:     lockedAttempt.ClaimEpoch,
+				FailureClass:   "run_barrier_preempted",
+				TerminalReason: "attempt preempted by run barrier during execution",
+			})
+			if err == nil {
+				_, err = s.appendEvent(ctx, qtx, runID, eventSpec{
+					TaskID:           finalAttempt.TaskID,
+					AttemptID:        finalAttempt.ID,
+					CheckpointID:     checkpointID,
+					AggregateType:    "attempt",
+					AggregateID:      finalAttempt.ID,
+					AggregateVersion: finalAttempt.ClaimEpoch,
+					Type:             "run.event.attempt.failed",
+					Payload: map[string]any{
+						"attempt_id":      finalAttempt.ID.String(),
+						"task_id":         finalAttempt.TaskID.String(),
+						"previous_status": lockedAttempt.Status,
+						"new_status":      finalAttempt.Status,
+						"failure_class":   finalAttempt.FailureClass,
+						"terminal_reason": finalAttempt.TerminalReason,
+					},
+				})
+			}
+		case TaskAttemptStatusClaimed, TaskAttemptStatusBinding:
+			_, err = s.retireAttempt(ctx, qtx, lockedAttempt, attemptRetirementSpec{
+				Status:         TaskAttemptStatusFailed,
+				FailureClass:   "run_barrier_paused",
+				TerminalReason: "attempt paused by run barrier before execution start",
+			})
+		}
+		if err != nil {
+			return fmt.Errorf("pause sibling attempt for run barrier: %w", err)
+		}
+	}
+	if !pausedAttempt {
+		return ErrRunBarrierUnsupported
+	}
+	return nil
+}
+
+func (s *Service) pauseRunBarrierSiblingVerification(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runID pgtype.UUID,
+	checkpointID pgtype.UUID,
+	taskRow sqlc.OrchestrationTask,
+	runVerifications []sqlc.OrchestrationTaskVerification,
+) error {
+	for _, verification := range runVerifications {
+		if verification.TaskID != taskRow.ID || isTerminalVerificationStatus(verification.Status) {
+			continue
+		}
+		if verification.Status == TaskVerificationStatusCreated {
+			return nil
+		}
+		lockedVerification, err := qtx.GetOrchestrationTaskVerificationByIDForUpdate(ctx, verification.ID)
+		if err != nil {
+			return fmt.Errorf("lock sibling verification for run barrier: %w", err)
+		}
+		if isTerminalVerificationStatus(lockedVerification.Status) {
+			return nil
+		}
+		requeuedVerification, err := qtx.RequeueOrchestrationTaskVerification(ctx, sqlc.RequeueOrchestrationTaskVerificationParams{
+			ID:         lockedVerification.ID,
+			ClaimEpoch: lockedVerification.ClaimEpoch,
+		})
+		if err != nil {
+			return fmt.Errorf("requeue sibling verification for run barrier: %w", err)
+		}
+		if _, err := s.appendEvent(ctx, qtx, runID, eventSpec{
+			TaskID:           requeuedVerification.TaskID,
+			CheckpointID:     checkpointID,
+			AggregateType:    "verification",
+			AggregateID:      requeuedVerification.ID,
+			AggregateVersion: requeuedVerification.ClaimEpoch,
+			Type:             "run.event.verification.requeued",
+			Payload: map[string]any{
+				"verification_id": requeuedVerification.ID.String(),
+				"task_id":         requeuedVerification.TaskID.String(),
+				"previous_status": lockedVerification.Status,
+				"new_status":      requeuedVerification.Status,
+				"result_id":       requeuedVerification.ResultID.String(),
+				"terminal_reason": "verification preempted by run barrier",
+			},
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
+	return ErrRunBarrierUnsupported
 }
 
 func findOpenRunBlockingCheckpoint(ctx context.Context, qtx *sqlc.Queries, runID pgtype.UUID) (sqlc.OrchestrationHumanCheckpoint, bool, error) {
@@ -2099,12 +2281,17 @@ func filterArtifacts(items []Artifact, taskID string, kinds []string) []Artifact
 func filterHash(values ...[]string) string {
 	parts := make([]string, 0, len(values))
 	for _, group := range values {
+		seen := make(map[string]struct{}, len(group))
 		normalized := make([]string, 0, len(group))
 		for _, value := range group {
 			trimmed := strings.TrimSpace(value)
 			if trimmed == "" {
 				continue
 			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
 			normalized = append(normalized, trimmed)
 		}
 		sort.Strings(normalized)
