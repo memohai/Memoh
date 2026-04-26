@@ -81,7 +81,7 @@ WITH next_attempt AS (
     AND tasks.waiting_checkpoint_id IS NULL
     AND tasks.superseded_by_planner_epoch IS NULL
     AND runs.lifecycle_status = 'running'
-    AND tasks.worker_profile = ANY($5::text[])
+    AND tasks.worker_profile = ANY($6::text[])
   ORDER BY attempts.created_at ASC, attempts.id ASC
   LIMIT 1
   FOR UPDATE OF attempts, tasks, runs SKIP LOCKED
@@ -90,27 +90,30 @@ UPDATE orchestration_task_attempts
 SET status = 'claimed',
     worker_id = $1,
     executor_id = $2,
+    worker_lease_token = $3,
     claim_epoch = claim_epoch + 1,
-    claim_token = $3,
-    lease_expires_at = $4,
+    claim_token = $4,
+    lease_expires_at = $5,
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_attempt)
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type ClaimNextCreatedOrchestrationTaskAttemptParams struct {
-	WorkerID       string             `json:"worker_id"`
-	ExecutorID     string             `json:"executor_id"`
-	ClaimToken     string             `json:"claim_token"`
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	WorkerProfiles []string           `json:"worker_profiles"`
+	WorkerID         string             `json:"worker_id"`
+	ExecutorID       string             `json:"executor_id"`
+	WorkerLeaseToken string             `json:"worker_lease_token"`
+	ClaimToken       string             `json:"claim_token"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
+	WorkerProfiles   []string           `json:"worker_profiles"`
 }
 
 func (q *Queries) ClaimNextCreatedOrchestrationTaskAttempt(ctx context.Context, arg ClaimNextCreatedOrchestrationTaskAttemptParams) (OrchestrationTaskAttempt, error) {
 	row := q.db.QueryRow(ctx, claimNextCreatedOrchestrationTaskAttempt,
 		arg.WorkerID,
 		arg.ExecutorID,
+		arg.WorkerLeaseToken,
 		arg.ClaimToken,
 		arg.LeaseExpiresAt,
 		arg.WorkerProfiles,
@@ -123,6 +126,7 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskAttempt(ctx context.Context, 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -152,7 +156,7 @@ WITH next_verification AS (
     AND tasks.status = 'verifying'
     AND tasks.superseded_by_planner_epoch IS NULL
     AND runs.lifecycle_status = 'running'
-    AND verifications.verifier_profile = ANY($5::text[])
+    AND verifications.verifier_profile = ANY($6::text[])
   ORDER BY verifications.created_at ASC, verifications.id ASC
   LIMIT 1
   FOR UPDATE OF verifications, tasks, runs SKIP LOCKED
@@ -161,18 +165,20 @@ UPDATE orchestration_task_verifications
 SET status = 'claimed',
     worker_id = $1,
     executor_id = $2,
+    worker_lease_token = $3,
     claim_epoch = claim_epoch + 1,
-    claim_token = $3,
-    lease_expires_at = $4,
+    claim_token = $4,
+    lease_expires_at = $5,
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_verification)
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type ClaimNextCreatedOrchestrationTaskVerificationParams struct {
 	WorkerID         string             `json:"worker_id"`
 	ExecutorID       string             `json:"executor_id"`
+	WorkerLeaseToken string             `json:"worker_lease_token"`
 	ClaimToken       string             `json:"claim_token"`
 	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
 	VerifierProfiles []string           `json:"verifier_profiles"`
@@ -182,6 +188,7 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskVerification(ctx context.Cont
 	row := q.db.QueryRow(ctx, claimNextCreatedOrchestrationTaskVerification,
 		arg.WorkerID,
 		arg.ExecutorID,
+		arg.WorkerLeaseToken,
 		arg.ClaimToken,
 		arg.LeaseExpiresAt,
 		arg.VerifierProfiles,
@@ -195,6 +202,7 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskVerification(ctx context.Cont
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -1098,7 +1106,7 @@ INSERT INTO orchestration_task_attempts (
   $5,
   $6,
   $7
-) RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+) RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type CreateOrchestrationTaskAttemptParams struct {
@@ -1129,6 +1137,7 @@ func (q *Queries) CreateOrchestrationTaskAttempt(ctx context.Context, arg Create
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -1289,7 +1298,7 @@ INSERT INTO orchestration_task_verifications (
   $5,
   $6,
   $7
-) RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+) RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type CreateOrchestrationTaskVerificationParams struct {
@@ -1321,6 +1330,7 @@ func (q *Queries) CreateOrchestrationTaskVerification(ctx context.Context, arg C
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -1667,7 +1677,7 @@ func (q *Queries) GetOrchestrationRunByIDForUpdate(ctx context.Context, id pgtyp
 }
 
 const getOrchestrationTaskAttemptByID = `-- name: GetOrchestrationTaskAttemptByID :one
-SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
 WHERE id = $1
 `
@@ -1682,6 +1692,7 @@ func (q *Queries) GetOrchestrationTaskAttemptByID(ctx context.Context, id pgtype
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -1700,7 +1711,7 @@ func (q *Queries) GetOrchestrationTaskAttemptByID(ctx context.Context, id pgtype
 }
 
 const getOrchestrationTaskAttemptByIDForUpdate = `-- name: GetOrchestrationTaskAttemptByIDForUpdate :one
-SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
 WHERE id = $1
 FOR UPDATE
@@ -1716,6 +1727,7 @@ func (q *Queries) GetOrchestrationTaskAttemptByIDForUpdate(ctx context.Context, 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -1835,7 +1847,7 @@ func (q *Queries) GetOrchestrationTaskResultByID(ctx context.Context, id pgtype.
 }
 
 const getOrchestrationTaskVerificationByID = `-- name: GetOrchestrationTaskVerificationByID :one
-SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_verifications
 WHERE id = $1
 `
@@ -1851,6 +1863,7 @@ func (q *Queries) GetOrchestrationTaskVerificationByID(ctx context.Context, id p
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -1870,7 +1883,7 @@ func (q *Queries) GetOrchestrationTaskVerificationByID(ctx context.Context, id p
 }
 
 const getOrchestrationTaskVerificationByIDForUpdate = `-- name: GetOrchestrationTaskVerificationByIDForUpdate :one
-SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_verifications
 WHERE id = $1
 FOR UPDATE
@@ -1887,6 +1900,7 @@ func (q *Queries) GetOrchestrationTaskVerificationByIDForUpdate(ctx context.Cont
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -1899,6 +1913,31 @@ func (q *Queries) GetOrchestrationTaskVerificationByIDForUpdate(ctx context.Cont
 		&i.TerminalReason,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOrchestrationWorkerByIDForUpdate = `-- name: GetOrchestrationWorkerByIDForUpdate :one
+SELECT id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
+FROM orchestration_workers
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetOrchestrationWorkerByIDForUpdate(ctx context.Context, id string) (OrchestrationWorker, error) {
+	row := q.db.QueryRow(ctx, getOrchestrationWorkerByIDForUpdate, id)
+	var i OrchestrationWorker
+	err := row.Scan(
+		&i.ID,
+		&i.ExecutorID,
+		&i.DisplayName,
+		&i.Capabilities,
+		&i.Status,
+		&i.LeaseToken,
+		&i.LastHeartbeatAt,
+		&i.LeaseExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1958,7 +1997,7 @@ WHERE id = $2
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type HeartbeatOrchestrationTaskAttemptParams struct {
@@ -1977,6 +2016,7 @@ func (q *Queries) HeartbeatOrchestrationTaskAttempt(ctx context.Context, arg Hea
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -2004,7 +2044,7 @@ WHERE id = $2
   AND claim_token = $3
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type HeartbeatOrchestrationTaskVerificationParams struct {
@@ -2024,6 +2064,7 @@ func (q *Queries) HeartbeatOrchestrationTaskVerification(ctx context.Context, ar
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -2050,6 +2091,7 @@ SET status = $1,
     updated_at = now()
 WHERE id = $3
   AND lease_token = $4
+  AND lease_expires_at > now()
 RETURNING id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
 `
 
@@ -2247,7 +2289,7 @@ func (q *Queries) ListCurrentOrchestrationCheckpointsByRun(ctx context.Context, 
 }
 
 const listCurrentOrchestrationTaskAttemptsByRun = `-- name: ListCurrentOrchestrationTaskAttemptsByRun :many
-SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
 WHERE run_id = $1
 ORDER BY created_at ASC, id ASC
@@ -2269,6 +2311,7 @@ func (q *Queries) ListCurrentOrchestrationTaskAttemptsByRun(ctx context.Context,
 			&i.AttemptNo,
 			&i.WorkerID,
 			&i.ExecutorID,
+			&i.WorkerLeaseToken,
 			&i.Status,
 			&i.ClaimEpoch,
 			&i.ClaimToken,
@@ -2330,7 +2373,7 @@ func (q *Queries) ListCurrentOrchestrationTaskDependenciesByRun(ctx context.Cont
 }
 
 const listCurrentOrchestrationTaskVerificationsByRun = `-- name: ListCurrentOrchestrationTaskVerificationsByRun :many
-SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_verifications
 WHERE run_id = $1
 ORDER BY created_at ASC, id ASC
@@ -2353,6 +2396,7 @@ func (q *Queries) ListCurrentOrchestrationTaskVerificationsByRun(ctx context.Con
 			&i.AttemptNo,
 			&i.WorkerID,
 			&i.ExecutorID,
+			&i.WorkerLeaseToken,
 			&i.VerifierProfile,
 			&i.Status,
 			&i.ClaimEpoch,
@@ -2484,7 +2528,7 @@ func (q *Queries) ListDependencyBlockedOrchestrationTasks(ctx context.Context) (
 }
 
 const listExpiredOrchestrationTaskAttempts = `-- name: ListExpiredOrchestrationTaskAttempts :many
-SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
 WHERE status IN ('claimed', 'binding', 'running')
   AND lease_expires_at IS NOT NULL
@@ -2508,6 +2552,7 @@ func (q *Queries) ListExpiredOrchestrationTaskAttempts(ctx context.Context) ([]O
 			&i.AttemptNo,
 			&i.WorkerID,
 			&i.ExecutorID,
+			&i.WorkerLeaseToken,
 			&i.Status,
 			&i.ClaimEpoch,
 			&i.ClaimToken,
@@ -2533,7 +2578,7 @@ func (q *Queries) ListExpiredOrchestrationTaskAttempts(ctx context.Context) ([]O
 }
 
 const listExpiredOrchestrationTaskVerifications = `-- name: ListExpiredOrchestrationTaskVerifications :many
-SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+SELECT id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_verifications
 WHERE status IN ('claimed', 'running')
   AND lease_expires_at IS NOT NULL
@@ -2558,6 +2603,7 @@ func (q *Queries) ListExpiredOrchestrationTaskVerifications(ctx context.Context)
 			&i.AttemptNo,
 			&i.WorkerID,
 			&i.ExecutorID,
+			&i.WorkerLeaseToken,
 			&i.VerifierProfile,
 			&i.Status,
 			&i.ClaimEpoch,
@@ -2689,7 +2735,7 @@ JOIN orchestration_runs r ON r.id = t.run_id
 WHERE t.status = 'ready'
   AND t.superseded_by_planner_epoch IS NULL
   AND r.lifecycle_status = 'running'
-ORDER BY t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC
+ORDER BY t.priority DESC, t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC
 `
 
 func (q *Queries) ListSchedulableOrchestrationTasks(ctx context.Context) ([]OrchestrationTask, error) {
@@ -3026,7 +3072,7 @@ WHERE id = $1
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskAttemptBindingParams struct {
@@ -3044,6 +3090,7 @@ func (q *Queries) MarkOrchestrationTaskAttemptBinding(ctx context.Context, arg M
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3072,7 +3119,7 @@ WHERE id = $1
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskAttemptCompletedParams struct {
@@ -3090,6 +3137,7 @@ func (q *Queries) MarkOrchestrationTaskAttemptCompleted(ctx context.Context, arg
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3120,7 +3168,7 @@ WHERE id = $3
   AND claim_token = $4
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskAttemptFailedParams struct {
@@ -3145,6 +3193,7 @@ func (q *Queries) MarkOrchestrationTaskAttemptFailed(ctx context.Context, arg Ma
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3173,7 +3222,7 @@ SET status = 'lost',
 WHERE id = $2
   AND status IN ('claimed', 'binding', 'running')
   AND claim_epoch = $3
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskAttemptLostParams struct {
@@ -3192,6 +3241,7 @@ func (q *Queries) MarkOrchestrationTaskAttemptLost(ctx context.Context, arg Mark
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3219,7 +3269,7 @@ WHERE id = $1
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskAttemptRunningParams struct {
@@ -3237,6 +3287,7 @@ func (q *Queries) MarkOrchestrationTaskAttemptRunning(ctx context.Context, arg M
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3611,7 +3662,7 @@ WHERE id = $5
   AND claim_token = $6
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskVerificationCompletedParams struct {
@@ -3641,6 +3692,7 @@ func (q *Queries) MarkOrchestrationTaskVerificationCompleted(ctx context.Context
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -3674,7 +3726,7 @@ WHERE id = $5
   AND claim_token = $6
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskVerificationFailedParams struct {
@@ -3704,6 +3756,7 @@ func (q *Queries) MarkOrchestrationTaskVerificationFailed(ctx context.Context, a
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -3736,7 +3789,7 @@ SET status = 'lost',
 WHERE id = $5
   AND status IN ('claimed', 'running')
   AND claim_epoch = $6
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskVerificationLostParams struct {
@@ -3766,6 +3819,7 @@ func (q *Queries) MarkOrchestrationTaskVerificationLost(ctx context.Context, arg
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -3794,7 +3848,7 @@ WHERE id = $1
   AND claim_token = $2
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type MarkOrchestrationTaskVerificationRunningParams struct {
@@ -3813,6 +3867,7 @@ func (q *Queries) MarkOrchestrationTaskVerificationRunning(ctx context.Context, 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -3940,7 +3995,7 @@ SET status = 'failed',
 WHERE id = $3
   AND status = 'running'
   AND claim_epoch = $4
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type PreemptRunningOrchestrationTaskAttemptFailedParams struct {
@@ -3965,6 +4020,7 @@ func (q *Queries) PreemptRunningOrchestrationTaskAttemptFailed(ctx context.Conte
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -3987,6 +4043,7 @@ UPDATE orchestration_task_attempts
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -3994,7 +4051,7 @@ SET status = 'created',
 WHERE id = $1
   AND status IN ('claimed', 'binding')
   AND claim_token = $2
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type ReleaseOrchestrationTaskAttemptClaimParams struct {
@@ -4012,6 +4069,7 @@ func (q *Queries) ReleaseOrchestrationTaskAttemptClaim(ctx context.Context, arg 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -4034,6 +4092,7 @@ UPDATE orchestration_task_verifications
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -4041,7 +4100,7 @@ SET status = 'created',
 WHERE id = $1
   AND status = 'claimed'
   AND claim_token = $2
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type ReleaseOrchestrationTaskVerificationClaimParams struct {
@@ -4060,6 +4119,7 @@ func (q *Queries) ReleaseOrchestrationTaskVerificationClaim(ctx context.Context,
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -4083,6 +4143,7 @@ UPDATE orchestration_task_verifications
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -4091,7 +4152,7 @@ SET status = 'created',
 WHERE id = $1
   AND status IN ('claimed', 'running')
   AND claim_epoch = $2
-RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type RequeueOrchestrationTaskVerificationParams struct {
@@ -4110,6 +4171,7 @@ func (q *Queries) RequeueOrchestrationTaskVerification(ctx context.Context, arg 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.VerifierProfile,
 		&i.Status,
 		&i.ClaimEpoch,
@@ -4194,7 +4256,7 @@ SET status = 'failed',
     updated_at = now()
 WHERE id = $3
   AND status = 'created'
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type RetireCreatedOrchestrationTaskAttemptFailedParams struct {
@@ -4213,6 +4275,7 @@ func (q *Queries) RetireCreatedOrchestrationTaskAttemptFailed(ctx context.Contex
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,
@@ -4243,7 +4306,7 @@ WHERE id = $3
   AND claim_token = $4
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > clock_timestamp()
-RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 `
 
 type RetireOrchestrationTaskAttemptFailedParams struct {
@@ -4268,6 +4331,7 @@ func (q *Queries) RetireOrchestrationTaskAttemptFailed(ctx context.Context, arg 
 		&i.AttemptNo,
 		&i.WorkerID,
 		&i.ExecutorID,
+		&i.WorkerLeaseToken,
 		&i.Status,
 		&i.ClaimEpoch,
 		&i.ClaimToken,

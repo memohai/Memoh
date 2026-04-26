@@ -41,14 +41,15 @@ func (s *Service) ClaimNextVerification(ctx context.Context, claim VerificationC
 	}
 	leaseToken := strings.TrimSpace(claim.LeaseToken)
 
-	if _, err := s.RegisterWorker(ctx, WorkerRegistration{
+	lease, err := s.RegisterWorker(ctx, WorkerRegistration{
 		WorkerID:        workerID,
 		ExecutorID:      executorID,
 		DisplayName:     workerID,
 		Capabilities:    verifierCapabilities(supportedProfiles),
 		LeaseToken:      leaseToken,
 		LeaseTTLSeconds: int(ttl / time.Second),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -62,6 +63,7 @@ func (s *Service) ClaimNextVerification(ctx context.Context, claim VerificationC
 	row, err := qtx.ClaimNextCreatedOrchestrationTaskVerification(ctx, sqlc.ClaimNextCreatedOrchestrationTaskVerificationParams{
 		WorkerID:         workerID,
 		ExecutorID:       executorID,
+		WorkerLeaseToken: lease.LeaseToken,
 		VerifierProfiles: supportedProfiles,
 		ClaimToken:       uuid.NewString(),
 		LeaseExpiresAt:   timeToPg(time.Now().Add(ttl)),
@@ -176,6 +178,11 @@ func (s *Service) StartVerification(ctx context.Context, verificationID, claimTo
 		return nil, ErrVerificationLeaseConflict
 	}
 	if leaseExpired(row.LeaseExpiresAt) {
+		return nil, ErrVerificationLeaseConflict
+	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
 		return nil, ErrVerificationLeaseConflict
 	}
 	if row.Status != TaskVerificationStatusClaimed && row.Status != TaskVerificationStatusRunning {
@@ -293,6 +300,11 @@ func (s *Service) HeartbeatVerification(ctx context.Context, input VerificationH
 	if leaseExpired(row.LeaseExpiresAt) {
 		return nil, ErrVerificationLeaseConflict
 	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrVerificationLeaseConflict
+	}
 
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, row.RunID)
 	if err != nil {
@@ -398,6 +410,11 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 	}
 	if row.Status != TaskVerificationStatusRunning {
 		return nil, ErrVerificationImmutable
+	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrVerificationLeaseConflict
 	}
 
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, row.RunID)
@@ -659,6 +676,42 @@ func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) 
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return recovered, fmt.Errorf("lock task for expired verification: %w", err)
+		}
+
+		if row.Status == TaskVerificationStatusClaimed {
+			releasedRow, err := qtx.ReleaseOrchestrationTaskVerificationClaim(ctx, sqlc.ReleaseOrchestrationTaskVerificationClaimParams{
+				ID:         row.ID,
+				ClaimToken: row.ClaimToken,
+			})
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue
+				}
+				return recovered, fmt.Errorf("release expired verification claim: %w", err)
+			}
+			if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+				TaskID:           releasedRow.TaskID,
+				AggregateType:    "verification",
+				AggregateID:      releasedRow.ID,
+				AggregateVersion: releasedRow.ClaimEpoch,
+				Type:             "run.event.verification.requeued",
+				Payload: map[string]any{
+					"verification_id": releasedRow.ID.String(),
+					"task_id":         releasedRow.TaskID.String(),
+					"previous_status": row.Status,
+					"new_status":      releasedRow.Status,
+					"terminal_reason": "verification lease expired before execution start",
+				},
+			}); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return recovered, fmt.Errorf("commit claimed verification requeue tx: %w", err)
+			}
+			recovered++
+			continue
 		}
 
 		lostRow, err := qtx.MarkOrchestrationTaskVerificationLost(ctx, sqlc.MarkOrchestrationTaskVerificationLostParams{

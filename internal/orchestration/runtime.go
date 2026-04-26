@@ -148,7 +148,7 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("lock run for planning intent: %w", err)
 	}
-	if !runAcceptsPlanningIntent(runRow.LifecycleStatus, intent.BasePlannerEpoch, runRow.PlannerEpoch) {
+	if !runAcceptsPlanningIntent(intent.Kind, runRow.LifecycleStatus, intent.BasePlannerEpoch, runRow.PlannerEpoch) {
 		reason := fmt.Sprintf("stale planning intent for run status=%s base_epoch=%d current_epoch=%d", runRow.LifecycleStatus, intent.BasePlannerEpoch, runRow.PlannerEpoch)
 		_, failErr := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
 			ID:            intent.ID,
@@ -1111,14 +1111,15 @@ func (s *Service) ClaimNextAttempt(ctx context.Context, claim AttemptClaim) (*Ta
 	}
 	leaseToken := strings.TrimSpace(claim.LeaseToken)
 
-	if _, err := s.RegisterWorker(ctx, WorkerRegistration{
+	lease, err := s.RegisterWorker(ctx, WorkerRegistration{
 		WorkerID:        workerID,
 		ExecutorID:      executorID,
 		DisplayName:     workerID,
 		Capabilities:    workerCapabilities(supportedProfiles),
 		LeaseToken:      leaseToken,
 		LeaseTTLSeconds: int(ttl / time.Second),
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -1130,11 +1131,12 @@ func (s *Service) ClaimNextAttempt(ctx context.Context, claim AttemptClaim) (*Ta
 	qtx := s.queries.WithTx(tx)
 
 	attemptRow, err := qtx.ClaimNextCreatedOrchestrationTaskAttempt(ctx, sqlc.ClaimNextCreatedOrchestrationTaskAttemptParams{
-		WorkerID:       workerID,
-		ExecutorID:     executorID,
-		WorkerProfiles: supportedProfiles,
-		ClaimToken:     uuid.NewString(),
-		LeaseExpiresAt: timeToPg(time.Now().Add(ttl)),
+		WorkerID:         workerID,
+		ExecutorID:       executorID,
+		WorkerLeaseToken: lease.LeaseToken,
+		WorkerProfiles:   supportedProfiles,
+		ClaimToken:       uuid.NewString(),
+		LeaseExpiresAt:   timeToPg(time.Now().Add(ttl)),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1204,6 +1206,11 @@ func (s *Service) ensureAttemptBinding(ctx context.Context, attemptID pgtype.UUI
 		return ErrAttemptLeaseConflict
 	}
 	if leaseExpired(attemptRow.LeaseExpiresAt) {
+		return ErrAttemptLeaseConflict
+	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+		return err
+	} else if !ok {
 		return ErrAttemptLeaseConflict
 	}
 	switch attemptRow.Status {
@@ -1302,6 +1309,11 @@ func (s *Service) advanceAttemptToRunning(ctx context.Context, attemptID pgtype.
 		return nil, ErrAttemptLeaseConflict
 	}
 	if leaseExpired(attemptRow.LeaseExpiresAt) {
+		return nil, ErrAttemptLeaseConflict
+	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
 		return nil, ErrAttemptLeaseConflict
 	}
 	if attemptRow.Status == TaskAttemptStatusRunning {
@@ -1447,6 +1459,11 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 	if leaseExpired(attemptRow.LeaseExpiresAt) {
 		return nil, ErrAttemptLeaseConflict
 	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrAttemptLeaseConflict
+	}
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, attemptRow.RunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1541,6 +1558,11 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 	}
 	if attemptRow.Status != TaskAttemptStatusRunning {
 		return nil, ErrAttemptImmutable
+	}
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrAttemptLeaseConflict
 	}
 
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, attemptRow.RunID)
@@ -1778,7 +1800,11 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			_ = tx.Rollback(ctx)
 			return recovered, fmt.Errorf("lock task for expired attempt: %w", err)
 		}
-		if attemptRow.Status == TaskAttemptStatusBinding {
+		if attemptRow.Status == TaskAttemptStatusClaimed || attemptRow.Status == TaskAttemptStatusBinding {
+			requeueReason := "attempt lease expired before execution start"
+			if attemptRow.Status == TaskAttemptStatusBinding {
+				requeueReason = "attempt binding lease expired before execution start"
+			}
 			releasedAttempt, err := qtx.ReleaseOrchestrationTaskAttemptClaim(ctx, sqlc.ReleaseOrchestrationTaskAttemptClaimParams{
 				ID:         attemptRow.ID,
 				ClaimToken: attemptRow.ClaimToken,
@@ -1802,14 +1828,14 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 					"task_id":         releasedAttempt.TaskID.String(),
 					"previous_status": attemptRow.Status,
 					"new_status":      releasedAttempt.Status,
-					"terminal_reason": "attempt binding lease expired before execution start",
+					"terminal_reason": requeueReason,
 				},
 			}); err != nil {
 				_ = tx.Rollback(ctx)
 				return recovered, err
 			}
 			if err := tx.Commit(ctx); err != nil {
-				return recovered, fmt.Errorf("commit binding attempt requeue tx: %w", err)
+				return recovered, fmt.Errorf("commit pre-start attempt requeue tx: %w", err)
 			}
 			recovered++
 			continue
@@ -2101,6 +2127,32 @@ func normalizeLeaseTTL(rawSeconds int, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return time.Duration(rawSeconds) * time.Second
+}
+
+func ensureWorkerLeaseSnapshot(ctx context.Context, qtx *sqlc.Queries, workerID, executorID, workerLeaseToken string) (bool, error) {
+	workerID = strings.TrimSpace(workerID)
+	executorID = strings.TrimSpace(executorID)
+	workerLeaseToken = strings.TrimSpace(workerLeaseToken)
+	if workerID == "" || executorID == "" || workerLeaseToken == "" {
+		return false, nil
+	}
+	row, err := qtx.GetOrchestrationWorkerByIDForUpdate(ctx, workerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("lock worker lease snapshot: %w", err)
+	}
+	if strings.TrimSpace(row.ExecutorID) != executorID {
+		return false, nil
+	}
+	if strings.TrimSpace(row.LeaseToken) != workerLeaseToken {
+		return false, nil
+	}
+	if leaseExpired(row.LeaseExpiresAt) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *Service) activateDependencySatisfiedTasks(ctx context.Context, qtx *sqlc.Queries) (bool, error) {

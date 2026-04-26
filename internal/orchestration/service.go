@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -824,6 +825,10 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 		Metadata:      marshalObject(req.Metadata),
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_orchestration_human_checkpoints_open_run_barrier_unique" {
+			return nil, ErrRunBarrierAlreadyOpen
+		}
 		return nil, fmt.Errorf("create human checkpoint: %w", err)
 	}
 
@@ -1466,9 +1471,12 @@ func runAcceptsExternalMutations(status string) bool {
 	}
 }
 
-func runAcceptsPlanningIntent(status string, basePlannerEpoch, currentPlannerEpoch int64) bool {
+func runAcceptsPlanningIntent(kind, status string, basePlannerEpoch, currentPlannerEpoch int64) bool {
 	if !runAcceptsExternalMutations(status) {
 		return false
+	}
+	if kind == PlanningIntentKindCheckpointResume {
+		return true
 	}
 	return basePlannerEpoch == currentPlannerEpoch
 }
@@ -2347,6 +2355,9 @@ func resolvePageAsOfSeq(current, requested uint64, after string) (uint64, error)
 
 func resolveEventUntilSeq(current, after, requested uint64) (uint64, error) {
 	if requested == 0 {
+		if after > 0 {
+			return 0, fmt.Errorf("%w: until_seq is required when after_seq is set", ErrInvalidArgument)
+		}
 		requested = current
 	}
 	if requested > current {

@@ -178,7 +178,7 @@ JOIN orchestration_runs r ON r.id = t.run_id
 WHERE t.status = 'ready'
   AND t.superseded_by_planner_epoch IS NULL
   AND r.lifecycle_status = 'running'
-ORDER BY t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC;
+ORDER BY t.priority DESC, t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC;
 
 -- name: ListDependencyBlockedOrchestrationTasks :many
 SELECT t.*
@@ -257,6 +257,12 @@ FROM orchestration_human_checkpoints
 WHERE run_id = sqlc.arg(run_id)
   AND blocks_run = TRUE
   AND status = 'open';
+
+-- name: GetOrchestrationWorkerByIDForUpdate :one
+SELECT *
+FROM orchestration_workers
+WHERE id = sqlc.arg(id)
+FOR UPDATE;
 
 -- name: MarkOrchestrationTaskWaitingHuman :one
 UPDATE orchestration_tasks
@@ -564,6 +570,7 @@ UPDATE orchestration_task_verifications
 SET status = 'claimed',
     worker_id = sqlc.arg(worker_id),
     executor_id = sqlc.arg(executor_id),
+    worker_lease_token = sqlc.arg(worker_lease_token),
     claim_epoch = claim_epoch + 1,
     claim_token = sqlc.arg(claim_token),
     lease_expires_at = sqlc.arg(lease_expires_at),
@@ -635,6 +642,7 @@ UPDATE orchestration_task_verifications
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -649,6 +657,7 @@ UPDATE orchestration_task_verifications
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -705,6 +714,7 @@ UPDATE orchestration_task_attempts
 SET status = 'claimed',
     worker_id = sqlc.arg(worker_id),
     executor_id = sqlc.arg(executor_id),
+    worker_lease_token = sqlc.arg(worker_lease_token),
     claim_epoch = claim_epoch + 1,
     claim_token = sqlc.arg(claim_token),
     lease_expires_at = sqlc.arg(lease_expires_at),
@@ -821,6 +831,7 @@ UPDATE orchestration_task_attempts
 SET status = 'created',
     worker_id = '',
     executor_id = '',
+    worker_lease_token = '',
     claim_token = '',
     lease_expires_at = NULL,
     last_heartbeat_at = NULL,
@@ -897,6 +908,7 @@ SET status = sqlc.arg(status),
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND lease_token = sqlc.arg(lease_token)
+  AND lease_expires_at > now()
 RETURNING *;
 
 -- name: CreateOrchestrationTaskResult :one

@@ -36,6 +36,18 @@ func setupOrchestrationIntegrationTest(t *testing.T) (*Service, *pgxpool.Pool, f
 		pool.Close()
 		t.Skipf("skip integration test: database ping failed: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+ALTER TABLE IF EXISTS orchestration_task_attempts
+  ADD COLUMN IF NOT EXISTS worker_lease_token TEXT NOT NULL DEFAULT '';
+ALTER TABLE IF EXISTS orchestration_task_verifications
+  ADD COLUMN IF NOT EXISTS worker_lease_token TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_open_run_barrier_unique
+  ON orchestration_human_checkpoints (run_id)
+  WHERE blocks_run = TRUE AND status = 'open';
+`); err != nil {
+		pool.Close()
+		t.Skipf("skip integration test: database schema bootstrap failed: %v", err)
+	}
 
 	logger := slog.New(slog.DiscardHandler)
 	return NewService(logger, pool, sqlc.New(pool)), pool, func() { pool.Close() }
@@ -705,15 +717,12 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 		t.Fatal("DispatchNextReadyTask() = false, want true")
 	}
 
-	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt() error = %v", err)
-	}
+	}, 4)
 	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
 	if err != nil {
 		t.Fatalf("StartAttempt() error = %v", err)
@@ -838,7 +847,6 @@ func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
 	processRunPlanningIntent(t, ctx, svc)
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
-
 	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
 		"require_structured_output": true,
 	})
@@ -955,7 +963,6 @@ func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
 	processRunPlanningIntent(t, ctx, svc)
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
-
 	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
 		"require_structured_output": true,
 	})
@@ -1088,11 +1095,13 @@ func TestIntegrationKernelEndToEndRunBarrierResumeAndCompletion(t *testing.T) {
 					"id":             "verify-child",
 					"goal":           "verify child",
 					"worker_profile": "kernel-e2e.verify",
+					"priority":       100,
 				},
 				map[string]any{
 					"id":             "checkpoint-child",
 					"goal":           "checkpoint child",
 					"worker_profile": "kernel-e2e.checkpoint",
+					"priority":       10,
 				},
 			},
 		},
@@ -3590,6 +3599,42 @@ func TestIntegrationListRunEventsSupportsStableReplayPagination(t *testing.T) {
 	}
 }
 
+func TestIntegrationListRunEventsContinuationRequiresUntilSeq(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "event continuation should require until_seq",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	page1, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListRunEvents(page1) error = %v", err)
+	}
+	if len(page1.Items) != 1 {
+		t.Fatalf("ListRunEvents(page1) len = %d, want 1", len(page1.Items))
+	}
+	if _, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{
+		AfterSeq: page1.Items[0].Seq,
+		Limit:    10,
+	}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("ListRunEvents(continuation without until_seq) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
 func TestIntegrationSnapshotSeqCutsAcrossAllReadModelsConsistently(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -5146,7 +5191,495 @@ func TestIntegrationWorkerLeaseTokenFencesSplitBrainHeartbeat(t *testing.T) {
 	}
 }
 
-func TestIntegrationStaleCheckpointResumeIntentFailsClosed(t *testing.T) {
+func TestIntegrationClaimedAttemptRecoveryRequeuesInsteadOfFailing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "claimed attempt should be requeued on lease expiry",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	pgAttemptID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("expire claimed attempt lease: %v", err)
+	}
+
+	recovered, err := svc.RecoverExpiredAttempts(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredAttempts() error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredAttempts() = %d, want 1", recovered)
+	}
+
+	attemptRow, err := svc.queries.GetOrchestrationTaskAttemptByID(ctx, pgAttemptID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskAttemptByID() error = %v", err)
+	}
+	if attemptRow.Status != TaskAttemptStatusCreated {
+		t.Fatalf("attempt status = %q, want %q", attemptRow.Status, TaskAttemptStatusCreated)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusDispatching {
+		t.Fatalf("task page = %+v, want single dispatching task", taskPage.Items)
+	}
+	reclaimed, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt(reclaimed) error = %v", err)
+	}
+	if reclaimed.ID != attempt.ID {
+		t.Fatalf("reclaimed attempt id = %q, want %q", reclaimed.ID, attempt.ID)
+	}
+}
+
+func TestIntegrationClaimedVerificationRecoveryRequeuesInsteadOfFailing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "claimed verification should be requeued on lease expiry",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "ready for verification",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(verifying) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("task page = %+v, want single verifying task", taskPage.Items)
+	}
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	pgVerificationID, err := db.ParseUUID(verification.ID)
+	if err != nil {
+		t.Fatalf("parse verification uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_verifications SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", pgVerificationID); err != nil {
+		t.Fatalf("expire claimed verification lease: %v", err)
+	}
+
+	recovered, err := svc.RecoverExpiredVerifications(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredVerifications() error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredVerifications() = %d, want 1", recovered)
+	}
+
+	verificationRow, err := svc.queries.GetOrchestrationTaskVerificationByID(ctx, pgVerificationID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskVerificationByID() error = %v", err)
+	}
+	if verificationRow.Status != TaskVerificationStatusCreated {
+		t.Fatalf("verification status = %q, want %q", verificationRow.Status, TaskVerificationStatusCreated)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("task page = %+v, want single verifying task", taskPage.Items)
+	}
+	reclaimed, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification(reclaimed) error = %v", err)
+	}
+	if reclaimed.ID != verification.ID {
+		t.Fatalf("reclaimed verification id = %q, want %q", reclaimed.ID, verification.ID)
+	}
+}
+
+func TestIntegrationStaleWorkerTakeoverFencesClaimedAttemptLeaseOps(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "stale claimed attempt should be fenced after worker takeover",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	workerID := "worker-" + uuid.NewString()
+	oldLease := "lease-old-" + uuid.NewString()
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseToken:      oldLease,
+		LeaseTTLSeconds: 30,
+	}, 4)
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_workers SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", workerID); err != nil {
+		t.Fatalf("expire worker lease: %v", err)
+	}
+	if _, err := svc.RegisterWorker(ctx, WorkerRegistration{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultWorkerExecutorID,
+		DisplayName:     workerID,
+		Capabilities:    workerCapabilities([]string{DefaultRootWorkerProfile}),
+		LeaseToken:      "lease-new-" + uuid.NewString(),
+		LeaseTTLSeconds: 30,
+	}); err != nil {
+		t.Fatalf("RegisterWorker(takeover) error = %v", err)
+	}
+
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("StartAttempt(stale worker) error = %v, want %v", err, ErrAttemptLeaseConflict)
+	}
+	if _, err := svc.HeartbeatAttempt(ctx, AttemptHeartbeat{
+		AttemptID:       attempt.ID,
+		ClaimToken:      attempt.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("HeartbeatAttempt(stale worker) error = %v, want %v", err, ErrAttemptLeaseConflict)
+	}
+}
+
+func TestIntegrationStaleWorkerTakeoverFencesRunningAttemptCompletion(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "stale running attempt should be fenced after worker takeover",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	workerID := "worker-" + uuid.NewString()
+	oldLease := "lease-old-" + uuid.NewString()
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseToken:      oldLease,
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_workers SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", workerID); err != nil {
+		t.Fatalf("expire worker lease: %v", err)
+	}
+	if _, err := svc.RegisterWorker(ctx, WorkerRegistration{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultWorkerExecutorID,
+		DisplayName:     workerID,
+		Capabilities:    workerCapabilities([]string{DefaultRootWorkerProfile}),
+		LeaseToken:      "lease-new-" + uuid.NewString(),
+		LeaseTTLSeconds: 30,
+	}); err != nil {
+		t.Fatalf("RegisterWorker(takeover) error = %v", err)
+	}
+
+	if _, err := svc.HeartbeatAttempt(ctx, AttemptHeartbeat{
+		AttemptID:       runningAttempt.ID,
+		ClaimToken:      runningAttempt.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("HeartbeatAttempt(stale running worker) error = %v, want %v", err, ErrAttemptLeaseConflict)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "should be fenced",
+		StructuredOutput: map[string]any{"ok": true},
+	}); !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("CompleteAttempt(stale running worker) error = %v, want %v", err, ErrAttemptLeaseConflict)
+	}
+}
+
+func TestIntegrationStaleWorkerTakeoverFencesVerificationLeaseOps(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "stale verification should be fenced after worker takeover",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "ready for verification",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(verifying) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("task page = %+v, want single verifying task", taskPage.Items)
+	}
+
+	workerID := "verifier-" + uuid.NewString()
+	oldLease := "lease-old-" + uuid.NewString()
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         workerID,
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseToken:       oldLease,
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_workers SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", workerID); err != nil {
+		t.Fatalf("expire verifier worker lease: %v", err)
+	}
+	if _, err := svc.RegisterWorker(ctx, WorkerRegistration{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultVerifierExecutorID,
+		DisplayName:     workerID,
+		Capabilities:    verifierCapabilities([]string{DefaultVerifierProfile}),
+		LeaseToken:      "lease-new-" + uuid.NewString(),
+		LeaseTTLSeconds: 30,
+	}); err != nil {
+		t.Fatalf("RegisterWorker(takeover) error = %v", err)
+	}
+
+	if _, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("StartVerification(stale worker) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+	if _, err := svc.HeartbeatVerification(ctx, VerificationHeartbeat{
+		VerificationID:  verification.ID,
+		ClaimToken:      verification.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("HeartbeatVerification(stale worker) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+}
+
+func TestIntegrationStaleWorkerTakeoverFencesRunningVerificationCompletion(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "stale running verification should be fenced after worker takeover",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "ready for verification",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(verifying) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("task page = %+v, want single verifying task", taskPage.Items)
+	}
+
+	workerID := "verifier-" + uuid.NewString()
+	oldLease := "lease-old-" + uuid.NewString()
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         workerID,
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseToken:       oldLease,
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_workers SET lease_expires_at = now() - interval '1 second', updated_at = now() WHERE id = $1", workerID); err != nil {
+		t.Fatalf("expire verifier worker lease: %v", err)
+	}
+	if _, err := svc.RegisterWorker(ctx, WorkerRegistration{
+		WorkerID:        workerID,
+		ExecutorID:      DefaultVerifierExecutorID,
+		DisplayName:     workerID,
+		Capabilities:    verifierCapabilities([]string{DefaultVerifierProfile}),
+		LeaseToken:      "lease-new-" + uuid.NewString(),
+		LeaseTTLSeconds: 30,
+	}); err != nil {
+		t.Fatalf("RegisterWorker(takeover) error = %v", err)
+	}
+
+	if _, err := svc.HeartbeatVerification(ctx, VerificationHeartbeat{
+		VerificationID:  runningVerification.ID,
+		ClaimToken:      runningVerification.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("HeartbeatVerification(stale running worker) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "should be fenced",
+	}); !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("CompleteVerification(stale running worker) error = %v, want %v", err, ErrVerificationLeaseConflict)
+	}
+}
+
+func TestIntegrationCheckpointResumeIntentIgnoresPlannerEpochDrift(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
 
@@ -5184,32 +5717,39 @@ func TestIntegrationStaleCheckpointResumeIntentFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse run uuid: %v", err)
 	}
-	pgTaskID, err := db.ParseUUID(handle.RootTaskID)
-	if err != nil {
-		t.Fatalf("parse task uuid: %v", err)
-	}
 	pgCheckpointID, err := db.ParseUUID(checkpointResult.Checkpoint.ID)
 	if err != nil {
 		t.Fatalf("parse checkpoint uuid: %v", err)
 	}
+	resolveResult, err := svc.ResolveCheckpoint(ctx, caller, checkpointResult.Checkpoint.ID, CheckpointResolution{
+		Mode:           CheckpointResolutionModeSelectOption,
+		OptionID:       "continue",
+		IdempotencyKey: "resolve-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("ResolveCheckpoint() error = %v", err)
+	}
+	var intentID pgtype.UUID
+	var basePlannerEpoch int64
+	if err := pool.QueryRow(ctx, `
+SELECT id, base_planner_epoch
+FROM orchestration_planning_intents
+WHERE run_id = $1
+  AND checkpoint_id = $2
+  AND kind = $3
+ORDER BY created_at DESC
+LIMIT 1
+`, pgRunID, pgCheckpointID, PlanningIntentKindCheckpointResume).Scan(&intentID, &basePlannerEpoch); err != nil {
+		t.Fatalf("load checkpoint_resume planning intent: %v", err)
+	}
+	if !intentID.Valid {
+		t.Fatal("checkpoint_resume planning intent not found")
+	}
+	if basePlannerEpoch != 1 {
+		t.Fatalf("planning intent base_planner_epoch = %d, want 1", basePlannerEpoch)
+	}
 	if _, err := pool.Exec(ctx, "UPDATE orchestration_runs SET planner_epoch = planner_epoch + 1, updated_at = now() WHERE id = $1", pgRunID); err != nil {
 		t.Fatalf("bump planner_epoch: %v", err)
-	}
-	_, intentUUID, err := newPGUUID()
-	if err != nil {
-		t.Fatalf("newPGUUID(intent) error = %v", err)
-	}
-	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
-		ID:               intentUUID,
-		RunID:            pgRunID,
-		TaskID:           pgTaskID,
-		CheckpointID:     pgCheckpointID,
-		Kind:             PlanningIntentKindCheckpointResume,
-		Status:           PlanningIntentStatusPending,
-		BasePlannerEpoch: 1,
-		Payload:          marshalJSON(map[string]any{"reason": "stale-checkpoint-resume-test"}),
-	}); err != nil {
-		t.Fatalf("CreateOrchestrationPlanningIntent() error = %v", err)
 	}
 
 	processed, err := svc.ProcessNextPlanningIntent(ctx)
@@ -5220,12 +5760,15 @@ func TestIntegrationStaleCheckpointResumeIntentFailsClosed(t *testing.T) {
 		t.Fatal("ProcessNextPlanningIntent() = false, want true")
 	}
 
-	intentRow, err := svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentUUID)
+	intentRow, err := svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentID)
 	if err != nil {
 		t.Fatalf("GetOrchestrationPlanningIntentByID() error = %v", err)
 	}
-	if intentRow.Status != PlanningIntentStatusFailed {
-		t.Fatalf("planning intent status = %q, want %q", intentRow.Status, PlanningIntentStatusFailed)
+	if resolveResult.SnapshotSeq == 0 {
+		t.Fatal("ResolveCheckpoint() snapshot_seq = 0, want non-zero")
+	}
+	if intentRow.Status != PlanningIntentStatusCompleted {
+		t.Fatalf("planning intent status = %q, want %q", intentRow.Status, PlanningIntentStatusCompleted)
 	}
 
 	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
@@ -5235,11 +5778,11 @@ func TestIntegrationStaleCheckpointResumeIntentFailsClosed(t *testing.T) {
 	if len(taskPage.Items) != 1 {
 		t.Fatalf("ListRunTasks() len = %d, want 1", len(taskPage.Items))
 	}
-	if taskPage.Items[0].Status != TaskStatusWaitingHuman {
-		t.Fatalf("task status = %q, want %q", taskPage.Items[0].Status, TaskStatusWaitingHuman)
+	if taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("task status = %q, want %q", taskPage.Items[0].Status, TaskStatusReady)
 	}
-	if taskPage.Items[0].WaitingCheckpointID != checkpointResult.Checkpoint.ID {
-		t.Fatalf("waiting checkpoint id = %q, want %q", taskPage.Items[0].WaitingCheckpointID, checkpointResult.Checkpoint.ID)
+	if taskPage.Items[0].WaitingCheckpointID != "" {
+		t.Fatalf("waiting checkpoint id = %q, want empty", taskPage.Items[0].WaitingCheckpointID)
 	}
 }
 
