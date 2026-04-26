@@ -21,8 +21,8 @@
       </SidebarFooter>
     </Sidebar>
 
-    <SidebarInset>
-      <section class="flex-1 min-w-0 relative min-h-0">
+    <SidebarInset class="min-w-0 overflow-hidden">
+      <section class="flex-1 min-w-0 relative min-h-0 overflow-hidden">
         <slot name="detail" />
       </section>
 

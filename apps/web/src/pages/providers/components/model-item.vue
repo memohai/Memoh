@@ -1,11 +1,11 @@
 <template>
   <Item
     variant="outline"
-    class="h-full flex-col items-stretch"
+    class="h-full flex-col items-stretch min-w-0"
   >
-    <ItemContent class="w-full">
-      <ItemTitle class="flex items-center gap-2 min-w-0">
-        <span class="truncate">{{ model.name || model.model_id }}</span>
+    <ItemContent class="w-full min-w-0">
+      <ItemTitle class="flex items-center gap-2 w-full min-w-0">
+        <span class="truncate min-w-0 flex-1">{{ model.name || model.model_id }}</span>
         <Badge
           v-if="model.type"
           variant="outline"
