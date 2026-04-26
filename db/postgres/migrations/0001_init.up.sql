@@ -872,6 +872,9 @@ CREATE TABLE IF NOT EXISTS orchestration_human_checkpoints (
 
 CREATE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_run_created_at ON orchestration_human_checkpoints(run_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_run_status ON orchestration_human_checkpoints(run_id, status, created_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_open_run_barrier_unique
+  ON orchestration_human_checkpoints(run_id)
+  WHERE blocks_run = TRUE AND status = 'open';
 
 -- orchestration_planning_intents: authoritative planner/replanner work queue
 CREATE TABLE IF NOT EXISTS orchestration_planning_intents (
@@ -924,6 +927,7 @@ CREATE TABLE IF NOT EXISTS orchestration_task_attempts (
   attempt_no INTEGER NOT NULL,
   worker_id TEXT NOT NULL DEFAULT '',
   executor_id TEXT NOT NULL DEFAULT '',
+  worker_lease_token TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK (status IN ('created', 'claimed', 'binding', 'running', 'completed', 'failed', 'lost')),
   claim_epoch BIGINT NOT NULL DEFAULT 0,
   claim_token TEXT NOT NULL DEFAULT '',
@@ -955,6 +959,7 @@ CREATE TABLE IF NOT EXISTS orchestration_task_verifications (
   attempt_no INTEGER NOT NULL DEFAULT 1,
   worker_id TEXT NOT NULL DEFAULT '',
   executor_id TEXT NOT NULL DEFAULT '',
+  worker_lease_token TEXT NOT NULL DEFAULT '',
   verifier_profile TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL CHECK (status IN ('created', 'claimed', 'running', 'completed', 'failed', 'lost')),
   claim_epoch BIGINT NOT NULL DEFAULT 0,

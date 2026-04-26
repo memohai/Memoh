@@ -118,6 +118,9 @@ func run() error {
 			}
 		}
 
+		if err := sleepWithContext(ctx, time.Duration(envInt("VERIFIER_START_DELAY_MS", 0))*time.Millisecond); err != nil {
+			return nil
+		}
 		runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
 		if err != nil {
 			log.Error("start verification failed", slog.String("verification_id", verification.ID), slog.Any("error", err))
@@ -183,6 +186,9 @@ func runWorkerHeartbeatLoop(ctx context.Context, svc *orchestration.Service, log
 }
 
 func executeVerification(ctx context.Context, queries *dbsqlc.Queries, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
+	if err := sleepWithContext(ctx, time.Duration(envInt("VERIFIER_EXECUTION_DELAY_MS", 0))*time.Millisecond); err != nil {
+		return workerShutdownVerificationCompletion(verification)
+	}
 	return orchestration.ExecuteBuiltinVerification(ctx, queries, verification)
 }
 
@@ -244,4 +250,30 @@ func stringSliceToAny(items []string) []any {
 		values = append(values, item)
 	}
 	return values
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) error {
+	if duration <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func workerShutdownVerificationCompletion(verification orchestration.TaskVerification) orchestration.VerificationCompletion {
+	return orchestration.VerificationCompletion{
+		VerificationID: verification.ID,
+		ClaimToken:     verification.ClaimToken,
+		Status:         orchestration.TaskVerificationStatusFailed,
+		Verdict:        orchestration.VerificationVerdictRejected,
+		Summary:        "verifier shutdown interrupted verification",
+		FailureClass:   "worker_shutdown",
+		TerminalReason: "verifier shutdown interrupted verification",
+	}
 }

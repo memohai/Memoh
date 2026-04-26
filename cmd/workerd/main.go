@@ -121,6 +121,9 @@ func run() error {
 			}
 		}
 
+		if err := sleepWithContext(ctx, time.Duration(envInt("WORKER_START_DELAY_MS", 0))*time.Millisecond); err != nil {
+			return nil
+		}
 		runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
 		if err != nil {
 			log.Error("start attempt failed", slog.String("attempt_id", attempt.ID), slog.Any("error", err))
@@ -335,6 +338,13 @@ func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, attempt orches
 	}
 
 	inputs := decodeObject(taskRow.Inputs)
+	builtinOptions := decodeObjectFromAny(inputs["builtin_workerd"])
+	if err := sleepWithContext(ctx, time.Duration(intValue(builtinOptions["sleep_ms"]))*time.Millisecond); err != nil {
+		return workerShutdownCompletion(attempt)
+	}
+	if err := sleepWithContext(ctx, time.Duration(envInt("WORKER_EXECUTION_DELAY_MS", 0))*time.Millisecond); err != nil {
+		return workerShutdownCompletion(attempt)
+	}
 	output := map[string]any{
 		"task_id":        taskRow.ID.String(),
 		"goal":           taskRow.Goal,
@@ -366,6 +376,21 @@ func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, attempt orches
 	if completion.Summary == "" {
 		completion.Summary = "builtin workerd completed task"
 	}
+	if summary := strings.TrimSpace(stringValue(builtinOptions["summary"])); summary != "" {
+		completion.Summary = summary
+	}
+	if requestReplan, ok := builtinOptions["request_replan"].(bool); ok {
+		completion.RequestReplan = requestReplan
+	}
+	if childTasks, ok := builtinOptions["child_tasks"].([]any); ok && len(childTasks) > 0 {
+		output["child_tasks"] = childTasks
+	}
+	completion.ArtifactIntents = decodeArtifactIntents(builtinOptions["artifact_intents"])
+	if extraOutput := decodeObjectFromAny(builtinOptions["structured_output"]); len(extraOutput) > 0 {
+		for key, value := range extraOutput {
+			output[key] = value
+		}
+	}
 	completion.StructuredOutput = output
 	return completion
 }
@@ -379,6 +404,61 @@ func decodeObject(raw []byte) map[string]any {
 		return map[string]any{}
 	}
 	return payload
+}
+
+func decodeObjectFromAny(raw any) map[string]any {
+	value, _ := raw.(map[string]any)
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func decodeArtifactIntents(raw any) []orchestration.AttemptArtifactIntent {
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	intents := make([]orchestration.AttemptArtifactIntent, 0, len(items))
+	for _, item := range items {
+		payload := decodeObjectFromAny(item)
+		if len(payload) == 0 {
+			continue
+		}
+		intents = append(intents, orchestration.AttemptArtifactIntent{
+			Kind:        strings.TrimSpace(stringValue(payload["kind"])),
+			URI:         strings.TrimSpace(stringValue(payload["uri"])),
+			Version:     strings.TrimSpace(stringValue(payload["version"])),
+			Digest:      strings.TrimSpace(stringValue(payload["digest"])),
+			ContentType: strings.TrimSpace(stringValue(payload["content_type"])),
+			Summary:     strings.TrimSpace(stringValue(payload["summary"])),
+			Metadata:    decodeObjectFromAny(payload["metadata"]),
+		})
+	}
+	if len(intents) == 0 {
+		return nil
+	}
+	return intents
+}
+
+func stringValue(raw any) string {
+	value, _ := raw.(string)
+	return value
+}
+
+func intValue(raw any) int {
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 func envInt(name string, fallback int) int {
@@ -440,4 +520,18 @@ func heartbeatInterval(leaseTTLSeconds int) time.Duration {
 		return time.Second
 	}
 	return time.Duration(leaseTTLSeconds/2) * time.Second
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) error {
+	if duration <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

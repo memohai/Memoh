@@ -562,7 +562,7 @@ func TestOrchestrationStartRunMapsIdempotencyConflicts(t *testing.T) {
 }
 
 func TestOrchestrationListRunTasksPassesFilters(t *testing.T) {
-	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/tasks?status=ready,%20waiting_human,,&after=%20cursor-1%20&limit=abc&as_of_seq=42", "")
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/tasks?status=ready,%20waiting_human,,&after=%20cursor-1%20&limit=25&as_of_seq=42", "")
 	var called bool
 	svc := newNoopOrchestrationService()
 	svc.listRunTasks = func(_ context.Context, _ orchestration.ControlIdentity, runID string, req orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error) {
@@ -576,8 +576,8 @@ func TestOrchestrationListRunTasksPassesFilters(t *testing.T) {
 		if req.After != "cursor-1" {
 			t.Fatalf("after = %q, want %q", req.After, "cursor-1")
 		}
-		if req.Limit != 0 {
-			t.Fatalf("limit = %d, want 0 for invalid limit fallback", req.Limit)
+		if req.Limit != 25 {
+			t.Fatalf("limit = %d, want %d", req.Limit, 25)
 		}
 		if req.AsOfSeq != 42 {
 			t.Fatalf("as_of_seq = %d, want %d", req.AsOfSeq, 42)
@@ -594,6 +594,32 @@ func TestOrchestrationListRunTasksPassesFilters(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("ListRunTasks was not called")
+	}
+}
+
+func TestOrchestrationListEndpointsRejectInvalidLimit(t *testing.T) {
+	testCases := []struct {
+		name string
+		path string
+	}{
+		{name: "tasks", path: "/orchestration/runs/run-1/tasks?limit=abc"},
+		{name: "checkpoints", path: "/orchestration/runs/run-1/checkpoints?limit=0"},
+		{name: "artifacts", path: "/orchestration/runs/run-1/artifacts?limit=-1"},
+		{name: "events", path: "/orchestration/runs/run-1/events?limit=abc"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, rec, req := newAuthedEcho(http.MethodGet, tc.path, "")
+			handler := &OrchestrationHandler{service: newNoopOrchestrationService(), logger: slog.New(slog.DiscardHandler)}
+			handler.Register(e)
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("GET invalid limit status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+		})
 	}
 }
 

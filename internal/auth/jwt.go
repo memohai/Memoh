@@ -28,7 +28,7 @@ const (
 
 // JWTMiddleware returns a JWT auth middleware configured for HS256 tokens.
 func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFunc {
-	return echojwt.WithConfig(echojwt.Config{
+	jwtMiddleware := echojwt.WithConfig(echojwt.Config{
 		SigningKey:    []byte(secret),
 		SigningMethod: "HS256",
 		TokenLookup:   "header:Authorization:Bearer ,query:token",
@@ -37,6 +37,14 @@ func JWTMiddleware(secret string, skipper middleware.Skipper) echo.MiddlewareFun
 			return jwt.MapClaims{}
 		},
 	})
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if strings.HasPrefix(c.Request().URL.Path, "/orchestration") && strings.TrimSpace(c.QueryParam("token")) != "" {
+				return echo.NewHTTPError(http.StatusUnauthorized, "authorization header required")
+			}
+			return jwtMiddleware(next)(c)
+		}
+	}
 }
 
 // UserIDFromContext extracts the user id from JWT claims.

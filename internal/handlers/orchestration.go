@@ -141,8 +141,11 @@ func (h *OrchestrationHandler) ListRunTasks(c echo.Context) error {
 	req := orchestration.ListRunTasksRequest{
 		Status:  splitCSVQuery(c.QueryParam("status")),
 		After:   strings.TrimSpace(c.QueryParam("after")),
-		Limit:   parsePositiveInt(c.QueryParam("limit")),
 		AsOfSeq: asOfSeq,
+	}
+	req.Limit, err = parsePositiveIntQuery(c, "limit")
+	if err != nil {
+		return err
 	}
 	page, err := h.service.ListRunTasks(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
 	if err != nil {
@@ -218,11 +221,14 @@ func (h *OrchestrationHandler) ListRunCheckpoints(c echo.Context) error {
 		return err
 	}
 	req := orchestration.ListRunCheckpointsRequest{
-		Status:  splitCSVQuery(c.QueryParam("status")),
-		After:   strings.TrimSpace(c.QueryParam("after")),
-		Limit:   parsePositiveInt(c.QueryParam("limit")),
-		AsOfSeq: asOfSeq,
+		Status: splitCSVQuery(c.QueryParam("status")),
+		After:  strings.TrimSpace(c.QueryParam("after")),
 	}
+	req.Limit, err = parsePositiveIntQuery(c, "limit")
+	if err != nil {
+		return err
+	}
+	req.AsOfSeq = asOfSeq
 	page, err := h.service.ListRunCheckpoints(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
 	if err != nil {
 		return h.httpError(err)
@@ -257,12 +263,15 @@ func (h *OrchestrationHandler) ListRunArtifacts(c echo.Context) error {
 		return err
 	}
 	req := orchestration.ListRunArtifactsRequest{
-		TaskID:  strings.TrimSpace(c.QueryParam("task_id")),
-		Kind:    splitCSVQuery(c.QueryParam("kind")),
-		After:   strings.TrimSpace(c.QueryParam("after")),
-		Limit:   parsePositiveInt(c.QueryParam("limit")),
-		AsOfSeq: asOfSeq,
+		TaskID: strings.TrimSpace(c.QueryParam("task_id")),
+		Kind:   splitCSVQuery(c.QueryParam("kind")),
+		After:  strings.TrimSpace(c.QueryParam("after")),
 	}
+	req.Limit, err = parsePositiveIntQuery(c, "limit")
+	if err != nil {
+		return err
+	}
+	req.AsOfSeq = asOfSeq
 	page, err := h.service.ListRunArtifacts(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
 	if err != nil {
 		return h.httpError(err)
@@ -301,7 +310,10 @@ func (h *OrchestrationHandler) ListRunEvents(c echo.Context) error {
 	req := orchestration.ListRunEventsRequest{
 		AfterSeq: afterSeq,
 		UntilSeq: untilSeq,
-		Limit:    parsePositiveInt(c.QueryParam("limit")),
+	}
+	req.Limit, err = parsePositiveIntQuery(c, "limit")
+	if err != nil {
+		return err
 	}
 	page, err := h.service.ListRunEvents(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
 	if err != nil {
@@ -435,14 +447,14 @@ func parseUint64Query(c echo.Context, key string) (uint64, error) {
 	return value, nil
 }
 
-func parsePositiveInt(raw string) int {
-	raw = strings.TrimSpace(raw)
+func parsePositiveIntQuery(c echo.Context, key string) (int, error) {
+	raw := strings.TrimSpace(c.QueryParam(key))
 	if raw == "" {
-		return 0
+		return 0, nil
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value <= 0 {
-		return 0
+		return 0, echo.NewHTTPError(http.StatusBadRequest, key+" must be a positive integer")
 	}
-	return value
+	return value, nil
 }
