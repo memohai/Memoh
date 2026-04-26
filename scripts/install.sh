@@ -80,13 +80,13 @@ fi
 echo "${PURPLE}Memoh One-Click Install${NC}"
 
 if [ "$(id -u 2>/dev/null || printf '1')" = "0" ] && [ "${MEMOH_ALLOW_ROOT_INSTALL:-false}" != "true" ]; then
-    echo "${RED}Error: Do not run this installer as root.${NC}"
-    echo "Run it as your normal user instead:"
-    echo "  curl -fsSL https://memoh.sh | sh"
-    echo ""
-    echo "The installer will use sudo for Docker commands only when Docker requires it."
-    echo "To override this guard, set MEMOH_ALLOW_ROOT_INSTALL=true."
-    exit 1
+  echo "${RED}Error: Do not run this installer as root.${NC}"
+  echo "Run it as your normal user instead:"
+  echo "  curl -fsSL https://memoh.sh | sh"
+  echo ""
+  echo "The installer will use sudo for Docker commands only when Docker requires it."
+  echo "To override this guard, set MEMOH_ALLOW_ROOT_INSTALL=true."
+  exit 1
 fi
 
 read_env_file_value() {

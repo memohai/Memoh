@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TMPDIR=$(mktemp -d)
+ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/test-install-root-guard.XXXXXX" 2>/dev/null || mktemp -d -t test-install-root-guard)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 FAKEBIN="$TMPDIR/bin"
@@ -24,6 +24,12 @@ cat > "$FAKEBIN/docker" <<'EOF'
 exit 42
 EOF
 chmod +x "$FAKEBIN/docker"
+
+cat > "$FAKEBIN/sudo" <<'EOF'
+#!/bin/sh
+exec "$@"
+EOF
+chmod +x "$FAKEBIN/sudo"
 
 OUTPUT="$TMPDIR/output.txt"
 DOCKER_MARKER="$TMPDIR/docker-marker.txt"
