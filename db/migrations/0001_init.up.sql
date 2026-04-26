@@ -883,7 +883,7 @@ CREATE TABLE IF NOT EXISTS orchestration_task_attempts (
   attempt_no INTEGER NOT NULL,
   worker_id TEXT NOT NULL DEFAULT '',
   executor_id TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL CHECK (status IN ('created', 'claimed', 'running', 'completed', 'failed', 'lost')),
+  status TEXT NOT NULL CHECK (status IN ('created', 'claimed', 'binding', 'running', 'completed', 'failed', 'lost')),
   claim_epoch BIGINT NOT NULL DEFAULT 0,
   claim_token TEXT NOT NULL DEFAULT '',
   lease_expires_at TIMESTAMPTZ,

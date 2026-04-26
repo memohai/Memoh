@@ -1179,6 +1179,111 @@ func (s *Service) StartAttempt(ctx context.Context, attemptID, claimToken string
 		return nil, fmt.Errorf("%w: claim token is required", ErrInvalidArgument)
 	}
 
+	if err := s.ensureAttemptBinding(ctx, pgAttemptID, normalizedClaimToken); err != nil {
+		return nil, err
+	}
+	return s.advanceAttemptToRunning(ctx, pgAttemptID, normalizedClaimToken)
+}
+
+func (s *Service) ensureAttemptBinding(ctx context.Context, attemptID pgtype.UUID, claimToken string) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin attempt binding tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	attemptRow, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, attemptID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAttemptNotFound
+		}
+		return fmt.Errorf("lock task attempt for binding: %w", err)
+	}
+	if strings.TrimSpace(attemptRow.ClaimToken) != claimToken {
+		return ErrAttemptLeaseConflict
+	}
+	if leaseExpired(attemptRow.LeaseExpiresAt) {
+		return ErrAttemptLeaseConflict
+	}
+	switch attemptRow.Status {
+	case TaskAttemptStatusBinding, TaskAttemptStatusRunning:
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit replayed attempt binding tx: %w", err)
+		}
+		return nil
+	case TaskAttemptStatusClaimed:
+	default:
+		return ErrAttemptImmutable
+	}
+
+	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, attemptRow.RunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRunNotFound
+		}
+		return fmt.Errorf("lock run for attempt binding: %w", err)
+	}
+	taskRow, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTaskNotFound
+		}
+		return fmt.Errorf("lock task for attempt binding: %w", err)
+	}
+	if runRow.LifecycleStatus != LifecycleStatusRunning || taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
+		if _, retireErr := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+			Status:         TaskAttemptStatusFailed,
+			FailureClass:   "attempt_immutable",
+			TerminalReason: "attempt invalidated before start",
+		}); retireErr != nil {
+			if errors.Is(retireErr, pgx.ErrNoRows) {
+				return ErrAttemptLeaseConflict
+			}
+			return fmt.Errorf("retire invalid attempt before binding: %w", retireErr)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit retired invalid attempt before binding: %w", err)
+		}
+		return ErrAttemptImmutable
+	}
+
+	bindingAttempt, err := qtx.MarkOrchestrationTaskAttemptBinding(ctx, sqlc.MarkOrchestrationTaskAttemptBindingParams{
+		ID:         attemptRow.ID,
+		ClaimToken: claimToken,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAttemptLeaseConflict
+		}
+		return fmt.Errorf("mark attempt binding: %w", err)
+	}
+	if _, err := s.appendEvent(ctx, qtx, bindingAttempt.RunID, eventSpec{
+		TaskID:           bindingAttempt.TaskID,
+		AttemptID:        bindingAttempt.ID,
+		AggregateType:    "attempt",
+		AggregateID:      bindingAttempt.ID,
+		AggregateVersion: bindingAttempt.ClaimEpoch,
+		Type:             "run.event.attempt.binding",
+		Payload: map[string]any{
+			"attempt_id":       bindingAttempt.ID.String(),
+			"task_id":          bindingAttempt.TaskID.String(),
+			"previous_status":  attemptRow.Status,
+			"new_status":       bindingAttempt.Status,
+			"claim_epoch":      bindingAttempt.ClaimEpoch,
+			"claim_token":      bindingAttempt.ClaimToken,
+			"lease_expires_at": timeForJSON(db.TimeFromPg(bindingAttempt.LeaseExpiresAt)),
+		},
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit attempt binding tx: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) advanceAttemptToRunning(ctx context.Context, attemptID pgtype.UUID, claimToken string) (*TaskAttempt, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin start attempt tx: %w", err)
@@ -1186,37 +1291,46 @@ func (s *Service) StartAttempt(ctx context.Context, attemptID, claimToken string
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
 
-	attemptRow, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, pgAttemptID)
+	attemptRow, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, attemptID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrAttemptNotFound
 		}
 		return nil, fmt.Errorf("lock task attempt: %w", err)
 	}
-	if strings.TrimSpace(attemptRow.ClaimToken) != normalizedClaimToken {
+	if strings.TrimSpace(attemptRow.ClaimToken) != claimToken {
 		return nil, ErrAttemptLeaseConflict
 	}
 	if leaseExpired(attemptRow.LeaseExpiresAt) {
 		return nil, ErrAttemptLeaseConflict
 	}
-	if attemptRow.Status != TaskAttemptStatusClaimed && attemptRow.Status != TaskAttemptStatusRunning {
+	if attemptRow.Status == TaskAttemptStatusRunning {
+		taskRow, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrTaskNotFound
+			}
+			return nil, fmt.Errorf("lock task for replayed start attempt: %w", err)
+		}
+		if taskRow.Status != TaskStatusRunning || taskRow.SupersededByPlannerEpoch.Valid {
+			return nil, ErrAttemptImmutable
+		}
+		attempt := toTaskAttempt(attemptRow)
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed start attempt tx: %w", err)
+		}
+		return &attempt, nil
+	}
+	if attemptRow.Status != TaskAttemptStatusBinding {
 		return nil, ErrAttemptImmutable
 	}
+
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, attemptRow.RunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRunNotFound
 		}
 		return nil, fmt.Errorf("lock run for start attempt: %w", err)
-	}
-	if runRow.LifecycleStatus != LifecycleStatusRunning {
-		if _, releaseErr := qtx.ReleaseOrchestrationTaskAttemptClaim(ctx, sqlc.ReleaseOrchestrationTaskAttemptClaimParams{
-			ID:         attemptRow.ID,
-			ClaimToken: normalizedClaimToken,
-		}); releaseErr != nil && !errors.Is(releaseErr, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("release invalid claim after run state change: %w", releaseErr)
-		}
-		return nil, ErrAttemptImmutable
 	}
 	taskRow, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
 	if err != nil {
@@ -1225,29 +1339,31 @@ func (s *Service) StartAttempt(ctx context.Context, attemptID, claimToken string
 		}
 		return nil, fmt.Errorf("lock task for start attempt: %w", err)
 	}
-	if taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
-		if attemptRow.Status == TaskAttemptStatusClaimed {
-			if _, releaseErr := qtx.ReleaseOrchestrationTaskAttemptClaim(ctx, sqlc.ReleaseOrchestrationTaskAttemptClaimParams{
-				ID:         attemptRow.ID,
-				ClaimToken: normalizedClaimToken,
-			}); releaseErr != nil && !errors.Is(releaseErr, pgx.ErrNoRows) {
-				return nil, fmt.Errorf("release invalid claim after task state change: %w", releaseErr)
+	if runRow.LifecycleStatus != LifecycleStatusRunning || taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
+		if _, retireErr := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+			Status:         TaskAttemptStatusFailed,
+			FailureClass:   "attempt_immutable",
+			TerminalReason: "attempt invalidated before start",
+		}); retireErr != nil {
+			if errors.Is(retireErr, pgx.ErrNoRows) {
+				return nil, ErrAttemptLeaseConflict
 			}
+			return nil, fmt.Errorf("retire invalid bound attempt before running: %w", retireErr)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit retired invalid bound attempt before running: %w", err)
 		}
 		return nil, ErrAttemptImmutable
 	}
-	if attemptRow.Status == TaskAttemptStatusRunning {
-		attempt := toTaskAttempt(attemptRow)
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("commit replayed start attempt tx: %w", err)
-		}
-		return &attempt, nil
-	}
+
 	runningAttempt, err := qtx.MarkOrchestrationTaskAttemptRunning(ctx, sqlc.MarkOrchestrationTaskAttemptRunningParams{
 		ID:         attemptRow.ID,
-		ClaimToken: normalizedClaimToken,
+		ClaimToken: claimToken,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAttemptLeaseConflict
+		}
 		return nil, fmt.Errorf("mark attempt running: %w", err)
 	}
 	if _, err := s.appendEvent(ctx, qtx, runningAttempt.RunID, eventSpec{
@@ -1323,7 +1439,9 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 	if strings.TrimSpace(attemptRow.ClaimToken) != normalizedClaimToken {
 		return nil, ErrAttemptLeaseConflict
 	}
-	if attemptRow.Status != TaskAttemptStatusClaimed && attemptRow.Status != TaskAttemptStatusRunning {
+	if attemptRow.Status != TaskAttemptStatusClaimed &&
+		attemptRow.Status != TaskAttemptStatusBinding &&
+		attemptRow.Status != TaskAttemptStatusRunning {
 		return nil, ErrAttemptImmutable
 	}
 	if leaseExpired(attemptRow.LeaseExpiresAt) {
@@ -1348,6 +1466,10 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 	}
 	switch attemptRow.Status {
 	case TaskAttemptStatusClaimed:
+		if taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
+			return nil, ErrAttemptImmutable
+		}
+	case TaskAttemptStatusBinding:
 		if taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
 			return nil, ErrAttemptImmutable
 		}
@@ -1656,14 +1778,49 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			_ = tx.Rollback(ctx)
 			return recovered, fmt.Errorf("lock task for expired attempt: %w", err)
 		}
-		lostAttempt, err := qtx.MarkOrchestrationTaskAttemptLost(ctx, sqlc.MarkOrchestrationTaskAttemptLostParams{
-			ID:             attemptRow.ID,
-			ClaimEpoch:     attemptRow.ClaimEpoch,
+		if attemptRow.Status == TaskAttemptStatusBinding {
+			releasedAttempt, err := qtx.ReleaseOrchestrationTaskAttemptClaim(ctx, sqlc.ReleaseOrchestrationTaskAttemptClaimParams{
+				ID:         attemptRow.ID,
+				ClaimToken: attemptRow.ClaimToken,
+			})
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue
+				}
+				return recovered, fmt.Errorf("release expired binding attempt: %w", err)
+			}
+			if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           releasedAttempt.TaskID,
+				AttemptID:        releasedAttempt.ID,
+				AggregateType:    "attempt",
+				AggregateID:      releasedAttempt.ID,
+				AggregateVersion: releasedAttempt.ClaimEpoch,
+				Type:             "run.event.attempt.requeued",
+				Payload: map[string]any{
+					"attempt_id":      releasedAttempt.ID.String(),
+					"task_id":         releasedAttempt.TaskID.String(),
+					"previous_status": attemptRow.Status,
+					"new_status":      releasedAttempt.Status,
+					"terminal_reason": "attempt binding lease expired before execution start",
+				},
+			}); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return recovered, fmt.Errorf("commit binding attempt requeue tx: %w", err)
+			}
+			recovered++
+			continue
+		}
+		lostAttempt, err := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+			Status:         TaskAttemptStatusLost,
 			TerminalReason: "attempt lease expired",
 		})
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return recovered, fmt.Errorf("mark attempt lost: %w", err)
+			return recovered, fmt.Errorf("retire expired attempt: %w", err)
 		}
 		resultRow, err := qtx.CreateOrchestrationTaskResult(ctx, sqlc.CreateOrchestrationTaskResultParams{
 			RunID:            attemptRow.RunID,
@@ -1679,24 +1836,6 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return recovered, fmt.Errorf("create result for lost attempt: %w", err)
-		}
-		if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
-			TaskID:           lostAttempt.TaskID,
-			AttemptID:        lostAttempt.ID,
-			AggregateType:    "attempt",
-			AggregateID:      lostAttempt.ID,
-			AggregateVersion: lostAttempt.ClaimEpoch,
-			Type:             "run.event.attempt.lost",
-			Payload: map[string]any{
-				"attempt_id":      lostAttempt.ID.String(),
-				"task_id":         lostAttempt.TaskID.String(),
-				"previous_status": attemptRow.Status,
-				"new_status":      lostAttempt.Status,
-				"terminal_reason": lostAttempt.TerminalReason,
-			},
-		}); err != nil {
-			_ = tx.Rollback(ctx)
-			return recovered, err
 		}
 		if taskRow.SupersededByPlannerEpoch.Valid {
 			if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, taskRow.ID, lostAttempt.ID); err != nil {
@@ -2186,6 +2325,76 @@ func isTerminalAttemptStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+type attemptRetirementSpec struct {
+	Status         string
+	FailureClass   string
+	TerminalReason string
+}
+
+func (s *Service) retireAttempt(ctx context.Context, qtx *sqlc.Queries, attemptRow sqlc.OrchestrationTaskAttempt, spec attemptRetirementSpec) (sqlc.OrchestrationTaskAttempt, error) {
+	var (
+		finalAttempt sqlc.OrchestrationTaskAttempt
+		err          error
+		eventType    string
+		payload      map[string]any
+	)
+
+	switch spec.Status {
+	case TaskAttemptStatusFailed:
+		finalAttempt, err = qtx.RetireOrchestrationTaskAttemptFailed(ctx, sqlc.RetireOrchestrationTaskAttemptFailedParams{
+			ID:             attemptRow.ID,
+			ClaimToken:     attemptRow.ClaimToken,
+			FailureClass:   strings.TrimSpace(spec.FailureClass),
+			TerminalReason: normalizeAttemptTerminalReason(spec.TerminalReason),
+		})
+		if err != nil {
+			return sqlc.OrchestrationTaskAttempt{}, err
+		}
+		eventType = "run.event.attempt.failed"
+		payload = map[string]any{
+			"attempt_id":      finalAttempt.ID.String(),
+			"task_id":         finalAttempt.TaskID.String(),
+			"previous_status": attemptRow.Status,
+			"new_status":      finalAttempt.Status,
+			"failure_class":   finalAttempt.FailureClass,
+			"terminal_reason": finalAttempt.TerminalReason,
+		}
+	case TaskAttemptStatusLost:
+		finalAttempt, err = qtx.MarkOrchestrationTaskAttemptLost(ctx, sqlc.MarkOrchestrationTaskAttemptLostParams{
+			ID:             attemptRow.ID,
+			ClaimEpoch:     attemptRow.ClaimEpoch,
+			TerminalReason: normalizeAttemptTerminalReason(spec.TerminalReason),
+		})
+		if err != nil {
+			return sqlc.OrchestrationTaskAttempt{}, err
+		}
+		eventType = "run.event.attempt.lost"
+		payload = map[string]any{
+			"attempt_id":      finalAttempt.ID.String(),
+			"task_id":         finalAttempt.TaskID.String(),
+			"previous_status": attemptRow.Status,
+			"new_status":      finalAttempt.Status,
+			"terminal_reason": finalAttempt.TerminalReason,
+		}
+	default:
+		return sqlc.OrchestrationTaskAttempt{}, fmt.Errorf("%w: unsupported attempt retirement status %q", ErrInvalidArgument, spec.Status)
+	}
+
+	if _, err := s.appendEvent(ctx, qtx, finalAttempt.RunID, eventSpec{
+		TaskID:           finalAttempt.TaskID,
+		AttemptID:        finalAttempt.ID,
+		AggregateType:    "attempt",
+		AggregateID:      finalAttempt.ID,
+		AggregateVersion: finalAttempt.ClaimEpoch,
+		Type:             eventType,
+		Payload:          payload,
+	}); err != nil {
+		return sqlc.OrchestrationTaskAttempt{}, err
+	}
+
+	return finalAttempt, nil
 }
 
 func shouldFailPlanningIntent(err error) bool {

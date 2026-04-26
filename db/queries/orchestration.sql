@@ -235,7 +235,7 @@ WHERE task_id = sqlc.arg(task_id);
 SELECT COUNT(*)
 FROM orchestration_task_attempts
 WHERE task_id = sqlc.arg(task_id)
-  AND status IN ('created', 'claimed', 'running');
+  AND status IN ('created', 'claimed', 'binding', 'running');
 
 -- name: CountNonTerminalOrchestrationTasksByRun :one
 SELECT COUNT(*)
@@ -377,11 +377,11 @@ WITH next_intent AS (
   FROM orchestration_planning_intents
   WHERE (
       status = 'pending'
-      AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+      AND (lease_expires_at IS NULL OR lease_expires_at <= clock_timestamp())
     ) OR (
       status = 'processing'
       AND lease_expires_at IS NOT NULL
-      AND lease_expires_at <= now()
+      AND lease_expires_at <= clock_timestamp()
     )
   ORDER BY created_at ASC, id ASC
   LIMIT 1
@@ -407,7 +407,7 @@ WHERE id = sqlc.arg(id)
   AND status = 'processing'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: CompleteOrchestrationPlanningIntent :one
@@ -421,7 +421,7 @@ WHERE id = sqlc.arg(id)
   AND status = 'processing'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: FailOrchestrationPlanningIntent :one
@@ -436,7 +436,7 @@ WHERE id = sqlc.arg(id)
   AND status = 'processing'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: CountActiveOrchestrationPlanningIntentsByRun :one
@@ -579,7 +579,7 @@ WHERE id = sqlc.arg(id)
   AND status IN ('claimed', 'running')
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskVerificationRunning :one
@@ -591,7 +591,7 @@ WHERE id = sqlc.arg(id)
   AND status = 'claimed'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskVerificationCompleted :one
@@ -608,7 +608,7 @@ WHERE id = sqlc.arg(id)
   AND status IN ('claimed', 'running')
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskVerificationFailed :one
@@ -625,7 +625,7 @@ WHERE id = sqlc.arg(id)
   AND status IN ('claimed', 'running')
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: ReleaseOrchestrationTaskVerificationClaim :one
@@ -663,7 +663,7 @@ SELECT *
 FROM orchestration_task_verifications
 WHERE status IN ('claimed', 'running')
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at <= now()
+  AND lease_expires_at <= clock_timestamp()
 ORDER BY lease_expires_at ASC, id ASC;
 
 -- name: ClaimNextCreatedOrchestrationTaskAttempt :one
@@ -702,10 +702,21 @@ SET lease_expires_at = sqlc.arg(lease_expires_at),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status IN ('claimed', 'running')
+  AND status IN ('claimed', 'binding', 'running')
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: MarkOrchestrationTaskAttemptBinding :one
+UPDATE orchestration_task_attempts
+SET status = 'binding',
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'claimed'
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskAttemptRunning :one
@@ -714,10 +725,10 @@ SET status = 'running',
     started_at = COALESCE(started_at, now()),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status = 'claimed'
+  AND status = 'binding'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskAttemptCompleted :one
@@ -727,10 +738,10 @@ SET status = 'completed',
     finished_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status IN ('claimed', 'running')
+  AND status = 'running'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: MarkOrchestrationTaskAttemptFailed :one
@@ -742,10 +753,25 @@ SET status = 'failed',
     finished_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status IN ('claimed', 'running')
+  AND status = 'running'
   AND claim_token = sqlc.arg(claim_token)
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
+RETURNING *;
+
+-- name: RetireOrchestrationTaskAttemptFailed :one
+UPDATE orchestration_task_attempts
+SET status = 'failed',
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    lease_expires_at = NULL,
+    finished_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('claimed', 'binding')
+  AND claim_token = sqlc.arg(claim_token)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
 
 -- name: ReleaseOrchestrationTaskAttemptClaim :one
@@ -758,7 +784,7 @@ SET status = 'created',
     last_heartbeat_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status = 'claimed'
+  AND status IN ('claimed', 'binding')
   AND claim_token = sqlc.arg(claim_token)
 RETURNING *;
 
@@ -771,23 +797,23 @@ SET status = 'lost',
     finished_at = COALESCE(finished_at, now()),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND status IN ('claimed', 'running')
+  AND status IN ('claimed', 'binding', 'running')
   AND claim_epoch = sqlc.arg(claim_epoch)
 RETURNING *;
 
 -- name: ListExpiredOrchestrationTaskAttempts :many
 SELECT *
 FROM orchestration_task_attempts
-WHERE status IN ('claimed', 'running')
+WHERE status IN ('claimed', 'binding', 'running')
   AND lease_expires_at IS NOT NULL
-  AND lease_expires_at <= now()
+  AND lease_expires_at <= clock_timestamp()
 ORDER BY lease_expires_at ASC, id ASC;
 
 -- name: CountActiveOrchestrationTaskAttemptsByRun :one
 SELECT COUNT(*)
 FROM orchestration_task_attempts
 WHERE run_id = sqlc.arg(run_id)
-  AND status IN ('created', 'claimed', 'running');
+  AND status IN ('created', 'claimed', 'binding', 'running');
 
 -- name: UpsertOrchestrationWorker :one
 INSERT INTO orchestration_workers (
