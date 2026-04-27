@@ -1,0 +1,18 @@
+name: Update AGENTS.md
+on:
+  schedule:
+    - cron: "0 0 */2 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    uses: sheepbox8646/agents-md-updater/.github/workflows/update-agents-md.yml@main
+    with:
+      agent: claude
+      target_files: AGENTS.md
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN	: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
