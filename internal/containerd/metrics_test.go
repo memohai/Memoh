@@ -26,6 +26,7 @@ func TestBuildCPUMetricsUsesCumulativeDelta(t *testing.T) {
 	metrics := buildCPUMetrics(first, second)
 	if metrics == nil {
 		t.Fatal("expected cpu metrics")
+		return
 	}
 	if metrics.UsagePercent != 50 {
 		t.Fatalf("expected cpu usage percent 50, got %v", metrics.UsagePercent)

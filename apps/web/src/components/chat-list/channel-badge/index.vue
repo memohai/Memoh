@@ -1,14 +1,14 @@
 <template>
   <span
     v-if="showBadge"
-    class="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-muted ring-[1.5px] ring-background text-muted-foreground"
+    class="flex items-center justify-center rounded-full bg-muted ring-[1.5px] ring-background text-muted-foreground"
     :title="channelLabel"
     role="img"
     :aria-label="channelLabel"
   >
     <ChannelIcon
       :channel="platformKey"
-      size="1em"
+      size="10px"
       aria-hidden="true"
     />
   </span>

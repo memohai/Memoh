@@ -133,6 +133,7 @@ func TestFormatWebSearchEmitsLinks(t *testing.T) {
 	link := hasLinkBlock(p.Body, "https://go.dev/doc/tutorial/generics")
 	if link == nil {
 		t.Fatalf("expected link block for tutorial, got %+v", p.Body)
+		return
 	}
 	if link.Title != "Tutorial: Getting started with generics" {
 		t.Fatalf("unexpected title: %q", link.Title)
@@ -274,6 +275,7 @@ func TestFormatWebFetchShowsLink(t *testing.T) {
 	link := hasLinkBlock(p.Body, "https://example.com/article")
 	if link == nil {
 		t.Fatalf("expected link block, got %+v", p.Body)
+		return
 	}
 	if link.Title != "Example Article Title" {
 		t.Fatalf("unexpected link title: %q", link.Title)

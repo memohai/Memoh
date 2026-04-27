@@ -14,7 +14,7 @@
           :src="avatarUrl"
           :alt="displayLabel"
         />
-        <AvatarFallback class="text-[9px] bg-accent text-muted-foreground">
+        <AvatarFallback class="text-[16px] bg-accent text-muted-foreground">
           {{ avatarFallback }}
         </AvatarFallback>
       </Avatar>
@@ -30,11 +30,10 @@
       </div>
       <div
         v-if="isIMSession && session.channel_type"
-        class="absolute -bottom-px -right-px flex items-center justify-center size-3 rounded-full bg-background border border-border"
+        class="absolute -bottom-px -right-px flex items-center justify-center size-3 overflow-hidden rounded-full bg-background border border-border"
       >
         <ChannelBadge
           :platform="session.channel_type"
-          class="size-2"
         />
       </div>
     </div>
