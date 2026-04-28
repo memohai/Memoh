@@ -22,6 +22,9 @@ timezone = "UTC"
 [database]
 driver = "postgres"
 
+[container]
+backend = "apple"
+
 [containerd]
 # socket_path / namespace are unused on macOS; socktainer takes over.
 

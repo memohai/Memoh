@@ -23,9 +23,25 @@ timezone = "UTC"
 [database]
 driver = "postgres"
 
+[container]
+# Required. Supported values: docker, kubernetes, containerd, apple.
+backend = "docker"
+
 [containerd]
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
+
+[kubernetes]
+# Enable with [container].backend = "kubernetes".
+# In-cluster mode uses the pod ServiceAccount; set kubeconfig for external control.
+namespace = "default"
+in_cluster = true
+kubeconfig = ""
+service_account_name = ""
+image_pull_secret = ""
+pvc_storage_class = ""
+pvc_size = "10Gi"
+bridge_port = 9090
 
 [workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror

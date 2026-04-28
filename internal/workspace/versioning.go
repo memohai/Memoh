@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -80,6 +80,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	info := ref.info
 	displayName := strings.TrimSpace(snapshotName)
 	runtimeSnapshotName := fmt.Sprintf("%s-snapshot-%d", containerID, time.Now().UnixNano())
+	snapshotter := info.Snapshotter
 	normalizedSource := normalizeSnapshotSource(source)
 
 	// The sequence below (stop → commit → replace → start) is atomic from the
@@ -88,7 +89,14 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	dctx := context.WithoutCancel(ctx)
 
 	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, runtimeSnapshotName); err != nil {
-		return nil, err
+		if !errors.Is(err, ctr.ErrNotSupported) {
+			return nil, err
+		}
+		runtimeSnapshotName = m.archiveSnapshotKey(botID)
+		snapshotter = "archive"
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, runtimeSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
 	}
 
 	_, versionNumber, createdAt, err := m.recordSnapshotVersion(
@@ -97,7 +105,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		runtimeSnapshotName,
 		displayName,
 		info.SnapshotKey,
-		info.Snapshotter,
+		snapshotter,
 		normalizedSource,
 	)
 	if err != nil {
@@ -107,7 +115,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		"snapshot_name":         coalesceSnapshotName(displayName, versionNumber),
 		"display_name":          displayName,
 		"runtime_snapshot_name": runtimeSnapshotName,
-		"snapshotter":           info.Snapshotter,
+		"snapshotter":           snapshotter,
 		"source":                normalizedSource,
 		"version":               versionNumber,
 	}); err != nil {
@@ -119,7 +127,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		SnapshotName:        coalesceSnapshotName(displayName, versionNumber),
 		RuntimeSnapshotName: runtimeSnapshotName,
 		DisplayName:         displayName,
-		Snapshotter:         info.Snapshotter,
+		Snapshotter:         snapshotter,
 		Version:             versionNumber,
 		CreatedAt:           createdAt,
 	}, nil
@@ -148,7 +156,13 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 
 	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
 	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, versionSnapshotName); err != nil {
-		return nil, err
+		if !errors.Is(err, ctr.ErrNotSupported) {
+			return nil, err
+		}
+		versionSnapshotName = m.archiveSnapshotKey(botID)
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, versionSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
 	}
 
 	versionID, versionNumber, createdAt, err := m.recordSnapshotVersion(
@@ -157,7 +171,7 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		versionSnapshotName,
 		"",
 		info.SnapshotKey,
-		info.Snapshotter,
+		archiveAwareSnapshotter(info.Snapshotter, versionSnapshotName),
 		SnapshotSourcePreExec,
 	)
 	if err != nil {
@@ -207,7 +221,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 	}
 
 	runtimeSnapshots, err := m.service.ListSnapshots(ctx, snapshotter)
-	if err != nil {
+	if err != nil && !errors.Is(err, ctr.ErrNotSupported) {
 		return nil, err
 	}
 
@@ -301,6 +315,17 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 	}
 
 	dctx := context.WithoutCancel(ctx)
+
+	if strings.HasPrefix(strings.TrimSpace(snapshotName), archivePrefix) {
+		if err := m.restoreArchiveSnapshot(dctx, botID, snapshotName); err != nil {
+			return err
+		}
+		return m.insertEvent(dctx, ref.containerID, "version_rollback", map[string]any{
+			"snapshot_name": snapshotName,
+			"version":       version,
+			"source":        SnapshotSourceRollback,
+		})
+	}
 
 	if err := m.safeStopTask(dctx, ref.containerID); err != nil {
 		return err
@@ -523,6 +548,13 @@ func normalizeSnapshotSource(source string) string {
 		return SnapshotSourceManual
 	}
 	return s
+}
+
+func archiveAwareSnapshotter(snapshotter, runtimeSnapshotName string) string {
+	if strings.HasPrefix(strings.TrimSpace(runtimeSnapshotName), archivePrefix) {
+		return "archive"
+	}
+	return snapshotter
 }
 
 func coalesceSnapshotName(displayName string, version int) string {

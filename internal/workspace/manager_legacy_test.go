@@ -12,7 +12,7 @@ import (
 	"github.com/containerd/errdefs"
 
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	netctl "github.com/memohai/memoh/internal/network"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )

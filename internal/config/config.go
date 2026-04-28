@@ -42,7 +42,9 @@ type Config struct {
 	Auth           AuthConfig           `toml:"auth"`
 	Timezone       string               `toml:"timezone"`
 	Database       DatabaseConfig       `toml:"database"`
+	Container      ContainerConfig      `toml:"container"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
+	Kubernetes     KubernetesConfig     `toml:"kubernetes"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	SQLite         SQLiteConfig         `toml:"sqlite"`
@@ -85,6 +87,10 @@ func (c DatabaseConfig) DriverOrDefault() string {
 	return driver
 }
 
+type ContainerConfig struct {
+	Backend string `toml:"backend"`
+}
+
 type ContainerdConfig struct {
 	SocketPath string           `toml:"socket_path"`
 	Namespace  string           `toml:"namespace"`
@@ -94,6 +100,38 @@ type ContainerdConfig struct {
 type SocktainerConfig struct {
 	SocketPath string `toml:"socket_path"`
 	BinaryPath string `toml:"binary_path"`
+}
+
+type KubernetesConfig struct {
+	Namespace          string `toml:"namespace"`
+	Kubeconfig         string `toml:"kubeconfig"`
+	InCluster          bool   `toml:"in_cluster"`
+	ServiceAccountName string `toml:"service_account_name"`
+	ImagePullSecret    string `toml:"image_pull_secret"`
+	PVCStorageClass    string `toml:"pvc_storage_class"`
+	PVCSize            string `toml:"pvc_size"`
+	BridgePort         int    `toml:"bridge_port"`
+}
+
+func (c KubernetesConfig) EffectiveNamespace() string {
+	if strings.TrimSpace(c.Namespace) != "" {
+		return strings.TrimSpace(c.Namespace)
+	}
+	return DefaultNamespace
+}
+
+func (c KubernetesConfig) EffectivePVCSize() string {
+	if strings.TrimSpace(c.PVCSize) != "" {
+		return strings.TrimSpace(c.PVCSize)
+	}
+	return "10Gi"
+}
+
+func (c KubernetesConfig) EffectiveBridgePort() int {
+	if c.BridgePort > 0 {
+		return c.BridgePort
+	}
+	return 9090
 }
 
 type WorkspaceConfig struct {
@@ -232,9 +270,18 @@ func Load(path string) (Config, error) {
 		Database: DatabaseConfig{
 			Driver: DefaultDatabaseDriver,
 		},
+		Container: ContainerConfig{
+			Backend: "",
+		},
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
+		},
+		Kubernetes: KubernetesConfig{
+			Namespace:  DefaultNamespace,
+			InCluster:  true,
+			PVCSize:    "10Gi",
+			BridgePort: 9090,
 		},
 		Workspace: WorkspaceConfig{
 			DefaultImage: DefaultBaseImage,

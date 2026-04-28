@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	netctl "github.com/memohai/memoh/internal/network"

@@ -14,7 +14,7 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/jackc/pgx/v5"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
 )

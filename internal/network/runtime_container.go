@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 type containerRuntimeService interface {
@@ -92,6 +92,12 @@ func descriptorForBackend(backend string) RuntimeDescriptor {
 		return RuntimeDescriptor{
 			Kind:         "apple",
 			DisplayName:  "Apple Container",
+			Capabilities: RuntimeCapabilities{},
+		}
+	case "kubernetes", "k8s":
+		return RuntimeDescriptor{
+			Kind:         "kubernetes",
+			DisplayName:  "Kubernetes",
 			Capabilities: RuntimeCapabilities{},
 		}
 	default:

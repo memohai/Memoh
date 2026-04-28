@@ -3,7 +3,7 @@ package workspace
 import (
 	"strings"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 var knownContainerPrefixes = []string{ContainerPrefix, LegacyContainerPrefix}

@@ -22,6 +22,9 @@ timezone = "UTC"
 [database]
 driver = "postgres"
 
+[container]
+backend = "containerd"
+
 ## Docker configuration
 [containerd]
 socket_path = "/run/containerd/containerd.sock"

@@ -15,6 +15,9 @@ func TestProvideRuntimeConfig_DefaultTimezone(t *testing.T) {
 			JWTExpiresIn: "24h",
 		},
 		Timezone: config.DefaultTimezone,
+		Container: config.ContainerConfig{
+			Backend: "containerd",
+		},
 		Containerd: config.ContainerdConfig{
 			SocketPath: "/run/containerd/containerd.sock",
 			Namespace:  "default",
@@ -48,6 +51,9 @@ func TestProvideRuntimeConfig_ResolvesTZEnv(t *testing.T) {
 			JWTExpiresIn: "24h",
 		},
 		Timezone: "UTC",
+		Container: config.ContainerConfig{
+			Backend: "containerd",
+		},
 		Containerd: config.ContainerdConfig{
 			SocketPath: "/run/containerd/containerd.sock",
 			Namespace:  "default",
@@ -69,5 +75,59 @@ func TestProvideRuntimeConfig_ResolvesTZEnv(t *testing.T) {
 	}
 	if rc.TimezoneLocation.String() != "Asia/Tokyo" {
 		t.Fatalf("TimezoneLocation = %q, want Asia/Tokyo", rc.TimezoneLocation.String())
+	}
+}
+
+func TestProvideRuntimeConfigRequiresContainerBackend(t *testing.T) {
+	cfg := config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:    "secret",
+			JWTExpiresIn: "24h",
+		},
+		Timezone: config.DefaultTimezone,
+	}
+	if _, err := ProvideRuntimeConfig(cfg); err == nil {
+		t.Fatal("expected missing container backend error")
+	}
+}
+
+func TestProvideRuntimeConfigNormalizesK8sBackend(t *testing.T) {
+	cfg := config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:    "secret",
+			JWTExpiresIn: "24h",
+		},
+		Timezone: config.DefaultTimezone,
+		Container: config.ContainerConfig{
+			Backend: "k8s",
+		},
+	}
+	rc, err := ProvideRuntimeConfig(cfg)
+	if err != nil {
+		t.Fatalf("ProvideRuntimeConfig returned error: %v", err)
+	}
+	if rc.ContainerBackend != "kubernetes" {
+		t.Fatalf("ContainerBackend = %q, want kubernetes", rc.ContainerBackend)
+	}
+}
+
+func TestProvideRuntimeConfigBackendIgnoresEnvOverride(t *testing.T) {
+	t.Setenv("CONTAINER_BACKEND", "k8s")
+	cfg := config.Config{
+		Auth: config.AuthConfig{
+			JWTSecret:    "secret",
+			JWTExpiresIn: "24h",
+		},
+		Timezone: config.DefaultTimezone,
+		Container: config.ContainerConfig{
+			Backend: "docker",
+		},
+	}
+	rc, err := ProvideRuntimeConfig(cfg)
+	if err != nil {
+		t.Fatalf("ProvideRuntimeConfig returned error: %v", err)
+	}
+	if rc.ContainerBackend != "docker" {
+		t.Fatalf("ContainerBackend = %q, want docker", rc.ContainerBackend)
 	}
 }

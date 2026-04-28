@@ -1,4 +1,4 @@
-package containerd
+package apple
 
 import (
 	"context"
@@ -13,13 +13,54 @@ import (
 	"github.com/memohai/acgo/socktainer"
 
 	"github.com/memohai/memoh/internal/config"
+	containerapi "github.com/memohai/memoh/internal/container"
+)
+
+var (
+	ErrInvalidArgument = containerapi.ErrInvalidArgument
+	ErrNotSupported    = containerapi.ErrNotSupported
+)
+
+type ServiceConfig struct {
+	SocketPath string
+	BinaryPath string
+}
+
+type (
+	PullImageOptions       = containerapi.PullImageOptions
+	DeleteImageOptions     = containerapi.DeleteImageOptions
+	CreateContainerRequest = containerapi.CreateContainerRequest
+	DeleteContainerOptions = containerapi.DeleteContainerOptions
+	StartTaskOptions       = containerapi.StartTaskOptions
+	StopTaskOptions        = containerapi.StopTaskOptions
+	DeleteTaskOptions      = containerapi.DeleteTaskOptions
+	ListTasksOptions       = containerapi.ListTasksOptions
+	ImageInfo              = containerapi.ImageInfo
+	ContainerInfo          = containerapi.ContainerInfo
+	RuntimeInfo            = containerapi.RuntimeInfo
+	TaskInfo               = containerapi.TaskInfo
+	TaskStatus             = containerapi.TaskStatus
+	ContainerMetrics       = containerapi.ContainerMetrics
+	SnapshotUsage          = containerapi.SnapshotUsage
+	SnapshotInfo           = containerapi.SnapshotInfo
+	MountInfo              = containerapi.MountInfo
+	NetworkRequest         = containerapi.NetworkRequest
+	NetworkResult          = containerapi.NetworkResult
+)
+
+const (
+	TaskStatusUnknown = containerapi.TaskStatusUnknown
+	TaskStatusCreated = containerapi.TaskStatusCreated
+	TaskStatusRunning = containerapi.TaskStatusRunning
+	TaskStatusStopped = containerapi.TaskStatusStopped
+	TaskStatusPaused  = containerapi.TaskStatusPaused
 )
 
 // ---------------------------------------------------------------------------
 // Service & lifecycle
 // ---------------------------------------------------------------------------
 
-type AppleService struct {
+type Service struct {
 	client      *acgo.Client
 	manager     *socktainer.Manager
 	managerOpts []socktainer.Option
@@ -28,12 +69,7 @@ type AppleService struct {
 	mu          sync.Mutex
 }
 
-type AppleServiceConfig struct {
-	SocketPath string
-	BinaryPath string
-}
-
-func NewAppleService(ctx context.Context, log *slog.Logger, cfg AppleServiceConfig) (*AppleService, error) {
+func NewService(ctx context.Context, log *slog.Logger, cfg ServiceConfig) (*Service, error) {
 	var managerOpts []socktainer.Option
 	if cfg.BinaryPath != "" {
 		managerOpts = append(managerOpts, socktainer.WithBinary(cfg.BinaryPath))
@@ -42,7 +78,7 @@ func NewAppleService(ctx context.Context, log *slog.Logger, cfg AppleServiceConf
 		managerOpts = append(managerOpts, socktainer.WithSocket(expandHome(cfg.SocketPath)))
 	}
 
-	svc := &AppleService{
+	svc := &Service{
 		managerOpts: managerOpts,
 		logger:      log.With(slog.String("service", "apple-container")),
 	}
@@ -52,7 +88,7 @@ func NewAppleService(ctx context.Context, log *slog.Logger, cfg AppleServiceConf
 	return svc, nil
 }
 
-func (s *AppleService) startSocktainer(ctx context.Context) error {
+func (s *Service) startSocktainer(ctx context.Context) error {
 	mgr := socktainer.NewManager(s.managerOpts...)
 	if err := mgr.Start(ctx); err != nil {
 		return fmt.Errorf("start socktainer: %w", err)
@@ -68,7 +104,7 @@ func (s *AppleService) startSocktainer(ctx context.Context) error {
 	return nil
 }
 
-func (s *AppleService) ensureHealthy(ctx context.Context) error {
+func (s *Service) ensureHealthy(ctx context.Context) error {
 	if ok, _ := s.client.IsServing(ctx); ok {
 		return nil
 	}
@@ -89,7 +125,7 @@ func (s *AppleService) ensureHealthy(ctx context.Context) error {
 	return nil
 }
 
-func (s *AppleService) Close() error {
+func (s *Service) Close() error {
 	_ = s.client.Close()
 	return s.manager.Stop()
 }
@@ -98,7 +134,7 @@ func (s *AppleService) Close() error {
 // Images
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) PullImage(ctx context.Context, ref string, _ *PullImageOptions) (ImageInfo, error) {
+func (s *Service) PullImage(ctx context.Context, ref string, _ *PullImageOptions) (ImageInfo, error) {
 	if ref == "" {
 		return ImageInfo{}, ErrInvalidArgument
 	}
@@ -112,7 +148,7 @@ func (s *AppleService) PullImage(ctx context.Context, ref string, _ *PullImageOp
 	return toAcgoImageInfo(img), nil
 }
 
-func (s *AppleService) GetImage(ctx context.Context, ref string) (ImageInfo, error) {
+func (s *Service) GetImage(ctx context.Context, ref string) (ImageInfo, error) {
 	if ref == "" {
 		return ImageInfo{}, ErrInvalidArgument
 	}
@@ -126,7 +162,7 @@ func (s *AppleService) GetImage(ctx context.Context, ref string) (ImageInfo, err
 	return toAcgoImageInfo(img), nil
 }
 
-func (s *AppleService) ListImages(ctx context.Context) ([]ImageInfo, error) {
+func (s *Service) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	if err := s.ensureHealthy(ctx); err != nil {
 		return nil, err
 	}
@@ -141,11 +177,11 @@ func (s *AppleService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	return out, nil
 }
 
-func (*AppleService) ResolveRemoteDigest(_ context.Context, _ string) (string, error) {
+func (*Service) ResolveRemoteDigest(_ context.Context, _ string) (string, error) {
 	return "", ErrNotSupported
 }
 
-func (s *AppleService) DeleteImage(ctx context.Context, ref string, _ *DeleteImageOptions) error {
+func (s *Service) DeleteImage(ctx context.Context, ref string, _ *DeleteImageOptions) error {
 	if ref == "" {
 		return ErrInvalidArgument
 	}
@@ -159,7 +195,7 @@ func (s *AppleService) DeleteImage(ctx context.Context, ref string, _ *DeleteIma
 // Containers
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) CreateContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error) {
+func (s *Service) CreateContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error) {
 	if req.ID == "" || req.ImageRef == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
@@ -186,7 +222,7 @@ func (s *AppleService) CreateContainer(ctx context.Context, req CreateContainerR
 	return acgoContainerToInfo(ctx, ctr)
 }
 
-func (s *AppleService) GetContainer(ctx context.Context, id string) (ContainerInfo, error) {
+func (s *Service) GetContainer(ctx context.Context, id string) (ContainerInfo, error) {
 	if id == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
@@ -200,7 +236,7 @@ func (s *AppleService) GetContainer(ctx context.Context, id string) (ContainerIn
 	return acgoContainerToInfo(ctx, ctr)
 }
 
-func (s *AppleService) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+func (s *Service) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	if err := s.ensureHealthy(ctx); err != nil {
 		return nil, err
 	}
@@ -219,7 +255,7 @@ func (s *AppleService) ListContainers(ctx context.Context) ([]ContainerInfo, err
 	return out, nil
 }
 
-func (s *AppleService) DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error {
+func (s *Service) DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error {
 	if id == "" {
 		return ErrInvalidArgument
 	}
@@ -238,7 +274,7 @@ func (s *AppleService) DeleteContainer(ctx context.Context, id string, opts *Del
 	return ctr.Delete(ctx, deleteOpts...)
 }
 
-func (s *AppleService) ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error) {
+func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error) {
 	if key == "" {
 		return nil, ErrInvalidArgument
 	}
@@ -267,7 +303,7 @@ func (s *AppleService) ListContainersByLabel(ctx context.Context, key, value str
 // Task / process lifecycle
 // ---------------------------------------------------------------------------
 
-func (s *AppleService) StartContainer(ctx context.Context, containerID string, _ *StartTaskOptions) error {
+func (s *Service) StartContainer(ctx context.Context, containerID string, _ *StartTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
 	}
@@ -281,7 +317,7 @@ func (s *AppleService) StartContainer(ctx context.Context, containerID string, _
 	return ctr.Start(ctx)
 }
 
-func (s *AppleService) StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error {
+func (s *Service) StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error {
 	if containerID == "" {
 		return ErrInvalidArgument
 	}
@@ -307,11 +343,11 @@ func (s *AppleService) StopContainer(ctx context.Context, containerID string, op
 	return nil
 }
 
-func (*AppleService) DeleteTask(context.Context, string, *DeleteTaskOptions) error {
+func (*Service) DeleteTask(context.Context, string, *DeleteTaskOptions) error {
 	return nil
 }
 
-func (s *AppleService) GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error) {
+func (s *Service) GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error) {
 	if containerID == "" {
 		return TaskInfo{}, ErrInvalidArgument
 	}
@@ -333,11 +369,11 @@ func (s *AppleService) GetTaskInfo(ctx context.Context, containerID string) (Tas
 	}, nil
 }
 
-func (*AppleService) GetContainerMetrics(context.Context, string) (ContainerMetrics, error) {
+func (*Service) GetContainerMetrics(context.Context, string) (ContainerMetrics, error) {
 	return ContainerMetrics{}, ErrNotSupported
 }
 
-func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error) {
+func (s *Service) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error) {
 	if err := s.ensureHealthy(ctx); err != nil {
 		return nil, err
 	}
@@ -371,34 +407,38 @@ func (s *AppleService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([
 // Network (no-op — Apple Container handles networking natively)
 // ---------------------------------------------------------------------------
 
-func (*AppleService) SetupNetwork(context.Context, NetworkRequest) (NetworkResult, error) {
+func (*Service) SetupNetwork(context.Context, NetworkRequest) (NetworkResult, error) {
 	return NetworkResult{}, nil
 }
-func (*AppleService) RemoveNetwork(context.Context, NetworkRequest) error { return nil }
-func (*AppleService) CheckNetwork(context.Context, NetworkRequest) error  { return nil }
+func (*Service) RemoveNetwork(context.Context, NetworkRequest) error { return nil }
+func (*Service) CheckNetwork(context.Context, NetworkRequest) error  { return nil }
 
 // ---------------------------------------------------------------------------
 // Snapshots (not supported on Apple Container)
 // ---------------------------------------------------------------------------
 
-func (*AppleService) CommitSnapshot(context.Context, string, string, string) error {
+func (*Service) CommitSnapshot(context.Context, string, string, string) error {
 	return ErrNotSupported
 }
 
-func (*AppleService) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
+func (*Service) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
 	return nil, ErrNotSupported
 }
 
-func (*AppleService) PrepareSnapshot(context.Context, string, string, string) error {
+func (*Service) PrepareSnapshot(context.Context, string, string, string) error {
 	return ErrNotSupported
 }
 
-func (*AppleService) CreateContainerFromSnapshot(context.Context, CreateContainerRequest) (ContainerInfo, error) {
+func (*Service) CreateContainerFromSnapshot(context.Context, CreateContainerRequest) (ContainerInfo, error) {
 	return ContainerInfo{}, ErrNotSupported
 }
 
-func (*AppleService) SnapshotMounts(context.Context, string, string) ([]MountInfo, error) {
+func (*Service) SnapshotMounts(context.Context, string, string) ([]MountInfo, error) {
 	return nil, ErrNotSupported
+}
+
+func (*Service) SnapshotUsage(context.Context, string, string) (SnapshotUsage, error) {
+	return SnapshotUsage{}, ErrNotSupported
 }
 
 // ---------------------------------------------------------------------------

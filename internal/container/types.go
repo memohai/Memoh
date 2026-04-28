@@ -1,11 +1,14 @@
-package containerd
+package container
 
 import (
 	"errors"
 	"time"
 )
 
-var ErrNotSupported = errors.New("operation not supported on this backend")
+var (
+	ErrInvalidArgument = errors.New("invalid argument")
+	ErrNotSupported    = errors.New("operation not supported on this backend")
+)
 
 type TaskStatus int
 

@@ -1,0 +1,557 @@
+package docker
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
+	dockermount "github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/client"
+
+	"github.com/memohai/memoh/internal/config"
+	containerapi "github.com/memohai/memoh/internal/container"
+)
+
+type Service struct {
+	client *client.Client
+	logger *slog.Logger
+}
+
+func NewService(log *slog.Logger, _ config.Config) (*Service, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, fmt.Errorf("create docker client: %w", err)
+	}
+	return &Service{
+		client: cli,
+		logger: log.With(slog.String("service", "docker")),
+	}, nil
+}
+
+func (s *Service) Close() error {
+	return s.client.Close()
+}
+
+func (s *Service) PullImage(ctx context.Context, ref string, opts *containerapi.PullImageOptions) (containerapi.ImageInfo, error) {
+	ref = config.NormalizeImageRef(strings.TrimSpace(ref))
+	if ref == "" {
+		return containerapi.ImageInfo{}, containerapi.ErrInvalidArgument
+	}
+	reader, err := s.client.ImagePull(ctx, ref, image.PullOptions{})
+	if err != nil {
+		return containerapi.ImageInfo{}, err
+	}
+	defer func() { _ = reader.Close() }()
+	if opts != nil && opts.OnProgress != nil {
+		_ = decodePullProgress(reader, opts.OnProgress)
+	} else {
+		_, _ = io.Copy(io.Discard, reader)
+	}
+	return s.GetImage(ctx, ref)
+}
+
+func (s *Service) GetImage(ctx context.Context, ref string) (containerapi.ImageInfo, error) {
+	ref = config.NormalizeImageRef(strings.TrimSpace(ref))
+	if ref == "" {
+		return containerapi.ImageInfo{}, containerapi.ErrInvalidArgument
+	}
+	info, err := s.client.ImageInspect(ctx, ref)
+	if err != nil {
+		return containerapi.ImageInfo{}, mapDockerErr(err)
+	}
+	return imageInfoFromInspect(ref, info), nil
+}
+
+func (s *Service) ListImages(ctx context.Context) ([]containerapi.ImageInfo, error) {
+	images, err := s.client.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]containerapi.ImageInfo, len(images))
+	for i, img := range images {
+		out[i] = imageInfoFromSummary(img)
+	}
+	return out, nil
+}
+
+func (s *Service) DeleteImage(ctx context.Context, ref string, _ *containerapi.DeleteImageOptions) error {
+	if strings.TrimSpace(ref) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	_, err := s.client.ImageRemove(ctx, ref, image.RemoveOptions{Force: true, PruneChildren: true})
+	return mapDockerErr(err)
+}
+
+func (*Service) ResolveRemoteDigest(context.Context, string) (string, error) {
+	return "", containerapi.ErrNotSupported
+}
+
+func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateContainerRequest) (containerapi.ContainerInfo, error) {
+	if strings.TrimSpace(req.ID) == "" || strings.TrimSpace(req.ImageRef) == "" {
+		return containerapi.ContainerInfo{}, containerapi.ErrInvalidArgument
+	}
+	hostCfg := &container.HostConfig{
+		Mounts: toDockerMounts(req.Spec.Mounts),
+		DNS:    req.Spec.DNS,
+		Init:   boolPtr(true),
+	}
+	if req.Spec.NetworkNamespacePath != "" {
+		hostCfg.NetworkMode = container.NetworkMode("none")
+	}
+	cfg := &container.Config{
+		Image:      config.NormalizeImageRef(req.ImageRef),
+		Cmd:        req.Spec.Cmd,
+		Env:        req.Spec.Env,
+		WorkingDir: req.Spec.WorkDir,
+		User:       req.Spec.User,
+		Tty:        req.Spec.TTY,
+		Labels:     req.Labels,
+	}
+	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, req.ID)
+	if err != nil {
+		return containerapi.ContainerInfo{}, mapDockerErr(err)
+	}
+	return s.GetContainer(ctx, resp.ID)
+}
+
+func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.ContainerInfo, error) {
+	if strings.TrimSpace(id) == "" {
+		return containerapi.ContainerInfo{}, containerapi.ErrInvalidArgument
+	}
+	info, err := s.client.ContainerInspect(ctx, id)
+	if err != nil {
+		return containerapi.ContainerInfo{}, mapDockerErr(err)
+	}
+	return containerInfoFromInspect(info), nil
+}
+
+func (s *Service) ListContainers(ctx context.Context) ([]containerapi.ContainerInfo, error) {
+	items, err := s.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]containerapi.ContainerInfo, len(items))
+	for i, item := range items {
+		out[i] = containerInfoFromSummary(item)
+	}
+	return out, nil
+}
+
+func (s *Service) DeleteContainer(ctx context.Context, id string, opts *containerapi.DeleteContainerOptions) error {
+	if strings.TrimSpace(id) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	removeVolumes := opts != nil && opts.CleanupSnapshot
+	err := s.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true, RemoveVolumes: removeVolumes})
+	return mapDockerErr(err)
+}
+
+func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) ([]containerapi.ContainerInfo, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, containerapi.ErrInvalidArgument
+	}
+	label := strings.TrimSpace(key)
+	if strings.TrimSpace(value) != "" {
+		label += "=" + strings.TrimSpace(value)
+	}
+	items, err := s.client.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", label)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]containerapi.ContainerInfo, len(items))
+	for i, item := range items {
+		out[i] = containerInfoFromSummary(item)
+	}
+	return out, nil
+}
+
+func (*Service) CreateContainerFromSnapshot(context.Context, containerapi.CreateContainerRequest) (containerapi.ContainerInfo, error) {
+	return containerapi.ContainerInfo{}, containerapi.ErrNotSupported
+}
+
+func (s *Service) StartContainer(ctx context.Context, id string, _ *containerapi.StartTaskOptions) error {
+	if strings.TrimSpace(id) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	return mapDockerErr(s.client.ContainerStart(ctx, id, container.StartOptions{}))
+}
+
+func (s *Service) StopContainer(ctx context.Context, id string, opts *containerapi.StopTaskOptions) error {
+	if strings.TrimSpace(id) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	stopOpts := container.StopOptions{}
+	if opts != nil {
+		if opts.Signal != 0 {
+			stopOpts.Signal = dockerSignalName(opts.Signal)
+		}
+		if opts.Timeout > 0 {
+			seconds := int(opts.Timeout.Seconds())
+			if seconds == 0 {
+				seconds = 1
+			}
+			stopOpts.Timeout = &seconds
+		}
+	}
+	return mapDockerErr(s.client.ContainerStop(ctx, id, stopOpts))
+}
+
+func (s *Service) DeleteTask(ctx context.Context, id string, opts *containerapi.DeleteTaskOptions) error {
+	info, err := s.client.ContainerInspect(ctx, id)
+	if err != nil {
+		return mapDockerErr(err)
+	}
+	if info.State == nil || !info.State.Running {
+		return nil
+	}
+	if opts != nil && opts.Force {
+		return mapDockerErr(s.client.ContainerKill(ctx, id, "SIGKILL"))
+	}
+	return s.StopContainer(ctx, id, nil)
+}
+
+func (s *Service) GetTaskInfo(ctx context.Context, id string) (containerapi.TaskInfo, error) {
+	info, err := s.client.ContainerInspect(ctx, id)
+	if err != nil {
+		return containerapi.TaskInfo{}, mapDockerErr(err)
+	}
+	return taskInfoFromInspect(info), nil
+}
+
+func (s *Service) GetContainerMetrics(ctx context.Context, id string) (containerapi.ContainerMetrics, error) {
+	stats, err := s.client.ContainerStatsOneShot(ctx, id)
+	if err != nil {
+		return containerapi.ContainerMetrics{}, mapDockerErr(err)
+	}
+	defer func() { _ = stats.Body.Close() }()
+	var payload container.StatsResponse
+	if err := json.NewDecoder(stats.Body).Decode(&payload); err != nil {
+		return containerapi.ContainerMetrics{}, err
+	}
+	return metricsFromStats(payload), nil
+}
+
+func (s *Service) ListTasks(ctx context.Context, _ *containerapi.ListTasksOptions) ([]containerapi.TaskInfo, error) {
+	items, err := s.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]containerapi.TaskInfo, 0, len(items))
+	for _, item := range items {
+		out = append(out, taskInfoFromSummary(item))
+	}
+	return out, nil
+}
+
+func (s *Service) SetupNetwork(ctx context.Context, req containerapi.NetworkRequest) (containerapi.NetworkResult, error) {
+	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
+	if err != nil {
+		return containerapi.NetworkResult{}, mapDockerErr(err)
+	}
+	return containerapi.NetworkResult{IP: firstContainerIP(info)}, nil
+}
+
+func (*Service) RemoveNetwork(context.Context, containerapi.NetworkRequest) error {
+	return nil
+}
+
+func (s *Service) CheckNetwork(ctx context.Context, req containerapi.NetworkRequest) error {
+	_, err := s.client.ContainerInspect(ctx, req.ContainerID)
+	return mapDockerErr(err)
+}
+
+func (*Service) CommitSnapshot(context.Context, string, string, string) error {
+	return containerapi.ErrNotSupported
+}
+
+func (*Service) ListSnapshots(context.Context, string) ([]containerapi.SnapshotInfo, error) {
+	return nil, containerapi.ErrNotSupported
+}
+
+func (*Service) PrepareSnapshot(context.Context, string, string, string) error {
+	return containerapi.ErrNotSupported
+}
+
+func (*Service) SnapshotUsage(context.Context, string, string) (containerapi.SnapshotUsage, error) {
+	return containerapi.SnapshotUsage{}, containerapi.ErrNotSupported
+}
+
+func (*Service) SnapshotMounts(context.Context, string, string) ([]containerapi.MountInfo, error) {
+	return nil, containerapi.ErrNotSupported
+}
+
+func toDockerMounts(in []containerapi.MountSpec) []dockermount.Mount {
+	out := make([]dockermount.Mount, 0, len(in))
+	for _, m := range in {
+		if strings.TrimSpace(m.Source) == "" || strings.TrimSpace(m.Destination) == "" {
+			continue
+		}
+		out = append(out, dockermount.Mount{
+			Type:     dockerMountType(m.Type),
+			Source:   m.Source,
+			Target:   m.Destination,
+			ReadOnly: hasReadonlyOption(m.Options),
+		})
+	}
+	return out
+}
+
+func dockerMountType(raw string) dockermount.Type {
+	switch strings.TrimSpace(raw) {
+	case "volume":
+		return dockermount.TypeVolume
+	case "tmpfs":
+		return dockermount.TypeTmpfs
+	default:
+		return dockermount.TypeBind
+	}
+}
+
+func hasReadonlyOption(options []string) bool {
+	for _, opt := range options {
+		switch strings.TrimSpace(opt) {
+		case "ro", "readonly":
+			return true
+		}
+	}
+	return false
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func imageInfoFromInspect(ref string, info image.InspectResponse) containerapi.ImageInfo {
+	tags := append([]string(nil), info.RepoTags...)
+	name := ref
+	if len(tags) > 0 {
+		name = tags[0]
+	}
+	return containerapi.ImageInfo{Name: name, ID: info.ID, Tags: tags}
+}
+
+func imageInfoFromSummary(info image.Summary) containerapi.ImageInfo {
+	name := info.ID
+	if len(info.RepoTags) > 0 {
+		name = info.RepoTags[0]
+	}
+	return containerapi.ImageInfo{Name: name, ID: info.ID, Tags: append([]string(nil), info.RepoTags...)}
+}
+
+func containerInfoFromInspect(info container.InspectResponse) containerapi.ContainerInfo {
+	created, _ := time.Parse(time.RFC3339Nano, info.Created)
+	imageRef := info.Image
+	if info.Config != nil && strings.TrimSpace(info.Config.Image) != "" {
+		imageRef = info.Config.Image
+	}
+	labels := map[string]string(nil)
+	if info.Config != nil {
+		labels = info.Config.Labels
+	}
+	return containerapi.ContainerInfo{
+		ID:          info.ID,
+		Image:       imageRef,
+		Labels:      labels,
+		Snapshotter: "docker",
+		SnapshotKey: info.ID,
+		Runtime:     containerapi.RuntimeInfo{Name: "docker"},
+		CreatedAt:   created,
+		UpdatedAt:   created,
+	}
+}
+
+func containerInfoFromSummary(info container.Summary) containerapi.ContainerInfo {
+	return containerapi.ContainerInfo{
+		ID:          info.ID,
+		Image:       info.Image,
+		Labels:      info.Labels,
+		Snapshotter: "docker",
+		SnapshotKey: info.ID,
+		Runtime:     containerapi.RuntimeInfo{Name: "docker"},
+		CreatedAt:   time.Unix(info.Created, 0),
+		UpdatedAt:   time.Unix(info.Created, 0),
+	}
+}
+
+func taskInfoFromInspect(info container.InspectResponse) containerapi.TaskInfo {
+	task := containerapi.TaskInfo{ContainerID: info.ID, ID: info.ID, Status: containerapi.TaskStatusUnknown}
+	if info.State == nil {
+		return task
+	}
+	if info.State.Pid > 0 {
+		task.PID = uint32(info.State.Pid) //nolint:gosec // Docker PIDs are non-negative here
+	}
+	if info.State.ExitCode > 0 {
+		task.ExitCode = uint32(info.State.ExitCode) //nolint:gosec // Docker exit codes are small non-negative values
+	}
+	task.Status = taskStatusFromDocker(info.State.Status, info.State.Running, info.State.Paused)
+	return task
+}
+
+func taskInfoFromSummary(info container.Summary) containerapi.TaskInfo {
+	return containerapi.TaskInfo{
+		ContainerID: info.ID,
+		ID:          info.ID,
+		Status:      taskStatusFromDocker(info.State, false, false),
+	}
+}
+
+func taskStatusFromDocker(status container.ContainerState, running, paused bool) containerapi.TaskStatus {
+	if running {
+		return containerapi.TaskStatusRunning
+	}
+	if paused {
+		return containerapi.TaskStatusPaused
+	}
+	switch strings.ToLower(status) {
+	case "created":
+		return containerapi.TaskStatusCreated
+	case "running":
+		return containerapi.TaskStatusRunning
+	case "paused":
+		return containerapi.TaskStatusPaused
+	case "exited", "dead", "removing":
+		return containerapi.TaskStatusStopped
+	default:
+		return containerapi.TaskStatusUnknown
+	}
+}
+
+func metricsFromStats(stats container.StatsResponse) containerapi.ContainerMetrics {
+	totalUsage := stats.CPUStats.CPUUsage.TotalUsage
+	memoryLimit := normalizeDockerMemoryLimit(stats.MemoryStats.Limit)
+	memory := &containerapi.MemoryMetrics{
+		UsageBytes: stats.MemoryStats.Usage,
+		LimitBytes: memoryLimit,
+	}
+	if memoryLimit > 0 {
+		memory.UsagePercent = (float64(memory.UsageBytes) / float64(memoryLimit)) * 100
+	}
+	return containerapi.ContainerMetrics{
+		SampledAt: stats.Read,
+		CPU: &containerapi.CPUMetrics{
+			UsageNanoseconds:  totalUsage,
+			UserNanoseconds:   stats.CPUStats.CPUUsage.UsageInUsermode,
+			KernelNanoseconds: stats.CPUStats.CPUUsage.UsageInKernelmode,
+			UsagePercent:      dockerCPUPercent(stats),
+		},
+		Memory: memory,
+	}
+}
+
+func dockerCPUPercent(stats container.StatsResponse) float64 {
+	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
+	if cpuDelta <= 0 || systemDelta <= 0 {
+		return 0
+	}
+	onlineCPUs := float64(stats.CPUStats.OnlineCPUs)
+	if onlineCPUs == 0 {
+		onlineCPUs = float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+	}
+	if onlineCPUs == 0 {
+		onlineCPUs = 1
+	}
+	return (cpuDelta / systemDelta) * onlineCPUs * 100
+}
+
+func normalizeDockerMemoryLimit(limit uint64) uint64 {
+	if limit == 0 || limit > uint64(1)<<60 {
+		return 0
+	}
+	return limit
+}
+
+func firstContainerIP(info container.InspectResponse) string {
+	if info.NetworkSettings == nil {
+		return ""
+	}
+	for _, network := range info.NetworkSettings.Networks {
+		if strings.TrimSpace(network.IPAddress) != "" {
+			return strings.TrimSpace(network.IPAddress)
+		}
+	}
+	return ""
+}
+
+func mapDockerErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errdefs.IsNotFound(err) {
+		return errdefs.ErrNotFound
+	}
+	if client.IsErrConnectionFailed(err) {
+		return fmt.Errorf("docker daemon unavailable: %w", err)
+	}
+	return err
+}
+
+func dockerSignalName(sig syscall.Signal) string {
+	switch sig {
+	case syscall.SIGKILL:
+		return "SIGKILL"
+	case syscall.SIGINT:
+		return "SIGINT"
+	case syscall.SIGQUIT:
+		return "SIGQUIT"
+	default:
+		return "SIGTERM"
+	}
+}
+
+func decodePullProgress(reader io.Reader, onProgress func(containerapi.PullProgress)) error {
+	decoder := json.NewDecoder(reader)
+	var layers []containerapi.LayerStatus
+	for decoder.More() {
+		var event struct {
+			ID             string `json:"id"`
+			Status         string `json:"status"`
+			ProgressDetail struct {
+				Current int64 `json:"current"`
+				Total   int64 `json:"total"`
+			} `json:"progressDetail"`
+		}
+		if err := decoder.Decode(&event); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if event.ID == "" {
+			continue
+		}
+		found := false
+		for i := range layers {
+			if layers[i].Ref == event.ID {
+				layers[i].Offset = event.ProgressDetail.Current
+				layers[i].Total = event.ProgressDetail.Total
+				found = true
+				break
+			}
+		}
+		if !found {
+			layers = append(layers, containerapi.LayerStatus{
+				Ref:    event.ID,
+				Offset: event.ProgressDetail.Current,
+				Total:  event.ProgressDetail.Total,
+			})
+		}
+		onProgress(containerapi.PullProgress{Layers: append([]containerapi.LayerStatus(nil), layers...)})
+	}
+	return nil
+}
