@@ -11,7 +11,7 @@ import (
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/errdefs"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 const unsupportedReasonBackend = "backend_not_supported"

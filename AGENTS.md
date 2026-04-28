@@ -17,7 +17,7 @@ The system consists of three core services:
 Infrastructure dependencies:
 - **PostgreSQL** — Relational data storage
 - **Qdrant** — Vector database for memory semantic search
-- **Containerd** — Container runtime providing isolated environments per bot (Linux); Apple Virtualization on macOS
+- **Container runtime** — Isolated workspace containers per bot (Docker, Kubernetes, containerd, Apple Virtualization)
 
 ## Tech Stack
 
@@ -29,7 +29,7 @@ Infrastructure dependencies:
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
-- **Containers**: containerd v2 (Linux), Apple Virtualization (macOS)
+- **Containers**: Docker / Kubernetes / containerd v2 / Apple Virtualization adapters
 - **TUI**: Charm libraries (bubbletea, glamour, lipgloss) for CLI interactive mode
 
 ### Frontend (TypeScript)
@@ -117,7 +117,7 @@ Memoh/
 │   ├── command/                #   Slash command system (extensible command handlers)
 │   ├── compaction/             #   Message history compaction service (LLM summarization)
 │   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
-│   ├── containerd/             #   Container runtime abstraction (containerd / Apple Virtualization)
+│   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker, Kubernetes)
 │   ├── conversation/           #   Conversation management and flow resolver
 │   │   ├── service.go          #     Conversation CRUD and routing
 │   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
@@ -326,7 +326,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 - The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. Bridge prompt templates live in `cmd/bridge/template/`.
 - Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
 - `internal/workspace/` manages container lifecycle (create, start, stop, reconcile) and maintains a gRPC connection pool.
-- `internal/containerd/` provides the container runtime abstraction layer (containerd on Linux, Apple Virtualization on macOS, socktainer for socket-based management).
+- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`containerd`, `apple`, `docker`, `k8s`).
 - SSE-based progress feedback is provided during container image pull and creation.
 
 ## Database Tables
@@ -395,7 +395,8 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
-- `[containerd]` — Container runtime configuration (socket path, namespace, socktainer)
+- `[container]` — Explicit container backend selection (`docker`, `kubernetes`, `containerd`, `apple`)
+- `[containerd]` / `[kubernetes]` — Backend-specific runtime configuration
 - `[workspace]` — Workspace container image and data configuration (registry, default_image, snapshotter, data_root, cni, runtime_dir)
 - `[postgres]` — PostgreSQL connection
 - `[qdrant]` — Qdrant vector database connection

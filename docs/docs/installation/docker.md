@@ -1,6 +1,6 @@
 # Docker Installation
 
-Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with embedded Containerd and in-process AI agent), and the web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
+Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with an explicit container runtime backend and in-process AI agent), and the web UI — all orchestrated via Docker Compose.
 
 ## Service Architecture
 
@@ -8,7 +8,7 @@ The Docker Compose stack consists of multiple services. Some are always started,
 
 | Service | Profile | Description |
 |---------|---------|-------------|
-| **server** | *(core)* | Main Memoh server with embedded Containerd and in-process AI agent |
+| **server** | *(core)* | Main Memoh server with the configured container runtime backend and in-process AI agent |
 | **web** | *(core)* | Web UI (Vue 3) |
 | **postgres** | *(core)* | PostgreSQL database |
 | **qdrant** | `qdrant` | Qdrant vector database for memory search (sparse and dense modes) |
@@ -194,6 +194,7 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `[admin]` | Admin account credentials (username, password, email) |
 | `[auth]` | JWT secret and token expiration |
 | `timezone` | Server timezone (default `UTC`) |
+| `[container]` | Required container backend selection (`docker`, `kubernetes`, `containerd`, `apple`) |
 | `[containerd]` | Containerd socket path and namespace |
 | `[workspace]` | Container image, snapshotter, data paths, CNI config, optional registry mirror |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |

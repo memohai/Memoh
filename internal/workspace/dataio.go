@@ -12,18 +12,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/errdefs"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 const (
 	containerDataDir = "/data"
+	snapshotsSubdir  = "snapshots"
 	backupsSubdir    = "backups"
 	legacyBotsSubdir = "bots"
 	migratedSuffix   = ".migrated"
+	archivePrefix    = "archive:"
 )
 
 // ExportData streams a tar.gz archive of the container's /data directory.
@@ -348,13 +351,12 @@ func (m *Manager) stopTaskForMutation(ctx context.Context, botID, containerID st
 	}, nil
 }
 
-func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts []mount.Mount) error {
-	backupPath := m.backupPath(botID)
-	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+func (*Manager) preserveDataToArchive(ctx context.Context, archivePath string, mounts []mount.Mount) error {
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o750); err != nil {
 		return fmt.Errorf("create backup dir: %w", err)
 	}
 
-	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
+	f, err := os.Create(archivePath) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
 		return fmt.Errorf("create backup file: %w", err)
 	}
@@ -369,13 +371,17 @@ func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts
 
 	closeErr := f.Close()
 	if writeErr != nil {
-		_ = os.Remove(backupPath)
+		_ = os.Remove(archivePath)
 		return fmt.Errorf("export data: %w", writeErr)
 	}
 	if closeErr != nil {
 		return closeErr
 	}
 	return nil
+}
+
+func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts []mount.Mount) error {
+	return m.preserveDataToArchive(ctx, m.backupPath(botID), mounts)
 }
 
 func (m *Manager) preserveDataBeforeDelete(ctx context.Context, botID string) error {
@@ -409,6 +415,15 @@ func mountedDataDir(root string) string {
 
 func (m *Manager) backupPath(botID string) string {
 	return filepath.Join(m.dataRoot(), backupsSubdir, botID+".tar.gz")
+}
+
+func (*Manager) archiveSnapshotKey(botID string) string {
+	return archivePrefix + filepath.ToSlash(filepath.Join(botID, fmt.Sprintf("%d.tar.gz", time.Now().UnixNano())))
+}
+
+func (m *Manager) archiveSnapshotPath(key string) string {
+	rel := strings.TrimPrefix(strings.TrimSpace(key), archivePrefix)
+	return filepath.Join(m.dataRoot(), snapshotsSubdir, filepath.FromSlash(rel))
 }
 
 func (m *Manager) legacyDataDir(botID string) string {
@@ -490,6 +505,48 @@ func (m *Manager) preserveDataViaGRPC(ctx context.Context, botID, backupPath str
 		return err
 	}
 	return f.Close()
+}
+
+func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedContainerRef, archiveKey string) error {
+	archivePath := m.archiveSnapshotPath(archiveKey)
+	mounts, mountErr := m.snapshotMounts(ctx, ref.info)
+	if errors.Is(mountErr, errMountNotSupported) {
+		return m.preserveDataViaGRPC(ctx, ref.botID, archivePath)
+	}
+	if mountErr != nil {
+		return mountErr
+	}
+	restartTask, err := ref.StopTaskForMutation(ctx)
+	if err != nil {
+		return fmt.Errorf("stop container: %w", err)
+	}
+	defer restartTask()
+	return m.preserveDataToArchive(ctx, archivePath, mounts)
+}
+
+func (m *Manager) restoreArchiveSnapshot(ctx context.Context, botID, archiveKey string) error {
+	archivePath := m.archiveSnapshotPath(archiveKey)
+	f, err := os.Open(archivePath) //nolint:gosec // G304: archive path is derived from managed snapshot metadata
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	ref, err := m.loadLockedContainer(ctx, botID)
+	if err != nil {
+		return err
+	}
+	defer ref.Close()
+
+	client, err := m.grpcPool.Get(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("grpc connect: %w", err)
+	}
+	_ = client.DeleteFile(ctx, containerDataDir, true)
+	if err := client.Mkdir(ctx, containerDataDir); err != nil {
+		return fmt.Errorf("mkdir data dir: %w", err)
+	}
+	return m.importDataViaGRPC(ctx, botID, f)
 }
 
 func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Reader) error {

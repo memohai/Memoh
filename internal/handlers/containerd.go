@@ -21,7 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/workspace"

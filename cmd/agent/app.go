@@ -47,7 +47,8 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
+	containerprovider "github.com/memohai/memoh/internal/container/provider"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
@@ -109,7 +110,7 @@ func provideLogger(cfg config.Config) *slog.Logger {
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
-	svc, cleanup, err := ctr.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
+	svc, cleanup, err := containerprovider.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
 	if err != nil {
 		return nil, err
 	}

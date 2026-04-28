@@ -19,6 +19,9 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[container]
+backend = "containerd"
+
 [containerd]
 # Windows containerd usually exposes a named pipe endpoint.
 # If your environment uses another pipe name or tcp endpoint, change this value.

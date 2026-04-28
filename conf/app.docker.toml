@@ -19,6 +19,9 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[container]
+backend = "containerd"
+
 ## Docker configuration
 [containerd]
 socket_path = "/run/containerd/containerd.sock"

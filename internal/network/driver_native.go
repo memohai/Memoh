@@ -15,7 +15,7 @@ import (
 
 	"github.com/containerd/errdefs"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 const (

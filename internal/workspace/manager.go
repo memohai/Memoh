@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
 	"github.com/memohai/memoh/internal/identity"
 	netctl "github.com/memohai/memoh/internal/network"
@@ -145,6 +145,11 @@ func (m *Manager) socketPath(botID string) string {
 // dialTarget returns the gRPC dial target for a bot. Legacy containers
 // (pre-bridge) are reached via TCP; bridge containers use UDS.
 func (m *Manager) dialTarget(botID string) string {
+	if targeter, ok := m.service.(interface{ BridgeTarget(string) string }); ok {
+		if target := strings.TrimSpace(targeter.BridgeTarget(botID)); target != "" {
+			return target
+		}
+	}
 	m.legacyMu.RLock()
 	ip, legacy := m.legacyIPs[botID]
 	m.legacyMu.RUnlock()

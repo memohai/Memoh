@@ -3,7 +3,7 @@ package workspace
 import (
 	"context"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 // lockedContainerRef holds a per-container lock together with the latest
