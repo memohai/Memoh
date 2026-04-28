@@ -48,6 +48,36 @@
             {{ t('chat.selectBotHint') }}
           </div>
         </div>
+        <div
+          v-show="activeTab === 'skills'"
+          class="absolute inset-0"
+        >
+          <ChatSidebarSkills
+            v-if="currentBotId"
+            :bot-id="currentBotId"
+          />
+          <div
+            v-else
+            class="flex items-center justify-center h-full text-xs text-muted-foreground"
+          >
+            {{ t('chat.selectBotHint') }}
+          </div>
+        </div>
+        <div
+          v-show="activeTab === 'mcp'"
+          class="absolute inset-0"
+        >
+          <ChatSidebarMcp
+            v-if="currentBotId"
+            :bot-id="currentBotId"
+          />
+          <div
+            v-else
+            class="flex items-center justify-center h-full text-xs text-muted-foreground"
+          >
+            {{ t('chat.selectBotHint') }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -68,12 +98,14 @@ import { ref, onBeforeUnmount, nextTick, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Folder } from 'lucide-vue-next'
+import { MessageSquare, Folder, Sparkles, Plug } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import ChatSidebarSessions from './chat-sidebar-sessions.vue'
 import ChatSidebarFiles from './chat-sidebar-files.vue'
+import ChatSidebarSkills from './chat-sidebar-skills.vue'
+import ChatSidebarMcp from './chat-sidebar-mcp.vue'
 
-type ActivityTabId = 'sessions' | 'files'
+type ActivityTabId = 'sessions' | 'files' | 'skills' | 'mcp'
 
 interface ActivityTab {
   id: ActivityTabId
@@ -88,6 +120,8 @@ const { currentBotId } = storeToRefs(chatStore)
 const activityTabs: ActivityTab[] = [
   { id: 'sessions', label: t('chat.activityTabSessions'), icon: MessageSquare },
   { id: 'files', label: t('chat.activityTabFiles'), icon: Folder },
+  { id: 'skills', label: t('chat.activityTabSkills'), icon: Sparkles },
+  { id: 'mcp', label: t('chat.activityTabMcp'), icon: Plug },
 ]
 
 const activeTab = useLocalStorage<ActivityTabId>('chat-sidebar-active-tab', 'sessions')

@@ -711,6 +711,7 @@ import type {
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
+import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useSupermarketMcpDraft } from '@/stores/supermarket-mcp-draft'
 
 interface McpItem {
@@ -750,6 +751,7 @@ const { copyText } = useClipboard()
 const loading = ref(false)
 const items = ref<McpItem[]>([])
 const selectedItem = ref<McpItem | null>(null)
+const selectedMcpId = useSyncedQueryParam('mcpId', '')
 const searchText = ref('')
 const submitting = ref(false)
 const probing = ref(false)
@@ -983,7 +985,10 @@ async function loadList() {
       else selectedItem.value = null
     }
     if (!selectedItem.value && items.value.length > 0) {
-      selectItem(items.value[0])
+      const fromUrl = selectedMcpId.value
+        ? items.value.find((i) => i.id === selectedMcpId.value)
+        : null
+      selectItem(fromUrl ?? items.value[0])
     }
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.loadFailed')))
@@ -1304,4 +1309,20 @@ watch(() => props.botId, async () => {
     applyPendingDraft()
   }
 }, { immediate: true })
+
+// Keep ?mcpId in sync with the currently selected connection (drafts ignored).
+watch(selectedItem, (item) => {
+  const next = item?.id && item.id !== DRAFT_ID ? item.id : ''
+  if (selectedMcpId.value !== next) {
+    selectedMcpId.value = next
+  }
+})
+
+// React to URL changes mid-session (e.g. arriving from the chat-home MCP tab).
+watch(selectedMcpId, (id) => {
+  if (!id) return
+  if (selectedItem.value?.id === id) return
+  const target = items.value.find((i) => i.id === id)
+  if (target) selectItem(target)
+})
 </script>
