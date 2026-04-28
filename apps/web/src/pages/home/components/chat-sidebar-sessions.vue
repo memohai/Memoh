@@ -219,7 +219,7 @@ function handleSelect(session: SessionSummary) {
 }
 
 function handleNewSession() {
-  chatStore.createNewSession()
+  workspaceTabs.openDraft()
 }
 
 const deleteSessionDialogOpen = ref(false)

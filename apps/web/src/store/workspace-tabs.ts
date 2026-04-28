@@ -8,6 +8,9 @@ export type WorkspaceTab =
   | { id: string; type: 'chat'; sessionId: string; title: string }
   | { id: string; type: 'file'; filePath: string; title: string }
   | { id: string; type: 'terminal'; title: string }
+  | { id: string; type: 'draft'; title: string }
+
+const DRAFT_TAB_ID = 'draft'
 
 interface BotTabState {
   tabs: WorkspaceTab[]
@@ -107,6 +110,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const tab = state.tabs.find((t) => t.id === id)
     if (tab?.type === 'chat') {
       void chatStore.selectSession(tab.sessionId)
+    } else if (tab?.type === 'draft') {
+      void chatStore.createNewSession()
     }
   }
 
@@ -156,6 +161,50 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       title: fileBaseName(path),
     }
     commit({ ...state, tabs: [...state.tabs, tab], activeId: id })
+  }
+
+  function openDraft() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const existing = state.tabs.find((t) => t.id === DRAFT_TAB_ID)
+    if (existing) {
+      commit({ ...state, activeId: DRAFT_TAB_ID })
+    } else {
+      const tab: WorkspaceTab = { id: DRAFT_TAB_ID, type: 'draft', title: '' }
+      commit({ ...state, tabs: [...state.tabs, tab], activeId: DRAFT_TAB_ID })
+    }
+    void chatStore.createNewSession()
+  }
+
+  function promoteDraftToChat(sessionId: string, title?: string) {
+    const sid = (sessionId ?? '').trim()
+    if (!sid) return
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const draftIdx = state.tabs.findIndex((t) => t.type === 'draft')
+    if (draftIdx < 0) return
+
+    const newId = chatTabId(sid)
+    const existingChatIdx = state.tabs.findIndex((t) => t.id === newId)
+
+    if (existingChatIdx >= 0) {
+      // A chat tab for this session already exists; drop the draft and focus it.
+      const nextTabs = state.tabs.filter((_, i) => i !== draftIdx)
+      const nextActive = state.activeId === DRAFT_TAB_ID ? newId : state.activeId
+      commit({ ...state, tabs: nextTabs, activeId: nextActive })
+      return
+    }
+
+    const promoted: WorkspaceTab = {
+      id: newId,
+      type: 'chat',
+      sessionId: sid,
+      title: title ?? '',
+    }
+    const nextTabs = [...state.tabs]
+    nextTabs[draftIdx] = promoted
+    const nextActive = state.activeId === DRAFT_TAB_ID ? newId : state.activeId
+    commit({ ...state, tabs: nextTabs, activeId: nextActive })
   }
 
   function openTerminal() {
@@ -223,6 +272,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'file':
         return dirty[tab.id] === true
       case 'terminal':
+      case 'draft':
         return false
     }
   }
@@ -293,8 +343,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     ensureBot(bid)
   }, { immediate: true })
 
-  // When the chat-store session is set externally (e.g. URL navigation),
-  // open or focus the corresponding chat tab.
+  // When the chat-store session is set externally (e.g. URL navigation, or
+  // the first message in a draft tab triggering server-side session creation),
+  // promote the draft tab if active, otherwise open or focus the chat tab.
   const draftSessionId = ref<string | null>(null)
   watch(
     () => chatStore.sessionId,
@@ -308,6 +359,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const state = ensureBot(currentBotId.value)
       if (!state) return
       const id = chatTabId(sid)
+
+      // Promote the draft tab in place if it's currently active. This is the
+      // path taken when sendMessage in a draft creates the real session.
+      if (state.activeId === DRAFT_TAB_ID) {
+        promoteDraftToChat(sid)
+        return
+      }
+
       const exists = state.tabs.some((t) => t.id === id)
       if (!exists) return
       if (state.activeId !== id) {
@@ -323,6 +382,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openChat,
     openFile,
     openTerminal,
+    openDraft,
+    promoteDraftToChat,
     closeTab,
     closeChatBySession,
     closeAll,

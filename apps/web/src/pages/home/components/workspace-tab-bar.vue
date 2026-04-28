@@ -1,8 +1,12 @@
 <template>
   <div class="flex items-center h-12 shrink-0 border-b border-border bg-background gap-1">
-    <div class="flex items-center flex-1 min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+    <div
+      ref="tabsContainerRef"
+      class="flex items-center flex-1 min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap"
+    >
       <button
         v-for="tab in tabs"
+        :ref="(el) => setTabRef(tab.id, el as Element | null)"
         :key="tab.id"
         type="button"
         class="group inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md px-2.5 text-xs transition-colors max-w-[200px]"
@@ -75,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { File as FileIcon, MessageSquare, MoreHorizontal, TerminalSquare, X } from 'lucide-vue-next'
@@ -92,6 +96,39 @@ const { t } = useI18n()
 const store = useWorkspaceTabsStore()
 const { tabs, activeId } = storeToRefs(store)
 
+const tabsContainerRef = ref<HTMLElement | null>(null)
+const tabRefs = new Map<string, HTMLElement>()
+
+function setTabRef(id: string, el: Element | null) {
+  if (el) tabRefs.set(id, el as HTMLElement)
+  else tabRefs.delete(id)
+}
+
+function scrollIntoViewHorizontal(container: HTMLElement, target: HTMLElement) {
+  const cRect = container.getBoundingClientRect()
+  const tRect = target.getBoundingClientRect()
+  const margin = 8
+  if (tRect.left < cRect.left) {
+    container.scrollBy({ left: tRect.left - cRect.left - margin, behavior: 'smooth' })
+  } else if (tRect.right > cRect.right) {
+    container.scrollBy({ left: tRect.right - cRect.right + margin, behavior: 'smooth' })
+  }
+}
+
+watch(
+  [activeId, () => tabs.value.length],
+  async () => {
+    const id = activeId.value
+    if (!id) return
+    await nextTick()
+    const container = tabsContainerRef.value
+    const target = tabRefs.get(id)
+    if (!container || !target) return
+    scrollIntoViewHorizontal(container, target)
+  },
+  { flush: 'post' },
+)
+
 const chatStore = useChatStore()
 const { sessions } = storeToRefs(chatStore)
 
@@ -106,6 +143,7 @@ const sessionTitleById = computed<Record<string, string>>(() => {
 function tabIcon(tab: WorkspaceTab): Component {
   switch (tab.type) {
     case 'chat': return MessageSquare
+    case 'draft': return MessageSquare
     case 'file': return FileIcon
     case 'terminal': return TerminalSquare
   }
@@ -114,6 +152,9 @@ function tabIcon(tab: WorkspaceTab): Component {
 function resolveTitle(tab: WorkspaceTab): string {
   if (tab.type === 'chat') {
     return sessionTitleById.value[tab.sessionId] || tab.title || t('chat.untitledSession')
+  }
+  if (tab.type === 'draft') {
+    return tab.title || t('chat.newSession')
   }
   if (tab.type === 'terminal') {
     return tab.title

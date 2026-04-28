@@ -5,8 +5,8 @@
     <div class="flex-1 min-h-0 relative">
       <template v-if="activeTab">
         <ChatPane
-          v-if="activeTab.type === 'chat'"
-          :key="`chat-pane:${activeTab.id}`"
+          v-if="activeTab.type === 'chat' || activeTab.type === 'draft'"
+          key="chat-pane"
         />
         <FilePane
           v-else-if="activeTab.type === 'file'"
