@@ -6,7 +6,7 @@
     viewBox="0 0 512 512"
     v-bind="$attrs"
   ><linearGradient
-    id="a"
+    :id="`${uid}-a`"
     x1="256"
     x2="256"
     y1="2"
@@ -23,7 +23,7 @@
     cx="256"
     cy="256"
     r="256"
-    style="fill:url(#a)"
+    :style="`fill:url(#${uid}-a)`"
   /><path
     d="m173.3 274.7 30.4 84.1s3.8 7.9 7.9 7.9 64.5-62.9 64.5-62.9l67.3-129.9-169 79.1z"
     style="fill:#c8daea"
@@ -37,6 +37,9 @@
 </template>
 
 <script setup lang="ts">
+import { useId } from 'vue'
 withDefaults(defineProps<{ size?: string | number }>(), { size: '1em' })
 defineOptions({ inheritAttrs: false })
+
+const uid = useId()
 </script>

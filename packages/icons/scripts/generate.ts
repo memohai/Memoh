@@ -33,9 +33,71 @@ function extractSvgAttrs(svg: string): { viewBox: string; innerContent: string; 
   return { viewBox, innerContent, isColor }
 }
 
+// Collect all standalone `id="X"` attributes declared inside the SVG inner
+// content. Skips compound attribute names like `p-id` whose suffix happens
+// to spell `id`.
+function collectIds(innerContent: string): Set<string> {
+  const ids = new Set<string>()
+  for (const m of innerContent.matchAll(/(?<=[\s<])id="([^"]+)"/g)) {
+    if (m[1]) ids.add(m[1])
+  }
+  return ids
+}
+
+// Rewrite SVG inner content so all internal id references become unique
+// per-instance using a `${uidPrefix}-` prefix. The result must be embeddable
+// in a Vue <template>: any attribute whose value contains `${...}` is converted
+// from `attr="..."` to `:attr="`...`"` form so Vue evaluates the interpolation.
+function scopeIdsForTemplate(innerContent: string, ids: Set<string>): string {
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let out = innerContent
+
+  // Helper: replace within attribute values, marking them as bound.
+  // We walk all attributes and inspect their value; if the value references
+  // `#<id>` (in url(#...), href="#...", or starts with #...), we convert the
+  // attribute to a Vue binding using a template literal.
+  for (const id of ids) {
+    const idRe = escapeRe(id)
+
+    // 1. id="X" → :id="`${uid}-X`" (declaration site, attribute-boundary aware)
+    out = out.replace(
+      new RegExp(`(?<=[\\s<])id="${idRe}"`, 'g'),
+      `:id="\`\${uid}-${id}\`"`,
+    )
+
+    // 2. url(#X) inside any attribute value → convert that attribute to :binding
+    //    Match attribute="…url(#X)…" (non-greedy) and rewrite to :attribute="`…url(#${uid}-X)…`"
+    out = out.replace(
+      new RegExp(
+        `(?<=[\\s<])([a-zA-Z][a-zA-Z0-9:-]*)="([^"]*url\\(#${idRe}\\)[^"]*)"`,
+        'g',
+      ),
+      (_match, attr: string, value: string) => {
+        const bound = value.replace(
+          new RegExp(`url\\(#${idRe}\\)`, 'g'),
+          `url(#\${uid}-${id})`,
+        )
+        return `:${attr}="\`${bound}\`"`
+      },
+    )
+
+    // 3. href="#X" / xlink:href="#X" → :href="`#${uid}-X`"
+    out = out.replace(
+      new RegExp(`(?<=[\\s<])(xlink:href|href)="#${idRe}"`, 'g'),
+      (_match, attr: string) => `:${attr}="\`#\${uid}-${id}\`"`,
+    )
+  }
+
+  return out
+}
+
 function generateVueSFC(viewBox: string, innerContent: string, isColor: boolean): string {
   const fillAttr = isColor ? '' : '\n    fill="currentColor"'
-  return `<template>
+  const ids = collectIds(innerContent)
+  const hasIds = ids.size > 0
+
+  if (!hasIds) {
+    return `<template>
   <svg
     xmlns="http://www.w3.org/2000/svg"
     :width="size"
@@ -48,6 +110,27 @@ function generateVueSFC(viewBox: string, innerContent: string, isColor: boolean)
 <script setup lang="ts">
 withDefaults(defineProps<{ size?: string | number }>(), { size: '1em' })
 defineOptions({ inheritAttrs: false })
+</script>
+`
+  }
+
+  const scoped = scopeIdsForTemplate(innerContent, ids)
+  return `<template>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    :width="size"
+    :height="size"
+    viewBox="${viewBox}"${fillAttr}
+    v-bind="$attrs"
+  >${scoped}</svg>
+</template>
+
+<script setup lang="ts">
+import { useId } from 'vue'
+withDefaults(defineProps<{ size?: string | number }>(), { size: '1em' })
+defineOptions({ inheritAttrs: false })
+
+const uid = useId()
 </script>
 `
 }
@@ -91,9 +174,26 @@ for (const file of manifest) {
   generated++
 }
 
-exports.sort()
-fs.writeFileSync(INDEX_FILE, exports.join('\n') + '\n')
+// Include any hand-authored icon SFCs that live in src/icons/ but are not
+// listed in the manifest (e.g. Misskey, which has no source SVG).
+const knownComponents = new Set(
+  exports.map(line => line.match(/from '\.\/icons\/([^']+)\.vue'/)?.[1]).filter(Boolean) as string[],
+)
+const orphanExports: string[] = []
+for (const fname of fs.readdirSync(SRC_ICONS_DIR)) {
+  if (!fname.endsWith('.vue')) continue
+  const componentName = fname.replace(/\.vue$/, '')
+  if (knownComponents.has(componentName)) continue
+  orphanExports.push(`export { default as ${componentName} } from './icons/${componentName}.vue'`)
+}
+
+const allExports = [...exports, ...orphanExports]
+allExports.sort()
+fs.writeFileSync(INDEX_FILE, allExports.join('\n') + '\n')
 
 console.log(`   ✅ Generated: ${generated}, Missing: ${missing}`)
-console.log(`   📄 Index: ${exports.length} exports written to src/index.ts`)
+if (orphanExports.length) {
+  console.log(`   📌 Preserved ${orphanExports.length} hand-authored icon(s) not in manifest`)
+}
+console.log(`   📄 Index: ${allExports.length} exports written to src/index.ts`)
 console.log('\n✨ Done!\n')
