@@ -793,6 +793,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     messages,
     streaming,
+    streamingSessionId,
     sessions,
     chats,
     chatId,

@@ -245,8 +245,6 @@ import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
-import BotTerminal from './components/bot-terminal.vue'
-import BotFiles from './components/bot-files.vue'
 import BotAccess from './components/bot-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -282,8 +280,6 @@ const tabList = computed(() => {
     { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'tool-approval', label: 'bots.tabs.toolApproval', component: BotToolApproval, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
-    { value: 'terminal', label: 'bots.tabs.terminal', component: BotTerminal, params: { 'bot-id': bot_id } },
-    { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', component: BotCompaction, params: { 'bot-id': bot_id } },

@@ -4,7 +4,7 @@
     :style="{ width: `${sidebarWidth}px` }"
   >
     <div class="flex flex-col h-full flex-1 min-w-0 bg-sidebar border-r border-border">
-      <div class="flex items-center h-12 shrink-0 border-b border-border bg-sidebar/60 px-1.5 pt-2 pb-1 gap-1 overflow-x-auto overflow-y-hidden">
+      <div class="flex items-center h-12 shrink-0 border-b border-border bg-sidebar/60 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden">
         <button
           v-for="tab in activityTabs"
           :key="tab.id"
@@ -48,16 +48,6 @@
             {{ t('chat.selectBotHint') }}
           </div>
         </div>
-        <div
-          v-show="activeTab === 'terminal'"
-          class="absolute inset-0"
-        >
-          <ChatSidebarTerminal
-            v-if="currentBotId"
-            :bot-id="currentBotId"
-            :visible="activeTab === 'terminal'"
-          />
-        </div>
       </div>
     </div>
 
@@ -78,13 +68,12 @@ import { ref, onBeforeUnmount, nextTick, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Folder, TerminalSquare } from 'lucide-vue-next'
+import { MessageSquare, Folder } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import ChatSidebarSessions from './chat-sidebar-sessions.vue'
 import ChatSidebarFiles from './chat-sidebar-files.vue'
-import ChatSidebarTerminal from './chat-sidebar-terminal.vue'
 
-type ActivityTabId = 'sessions' | 'files' | 'terminal'
+type ActivityTabId = 'sessions' | 'files'
 
 interface ActivityTab {
   id: ActivityTabId
@@ -99,10 +88,14 @@ const { currentBotId } = storeToRefs(chatStore)
 const activityTabs: ActivityTab[] = [
   { id: 'sessions', label: t('chat.activityTabSessions'), icon: MessageSquare },
   { id: 'files', label: t('chat.activityTabFiles'), icon: Folder },
-  { id: 'terminal', label: t('chat.activityTabTerminal'), icon: TerminalSquare },
 ]
 
 const activeTab = useLocalStorage<ActivityTabId>('chat-sidebar-active-tab', 'sessions')
+
+// Guard against stale persisted value (e.g. legacy 'terminal' tab).
+if (!activityTabs.some((t) => t.id === activeTab.value)) {
+  activeTab.value = 'sessions'
+}
 
 const filesPanelRef = ref<InstanceType<typeof ChatSidebarFiles> | null>(null)
 

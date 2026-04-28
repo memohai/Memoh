@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { File, Download, X } from 'lucide-vue-next'
+import { File, Download, Save } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {
   getBotsByBotIdContainerFsRead,
@@ -12,7 +12,7 @@ import {
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
-import { isTextFile, isImageFile, formatFileSize } from './utils'
+import { isTextFile, isImageFile } from './utils'
 
 const props = defineProps<{
   botId: string
@@ -20,8 +20,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
   saved: []
+  'update:dirty': [dirty: boolean]
 }>()
 
 const { t } = useI18n()
@@ -37,6 +37,10 @@ const filePath = computed(() => props.file.path ?? '')
 const isText = computed(() => isTextFile(filename.value))
 const isImage = computed(() => isImageFile(filename.value))
 const isDirty = computed(() => content.value !== originalContent.value)
+
+watch(isDirty, (dirty) => {
+  emit('update:dirty', dirty)
+}, { immediate: true })
 
 async function loadTextContent() {
   loading.value = true
@@ -119,63 +123,43 @@ watch(() => props.file.path, () => {
   }
 }, { immediate: true })
 
+function handleKeydown(e: KeyboardEvent) {
+  const isSave = (e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')
+  if (!isSave) return
+  if (!isText.value || !isDirty.value || saving.value) return
+  e.preventDefault()
+  void handleSave()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
   cleanupImageUrl()
 })
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden">
-    <!-- Header -->
-    <div class="flex items-center justify-between border-b border-border px-4 py-2">
-      <div class="flex items-center gap-2 min-w-0">
-        <File
-          class="size-3.5 shrink-0 text-muted-foreground"
-        />
-        <span class="truncate text-xs font-medium">{{ filename }}</span>
-        <span class="shrink-0 text-xs text-muted-foreground">{{ formatFileSize(file.size) }}</span>
-        <span
-          v-if="isDirty"
-          class="shrink-0 text-xs text-orange-500"
-        >{{ t('bots.files.unsaved') }}</span>
-      </div>
-      <div class="flex items-center gap-1.5">
-        <Button
-          v-if="isText && isDirty"
-          size="sm"
-          :disabled="saving"
-          @click="handleSave"
-        >
-          <Spinner
-            v-if="saving"
-            class="mr-1"
-          />
-          {{ t('bots.files.save') }}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          @click="handleDownload"
-        >
-          <Download
-            class="mr-1 size-3"
-          />
-          {{ t('bots.files.download') }}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="size-7 p-0"
-          @click="emit('close')"
-        >
-          <X
-            class="size-4"
-          />
-        </Button>
-      </div>
-    </div>
+  <div class="relative flex h-full flex-col overflow-hidden">
+    <Button
+      v-if="isText"
+      type="button"
+      size="sm"
+      class="absolute top-2 right-2 z-10 gap-1.5 bg-[#8B56E3] text-white shadow-md hover:bg-[#7c47d6] disabled:bg-[#8B56E3]/40 disabled:text-white/80"
+      :disabled="!isDirty || saving"
+      :title="t('bots.files.save')"
+      @click="handleSave"
+    >
+      <Spinner v-if="saving" />
+      <Save
+        v-else
+        class="size-3.5"
+      />
+      {{ t('bots.files.save') }}
+    </Button>
 
-    <!-- Content -->
     <div class="flex-1 min-h-0 overflow-hidden">
       <div
         v-if="loading"
@@ -207,9 +191,7 @@ onBeforeUnmount(() => {
         v-else
         class="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground"
       >
-        <File
-          class="size-12 opacity-30"
-        />
+        <File class="size-12 opacity-30" />
         <p class="text-xs">
           {{ t('bots.files.previewNotAvailable') }}
         </p>
@@ -218,9 +200,7 @@ onBeforeUnmount(() => {
           size="sm"
           @click="handleDownload"
         >
-          <Download
-            class="mr-1.5 size-3"
-          />
+          <Download class="mr-1.5 size-3" />
           {{ t('bots.files.download') }}
         </Button>
       </div>

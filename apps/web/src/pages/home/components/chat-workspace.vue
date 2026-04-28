@@ -1,18 +1,23 @@
 <template>
   <div class="flex flex-col flex-1 h-full min-w-0 bg-card">
-    <WorkspaceTabBar v-if="tabs.length" />
+    <WorkspaceTabBar />
 
     <div class="flex-1 min-h-0 relative">
       <template v-if="activeTab">
         <ChatPane
           v-if="activeTab.type === 'chat'"
-          :key="activeTab.id"
+          :key="`chat-pane:${activeTab.id}`"
         />
         <FilePane
-          v-else
-          :key="activeTab.id"
+          v-else-if="activeTab.type === 'file'"
+          :key="`file-pane:${activeTab.id}`"
           :tab-id="activeTab.id"
           :file-path="activeTab.filePath"
+        />
+        <TerminalPane
+          v-else-if="activeTab.type === 'terminal' && currentBotId"
+          :key="`terminal-pane:${activeTab.id}`"
+          :bot-id="currentBotId"
         />
       </template>
       <div
@@ -36,11 +41,15 @@
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatStore } from '@/store/chat-list'
 import WorkspaceTabBar from './workspace-tab-bar.vue'
 import ChatPane from './chat-pane.vue'
 import FilePane from './file-pane.vue'
+import TerminalPane from './terminal-pane.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
-const { tabs, activeTab } = storeToRefs(store)
+const { activeTab } = storeToRefs(store)
+const chatStore = useChatStore()
+const { currentBotId } = storeToRefs(chatStore)
 </script>

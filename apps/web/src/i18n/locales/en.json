@@ -285,7 +285,13 @@
     "tabClose": "Close tab",
     "sessionInfoRingAria": "Session info",
     "sessionInfoTooltipHint": "Hover to see session info",
-    "sessionActions": "Session actions"
+    "sessionActions": "Session actions",
+    "tabBarToolkit": {
+      "newTerminal": "Open new terminal",
+      "menu": "Tab actions",
+      "closeAll": "Close all",
+      "closeFinished": "Close saved and finished"
+    }
   },
   "models": {
     "title": "Models",

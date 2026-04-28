@@ -281,7 +281,13 @@
     "tabClose": "关闭标签页",
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
-    "sessionActions": "会话操作"
+    "sessionActions": "会话操作",
+    "tabBarToolkit": {
+      "newTerminal": "新建终端",
+      "menu": "标签页操作",
+      "closeAll": "关闭全部",
+      "closeFinished": "关闭已保存和结束的"
+    }
   },
   "models": {
     "title": "模型",

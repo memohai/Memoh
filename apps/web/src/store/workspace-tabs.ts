@@ -7,10 +7,13 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 export type WorkspaceTab =
   | { id: string; type: 'chat'; sessionId: string; title: string }
   | { id: string; type: 'file'; filePath: string; title: string }
+  | { id: string; type: 'terminal'; title: string }
 
 interface BotTabState {
   tabs: WorkspaceTab[]
   activeId: string | null
+  terminalCounter: number
+  dirtyFileTabs: Record<string, boolean>
 }
 
 type WorkspaceTabsStorage = Record<string, BotTabState>
@@ -23,9 +26,17 @@ function fileTabId(filePath: string): string {
   return `file:${filePath}`
 }
 
+function terminalTabId(counter: number): string {
+  return `terminal:${counter}`
+}
+
 function fileBaseName(filePath: string): string {
   const idx = filePath.lastIndexOf('/')
   return idx >= 0 ? filePath.slice(idx + 1) : filePath
+}
+
+function emptyBotState(): BotTabState {
+  return { tabs: [], activeId: null, terminalCounter: 0, dirtyFileTabs: {} }
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
@@ -39,15 +50,29 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const bid = (botId ?? '').trim()
     if (!bid) return null
     if (!storage.value[bid]) {
-      storage.value = { ...storage.value, [bid]: { tabs: [], activeId: null } }
+      storage.value = { ...storage.value, [bid]: emptyBotState() }
+    } else {
+      // Backfill fields added later so old persisted state stays usable.
+      const cur = storage.value[bid]!
+      if (cur.terminalCounter === undefined || cur.dirtyFileTabs === undefined) {
+        storage.value = {
+          ...storage.value,
+          [bid]: {
+            tabs: cur.tabs ?? [],
+            activeId: cur.activeId ?? null,
+            terminalCounter: cur.terminalCounter ?? 0,
+            dirtyFileTabs: cur.dirtyFileTabs ?? {},
+          },
+        }
+      }
     }
     return storage.value[bid] ?? null
   }
 
   const currentState = computed<BotTabState>(() => {
     const bid = (currentBotId.value ?? '').trim()
-    if (!bid) return { tabs: [], activeId: null }
-    return storage.value[bid] ?? { tabs: [], activeId: null }
+    if (!bid) return emptyBotState()
+    return storage.value[bid] ?? emptyBotState()
   })
 
   const tabs = computed<WorkspaceTab[]>(() => currentState.value.tabs)
@@ -63,7 +88,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!bid) return
     storage.value = {
       ...storage.value,
-      [bid]: { tabs: [...state.tabs], activeId: state.activeId },
+      [bid]: {
+        tabs: [...state.tabs],
+        activeId: state.activeId,
+        terminalCounter: state.terminalCounter,
+        dirtyFileTabs: { ...state.dirtyFileTabs },
+      },
     }
   }
 
@@ -71,7 +101,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const state = ensureBot(currentBotId.value)
     if (!state) return
     if (state.activeId === id) return
-    commit({ tabs: state.tabs, activeId: id })
+    commit({ ...state, activeId: id })
 
     if (!id) return
     const tab = state.tabs.find((t) => t.id === id)
@@ -92,9 +122,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         const next = state.tabs.map((t) =>
           t.id === id && t.type === 'chat' ? { ...t, title } : t,
         )
-        commit({ tabs: next, activeId: id })
+        commit({ ...state, tabs: next, activeId: id })
       } else {
-        commit({ tabs: state.tabs, activeId: id })
+        commit({ ...state, activeId: id })
       }
     } else {
       const tab: WorkspaceTab = {
@@ -103,7 +133,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         sessionId: sid,
         title: title ?? '',
       }
-      commit({ tabs: [...state.tabs, tab], activeId: id })
+      commit({ ...state, tabs: [...state.tabs, tab], activeId: id })
     }
     void chatStore.selectSession(sid)
   }
@@ -116,7 +146,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const id = fileTabId(path)
     const existing = state.tabs.find((t) => t.id === id)
     if (existing) {
-      commit({ tabs: state.tabs, activeId: id })
+      commit({ ...state, activeId: id })
       return
     }
     const tab: WorkspaceTab = {
@@ -125,7 +155,25 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       filePath: path,
       title: fileBaseName(path),
     }
-    commit({ tabs: [...state.tabs, tab], activeId: id })
+    commit({ ...state, tabs: [...state.tabs, tab], activeId: id })
+  }
+
+  function openTerminal() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const nextCounter = state.terminalCounter + 1
+    const id = terminalTabId(nextCounter)
+    const tab: WorkspaceTab = {
+      id,
+      type: 'terminal',
+      title: `Terminal ${nextCounter}`,
+    }
+    commit({
+      ...state,
+      tabs: [...state.tabs, tab],
+      activeId: id,
+      terminalCounter: nextCounter,
+    })
   }
 
   function closeTab(id: string) {
@@ -143,7 +191,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         nextActive = fallback?.id ?? null
       }
     }
-    commit({ tabs: nextTabs, activeId: nextActive })
+    const nextDirty = { ...state.dirtyFileTabs }
+    delete nextDirty[id]
+
+    commit({ ...state, tabs: nextTabs, activeId: nextActive, dirtyFileTabs: nextDirty })
 
     if (nextActive) {
       const tab = nextTabs.find((t) => t.id === nextActive)
@@ -159,6 +210,56 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     closeTab(chatTabId(sessionId))
   }
 
+  function closeAll() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    commit({ ...state, tabs: [], activeId: null, dirtyFileTabs: {} })
+  }
+
+  function isTabBusy(tab: WorkspaceTab, dirty: Record<string, boolean>): boolean {
+    switch (tab.type) {
+      case 'chat':
+        return chatStore.streamingSessionId === tab.sessionId
+      case 'file':
+        return dirty[tab.id] === true
+      case 'terminal':
+        return false
+    }
+  }
+
+  function closeFinished() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const remaining = state.tabs.filter((tab) => isTabBusy(tab, state.dirtyFileTabs))
+    let nextActive = state.activeId
+    if (nextActive && !remaining.some((t) => t.id === nextActive)) {
+      nextActive = remaining[0]?.id ?? null
+    }
+    const nextDirty: Record<string, boolean> = {}
+    for (const tab of remaining) {
+      if (state.dirtyFileTabs[tab.id]) nextDirty[tab.id] = true
+    }
+    commit({ ...state, tabs: remaining, activeId: nextActive, dirtyFileTabs: nextDirty })
+
+    if (nextActive) {
+      const tab = remaining.find((t) => t.id === nextActive)
+      if (tab?.type === 'chat') {
+        void chatStore.selectSession(tab.sessionId)
+      }
+    }
+  }
+
+  function setFileDirty(tabId: string, dirty: boolean) {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const current = state.dirtyFileTabs[tabId] === true
+    if (current === dirty) return
+    const nextDirty = { ...state.dirtyFileTabs }
+    if (dirty) nextDirty[tabId] = true
+    else delete nextDirty[tabId]
+    commit({ ...state, dirtyFileTabs: nextDirty })
+  }
+
   function updateChatTitle(sessionId: string, title: string) {
     const state = ensureBot(currentBotId.value)
     if (!state) return
@@ -166,7 +267,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const next = state.tabs.map((t) =>
       t.id === id && t.type === 'chat' ? { ...t, title } : t,
     )
-    commit({ tabs: next, activeId: state.activeId })
+    commit({ ...state, tabs: next })
   }
 
   // Reset all tabs for a specific bot. Used when the user switches bots.
@@ -210,7 +311,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const exists = state.tabs.some((t) => t.id === id)
       if (!exists) return
       if (state.activeId !== id) {
-        commit({ tabs: state.tabs, activeId: id })
+        commit({ ...state, activeId: id })
       }
     },
   )
@@ -221,8 +322,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     activeTab,
     openChat,
     openFile,
+    openTerminal,
     closeTab,
     closeChatBySession,
+    closeAll,
+    closeFinished,
+    setFileDirty,
     updateChatTitle,
     setActive,
     resetBot,
