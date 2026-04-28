@@ -8,9 +8,10 @@ import (
 type ToolCallStatus string
 
 const (
-	ToolCallStatusRunning   ToolCallStatus = "running"
-	ToolCallStatusCompleted ToolCallStatus = "completed"
-	ToolCallStatusFailed    ToolCallStatus = "failed"
+	ToolCallStatusRunning          ToolCallStatus = "running"
+	ToolCallStatusApprovalRequired ToolCallStatus = "approval_required"
+	ToolCallStatusCompleted        ToolCallStatus = "completed"
+	ToolCallStatusFailed           ToolCallStatus = "failed"
 )
 
 // ExternalToolCallEmoji is the emoji used for any tool not in the built-in
@@ -118,6 +119,22 @@ func BuildToolCallStart(tc *StreamToolCall) ToolCallPresentation {
 		return ToolCallPresentation{}
 	}
 	name := strings.TrimSpace(tc.Name)
+	if strings.TrimSpace(tc.ApprovalID) != "" {
+		summary := SummarizeToolInput(name, tc.Input)
+		return ToolCallPresentation{
+			Emoji:    ToolCallEmoji(name),
+			ToolName: name,
+			Status:   ToolCallStatusApprovalRequired,
+			Header:   summary,
+			Body: []ToolCallBlock{
+				{
+					Type: ToolCallBlockText,
+					Text: approvalHintText(tc),
+				},
+			},
+			InputSummary: summary,
+		}
+	}
 	if fn := lookupToolFormatter(name); fn != nil {
 		p := fn(tc, ToolCallStatusRunning)
 		fillBaseIdentity(&p, name, ToolCallStatusRunning)
@@ -161,6 +178,37 @@ func BuildToolCallEnd(tc *StreamToolCall) ToolCallPresentation {
 		InputSummary:  inputSummary,
 		ResultSummary: resultSummary,
 	}
+}
+
+func approvalHintText(tc *StreamToolCall) string {
+	id := tc.ShortID
+	if id > 0 {
+		return strings.TrimSpace(
+			"Approval required. Use /approve " + intString(id) +
+				" to allow, or /reject " + intString(id) + " [reason] to reject. You can also reply to this message with /approve or /reject.",
+		)
+	}
+	return "Approval required. Reply to this message with /approve or /reject."
+}
+
+func intString(v int) string {
+	var b strings.Builder
+	if v == 0 {
+		return "0"
+	}
+	if v < 0 {
+		b.WriteByte('-')
+		v = -v
+	}
+	var digits [20]byte
+	i := len(digits)
+	for v > 0 {
+		i--
+		digits[i] = byte('0' + v%10)
+		v /= 10
+	}
+	b.Write(digits[i:])
+	return b.String()
 }
 
 // fillBaseIdentity fills emoji / tool name / status after a per-tool

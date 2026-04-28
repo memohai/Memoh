@@ -100,6 +100,7 @@ export const useChatStore = defineStore('chat', () => {
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: Promise<void> | null = null
+  let suppressNextStartPlaceholder = false
   const messageEventsStream = useRetryingStream()
 
   const activeSession = computed(() =>
@@ -342,7 +343,11 @@ export const useChatStore = defineStore('chat', () => {
   function handleWSStreamEvent(event: UIStreamEvent) {
     switch (event.type) {
       case 'start':
-        ensureDiscussStream()
+        if (suppressNextStartPlaceholder) {
+          suppressNextStartPlaceholder = false
+        } else {
+          ensureDiscussStream()
+        }
         break
       case 'message':
         upsertAssistantUIMessage(ensureDiscussStream().assistantTurn, event.data)
@@ -744,6 +749,7 @@ export const useChatStore = defineStore('chat', () => {
     const ws = ensureWebSocket(bid)
     streamingSessionId.value = sid
     loading.value = true
+    suppressNextStartPlaceholder = true
     // Optimistically update the approved/rejected tool block before the
     // server snapshot arrives so the buttons disappear immediately.
     for (const message of messages) {
@@ -758,10 +764,6 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
     }
-    // Pre-create the streaming assistant turn so the "thinking" indicator
-    // stays visible until real content arrives, instead of flickering when
-    // the first server message creates the turn lazily.
-    ensureDiscussStream()
     abortFn = () => {
       const abortError = new Error('aborted')
       abortError.name = 'AbortError'

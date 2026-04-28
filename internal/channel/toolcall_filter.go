@@ -25,6 +25,9 @@ func (s *toolCallDroppingStream) Push(ctx context.Context, event StreamEvent) er
 	if s == nil || s.primary == nil {
 		return nil
 	}
+	if event.Type == StreamEventToolCallStart && event.ToolCall != nil && event.ToolCall.ApprovalID != "" {
+		return s.primary.Push(ctx, event)
+	}
 	if event.Type == StreamEventToolCallStart || event.Type == StreamEventToolCallEnd {
 		return nil
 	}

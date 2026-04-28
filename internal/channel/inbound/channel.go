@@ -1411,23 +1411,19 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 			},
 		}, finalMessages, nil
 	case "tool_approval_request":
-		msg := channel.Message{
-			Text: fmt.Sprintf("Tool approval required #%d\nTool: %s\n\nApprove with /approve %d or reply to this message with /approve.\nReject with /reject %d [reason] or reply with /reject [reason].",
-				envelope.ShortID,
-				strings.TrimSpace(envelope.ToolName),
-				envelope.ShortID,
-				envelope.ShortID,
-			),
-			Actions: []channel.Action{
-				{Type: "tool_approval", Label: "Approve", Value: "approve:" + strings.TrimSpace(envelope.ApprovalID)},
-				{Type: "tool_approval", Label: "Reject", Value: "reject:" + strings.TrimSpace(envelope.ApprovalID)},
-			},
-		}
 		return []channel.StreamEvent{
 			{
-				Type: channel.StreamEventFinal,
-				Final: &channel.StreamFinalizePayload{
-					Message: msg,
+				Type: channel.StreamEventToolCallStart,
+				ToolCall: &channel.StreamToolCall{
+					Name:       strings.TrimSpace(envelope.ToolName),
+					CallID:     strings.TrimSpace(envelope.ToolCallID),
+					Input:      parseRawJSON(envelope.Input),
+					ApprovalID: strings.TrimSpace(envelope.ApprovalID),
+					ShortID:    envelope.ShortID,
+					Actions: []channel.Action{
+						{Type: "tool_approval", Label: "Approve", Value: "approve:" + strings.TrimSpace(envelope.ApprovalID)},
+						{Type: "tool_approval", Label: "Reject", Value: "reject:" + strings.TrimSpace(envelope.ApprovalID)},
+					},
 				},
 			},
 		}, finalMessages, nil
@@ -2792,7 +2788,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		explicitID = actionText
 		reason = strings.TrimSpace(strings.Join(parsed.Args, " "))
 	}
-	err = approvalRunner.RespondToolApproval(ctx, flow.ToolApprovalResponseInput{
+	return p.streamToolApprovalCommand(ctx, msg, sender, identity, approvalRunner, flow.ToolApprovalResponseInput{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -2801,20 +2797,127 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 		Decision:               parsed.Resource,
 		Reason:                 reason,
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
-	}, nil)
-	reply := ""
-	switch {
-	case err != nil:
-		reply = "Tool approval failed: " + err.Error()
-	case parsed.Resource == "approve":
-		reply = "Tool approval accepted. Continuing execution."
-	default:
-		reply = "Tool approval rejected. Continuing execution."
-	}
-	return sender.Send(ctx, channel.OutboundMessage{
-		Target:  strings.TrimSpace(msg.ReplyTarget),
-		Message: channel.Message{Text: reply},
 	})
+}
+
+func (p *ChannelInboundProcessor) streamToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, approvalRunner ToolApprovalRunner, input flow.ToolApprovalResponseInput) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing")
+	}
+	sourceMessageID := strings.TrimSpace(msg.Message.ID)
+	replyRef := &channel.ReplyRef{Target: target}
+	if sourceMessageID != "" {
+		replyRef.MessageID = sourceMessageID
+	}
+	stream, err := sender.OpenStream(ctx, target, channel.StreamOptions{
+		Reply:           replyRef,
+		SourceMessageID: sourceMessageID,
+		Metadata: map[string]any{
+			"conversation_type": msg.Conversation.Type,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	streamClosed := false
+	closeStream := func() error {
+		if streamClosed {
+			return nil
+		}
+		streamClosed = true
+		return stream.Close(context.WithoutCancel(ctx))
+	}
+	defer func() { _ = closeStream() }()
+
+	if !isLocalChannelType(msg.Channel) && !p.shouldShowToolCallsInIM(ctx, identity.BotID) {
+		stream = channel.NewToolCallDroppingStream(stream)
+	}
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}); err != nil {
+		return err
+	}
+
+	eventCh := make(chan flow.WSStreamEvent, 64)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(eventCh)
+		errCh <- approvalRunner.RespondToolApproval(ctx, input, eventCh)
+		close(errCh)
+	}()
+
+	var finalMessages []conversation.ModelMessage
+	for eventCh != nil || errCh != nil {
+		select {
+		case chunk, ok := <-eventCh:
+			if !ok {
+				eventCh = nil
+				continue
+			}
+			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
+			if parseErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("approval stream chunk parse failed", slog.Any("error", parseErr))
+				}
+				continue
+			}
+			if len(messages) > 0 {
+				finalMessages = messages
+			}
+			for _, event := range events {
+				// Approval continuations should not flash transient "running"
+				// tool messages in IM. If tool visibility is enabled, the
+				// completed tool state may still be shown on tool_call_end.
+				if event.Type == channel.StreamEventToolCallStart &&
+					(event.ToolCall == nil || strings.TrimSpace(event.ToolCall.ApprovalID) == "") {
+					continue
+				}
+				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
+					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
+					continue
+				}
+				if err := stream.Push(ctx, event); err != nil {
+					return err
+				}
+			}
+		case runErr, ok := <-errCh:
+			if !ok {
+				errCh = nil
+				continue
+			}
+			if runErr != nil {
+				_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: runErr.Error()})
+				return runErr
+			}
+		}
+	}
+
+	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
+	if !suppressReplies {
+		outputs := flow.ExtractAssistantOutputs(finalMessages)
+		for _, output := range outputs {
+			outMessage := buildChannelMessage(output, channel.ChannelCapabilities{Text: true, Markdown: true, Reply: true})
+			if outMessage.IsEmpty() {
+				continue
+			}
+			plainText := strings.TrimSpace(outMessage.PlainText())
+			if isSilentReplyText(plainText) || isMessagingToolDuplicate(plainText, sentTexts) {
+				continue
+			}
+			if outMessage.Reply == nil && sourceMessageID != "" {
+				outMessage.Reply = &channel.ReplyRef{Target: target, MessageID: sourceMessageID}
+			}
+			if err := stream.Push(ctx, channel.StreamEvent{
+				Type:  channel.StreamEventFinal,
+				Final: &channel.StreamFinalizePayload{Message: outMessage},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventStatus, Status: channel.StreamStatusCompleted}); err != nil {
+		return err
+	}
+	return closeStream()
 }
 
 func (p *ChannelInboundProcessor) issueChatToken(identity InboundIdentity, routeID string, msg channel.InboundMessage) string {

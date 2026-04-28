@@ -149,10 +149,13 @@ type StreamFinalizePayload struct {
 
 // StreamToolCall carries tool invocation data for tool_call_start / tool_call_end events.
 type StreamToolCall struct {
-	Name   string `json:"name"`
-	CallID string `json:"call_id,omitempty"`
-	Input  any    `json:"input,omitempty"`
-	Result any    `json:"result,omitempty"`
+	Name       string   `json:"name"`
+	CallID     string   `json:"call_id,omitempty"`
+	Input      any      `json:"input,omitempty"`
+	Result     any      `json:"result,omitempty"`
+	ApprovalID string   `json:"approval_id,omitempty"`
+	ShortID    int      `json:"short_id,omitempty"`
+	Actions    []Action `json:"actions,omitempty"`
 }
 
 // StreamPhase labels a processing stage within a stream (e.g., reasoning, text).

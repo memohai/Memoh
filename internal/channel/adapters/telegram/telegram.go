@@ -385,6 +385,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 				if update.CallbackQuery != nil {
 					if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
 						_, _ = bot.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, "OK"))
+						_ = clearTelegramCallbackButtons(bot, update.CallbackQuery)
 						a.dispatchInbound(connCtx, cfg, handler, msg)
 					}
 					continue
@@ -510,6 +511,19 @@ func parseTelegramApprovalCallback(data string) (action, approvalID string, ok b
 	default:
 		return "", "", false
 	}
+}
+
+func clearTelegramCallbackButtons(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQuery) error {
+	if bot == nil || cb == nil || cb.Message == nil || cb.Message.Chat == nil {
+		return nil
+	}
+	edit := tgbotapi.NewEditMessageReplyMarkup(
+		cb.Message.Chat.ID,
+		cb.Message.MessageID,
+		tgbotapi.InlineKeyboardMarkup{},
+	)
+	_, err := bot.Request(edit)
+	return err
 }
 
 func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
@@ -911,10 +925,15 @@ func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text str
 }
 
 func sendTelegramTextWithActions(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string, actions []channel.Action) error {
+	_, _, err := sendTelegramTextWithActionsReturnMessage(bot, target, text, replyTo, parseMode, actions)
+	return err
+}
+
+func sendTelegramTextWithActionsReturnMessage(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string, actions []channel.Action) (chatID int64, messageID int, err error) {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	parsedChatID, channelUsername, parseErr := parseTelegramTarget(target)
 	if parseErr != nil {
-		return parseErr
+		return 0, 0, parseErr
 	}
 	var message tgbotapi.MessageConfig
 	if channelUsername != "" {
@@ -926,20 +945,19 @@ func sendTelegramTextWithActions(bot *tgbotapi.BotAPI, target string, text strin
 	if replyTo > 0 {
 		message.ReplyToMessageID = replyTo
 	}
-	keyboard := make([]tgbotapi.InlineKeyboardButton, 0, len(actions))
-	for _, action := range actions {
-		label := strings.TrimSpace(action.Label)
-		value := strings.TrimSpace(action.Value)
-		if label == "" || value == "" {
-			continue
-		}
-		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(label, value))
+	markup := telegramInlineKeyboard(actions)
+	if len(markup.InlineKeyboard) > 0 {
+		message.ReplyMarkup = markup
 	}
-	if len(keyboard) > 0 {
-		message.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard)
+	sent, err := bot.Send(message)
+	if err != nil {
+		return 0, 0, err
 	}
-	_, err := bot.Send(message)
-	return err
+	chatID = parsedChatID
+	if sent.Chat != nil {
+		chatID = sent.Chat.ID
+	}
+	return chatID, sent.MessageID, nil
 }
 
 var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConfig) error
@@ -959,6 +977,31 @@ func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, 
 		return nil
 	}
 	return err
+}
+
+func editTelegramMessageTextWithActions(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string, actions []channel.Action) error {
+	text = truncateTelegramText(sanitizeTelegramText(text))
+	markup := telegramInlineKeyboard(actions)
+	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, markup)
+	edit.ParseMode = parseMode
+	_, err := bot.Send(edit)
+	if err != nil && isTelegramMessageNotModified(err) {
+		return nil
+	}
+	return err
+}
+
+func telegramInlineKeyboard(actions []channel.Action) tgbotapi.InlineKeyboardMarkup {
+	keyboard := make([]tgbotapi.InlineKeyboardButton, 0, len(actions))
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		value := strings.TrimSpace(action.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(label, value))
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(keyboard)
 }
 
 var sendDraftForTest func(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error
