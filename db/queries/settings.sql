@@ -127,6 +127,6 @@ SET language = 'auto',
     browser_context_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
-    tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":[".cache/**","tmp/**","node_modules/.cache/**","dist/**"]},"edit":{"require_approval":true,"bypass_globs":[".cache/**","tmp/**","node_modules/.cache/**","dist/**"]},"exec":{"require_approval":true,"bypass_commands":["npm","pnpm","yarn","bun","go","git"]}}'::jsonb,
+    tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
     updated_at = now()
 WHERE id = $1;

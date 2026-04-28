@@ -609,7 +609,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 
 func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
 	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
-		eval, err := r.toolApproval.Evaluate(ctx, toolapproval.CreatePendingInput{
+		input := toolapproval.CreatePendingInput{
 			BotID:                        p.BotID,
 			SessionID:                    p.SessionID,
 			RouteID:                      p.RouteID,
@@ -621,23 +621,58 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			SourcePlatform:               p.CurrentPlatform,
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
-		})
+		}
+		eval, err := r.toolApproval.EvaluatePolicy(ctx, input)
 		if err != nil {
 			return sdk.ToolApprovalResult{}, err
 		}
 		if eval.Decision == toolapproval.DecisionBypass {
 			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
 		}
+		if !isInteractiveApprovalSession(p.SessionType) {
+			req, err := r.toolApproval.CreatePending(ctx, input)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			reason := "tool execution requires approval, but this session type cannot request approval"
+			rejected, err := r.toolApproval.Reject(ctx, req.ID, p.ChannelIdentityID, reason)
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionRejected,
+				ApprovalID: rejected.ID,
+				Reason:     reason,
+				Metadata:   approvalResultMetadata(rejected),
+			}, nil
+		}
+		eval, err = r.toolApproval.Evaluate(ctx, input)
+		if err != nil {
+			return sdk.ToolApprovalResult{}, err
+		}
 		return sdk.ToolApprovalResult{
 			Decision:   sdk.ToolApprovalDecisionDeferred,
 			ApprovalID: eval.Request.ID,
-			Metadata: map[string]any{
-				"short_id":     eval.Request.ShortID,
-				"status":       eval.Request.Status,
-				"tool_name":    eval.Request.ToolName,
-				"tool_call_id": eval.Request.ToolCallID,
-			},
+			Metadata:   approvalResultMetadata(eval.Request),
 		}, nil
+	}
+}
+
+func approvalResultMetadata(req toolapproval.Request) map[string]any {
+	return map[string]any{
+		"short_id":     req.ShortID,
+		"status":       req.Status,
+		"tool_name":    req.ToolName,
+		"tool_call_id": req.ToolCallID,
+	}
+}
+
+func isInteractiveApprovalSession(sessionType string) bool {
+	switch strings.ToLower(strings.TrimSpace(sessionType)) {
+	case "", "chat":
+		return true
+	default:
+		return false
 	}
 }
 

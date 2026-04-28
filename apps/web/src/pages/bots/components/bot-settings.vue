@@ -323,11 +323,22 @@
               @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = !!val"
             />
           </div>
-          <Textarea
-            :model-value="approvalBypassText(tool)"
-            class="min-h-20 font-mono text-xs"
-            @update:model-value="(val) => updateApprovalBypass(tool, String(val))"
-          />
+          <div class="space-y-1">
+            <Label class="text-xs text-muted-foreground">{{ $t('bots.settings.toolApprovalBypass') }}</Label>
+            <Textarea
+              :model-value="approvalBypassText(tool)"
+              class="min-h-20 font-mono text-xs"
+              @update:model-value="(val) => updateApprovalBypass(tool, String(val))"
+            />
+          </div>
+          <div class="space-y-1">
+            <Label class="text-xs text-muted-foreground">{{ $t('bots.settings.toolApprovalMustReview') }}</Label>
+            <Textarea
+              :model-value="approvalForceReviewText(tool)"
+              class="min-h-20 font-mono text-xs"
+              @update:model-value="(val) => updateApprovalForceReview(tool, String(val))"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -435,11 +446,13 @@ type ApprovalTool = 'write' | 'edit' | 'exec'
 interface ToolApprovalFilePolicy {
   require_approval: boolean
   bypass_globs: string[]
+  force_review_globs: string[]
 }
 
 interface ToolApprovalExecPolicy {
   require_approval: boolean
   bypass_commands: string[]
+  force_review_commands: string[]
 }
 
 interface ToolApprovalConfig {
@@ -453,15 +466,18 @@ const defaultToolApprovalConfig = (): ToolApprovalConfig => ({
   enabled: false,
   write: {
     require_approval: true,
-    bypass_globs: ['.cache/**', 'tmp/**', 'node_modules/.cache/**', 'dist/**'],
+    bypass_globs: ['/data/**', '/tmp/**'],
+    force_review_globs: [],
   },
   edit: {
     require_approval: true,
-    bypass_globs: ['.cache/**', 'tmp/**', 'node_modules/.cache/**', 'dist/**'],
+    bypass_globs: ['/data/**', '/tmp/**'],
+    force_review_globs: [],
   },
   exec: {
-    require_approval: true,
-    bypass_commands: ['npm', 'pnpm', 'yarn', 'bun', 'go', 'git'],
+    require_approval: false,
+    bypass_commands: [],
+    force_review_commands: [],
   },
 })
 
@@ -726,14 +742,17 @@ function normalizeToolApprovalConfig(raw: unknown): ToolApprovalConfig {
     write: {
       require_approval: value.write?.require_approval ?? defaults.write.require_approval,
       bypass_globs: value.write?.bypass_globs ?? defaults.write.bypass_globs,
+      force_review_globs: value.write?.force_review_globs ?? defaults.write.force_review_globs,
     },
     edit: {
       require_approval: value.edit?.require_approval ?? defaults.edit.require_approval,
       bypass_globs: value.edit?.bypass_globs ?? defaults.edit.bypass_globs,
+      force_review_globs: value.edit?.force_review_globs ?? defaults.edit.force_review_globs,
     },
     exec: {
       require_approval: value.exec?.require_approval ?? defaults.exec.require_approval,
       bypass_commands: value.exec?.bypass_commands ?? defaults.exec.bypass_commands,
+      force_review_commands: value.exec?.force_review_commands ?? defaults.exec.force_review_commands,
     },
   }
 }
@@ -756,6 +775,23 @@ function updateApprovalBypass(tool: ApprovalTool, raw: string) {
     form.tool_approval_config.exec.bypass_commands = values
   } else {
     form.tool_approval_config[tool].bypass_globs = values
+  }
+}
+
+function approvalForceReviewText(tool: ApprovalTool): string {
+  const policy = toolApprovalPolicy(tool)
+  return (tool === 'exec'
+    ? (policy as ToolApprovalExecPolicy).force_review_commands
+    : (policy as ToolApprovalFilePolicy).force_review_globs
+  ).join('\n')
+}
+
+function updateApprovalForceReview(tool: ApprovalTool, raw: string) {
+  const values = raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+  if (tool === 'exec') {
+    form.tool_approval_config.exec.force_review_commands = values
+  } else {
+    form.tool_approval_config[tool].force_review_globs = values
   }
 }
 

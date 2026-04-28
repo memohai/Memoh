@@ -35,6 +35,18 @@ func NewService(log *slog.Logger, queries *sqlc.Queries, settings *settings.Serv
 }
 
 func (s *Service) Evaluate(ctx context.Context, input CreatePendingInput) (Evaluation, error) {
+	eval, err := s.EvaluatePolicy(ctx, input)
+	if err != nil || eval.Decision == DecisionBypass {
+		return eval, err
+	}
+	req, err := s.CreatePending(ctx, input)
+	if err != nil {
+		return Evaluation{}, err
+	}
+	return Evaluation{Decision: DecisionNeedsApproval, Request: req}, nil
+}
+
+func (s *Service) EvaluatePolicy(ctx context.Context, input CreatePendingInput) (Evaluation, error) {
 	if s == nil || s.settings == nil {
 		return Evaluation{Decision: DecisionBypass}, nil
 	}
@@ -45,11 +57,7 @@ func (s *Service) Evaluate(ctx context.Context, input CreatePendingInput) (Evalu
 	if !needsApproval(botSettings.ToolApprovalConfig, input.ToolName, input.ToolInput) {
 		return Evaluation{Decision: DecisionBypass}, nil
 	}
-	req, err := s.CreatePending(ctx, input)
-	if err != nil {
-		return Evaluation{}, err
-	}
-	return Evaluation{Decision: DecisionNeedsApproval, Request: req}, nil
+	return Evaluation{Decision: DecisionNeedsApproval}, nil
 }
 
 func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (Request, error) {

@@ -1833,11 +1833,13 @@ export type SettingsToolApprovalConfig = {
 
 export type SettingsToolApprovalExecPolicy = {
     bypass_commands?: Array<string>;
+    force_review_commands?: Array<string>;
     require_approval?: boolean;
 };
 
 export type SettingsToolApprovalFilePolicy = {
     bypass_globs?: Array<string>;
+    force_review_globs?: Array<string>;
     require_approval?: boolean;
 };
 

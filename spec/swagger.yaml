@@ -3078,12 +3078,20 @@ definitions:
         items:
           type: string
         type: array
+      force_review_commands:
+        items:
+          type: string
+        type: array
       require_approval:
         type: boolean
     type: object
   settings.ToolApprovalFilePolicy:
     properties:
       bypass_globs:
+        items:
+          type: string
+        type: array
+      force_review_globs:
         items:
           type: string
         type: array

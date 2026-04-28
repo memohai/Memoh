@@ -14224,6 +14224,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "force_review_commands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "require_approval": {
                     "type": "boolean"
                 }
@@ -14233,6 +14239,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "bypass_globs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "force_review_globs": {
                     "type": "array",
                     "items": {
                         "type": "string"

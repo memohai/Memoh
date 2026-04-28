@@ -18,24 +18,41 @@ func needsApproval(cfg settings.ToolApprovalConfig, toolName string, input any) 
 	args := inputMap(input)
 	switch strings.ToLower(strings.TrimSpace(toolName)) {
 	case "write":
+		target := normalizeContainerPath(readString(args, "path"))
+		if matchesAnyGlob(target, cfg.Write.ForceReviewGlobs) {
+			return true
+		}
+		if matchesAnyGlob(target, cfg.Write.BypassGlobs) {
+			return false
+		}
 		if !cfg.Write.RequireApproval {
 			return false
 		}
-		return !matchesAnyGlob(normalizeContainerPath(readString(args, "path")), cfg.Write.BypassGlobs)
+		return true
 	case "edit":
+		target := normalizeContainerPath(readString(args, "path"))
+		if matchesAnyGlob(target, cfg.Edit.ForceReviewGlobs) {
+			return true
+		}
+		if matchesAnyGlob(target, cfg.Edit.BypassGlobs) {
+			return false
+		}
 		if !cfg.Edit.RequireApproval {
 			return false
 		}
-		return !matchesAnyGlob(normalizeContainerPath(readString(args, "path")), cfg.Edit.BypassGlobs)
+		return true
 	case "exec":
-		if !cfg.Exec.RequireApproval {
-			return false
-		}
 		exe, ok := simpleExecutable(readString(args, "command"))
 		if !ok {
+			return cfg.Exec.RequireApproval
+		}
+		if matchesCommand(exe, cfg.Exec.ForceReviewCommands) {
 			return true
 		}
-		return !matchesCommand(exe, cfg.Exec.BypassCommands)
+		if matchesCommand(exe, cfg.Exec.BypassCommands) {
+			return false
+		}
+		return cfg.Exec.RequireApproval
 	default:
 		return false
 	}
@@ -68,9 +85,10 @@ func readString(m map[string]any, key string) string {
 
 func normalizeContainerPath(raw string) string {
 	p := strings.TrimSpace(raw)
-	p = strings.TrimPrefix(p, "/data/")
+	if p == "/data" || p == "/tmp" {
+		return p
+	}
 	p = strings.TrimPrefix(p, "./")
-	p = strings.TrimLeft(p, "/")
 	if p == "" {
 		return "."
 	}
@@ -86,7 +104,12 @@ func matchesAnyGlob(target string, patterns []string) bool {
 		}
 		if strings.HasSuffix(pattern, "/**") {
 			prefix := strings.TrimSuffix(pattern, "/**")
-			if target == prefix || strings.HasPrefix(target, prefix+"/") {
+			relativePrefix := strings.TrimLeft(prefix, "/")
+			if prefix == "/data" && !strings.HasPrefix(target, "/") {
+				return true
+			}
+			if target == prefix || strings.HasPrefix(target, prefix+"/") ||
+				target == relativePrefix || strings.HasPrefix(target, relativePrefix+"/") {
 				return true
 			}
 			continue

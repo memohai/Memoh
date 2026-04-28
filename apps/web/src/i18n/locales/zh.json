@@ -1030,6 +1030,8 @@
       "showToolCallsInIMDescription": "在 IM 频道中以单条消息持续展示工具执行的状态（进行中 / 已完成 / 失败）。默认关闭。",
       "toolApproval": "工具调用审核",
       "toolApprovalDescription": "对 write、edit、exec 等敏感工具启用人工审核，可配置可跳过审核的路径或命令。",
+      "toolApprovalBypass": "跳过审核",
+      "toolApprovalMustReview": "必须审核",
       "browserContext": "浏览器上下文",
       "browserContextPlaceholder": "选择浏览器上下文（未配置时不启用）",
       "allowGuest": "ACL 默认行为",

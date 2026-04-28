@@ -1034,6 +1034,8 @@
       "showToolCallsInIMDescription": "Surface tool execution status (running / completed / failed) as a single message in IM channels. Off by default.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
+      "toolApprovalBypass": "Bypass",
+      "toolApprovalMustReview": "Must review",
       "browserContext": "Browser Context",
       "browserContextPlaceholder": "Select browser context (disabled if empty)",
       "allowGuest": "Default ACL Effect",

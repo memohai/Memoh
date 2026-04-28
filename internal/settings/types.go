@@ -68,30 +68,35 @@ type ToolApprovalConfig struct {
 }
 
 type ToolApprovalFilePolicy struct {
-	RequireApproval bool     `json:"require_approval"`
-	BypassGlobs     []string `json:"bypass_globs"`
+	RequireApproval  bool     `json:"require_approval"`
+	BypassGlobs      []string `json:"bypass_globs"`
+	ForceReviewGlobs []string `json:"force_review_globs"`
 }
 
 type ToolApprovalExecPolicy struct {
-	RequireApproval bool     `json:"require_approval"`
-	BypassCommands  []string `json:"bypass_commands"`
+	RequireApproval     bool     `json:"require_approval"`
+	BypassCommands      []string `json:"bypass_commands"`
+	ForceReviewCommands []string `json:"force_review_commands"`
 }
 
 func DefaultToolApprovalConfig() ToolApprovalConfig {
-	fileBypass := []string{".cache/**", "tmp/**", "node_modules/.cache/**", "dist/**"}
+	fileBypass := []string{"/data/**", "/tmp/**"}
 	return ToolApprovalConfig{
 		Enabled: false,
 		Write: ToolApprovalFilePolicy{
-			RequireApproval: true,
-			BypassGlobs:     append([]string(nil), fileBypass...),
+			RequireApproval:  true,
+			BypassGlobs:      append([]string(nil), fileBypass...),
+			ForceReviewGlobs: []string{},
 		},
 		Edit: ToolApprovalFilePolicy{
-			RequireApproval: true,
-			BypassGlobs:     append([]string(nil), fileBypass...),
+			RequireApproval:  true,
+			BypassGlobs:      append([]string(nil), fileBypass...),
+			ForceReviewGlobs: []string{},
 		},
 		Exec: ToolApprovalExecPolicy{
-			RequireApproval: true,
-			BypassCommands:  []string{"npm", "pnpm", "yarn", "bun", "go", "git"},
+			RequireApproval:     false,
+			BypassCommands:      []string{},
+			ForceReviewCommands: []string{},
 		},
 	}
 }
@@ -114,6 +119,9 @@ func normalizeFilePolicy(policy, defaults ToolApprovalFilePolicy) ToolApprovalFi
 	if policy.BypassGlobs != nil {
 		defaults.BypassGlobs = append([]string(nil), policy.BypassGlobs...)
 	}
+	if policy.ForceReviewGlobs != nil {
+		defaults.ForceReviewGlobs = append([]string(nil), policy.ForceReviewGlobs...)
+	}
 	return defaults
 }
 
@@ -125,6 +133,9 @@ func normalizeExecPolicy(policy, defaults ToolApprovalExecPolicy) ToolApprovalEx
 	}
 	if policy.BypassCommands != nil {
 		defaults.BypassCommands = append([]string(nil), policy.BypassCommands...)
+	}
+	if policy.ForceReviewCommands != nil {
+		defaults.ForceReviewCommands = append([]string(nil), policy.ForceReviewCommands...)
 	}
 	return defaults
 }
