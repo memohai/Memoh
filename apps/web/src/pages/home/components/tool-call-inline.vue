@@ -50,20 +50,6 @@
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
       >{{ approvalLabel }}</span>
-      <button
-        v-if="canRespondApproval"
-        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
-        @click.stop="handleApproval('approve')"
-      >
-        {{ t('chat.tools.approve', 'Allow') }}
-      </button>
-      <button
-        v-if="canRespondApproval"
-        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-destructive hover:bg-accent"
-        @click.stop="handleApproval('reject')"
-      >
-        {{ t('chat.tools.reject', 'Reject') }}
-      </button>
       <ChevronRight
         v-if="!open"
         class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
@@ -119,20 +105,6 @@
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
       >{{ approvalLabel }}</span>
-      <button
-        v-if="canRespondApproval"
-        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
-        @click="handleApproval('approve')"
-      >
-        {{ t('chat.tools.approve', 'Allow') }}
-      </button>
-      <button
-        v-if="canRespondApproval"
-        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-destructive hover:bg-accent"
-        @click="handleApproval('reject')"
-      >
-        {{ t('chat.tools.reject', 'Reject') }}
-      </button>
     </div>
 
     <div
@@ -149,12 +121,34 @@
         :block="block"
       />
     </div>
+
+    <div
+      v-if="canRespondApproval"
+      class="mt-1.5 ml-5 flex items-center gap-2"
+    >
+      <Button
+        size="sm"
+        class="bg-emerald-600 hover:bg-emerald-700 text-white"
+        @click="handleApproval('approve')"
+      >
+        {{ t('chat.tools.approve', 'Allow') }}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        class="hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+        @click="handleApproval('reject')"
+      >
+        {{ t('chat.tools.reject', 'Reject') }}
+      </Button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Button } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { useChatStore } from '@/store/chat-list'

@@ -234,6 +234,7 @@ import type {
 import { useCapabilitiesStore } from '@/store/capabilities'
 import LoadingButton from '@/components/loading-button/index.vue'
 import BotSettings from './components/bot-settings.vue'
+import BotToolApproval from './components/bot-tool-approval.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
@@ -279,6 +280,7 @@ const tabList = computed(() => {
     { value: 'memory', label: 'bots.tabs.memory', component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'tool-approval', label: 'bots.tabs.toolApproval', component: BotToolApproval, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'terminal', label: 'bots.tabs.terminal', component: BotTerminal, params: { 'bot-id': bot_id } },
     { value: 'files', label: 'bots.tabs.files', component: BotFiles, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },

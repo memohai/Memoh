@@ -667,6 +667,27 @@
     "title": "首页"
   },
   "bots": {
+    "toolApproval": {
+      "title": "工具调用审核",
+      "intro": "Bot 在容器内执行写入、修改文件或运行命令前，可以要求人工审核。下方为每类敏感工具单独配置规则——白名单内自动放行，黑名单强制审核。",
+      "tools": {
+        "write": "在容器内创建新文件",
+        "edit": "修改容器内已存在的文件",
+        "exec": "在容器内执行 shell 命令"
+      },
+      "toolDisabledHint": "该工具当前未要求审核。下方规则在打开开关后才会生效。",
+      "bypass": "跳过审核（白名单）",
+      "bypassHint": "匹配以下模式的调用将直接放行，不弹审核。",
+      "mustReview": "必须审核（黑名单）",
+      "mustReviewHint": "匹配以下模式的调用强制弹审核，即使该工具未默认要求审核。",
+      "placeholders": {
+        "fileBypass": "/tmp/**\n/data/**",
+        "fileMustReview": "/etc/**\n.env*",
+        "execBypass": "ls\npwd\ngit status",
+        "execMustReview": "rm -rf *\nsudo *"
+      },
+      "unsavedChanges": "有未保存的更改"
+    },
     "title": "Bots",
     "searchPlaceholder": "搜索 Bot…",
     "createBot": "新建 Bot",
@@ -768,6 +789,7 @@
     "tabs": {
       "overview": "概览",
       "general": "通用",
+      "toolApproval": "工具审核",
       "memory": "记忆",
       "channels": "平台",
       "container": "容器",
