@@ -272,7 +272,16 @@
     "infoNoData": "暂无数据",
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
-    "compactFailed": "上下文压缩失败"
+    "compactFailed": "上下文压缩失败",
+    "activityTabSessions": "会话",
+    "activityTabFiles": "文件",
+    "activityTabTerminal": "终端",
+    "emptyWorkspace": "暂无打开的标签页",
+    "emptyWorkspaceHint": "从左侧打开会话或文件",
+    "tabClose": "关闭标签页",
+    "sessionInfoRingAria": "会话信息",
+    "sessionInfoTooltipHint": "悬停查看会话信息",
+    "sessionActions": "会话操作"
   },
   "models": {
     "title": "模型",

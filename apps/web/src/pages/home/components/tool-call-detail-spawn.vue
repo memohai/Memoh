@@ -84,9 +84,8 @@
 import { computed } from 'vue'
 import { CircleCheck, CircleX, ExternalLink } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 interface SpawnTaskResult {
@@ -100,9 +99,8 @@ interface SpawnTaskResult {
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 
-const router = useRouter()
 const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
+const workspaceTabs = useWorkspaceTabsStore()
 
 const tasks = computed(() => {
   const input = props.block.input as Record<string, unknown> | undefined
@@ -128,12 +126,7 @@ const hasDetailedResults = computed(() =>
 )
 
 function navigateToSession(sessionId: string) {
-  const botId = currentBotId.value
-  if (!botId || !sessionId) return
-  chatStore.selectSession(sessionId)
-  router.push({
-    name: 'chat',
-    params: { botId, sessionId },
-  })
+  if (!sessionId || !chatStore.currentBotId) return
+  workspaceTabs.openChat(sessionId)
 }
 </script>

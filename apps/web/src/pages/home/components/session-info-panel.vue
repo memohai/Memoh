@@ -119,18 +119,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
-import { storeToRefs } from 'pinia'
+import { computed, inject, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { toast } from 'vue-sonner'
 import { Sparkles, ExternalLink, Loader2, Minimize2 } from 'lucide-vue-next'
 import { ScrollArea } from '@memohai/ui'
-import { getBotsByBotIdContainerSkills, getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
-import type { HandlersSessionInfoResponse, HandlersSkillItem } from '@memohai/sdk'
+import { getBotsByBotIdContainerSkills, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
+import type { HandlersSkillItem } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useSessionInfo } from '../composables/useSessionInfo'
 
 const props = defineProps<{
   visible: boolean
@@ -138,8 +137,6 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const chatStore = useChatStore()
-const { currentBotId, sessionId } = storeToRefs(chatStore)
 const openInFileManager = inject(openInFileManagerKey, undefined)
 const queryCache = useQueryCache()
 
@@ -148,23 +145,12 @@ type SkillItem = HandlersSkillItem & {
   state?: string
 }
 
-const { data: info } = useQuery({
-  key: () => ['session-status', currentBotId.value ?? '', sessionId.value ?? '', props.overrideModelId ?? ''],
-  query: async () => {
-    const { data } = await getBotsByBotIdSessionsBySessionIdStatus({
-      path: {
-        bot_id: currentBotId.value!,
-        session_id: sessionId.value!,
-      },
-      query: {
-        model_id: props.overrideModelId || undefined,
-      },
-      throwOnError: true,
-    })
-    return data as HandlersSessionInfoResponse
-  },
-  enabled: () => !!currentBotId.value && !!sessionId.value && props.visible,
-  refetchOnWindowFocus: false,
+const visibleRef = toRef(props, 'visible')
+const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
+
+const { info, usedTokens, contextWindow, contextPercent, currentBotId, sessionId } = useSessionInfo({
+  visible: visibleRef,
+  overrideModelId: overrideModelIdRef,
 })
 
 const { data: skillCatalog } = useQuery({
@@ -182,12 +168,6 @@ const { data: skillCatalog } = useQuery({
   refetchOnWindowFocus: false,
 })
 
-const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
-const contextWindow = computed(() => info.value?.context_usage?.context_window ?? null)
-const contextPercent = computed(() => {
-  if (contextWindow.value == null || contextWindow.value <= 0) return 0
-  return (usedTokens.value / contextWindow.value) * 100
-})
 const contextBarColor = computed(() => {
   if (contextPercent.value >= 90) return 'bg-destructive'
   if (contextPercent.value >= 70) return 'bg-amber-500'

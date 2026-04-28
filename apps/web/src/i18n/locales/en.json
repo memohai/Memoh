@@ -276,7 +276,16 @@
     "infoNoData": "No data available",
     "compactNow": "Compact Now",
     "compactSuccess": "Context compaction completed",
-    "compactFailed": "Context compaction failed"
+    "compactFailed": "Context compaction failed",
+    "activityTabSessions": "Sessions",
+    "activityTabFiles": "Files",
+    "activityTabTerminal": "Terminal",
+    "emptyWorkspace": "No open tabs",
+    "emptyWorkspaceHint": "Open a session or file from the left",
+    "tabClose": "Close tab",
+    "sessionInfoRingAria": "Session info",
+    "sessionInfoTooltipHint": "Hover to see session info",
+    "sessionActions": "Session actions"
   },
   "models": {
     "title": "Models",

@@ -93,18 +93,14 @@ const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
 const selectionStore = useChatSelectionStore()
-const { currentBotId, sessionId } = storeToRefs(selectionStore)
+const { currentBotId } = storeToRefs(selectionStore)
 
 const backToChatRoute = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
-  const targetSessionId = (sessionId.value ?? '').trim()
   if (!botId) return { name: 'home' as const }
   return {
     name: 'chat' as const,
-    params: {
-      botId,
-      sessionId: targetSessionId || undefined,
-    },
+    params: { botId },
   }
 })
 

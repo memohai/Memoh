@@ -22,7 +22,7 @@ const routes = [
       },
       {
         name: 'chat',
-        path: '/chat/:botId?/:sessionId?',
+        path: '/chat/:botId?',
         component: () => import('@/pages/home/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),

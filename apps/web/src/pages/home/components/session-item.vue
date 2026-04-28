@@ -1,8 +1,12 @@
 <template>
-  <button
-    class="group flex items-center h-12 w-full rounded-lg px-2.5 text-left transition-colors"
+  <div
+    role="button"
+    tabindex="0"
+    class="group relative flex items-center h-12 w-full rounded-lg px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
     :class="isActive ? 'bg-background' : 'hover:bg-background/60'"
     @click="$emit('select', session)"
+    @keydown.enter.prevent="$emit('select', session)"
+    @keydown.space.prevent="$emit('select', session)"
   >
     <div class="relative shrink-0 mr-2.5">
       <Avatar
@@ -44,12 +48,42 @@
         <span class="truncate text-xs font-medium text-foreground leading-[18px] flex-1">
           {{ session.title || t('chat.untitledSession') }}
         </span>
+
         <span
           v-if="session.updated_at"
           class="text-[8px] text-muted-foreground ml-1 shrink-0"
+          :class="{ 'group-hover:hidden': true, 'hidden': menuOpen }"
         >
           {{ formatTime(session.updated_at) }}
         </span>
+
+        <DropdownMenu v-model:open="menuOpen">
+          <DropdownMenuTrigger as-child>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center size-5 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors ml-1 shrink-0"
+              :class="menuOpen ? 'flex' : 'hidden group-hover:inline-flex'"
+              :aria-label="t('chat.sessionActions')"
+              @click.stop
+              @keydown.enter.stop
+              @keydown.space.stop
+            >
+              <MoreHorizontal class="size-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            @click.stop
+          >
+            <DropdownMenuItem
+              class="text-destructive focus:text-destructive"
+              @select="$emit('delete', session)"
+            >
+              <Trash2 class="mr-2 size-3.5" />
+              {{ t('chat.deleteSession') }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div
         v-if="subLabel"
@@ -58,15 +92,23 @@
         {{ subLabel }}
       </div>
     </div>
-  </button>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
-import { HeartPulse, Clock, GitBranch, MessageSquare } from 'lucide-vue-next'
+import { computed, ref, type Component } from 'vue'
+import { HeartPulse, Clock, GitBranch, MessageSquare, MoreHorizontal, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
-import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
+import {
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@memohai/ui'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 
 const props = defineProps<{
@@ -76,9 +118,12 @@ const props = defineProps<{
 
 defineEmits<{
   select: [session: SessionSummary]
+  delete: [session: SessionSummary]
 }>()
 
 const { t } = useI18n()
+
+const menuOpen = ref(false)
 
 const WEB_CHANNELS = new Set(['local', ''])
 
