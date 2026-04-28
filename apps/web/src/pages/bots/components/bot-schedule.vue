@@ -176,7 +176,7 @@
         v-if="totalPages > 1"
         class="flex items-center justify-between pt-4"
       >
-        <span class="text-xs text-muted-foreground">
+        <span class="text-xs text-muted-foreground whitespace-nowrap">
           {{ paginationSummary }}
         </span>
         <Pagination
@@ -201,6 +201,7 @@
               <PaginationItem
                 v-else
                 :value="item.value"
+                :is-active="item.value === currentPage"
               />
             </template>
             <PaginationNext />

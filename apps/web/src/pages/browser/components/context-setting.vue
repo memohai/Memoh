@@ -50,18 +50,17 @@
             <Label>{{ $t('browser.core') }}</Label>
             <FormControl>
               <div class="flex gap-3">
-                <button
+                <Button
                   v-for="c in availableCores"
                   :key="c"
-                  type="button"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs transition-colors"
-                  :class="value === c
-                    ? 'border-primary bg-primary/10 text-primary font-medium'
-                    : 'border-border bg-card text-muted-foreground hover:bg-accent'"
+                  variant="outline"
+                  class="px-3 py-1.5 "
+                
+                  :disabled="value === c"
                   @click="handleChange(c)"
                 >
                   {{ $t(`browser.${c}`) }}
-                </button>
+                </Button>
               </div>
             </FormControl>
           </FormItem>

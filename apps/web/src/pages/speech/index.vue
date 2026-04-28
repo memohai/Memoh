@@ -12,6 +12,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  Badge
 } from '@memohai/ui'
 import { getSpeechProviders } from '@memohai/sdk'
 import type { TtsSpeechProviderResponse } from '@memohai/sdk'
@@ -97,10 +98,15 @@ watch(filteredProviders, (list) => {
                     {{ getInitials(item.name) }}
                   </span>
                 </span>
-                <span
+                <Badge
+                  v-if="item.enable !== false"
+                  class="absolute bottom-[2px] right-[2px] p-0.5 rounded-full"
+                  variant="destructive"
+                />        
+                <!-- <span
                   v-if="item.enable !== false"
                   class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
-                />
+                /> -->
               </span>
               <span class="truncate">{{ item.name }}</span>
             </Toggle>

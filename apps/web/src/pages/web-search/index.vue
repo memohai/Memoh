@@ -13,7 +13,8 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-  Button
+  Button,
+  Badge,
 } from '@memohai/ui'
 import { getSearchProviders } from '@memohai/sdk'
 import type { SearchprovidersGetResponse } from '@memohai/sdk'
@@ -103,9 +104,10 @@ const openStatus = reactive({
                   :provider="item.provider || ''"
                   size="sm"
                 />
-                <span
+                <Badge
                   v-if="item.enable !== false"
-                  class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
+                  class="absolute bottom-[2px] right-[2px] p-0.5 rounded-full"
+                  variant="destructive"
                 />
               </span>
               <span class="truncate">{{ item.name }}</span>

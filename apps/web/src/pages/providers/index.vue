@@ -15,6 +15,7 @@ import {
   EmptyMedia,
   EmptyTitle,
   Button,
+  Badge,
 } from '@memohai/ui'
 import { getProviders } from '@memohai/sdk'
 import type { ProvidersGetResponse } from '@memohai/sdk'
@@ -121,9 +122,10 @@ const openStatus = reactive({
                     {{ getInitials(providerItem.name) }}
                   </span>
                 </span>
-                <span
+                <Badge
                   v-if="providerItem.enable !== false"
-                  class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-background"
+                  class="absolute bottom-[2px] right-[2px] p-0.5 rounded-full"
+                  variant="destructive"
                 />
               </span>
               <span class="truncate">{{ providerItem.name }}</span>

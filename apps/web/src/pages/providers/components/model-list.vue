@@ -69,6 +69,7 @@
               <PaginationItem
                 v-else
                 :value="item.value"
+                :is-active="item.value === currentPage"
               />
             </template>
             <PaginationNext />

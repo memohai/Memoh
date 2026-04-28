@@ -367,6 +367,7 @@
                   <PaginationItem
                     v-else
                     :value="item.value"
+                    :is-active="item.value === recordsPageNumber"
                   />
                 </template>
                 <PaginationNext />
