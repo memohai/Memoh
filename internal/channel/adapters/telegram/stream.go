@@ -46,8 +46,9 @@ type telegramOutboundStream struct {
 // "running" state so the matching tool_call_end event can edit the same
 // message in-place to show the "completed" / "failed" state.
 type telegramToolCallMessage struct {
-	chatID int64
-	msgID  int
+	chatID     int64
+	msgID      int
+	hasActions bool
 }
 
 func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tgbotapi.BotAPI, err error) {
@@ -390,7 +391,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			switch {
 			case p.Status == channel.ToolCallStatusApprovalRequired && len(tcActions(tc)) > 0 && testEditFunc == nil:
 				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, tcActions(tc))
-			case p.Status == channel.ToolCallStatusCompleted || p.Status == channel.ToolCallStatusFailed:
+			case (p.Status == channel.ToolCallStatusCompleted || p.Status == channel.ToolCallStatusFailed) && existing.hasActions && testEditFunc == nil:
 				editErr = editTelegramMessageTextWithActions(bot, existing.chatID, existing.msgID, text, parseMode, nil)
 			case testEditFunc != nil:
 				editErr = testEditFunc(bot, existing.chatID, existing.msgID, text, parseMode)
@@ -400,6 +401,9 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			if editErr == nil {
 				if p.Status != channel.ToolCallStatusApprovalRequired {
 					s.forgetToolCallMessage(callID)
+				} else if len(tcActions(tc)) > 0 {
+					existing.hasActions = true
+					s.storeToolCallMessage(callID, existing)
 				}
 				return nil
 			}
@@ -433,7 +437,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 		return sendErr
 	}
 	if p.Status == channel.ToolCallStatusRunning && callID != "" {
-		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID})
+		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID, hasActions: len(tcActions(tc)) > 0})
 	}
 	return nil
 }
