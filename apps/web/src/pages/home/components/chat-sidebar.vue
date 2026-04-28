@@ -78,6 +78,21 @@
             {{ t('chat.selectBotHint') }}
           </div>
         </div>
+        <div
+          v-show="activeTab === 'schedule'"
+          class="absolute inset-0"
+        >
+          <ChatSidebarSchedule
+            v-if="currentBotId"
+            :bot-id="currentBotId"
+          />
+          <div
+            v-else
+            class="flex items-center justify-center h-full text-xs text-muted-foreground"
+          >
+            {{ t('chat.selectBotHint') }}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -98,14 +113,15 @@ import { ref, onBeforeUnmount, nextTick, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Folder, Sparkles, Plug } from 'lucide-vue-next'
+import { MessageSquare, Folder, Sparkles, Plug, CalendarClock } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import ChatSidebarSessions from './chat-sidebar-sessions.vue'
 import ChatSidebarFiles from './chat-sidebar-files.vue'
 import ChatSidebarSkills from './chat-sidebar-skills.vue'
 import ChatSidebarMcp from './chat-sidebar-mcp.vue'
+import ChatSidebarSchedule from './chat-sidebar-schedule.vue'
 
-type ActivityTabId = 'sessions' | 'files' | 'skills' | 'mcp'
+type ActivityTabId = 'sessions' | 'files' | 'skills' | 'mcp' | 'schedule'
 
 interface ActivityTab {
   id: ActivityTabId
@@ -122,6 +138,7 @@ const activityTabs: ActivityTab[] = [
   { id: 'files', label: t('chat.activityTabFiles'), icon: Folder },
   { id: 'skills', label: t('chat.activityTabSkills'), icon: Sparkles },
   { id: 'mcp', label: t('chat.activityTabMcp'), icon: Plug },
+  { id: 'schedule', label: t('chat.activityTabSchedule'), icon: CalendarClock },
 ]
 
 const activeTab = useLocalStorage<ActivityTabId>('chat-sidebar-active-tab', 'sessions')
