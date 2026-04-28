@@ -36,10 +36,17 @@
             v-else
             class="flex flex-col gap-1"
           >
-            <div
+            <button
               v-for="skill in skills"
               :key="skillKey(skill)"
-              class="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/40 transition-colors"
+              type="button"
+              class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors disabled:cursor-default"
+              :class="skill.source_path
+                ? 'cursor-pointer hover:bg-sidebar-accent/40'
+                : 'cursor-default'"
+              :disabled="!skill.source_path"
+              :title="skill.source_path"
+              @click="handleSkillClick(skill)"
             >
               <Sparkles class="size-3.5 text-muted-foreground shrink-0 mt-0.5" />
               <div class="flex-1 min-w-0">
@@ -62,7 +69,7 @@
                   {{ skill.description }}
                 </p>
               </div>
-            </div>
+            </button>
           </div>
         </div>
       </ScrollArea>
@@ -71,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -80,6 +87,7 @@ import { Button, ScrollArea, Badge } from '@memohai/ui'
 import { getBotsByBotIdContainerSkills } from '@memohai/sdk'
 import type { HandlersSkillItem } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 
 const props = defineProps<{
   botId: string
@@ -87,6 +95,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const { data, isLoading, error } = useQuery({
   key: () => ['bot-skills-catalog', props.botId],
@@ -121,5 +130,17 @@ function stateLabel(state?: string): string {
 
 function reload() {
   queryCache.invalidateQueries({ key: ['bot-skills-catalog', props.botId] })
+}
+
+function parentDir(filePath: string): string {
+  const idx = filePath.lastIndexOf('/')
+  if (idx <= 0) return '/'
+  return filePath.slice(0, idx)
+}
+
+function handleSkillClick(skill: HandlersSkillItem) {
+  const path = skill.source_path
+  if (!path) return
+  openInFileManager?.(parentDir(path), true)
 }
 </script>
