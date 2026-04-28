@@ -13,6 +13,14 @@ import (
 )
 
 func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string) error {
+	return r.storeRoundWithOptions(ctx, req, messages, modelID, storeRoundOptions{})
+}
+
+type storeRoundOptions struct {
+	AllowPendingToolCalls bool
+}
+
+func (r *Resolver) storeRoundWithOptions(ctx context.Context, req conversation.ChatRequest, messages []conversation.ModelMessage, modelID string, opts storeRoundOptions) error {
 	fullRound := make([]conversation.ModelMessage, 0, len(messages))
 
 	// When the user message was already persisted by a channel adapter, skip
@@ -26,7 +34,9 @@ func (r *Resolver) storeRound(ctx context.Context, req conversation.ChatRequest,
 		}
 		fullRound = append(fullRound, m)
 	}
-	fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
+	if !opts.AllowPendingToolCalls {
+		fullRound = repairToolCallClosures(fullRound, syntheticToolClosureError)
+	}
 
 	// Filter out empty assistant messages (content: []) that result from LLM
 	// returning no useful output (e.g., context window overflow). These provide

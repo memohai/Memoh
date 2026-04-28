@@ -180,6 +180,7 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			Text:           true,
 			Markdown:       true,
 			Reply:          true,
+			Buttons:        true,
 			Attachments:    true,
 			Media:          true,
 			Streaming:      true,
@@ -372,9 +373,6 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 					}
 					return
 				}
-				if update.Message == nil {
-					continue
-				}
 				if a.seenTelegramUpdate(cfg.ID, update.UpdateID, time.Now()) {
 					if a.logger != nil {
 						a.logger.Debug("skip duplicate telegram update",
@@ -382,6 +380,16 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 							slog.Int("update_id", update.UpdateID),
 						)
 					}
+					continue
+				}
+				if update.CallbackQuery != nil {
+					if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
+						_, _ = bot.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, "OK"))
+						a.dispatchInbound(connCtx, cfg, handler, msg)
+					}
+					continue
+				}
+				if update.Message == nil {
 					continue
 				}
 				if queueMediaGroup(update.Message) {
@@ -464,6 +472,44 @@ func (a *TelegramAdapter) buildTelegramInboundMessage(bot *tgbotapi.BotAPI, cfg 
 	return a.toInboundTelegramMessage(bot, cfg, raw, text, attachments, map[string]any{
 		"update_id": update.UpdateID,
 	})
+}
+
+func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.ChannelConfig, update tgbotapi.Update) (channel.InboundMessage, bool) {
+	cb := update.CallbackQuery
+	if cb == nil || cb.Message == nil {
+		return channel.InboundMessage{}, false
+	}
+	action, approvalID, ok := parseTelegramApprovalCallback(cb.Data)
+	if !ok {
+		return channel.InboundMessage{}, false
+	}
+	text := "/" + action + " " + approvalID
+	raw := cb.Message
+	raw.Text = text
+	raw.From = cb.From
+	replyID := strconv.Itoa(cb.Message.MessageID)
+	msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, text, nil, map[string]any{
+		"update_id":         update.UpdateID,
+		"callback_query_id": cb.ID,
+	})
+	if !ok {
+		return channel.InboundMessage{}, false
+	}
+	msg.Message.Reply = &channel.ReplyRef{MessageID: replyID}
+	return msg, true
+}
+
+func parseTelegramApprovalCallback(data string) (action, approvalID string, ok bool) {
+	parts := strings.SplitN(strings.TrimSpace(data), ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	switch parts[0] {
+	case "approve", "reject":
+		return parts[0], strings.TrimSpace(parts[1]), strings.TrimSpace(parts[1]) != ""
+	default:
+		return "", "", false
+	}
 }
 
 func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
@@ -700,6 +746,9 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		}
 		return nil
 	}
+	if len(msg.Message.Message.Actions) > 0 {
+		return sendTelegramTextWithActions(bot, to, text, replyTo, parseMode, msg.Message.Message.Actions)
+	}
 	return sendTelegramText(bot, to, text, replyTo, parseMode)
 }
 
@@ -859,6 +908,38 @@ func sendTelegramTextReturnMessage(bot *tgbotapi.BotAPI, target string, text str
 	}
 	messageID = sent.MessageID
 	return chatID, messageID, nil
+}
+
+func sendTelegramTextWithActions(bot *tgbotapi.BotAPI, target string, text string, replyTo int, parseMode string, actions []channel.Action) error {
+	text = truncateTelegramText(sanitizeTelegramText(text))
+	parsedChatID, channelUsername, parseErr := parseTelegramTarget(target)
+	if parseErr != nil {
+		return parseErr
+	}
+	var message tgbotapi.MessageConfig
+	if channelUsername != "" {
+		message = tgbotapi.NewMessageToChannel(channelUsername, text)
+	} else {
+		message = tgbotapi.NewMessage(parsedChatID, text)
+	}
+	message.ParseMode = parseMode
+	if replyTo > 0 {
+		message.ReplyToMessageID = replyTo
+	}
+	keyboard := make([]tgbotapi.InlineKeyboardButton, 0, len(actions))
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		value := strings.TrimSpace(action.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(label, value))
+	}
+	if len(keyboard) > 0 {
+		message.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(keyboard)
+	}
+	_, err := bot.Send(message)
+	return err
 }
 
 var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConfig) error

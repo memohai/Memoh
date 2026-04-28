@@ -4966,6 +4966,128 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/tool-approvals/{approval_id}/approve": {
+            "post": {
+                "tags": [
+                    "tool-approvals"
+                ],
+                "summary": "Approve a pending tool call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Approval ID",
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Approval payload",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ToolApprovalDecisionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/tool-approvals/{approval_id}/reject": {
+            "post": {
+                "tags": [
+                    "tool-approvals"
+                ],
+                "summary": "Reject a pending tool call",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Approval ID",
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rejection payload",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ToolApprovalDecisionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/tools": {
             "post": {
                 "description": "MCP endpoint for tool discovery and invocation.",
@@ -12678,6 +12800,14 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ToolApprovalDecisionRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.TriggerCompactResponse": {
             "type": "object",
             "properties": {
@@ -14057,11 +14187,59 @@ const docTemplate = `{
                 "title_model_id": {
                     "type": "string"
                 },
+                "tool_approval_config": {
+                    "$ref": "#/definitions/settings.ToolApprovalConfig"
+                },
                 "transcription_model_id": {
                     "type": "string"
                 },
                 "tts_model_id": {
                     "type": "string"
+                }
+            }
+        },
+        "settings.ToolApprovalConfig": {
+            "type": "object",
+            "properties": {
+                "edit": {
+                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "exec": {
+                    "$ref": "#/definitions/settings.ToolApprovalExecPolicy"
+                },
+                "write": {
+                    "$ref": "#/definitions/settings.ToolApprovalFilePolicy"
+                }
+            }
+        },
+        "settings.ToolApprovalExecPolicy": {
+            "type": "object",
+            "properties": {
+                "bypass_commands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "require_approval": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "settings.ToolApprovalFilePolicy": {
+            "type": "object",
+            "properties": {
+                "bypass_globs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "require_approval": {
+                    "type": "boolean"
                 }
             }
         },
@@ -14130,6 +14308,9 @@ const docTemplate = `{
                 },
                 "title_model_id": {
                     "type": "string"
+                },
+                "tool_approval_config": {
+                    "$ref": "#/definitions/settings.ToolApprovalConfig"
                 },
                 "transcription_model_id": {
                     "type": "string"

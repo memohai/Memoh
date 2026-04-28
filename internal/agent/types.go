@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -102,6 +103,8 @@ type RunConfig struct {
 	// boundaries and injects them as user messages so the model learns
 	// about completed background work.
 	BackgroundManager *background.Manager
+
+	ToolApprovalHandler func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error)
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

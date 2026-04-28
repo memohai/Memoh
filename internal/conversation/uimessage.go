@@ -33,16 +33,25 @@ type UIAttachment struct {
 
 // UIMessage is the normalized assistant output block used by the web frontend.
 type UIMessage struct {
-	ID          int            `json:"id"`
-	Type        UIMessageType  `json:"type"`
-	Content     string         `json:"content,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	Input       any            `json:"input,omitempty"`
-	Output      any            `json:"output,omitempty"`
-	ToolCallID  string         `json:"tool_call_id,omitempty"`
-	Running     *bool          `json:"running,omitempty"`
-	Progress    []any          `json:"progress,omitempty"`
-	Attachments []UIAttachment `json:"attachments,omitempty"`
+	ID          int             `json:"id"`
+	Type        UIMessageType   `json:"type"`
+	Content     string          `json:"content,omitempty"`
+	Name        string          `json:"name,omitempty"`
+	Input       any             `json:"input,omitempty"`
+	Output      any             `json:"output,omitempty"`
+	ToolCallID  string          `json:"tool_call_id,omitempty"`
+	Running     *bool           `json:"running,omitempty"`
+	Progress    []any           `json:"progress,omitempty"`
+	Approval    *UIToolApproval `json:"approval,omitempty"`
+	Attachments []UIAttachment  `json:"attachments,omitempty"`
+}
+
+type UIToolApproval struct {
+	ApprovalID     string `json:"approval_id"`
+	ShortID        int    `json:"short_id,omitempty"`
+	Status         string `json:"status"`
+	DecisionReason string `json:"decision_reason,omitempty"`
+	CanApprove     bool   `json:"can_approve,omitempty"`
 }
 
 // UITurn is the normalized chat turn used by the web frontend.
@@ -71,6 +80,10 @@ type UIMessageStreamEvent struct {
 	Progress    any
 	Attachments []UIAttachment
 	Error       string
+	ApprovalID  string
+	ShortID     int
+	Status      string
+	Metadata    map[string]any
 }
 
 func uiBoolPtr(v bool) *bool {

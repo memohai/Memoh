@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 // MessageHandler handles bot-scoped messaging endpoints.
@@ -31,6 +32,7 @@ type MessageHandler struct {
 	mediaService        *media.Service
 	botService          *bots.Service
 	accountService      *accounts.Service
+	toolApproval        *toolapproval.Service
 	logger              *slog.Logger
 }
 
@@ -53,6 +55,10 @@ func NewMessageHandler(log *slog.Logger, conversationService conversation.Access
 // SetMediaService sets the optional media service for asset serving.
 func (h *MessageHandler) SetMediaService(svc *media.Service) {
 	h.mediaService = svc
+}
+
+func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
+	h.toolApproval = svc
 }
 
 // Register registers all conversation routes.
@@ -174,11 +180,53 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	}
 	h.fillAssetMimeFromStorage(c.Request().Context(), botID, messages)
 	if format == "ui" {
+		items := conversation.ConvertMessagesToUITurns(messages)
+		if sessionID != "" && h.toolApproval != nil {
+			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
+				mergeToolApprovals(items, approvals)
+			}
+		}
 		return c.JSON(http.StatusOK, map[string]any{
-			"items": conversation.ConvertMessagesToUITurns(messages),
+			"items": items,
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request) {
+	if len(turns) == 0 || len(approvals) == 0 {
+		return
+	}
+	byCallID := make(map[string]toolapproval.Request, len(approvals))
+	for _, approval := range approvals {
+		if callID := strings.TrimSpace(approval.ToolCallID); callID != "" {
+			byCallID[callID] = approval
+		}
+	}
+	for turnIdx := range turns {
+		if turns[turnIdx].Role != "assistant" {
+			continue
+		}
+		for msgIdx := range turns[turnIdx].Messages {
+			msg := &turns[turnIdx].Messages[msgIdx]
+			if msg.Type != conversation.UIMessageTool {
+				continue
+			}
+			approval, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
+			if !ok {
+				continue
+			}
+			running := false
+			msg.Running = &running
+			msg.Approval = &conversation.UIToolApproval{
+				ApprovalID:     approval.ID,
+				ShortID:        approval.ShortID,
+				Status:         approval.Status,
+				DecisionReason: approval.DecisionReason,
+				CanApprove:     approval.Status == toolapproval.StatusPending,
+			}
+		}
+	}
 }
 
 // fillAssetMimeFromStorage fills mime, storage_key, size_bytes from storage (soft link: DB only has content_hash).

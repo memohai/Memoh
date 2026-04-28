@@ -199,6 +199,9 @@
       "spawn": "Spawn {count} subagents",
       "use_skill": "Use skill",
       "generic": "Tool",
+      "approve": "Allow",
+      "reject": "Reject",
+      "pendingApproval": "pending approval",
       "detail": {
         "openInFiles": "Open in files",
         "input": "Input",
@@ -1029,6 +1032,8 @@
       "compactionModelPlaceholder": "Use chat model (default)",
       "showToolCallsInIM": "Show Tool Calls in IM",
       "showToolCallsInIMDescription": "Surface tool execution status (running / completed / failed) as a single message in IM channels. Off by default.",
+      "toolApproval": "Tool Call Approval",
+      "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
       "browserContext": "Browser Context",
       "browserContextPlaceholder": "Select browser context (disabled if empty)",
       "allowGuest": "Default ACL Effect",

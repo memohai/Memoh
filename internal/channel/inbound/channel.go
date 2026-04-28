@@ -93,6 +93,10 @@ type SessionEnsurer interface {
 	CreateNewSession(ctx context.Context, botID, routeID, channelType, sessionType string) (SessionResult, error)
 }
 
+type ToolApprovalRunner interface {
+	RespondToolApproval(ctx context.Context, input flow.ToolApprovalResponseInput, eventCh chan<- flow.WSStreamEvent) error
+}
+
 // IMDisplayOptionsReader exposes bot-level IM display preferences.
 // Implementations typically adapt the settings service.
 type IMDisplayOptionsReader interface {
@@ -377,7 +381,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
-	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && isDirectedAtBot(msg) {
+	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {
 		reply, err := p.commandHandler.ExecuteWithInput(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -489,6 +493,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			)
 		}
 		return nil
+	}
+
+	if isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleToolApprovalCommand(ctx, msg, sender, identity, resolved.RouteID, sessionID, cmdText)
 	}
 
 	// Push event into the DCP pipeline (persist + in-memory projection).
@@ -1335,6 +1343,9 @@ type agentStreamEnvelope struct {
 
 	ToolName    string          `json:"toolName"`
 	ToolCallID  string          `json:"toolCallId"`
+	ApprovalID  string          `json:"approvalId"`
+	ShortID     int             `json:"shortId"`
+	Status      string          `json:"status"`
 	Input       json.RawMessage `json:"input"`
 	Result      json.RawMessage `json:"result"`
 	Attachments json.RawMessage `json:"attachments"`
@@ -1396,6 +1407,27 @@ func mapStreamChunkToChannelEvents(chunk conversation.StreamChunk) ([]channel.St
 					CallID: strings.TrimSpace(envelope.ToolCallID),
 					Input:  parseRawJSON(envelope.Input),
 					Result: parseRawJSON(envelope.Result),
+				},
+			},
+		}, finalMessages, nil
+	case "tool_approval_request":
+		msg := channel.Message{
+			Text: fmt.Sprintf("Tool approval required #%d\nTool: %s\n\nApprove with /approve %d or reply to this message with /approve.\nReject with /reject %d [reason] or reply with /reject [reason].",
+				envelope.ShortID,
+				strings.TrimSpace(envelope.ToolName),
+				envelope.ShortID,
+				envelope.ShortID,
+			),
+			Actions: []channel.Action{
+				{Type: "tool_approval", Label: "Approve", Value: "approve:" + strings.TrimSpace(envelope.ApprovalID)},
+				{Type: "tool_approval", Label: "Reject", Value: "reject:" + strings.TrimSpace(envelope.ApprovalID)},
+			},
+		}
+		return []channel.StreamEvent{
+			{
+				Type: channel.StreamEventFinal,
+				Final: &channel.StreamFinalizePayload{
+					Message: msg,
 				},
 			},
 		}, finalMessages, nil
@@ -2717,6 +2749,105 @@ func isStatusCommand(cmdText string) bool {
 		return false
 	}
 	return parsed.Resource == "status"
+}
+
+func isToolApprovalCommand(cmdText string) bool {
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "approve" || parsed.Resource == "reject"
+}
+
+func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID, cmdText string) error {
+	approvalRunner, ok := p.runner.(ToolApprovalRunner)
+	if !ok {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  strings.TrimSpace(msg.ReplyTarget),
+			Message: channel.Message{Text: "Tool approval is not configured."},
+		})
+	}
+	extracted := command.ExtractCommandText(cmdText)
+	parsed, err := command.Parse(extracted)
+	if err != nil {
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  strings.TrimSpace(msg.ReplyTarget),
+			Message: channel.Message{Text: "Invalid approval command."},
+		})
+	}
+	explicitID := ""
+	reason := ""
+	replyExternalID := ""
+	if msg.Message.Reply != nil {
+		replyExternalID = strings.TrimSpace(msg.Message.Reply.MessageID)
+	}
+	actionText := strings.TrimSpace(parsed.Action)
+	if parsed.Resource == "reject" && replyExternalID != "" && actionText != "" && !looksLikeApprovalID(actionText) {
+		reason = strings.TrimSpace(strings.Join(append([]string{actionText}, parsed.Args...), " "))
+	} else {
+		explicitID = actionText
+		reason = strings.TrimSpace(strings.Join(parsed.Args, " "))
+	}
+	err = approvalRunner.RespondToolApproval(ctx, flow.ToolApprovalResponseInput{
+		BotID:                  strings.TrimSpace(identity.BotID),
+		SessionID:              strings.TrimSpace(sessionID),
+		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+		ExplicitID:             explicitID,
+		ReplyExternalMessageID: replyExternalID,
+		Decision:               parsed.Resource,
+		Reason:                 reason,
+		ChatToken:              p.issueChatToken(identity, routeID, msg),
+	}, nil)
+	reply := ""
+	switch {
+	case err != nil:
+		reply = "Tool approval failed: " + err.Error()
+	case parsed.Resource == "approve":
+		reply = "Tool approval accepted. Continuing execution."
+	default:
+		reply = "Tool approval rejected. Continuing execution."
+	}
+	return sender.Send(ctx, channel.OutboundMessage{
+		Target:  strings.TrimSpace(msg.ReplyTarget),
+		Message: channel.Message{Text: reply},
+	})
+}
+
+func (p *ChannelInboundProcessor) issueChatToken(identity InboundIdentity, routeID string, msg channel.InboundMessage) string {
+	if p.jwtSecret == "" || strings.TrimSpace(msg.ReplyTarget) == "" {
+		return ""
+	}
+	signed, _, err := auth.GenerateChatToken(auth.ChatToken{
+		BotID:             identity.BotID,
+		ChatID:            identity.BotID,
+		RouteID:           strings.TrimSpace(routeID),
+		UserID:            identity.UserID,
+		ChannelIdentityID: identity.ChannelIdentityID,
+	}, p.jwtSecret, p.tokenTTL)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("issue approval chat token failed", slog.Any("error", err))
+		}
+		return ""
+	}
+	return signed
+}
+
+func looksLikeApprovalID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return strings.Contains(value, "-")
+		}
+	}
+	return true
 }
 
 // resolveNewSessionType determines the session type for /new command.

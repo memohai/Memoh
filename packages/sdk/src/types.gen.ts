@@ -1264,6 +1264,10 @@ export type HandlersTokenUsageResponse = {
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
+export type HandlersToolApprovalDecisionRequest = {
+    reason?: string;
+};
+
 export type HandlersTriggerCompactResponse = {
     message_count?: number;
     status?: string;
@@ -1815,8 +1819,26 @@ export type SettingsSettings = {
     show_tool_calls_in_im?: boolean;
     timezone?: string;
     title_model_id?: string;
+    tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
+};
+
+export type SettingsToolApprovalConfig = {
+    edit?: SettingsToolApprovalFilePolicy;
+    enabled?: boolean;
+    exec?: SettingsToolApprovalExecPolicy;
+    write?: SettingsToolApprovalFilePolicy;
+};
+
+export type SettingsToolApprovalExecPolicy = {
+    bypass_commands?: Array<string>;
+    require_approval?: boolean;
+};
+
+export type SettingsToolApprovalFilePolicy = {
+    bypass_globs?: Array<string>;
+    require_approval?: boolean;
 };
 
 export type SettingsUpsertRequest = {
@@ -1841,6 +1863,7 @@ export type SettingsUpsertRequest = {
     show_tool_calls_in_im?: boolean;
     timezone?: string;
     title_model_id?: string;
+    tool_approval_config?: SettingsToolApprovalConfig;
     transcription_model_id?: string;
     tts_model_id?: string;
 };
@@ -5911,6 +5934,100 @@ export type GetBotsByBotIdTokenUsageRecordsResponses = {
 };
 
 export type GetBotsByBotIdTokenUsageRecordsResponse = GetBotsByBotIdTokenUsageRecordsResponses[keyof GetBotsByBotIdTokenUsageRecordsResponses];
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdApproveData = {
+    /**
+     * Approval payload
+     */
+    body?: HandlersToolApprovalDecisionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Approval ID
+         */
+        approval_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/tool-approvals/{approval_id}/approve';
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdApproveError = PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors];
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdApproveResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdApproveResponse = PostBotsByBotIdToolApprovalsByApprovalIdApproveResponses[keyof PostBotsByBotIdToolApprovalsByApprovalIdApproveResponses];
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdRejectData = {
+    /**
+     * Rejection payload
+     */
+    body?: HandlersToolApprovalDecisionRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Approval ID
+         */
+        approval_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/tool-approvals/{approval_id}/reject';
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdRejectError = PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors];
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdRejectResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostBotsByBotIdToolApprovalsByApprovalIdRejectResponse = PostBotsByBotIdToolApprovalsByApprovalIdRejectResponses[keyof PostBotsByBotIdToolApprovalsByApprovalIdRejectResponses];
 
 export type PostBotsByBotIdToolsData = {
     /**

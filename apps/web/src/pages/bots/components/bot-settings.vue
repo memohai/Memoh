@@ -295,6 +295,43 @@
       </Popover>
     </div>
 
+    <!-- Tool Approval -->
+    <div class="space-y-3 rounded-lg border border-border p-4">
+      <div class="flex items-center justify-between">
+        <div class="space-y-1">
+          <Label>{{ $t('bots.settings.toolApproval') }}</Label>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.settings.toolApprovalDescription') }}
+          </p>
+        </div>
+        <Switch
+          :model-value="form.tool_approval_config.enabled"
+          @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
+        />
+      </div>
+
+      <div class="grid gap-3 md:grid-cols-3">
+        <div
+          v-for="tool in approvalTools"
+          :key="tool"
+          class="space-y-2 rounded-md border border-border p-3"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <Label class="font-mono">{{ tool }}</Label>
+            <Switch
+              :model-value="toolApprovalPolicy(tool).require_approval"
+              @update:model-value="(val) => toolApprovalPolicy(tool).require_approval = !!val"
+            />
+          </div>
+          <Textarea
+            :model-value="approvalBypassText(tool)"
+            class="min-h-20 font-mono text-xs"
+            @update:model-value="(val) => updateApprovalBypass(tool, String(val))"
+          />
+        </div>
+      </div>
+    </div>
+
     <!-- Show Tool Calls in IM -->
     <div class="flex items-center justify-between">
       <div class="space-y-1">
@@ -359,6 +396,7 @@
 import {
   Label,
   Input,
+  Textarea,
   Button,
   Separator,
   Spinner,
@@ -391,6 +429,43 @@ import { emptyTimezoneValue } from '@/utils/timezones'
 const props = defineProps<{
   botId: string
 }>()
+
+type ApprovalTool = 'write' | 'edit' | 'exec'
+
+interface ToolApprovalFilePolicy {
+  require_approval: boolean
+  bypass_globs: string[]
+}
+
+interface ToolApprovalExecPolicy {
+  require_approval: boolean
+  bypass_commands: string[]
+}
+
+interface ToolApprovalConfig {
+  enabled: boolean
+  write: ToolApprovalFilePolicy
+  edit: ToolApprovalFilePolicy
+  exec: ToolApprovalExecPolicy
+}
+
+const defaultToolApprovalConfig = (): ToolApprovalConfig => ({
+  enabled: false,
+  write: {
+    require_approval: true,
+    bypass_globs: ['.cache/**', 'tmp/**', 'node_modules/.cache/**', 'dist/**'],
+  },
+  edit: {
+    require_approval: true,
+    bypass_globs: ['.cache/**', 'tmp/**', 'node_modules/.cache/**', 'dist/**'],
+  },
+  exec: {
+    require_approval: true,
+    bypass_commands: ['npm', 'pnpm', 'yarn', 'bun', 'go', 'git'],
+  },
+})
+
+const approvalTools: ApprovalTool[] = ['write', 'edit', 'exec']
 
 const { t } = useI18n()
 const router = useRouter()
@@ -491,7 +566,7 @@ const { data: browserContextData } = useQuery({
 })
 
 const { mutateAsync: updateSettings, isLoading } = useMutation({
-  mutation: async (body: Partial<SettingsSettings>) => {
+  mutation: async (body: Partial<SettingsSettings> & { tool_approval_config?: ToolApprovalConfig }) => {
     const { data } = await putBotsByBotIdSettings({
       path: { bot_id: botIdRef.value },
       body,
@@ -557,6 +632,7 @@ const form = reactive({
   reasoning_enabled: false,
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
+  tool_approval_config: defaultToolApprovalConfig(),
 })
 
 const selectedMemoryProvider = computed(() =>
@@ -641,6 +717,48 @@ const reasoningFormValue = computed({
   },
 })
 
+function normalizeToolApprovalConfig(raw: unknown): ToolApprovalConfig {
+  const defaults = defaultToolApprovalConfig()
+  if (!raw || typeof raw !== 'object') return defaults
+  const value = raw as Partial<ToolApprovalConfig>
+  return {
+    enabled: value.enabled ?? defaults.enabled,
+    write: {
+      require_approval: value.write?.require_approval ?? defaults.write.require_approval,
+      bypass_globs: value.write?.bypass_globs ?? defaults.write.bypass_globs,
+    },
+    edit: {
+      require_approval: value.edit?.require_approval ?? defaults.edit.require_approval,
+      bypass_globs: value.edit?.bypass_globs ?? defaults.edit.bypass_globs,
+    },
+    exec: {
+      require_approval: value.exec?.require_approval ?? defaults.exec.require_approval,
+      bypass_commands: value.exec?.bypass_commands ?? defaults.exec.bypass_commands,
+    },
+  }
+}
+
+function toolApprovalPolicy(tool: ApprovalTool) {
+  return form.tool_approval_config[tool]
+}
+
+function approvalBypassText(tool: ApprovalTool): string {
+  const policy = toolApprovalPolicy(tool)
+  return (tool === 'exec'
+    ? (policy as ToolApprovalExecPolicy).bypass_commands
+    : (policy as ToolApprovalFilePolicy).bypass_globs
+  ).join('\n')
+}
+
+function updateApprovalBypass(tool: ApprovalTool, raw: string) {
+  const values = raw.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
+  if (tool === 'exec') {
+    form.tool_approval_config.exec.bypass_commands = values
+  } else {
+    form.tool_approval_config[tool].bypass_globs = values
+  }
+}
+
 const { data: memoryStatusData, isLoading: isMemoryStatusLoading } = useQuery({
   key: () => ['bot-memory-status', botIdRef.value, persistedMemoryProviderID.value],
   query: async () => {
@@ -698,6 +816,7 @@ watch(settings, (val) => {
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
+    form.tool_approval_config = normalizeToolApprovalConfig((val as SettingsSettings & { tool_approval_config?: unknown }).tool_approval_config)
   }
 }, { immediate: true })
 
@@ -722,6 +841,7 @@ const hasSettingsChanges = computed(() => {
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
+    || JSON.stringify(form.tool_approval_config) !== JSON.stringify(normalizeToolApprovalConfig((s as SettingsSettings & { tool_approval_config?: unknown }).tool_approval_config))
   )
 })
 

@@ -65,6 +65,42 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 	return a.runGenerate(ctx, cfg)
 }
 
+func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {
+	sdkTools, err := a.assembleTools(ctx, cfg, tools.StreamEmitter(func(tools.ToolStreamEvent) {}))
+	if err != nil {
+		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
+	}
+	for i := range sdkTools {
+		tool := sdkTools[i]
+		if tool.Name != call.ToolName {
+			continue
+		}
+		if tool.Execute == nil {
+			return sdk.ToolResultPart{}, fmt.Errorf("tool %q has no execute handler", call.ToolName)
+		}
+		execCtx := &sdk.ToolExecContext{
+			Context:    ctx,
+			ToolCallID: call.ToolCallID,
+			ToolName:   call.ToolName,
+		}
+		output, err := tool.Execute(execCtx, call.Input)
+		if err != nil {
+			return sdk.ToolResultPart{
+				ToolCallID: call.ToolCallID,
+				ToolName:   call.ToolName,
+				Result:     err.Error(),
+				IsError:    true,
+			}, nil
+		}
+		return sdk.ToolResultPart{
+			ToolCallID: call.ToolCallID,
+			ToolName:   call.ToolName,
+			Result:     output,
+		}, nil
+	}
+	return sdk.ToolResultPart{}, fmt.Errorf("tool %q not found", call.ToolName)
+}
+
 // sendEvent sends an event to the stream channel. It returns false if the
 // context was cancelled (consumer stopped reading), allowing the caller to
 // abort cleanly instead of leaking the goroutine on a blocked channel send.
@@ -332,6 +368,20 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				aborted = true
 			}
 
+		case *sdk.ToolApprovalRequestPart:
+			if !sendEvent(ctx, ch, StreamEvent{
+				Type:       EventToolApprovalRequest,
+				ToolName:   p.ToolName,
+				ToolCallID: p.ToolCallID,
+				ApprovalID: p.ApprovalID,
+				ShortID:    approvalShortID(p.Metadata),
+				Status:     "pending",
+				Input:      p.Input,
+				Metadata:   p.Metadata,
+			}) {
+				aborted = true
+			}
+
 		case *sdk.StreamToolResultPart:
 			shouldAbort := toolLoopAbortCallIDs.Take(p.ToolCallID)
 			stepNumber++
@@ -432,6 +482,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if readMediaState != nil {
 		finalMessages = readMediaState.mergeMessages(streamResult.Steps, finalMessages)
 	}
+	if streamResult.DeferredToolApproval != nil {
+		finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
+	}
 	var totalUsage sdk.Usage
 	for _, step := range streamResult.Steps {
 		totalUsage.InputTokens += step.Usage.InputTokens
@@ -450,6 +503,18 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	termEvent := StreamEvent{
 		Messages: mustMarshal(finalMessages),
 		Usage:    usageJSON,
+	}
+	if streamResult.DeferredToolApproval != nil {
+		termEvent.ApprovalID = streamResult.DeferredToolApproval.ApprovalID
+		termEvent.ShortID = approvalShortID(streamResult.DeferredToolApproval.Metadata)
+		termEvent.Status = "pending"
+		termEvent.Metadata = streamResult.DeferredToolApproval.Metadata
+		if toolName, ok := streamResult.DeferredToolApproval.Metadata["tool_name"].(string); ok {
+			termEvent.ToolName = toolName
+		}
+		if toolCallID, ok := streamResult.DeferredToolApproval.Metadata["tool_call_id"].(string); ok {
+			termEvent.ToolCallID = toolCallID
+		}
 	}
 	if aborted {
 		termEvent.Type = EventAgentAbort
@@ -605,6 +670,9 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
 	}
+	if cfg.ToolApprovalHandler != nil {
+		opts = append(opts, sdk.WithApprovalHandler(cfg.ToolApprovalHandler))
+	}
 
 	// Wrap the existing prepareStep (if any) with mid-task context pruning.
 	// When the message array grows large during multi-tool runs, this prunes
@@ -679,7 +747,76 @@ func (a *Agent) assembleTools(ctx context.Context, cfg RunConfig, emitter tools.
 		}
 		allTools = append(allTools, providerTools...)
 	}
+	if cfg.ToolApprovalHandler != nil {
+		allTools = markApprovalTools(allTools)
+	}
 	return allTools, nil
+}
+
+func markApprovalTools(tools []sdk.Tool) []sdk.Tool {
+	for i := range tools {
+		switch tools[i].Name {
+		case "write", "edit", "exec":
+			tools[i].RequireApproval = true
+		}
+	}
+	return tools
+}
+
+func approvalShortID(metadata map[string]any) int {
+	if metadata == nil {
+		return 0
+	}
+	switch v := metadata["short_id"].(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func annotateDeferredApproval(messages []sdk.Message, approval sdk.ToolApprovalResult) []sdk.Message {
+	if approval.ApprovalID == "" {
+		return messages
+	}
+	toolCallID, _ := approval.Metadata["tool_call_id"].(string)
+	if strings.TrimSpace(toolCallID) == "" {
+		return messages
+	}
+	annotated := make([]sdk.Message, len(messages))
+	copy(annotated, messages)
+	for msgIdx := range annotated {
+		if annotated[msgIdx].Role != sdk.MessageRoleAssistant {
+			continue
+		}
+		for partIdx := range annotated[msgIdx].Content {
+			call, ok := annotated[msgIdx].Content[partIdx].(sdk.ToolCallPart)
+			if !ok || strings.TrimSpace(call.ToolCallID) != strings.TrimSpace(toolCallID) {
+				continue
+			}
+			if call.ProviderMetadata == nil {
+				call.ProviderMetadata = map[string]any{}
+			}
+			call.ProviderMetadata["approval"] = map[string]any{
+				"approval_id": approval.ApprovalID,
+				"short_id":    approvalShortID(approval.Metadata),
+				"status":      "pending",
+				"can_approve": true,
+			}
+			annotated[msgIdx].Content[partIdx] = call
+			return annotated
+		}
+	}
+	return annotated
 }
 
 // toolStreamEventToAgentEvent converts a tool-layer ToolStreamEvent into an

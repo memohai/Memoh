@@ -30,6 +30,7 @@ import (
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 func runServe() {
@@ -54,6 +55,7 @@ func options() fx.Option {
 			accounts.NewService,
 			acl.NewService,
 			settings.NewService,
+			toolapproval.NewService,
 			provideProvidersService,
 			searchproviders.NewService,
 			browsercontexts.NewService,
@@ -111,6 +113,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
+			provideServerHandler(handlers.NewToolApprovalHandler),
 			provideServerHandler(handlers.NewACLHandler),
 			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),

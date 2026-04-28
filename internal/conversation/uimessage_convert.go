@@ -15,21 +15,23 @@ var (
 )
 
 type uiContentPart struct {
-	Type       string `json:"type"`
-	Text       string `json:"text,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Emoji      string `json:"emoji,omitempty"`
-	ToolCallID string `json:"toolCallId,omitempty"`
-	ToolName   string `json:"toolName,omitempty"`
-	Input      any    `json:"input,omitempty"`
-	Output     any    `json:"output,omitempty"`
-	Result     any    `json:"result,omitempty"`
+	Type             string         `json:"type"`
+	Text             string         `json:"text,omitempty"`
+	URL              string         `json:"url,omitempty"`
+	Emoji            string         `json:"emoji,omitempty"`
+	ToolCallID       string         `json:"toolCallId,omitempty"`
+	ToolName         string         `json:"toolName,omitempty"`
+	Input            any            `json:"input,omitempty"`
+	Output           any            `json:"output,omitempty"`
+	Result           any            `json:"result,omitempty"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
 type uiExtractedToolCall struct {
-	ID    string
-	Name  string
-	Input any
+	ID       string
+	Name     string
+	Input    any
+	Approval *UIToolApproval
 }
 
 type uiExtractedToolResult struct {
@@ -88,6 +90,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 					Input:      call.Input,
 					ToolCallID: call.ID,
 					Running:    uiBoolPtr(true),
+					Approval:   call.Approval,
 				})
 				if call.ID != "" {
 					pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
@@ -207,6 +210,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 						Input:      call.Input,
 						ToolCallID: call.ID,
 						Running:    uiBoolPtr(true),
+						Approval:   call.Approval,
 					}
 					appendPendingAssistantMessage(pending, block)
 					if call.ID != "" {
@@ -460,9 +464,10 @@ func extractPersistedToolCalls(message ModelMessage) []uiExtractedToolCall {
 			continue
 		}
 		calls = append(calls, uiExtractedToolCall{
-			ID:    strings.TrimSpace(part.ToolCallID),
-			Name:  strings.TrimSpace(part.ToolName),
-			Input: part.Input,
+			ID:       strings.TrimSpace(part.ToolCallID),
+			Name:     strings.TrimSpace(part.ToolName),
+			Input:    part.Input,
+			Approval: extractApprovalMetadata(part.ProviderMetadata),
 		})
 	}
 	if len(calls) > 0 {
@@ -483,6 +488,69 @@ func extractPersistedToolCalls(message ModelMessage) []uiExtractedToolCall {
 		})
 	}
 	return calls
+}
+
+func extractApprovalMetadata(metadata map[string]any) *UIToolApproval {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["approval"]
+	if !ok {
+		return nil
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	approvalID, _ := obj["approval_id"].(string)
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return nil
+	}
+	status, _ := obj["status"].(string)
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "pending"
+	}
+	return &UIToolApproval{
+		ApprovalID:     approvalID,
+		ShortID:        intFromAny(obj["short_id"]),
+		Status:         status,
+		DecisionReason: stringFromAny(obj["decision_reason"]),
+		CanApprove:     boolFromAny(obj["can_approve"], true),
+	}
+}
+
+func intFromAny(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func stringFromAny(value any) string {
+	if s, ok := value.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func boolFromAny(value any, fallback bool) bool {
+	if b, ok := value.(bool); ok {
+		return b
+	}
+	return fallback
 }
 
 func extractPersistedToolResults(message ModelMessage) []uiExtractedToolResult {

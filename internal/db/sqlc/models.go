@@ -38,6 +38,7 @@ type Bot struct {
 	BrowserContextID       pgtype.UUID        `json:"browser_context_id"`
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
@@ -483,6 +484,30 @@ type Task struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	ExecID    pgtype.Text        `json:"exec_id"`
 	Pid       pgtype.Int4        `json:"pid"`
+}
+
+type ToolApprovalRequest struct {
+	ID                           pgtype.UUID        `json:"id"`
+	BotID                        pgtype.UUID        `json:"bot_id"`
+	SessionID                    pgtype.UUID        `json:"session_id"`
+	RouteID                      pgtype.UUID        `json:"route_id"`
+	ChannelIdentityID            pgtype.UUID        `json:"channel_identity_id"`
+	ToolCallID                   string             `json:"tool_call_id"`
+	ToolName                     string             `json:"tool_name"`
+	ToolInput                    []byte             `json:"tool_input"`
+	ShortID                      int32              `json:"short_id"`
+	Status                       string             `json:"status"`
+	DecisionReason               string             `json:"decision_reason"`
+	RequestedByChannelIdentityID pgtype.UUID        `json:"requested_by_channel_identity_id"`
+	DecidedByChannelIdentityID   pgtype.UUID        `json:"decided_by_channel_identity_id"`
+	RequestedMessageID           pgtype.UUID        `json:"requested_message_id"`
+	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
+	SourcePlatform               string             `json:"source_platform"`
+	ReplyTarget                  string             `json:"reply_target"`
+	ConversationType             string             `json:"conversation_type"`
+	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
+	DecidedAt                    pgtype.Timestamptz `json:"decided_at"`
 }
 
 type TtsModel struct {

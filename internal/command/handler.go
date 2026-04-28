@@ -139,8 +139,10 @@ func (h *Handler) SetCompactionService(s *compaction.Service, q *sqlc.Queries) {
 // the regular resource-group dispatch (e.g. in the channel inbound
 // processor which has the required routing context).
 var topLevelCommands = map[string]string{
-	"new":  "Start a new conversation (resets session context)",
-	"stop": "Stop the current generation",
+	"new":     "Start a new conversation (resets session context)",
+	"stop":    "Stop the current generation",
+	"approve": "Approve the latest or specified pending tool call",
+	"reject":  "Reject the latest or specified pending tool call",
 }
 
 // IsCommand reports whether the text contains a slash command.

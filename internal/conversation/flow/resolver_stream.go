@@ -236,9 +236,10 @@ func (r *Resolver) StreamChatWS(
 
 func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string, rc resolvedContext) (bool, error) {
 	var envelope struct {
-		Type     string          `json:"type"`
-		Messages json.RawMessage `json:"messages"`
-		Usage    json.RawMessage `json:"usage,omitempty"`
+		Type       string          `json:"type"`
+		Messages   json.RawMessage `json:"messages"`
+		Usage      json.RawMessage `json:"usage,omitempty"`
+		ApprovalID string          `json:"approvalId,omitempty"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return false, nil
@@ -258,7 +259,9 @@ func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequ
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRound(ctx, req, roundMessages, modelID); err != nil {
+	if err := r.storeRoundWithOptions(ctx, req, roundMessages, modelID, storeRoundOptions{
+		AllowPendingToolCalls: strings.TrimSpace(envelope.ApprovalID) != "",
+	}); err != nil {
 		return false, err
 	}
 

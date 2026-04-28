@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -264,6 +265,11 @@ type wsClientMessage struct {
 	Attachments     []json.RawMessage `json:"attachments,omitempty"`
 	ModelID         string            `json:"model_id,omitempty"`
 	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	ApprovalID      string            `json:"approval_id,omitempty"`
+	ShortID         int               `json:"short_id,omitempty"`
+	ToolCallID      string            `json:"tool_call_id,omitempty"`
+	Decision        string            `json:"decision,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
 }
 
 // wsWriter serialises all WebSocket writes through a single goroutine to
@@ -391,6 +397,100 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			case abortCh <- struct{}{}:
 			default:
 			}
+
+		case "tool_approval_response":
+			sessionID := strings.TrimSpace(msg.SessionID)
+			if sessionID == "" {
+				writer.SendJSON(map[string]string{"type": "error", "message": "session_id is required"})
+				continue
+			}
+			explicitID := strings.TrimSpace(msg.ApprovalID)
+			if explicitID == "" && msg.ShortID > 0 {
+				explicitID = strconv.Itoa(msg.ShortID)
+			}
+			streamCtx, streamCancel := context.WithCancel(ctx)
+			activeCancel = streamCancel
+			eventCh := make(chan flow.WSStreamEvent, 64)
+
+			var (
+				outboundAssetMu   sync.Mutex
+				outboundAssetRefs []messagepkg.AssetRef
+			)
+
+			go func() {
+				defer streamCancel()
+				defer close(eventCh)
+				if err := h.resolver.RespondToolApproval(streamCtx, flow.ToolApprovalResponseInput{
+					BotID:                  botID,
+					SessionID:              sessionID,
+					ActorChannelIdentityID: channelIdentityID,
+					ApprovalID:             strings.TrimSpace(msg.ApprovalID),
+					ExplicitID:             explicitID,
+					Decision:               strings.TrimSpace(msg.Decision),
+					Reason:                 strings.TrimSpace(msg.Reason),
+					ChatToken:              bearerToken,
+				}, eventCh); err != nil {
+					if ctx.Err() == nil {
+						h.logger.Error("ws approval stream error", slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
+						writer.SendJSON(map[string]string{"type": "error", "message": err.Error()})
+					}
+				}
+			}()
+
+			go func() {
+				converter := conversation.NewUIMessageStreamConverter()
+				for event := range eventCh {
+					processed := h.processWSEvent(streamCtx, botID, event)
+					for _, p := range processed {
+						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
+							outboundAssetMu.Lock()
+							outboundAssetRefs = append(outboundAssetRefs, refs...)
+							outboundAssetMu.Unlock()
+						}
+
+						var streamEvent agentpkg.StreamEvent
+						if err := json.Unmarshal(p, &streamEvent); err != nil {
+							continue
+						}
+
+						switch streamEvent.Type {
+						case agentpkg.EventAgentStart:
+							writer.SendJSON(map[string]string{"type": "start"})
+							continue
+						case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+							for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
+								writer.SendJSON(map[string]any{
+									"type": "message",
+									"data": uiMessage,
+								})
+							}
+							writer.SendJSON(map[string]string{"type": "end"})
+							continue
+						case agentpkg.EventError:
+							message := strings.TrimSpace(streamEvent.Error)
+							if message == "" {
+								message = "stream error"
+							}
+							writer.SendJSON(map[string]string{"type": "error", "message": message})
+							continue
+						}
+
+						uiEvents := converter.HandleEvent(uiStreamEventFromAgentEvent(streamEvent))
+						for _, uiMessage := range uiEvents {
+							writer.SendJSON(map[string]any{
+								"type": "message",
+								"data": uiMessage,
+							})
+						}
+					}
+				}
+				outboundAssetMu.Lock()
+				refs := outboundAssetRefs
+				outboundAssetMu.Unlock()
+				if len(refs) > 0 {
+					h.resolver.LinkOutboundAssets(context.WithoutCancel(ctx), botID, sessionID, refs)
+				}
+			}()
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
@@ -551,6 +651,10 @@ func uiStreamEventFromAgentEvent(event agentpkg.StreamEvent) conversation.UIMess
 		Progress:    event.Progress,
 		Attachments: attachments,
 		Error:       event.Error,
+		ApprovalID:  event.ApprovalID,
+		ShortID:     event.ShortID,
+		Status:      event.Status,
+		Metadata:    event.Metadata,
 	}
 }
 

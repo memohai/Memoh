@@ -34,6 +34,7 @@ import (
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 const (
@@ -88,6 +89,7 @@ type Resolver struct {
 	pipeline          *pipelinepkg.Pipeline
 	streamHTTPClient  *http.Client
 	bgManager         *background.Manager
+	toolApproval      *toolapproval.Service
 	outboundFn        func(ctx context.Context, botID, channelType, target, text string) error
 	bgNotifDeferred   sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
 	sessionTurnMu     sync.Mutex
@@ -184,6 +186,10 @@ func (r *Resolver) SetBackgroundManager(m *background.Manager) {
 	r.bgManager = m
 }
 
+func (r *Resolver) SetToolApprovalService(s *toolapproval.Service) {
+	r.toolApproval = s
+}
+
 // SetOutboundFn configures the function used to deliver background notification
 // responses to the user. The agent's text output is delivered through the same
 // path as normal responses.
@@ -265,6 +271,7 @@ func (r *Resolver) resolve(ctx context.Context, req conversation.ChatRequest) (r
 		BotID:             req.BotID,
 		ChatID:            req.ChatID,
 		SessionID:         req.SessionID,
+		RouteID:           req.RouteID,
 		UserID:            req.UserID,
 		ChannelIdentityID: req.SourceChannelIdentityID,
 		CurrentPlatform:   req.CurrentChannel,
@@ -492,6 +499,7 @@ type baseRunConfigParams struct {
 	BotID             string
 	ChatID            string
 	SessionID         string
+	RouteID           string
 	UserID            string
 	ChannelIdentityID string
 	CurrentPlatform   string
@@ -592,8 +600,45 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: r.bgManager,
 	}
+	if r.toolApproval != nil {
+		cfg.ToolApprovalHandler = r.buildToolApprovalHandler(p)
+	}
 
 	return cfg, chatModel, provider, nil
+}
+
+func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+		eval, err := r.toolApproval.Evaluate(ctx, toolapproval.CreatePendingInput{
+			BotID:                        p.BotID,
+			SessionID:                    p.SessionID,
+			RouteID:                      p.RouteID,
+			ChannelIdentityID:            p.ChannelIdentityID,
+			RequestedByChannelIdentityID: p.ChannelIdentityID,
+			ToolCallID:                   call.ToolCallID,
+			ToolName:                     call.ToolName,
+			ToolInput:                    call.Input,
+			SourcePlatform:               p.CurrentPlatform,
+			ReplyTarget:                  p.ReplyTarget,
+			ConversationType:             p.ConversationType,
+		})
+		if err != nil {
+			return sdk.ToolApprovalResult{}, err
+		}
+		if eval.Decision == toolapproval.DecisionBypass {
+			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+		}
+		return sdk.ToolApprovalResult{
+			Decision:   sdk.ToolApprovalDecisionDeferred,
+			ApprovalID: eval.Request.ID,
+			Metadata: map[string]any{
+				"short_id":     eval.Request.ShortID,
+				"status":       eval.Request.Status,
+				"tool_name":    eval.Request.ToolName,
+				"tool_call_id": eval.Request.ToolCallID,
+			},
+		}, nil
+	}
 }
 
 func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversation.ChatRequest {

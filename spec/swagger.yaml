@@ -2131,6 +2131,11 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
     type: object
+  handlers.ToolApprovalDecisionRequest:
+    properties:
+      reason:
+        type: string
+    type: object
   handlers.TriggerCompactResponse:
     properties:
       message_count:
@@ -3049,10 +3054,41 @@ definitions:
         type: string
       title_model_id:
         type: string
+      tool_approval_config:
+        $ref: '#/definitions/settings.ToolApprovalConfig'
       transcription_model_id:
         type: string
       tts_model_id:
         type: string
+    type: object
+  settings.ToolApprovalConfig:
+    properties:
+      edit:
+        $ref: '#/definitions/settings.ToolApprovalFilePolicy'
+      enabled:
+        type: boolean
+      exec:
+        $ref: '#/definitions/settings.ToolApprovalExecPolicy'
+      write:
+        $ref: '#/definitions/settings.ToolApprovalFilePolicy'
+    type: object
+  settings.ToolApprovalExecPolicy:
+    properties:
+      bypass_commands:
+        items:
+          type: string
+        type: array
+      require_approval:
+        type: boolean
+    type: object
+  settings.ToolApprovalFilePolicy:
+    properties:
+      bypass_globs:
+        items:
+          type: string
+        type: array
+      require_approval:
+        type: boolean
     type: object
   settings.UpsertRequest:
     properties:
@@ -3098,6 +3134,8 @@ definitions:
         type: string
       title_model_id:
         type: string
+      tool_approval_config:
+        $ref: '#/definitions/settings.ToolApprovalConfig'
       transcription_model_id:
         type: string
       tts_model_id:
@@ -6407,6 +6445,86 @@ paths:
       summary: List per-call token usage records
       tags:
       - token-usage
+  /bots/{bot_id}/tool-approvals/{approval_id}/approve:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Approval ID
+        in: path
+        name: approval_id
+        required: true
+        type: string
+      - description: Approval payload
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.ToolApprovalDecisionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Approve a pending tool call
+      tags:
+      - tool-approvals
+  /bots/{bot_id}/tool-approvals/{approval_id}/reject:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Approval ID
+        in: path
+        name: approval_id
+        required: true
+        type: string
+      - description: Rejection payload
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.ToolApprovalDecisionRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Reject a pending tool call
+      tags:
+      - tool-approvals
   /bots/{bot_id}/tools:
     post:
       description: MCP endpoint for tool discovery and invocation.

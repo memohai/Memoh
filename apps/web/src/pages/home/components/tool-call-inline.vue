@@ -46,6 +46,24 @@
         v-if="display.errorSuffix"
         class="font-mono shrink-0"
       >{{ display.errorSuffix }}</span>
+      <span
+        v-if="approvalLabel"
+        class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
+      >{{ approvalLabel }}</span>
+      <button
+        v-if="canRespondApproval"
+        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+        @click.stop="handleApproval('approve')"
+      >
+        {{ t('chat.tools.approve', 'Allow') }}
+      </button>
+      <button
+        v-if="canRespondApproval"
+        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-destructive hover:bg-accent"
+        @click.stop="handleApproval('reject')"
+      >
+        {{ t('chat.tools.reject', 'Reject') }}
+      </button>
       <ChevronRight
         v-if="!open"
         class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
@@ -97,6 +115,24 @@
         v-if="display.errorSuffix"
         class="font-mono shrink-0"
       >{{ display.errorSuffix }}</span>
+      <span
+        v-if="approvalLabel"
+        class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
+      >{{ approvalLabel }}</span>
+      <button
+        v-if="canRespondApproval"
+        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground hover:bg-accent"
+        @click="handleApproval('approve')"
+      >
+        {{ t('chat.tools.approve', 'Allow') }}
+      </button>
+      <button
+        v-if="canRespondApproval"
+        class="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-destructive hover:bg-accent"
+        @click="handleApproval('reject')"
+      >
+        {{ t('chat.tools.reject', 'Reject') }}
+      </button>
     </div>
 
     <div
@@ -117,10 +153,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import { useChatStore } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import {
   getToolDisplay,
@@ -131,6 +168,7 @@ import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+const chatStore = useChatStore()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
@@ -156,15 +194,59 @@ const rowClass = computed(() => {
     : 'text-muted-foreground hover:text-foreground'
 })
 
+// Brief tools (e.g. send/memory) finish in <100ms. Showing the running
+// shimmer for them flickers, so we only display it after a short delay.
+const showRunning = ref(false)
+let runningTimer: ReturnType<typeof setTimeout> | null = null
+const RUNNING_SHIMMER_DELAY_MS = 250
+
+function clearRunningTimer() {
+  if (runningTimer !== null) {
+    clearTimeout(runningTimer)
+    runningTimer = null
+  }
+}
+
+watch(
+  () => props.block.done,
+  (done) => {
+    clearRunningTimer()
+    if (done) {
+      showRunning.value = false
+      return
+    }
+    runningTimer = setTimeout(() => {
+      showRunning.value = true
+      runningTimer = null
+    }, RUNNING_SHIMMER_DELAY_MS)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(clearRunningTimer)
+
 const targetClass = computed(() => {
-  if (!props.block.done) return 'tool-shimmer-text'
+  if (showRunning.value) return 'tool-shimmer-text'
   if (display.value.isError) return 'text-destructive'
   return 'text-foreground/80'
 })
 
 const actionClass = computed(() => {
-  if (!props.block.done && !display.value.target) return 'tool-shimmer-text'
+  if (showRunning.value && !display.value.target) return 'tool-shimmer-text'
   return ''
+})
+
+const approvalLabel = computed(() => {
+  const approval = props.block.approval
+  if (!approval?.approval_id) return ''
+  const id = approval.short_id ? `#${approval.short_id}` : ''
+  if (approval.status === 'pending') return `${id} ${t('chat.tools.pendingApproval', 'pending approval')}`.trim()
+  return `${id} ${approval.status}`.trim()
+})
+
+const canRespondApproval = computed(() => {
+  const approval = props.block.approval
+  return Boolean(approval?.approval_id && approval.status === 'pending' && approval.can_approve !== false)
 })
 
 const filePath = computed(() => {
@@ -184,5 +266,11 @@ function toggleOpen() {
 function handleOpenInFiles() {
   if (!filePath.value || !openInFileManager) return
   openInFileManager(filePath.value, isDirPathTool(props.block.toolName))
+}
+
+function handleApproval(decision: 'approve' | 'reject') {
+  const approval = props.block.approval
+  if (!approval) return
+  void chatStore.respondToolApproval(approval, decision)
 }
 </script>

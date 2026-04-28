@@ -34,6 +34,7 @@ SET language = 'auto',
     browser_context_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
+    tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":[".cache/**","tmp/**","node_modules/.cache/**","dist/**"]},"edit":{"require_approval":true,"bypass_globs":[".cache/**","tmp/**","node_modules/.cache/**","dist/**"]},"exec":{"require_approval":true,"bypass_commands":["npm","pnpm","yarn","bun","go","git"]}}'::jsonb,
     updated_at = now()
 WHERE id = $1
 `
@@ -67,7 +68,8 @@ SELECT
   transcription_models.id AS transcription_model_id,
   browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
-  bots.show_tool_calls_in_im
+  bots.show_tool_calls_in_im,
+  bots.tool_approval_config
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
@@ -106,6 +108,7 @@ type GetSettingsByBotIDRow struct {
 	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -135,6 +138,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
+		&i.ToolApprovalConfig,
 	)
 	return i, err
 }
@@ -164,9 +168,10 @@ WITH updated AS (
       browser_context_id = COALESCE($20::uuid, bots.browser_context_id),
       persist_full_tool_results = $21,
       show_tool_calls_in_im = $22,
+      tool_approval_config = $23,
       updated_at = now()
-  WHERE bots.id = $23
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.browser_context_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im
+  WHERE bots.id = $24
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.browser_context_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config
 )
 SELECT
   updated.id AS bot_id,
@@ -191,7 +196,8 @@ SELECT
   transcription_models.id AS transcription_model_id,
   browser_contexts.id AS browser_context_id,
   updated.persist_full_tool_results,
-  updated.show_tool_calls_in_im
+  updated.show_tool_calls_in_im,
+  updated.tool_approval_config
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
@@ -228,6 +234,7 @@ type UpsertBotSettingsParams struct {
 	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
 	ID                     pgtype.UUID `json:"id"`
 }
 
@@ -255,6 +262,7 @@ type UpsertBotSettingsRow struct {
 	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -281,6 +289,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.BrowserContextID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
+		arg.ToolApprovalConfig,
 		arg.ID,
 	)
 	var i UpsertBotSettingsRow
@@ -308,6 +317,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
+		&i.ToolApprovalConfig,
 	)
 	return i, err
 }

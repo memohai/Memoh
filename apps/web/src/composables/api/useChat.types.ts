@@ -126,6 +126,15 @@ export interface UIToolMessage {
   tool_call_id: string
   running: boolean
   progress?: unknown[]
+  approval?: UIToolApproval
+}
+
+export interface UIToolApproval {
+  approval_id: string
+  short_id?: number
+  status: string
+  decision_reason?: string
+  can_approve?: boolean
 }
 
 export interface UIAttachmentsMessage {

@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -71,6 +72,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, err
 	}
 	current := normalizeBotSetting(botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
+	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
+		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
+	}
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
@@ -103,6 +107,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.ShowToolCallsInIM != nil {
 		current.ShowToolCallsInIM = *req.ShowToolCallsInIM
+	}
+	if req.ToolApprovalConfig != nil {
+		current.ToolApprovalConfig = NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
 	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
@@ -194,6 +201,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		browserContextUUID = ctxID
 	}
+	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
+	if err != nil {
+		return Settings{}, err
+	}
 
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                     pgID,
@@ -219,6 +230,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		BrowserContextID:       browserContextUUID,
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
+		ToolApprovalConfig:     toolApprovalConfig,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -261,6 +273,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 		CompactionEnabled:   compactionEnabled,
 		CompactionThreshold: int(compactionThreshold),
 		CompactionRatio:     int(compactionRatio),
+		ToolApprovalConfig:  DefaultToolApprovalConfig(),
 	}
 	if settings.Language == "" {
 		settings.Language = DefaultLanguage
@@ -315,6 +328,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
+		row.ToolApprovalConfig,
 	)
 }
 
@@ -341,6 +355,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
+		row.ToolApprovalConfig,
 	)
 }
 
@@ -366,6 +381,7 @@ func normalizeBotSettingsFields(
 	browserContextID pgtype.UUID,
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
+	toolApprovalConfig []byte,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
 	if timezone.Valid {
@@ -403,7 +419,19 @@ func normalizeBotSettingsFields(
 	}
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
+	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
 	return settings
+}
+
+func parseToolApprovalConfig(raw []byte) ToolApprovalConfig {
+	if len(raw) == 0 {
+		return DefaultToolApprovalConfig()
+	}
+	var cfg ToolApprovalConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return DefaultToolApprovalConfig()
+	}
+	return NormalizeToolApprovalConfig(cfg)
 }
 
 func (s *Service) getDefaultEffect(ctx context.Context, botID string) (string, error) {

@@ -2,12 +2,17 @@ import { client } from '@memohai/sdk/client'
 import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
 export interface WSClientMessage {
-  type: 'message' | 'abort'
+  type: 'message' | 'abort' | 'tool_approval_response'
   text?: string
   session_id?: string
   attachments?: ChatAttachment[]
   model_id?: string
   reasoning_effort?: string
+  approval_id?: string
+  short_id?: number
+  tool_call_id?: string
+  decision?: 'approve' | 'reject'
+  reason?: string
 }
 
 export interface ChatWebSocket {

@@ -41,6 +41,8 @@ services:
     container_name: memoh-dev-deps
     working_dir: /workspace
     command: ["pnpm", "install"]
+    environment:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     volumes:
       - ..:/workspace
       - node_modules:/workspace/node_modules

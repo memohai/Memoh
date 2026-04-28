@@ -6,24 +6,25 @@ import "encoding/json"
 type StreamEventType string
 
 const (
-	EventAgentStart       StreamEventType = "agent_start"
-	EventTextStart        StreamEventType = "text_start"
-	EventTextDelta        StreamEventType = "text_delta"
-	EventTextEnd          StreamEventType = "text_end"
-	EventReasoningStart   StreamEventType = "reasoning_start"
-	EventReasoningDelta   StreamEventType = "reasoning_delta"
-	EventReasoningEnd     StreamEventType = "reasoning_end"
-	EventToolCallStart    StreamEventType = "tool_call_start"
-	EventToolCallProgress StreamEventType = "tool_call_progress"
-	EventToolCallEnd      StreamEventType = "tool_call_end"
-	EventAttachment       StreamEventType = "attachment_delta"
-	EventReaction         StreamEventType = "reaction_delta"
-	EventSpeech           StreamEventType = "speech_delta"
-	EventAgentEnd         StreamEventType = "agent_end"
-	EventAgentAbort       StreamEventType = "agent_abort"
-	EventRetry            StreamEventType = "retry"
-	EventProgress         StreamEventType = "progress"
-	EventError            StreamEventType = "error"
+	EventAgentStart          StreamEventType = "agent_start"
+	EventTextStart           StreamEventType = "text_start"
+	EventTextDelta           StreamEventType = "text_delta"
+	EventTextEnd             StreamEventType = "text_end"
+	EventReasoningStart      StreamEventType = "reasoning_start"
+	EventReasoningDelta      StreamEventType = "reasoning_delta"
+	EventReasoningEnd        StreamEventType = "reasoning_end"
+	EventToolCallStart       StreamEventType = "tool_call_start"
+	EventToolCallProgress    StreamEventType = "tool_call_progress"
+	EventToolCallEnd         StreamEventType = "tool_call_end"
+	EventToolApprovalRequest StreamEventType = "tool_approval_request"
+	EventAttachment          StreamEventType = "attachment_delta"
+	EventReaction            StreamEventType = "reaction_delta"
+	EventSpeech              StreamEventType = "speech_delta"
+	EventAgentEnd            StreamEventType = "agent_end"
+	EventAgentAbort          StreamEventType = "agent_abort"
+	EventRetry               StreamEventType = "retry"
+	EventProgress            StreamEventType = "progress"
+	EventError               StreamEventType = "error"
 )
 
 // StreamEvent is emitted by the agent during streaming.
@@ -32,7 +33,11 @@ type StreamEvent struct {
 	Delta          string           `json:"delta,omitempty"`
 	ToolName       string           `json:"toolName,omitempty"`
 	ToolCallID     string           `json:"toolCallId,omitempty"`
+	ApprovalID     string           `json:"approvalId,omitempty"`
+	ShortID        int              `json:"shortId,omitempty"`
+	Status         string           `json:"status,omitempty"`
 	Input          any              `json:"input,omitempty"`
+	Metadata       map[string]any   `json:"metadata,omitempty"`
 	Progress       any              `json:"progress,omitempty"`
 	Result         any              `json:"result,omitempty"`
 	Attachments    []FileAttachment `json:"attachments,omitempty"`
