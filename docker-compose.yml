@@ -21,6 +21,26 @@ services:
     networks:
       - memoh-network
 
+  nats:
+    image: nats:2-alpine
+    container_name: memoh-nats
+    user: "0:0"
+    command: ["-js", "-sd", "/opt/memoh/data/nats/jetstream", "-m", "8222"]
+    volumes:
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    expose:
+      - "4222"
+      - "8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   migrate:
     image: memohai/server:latest
     container_name: memoh-migrate
@@ -39,6 +59,8 @@ services:
     container_name: memoh-server
     privileged: true
     pid: host
+    environment:
+      MEMOH_ORCHESTRATION_BUILTIN_VERIFYD: "false"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
@@ -59,6 +81,24 @@ services:
     networks:
       - memoh-network
 
+  verifyd:
+    image: memohai/server:latest
+    container_name: memoh-verifyd
+    entrypoint: ["/app/verifyd"]
+    healthcheck:
+      disable: true
+    environment:
+      CONFIG_PATH: /app/config.toml
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   web:
     image: memohai/web:latest
     container_name: memoh-web
@@ -66,6 +106,7 @@ services:
       - "8082:8082"
     depends_on:
       - server
+      - verifyd
     restart: unless-stopped
     networks:
       - memoh-network

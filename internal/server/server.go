@@ -36,9 +36,13 @@ func NewServer(log *slog.Logger, addr string, jwtSecret string,
 		LogURI:    true,
 		LogMethod: true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			uri := c.Request().URL.Path
+			if uri == "" {
+				uri = v.URI
+			}
 			log.Info("request",
 				slog.String("method", v.Method),
-				slog.String("uri", v.URI),
+				slog.String("uri", uri),
 				slog.Int("status", v.Status),
 				slog.Duration("latency", v.Latency),
 				slog.String("remote_ip", c.RealIP()),

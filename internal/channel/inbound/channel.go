@@ -670,7 +670,7 @@ startStream:
 			}
 		}
 		if tokenUserID != "" {
-			signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
+			signed, _, err := auth.GenerateServiceToken(tokenUserID, p.jwtSecret, p.tokenTTL)
 			if err != nil {
 				if p.logger != nil {
 					p.logger.Warn("issue channel token failed", slog.Any("error", err))

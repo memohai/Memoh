@@ -2637,6 +2637,392 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  orchestration.Artifact:
+    properties:
+      attempt_id:
+        type: string
+      content_type:
+        type: string
+      created_at:
+        type: string
+      digest:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      summary:
+        type: string
+      task_id:
+        type: string
+      uri:
+        type: string
+      version:
+        type: string
+    type: object
+  orchestration.ArtifactPage:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/orchestration.Artifact'
+        type: array
+      next_after:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.CheckpointDefaultAction:
+    properties:
+      freeform_input:
+        type: string
+      mode:
+        type: string
+      option_id:
+        type: string
+    required:
+    - mode
+    - option_id
+    type: object
+  orchestration.CheckpointOption:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      label:
+        type: string
+    required:
+    - id
+    - kind
+    type: object
+  orchestration.CheckpointResolution:
+    properties:
+      freeform_input:
+        type: string
+      idempotency_key:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      mode:
+        type: string
+      option_id:
+        type: string
+    required:
+    - idempotency_key
+    - mode
+    type: object
+  orchestration.CheckpointResumePolicy:
+    properties:
+      resume_mode:
+        type: string
+    required:
+    - resume_mode
+    type: object
+  orchestration.CreateHumanCheckpointRequest:
+    properties:
+      blocks_run:
+        type: boolean
+      default_action:
+        $ref: '#/definitions/orchestration.CheckpointDefaultAction'
+      idempotency_key:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      options:
+        items:
+          $ref: '#/definitions/orchestration.CheckpointOption'
+        type: array
+      question:
+        type: string
+      resume_policy:
+        $ref: '#/definitions/orchestration.CheckpointResumePolicy'
+      timeout_at:
+        type: string
+    required:
+    - idempotency_key
+    - options
+    - question
+    type: object
+  orchestration.CreateHumanCheckpointResult:
+    properties:
+      checkpoint:
+        $ref: '#/definitions/orchestration.HumanCheckpoint'
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.HumanCheckpoint:
+    properties:
+      blocks_run:
+        type: boolean
+      created_at:
+        type: string
+      default_action:
+        $ref: '#/definitions/orchestration.CheckpointDefaultAction'
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      options:
+        items:
+          $ref: '#/definitions/orchestration.CheckpointOption'
+        type: array
+      planner_epoch:
+        type: integer
+      question:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+      resolved_freeform_input:
+        type: string
+      resolved_mode:
+        type: string
+      resolved_option_id:
+        type: string
+      resume_policy:
+        $ref: '#/definitions/orchestration.CheckpointResumePolicy'
+      run_id:
+        type: string
+      status:
+        type: string
+      status_version:
+        type: integer
+      superseded_by_planner_epoch:
+        type: integer
+      task_id:
+        type: string
+      timeout_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  orchestration.HumanCheckpointPage:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/orchestration.HumanCheckpoint'
+        type: array
+      next_after:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.ResolveCheckpointResult:
+    properties:
+      checkpoint_id:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.Run:
+    properties:
+      control_policy:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      created_by:
+        type: string
+      finished_at:
+        type: string
+      goal:
+        type: string
+      id:
+        type: string
+      input:
+        additionalProperties: {}
+        type: object
+      lifecycle_status:
+        type: string
+      output_schema:
+        additionalProperties: {}
+        type: object
+      owner_subject:
+        type: string
+      planner_epoch:
+        type: integer
+      planning_status:
+        type: string
+      policies:
+        additionalProperties: {}
+        type: object
+      requested_control_policy:
+        additionalProperties: {}
+        type: object
+      root_task_id:
+        type: string
+      source_metadata:
+        additionalProperties: {}
+        type: object
+      status_version:
+        type: integer
+      tenant_id:
+        type: string
+      terminal_reason:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  orchestration.RunEvent:
+    properties:
+      aggregate_id:
+        type: string
+      aggregate_type:
+        type: string
+      aggregate_version:
+        type: integer
+      attempt_id:
+        type: string
+      causation_event_id:
+        type: string
+      checkpoint_id:
+        type: string
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      idempotency_key:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      published_at:
+        type: string
+      run_id:
+        type: string
+      seq:
+        type: integer
+      task_id:
+        type: string
+      type:
+        type: string
+    type: object
+  orchestration.RunEventPage:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/orchestration.RunEvent'
+        type: array
+      until_seq:
+        type: integer
+    type: object
+  orchestration.RunHandle:
+    properties:
+      root_task_id:
+        type: string
+      run_id:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.RunSnapshot:
+    properties:
+      run:
+        $ref: '#/definitions/orchestration.Run'
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.StartRunRequest:
+    properties:
+      goal:
+        type: string
+      idempotency_key:
+        type: string
+      input:
+        additionalProperties: {}
+        type: object
+      output_schema:
+        additionalProperties: {}
+        type: object
+      policies:
+        additionalProperties: {}
+        type: object
+      requested_control_policy:
+        additionalProperties: {}
+        type: object
+      source_metadata:
+        additionalProperties: {}
+        type: object
+    required:
+    - goal
+    - idempotency_key
+    type: object
+  orchestration.Task:
+    properties:
+      blackboard_scope:
+        type: string
+      blocked_reason:
+        type: string
+      created_at:
+        type: string
+      decomposed_from_task_id:
+        type: string
+      goal:
+        type: string
+      id:
+        type: string
+      inputs:
+        additionalProperties: {}
+        type: object
+      kind:
+        type: string
+      latest_result_id:
+        type: string
+      planner_epoch:
+        type: integer
+      priority:
+        type: integer
+      ready_at:
+        type: string
+      retry_policy:
+        additionalProperties: {}
+        type: object
+      run_id:
+        type: string
+      status:
+        type: string
+      status_version:
+        type: integer
+      superseded_by_planner_epoch:
+        type: integer
+      terminal_reason:
+        type: string
+      updated_at:
+        type: string
+      verification_policy:
+        additionalProperties: {}
+        type: object
+      waiting_checkpoint_id:
+        type: string
+      waiting_scope:
+        type: string
+      worker_profile:
+        type: string
+    type: object
+  orchestration.TaskPage:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/orchestration.Task'
+        type: array
+      next_after:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
   providers.CountResponse:
     properties:
       count:
@@ -7834,6 +8220,409 @@ paths:
       summary: Update model by model ID
       tags:
       - models
+  /orchestration/checkpoints/{checkpoint_id}/resolve:
+    post:
+      description: Resolve an open checkpoint using a committed idempotent resolution
+      parameters:
+      - description: Checkpoint ID
+        in: path
+        name: checkpoint_id
+        required: true
+        type: string
+      - description: Checkpoint resolution
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.CheckpointResolution'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.ResolveCheckpointResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Resolve a human checkpoint
+      tags:
+      - orchestration
+  /orchestration/runs:
+    post:
+      description: Create a new orchestration run under the authenticated user
+      parameters:
+      - description: Start run request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.StartRunRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/orchestration.RunHandle'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Start an orchestration run
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/artifacts:
+    get:
+      description: List artifact projections for a run at a committed snapshot sequence
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Filter by task ID
+        in: query
+        name: task_id
+        type: string
+      - description: Comma-separated artifact kinds
+        in: query
+        name: kind
+        type: string
+      - description: Opaque pagination cursor
+        in: query
+        name: after
+        type: string
+      - description: Page size
+        in: query
+        name: limit
+        type: integer
+      - description: Committed snapshot sequence
+        in: query
+        name: as_of_seq
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.ArtifactPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List orchestration artifacts
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/checkpoints:
+    get:
+      description: List checkpoints for a run at a committed snapshot sequence
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Comma-separated checkpoint statuses
+        in: query
+        name: status
+        type: string
+      - description: Opaque pagination cursor
+        in: query
+        name: after
+        type: string
+      - description: Page size
+        in: query
+        name: limit
+        type: integer
+      - description: Committed snapshot sequence
+        in: query
+        name: as_of_seq
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.HumanCheckpointPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List human checkpoints
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/events:
+    get:
+      description: List committed run events after a sequence cursor
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Return events with seq greater than this value
+        in: query
+        name: after_seq
+        type: integer
+      - description: Maximum number of events
+        in: query
+        name: limit
+        type: integer
+      - description: Upper committed sequence bound for stable replay
+        in: query
+        name: until_seq
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.RunEventPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List committed orchestration events
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/snapshot:
+    get:
+      description: Return the current run aggregate snapshot
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.RunSnapshot'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get orchestration run snapshot
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/tasks:
+    get:
+      description: List tasks for a run at a committed snapshot sequence
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Comma-separated task statuses
+        in: query
+        name: status
+        type: string
+      - description: Opaque pagination cursor
+        in: query
+        name: after
+        type: string
+      - description: Page size
+        in: query
+        name: limit
+        type: integer
+      - description: Committed snapshot sequence
+        in: query
+        name: as_of_seq
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.TaskPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List orchestration tasks
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/tasks/{task_id}/checkpoints:
+    post:
+      description: Create an open HITL checkpoint on a run task for the authenticated
+        user
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Checkpoint definition
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.CreateHumanCheckpointRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/orchestration.CreateHumanCheckpointResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a human checkpoint for a task
+      tags:
+      - orchestration
   /ping:
     get:
       responses:

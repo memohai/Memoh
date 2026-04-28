@@ -7118,6 +7118,629 @@ const docTemplate = `{
                 }
             }
         },
+        "/orchestration/checkpoints/{checkpoint_id}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resolve an open checkpoint using a committed idempotent resolution",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Resolve a human checkpoint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Checkpoint ID",
+                        "name": "checkpoint_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Checkpoint resolution",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.CheckpointResolution"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.ResolveCheckpointResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new orchestration run under the authenticated user",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Start an orchestration run",
+                "parameters": [
+                    {
+                        "description": "Start run request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.StartRunRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.RunHandle"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/artifacts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List artifact projections for a run at a committed snapshot sequence",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "List orchestration artifacts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by task ID",
+                        "name": "task_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated artifact kinds",
+                        "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque pagination cursor",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Committed snapshot sequence",
+                        "name": "as_of_seq",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.ArtifactPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/checkpoints": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List checkpoints for a run at a committed snapshot sequence",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "List human checkpoints",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated checkpoint statuses",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque pagination cursor",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Committed snapshot sequence",
+                        "name": "as_of_seq",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.HumanCheckpointPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List committed run events after a sequence cursor",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "List committed orchestration events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return events with seq greater than this value",
+                        "name": "after_seq",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of events",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Upper committed sequence bound for stable replay",
+                        "name": "until_seq",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.RunEventPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/snapshot": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return the current run aggregate snapshot",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Get orchestration run snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.RunSnapshot"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/tasks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List tasks for a run at a committed snapshot sequence",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "List orchestration tasks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated task statuses",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque pagination cursor",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Committed snapshot sequence",
+                        "name": "as_of_seq",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.TaskPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/tasks/{task_id}/checkpoints": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create an open HITL checkpoint on a run task for the authenticated user",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Create a human checkpoint for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Checkpoint definition",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.CreateHumanCheckpointRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.CreateHumanCheckpointResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/ping": {
             "get": {
                 "tags": [
@@ -13442,6 +14065,582 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "orchestration.Artifact": {
+            "type": "object",
+            "properties": {
+                "attempt_id": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.ArtifactPage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.Artifact"
+                    }
+                },
+                "next_after": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.CheckpointDefaultAction": {
+            "type": "object",
+            "required": [
+                "mode",
+                "option_id"
+            ],
+            "properties": {
+                "freeform_input": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "option_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CheckpointOption": {
+            "type": "object",
+            "required": [
+                "id",
+                "kind"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CheckpointResolution": {
+            "type": "object",
+            "required": [
+                "idempotency_key",
+                "mode"
+            ],
+            "properties": {
+                "freeform_input": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "option_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CheckpointResumePolicy": {
+            "type": "object",
+            "required": [
+                "resume_mode"
+            ],
+            "properties": {
+                "resume_mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CreateHumanCheckpointRequest": {
+            "type": "object",
+            "required": [
+                "idempotency_key",
+                "options",
+                "question"
+            ],
+            "properties": {
+                "blocks_run": {
+                    "type": "boolean"
+                },
+                "default_action": {
+                    "$ref": "#/definitions/orchestration.CheckpointDefaultAction"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.CheckpointOption"
+                    }
+                },
+                "question": {
+                    "type": "string"
+                },
+                "resume_policy": {
+                    "$ref": "#/definitions/orchestration.CheckpointResumePolicy"
+                },
+                "timeout_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CreateHumanCheckpointResult": {
+            "type": "object",
+            "properties": {
+                "checkpoint": {
+                    "$ref": "#/definitions/orchestration.HumanCheckpoint"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.HumanCheckpoint": {
+            "type": "object",
+            "properties": {
+                "blocks_run": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "default_action": {
+                    "$ref": "#/definitions/orchestration.CheckpointDefaultAction"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.CheckpointOption"
+                    }
+                },
+                "planner_epoch": {
+                    "type": "integer"
+                },
+                "question": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by": {
+                    "type": "string"
+                },
+                "resolved_freeform_input": {
+                    "type": "string"
+                },
+                "resolved_mode": {
+                    "type": "string"
+                },
+                "resolved_option_id": {
+                    "type": "string"
+                },
+                "resume_policy": {
+                    "$ref": "#/definitions/orchestration.CheckpointResumePolicy"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "status_version": {
+                    "type": "integer"
+                },
+                "superseded_by_planner_epoch": {
+                    "type": "integer"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "timeout_at": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.HumanCheckpointPage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.HumanCheckpoint"
+                    }
+                },
+                "next_after": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.ResolveCheckpointResult": {
+            "type": "object",
+            "properties": {
+                "checkpoint_id": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.Run": {
+            "type": "object",
+            "properties": {
+                "control_policy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "lifecycle_status": {
+                    "type": "string"
+                },
+                "output_schema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "owner_subject": {
+                    "type": "string"
+                },
+                "planner_epoch": {
+                    "type": "integer"
+                },
+                "planning_status": {
+                    "type": "string"
+                },
+                "policies": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "requested_control_policy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "root_task_id": {
+                    "type": "string"
+                },
+                "source_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "status_version": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "string"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.RunEvent": {
+            "type": "object",
+            "properties": {
+                "aggregate_id": {
+                    "type": "string"
+                },
+                "aggregate_type": {
+                    "type": "string"
+                },
+                "aggregate_version": {
+                    "type": "integer"
+                },
+                "attempt_id": {
+                    "type": "string"
+                },
+                "causation_event_id": {
+                    "type": "string"
+                },
+                "checkpoint_id": {
+                    "type": "string"
+                },
+                "correlation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.RunEventPage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.RunEvent"
+                    }
+                },
+                "until_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.RunHandle": {
+            "type": "object",
+            "properties": {
+                "root_task_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.RunSnapshot": {
+            "type": "object",
+            "properties": {
+                "run": {
+                    "$ref": "#/definitions/orchestration.Run"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.StartRunRequest": {
+            "type": "object",
+            "required": [
+                "goal",
+                "idempotency_key"
+            ],
+            "properties": {
+                "goal": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "output_schema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "policies": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "requested_control_policy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "source_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "orchestration.Task": {
+            "type": "object",
+            "properties": {
+                "blackboard_scope": {
+                    "type": "string"
+                },
+                "blocked_reason": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "decomposed_from_task_id": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "latest_result_id": {
+                    "type": "string"
+                },
+                "planner_epoch": {
+                    "type": "integer"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "ready_at": {
+                    "type": "string"
+                },
+                "retry_policy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "status_version": {
+                    "type": "integer"
+                },
+                "superseded_by_planner_epoch": {
+                    "type": "integer"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verification_policy": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "waiting_checkpoint_id": {
+                    "type": "string"
+                },
+                "waiting_scope": {
+                    "type": "string"
+                },
+                "worker_profile": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.TaskPage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.Task"
+                    }
+                },
+                "next_after": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
                 }
             }
         },

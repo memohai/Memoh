@@ -477,7 +477,7 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 	if strings.TrimSpace(s.jwtSecret) == "" {
 		return "", errors.New("jwt secret not configured")
 	}
-	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, scheduleTokenTTL)
+	signed, _, err := auth.GenerateServiceToken(userID, s.jwtSecret, scheduleTokenTTL)
 	if err != nil {
 		return "", err
 	}
