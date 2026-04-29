@@ -140,6 +140,62 @@ If you'd rather plug into an existing memory service, Memoh also supports [**Mem
 
 See the [documentation](https://docs.memoh.ai/memory-providers/) for full setup details.
 
+## FAQ
+
+### General
+
+**Q: What is Memoh?**
+Memoh is a self-hosted, always-on AI agent orchestrator that runs in Docker containers. Each bot gets its own isolated environment with persistent memory, and can interact across Telegram, Discord, and other channels.
+
+**Q: How is Memoh different from other AI chatbots?**
+Unlike simple chatbots, Memoh provides persistent memory (bots remember past conversations), multi-channel support, MCP tool integration, and a skills marketplace — all running locally on your hardware.
+
+**Q: What LLM providers are supported?**
+Memoh supports any OpenAI-compatible API, including OpenAI, Anthropic, Google Gemini, Ollama, vLLM, and local models. Configure providers in `config.toml`.
+
+### Installation & Setup
+
+**Q: What are the system requirements?**
+Docker and Docker Compose are required. For memory providers, Qdrant needs ~512MB RAM. Minimum 2GB RAM recommended for basic usage.
+
+**Q: How do I update Memoh?**
+Run the installer again (`curl -fsSL https://memoh.sh | sh`) or use `docker compose pull && docker compose up -d` to update to the latest version.
+
+**Q: Can I run Memoh on a remote server?**
+Yes. The installer works on any Linux server with Docker. Access the web UI at `http://your-server-ip:8082`.
+
+### Bot & Channel Configuration
+
+**Q: How do I connect Telegram/Discord?**
+Create a bot token in Telegram Bot Father or Discord Developer Portal, then configure the channel in the web UI under Channel settings.
+
+**Q: Can I create multiple bots?**
+Yes. Each bot runs in its own isolated container with independent memory, skills, and channel connections.
+
+**Q: What are Skills?**
+Skills are reusable modules that extend bot capabilities — from web browsing to file operations. Browse and install skills from the Supermarket.
+
+### Memory & Tools
+
+**Q: How does Memoh memory work?**
+Memoh extracts facts from conversations and stores them as structured memories. Three modes are available: Off (no memory), Sparse (local BM25), and Dense (vector DB with Qdrant). Hybrid retrieval combines all methods for best recall.
+
+**Q: Can I use MCP tools?**
+Yes. Configure MCP servers in the bot settings to give your agents access to external tools and APIs.
+
+### Troubleshooting
+
+**Q: Docker container fails to start**
+Check Docker logs with `docker compose logs`. Common issues: port 8082 already in use, insufficient memory, or Docker daemon not running.
+
+**Q: Bot not responding to messages**
+Verify the LLM provider API key is correct in `config.toml`, check the bot is enabled in the web UI, and review container logs for errors.
+
+**Q: Memory not working**
+Ensure the memory mode is set to Sparse or Dense in bot settings. For Dense mode, verify Qdrant is running (`docker compose ps`).
+
+---
+
 ## Gallery
 
 <table>
