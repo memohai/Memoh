@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/v2/core/mount"
-	"github.com/containerd/errdefs"
 
 	ctr "github.com/memohai/memoh/internal/container"
 )
@@ -28,6 +27,13 @@ const (
 	migratedSuffix   = ".migrated"
 	archivePrefix    = "archive:"
 )
+
+// snapshotMountProvider is a private escape hatch for runtimes, currently
+// containerd, that can expose host-side snapshot mounts. It is deliberately not
+// part of the public container snapshot lifecycle abstraction.
+type snapshotMountProvider interface {
+	SnapshotMounts(ctx context.Context, snapshotter, key string) ([]ctr.MountInfo, error)
+}
 
 // ExportData streams a tar.gz archive of the container's /data directory.
 // The container is stopped during export and restarted afterwards.
@@ -222,7 +228,11 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 	}
 
 	snapshotKey := m.resolveContainerID(ctx, botID)
-	raw, err := m.service.SnapshotMounts(ctx, snapshotter, snapshotKey)
+	mounter, ok := m.service.(snapshotMountProvider)
+	if !ok {
+		return false
+	}
+	raw, err := mounter.SnapshotMounts(ctx, snapshotter, snapshotKey)
 	if err != nil {
 		return false
 	}
@@ -309,7 +319,11 @@ func (m *Manager) restorePreservedIntoSnapshot(ctx context.Context, botID string
 var errMountNotSupported = errors.New("snapshot mount not supported on this backend")
 
 func (m *Manager) snapshotMounts(ctx context.Context, info ctr.ContainerInfo) ([]mount.Mount, error) {
-	raw, err := m.service.SnapshotMounts(ctx, info.Snapshotter, info.SnapshotKey)
+	mounter, ok := m.service.(snapshotMountProvider)
+	if !ok {
+		return nil, errMountNotSupported
+	}
+	raw, err := mounter.SnapshotMounts(ctx, info.StorageRef.Driver, info.StorageRef.Key)
 	if err != nil {
 		if errors.Is(err, ctr.ErrNotSupported) {
 			return nil, errMountNotSupported
@@ -329,7 +343,7 @@ func (m *Manager) snapshotMounts(ctx context.Context, info ctr.ContainerInfo) ([
 
 func (m *Manager) restartContainer(ctx context.Context, botID, containerID string) {
 	m.grpcPool.Remove(botID)
-	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !ctr.IsNotFound(err) {
 		m.logger.Warn("cleanup stale task after data operation failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
@@ -495,6 +509,9 @@ func (m *Manager) preserveDataViaGRPC(ctx context.Context, botID, backupPath str
 	}
 	defer func() { _ = reader.Close() }()
 
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
+		return fmt.Errorf("create backup dir: %w", err)
+	}
 	f, err := os.Create(backupPath) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
 		return fmt.Errorf("create backup file: %w", err)
@@ -511,7 +528,21 @@ func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedC
 	archivePath := m.archiveSnapshotPath(archiveKey)
 	mounts, mountErr := m.snapshotMounts(ctx, ref.info)
 	if errors.Is(mountErr, errMountNotSupported) {
-		return m.preserveDataViaGRPC(ctx, ref.botID, archivePath)
+		var lastErr error
+		for range 20 {
+			m.grpcPool.Remove(ref.botID)
+			if err := m.preserveDataViaGRPC(ctx, ref.botID, archivePath); err == nil {
+				return nil
+			} else {
+				lastErr = err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+		return lastErr
 	}
 	if mountErr != nil {
 		return mountErr
@@ -524,7 +555,7 @@ func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedC
 	return m.preserveDataToArchive(ctx, archivePath, mounts)
 }
 
-func (m *Manager) restoreArchiveSnapshot(ctx context.Context, botID, archiveKey string) error {
+func (m *Manager) restoreArchiveSnapshotFromRef(ctx context.Context, ref *lockedContainerRef, archiveKey string) error {
 	archivePath := m.archiveSnapshotPath(archiveKey)
 	f, err := os.Open(archivePath) //nolint:gosec // G304: archive path is derived from managed snapshot metadata
 	if err != nil {
@@ -532,13 +563,7 @@ func (m *Manager) restoreArchiveSnapshot(ctx context.Context, botID, archiveKey 
 	}
 	defer func() { _ = f.Close() }()
 
-	ref, err := m.loadLockedContainer(ctx, botID)
-	if err != nil {
-		return err
-	}
-	defer ref.Close()
-
-	client, err := m.grpcPool.Get(ctx, botID)
+	client, err := m.grpcPool.Get(ctx, ref.botID)
 	if err != nil {
 		return fmt.Errorf("grpc connect: %w", err)
 	}
@@ -546,7 +571,7 @@ func (m *Manager) restoreArchiveSnapshot(ctx context.Context, botID, archiveKey 
 	if err := client.Mkdir(ctx, containerDataDir); err != nil {
 		return fmt.Errorf("mkdir data dir: %w", err)
 	}
-	return m.importDataViaGRPC(ctx, botID, f)
+	return m.importDataViaGRPC(ctx, ref.botID, f)
 }
 
 func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Reader) error {

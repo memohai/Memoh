@@ -4,16 +4,17 @@ type BotActionRequest struct {
 	Input map[string]any `json:"input,omitempty"`
 }
 
-// WorkspaceRuntimeStatus describes the bot workspace container task and network
-// namespace from the host (foundation before SD-WAN overlay).
+// WorkspaceRuntimeStatus describes the bot workspace runtime state (foundation
+// before SD-WAN overlay).
 type WorkspaceRuntimeStatus struct {
-	State           string `json:"state"` // workspace_missing | runtime_unavailable | task_stopped | netns_ready | unknown
-	ContainerID     string `json:"container_id,omitempty"`
-	TaskStatus      string `json:"task_status,omitempty"`
-	PID             uint32 `json:"pid,omitempty"`
-	NetNSPath       string `json:"netns_path,omitempty"`
-	NetworkAttached bool   `json:"network_attached,omitempty"`
-	Message         string `json:"message,omitempty"`
+	State             string `json:"state"` // workspace_missing | runtime_unavailable | task_stopped | network_target_ready | unknown
+	ContainerID       string `json:"container_id,omitempty"`
+	TaskStatus        string `json:"task_status,omitempty"`
+	PID               uint32 `json:"pid,omitempty"`
+	NetworkTargetKind string `json:"network_target_kind,omitempty"`
+	NetworkTarget     string `json:"network_target,omitempty"`
+	NetworkAttached   bool   `json:"network_attached,omitempty"`
+	Message           string `json:"message,omitempty"`
 }
 
 type BotStatus struct {
@@ -72,10 +73,13 @@ type AttachmentStatus struct {
 // runtime adapter.
 type RuntimeNetworkRequest struct {
 	ContainerID string
-	NetNSPath   string
-	PID         uint32
-	CNIBinDir   string
-	CNIConfDir  string
+	JoinTarget  NetworkJoinTarget
+}
+
+type NetworkJoinTarget struct {
+	Kind string
+	Path string
+	PID  uint32
 }
 
 // RuntimeNetworkStatus describes the current state of the container runtime

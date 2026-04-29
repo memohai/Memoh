@@ -1119,13 +1119,13 @@
       "networkWorkspaceContainerID": "容器 ID",
       "networkWorkspaceTaskStatus": "任务状态",
       "networkWorkspaceTaskPID": "任务 PID",
-      "networkWorkspaceNetNS": "网络命名空间路径",
+      "networkWorkspaceTarget": "网络目标",
       "networkWorkspaceMessage": "说明",
       "networkWorkspaceState": {
         "workspace_missing": "尚未创建工作区容器",
         "runtime_unavailable": "无法查询容器任务（运行时未就绪）",
         "task_stopped": "工作区未运行或任务未启动",
-        "netns_ready": "工作区运行中，网络命名空间可用",
+        "network_target_ready": "工作区运行中，网络目标可用",
         "unknown": "未知"
       },
       "networkActionFailed": "网络检测失败",

@@ -38,7 +38,8 @@ export interface WorkspaceRuntimeStatus {
   container_id?: string
   task_status?: string
   pid?: number
-  netns_path?: string
+  network_target_kind?: string
+  network_target?: string
   message?: string
 }
 

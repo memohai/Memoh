@@ -57,3 +57,15 @@ func TestLoadReadsWorkspaceDefaultImage(t *testing.T) {
 		t.Fatalf("expected default_image to load, got %q", cfg.Workspace.DefaultImage)
 	}
 }
+
+func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
+	if got := (WorkspaceConfig{}).EffectiveImagePullPolicy(); got != ImagePullPolicyIfNotPresent {
+		t.Fatalf("default policy = %q", got)
+	}
+	if got := (WorkspaceConfig{ImagePullPolicy: "always"}).EffectiveImagePullPolicy(); got != ImagePullPolicyAlways {
+		t.Fatalf("always policy = %q", got)
+	}
+	if got := (WorkspaceConfig{ImagePullPolicy: "invalid"}).EffectiveImagePullPolicy(); got != ImagePullPolicyIfNotPresent {
+		t.Fatalf("invalid policy = %q", got)
+	}
+}

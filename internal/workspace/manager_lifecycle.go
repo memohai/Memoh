@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -92,12 +89,13 @@ func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
 func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, containerID string) netctl.AttachmentRequest {
 	runtimeReq := netctl.RuntimeNetworkRequest{
 		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
 	}
-	if task, err := m.service.GetTaskInfo(ctx, containerID); err == nil && task.PID > 0 {
-		runtimeReq.PID = task.PID
-		runtimeReq.NetNSPath = filepath.Join("/proc", strconv.FormatUint(uint64(task.PID), 10), "ns", "net")
+	if task, err := m.service.GetTaskInfo(ctx, containerID); err == nil {
+		runtimeReq.JoinTarget = netctl.NetworkJoinTarget{
+			Kind: task.NetworkJoinTarget.Kind,
+			Path: task.NetworkJoinTarget.Value,
+			PID:  task.NetworkJoinTarget.PID,
+		}
 	}
 	return netctl.AttachmentRequest{
 		BotID:       botID,
@@ -145,9 +143,29 @@ func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID
 
 func (m *Manager) startTaskAndEnsureNetwork(ctx context.Context, botID, containerID string) error {
 	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
+		if !m.waitTaskRunning(ctx, containerID, 5*time.Second) {
+			return err
+		}
 	}
 	return m.ensureContainerNetwork(ctx, containerID, botID)
+}
+
+func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		task, err := m.service.GetTaskInfo(ctx, containerID)
+		if err == nil && task.Status == ctr.TaskStatusRunning {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +187,7 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 
 	_, err = m.service.GetContainer(ctx, containerID)
 	if err != nil {
-		if !errdefs.IsNotFound(err) {
+		if !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.Warn("container missing in containerd, rebuilding",
@@ -183,13 +201,13 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 			return m.ensureContainerNetwork(ctx, containerID, botID)
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-			if !errdefs.IsNotFound(err) {
+			if !ctr.IsNotFound(err) {
 				m.logger.Warn("cleanup: delete task failed",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				return err
 			}
 		}
-	} else if !errdefs.IsNotFound(err) {
+	} else if !ctr.IsNotFound(err) {
 		return err
 	}
 
@@ -206,7 +224,7 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 	if err := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 10 * time.Second,
 		Force:   true,
-	}); err != nil && !errdefs.IsNotFound(err) {
+	}); err != nil && !ctr.IsNotFound(err) {
 		return err
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
@@ -265,7 +283,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	}
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return nil, ErrContainerNotFound
 		}
 		return nil, err
@@ -282,12 +300,6 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 		CreatedAt:        info.CreatedAt,
 		UpdatedAt:        info.UpdatedAt,
 	}, nil
-}
-
-// PullImage pulls a container image. This is exposed so the HTTP layer can
-// pass progress callbacks for SSE streaming without needing direct ctr.Service access.
-func (m *Manager) PullImage(ctx context.Context, image string, opts *ctr.PullImageOptions) (ctr.ImageInfo, error) {
-	return m.service.PullImage(ctx, image, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +344,7 @@ func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserv
 			// failed to preserve data.
 			return err
 		}
-		if !errdefs.IsNotFound(err) {
+		if !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.Warn("cleanup: container not found in containerd, continuing",
@@ -371,7 +383,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
-			if !errdefs.IsNotFound(err) {
+			if !ctr.IsNotFound(err) {
 				m.logger.Error("reconcile: failed to get container",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				continue

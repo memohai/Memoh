@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	ctr "github.com/memohai/memoh/internal/container"
@@ -38,10 +39,11 @@ func (r *containerRuntime) Descriptor() RuntimeDescriptor {
 func (r *containerRuntime) EnsureNetwork(ctx context.Context, req RuntimeNetworkRequest) (RuntimeNetworkStatus, error) {
 	result, err := r.svc.SetupNetwork(ctx, ctr.NetworkRequest{
 		ContainerID: req.ContainerID,
-		NetNSPath:   req.NetNSPath,
-		PID:         req.PID,
-		CNIBinDir:   req.CNIBinDir,
-		CNIConfDir:  req.CNIConfDir,
+		JoinTarget: ctr.NetworkJoinTarget{
+			Kind:  req.JoinTarget.Kind,
+			Value: req.JoinTarget.Path,
+			PID:   req.JoinTarget.PID,
+		},
 	})
 	if err != nil {
 		return RuntimeNetworkStatus{}, err
@@ -56,23 +58,25 @@ func (r *containerRuntime) EnsureNetwork(ctx context.Context, req RuntimeNetwork
 func (r *containerRuntime) RemoveNetwork(ctx context.Context, req RuntimeNetworkRequest) error {
 	return r.svc.RemoveNetwork(ctx, ctr.NetworkRequest{
 		ContainerID: req.ContainerID,
-		NetNSPath:   req.NetNSPath,
-		PID:         req.PID,
-		CNIBinDir:   req.CNIBinDir,
-		CNIConfDir:  req.CNIConfDir,
+		JoinTarget: ctr.NetworkJoinTarget{
+			Kind:  req.JoinTarget.Kind,
+			Value: req.JoinTarget.Path,
+			PID:   req.JoinTarget.PID,
+		},
 	})
 }
 
 func (r *containerRuntime) StatusNetwork(ctx context.Context, req RuntimeNetworkRequest) (RuntimeNetworkStatus, error) {
 	err := r.svc.CheckNetwork(ctx, ctr.NetworkRequest{
 		ContainerID: req.ContainerID,
-		NetNSPath:   req.NetNSPath,
-		PID:         req.PID,
-		CNIBinDir:   req.CNIBinDir,
-		CNIConfDir:  req.CNIConfDir,
+		JoinTarget: ctr.NetworkJoinTarget{
+			Kind:  req.JoinTarget.Kind,
+			Value: req.JoinTarget.Path,
+			PID:   req.JoinTarget.PID,
+		},
 	})
 	if err != nil {
-		if isCNICheckUnsupported(err) {
+		if errors.Is(err, ctr.ErrNotSupported) {
 			return RuntimeNetworkStatus{}, ErrNotSupported
 		}
 		return RuntimeNetworkStatus{}, err
@@ -80,14 +84,30 @@ func (r *containerRuntime) StatusNetwork(ctx context.Context, req RuntimeNetwork
 	return RuntimeNetworkStatus{Attached: true}, nil
 }
 
-// isCNICheckUnsupported returns true when the CNI configuration version
-// predates the CHECK command (requires spec >= 0.4.0).
-func isCNICheckUnsupported(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "does not support the CHECK command")
-}
-
 func descriptorForBackend(backend string) RuntimeDescriptor {
 	switch normalizeKind(backend) {
+	case "", "containerd":
+		return RuntimeDescriptor{
+			Kind:        "containerd",
+			DisplayName: "containerd",
+			Capabilities: RuntimeCapabilities{
+				SidecarWorker:       true,
+				RuntimeNetworkSetup: true,
+				JoinNamespacePath:   true,
+				CNI:                 true,
+				Devices:             true,
+				Capabilities:        true,
+				Privileged:          true,
+			},
+		}
+	case "docker":
+		return RuntimeDescriptor{
+			Kind:        "docker",
+			DisplayName: "Docker",
+			Capabilities: RuntimeCapabilities{
+				JoinContainerNetwork: true,
+			},
+		}
 	case "apple":
 		return RuntimeDescriptor{
 			Kind:         "apple",
@@ -96,21 +116,19 @@ func descriptorForBackend(backend string) RuntimeDescriptor {
 		}
 	case "kubernetes", "k8s":
 		return RuntimeDescriptor{
-			Kind:         "kubernetes",
-			DisplayName:  "Kubernetes",
-			Capabilities: RuntimeCapabilities{},
+			Kind:        "kubernetes",
+			DisplayName: "Kubernetes",
+			Capabilities: RuntimeCapabilities{
+				ClusterNative:    true,
+				PodLikeSandbox:   true,
+				KubernetesNative: true,
+			},
 		}
 	default:
 		return RuntimeDescriptor{
-			Kind:        "containerd",
-			DisplayName: "containerd",
-			Capabilities: RuntimeCapabilities{
-				JoinNamespacePath: true,
-				CNI:               true,
-				Devices:           true,
-				Capabilities:      true,
-				Privileged:        true,
-			},
+			Kind:         normalizeKind(backend),
+			DisplayName:  backend,
+			Capabilities: RuntimeCapabilities{},
 		}
 	}
 }

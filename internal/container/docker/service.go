@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +24,15 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	containerapi "github.com/memohai/memoh/internal/container"
 )
+
+const (
+	snapshotImageRepository = "memoh-workspace-snapshot"
+	snapshotParentLabel     = "memoh.snapshot_parent"
+	bridgeTCPPort           = "9090"
+	workspaceContainerPref  = "workspace-"
+)
+
+var invalidSnapshotTagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
 type Service struct {
 	client *client.Client
@@ -52,7 +64,7 @@ func (s *Service) PullImage(ctx context.Context, ref string, opts *containerapi.
 	}
 	reader, err := s.client.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
-		return containerapi.ImageInfo{}, err
+		return containerapi.ImageInfo{}, mapDockerErr(err)
 	}
 	defer func() { _ = reader.Close() }()
 	if opts != nil && opts.OnProgress != nil {
@@ -78,7 +90,7 @@ func (s *Service) GetImage(ctx context.Context, ref string) (containerapi.ImageI
 func (s *Service) ListImages(ctx context.Context) ([]containerapi.ImageInfo, error) {
 	images, err := s.client.ImageList(ctx, image.ListOptions{All: true})
 	if err != nil {
-		return nil, err
+		return nil, mapDockerErr(err)
 	}
 	out := make([]containerapi.ImageInfo, len(images))
 	for i, img := range images {
@@ -88,10 +100,17 @@ func (s *Service) ListImages(ctx context.Context) ([]containerapi.ImageInfo, err
 }
 
 func (s *Service) DeleteImage(ctx context.Context, ref string, _ *containerapi.DeleteImageOptions) error {
-	if strings.TrimSpace(ref) == "" {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
 		return containerapi.ErrInvalidArgument
 	}
 	_, err := s.client.ImageRemove(ctx, ref, image.RemoveOptions{Force: true, PruneChildren: true})
+	if err != nil {
+		normalized := config.NormalizeImageRef(ref)
+		if normalized != ref && containerapi.IsNotFound(mapDockerErr(err)) {
+			_, err = s.client.ImageRemove(ctx, normalized, image.RemoveOptions{Force: true, PruneChildren: true})
+		}
+	}
 	return mapDockerErr(err)
 }
 
@@ -103,28 +122,50 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	if strings.TrimSpace(req.ID) == "" || strings.TrimSpace(req.ImageRef) == "" {
 		return containerapi.ContainerInfo{}, containerapi.ErrInvalidArgument
 	}
+	req.ImageRef = config.NormalizeImageRef(req.ImageRef)
+	labels := cloneLabels(req.Labels)
+	if req.StorageRef.Key != "" {
+		labels[containerapi.StorageKeyLabel] = req.StorageRef.Key
+	}
 	hostCfg := &container.HostConfig{
 		Mounts: toDockerMounts(req.Spec.Mounts),
 		DNS:    req.Spec.DNS,
 		Init:   boolPtr(true),
 	}
-	if req.Spec.NetworkNamespacePath != "" {
+	if req.Spec.NetworkJoinTarget.Value != "" {
 		hostCfg.NetworkMode = container.NetworkMode("none")
 	}
 	cfg := &container.Config{
-		Image:      config.NormalizeImageRef(req.ImageRef),
+		Image:      req.ImageRef,
 		Cmd:        req.Spec.Cmd,
-		Env:        req.Spec.Env,
+		Env:        upsertEnv(req.Spec.Env, "BRIDGE_TCP_ADDR", ":"+bridgeTCPPort),
 		WorkingDir: req.Spec.WorkDir,
 		User:       req.Spec.User,
 		Tty:        req.Spec.TTY,
-		Labels:     req.Labels,
+		Labels:     labels,
 	}
 	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, req.ID)
 	if err != nil {
 		return containerapi.ContainerInfo{}, mapDockerErr(err)
 	}
 	return s.GetContainer(ctx, resp.ID)
+}
+
+func (s *Service) BridgeTarget(botID string) string {
+	if strings.TrimSpace(botID) == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	info, err := s.client.ContainerInspect(ctx, workspaceContainerPref+strings.TrimSpace(botID))
+	if err != nil {
+		return ""
+	}
+	ip := firstContainerIP(info)
+	if ip == "" {
+		return ""
+	}
+	return net.JoinHostPort(ip, bridgeTCPPort)
 }
 
 func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.ContainerInfo, error) {
@@ -141,7 +182,7 @@ func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.Con
 func (s *Service) ListContainers(ctx context.Context) ([]containerapi.ContainerInfo, error) {
 	items, err := s.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, err
+		return nil, mapDockerErr(err)
 	}
 	out := make([]containerapi.ContainerInfo, len(items))
 	for i, item := range items {
@@ -172,7 +213,7 @@ func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) 
 		Filters: filters.NewArgs(filters.Arg("label", label)),
 	})
 	if err != nil {
-		return nil, err
+		return nil, mapDockerErr(err)
 	}
 	out := make([]containerapi.ContainerInfo, len(items))
 	for i, item := range items {
@@ -181,8 +222,12 @@ func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) 
 	return out, nil
 }
 
-func (*Service) CreateContainerFromSnapshot(context.Context, containerapi.CreateContainerRequest) (containerapi.ContainerInfo, error) {
-	return containerapi.ContainerInfo{}, containerapi.ErrNotSupported
+func (s *Service) RestoreContainer(ctx context.Context, req containerapi.CreateContainerRequest) (containerapi.ContainerInfo, error) {
+	if strings.TrimSpace(req.ID) == "" || strings.TrimSpace(req.StorageRef.Key) == "" {
+		return containerapi.ContainerInfo{}, containerapi.ErrInvalidArgument
+	}
+	req.ImageRef = dockerSnapshotImageRef(req.StorageRef.Key)
+	return s.CreateContainer(ctx, req)
 }
 
 func (s *Service) StartContainer(ctx context.Context, id string, _ *containerapi.StartTaskOptions) error {
@@ -209,7 +254,14 @@ func (s *Service) StopContainer(ctx context.Context, id string, opts *containera
 			stopOpts.Timeout = &seconds
 		}
 	}
-	return mapDockerErr(s.client.ContainerStop(ctx, id, stopOpts))
+	err := s.client.ContainerStop(ctx, id, stopOpts)
+	if err == nil || opts == nil || !opts.Force {
+		return mapDockerErr(err)
+	}
+	if killErr := s.client.ContainerKill(ctx, id, "SIGKILL"); killErr != nil {
+		return mapDockerErr(killErr)
+	}
+	return nil
 }
 
 func (s *Service) DeleteTask(ctx context.Context, id string, opts *containerapi.DeleteTaskOptions) error {
@@ -242,7 +294,7 @@ func (s *Service) GetContainerMetrics(ctx context.Context, id string) (container
 	defer func() { _ = stats.Body.Close() }()
 	var payload container.StatsResponse
 	if err := json.NewDecoder(stats.Body).Decode(&payload); err != nil {
-		return containerapi.ContainerMetrics{}, err
+		return containerapi.ContainerMetrics{}, errors.Join(containerapi.ErrRuntime, err)
 	}
 	return metricsFromStats(payload), nil
 }
@@ -250,7 +302,7 @@ func (s *Service) GetContainerMetrics(ctx context.Context, id string) (container
 func (s *Service) ListTasks(ctx context.Context, _ *containerapi.ListTasksOptions) ([]containerapi.TaskInfo, error) {
 	items, err := s.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, err
+		return nil, mapDockerErr(err)
 	}
 	out := make([]containerapi.TaskInfo, 0, len(items))
 	for _, item := range items {
@@ -276,24 +328,82 @@ func (s *Service) CheckNetwork(ctx context.Context, req containerapi.NetworkRequ
 	return mapDockerErr(err)
 }
 
-func (*Service) CommitSnapshot(context.Context, string, string, string) error {
-	return containerapi.ErrNotSupported
+func (s *Service) CommitSnapshot(ctx context.Context, req containerapi.CommitSnapshotRequest) error {
+	snapshotter := strings.TrimSpace(req.Source.Driver)
+	name := strings.TrimSpace(req.Target.Key)
+	key := strings.TrimSpace(req.Source.Key)
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(key) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	if strings.TrimSpace(snapshotter) != "" && strings.TrimSpace(snapshotter) != "docker" {
+		return containerapi.ErrNotSupported
+	}
+	info, err := s.client.ContainerInspect(ctx, key)
+	if err != nil {
+		return mapDockerErr(err)
+	}
+	parent := ""
+	if info.Config != nil {
+		parent = strings.TrimSpace(info.Config.Labels[containerapi.StorageKeyLabel])
+	}
+	_, err = s.client.ContainerCommit(ctx, key, container.CommitOptions{
+		Reference: dockerSnapshotImageRef(name),
+		Comment:   "memoh workspace snapshot",
+		Config: &container.Config{
+			Labels: map[string]string{
+				containerapi.StorageKeyLabel: name,
+				snapshotParentLabel:          parent,
+			},
+		},
+	})
+	return mapDockerErr(err)
 }
 
-func (*Service) ListSnapshots(context.Context, string) ([]containerapi.SnapshotInfo, error) {
-	return nil, containerapi.ErrNotSupported
+func (s *Service) ListSnapshots(ctx context.Context, req containerapi.ListSnapshotsRequest) ([]containerapi.SnapshotInfo, error) {
+	snapshotter := strings.TrimSpace(req.Driver)
+	if strings.TrimSpace(snapshotter) != "" && strings.TrimSpace(snapshotter) != "docker" {
+		return nil, containerapi.ErrNotSupported
+	}
+	images, err := s.client.ImageList(ctx, image.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", containerapi.StorageKeyLabel)),
+	})
+	if err != nil {
+		return nil, mapDockerErr(err)
+	}
+	out := make([]containerapi.SnapshotInfo, 0, len(images))
+	for _, img := range images {
+		name := strings.TrimSpace(img.Labels[containerapi.StorageKeyLabel])
+		if name == "" {
+			continue
+		}
+		out = append(out, containerapi.SnapshotInfo{
+			Name:    name,
+			Parent:  strings.TrimSpace(img.Labels[snapshotParentLabel]),
+			Kind:    "committed",
+			Created: time.Unix(img.Created, 0),
+			Updated: time.Unix(img.Created, 0),
+			Labels:  cloneLabels(img.Labels),
+		})
+	}
+	return out, nil
 }
 
-func (*Service) PrepareSnapshot(context.Context, string, string, string) error {
-	return containerapi.ErrNotSupported
-}
-
-func (*Service) SnapshotUsage(context.Context, string, string) (containerapi.SnapshotUsage, error) {
-	return containerapi.SnapshotUsage{}, containerapi.ErrNotSupported
-}
-
-func (*Service) SnapshotMounts(context.Context, string, string) ([]containerapi.MountInfo, error) {
-	return nil, containerapi.ErrNotSupported
+func (s *Service) PrepareSnapshot(ctx context.Context, req containerapi.PrepareSnapshotRequest) error {
+	snapshotter := strings.TrimSpace(req.Target.Driver)
+	key := strings.TrimSpace(req.Target.Key)
+	parent := strings.TrimSpace(req.Parent.Key)
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(parent) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	if strings.TrimSpace(snapshotter) != "" && strings.TrimSpace(snapshotter) != "docker" {
+		return containerapi.ErrNotSupported
+	}
+	target := dockerSnapshotImageRef(key)
+	if err := s.client.ImageTag(ctx, dockerSnapshotImageRef(parent), target); err != nil {
+		return mapDockerErr(err)
+	}
+	return nil
 }
 
 func toDockerMounts(in []containerapi.MountSpec) []dockermount.Mount {
@@ -335,6 +445,39 @@ func hasReadonlyOption(options []string) bool {
 
 func boolPtr(v bool) *bool { return &v }
 
+func cloneLabels(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func upsertEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	out := append([]string(nil), env...)
+	for i, item := range out {
+		if strings.HasPrefix(item, prefix) {
+			out[i] = prefix + value
+			return out
+		}
+	}
+	return append(out, prefix+value)
+}
+
+func dockerSnapshotImageRef(name string) string {
+	tag := invalidSnapshotTagChars.ReplaceAllString(strings.TrimSpace(name), "-")
+	tag = strings.Trim(tag, ".-")
+	if tag == "" {
+		tag = "snapshot"
+	}
+	if len(tag) > 128 {
+		tag = tag[:128]
+		tag = strings.TrimRight(tag, ".-")
+	}
+	return snapshotImageRepository + ":" + tag
+}
+
 func imageInfoFromInspect(ref string, info image.InspectResponse) containerapi.ImageInfo {
 	tags := append([]string(nil), info.RepoTags...)
 	name := ref
@@ -362,28 +505,38 @@ func containerInfoFromInspect(info container.InspectResponse) containerapi.Conta
 	if info.Config != nil {
 		labels = info.Config.Labels
 	}
+	id := strings.TrimPrefix(strings.TrimSpace(info.Name), "/")
+	if id == "" {
+		id = info.ID
+	}
 	return containerapi.ContainerInfo{
-		ID:          info.ID,
-		Image:       imageRef,
-		Labels:      labels,
-		Snapshotter: "docker",
-		SnapshotKey: info.ID,
-		Runtime:     containerapi.RuntimeInfo{Name: "docker"},
-		CreatedAt:   created,
-		UpdatedAt:   created,
+		ID:         id,
+		Image:      imageRef,
+		Labels:     labels,
+		StorageRef: containerapi.StorageRef{Driver: "docker", Key: info.ID, Kind: "container"},
+		Runtime:    containerapi.RuntimeInfo{Name: "docker"},
+		CreatedAt:  created,
+		UpdatedAt:  created,
 	}
 }
 
 func containerInfoFromSummary(info container.Summary) containerapi.ContainerInfo {
+	id := info.ID
+	for _, name := range info.Names {
+		name = strings.TrimPrefix(strings.TrimSpace(name), "/")
+		if name != "" {
+			id = name
+			break
+		}
+	}
 	return containerapi.ContainerInfo{
-		ID:          info.ID,
-		Image:       info.Image,
-		Labels:      info.Labels,
-		Snapshotter: "docker",
-		SnapshotKey: info.ID,
-		Runtime:     containerapi.RuntimeInfo{Name: "docker"},
-		CreatedAt:   time.Unix(info.Created, 0),
-		UpdatedAt:   time.Unix(info.Created, 0),
+		ID:         id,
+		Image:      info.Image,
+		Labels:     info.Labels,
+		StorageRef: containerapi.StorageRef{Driver: "docker", Key: info.ID, Kind: "container"},
+		Runtime:    containerapi.RuntimeInfo{Name: "docker"},
+		CreatedAt:  time.Unix(info.Created, 0),
+		UpdatedAt:  time.Unix(info.Created, 0),
 	}
 }
 
@@ -493,12 +646,30 @@ func mapDockerErr(err error) error {
 		return nil
 	}
 	if errdefs.IsNotFound(err) {
-		return errdefs.ErrNotFound
+		return errors.Join(containerapi.ErrNotFound, err)
+	}
+	if errdefs.IsAlreadyExists(err) || isDockerConflict(err) {
+		return errors.Join(containerapi.ErrAlreadyExists, err)
 	}
 	if client.IsErrConnectionFailed(err) {
-		return fmt.Errorf("docker daemon unavailable: %w", err)
+		return errors.Join(containerapi.ErrRuntime, fmt.Errorf("docker daemon unavailable: %w", err))
 	}
-	return err
+	return errors.Join(containerapi.ErrRuntime, err)
+}
+
+type statusCoder interface {
+	StatusCode() int
+}
+
+func isDockerConflict(err error) bool {
+	var statusErr statusCoder
+	if errors.As(err, &statusErr) && statusErr.StatusCode() == http.StatusConflict {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "conflict") ||
+		strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "is already in use")
 }
 
 func dockerSignalName(sig syscall.Signal) string {

@@ -158,6 +158,7 @@ For users in mainland China who cannot access Docker Hub directly, uncomment the
 ```toml
 [workspace]
 registry = "memoh.cn"
+image_pull_policy = "if_not_present" # if_not_present, always, or never
 ```
 
 And add the China mirror compose overlay:
@@ -196,7 +197,7 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `timezone` | Server timezone (default `UTC`) |
 | `[container]` | Required container backend selection (`docker`, `kubernetes`, `containerd`, `apple`) |
 | `[containerd]` | Containerd socket path and namespace |
-| `[workspace]` | Container image, snapshotter, data paths, CNI config, optional registry mirror |
+| `[workspace]` | Container image, pull policy, snapshotter, data paths, CNI config, optional registry mirror |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
 | `[qdrant]` | Qdrant vector database connection (base_url, api_key, timeout) |
 | `[sparse]` | Sparse encoding service URL |

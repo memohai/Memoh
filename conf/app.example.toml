@@ -43,6 +43,7 @@ bridge_port = 9090
 [workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
 default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
 snapshotter = "overlayfs"
 data_root = "data"
 cni_bin_dir = "/opt/cni/bin"

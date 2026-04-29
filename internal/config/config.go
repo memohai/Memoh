@@ -30,6 +30,10 @@ const (
 	DefaultRuntimeDir       = "/opt/memoh/runtime"
 	DefaultBaseImage        = "debian:bookworm-slim"
 	DefaultTimezone         = "UTC"
+
+	ImagePullPolicyIfNotPresent = "if_not_present"
+	ImagePullPolicyAlways       = "always"
+	ImagePullPolicyNever        = "never"
 )
 
 type Config struct {
@@ -118,13 +122,14 @@ func (c KubernetesConfig) EffectiveBridgePort() int {
 }
 
 type WorkspaceConfig struct {
-	Registry     string `toml:"registry"`
-	DefaultImage string `toml:"default_image"`
-	Snapshotter  string `toml:"snapshotter"`
-	DataRoot     string `toml:"data_root"`
-	CNIBinaryDir string `toml:"cni_bin_dir"`
-	CNIConfigDir string `toml:"cni_conf_dir"`
-	RuntimeDir   string `toml:"runtime_dir"`
+	Registry        string `toml:"registry"`
+	DefaultImage    string `toml:"default_image"`
+	ImagePullPolicy string `toml:"image_pull_policy"`
+	Snapshotter     string `toml:"snapshotter"`
+	DataRoot        string `toml:"data_root"`
+	CNIBinaryDir    string `toml:"cni_bin_dir"`
+	CNIConfigDir    string `toml:"cni_conf_dir"`
+	RuntimeDir      string `toml:"runtime_dir"`
 }
 
 // ImageRef returns the fully qualified image reference for the base image,
@@ -147,6 +152,19 @@ func (c WorkspaceConfig) RuntimePath() string {
 		return c.RuntimeDir
 	}
 	return DefaultRuntimeDir
+}
+
+func (c WorkspaceConfig) EffectiveImagePullPolicy() string {
+	switch strings.TrimSpace(strings.ToLower(c.ImagePullPolicy)) {
+	case ImagePullPolicyAlways:
+		return ImagePullPolicyAlways
+	case ImagePullPolicyNever:
+		return ImagePullPolicyNever
+	case ImagePullPolicyIfNotPresent, "":
+		return ImagePullPolicyIfNotPresent
+	default:
+		return ImagePullPolicyIfNotPresent
+	}
 }
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.

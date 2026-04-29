@@ -34,14 +34,15 @@ type ProviderDescriptor struct {
 }
 
 type ProviderCapabilities struct {
-	Mesh              bool `json:"mesh"`
-	PrivateDNS        bool `json:"private_dns"`
-	ServiceProxy      bool `json:"service_proxy"`
-	EgressProxy       bool `json:"egress_proxy"`
-	TransparentProxy  bool `json:"transparent_proxy"`
-	ExitNode          bool `json:"exit_node"`
-	Userspace         bool `json:"userspace"`
-	KernelTUN         bool `json:"kernel_tun"`
-	NativeClient      bool `json:"native_client"`
-	SharedNetNSWorker bool `json:"shared_netns_worker"`
+	Mesh             bool `json:"mesh"`
+	PrivateDNS       bool `json:"private_dns"`
+	ServiceProxy     bool `json:"service_proxy"`
+	EgressProxy      bool `json:"egress_proxy"`
+	TransparentProxy bool `json:"transparent_proxy"`
+	ExitNode         bool `json:"exit_node"`
+	Userspace        bool `json:"userspace"`
+	KernelTUN        bool `json:"kernel_tun"`
+	NativeClient     bool `json:"native_client"`
+	SidecarWorker    bool `json:"sidecar_worker"`
+	KubernetesNative bool `json:"kubernetes_native"`
 }

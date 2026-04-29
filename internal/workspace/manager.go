@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/config"
@@ -189,18 +188,16 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 
 func (m *Manager) Init(ctx context.Context) error {
 	image := m.imageRef()
-
-	// Pre-pull the default base image so container creation doesn't block
-	// on a network download. If the image is already present, this is a no-op.
-	if _, err := m.service.GetImage(ctx, image); err != nil {
-		m.logger.Info("pulling base image for workspace containers", slog.String("image", image))
-		if _, pullErr := m.service.PullImage(ctx, image, &ctr.PullImageOptions{
-			Unpack:      true,
-			Snapshotter: m.cfg.Snapshotter,
-		}); pullErr != nil {
-			m.logger.Warn("base image pull failed", slog.String("image", image), slog.Any("error", pullErr))
-			return pullErr
-		}
+	result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		Unpack:        true,
+		StorageDriver: m.cfg.Snapshotter,
+	})
+	if err != nil {
+		m.logger.Warn("base image preparation failed", slog.String("image", image), slog.Any("error", err))
+		return err
+	}
+	if result.Mode == ImagePrepareDelegated {
+		m.logger.Info("base image pull delegated to container backend", slog.String("image", image))
 	}
 	return nil
 }
@@ -308,17 +305,18 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 	}
 
 	_, err = m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
-		ID:          ContainerPrefix + botID,
-		ImageRef:    image,
-		Snapshotter: m.cfg.Snapshotter,
-		Labels:      labels,
-		Spec:        spec,
+		ID:              ContainerPrefix + botID,
+		ImageRef:        image,
+		ImagePullPolicy: m.cfg.EffectiveImagePullPolicy(),
+		StorageRef:      ctr.StorageRef{Driver: m.cfg.Snapshotter, Kind: "active"},
+		Labels:          labels,
+		Spec:            spec,
 	})
 	if err == nil {
 		return nil
 	}
 
-	if !errdefs.IsAlreadyExists(err) {
+	if !ctr.IsAlreadyExists(err) {
 		return err
 	}
 
@@ -398,7 +396,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	// to a backup so it can be restored after EnsureBot creates a fresh
 	// container. This covers dev image rebuilds, containerd metadata loss,
 	// and manual container deletion.
-	if _, err := m.service.GetContainer(ctx, containerID); errdefs.IsNotFound(err) {
+	if _, err := m.service.GetContainer(ctx, containerID); ctr.IsNotFound(err) {
 		m.recoverOrphanedSnapshot(ctx, botID)
 	}
 
@@ -408,10 +406,16 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 
 	// Restore preserved data (from orphaned snapshot recovery or a previous
 	// CleanupBotContainer with preserveData) into the fresh snapshot before
-	// starting the task, avoiding a redundant stop/start cycle.
+	// starting the task when the backend exposes snapshot mounts. Backends
+	// without mount support restore through the bridge after the task starts.
+	restoreAfterStart := false
 	if m.HasPreservedData(botID) {
 		if err := m.restorePreservedIntoSnapshot(ctx, botID); err != nil {
-			return fmt.Errorf("restore preserved data: %w", err)
+			if errors.Is(err, errMountNotSupported) {
+				restoreAfterStart = true
+			} else {
+				return fmt.Errorf("restore preserved data: %w", err)
+			}
 		}
 	}
 
@@ -422,6 +426,11 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
 		}
 		return err
+	}
+	if restoreAfterStart {
+		if err := m.RestorePreservedData(ctx, botID); err != nil {
+			return fmt.Errorf("restore preserved data through bridge: %w", err)
+		}
 	}
 	if !m.IsLegacyContainer(ctx, containerID) {
 		m.clearLegacyRoute(botID)

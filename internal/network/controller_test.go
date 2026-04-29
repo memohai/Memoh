@@ -110,8 +110,6 @@ func TestControllerEnsureAttachedDelegatesRuntimeAndOverlay(t *testing.T) {
 		ContainerID: "workspace-bot-1",
 		Runtime: RuntimeNetworkRequest{
 			ContainerID: "workspace-bot-1",
-			CNIBinDir:   "/opt/cni/bin",
-			CNIConfDir:  "/etc/cni/net.d",
 		},
 		Overlay: BotOverlayConfig{
 			Enabled:  true,

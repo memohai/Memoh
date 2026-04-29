@@ -44,6 +44,10 @@ type (
 	SnapshotUsage          = containerapi.SnapshotUsage
 	SnapshotInfo           = containerapi.SnapshotInfo
 	MountInfo              = containerapi.MountInfo
+	StorageRef             = containerapi.StorageRef
+	CommitSnapshotRequest  = containerapi.CommitSnapshotRequest
+	ListSnapshotsRequest   = containerapi.ListSnapshotsRequest
+	PrepareSnapshotRequest = containerapi.PrepareSnapshotRequest
 	NetworkRequest         = containerapi.NetworkRequest
 	NetworkResult          = containerapi.NetworkResult
 )
@@ -203,7 +207,7 @@ func (s *Service) CreateContainer(ctx context.Context, req CreateContainerReques
 	if len(req.Spec.CDIDevices) > 0 {
 		return ContainerInfo{}, ErrNotSupported
 	}
-	if req.Spec.NetworkNamespacePath != "" || len(req.Spec.AddedCapabilities) > 0 {
+	if req.Spec.NetworkJoinTarget.Value != "" || len(req.Spec.AddedCapabilities) > 0 {
 		return ContainerInfo{}, ErrNotSupported
 	}
 	if err := s.ensureHealthy(ctx); err != nil {
@@ -387,12 +391,8 @@ func (s *Service) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]Task
 		if err != nil {
 			continue
 		}
-		if opts != nil && opts.Filter != "" {
-			if strings.Contains(opts.Filter, "container.id==") {
-				if strings.TrimPrefix(opts.Filter, "container.id==") != info.ID {
-					continue
-				}
-			}
+		if opts != nil && strings.TrimSpace(opts.ContainerID) != "" && strings.TrimSpace(opts.ContainerID) != info.ID {
+			continue
 		}
 		out = append(out, TaskInfo{
 			ContainerID: info.ID,
@@ -417,28 +417,20 @@ func (*Service) CheckNetwork(context.Context, NetworkRequest) error  { return ni
 // Snapshots (not supported on Apple Container)
 // ---------------------------------------------------------------------------
 
-func (*Service) CommitSnapshot(context.Context, string, string, string) error {
+func (*Service) CommitSnapshot(context.Context, CommitSnapshotRequest) error {
 	return ErrNotSupported
 }
 
-func (*Service) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
+func (*Service) ListSnapshots(context.Context, ListSnapshotsRequest) ([]SnapshotInfo, error) {
 	return nil, ErrNotSupported
 }
 
-func (*Service) PrepareSnapshot(context.Context, string, string, string) error {
+func (*Service) PrepareSnapshot(context.Context, PrepareSnapshotRequest) error {
 	return ErrNotSupported
 }
 
-func (*Service) CreateContainerFromSnapshot(context.Context, CreateContainerRequest) (ContainerInfo, error) {
+func (*Service) RestoreContainer(context.Context, CreateContainerRequest) (ContainerInfo, error) {
 	return ContainerInfo{}, ErrNotSupported
-}
-
-func (*Service) SnapshotMounts(context.Context, string, string) ([]MountInfo, error) {
-	return nil, ErrNotSupported
-}
-
-func (*Service) SnapshotUsage(context.Context, string, string) (SnapshotUsage, error) {
-	return SnapshotUsage{}, ErrNotSupported
 }
 
 // ---------------------------------------------------------------------------
@@ -490,9 +482,14 @@ func acgoContainerToInfo(ctx context.Context, c acgo.Container) (ContainerInfo, 
 		return ContainerInfo{}, err
 	}
 	return ContainerInfo{
-		ID:        info.ID,
-		Image:     info.Image,
-		Labels:    info.Labels,
+		ID:     info.ID,
+		Image:  info.Image,
+		Labels: info.Labels,
+		StorageRef: StorageRef{
+			Driver: "apple",
+			Key:    info.ID,
+			Kind:   "container",
+		},
 		Runtime:   RuntimeInfo{Name: "apple-container"},
 		CreatedAt: info.CreatedAt,
 		UpdatedAt: info.CreatedAt,
