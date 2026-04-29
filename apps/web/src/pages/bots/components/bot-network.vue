@@ -172,8 +172,8 @@
           </h4>
           <Switch
             class="shrink-0"
-            :model-value="form.network_enabled"
-            @update:model-value="(value) => form.network_enabled = !!value"
+            :model-value="form.overlay_enabled"
+            @update:model-value="(value) => form.overlay_enabled = !!value"
           />
         </div>
         <p class="text-xs text-muted-foreground">
@@ -182,15 +182,15 @@
       </div>
 
       <div
-        v-if="form.network_enabled"
+        v-if="form.overlay_enabled"
         class="space-y-4"
       >
         <div class="space-y-2">
-          <Label>{{ $t('bots.settings.networkProviderFieldLabel') }}</Label>
-          <NetworkProviderSelect
-            v-model="form.network_provider"
-            :providers="networkProviderMeta"
-            :placeholder="$t('bots.settings.networkProviderPlaceholder')"
+          <Label>{{ $t('bots.settings.overlayProviderFieldLabel') }}</Label>
+          <OverlayProviderSelect
+            v-model="form.overlay_provider"
+            :providers="overlayProviderMeta"
+            :placeholder="$t('bots.settings.overlayProviderPlaceholder')"
           />
         </div>
 
@@ -198,9 +198,9 @@
              When connected, auth fields (auth_key, control_url, setup_key, management_url)
              are rendered as readonly to prevent accidental identity changes. -->
         <ConfigSchemaForm
-          v-if="showNetworkConfig"
-          v-model="form.network_config"
-          :schema="selectedNetworkProviderSchema"
+          v-if="showOverlayConfig"
+          v-model="form.overlay_config"
+          :schema="selectedOverlayProviderSchema"
           id-prefix="bot-network-config"
         />
       </div>
@@ -297,15 +297,15 @@ import ConfigSchemaForm from '@/components/config-schema-form/index.vue'
 import { cloneConfig } from '@/components/config-schema-form/utils'
 import type { ConfigSchema } from '@/components/config-schema-form/types'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import NetworkProviderSelect from './network-provider-select.vue'
+import OverlayProviderSelect from './network-provider-select.vue'
 import NetworkNodeSelect from './network-node-select.vue'
 import {
   getBotNetworkStatus,
   executeBotNetworkAction,
   listBotNetworkNodes,
-  listNetworkProviderMeta,
+  listOverlayProviderMeta,
   type NetworkBotStatus,
-  type NetworkProviderMeta,
+  type OverlayProviderMeta,
 } from '@/pages/network/api'
 
 const props = defineProps<{
@@ -327,61 +327,61 @@ const { data: settings } = useQuery({
   enabled: () => !!props.botId,
 })
 
-const { data: networkProviderMetaData } = useQuery({
+const { data: overlayProviderMetaData } = useQuery({
   key: ['network-providers-meta'],
-  query: () => listNetworkProviderMeta(),
+  query: () => listOverlayProviderMeta(),
 })
 
-const networkProviderMeta = computed(() => networkProviderMetaData.value ?? [])
+const overlayProviderMeta = computed(() => overlayProviderMetaData.value ?? [])
 
 const form = reactive({
-  network_enabled: false,
-  network_provider: '',
-  network_config: {} as Record<string, unknown>,
+  overlay_enabled: false,
+  overlay_provider: '',
+  overlay_config: {} as Record<string, unknown>,
 })
 
-const selectedNetworkProviderMeta = computed(() =>
-  networkProviderMeta.value.find((meta: NetworkProviderMeta) => meta.kind === form.network_provider),
+const selectedOverlayProviderMeta = computed(() =>
+  overlayProviderMeta.value.find((meta: OverlayProviderMeta) => meta.kind === form.overlay_provider),
 )
 const selectedNetworkCapabilities = computed(() =>
-  selectedNetworkProviderMeta.value?.capabilities ?? null,
+  selectedOverlayProviderMeta.value?.capabilities ?? null,
 )
 // Config schema excludes exit_node (managed by the dedicated Exit Node card).
-const selectedNetworkProviderSchema = computed<ConfigSchema | undefined>(() => {
-  const schema = selectedNetworkProviderMeta.value?.config_schema as ConfigSchema | undefined
+const selectedOverlayProviderSchema = computed<ConfigSchema | undefined>(() => {
+  const schema = selectedOverlayProviderMeta.value?.config_schema as ConfigSchema | undefined
   if (!schema) return undefined
   return {
     ...schema,
     fields: (schema.fields ?? []).filter(field => field.key !== 'exit_node'),
   }
 })
-const showNetworkConfig = computed(() =>
-  !!form.network_enabled
-  && !!form.network_provider
-  && !!selectedNetworkProviderSchema.value?.fields?.length,
+const showOverlayConfig = computed(() =>
+  !!form.overlay_enabled
+  && !!form.overlay_provider
+  && !!selectedOverlayProviderSchema.value?.fields?.length,
 )
 // Exit node selection only makes sense after the sidecar is authenticated and connected.
 const showExitNodeSelector = computed(() =>
-  !!form.network_enabled
-  && !!form.network_provider
+  !!form.overlay_enabled
+  && !!form.overlay_provider
   && !!selectedNetworkCapabilities.value?.exit_node
   && isConnected.value,
 )
 
-const persistedNetworkProvider = computed(() => settings.value?.network_provider ?? '')
-const persistedNetworkEnabled = computed(() => settings.value?.network_enabled ?? false)
-const persistedNetworkConfig = computed(() =>
-  JSON.stringify((settings.value?.network_config as Record<string, unknown> | undefined) ?? {}),
+const persistedOverlayProvider = computed(() => settings.value?.overlay_provider ?? '')
+const persistedOverlayEnabled = computed(() => settings.value?.overlay_enabled ?? false)
+const persistedOverlayConfig = computed(() =>
+  JSON.stringify((settings.value?.overlay_config as Record<string, unknown> | undefined) ?? {}),
 )
 const isSelectedNetworkPersisted = computed(() =>
-  form.network_enabled === persistedNetworkEnabled.value
-  && form.network_provider === persistedNetworkProvider.value
-  && JSON.stringify(form.network_config ?? {}) === persistedNetworkConfig.value,
+  form.overlay_enabled === persistedOverlayEnabled.value
+  && form.overlay_provider === persistedOverlayProvider.value
+  && JSON.stringify(form.overlay_config ?? {}) === persistedOverlayConfig.value,
 )
 const shouldLoadNetworkStatus = computed(() =>
   !!props.botId
-  && persistedNetworkEnabled.value
-  && !!persistedNetworkProvider.value
+  && persistedOverlayEnabled.value
+  && !!persistedOverlayProvider.value
   && isSelectedNetworkPersisted.value,
 )
 const shouldLoadNodeOptions = computed(() =>
@@ -414,7 +414,7 @@ const {
   isLoading: isNodeListLoading,
   refetch: refetchNodeList,
 } = useQuery({
-  key: () => ['bot-network-nodes', props.botId, persistedNetworkProvider.value],
+  key: () => ['bot-network-nodes', props.botId, persistedOverlayProvider.value],
   query: () => listBotNetworkNodes(props.botId),
   enabled: () => shouldLoadNodeOptions.value,
 })
@@ -481,10 +481,10 @@ const nodeListHint = computed(() => {
   return t('bots.settings.networkExitNodeDescription')
 })
 const exitNodeValue = computed({
-  get: () => String(form.network_config.exit_node ?? ''),
+  get: () => String(form.overlay_config.exit_node ?? ''),
   set: (value: string) => {
-    form.network_config = {
-      ...form.network_config,
+    form.overlay_config = {
+      ...form.overlay_config,
       exit_node: value || undefined,
     }
   },
@@ -494,7 +494,7 @@ const selectedExitNodeMeta = computed(() =>
 )
 
 const networkStatusCard = computed(() => {
-  if (form.network_enabled && form.network_provider && !isSelectedNetworkPersisted.value) {
+  if (form.overlay_enabled && form.overlay_provider && !isSelectedNetworkPersisted.value) {
     return {
       state: 'pending_save',
       title: t('bots.settings.networkStatusPendingSaveTitle'),
@@ -565,27 +565,27 @@ const overlayNetworkStatusFields = computed(() => {
 const hasChanges = computed(() => {
   if (!settings.value) return true
   const s = settings.value
-  return form.network_enabled !== (s.network_enabled ?? false)
-    || form.network_provider !== (s.network_provider ?? '')
-    || JSON.stringify(form.network_config ?? {}) !== JSON.stringify((s.network_config as Record<string, unknown> | undefined) ?? {})
+  return form.overlay_enabled !== (s.overlay_enabled ?? false)
+    || form.overlay_provider !== (s.overlay_provider ?? '')
+    || JSON.stringify(form.overlay_config ?? {}) !== JSON.stringify((s.overlay_config as Record<string, unknown> | undefined) ?? {})
 })
 
-// When settings load from API, network_provider goes from '' to the saved value in the
-// same flush as configs are written. A separate watcher on network_provider must not
+// When settings load from API, overlay_provider goes from '' to the saved value in the
+// same flush as configs are written. A separate watcher on overlay_provider must not
 // wipe those configs (it would leave the UI empty after refresh).
 let skipProviderChangeReset = false
 
-watch(() => form.network_provider, (next, prev) => {
+watch(() => form.overlay_provider, (next, prev) => {
   if (next === prev || skipProviderChangeReset) return
-  form.network_config = {}
+  form.overlay_config = {}
 })
 
 watch(settings, (val) => {
   if (!val) return
   skipProviderChangeReset = true
-  form.network_enabled = val.network_enabled ?? false
-  form.network_provider = val.network_provider ?? ''
-  form.network_config = cloneConfig((val.network_config as Record<string, unknown> | undefined) ?? {})
+  form.overlay_enabled = val.overlay_enabled ?? false
+  form.overlay_provider = val.overlay_provider ?? ''
+  form.overlay_config = cloneConfig((val.overlay_config as Record<string, unknown> | undefined) ?? {})
   void nextTick(() => {
     skipProviderChangeReset = false
   })
@@ -615,15 +615,15 @@ onBeforeUnmount(() => {
 })
 
 async function handleSave() {
-  if (form.network_enabled && !form.network_provider) {
-    toast.error(t('bots.settings.networkProviderRequired'))
+  if (form.overlay_enabled && !form.overlay_provider) {
+    toast.error(t('bots.settings.overlayProviderRequired'))
     return
   }
   try {
     await updateSettings({
-      network_enabled: form.network_enabled,
-      network_provider: form.network_provider,
-      network_config: form.network_config,
+      overlay_enabled: form.overlay_enabled,
+      overlay_provider: form.overlay_provider,
+      overlay_config: form.overlay_config,
     })
     toast.success(t('bots.settings.saveSuccess'))
   } catch (error) {

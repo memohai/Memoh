@@ -83,6 +83,11 @@ type MemoryMetrics struct {
 	UsagePercent float64
 }
 
+type SnapshotUsage struct {
+	SizeBytes uint64
+	Inodes    uint64
+}
+
 type SnapshotInfo struct {
 	Name    string
 	Parent  string

@@ -45,14 +45,14 @@ import { useI18n } from 'vue-i18n'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 
-interface NetworkProviderItem {
+interface OverlayProviderItem {
   kind: string
   display_name: string
   description?: string
 }
 
 const props = defineProps<{
-  providers: NetworkProviderItem[]
+  providers: OverlayProviderItem[]
   placeholder?: string
 }>()
 

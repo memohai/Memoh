@@ -64,44 +64,44 @@ func (s *Service) ListMeta(_ context.Context) []ProviderDescriptor {
 	return s.registry.ListDescriptors()
 }
 
-func (s *Service) Resolve(ctx context.Context, botID string) (BotNetworkConfig, error) {
+func (s *Service) Resolve(ctx context.Context, botID string) (BotOverlayConfig, error) {
 	return s.GetBotConfig(ctx, botID)
 }
 
-func (s *Service) GetBotConfig(ctx context.Context, botID string) (BotNetworkConfig, error) {
+func (s *Service) GetBotConfig(ctx context.Context, botID string) (BotOverlayConfig, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
-	row, err := s.queries.GetBotNetworkConfig(ctx, pgBotID)
+	row, err := s.queries.GetBotOverlayConfig(ctx, pgBotID)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	return s.normalizeBotConfig(
-		row.NetworkEnabled,
-		row.NetworkProvider,
-		decodeJSONMap(row.NetworkConfig),
+		row.OverlayEnabled,
+		row.OverlayProvider,
+		decodeJSONMap(row.OverlayConfig),
 	)
 }
 
-func (s *Service) PrepareBotConfigForWrite(cfg BotNetworkConfig) (BotNetworkConfig, error) {
+func (s *Service) PrepareBotConfigForWrite(cfg BotOverlayConfig) (BotOverlayConfig, error) {
 	normalized, err := s.normalizeBotConfig(
 		cfg.Enabled,
 		cfg.Provider,
 		cfg.Config,
 	)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	if !normalized.Enabled || strings.TrimSpace(normalized.Provider) == "" {
 		return normalized, nil
 	}
 	provider, err := s.requireProvider(normalized.Provider)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	if _, err := provider.BuildDriver(normalized); err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	return normalized, nil
 }
@@ -280,7 +280,7 @@ func (s *Service) ExecuteActionBot(ctx context.Context, botID, actionID string, 
 // executeLogout stops and removes the overlay sidecar and then wipes the
 // provider's state directory so that the next EnsureAttached triggers a fresh
 // authentication flow.
-func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotNetworkConfig) (ProviderActionExecution, error) {
+func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverlayConfig) (ProviderActionExecution, error) {
 	if err := s.detachOverlayBot(ctx, botID, cfg); err != nil && !errors.Is(err, ErrWorkspaceContainerMissing) {
 		return ProviderActionExecution{}, err
 	}
@@ -303,7 +303,7 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotNetwor
 	}, nil
 }
 
-func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next BotNetworkConfig) error {
+func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next BotOverlayConfig) error {
 	if previous.Enabled && strings.TrimSpace(previous.Provider) != "" {
 		s.logger.Info("detach previous overlay", slog.String("bot_id", botID), slog.String("provider", previous.Provider))
 		if err := s.detachOverlayBot(ctx, botID, previous); err != nil && !errors.Is(err, ErrWorkspaceContainerMissing) {
@@ -322,8 +322,8 @@ func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next
 	return ensureErr
 }
 
-func (s *Service) normalizeBotConfig(enabled bool, provider string, config map[string]any) (BotNetworkConfig, error) {
-	cfg := BotNetworkConfig{
+func (s *Service) normalizeBotConfig(enabled bool, provider string, config map[string]any) (BotOverlayConfig, error) {
+	cfg := BotOverlayConfig{
 		Enabled:  enabled,
 		Provider: strings.TrimSpace(provider),
 		Config:   cloneMap(config),
@@ -340,31 +340,31 @@ func (s *Service) normalizeBotConfig(enabled bool, provider string, config map[s
 	}
 	providerImpl, err := s.requireProvider(cfg.Provider)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	cfg.Config, err = providerImpl.NormalizeConfig(cfg.Config)
 	if err != nil {
-		return BotNetworkConfig{}, err
+		return BotOverlayConfig{}, err
 	}
 	return cfg, nil
 }
 
-func (s *Service) getBotProvider(ctx context.Context, botID string) (BotNetworkConfig, Provider, error) {
+func (s *Service) getBotProvider(ctx context.Context, botID string) (BotOverlayConfig, Provider, error) {
 	cfg, err := s.GetBotConfig(ctx, botID)
 	if err != nil {
-		return BotNetworkConfig{}, nil, err
+		return BotOverlayConfig{}, nil, err
 	}
 	if strings.TrimSpace(cfg.Provider) == "" {
-		return BotNetworkConfig{}, nil, fmt.Errorf("network provider is not configured for bot %s", botID)
+		return BotOverlayConfig{}, nil, fmt.Errorf("network provider is not configured for bot %s", botID)
 	}
 	provider, err := s.requireProvider(cfg.Provider)
 	if err != nil {
-		return BotNetworkConfig{}, nil, err
+		return BotOverlayConfig{}, nil, err
 	}
 	return cfg, provider, nil
 }
 
-func (s *Service) statusOverlayBot(ctx context.Context, botID string, cfg BotNetworkConfig) (OverlayStatus, error) {
+func (s *Service) statusOverlayBot(ctx context.Context, botID string, cfg BotOverlayConfig) (OverlayStatus, error) {
 	req, err := s.buildAttachmentRequest(ctx, botID, cfg)
 	if err != nil {
 		return OverlayStatus{}, err
@@ -379,7 +379,7 @@ func (s *Service) statusOverlayBot(ctx context.Context, botID string, cfg BotNet
 	return attachmentStatus.Overlay, nil
 }
 
-func (s *Service) buildAttachmentRequest(ctx context.Context, botID string, cfg BotNetworkConfig) (AttachmentRequest, error) {
+func (s *Service) buildAttachmentRequest(ctx context.Context, botID string, cfg BotOverlayConfig) (AttachmentRequest, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
 		return AttachmentRequest{}, err
@@ -416,7 +416,7 @@ func (s *Service) buildAttachmentRequest(ctx context.Context, botID string, cfg 
 	return req, nil
 }
 
-func composeBotStatus(cfg BotNetworkConfig, overlay OverlayStatus) BotStatus {
+func composeBotStatus(cfg BotOverlayConfig, overlay OverlayStatus) BotStatus {
 	status := BotStatus{
 		Provider:     cfg.Provider,
 		Attached:     overlay.Attached,
@@ -458,7 +458,7 @@ func composeBotStatus(cfg BotNetworkConfig, overlay OverlayStatus) BotStatus {
 	return status
 }
 
-func (s *Service) ensureOverlayBot(ctx context.Context, botID string, cfg BotNetworkConfig) (OverlayStatus, error) {
+func (s *Service) ensureOverlayBot(ctx context.Context, botID string, cfg BotOverlayConfig) (OverlayStatus, error) {
 	req, err := s.buildAttachmentRequest(ctx, botID, cfg)
 	if err != nil {
 		return OverlayStatus{}, err
@@ -483,7 +483,7 @@ func (s *Service) ensureOverlayBot(ctx context.Context, botID string, cfg BotNet
 	return attachmentStatus.Overlay, nil
 }
 
-func (s *Service) detachOverlayBot(ctx context.Context, botID string, cfg BotNetworkConfig) error {
+func (s *Service) detachOverlayBot(ctx context.Context, botID string, cfg BotOverlayConfig) error {
 	req, err := s.buildAttachmentRequest(ctx, botID, cfg)
 	if err != nil {
 		return err
@@ -496,7 +496,7 @@ func (s *Service) overlayRuntimeUnsupported() bool {
 	return s.runtimeKind == "apple"
 }
 
-func unsupportedOverlayStatus(cfg BotNetworkConfig) OverlayStatus {
+func unsupportedOverlayStatus(cfg BotOverlayConfig) OverlayStatus {
 	return OverlayStatus{
 		Provider: cfg.Provider,
 		State:    "unsupported",

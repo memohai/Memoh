@@ -15,7 +15,7 @@ import (
 func TestNativeProviderStatusRejectsExitNodeWithUserspace(t *testing.T) {
 	provider := newTailscaleProvider(nil, t.TempDir())
 
-	status, err := provider.Status(context.Background(), BotNetworkConfig{
+	status, err := provider.Status(context.Background(), BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
 		Config: map[string]any{
@@ -38,7 +38,7 @@ func TestNativeProviderStatusRejectsExitNodeWithUserspace(t *testing.T) {
 func TestNativeProviderStatusAllowsExitNodeWithKernelTUN(t *testing.T) {
 	provider := newTailscaleProvider(nil, t.TempDir())
 
-	status, err := provider.Status(context.Background(), BotNetworkConfig{
+	status, err := provider.Status(context.Background(), BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
 		Config: map[string]any{
@@ -58,7 +58,7 @@ func TestNativeProviderStatusAllowsExitNodeWithKernelTUN(t *testing.T) {
 func TestNativeProviderStatusAllowsNoExitNode(t *testing.T) {
 	provider := newTailscaleProvider(nil, t.TempDir())
 
-	status, err := provider.Status(context.Background(), BotNetworkConfig{
+	status, err := provider.Status(context.Background(), BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
 		Config: map[string]any{
@@ -77,7 +77,7 @@ func TestNativeProviderStatusAllowsNoExitNode(t *testing.T) {
 func TestNativeClientDriverBuildTailscaleSpecExitNodeArgs(t *testing.T) {
 	driver := &nativeClientDriver{
 		kind: "tailscale",
-		config: BotNetworkConfig{
+		config: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config: map[string]any{
@@ -90,7 +90,7 @@ func TestNativeClientDriverBuildTailscaleSpecExitNodeArgs(t *testing.T) {
 
 	spec, err := driver.buildTailscaleSpec(AttachmentRequest{
 		BotID: "bot-1",
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config: map[string]any{
@@ -113,7 +113,7 @@ func TestNativeClientDriverBuildTailscaleSpecExitNodeArgs(t *testing.T) {
 func TestNativeClientDriverBuildTailscaleSpecNoExitNode(t *testing.T) {
 	driver := &nativeClientDriver{
 		kind: "tailscale",
-		config: BotNetworkConfig{
+		config: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config: map[string]any{
@@ -126,7 +126,7 @@ func TestNativeClientDriverBuildTailscaleSpecNoExitNode(t *testing.T) {
 
 	spec, err := driver.buildTailscaleSpec(AttachmentRequest{
 		BotID: "bot-1",
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config:   map[string]any{},
@@ -146,7 +146,7 @@ func TestNativeClientDriverBuildTailscaleSpecNoExitNode(t *testing.T) {
 func TestNativeClientDriverBuildTailscaleSpecSocks5Enabled(t *testing.T) {
 	driver := &nativeClientDriver{
 		kind: "tailscale",
-		config: BotNetworkConfig{
+		config: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config: map[string]any{
@@ -161,7 +161,7 @@ func TestNativeClientDriverBuildTailscaleSpecSocks5Enabled(t *testing.T) {
 
 	spec, err := driver.buildTailscaleSpec(AttachmentRequest{
 		BotID: "bot-1",
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "tailscale",
 			Config:   map[string]any{},
@@ -191,7 +191,7 @@ func TestNativeClientDriverListTailscaleNodesFiltersExitNodes(t *testing.T) {
 	})
 	driver := &nativeClientDriver{
 		kind: "tailscale",
-		config: BotNetworkConfig{
+		config: BotOverlayConfig{
 			Provider: "tailscale",
 			Config: map[string]any{
 				"exit_node": "100.64.0.10",

@@ -20,7 +20,7 @@ type Controller interface {
 }
 
 type BindingResolver interface {
-	Resolve(ctx context.Context, botID string) (BotNetworkConfig, error)
+	Resolve(ctx context.Context, botID string) (BotOverlayConfig, error)
 }
 
 type controller struct {

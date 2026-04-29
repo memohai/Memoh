@@ -37,7 +37,7 @@ type nativeClientRuntime interface {
 
 type nativeClientDriver struct {
 	kind      string
-	config    BotNetworkConfig
+	config    BotOverlayConfig
 	runtime   nativeClientRuntime
 	stateRoot string
 }

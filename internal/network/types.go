@@ -47,7 +47,7 @@ type NodeListResponse struct {
 	Message  string       `json:"message,omitempty"`
 }
 
-type BotNetworkConfig struct {
+type BotOverlayConfig struct {
 	Enabled  bool           `json:"enabled"`
 	Provider string         `json:"provider,omitempty"`
 	Config   map[string]any `json:"config,omitempty"`
@@ -57,7 +57,7 @@ type AttachmentRequest struct {
 	BotID       string
 	ContainerID string
 	Runtime     RuntimeNetworkRequest
-	Overlay     BotNetworkConfig
+	Overlay     BotOverlayConfig
 	OverlayOnly bool // When true, skip runtime network setup/teardown (overlay-only mutation).
 }
 

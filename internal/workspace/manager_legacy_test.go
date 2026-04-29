@@ -161,6 +161,10 @@ func (*legacyRouteTestService) SnapshotMounts(context.Context, string, string) (
 	return nil, ctr.ErrNotSupported
 }
 
+func (*legacyRouteTestService) SnapshotUsage(context.Context, string, string) (ctr.SnapshotUsage, error) {
+	return ctr.SnapshotUsage{}, ctr.ErrNotSupported
+}
+
 func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.WorkspaceConfig) *Manager {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)

@@ -1,12 +1,12 @@
 <template>
   <div class="space-y-4">
     <div
-      v-for="field in visibleFields"
-      :key="field.key"
+      v-for="schemaField in visibleFields"
+      :key="schemaField.key"
       class="space-y-2"
     >
       <FieldContent
-        :field="field"
+        :field="schemaField"
         :id-prefix="idPrefix"
         :disabled="disabled"
       />
@@ -30,12 +30,12 @@
 
       <template v-if="showCollapsed">
         <div
-          v-for="field in collapsedFields"
-          :key="field.key"
+          v-for="schemaField in collapsedFields"
+          :key="schemaField.key"
           class="space-y-2"
         >
           <FieldContent
-            :field="field"
+            :field="schemaField"
             :id-prefix="idPrefix"
             :disabled="disabled"
           />

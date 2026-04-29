@@ -172,7 +172,7 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 	return postgresstore.New(conn)
 }
 
-func provideNetworkProviderRegistry(service ctr.Service, cfg config.Config) *netctl.Registry {
+func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config) *netctl.Registry {
 	registry := netctl.NewRegistry()
 	if err := netctl.RegisterBuiltinProviders(registry, service, cfg.Workspace.DataRoot); err != nil {
 		panic(err)

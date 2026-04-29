@@ -748,6 +748,25 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 	return result, nil
 }
 
+func (s *DefaultService) SnapshotUsage(ctx context.Context, snapshotter, key string) (SnapshotUsage, error) {
+	if snapshotter == "" || key == "" {
+		return SnapshotUsage{}, ErrInvalidArgument
+	}
+	ctx = s.withNamespace(ctx)
+	usage, err := s.client.SnapshotService(snapshotter).Usage(ctx, key)
+	if err != nil {
+		return SnapshotUsage{}, err
+	}
+	result := SnapshotUsage{}
+	if usage.Size > 0 {
+		result.SizeBytes = uint64(usage.Size) //nolint:gosec // negative values are ignored above
+	}
+	if usage.Inodes > 0 {
+		result.Inodes = uint64(usage.Inodes) //nolint:gosec // negative values are ignored above
+	}
+	return result, nil
+}
+
 func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkRequest) (NetworkResult, error) {
 	if req.ContainerID == "" {
 		return NetworkResult{}, ErrInvalidArgument
