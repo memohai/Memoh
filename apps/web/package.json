@@ -1,6 +1,5 @@
 {
   "name": "@memohai/web",
-  "private": true,
   "version": "0.7.3",
   "type": "module",
   "exports": {

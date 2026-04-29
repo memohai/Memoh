@@ -86,7 +86,7 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm -r publish --access public --no-git-checks
+        run: pnpm publish:npm
 
   desktop-build:
     name: Build desktop (${{ matrix.platform }})

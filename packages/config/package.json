@@ -7,7 +7,6 @@
   "packageManager": "pnpm@10.27.0",
   "module": "src/index.ts",
   "type": "module",
-  "private": true,
   "peerDependencies": {
     "typescript": "^5"
   },

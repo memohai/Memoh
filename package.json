@@ -13,7 +13,7 @@
     "release:patch": "bumpp patch --yes",
     "release:minor": "bumpp minor --yes",
     "release:major": "bumpp major --yes",
-    "publish:npm": "pnpm -r publish --access public --no-git-checks",
+    "publish:npm": "node scripts/publish-packages.mjs",
     "generate-sdk": "openapi-ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
