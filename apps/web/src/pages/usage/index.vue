@@ -710,7 +710,15 @@ const modelPieOption = computed(() => {
     legend: {
       orient: 'vertical' as const,
       right: 10,
-      top: 'center',
+      top: 0,
+      fontSize: 10,     
+      textStyle: {
+        overflow: 'truncate',
+        width: 150,        
+      },
+      tooltip: {
+        show:true
+      }
     },
     series: [
       {
@@ -738,7 +746,7 @@ const modelBarOption = computed(() => {
   const names = models.map(m => modelLabel(m))
   return {
     tooltip: { trigger: 'axis' as const },
-    legend: { data: [t('usage.inputTokens'), t('usage.outputTokens')] },
+    legend: { data: [t('usage.inputTokens'), t('usage.outputTokens')],top: 0, },
     grid: { left: 60, right: 20, bottom: 60, top: 40 },
     xAxis: {
       type: 'category' as const,
@@ -763,8 +771,12 @@ const modelBarOption = computed(() => {
   }
 })
 
-const modelChartOption = computed(() =>
-  modelChartType.value === 'bar' ? modelBarOption.value : modelPieOption.value,
+const modelChartOption = computed(() => ({
+  ...(modelChartType.value === 'bar' ? modelBarOption.value : modelPieOption.value),
+  // legend: {
+  //   fontSize: 10,
+  // }
+}),
 )
 
 const dailyTokensOption = computed(() => {

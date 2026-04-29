@@ -18,10 +18,16 @@
     >
       <div class="size-6.5 shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px group-data-[collapsible=icon]:mx-auto">
         <img
-          v-if="bot.avatar_url"
+          v-if="bot.avatar_url&&!isError"
           :src="bot.avatar_url"
           :alt="bot.display_name || bot.id"
-          class="size-full rounded-full object-cover"
+          class="size-full rounded-full object-cover "
+          @error="() => {
+            isError = true;
+          }"
+          @load="() => { 
+            isError = false
+          }"
         >
         <span
           v-else
@@ -88,6 +94,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@memohai/ui'
+import { ref } from 'vue'
 
 const props = defineProps<{ bot: BotsBot }>()
 
@@ -101,6 +108,7 @@ const avatarFallback = useAvatarInitials(() => displayName.value, 'B')
 
 const isActive = computed(() => currentBotId.value === props.bot.id)
 const pinned = computed(() => isPinned(props.bot.id ?? ''))
+const isError=ref(false)
 
 function handleSelect() {
   if (props.bot.status === 'error') return

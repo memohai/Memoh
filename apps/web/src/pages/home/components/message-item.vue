@@ -159,8 +159,8 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
+          class="text-xs text-muted-foreground/80 mt-1 text-right"
+          :title="fullTimestamp" 
         >
           {{ relativeTimestamp }}
         </p>

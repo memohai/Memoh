@@ -279,6 +279,7 @@ const {
   overrideReasoningEffort,
 } = storeToRefs(chatStore)
 
+
 const { data: modelData } = useQuery({
   key: ['all-models'],
   query: async () => {
@@ -404,14 +405,23 @@ const isInstant = ref(false)
 const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height, bottom } = useElementBounding(descEl)
 
+watch(activeSession, async () => {
+  isInstant.value = false
+  y.value=height.value  
+},{immediate:true,deep:true})
+
+
 watchEffect(() => {
   if (directions.top) {
     isAutoScroll.value = false
+     isInstant.value=true
   }
   if (arrivedState.bottom) {
     isAutoScroll.value = true
+    isInstant.value=true
   }
-})
+},{flush:'post'})
+
 
 watchEffect(() => {
   if (isAutoScroll.value) {

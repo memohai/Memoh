@@ -1064,9 +1064,7 @@ watch([activeTab, botId], ([tab]) => {
           class="hidden"
           @change="handleImportData"
         >
-
         <Separator />
-
         <div class="space-y-3">
           <div class="space-y-1">
             <h4 class="text-xs font-medium text-destructive">
