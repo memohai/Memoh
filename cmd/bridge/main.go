@@ -79,16 +79,23 @@ func main() {
 		}
 	}()
 
-	socketPath := os.Getenv("BRIDGE_SOCKET_PATH")
-	if socketPath == "" {
-		socketPath = defaultSocketPath
+	network := "unix"
+	address := os.Getenv("BRIDGE_SOCKET_PATH")
+	if tcpAddr := os.Getenv("BRIDGE_TCP_ADDR"); tcpAddr != "" {
+		network = "tcp"
+		address = tcpAddr
 	}
-	// Clean up residual socket from a previous run.
-	_ = os.Remove(filepath.Clean(socketPath)) //nolint:gosec // G703: socketPath is from BRIDGE_SOCKET_PATH env or a compiled-in default, not end-user input
+	if address == "" {
+		address = defaultSocketPath
+	}
+	if network == "unix" {
+		// Clean up residual socket from a previous run.
+		_ = os.Remove(filepath.Clean(address)) //nolint:gosec // G703: address is from BRIDGE_SOCKET_PATH env or a compiled-in default, not end-user input
+	}
 
-	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
+	lis, err := (&net.ListenConfig{}).Listen(ctx, network, address)
 	if err != nil {
-		logger.Error("failed to listen", slog.String("socket", socketPath), slog.Any("error", err))
+		logger.Error("failed to listen", slog.String("network", network), slog.String("address", address), slog.Any("error", err))
 		return
 	}
 
@@ -116,7 +123,7 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	logger.Info("bridge gRPC server listening", slog.String("socket", socketPath))
+	logger.Info("bridge gRPC server listening", slog.String("network", network), slog.String("address", address))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server failed", slog.Any("error", err))
 		return

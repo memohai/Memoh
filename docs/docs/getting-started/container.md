@@ -30,7 +30,7 @@ Manage the lifecycle of your bot's environment from the **Container** tab in the
 The **Container** tab displays real-time data about the bot's runtime:
 - **Container ID**: Unique identifier for the instance.
 - **Status**: Whether it's currently running, stopped, or creating.
-- **Image**: The Docker/Containerd image used as the base.
+- **Image**: The container image used as the base.
 - **Paths**: Host and container paths for data persistence.
 - **Tasks**: Number of active background tasks running in the container.
 - **CDI Devices**: The effective GPU CDI devices currently attached to the container, if any.

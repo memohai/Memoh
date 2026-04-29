@@ -29,93 +29,18 @@ import (
 	"github.com/memohai/memoh/internal/config"
 )
 
-var (
-	ErrInvalidArgument = errors.New("invalid argument")
-	ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
-)
-
-type PullImageOptions struct {
-	Unpack      bool
-	Snapshotter string
-	OnProgress  func(PullProgress) // optional, nil = no progress reporting
-}
-
-type DeleteImageOptions struct {
-	Synchronous bool
-}
-
-type CreateContainerRequest struct {
-	ID          string
-	ImageRef    string
-	SnapshotID  string
-	Snapshotter string
-	Labels      map[string]string
-	Spec        ContainerSpec
-}
-
-type DeleteContainerOptions struct {
-	CleanupSnapshot bool
-}
-
-type StartTaskOptions struct {
-	Terminal bool
-}
-
-type StopTaskOptions struct {
-	Signal  syscall.Signal
-	Timeout time.Duration
-	Force   bool
-}
-
-type DeleteTaskOptions struct {
-	Force bool
-}
-
-type SnapshotCommitResult struct {
-	VersionSnapshotName string
-	ActiveSnapshotName  string
-}
-
-type ListTasksOptions struct {
-	Filter string
-}
-
-type Service interface {
-	PullImage(ctx context.Context, ref string, opts *PullImageOptions) (ImageInfo, error)
-	GetImage(ctx context.Context, ref string) (ImageInfo, error)
-	ListImages(ctx context.Context) ([]ImageInfo, error)
-	DeleteImage(ctx context.Context, ref string, opts *DeleteImageOptions) error
-	// ResolveRemoteDigest fetches only the manifest digest from the registry
-	// without downloading any layers. Returns ErrNotSupported on backends that
-	// have no concept of a remote registry (e.g. Apple Virtualization).
-	ResolveRemoteDigest(ctx context.Context, ref string) (string, error)
-
-	CreateContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
-	GetContainer(ctx context.Context, id string) (ContainerInfo, error)
-	ListContainers(ctx context.Context) ([]ContainerInfo, error)
-	DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error
-	ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error)
-
-	StartContainer(ctx context.Context, containerID string, opts *StartTaskOptions) error
-	StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error
-	DeleteTask(ctx context.Context, containerID string, opts *DeleteTaskOptions) error
-	GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error)
-	GetContainerMetrics(ctx context.Context, containerID string) (ContainerMetrics, error)
-	ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error)
-	SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error)
-	RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error
-
-	CommitSnapshot(ctx context.Context, snapshotter, name, key string) error
-	ListSnapshots(ctx context.Context, snapshotter string) ([]SnapshotInfo, error)
-	PrepareSnapshot(ctx context.Context, snapshotter, key, parent string) error
-	CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
-	SnapshotMounts(ctx context.Context, snapshotter, key string) ([]MountInfo, error)
-}
+var ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
 
 type DefaultService struct {
-	client    *containerd.Client
-	namespace string
-	logger    *slog.Logger
+	client     *containerd.Client
+	namespace  string
+	logger     *slog.Logger
+	cniBinDir  string
+	cniConfDir string
+}
+
+func NewService(log *slog.Logger, client *containerd.Client, cfg config.Config) *DefaultService {
+	return NewDefaultService(log, client, cfg)
 }
 
 func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.Config) *DefaultService {
@@ -123,10 +48,20 @@ func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.C
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
+	cniBinDir := cfg.Workspace.CNIBinaryDir
+	if cniBinDir == "" {
+		cniBinDir = config.DefaultCNIBinaryDir
+	}
+	cniConfDir := cfg.Workspace.CNIConfigDir
+	if cniConfDir == "" {
+		cniConfDir = config.DefaultCNIConfigDir
+	}
 	return &DefaultService{
-		client:    client,
-		namespace: namespace,
-		logger:    log.With(slog.String("service", "containerd")),
+		client:     client,
+		namespace:  namespace,
+		logger:     log.With(slog.String("service", "containerd")),
+		cniBinDir:  cniBinDir,
+		cniConfDir: cniConfDir,
 	}
 }
 
@@ -141,8 +76,8 @@ func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullIm
 	if opts == nil || opts.Unpack {
 		pullOpts = append(pullOpts, containerd.WithPullUnpack)
 	}
-	if opts != nil && opts.Snapshotter != "" {
-		pullOpts = append(pullOpts, containerd.WithPullSnapshotter(opts.Snapshotter))
+	if opts != nil && opts.StorageDriver != "" {
+		pullOpts = append(pullOpts, containerd.WithPullSnapshotter(opts.StorageDriver))
 	}
 
 	// When OnProgress is set, poll content store for active download statuses.
@@ -180,7 +115,7 @@ func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullIm
 
 	img, err := s.client.Pull(ctx, ref, pullOpts...)
 	if err != nil {
-		return ImageInfo{}, err
+		return ImageInfo{}, mapContainerdErr(err)
 	}
 	return toImageInfo(img), nil
 }
@@ -192,7 +127,7 @@ func (s *DefaultService) GetImage(ctx context.Context, ref string) (ImageInfo, e
 	ctx = s.withNamespace(ctx)
 	img, err := s.getImageWithFallback(ctx, ref)
 	if err != nil {
-		return ImageInfo{}, err
+		return ImageInfo{}, mapContainerdErr(err)
 	}
 	return toImageInfo(img), nil
 }
@@ -201,7 +136,7 @@ func (s *DefaultService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	ctx = s.withNamespace(ctx)
 	imgs, err := s.client.ListImages(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 	result := make([]ImageInfo, len(imgs))
 	for i, img := range imgs {
@@ -219,7 +154,7 @@ func (s *DefaultService) DeleteImage(ctx context.Context, ref string, opts *Dele
 	if opts != nil && opts.Synchronous {
 		deleteOpts = append(deleteOpts, images.SynchronousDelete())
 	}
-	return s.client.ImageService().Delete(ctx, ref, deleteOpts...)
+	return mapContainerdErr(s.client.ImageService().Delete(ctx, ref, deleteOpts...))
 }
 
 func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
@@ -252,12 +187,75 @@ func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
 		}
 		opts = append(opts, oci.WithMounts(mounts))
 	}
+	if target := networkJoinTargetValue(spec); target != "" {
+		opts = append(opts, withNetworkNamespacePath(target))
+	}
+	if len(spec.AddedCapabilities) > 0 {
+		opts = append(opts, withAddedCapabilities(spec.AddedCapabilities...))
+	}
 	if len(spec.CDIDevices) > 0 {
 		opts = append(opts, withStaticCDIRegistry())
 		opts = append(opts, cdispec.WithCDIDevices(spec.CDIDevices...))
 	}
 
 	return opts
+}
+
+func networkJoinTargetValue(spec ContainerSpec) string {
+	return spec.NetworkJoinTarget.Value
+}
+
+func withNetworkNamespacePath(path string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *oci.Spec) error {
+		if spec.Linux == nil {
+			spec.Linux = &specs.Linux{}
+		}
+		filtered := make([]specs.LinuxNamespace, 0, len(spec.Linux.Namespaces)+1)
+		for _, ns := range spec.Linux.Namespaces {
+			if ns.Type != specs.NetworkNamespace {
+				filtered = append(filtered, ns)
+			}
+		}
+		filtered = append(filtered, specs.LinuxNamespace{
+			Type: specs.NetworkNamespace,
+			Path: path,
+		})
+		spec.Linux.Namespaces = filtered
+		return nil
+	}
+}
+
+func withAddedCapabilities(capabilities ...string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *oci.Spec) error {
+		if spec.Process == nil {
+			spec.Process = &specs.Process{}
+		}
+		if spec.Process.Capabilities == nil {
+			spec.Process.Capabilities = &specs.LinuxCapabilities{}
+		}
+		spec.Process.Capabilities.Bounding = appendUnique(spec.Process.Capabilities.Bounding, capabilities...)
+		spec.Process.Capabilities.Effective = appendUnique(spec.Process.Capabilities.Effective, capabilities...)
+		spec.Process.Capabilities.Inheritable = appendUnique(spec.Process.Capabilities.Inheritable, capabilities...)
+		spec.Process.Capabilities.Permitted = appendUnique(spec.Process.Capabilities.Permitted, capabilities...)
+		spec.Process.Capabilities.Ambient = appendUnique(spec.Process.Capabilities.Ambient, capabilities...)
+		return nil
+	}
+}
+
+func appendUnique(current []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(current))
+	for _, item := range current {
+		seen[item] = struct{}{}
+	}
+	out := append([]string(nil), current...)
+	for _, item := range values {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func withStaticCDIRegistry() oci.SpecOpts {
@@ -276,29 +274,28 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	if req.ID == "" || req.ImageRef == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
+	req.ImageRef = config.NormalizeImageRef(req.ImageRef)
 
 	ctx = s.withNamespace(ctx)
 	ctx, done, err := s.client.WithLease(ctx)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapContainerdErr(err)
 	}
 	defer func() { _ = done(ctx) }()
 	image, err := s.getImageWithFallback(ctx, req.ImageRef)
 	if err != nil {
-		pullOpts := &PullImageOptions{
-			Unpack:      true,
-			Snapshotter: req.Snapshotter,
-		}
+		pullOpts := &PullImageOptions{Unpack: true, StorageDriver: req.StorageRef.Driver}
 		_, err = s.PullImage(ctx, req.ImageRef, pullOpts)
 		if err != nil {
 			return ContainerInfo{}, err
 		}
 		image, err = s.getImageWithFallback(ctx, req.ImageRef)
 		if err != nil {
-			return ContainerInfo{}, err
+			return ContainerInfo{}, mapContainerdErr(err)
 		}
 	}
-	snapshotID := req.SnapshotID
+	snapshotter := strings.TrimSpace(req.StorageRef.Driver)
+	snapshotID := strings.TrimSpace(req.StorageRef.Key)
 	if snapshotID == "" {
 		snapshotID = req.ID
 	}
@@ -312,23 +309,23 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
 	}
-	if req.Snapshotter != "" {
-		containerOpts = append(containerOpts, containerd.WithSnapshotter(req.Snapshotter))
+	if snapshotter != "" {
+		containerOpts = append(containerOpts, containerd.WithSnapshotter(snapshotter))
 	}
-	if req.Snapshotter != "" {
+	if snapshotter != "" {
 		parent, err := s.snapshotParentFromLayers(ctx, image)
 		if err != nil {
-			return ContainerInfo{}, err
+			return ContainerInfo{}, mapContainerdErr(err)
 		}
-		ok, err := s.snapshotExists(ctx, req.Snapshotter, parent)
+		ok, err := s.snapshotExists(ctx, snapshotter, parent)
 		if err != nil {
-			return ContainerInfo{}, err
+			return ContainerInfo{}, mapContainerdErr(err)
 		}
 		if !ok {
 			return ContainerInfo{}, fmt.Errorf("parent snapshot %s does not exist", parent)
 		}
-		if err := s.prepareSnapshot(ctx, req.Snapshotter, snapshotID, parent); err != nil {
-			return ContainerInfo{}, err
+		if err := s.prepareSnapshot(ctx, snapshotter, snapshotID, parent); err != nil {
+			return ContainerInfo{}, mapContainerdErr(err)
 		}
 		containerOpts = append(containerOpts, containerd.WithSnapshot(snapshotID))
 	} else {
@@ -343,9 +340,10 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 
 	ctrObj, err := s.client.NewContainer(ctx, req.ID, containerOpts...)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapContainerdErr(err)
 	}
-	return toContainerInfo(ctx, ctrObj)
+	info, err := toContainerInfo(ctx, ctrObj)
+	return info, mapContainerdErr(err)
 }
 
 func (*DefaultService) snapshotParentFromLayers(ctx context.Context, image containerd.Image) (string, error) {
@@ -413,22 +411,23 @@ func (s *DefaultService) GetContainer(ctx context.Context, id string) (Container
 	ctx = s.withNamespace(ctx)
 	ctrObj, err := s.client.LoadContainer(ctx, id)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapContainerdErr(err)
 	}
-	return toContainerInfo(ctx, ctrObj)
+	info, err := toContainerInfo(ctx, ctrObj)
+	return info, mapContainerdErr(err)
 }
 
 func (s *DefaultService) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	ctx = s.withNamespace(ctx)
 	ctrs, err := s.client.Containers(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 	result := make([]ContainerInfo, 0, len(ctrs))
 	for _, c := range ctrs {
 		info, err := toContainerInfo(ctx, c)
 		if err != nil {
-			return nil, err
+			return nil, mapContainerdErr(err)
 		}
 		result = append(result, info)
 	}
@@ -443,17 +442,17 @@ func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *D
 	ctx = s.withNamespace(ctx)
 	container, err := s.client.LoadContainer(ctx, id)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	// A stopped task still holds an entry in containerd; container.Delete fails
 	// with FAILED_PRECONDITION if any task entry exists. Delete it first.
 	if task, err := container.Task(ctx, nil); err == nil {
 		if _, err := task.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
-			return err
+			return mapContainerdErr(err)
 		}
 	} else if !errdefs.IsNotFound(err) {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	deleteOpts := []containerd.DeleteOpts{}
@@ -465,7 +464,7 @@ func (s *DefaultService) DeleteContainer(ctx context.Context, id string, opts *D
 		deleteOpts = append(deleteOpts, containerd.WithSnapshotCleanup)
 	}
 
-	return container.Delete(ctx, deleteOpts...)
+	return mapContainerdErr(container.Delete(ctx, deleteOpts...))
 }
 
 func (s *DefaultService) StartContainer(ctx context.Context, containerID string, _ *StartTaskOptions) error {
@@ -476,14 +475,14 @@ func (s *DefaultService) StartContainer(ctx context.Context, containerID string,
 	ctx = s.withNamespace(ctx)
 	container, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	task, err := container.NewTask(ctx, cio.NullIO)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
-	return task.Start(ctx)
+	return mapContainerdErr(task.Start(ctx))
 }
 
 func (s *DefaultService) getTask(ctx context.Context, containerID string) (containerd.Task, context.Context, error) {
@@ -494,11 +493,11 @@ func (s *DefaultService) getTask(ctx context.Context, containerID string) (conta
 	ctx = s.withNamespace(ctx)
 	container, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, mapContainerdErr(err)
 	}
 	task, err := container.Task(ctx, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, mapContainerdErr(err)
 	}
 	return task, ctx, nil
 }
@@ -506,31 +505,36 @@ func (s *DefaultService) getTask(ctx context.Context, containerID string) (conta
 func (s *DefaultService) GetTaskInfo(ctx context.Context, containerID string) (TaskInfo, error) {
 	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
-		return TaskInfo{}, err
+		return TaskInfo{}, mapContainerdErr(err)
 	}
 	status, err := task.Status(ctx)
 	if err != nil {
-		return TaskInfo{}, err
+		return TaskInfo{}, mapContainerdErr(err)
 	}
 	return TaskInfo{
 		ContainerID: containerID,
 		ID:          task.ID(),
 		PID:         task.Pid(),
-		Status:      convertTaskStatus(status.Status),
-		ExitCode:    status.ExitStatus,
+		NetworkJoinTarget: NetworkJoinTarget{
+			Kind:  "network-namespace",
+			Value: networkNamespacePath(task.Pid()),
+			PID:   task.Pid(),
+		},
+		Status:   convertTaskStatus(status.Status),
+		ExitCode: status.ExitStatus,
 	}, nil
 }
 
 func (s *DefaultService) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]TaskInfo, error) {
 	ctx = s.withNamespace(ctx)
 	request := &tasksv1.ListTasksRequest{}
-	if opts != nil {
-		request.Filter = opts.Filter
+	if opts != nil && strings.TrimSpace(opts.ContainerID) != "" {
+		request.Filter = "container.id==" + strings.TrimSpace(opts.ContainerID)
 	}
 
 	response, err := s.client.TaskService().List(ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 
 	tasks := make([]TaskInfo, 0, len(response.Tasks))
@@ -539,8 +543,13 @@ func (s *DefaultService) ListTasks(ctx context.Context, opts *ListTasksOptions) 
 			ContainerID: task.ContainerID,
 			ID:          task.ID,
 			PID:         task.Pid,
-			Status:      convertContainerdTaskStatus(task.Status),
-			ExitCode:    task.ExitStatus,
+			NetworkJoinTarget: NetworkJoinTarget{
+				Kind:  "network-namespace",
+				Value: networkNamespacePath(task.Pid),
+				PID:   task.Pid,
+			},
+			Status:   convertContainerdTaskStatus(task.Status),
+			ExitCode: task.ExitStatus,
 		})
 	}
 
@@ -554,7 +563,7 @@ func (s *DefaultService) StopContainer(ctx context.Context, containerID string, 
 
 	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	signal := syscall.SIGTERM
@@ -571,12 +580,12 @@ func (s *DefaultService) StopContainer(ctx context.Context, containerID string, 
 	}
 
 	if err := task.Kill(ctx, signal); err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	statusC, err := task.Wait(ctx)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	timer := time.NewTimer(timeout)
@@ -588,7 +597,7 @@ func (s *DefaultService) StopContainer(ctx context.Context, containerID string, 
 	case <-timer.C:
 		if force {
 			if err := task.Kill(ctx, syscall.SIGKILL); err != nil {
-				return fmt.Errorf("force kill failed: %w", err)
+				return fmt.Errorf("force kill failed: %w", mapContainerdErr(err))
 			}
 			<-statusC
 			return nil
@@ -604,7 +613,7 @@ func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opt
 
 	task, ctx, err := s.getTask(ctx, containerID)
 	if err != nil {
-		return err
+		return mapContainerdErr(err)
 	}
 
 	if opts != nil && opts.Force {
@@ -622,7 +631,7 @@ func (s *DefaultService) DeleteTask(ctx context.Context, containerID string, opt
 	}
 
 	_, err = task.Delete(ctx)
-	return err
+	return mapContainerdErr(err)
 }
 
 func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error) {
@@ -633,14 +642,14 @@ func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value s
 	ctx = s.withNamespace(ctx)
 	containers, err := s.client.Containers(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 
 	filtered := make([]ContainerInfo, 0, len(containers))
 	for _, container := range containers {
 		ci, err := toContainerInfo(ctx, container)
 		if err != nil {
-			return nil, err
+			return nil, mapContainerdErr(err)
 		}
 		if labelValue, ok := ci.Labels[key]; ok && (value == "" || value == labelValue) {
 			filtered = append(filtered, ci)
@@ -649,15 +658,19 @@ func (s *DefaultService) ListContainersByLabel(ctx context.Context, key, value s
 	return filtered, nil
 }
 
-func (s *DefaultService) CommitSnapshot(ctx context.Context, snapshotter, name, key string) error {
+func (s *DefaultService) CommitSnapshot(ctx context.Context, req CommitSnapshotRequest) error {
+	snapshotter := strings.TrimSpace(req.Source.Driver)
+	name := strings.TrimSpace(req.Target.Key)
+	key := strings.TrimSpace(req.Source.Key)
 	if snapshotter == "" || name == "" || key == "" {
 		return ErrInvalidArgument
 	}
 	ctx = s.withNamespace(ctx)
-	return s.client.SnapshotService(snapshotter).Commit(ctx, name, key)
+	return mapContainerdErr(s.client.SnapshotService(snapshotter).Commit(ctx, name, key))
 }
 
-func (s *DefaultService) ListSnapshots(ctx context.Context, snapshotter string) ([]SnapshotInfo, error) {
+func (s *DefaultService) ListSnapshots(ctx context.Context, req ListSnapshotsRequest) ([]SnapshotInfo, error) {
+	snapshotter := strings.TrimSpace(req.Driver)
 	if snapshotter == "" {
 		return nil, ErrInvalidArgument
 	}
@@ -674,22 +687,27 @@ func (s *DefaultService) ListSnapshots(ctx context.Context, snapshotter string) 
 		})
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 	return infos, nil
 }
 
-func (s *DefaultService) PrepareSnapshot(ctx context.Context, snapshotter, key, parent string) error {
+func (s *DefaultService) PrepareSnapshot(ctx context.Context, req PrepareSnapshotRequest) error {
+	snapshotter := strings.TrimSpace(req.Target.Driver)
+	key := strings.TrimSpace(req.Target.Key)
+	parent := strings.TrimSpace(req.Parent.Key)
 	if snapshotter == "" || key == "" || parent == "" {
 		return ErrInvalidArgument
 	}
 	ctx = s.withNamespace(ctx)
 	_, err := s.client.SnapshotService(snapshotter).Prepare(ctx, key, parent)
-	return err
+	return mapContainerdErr(err)
 }
 
-func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error) {
-	if req.ID == "" || req.SnapshotID == "" {
+func (s *DefaultService) RestoreContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error) {
+	snapshotID := strings.TrimSpace(req.StorageRef.Key)
+	snapshotter := strings.TrimSpace(req.StorageRef.Driver)
+	if req.ID == "" || snapshotID == "" {
 		return ContainerInfo{}, ErrInvalidArgument
 	}
 
@@ -703,15 +721,15 @@ func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req Cr
 	image, err := s.getImageWithFallback(ctx, imageRef)
 	if err != nil {
 		_, pullErr := s.PullImage(ctx, imageRef, &PullImageOptions{
-			Unpack:      true,
-			Snapshotter: req.Snapshotter,
+			Unpack:        true,
+			StorageDriver: snapshotter,
 		})
 		if pullErr != nil {
-			return ContainerInfo{}, pullErr
+			return ContainerInfo{}, mapContainerdErr(pullErr)
 		}
 		image, err = s.getImageWithFallback(ctx, imageRef)
 		if err != nil {
-			return ContainerInfo{}, err
+			return ContainerInfo{}, mapContainerdErr(err)
 		}
 	}
 
@@ -724,11 +742,11 @@ func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req Cr
 	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
 	}
-	if req.Snapshotter != "" {
-		containerOpts = append(containerOpts, containerd.WithSnapshotter(req.Snapshotter))
+	if snapshotter != "" {
+		containerOpts = append(containerOpts, containerd.WithSnapshotter(snapshotter))
 	}
 	containerOpts = append(containerOpts,
-		containerd.WithSnapshot(req.SnapshotID),
+		containerd.WithSnapshot(snapshotID),
 		containerd.WithNewSpec(specOpts...),
 	)
 	if len(req.Labels) > 0 {
@@ -740,9 +758,10 @@ func (s *DefaultService) CreateContainerFromSnapshot(ctx context.Context, req Cr
 
 	ctrObj, err := s.client.NewContainer(ctx, req.ID, containerOpts...)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapContainerdErr(err)
 	}
-	return toContainerInfo(ctx, ctrObj)
+	info, err := toContainerInfo(ctx, ctrObj)
+	return info, mapContainerdErr(err)
 }
 
 func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key string) ([]MountInfo, error) {
@@ -752,7 +771,7 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 	ctx = s.withNamespace(ctx)
 	mounts, err := s.client.SnapshotService(snapshotter).Mounts(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, mapContainerdErr(err)
 	}
 	result := make([]MountInfo, len(mounts))
 	for i, m := range mounts {
@@ -765,24 +784,72 @@ func (s *DefaultService) SnapshotMounts(ctx context.Context, snapshotter, key st
 	return result, nil
 }
 
-func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkSetupRequest) (NetworkResult, error) {
-	task, ctx, err := s.getTask(ctx, req.ContainerID)
-	if err != nil {
-		return NetworkResult{}, err
+func (s *DefaultService) SnapshotUsage(ctx context.Context, snapshotter, key string) (SnapshotUsage, error) {
+	if snapshotter == "" || key == "" {
+		return SnapshotUsage{}, ErrInvalidArgument
 	}
-	ip, err := setupCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	ctx = s.withNamespace(ctx)
+	usage, err := s.client.SnapshotService(snapshotter).Usage(ctx, key)
 	if err != nil {
-		return NetworkResult{}, err
+		return SnapshotUsage{}, mapContainerdErr(err)
+	}
+	result := SnapshotUsage{}
+	if usage.Size > 0 {
+		result.SizeBytes = uint64(usage.Size) //nolint:gosec // negative values are ignored above
+	}
+	if usage.Inodes > 0 {
+		result.Inodes = uint64(usage.Inodes) //nolint:gosec // negative values are ignored above
+	}
+	return result, nil
+}
+
+func (s *DefaultService) SetupNetwork(ctx context.Context, req NetworkRequest) (NetworkResult, error) {
+	if req.ContainerID == "" {
+		return NetworkResult{}, ErrInvalidArgument
+	}
+	if req.JoinTarget.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return NetworkResult{}, mapContainerdErr(err)
+		}
+		ctx = taskCtx
+		req.JoinTarget.PID = task.Pid()
+	}
+	ip, err := s.setupNetwork(ctx, req)
+	if err != nil {
+		return NetworkResult{}, mapContainerdErr(err)
 	}
 	return NetworkResult{IP: ip}, nil
 }
 
-func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkSetupRequest) error {
-	task, ctx, err := s.getTask(ctx, req.ContainerID)
-	if err != nil {
-		return err
+func (s *DefaultService) RemoveNetwork(ctx context.Context, req NetworkRequest) error {
+	if req.ContainerID == "" {
+		return ErrInvalidArgument
 	}
-	return removeCNINetwork(ctx, task, req.ContainerID, req.CNIBinDir, req.CNIConfDir)
+	if req.JoinTarget.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return mapContainerdErr(err)
+		}
+		ctx = taskCtx
+		req.JoinTarget.PID = task.Pid()
+	}
+	return mapContainerdErr(s.removeNetwork(ctx, req))
+}
+
+func (s *DefaultService) CheckNetwork(ctx context.Context, req NetworkRequest) error {
+	if req.ContainerID == "" {
+		return ErrInvalidArgument
+	}
+	if req.JoinTarget.PID == 0 {
+		task, taskCtx, err := s.getTask(ctx, req.ContainerID)
+		if err != nil {
+			return mapContainerdErr(err)
+		}
+		ctx = taskCtx
+		req.JoinTarget.PID = task.Pid()
+	}
+	return mapContainerdErr(s.checkNetwork(ctx, req))
 }
 
 func (s *DefaultService) withNamespace(ctx context.Context) context.Context {
@@ -799,7 +866,7 @@ func (*DefaultService) ResolveRemoteDigest(ctx context.Context, ref string) (str
 	})
 	_, desc, err := resolver.Resolve(ctx, ref)
 	if err != nil {
-		return "", err
+		return "", mapContainerdErr(err)
 	}
 	return desc.Digest.String(), nil
 }
@@ -818,15 +885,27 @@ func toContainerInfo(ctx context.Context, c containerd.Container) (ContainerInfo
 		return ContainerInfo{}, err
 	}
 	return ContainerInfo{
-		ID:          info.ID,
-		Image:       info.Image,
-		Labels:      info.Labels,
-		Snapshotter: info.Snapshotter,
-		SnapshotKey: info.SnapshotKey,
-		Runtime:     RuntimeInfo{Name: info.Runtime.Name},
-		CreatedAt:   info.CreatedAt,
-		UpdatedAt:   info.UpdatedAt,
+		ID:         info.ID,
+		Image:      info.Image,
+		Labels:     info.Labels,
+		StorageRef: StorageRef{Driver: info.Snapshotter, Key: info.SnapshotKey, Kind: "snapshot"},
+		Runtime:    RuntimeInfo{Name: info.Runtime.Name},
+		CreatedAt:  info.CreatedAt,
+		UpdatedAt:  info.UpdatedAt,
 	}, nil
+}
+
+func mapContainerdErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errdefs.IsNotFound(err) {
+		return errors.Join(ErrNotFound, err)
+	}
+	if errdefs.IsAlreadyExists(err) {
+		return errors.Join(ErrAlreadyExists, err)
+	}
+	return errors.Join(ErrRuntime, err)
 }
 
 func convertTaskStatus(s containerd.ProcessStatus) TaskStatus {

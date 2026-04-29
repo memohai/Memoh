@@ -69,19 +69,17 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 	}
 	prepared := make([]gatewayAttachment, 0, len(req.Attachments))
 	for _, raw := range req.Attachments {
-		attachmentType := strings.ToLower(strings.TrimSpace(raw.Type))
-		payload := strings.TrimSpace(raw.Base64)
+		bundle := conversation.BundleFromChatAttachment(raw)
+		attachmentType := strings.ToLower(strings.TrimSpace(bundle.Type))
+		payload := strings.TrimSpace(bundle.Base64)
 		transport := ""
-		fallbackPath := strings.TrimSpace(raw.Path)
+		fallbackPath := strings.TrimSpace(bundle.Path)
 		if payload != "" {
 			transport = gatewayTransportInlineDataURL
 		} else {
-			rawURL := strings.TrimSpace(raw.URL)
-			contentHash := strings.TrimSpace(raw.ContentHash)
+			rawURL := strings.TrimSpace(bundle.URL)
+			contentHash := strings.TrimSpace(bundle.ContentHash)
 			switch {
-			case isDataURL(rawURL):
-				payload = rawURL
-				transport = gatewayTransportInlineDataURL
 			case isLikelyPublicURL(rawURL) && contentHash == "":
 				// Only treat a public HTTP URL as direct vision input when the
 				// attachment has not been persisted yet. If ContentHash is set,
@@ -99,14 +97,14 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 			}
 		}
 		item := gatewayAttachment{
-			ContentHash:  strings.TrimSpace(raw.ContentHash),
+			ContentHash:  strings.TrimSpace(bundle.ContentHash),
 			Type:         attachmentType,
-			Mime:         strings.TrimSpace(raw.Mime),
-			Size:         raw.Size,
-			Name:         strings.TrimSpace(raw.Name),
+			Mime:         strings.TrimSpace(bundle.Mime),
+			Size:         bundle.Size,
+			Name:         strings.TrimSpace(bundle.Name),
 			Transport:    transport,
 			Payload:      payload,
-			Metadata:     raw.Metadata,
+			Metadata:     bundle.Metadata,
 			FallbackPath: fallbackPath,
 		}
 		item = normalizeGatewayAttachmentPayload(item)
@@ -145,11 +143,6 @@ func normalizeGatewayAttachmentPayload(item gatewayAttachment) gatewayAttachment
 func isLikelyPublicURL(raw string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(raw))
 	return strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")
-}
-
-func isDataURL(raw string) bool {
-	trimmed := strings.ToLower(strings.TrimSpace(raw))
-	return strings.HasPrefix(trimmed, "data:")
 }
 
 // inlineInjectAttachments converts image attachments from an injected message

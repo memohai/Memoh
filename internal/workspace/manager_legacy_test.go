@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/errdefs"
-
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
+	netctl "github.com/memohai/memoh/internal/network"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -29,16 +28,28 @@ type legacyRouteTestService struct {
 	setupNet    int
 
 	getContainerBeforeCreateErr error
+	getImageErr                 error
+	pullErr                     error
+	pullCalls                   int
+	getImageCalls               int
 	setupNetworkResults         []ctr.NetworkResult
 	setupNetworkErrs            []error
 }
 
-func (*legacyRouteTestService) PullImage(context.Context, string, *ctr.PullImageOptions) (ctr.ImageInfo, error) {
-	return ctr.ImageInfo{}, nil
+func (s *legacyRouteTestService) PullImage(_ context.Context, ref string, _ *ctr.PullImageOptions) (ctr.ImageInfo, error) {
+	s.pullCalls++
+	if s.pullErr != nil {
+		return ctr.ImageInfo{}, s.pullErr
+	}
+	return ctr.ImageInfo{Name: ref, ID: ref, Tags: []string{ref}}, nil
 }
 
-func (*legacyRouteTestService) GetImage(context.Context, string) (ctr.ImageInfo, error) {
-	return ctr.ImageInfo{}, nil
+func (s *legacyRouteTestService) GetImage(_ context.Context, ref string) (ctr.ImageInfo, error) {
+	s.getImageCalls++
+	if s.getImageErr != nil {
+		return ctr.ImageInfo{}, s.getImageErr
+	}
+	return ctr.ImageInfo{Name: ref, ID: ref, Tags: []string{ref}}, nil
 }
 
 func (*legacyRouteTestService) ListImages(context.Context) ([]ctr.ImageInfo, error) {
@@ -57,11 +68,10 @@ func (s *legacyRouteTestService) CreateContainer(_ context.Context, req ctr.Crea
 	s.createCalls++
 	s.created = true
 	s.container = ctr.ContainerInfo{
-		ID:          req.ID,
-		Image:       req.ImageRef,
-		Labels:      req.Labels,
-		Snapshotter: req.Snapshotter,
-		SnapshotKey: req.ID,
+		ID:         req.ID,
+		Image:      req.ImageRef,
+		Labels:     req.Labels,
+		StorageRef: ctr.StorageRef{Driver: req.StorageRef.Driver, Key: req.ID, Kind: "active"},
 	}
 	return s.container, nil
 }
@@ -71,7 +81,7 @@ func (s *legacyRouteTestService) GetContainer(context.Context, string) (ctr.Cont
 		if s.getContainerBeforeCreateErr != nil {
 			return ctr.ContainerInfo{}, s.getContainerBeforeCreateErr
 		}
-		return ctr.ContainerInfo{}, errdefs.ErrNotFound
+		return ctr.ContainerInfo{}, ctr.ErrNotFound
 	}
 	return s.container, nil
 }
@@ -108,7 +118,7 @@ func (s *legacyRouteTestService) DeleteTask(context.Context, string, *ctr.Delete
 }
 
 func (*legacyRouteTestService) GetTaskInfo(context.Context, string) (ctr.TaskInfo, error) {
-	return ctr.TaskInfo{}, errdefs.ErrNotFound
+	return ctr.TaskInfo{}, ctr.ErrNotFound
 }
 
 func (*legacyRouteTestService) GetContainerMetrics(context.Context, string) (ctr.ContainerMetrics, error) {
@@ -119,7 +129,7 @@ func (*legacyRouteTestService) ListTasks(context.Context, *ctr.ListTasksOptions)
 	return nil, nil
 }
 
-func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupRequest) (ctr.NetworkResult, error) {
+func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkRequest) (ctr.NetworkResult, error) {
 	idx := s.setupNet
 	s.setupNet++
 	if idx < len(s.setupNetworkErrs) && s.setupNetworkErrs[idx] != nil {
@@ -131,24 +141,28 @@ func (s *legacyRouteTestService) SetupNetwork(context.Context, ctr.NetworkSetupR
 	return ctr.NetworkResult{IP: "10.0.0.2"}, nil
 }
 
-func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkSetupRequest) error {
+func (s *legacyRouteTestService) RemoveNetwork(context.Context, ctr.NetworkRequest) error {
 	s.removeNet++
 	return nil
 }
 
-func (*legacyRouteTestService) CommitSnapshot(context.Context, string, string, string) error {
+func (*legacyRouteTestService) CheckNetwork(context.Context, ctr.NetworkRequest) error {
 	return nil
 }
 
-func (*legacyRouteTestService) ListSnapshots(context.Context, string) ([]ctr.SnapshotInfo, error) {
+func (*legacyRouteTestService) CommitSnapshot(context.Context, ctr.CommitSnapshotRequest) error {
+	return nil
+}
+
+func (*legacyRouteTestService) ListSnapshots(context.Context, ctr.ListSnapshotsRequest) ([]ctr.SnapshotInfo, error) {
 	return nil, nil
 }
 
-func (*legacyRouteTestService) PrepareSnapshot(context.Context, string, string, string) error {
+func (*legacyRouteTestService) PrepareSnapshot(context.Context, ctr.PrepareSnapshotRequest) error {
 	return nil
 }
 
-func (*legacyRouteTestService) CreateContainerFromSnapshot(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
+func (*legacyRouteTestService) RestoreContainer(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
 	return ctr.ContainerInfo{}, nil
 }
 
@@ -156,16 +170,21 @@ func (*legacyRouteTestService) SnapshotMounts(context.Context, string, string) (
 	return nil, ctr.ErrNotSupported
 }
 
-func newLegacyRouteTestManager(t *testing.T, svc ctr.Service, cfg config.WorkspaceConfig) *Manager {
+func (*legacyRouteTestService) SnapshotUsage(context.Context, string, string) (ctr.SnapshotUsage, error) {
+	return ctr.SnapshotUsage{}, ctr.ErrNotSupported
+}
+
+func newLegacyRouteTestManager(t *testing.T, svc runtimeService, cfg config.WorkspaceConfig) *Manager {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)
 	m := &Manager{
-		service:        svc,
-		cfg:            cfg,
-		namespace:      config.DefaultNamespace,
-		containerLocks: make(map[string]*sync.Mutex),
-		legacyIPs:      make(map[string]string),
-		logger:         logger,
+		service:           svc,
+		networkController: netctl.NewController(netctl.NewContainerRuntimeFromBackend("containerd", svc), nil, nil),
+		cfg:               cfg,
+		namespace:         config.DefaultNamespace,
+		containerLocks:    make(map[string]*sync.Mutex),
+		legacyIPs:         make(map[string]string),
+		logger:            logger,
 	}
 	m.grpcPool = bridge.NewPool(m.dialTarget)
 	return m
@@ -230,7 +249,7 @@ func TestDeleteClearsLegacyRoute(t *testing.T) {
 	}
 }
 
-func TestSetupNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
+func TestEnsureContainerNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
 	svc := &legacyRouteTestService{
 		setupNetworkResults: []ctr.NetworkResult{{IP: ""}, {IP: "10.0.0.3"}},
 	}
@@ -239,9 +258,9 @@ func TestSetupNetworkAndGetIPRejectsEmptyIP(t *testing.T) {
 		CNIConfigDir: "/etc/cni/net.d",
 	})
 
-	ip, err := m.setupNetworkAndGetIP(context.Background(), "workspace-bot")
+	ip, err := m.ensureContainerNetworkAndGetIP(context.Background(), "", "workspace-bot")
 	if err != nil {
-		t.Fatalf("setupNetworkAndGetIP failed: %v", err)
+		t.Fatalf("ensureContainerNetworkAndGetIP failed: %v", err)
 	}
 	if ip != "10.0.0.3" {
 		t.Fatalf("expected retry IP, got %q", ip)

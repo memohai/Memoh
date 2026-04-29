@@ -19,6 +19,9 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[container]
+backend = "apple"
+
 [containerd]
 # socket_path / namespace are unused on macOS; socktainer takes over.
 
@@ -30,6 +33,7 @@ timezone = "UTC"
 
 [workspace]
 default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
 data_root = "data"
 
 [postgres]

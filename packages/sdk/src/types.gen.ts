@@ -552,11 +552,18 @@ export type ChannelAttachment = {
     };
     mime?: string;
     name?: string;
+    /**
+     * container-local filesystem path
+     */
+    path?: string;
     platform_key?: string;
     size?: number;
     source_platform?: string;
     thumbnail_url?: string;
     type?: ChannelAttachmentType;
+    /**
+     * HTTP(S) or data URL
+     */
     url?: string;
     width?: number;
 };
@@ -1812,6 +1819,11 @@ export type SettingsSettings = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    overlay_config?: {
+        [key: string]: unknown;
+    };
+    overlay_enabled?: boolean;
+    overlay_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
@@ -1858,6 +1870,11 @@ export type SettingsUpsertRequest = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    overlay_config?: {
+        [key: string]: unknown;
+    };
+    overlay_enabled?: boolean;
+    overlay_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;

@@ -89,18 +89,23 @@ func adaptAttachments(atts []channel.Attachment) []Attachment {
 	}
 	result := make([]Attachment, 0, len(atts))
 	for _, a := range atts {
+		bundle := channel.BundleFromAttachment(a)
 		att := Attachment{
-			Type:        string(a.Type),
-			MimeType:    strings.TrimSpace(a.Mime),
-			FileName:    strings.TrimSpace(a.Name),
-			ContentHash: strings.TrimSpace(a.ContentHash),
-			Width:       a.Width,
-			Height:      a.Height,
+			Type:        bundle.Type,
+			MimeType:    strings.TrimSpace(bundle.Mime),
+			FileName:    strings.TrimSpace(bundle.Name),
+			ContentHash: strings.TrimSpace(bundle.ContentHash),
+			Width:       bundle.Width,
+			Height:      bundle.Height,
 		}
-		if a.DurationMs > 0 {
-			att.Duration = int(a.DurationMs / 1000)
+		if bundle.DurationMs > 0 {
+			att.Duration = int(bundle.DurationMs / 1000)
 		}
-		if ref := a.Reference(); ref != "" {
+		if ref := strings.TrimSpace(bundle.Path); ref != "" {
+			att.FilePath = ref
+		} else if ref := strings.TrimSpace(bundle.URL); ref != "" {
+			att.FilePath = ref
+		} else if ref := strings.TrimSpace(bundle.PlatformKey); ref != "" {
 			att.FilePath = ref
 		}
 		result = append(result, att)

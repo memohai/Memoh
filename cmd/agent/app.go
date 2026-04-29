@@ -47,7 +47,8 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
+	containerprovider "github.com/memohai/memoh/internal/container/provider"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
@@ -76,6 +77,9 @@ import (
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
+	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/network/kubeapi"
+	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -91,6 +95,7 @@ import (
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/version"
 	"github.com/memohai/memoh/internal/workspace"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 func provideServerHandler(fn any) any {
@@ -107,7 +112,7 @@ func provideLogger(cfg config.Config) *slog.Logger {
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
-	svc, cleanup, err := ctr.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
+	svc, cleanup, err := containerprovider.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +123,13 @@ func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 		},
 	})
 	return svc, nil
+}
+
+func provideNetworkController(service ctr.Service, rc *boot.RuntimeConfig, networkService *netctl.Service, registry *netctl.Registry) netctl.Controller {
+	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
+	ctrl := netctl.NewController(runtime, networkService, registry)
+	networkService.SetController(ctrl)
+	return ctrl
 }
 
 func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
@@ -138,8 +150,34 @@ func provideDBQueries(conn *pgxpool.Pool) *dbsqlc.Queries {
 	return dbsqlc.New(conn)
 }
 
-func provideWorkspaceManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool) *workspace.Manager {
-	return workspace.NewManager(log, service, cfg.Workspace, cfg.Containerd.Namespace, conn)
+func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
+	registry := netctl.NewRegistry()
+	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
+	var kubeRuntime kubeapi.Runtime
+	if rt, ok := service.(kubeapi.Runtime); ok {
+		kubeRuntime = rt
+	}
+	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
+		SidecarRuntime: service,
+		KubeRuntime:    kubeRuntime,
+		Runtime:        runtime.Descriptor(),
+		StateRoot:      cfg.Workspace.DataRoot,
+	}); err != nil {
+		panic(err)
+	}
+	return registry
+}
+
+func provideNetworkService(log *slog.Logger, queries *dbsqlc.Queries, registry *netctl.Registry, service ctr.Service, rc *boot.RuntimeConfig, cfg config.Config) *netctl.Service {
+	return netctl.NewService(log, queries, registry, service, rc.ContainerBackend, cfg.Workspace.CNIBinaryDir, cfg.Workspace.CNIConfigDir, cfg.Workspace.DataRoot)
+}
+
+func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool) *workspace.Manager {
+	return workspace.NewManager(log, service, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn)
+}
+
+func provideBridgeProvider(manager *workspace.Manager) bridge.Provider {
+	return manager
 }
 
 func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries *dbsqlc.Queries, log *slog.Logger) memprovider.LLM {
@@ -152,10 +190,10 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, manager *workspace.Manager, queries *dbsqlc.Queries, cfg config.Config) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries *dbsqlc.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
-	fileRuntime := handlers.NewBuiltinMemoryRuntime(manager)
-	fileStore := storefs.New(log, manager)
+	fileRuntime := handlers.NewBuiltinMemoryRuntime(provider)
+	fileStore := storefs.New(log, provider)
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
 		if err != nil {
@@ -239,9 +277,9 @@ func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.
 	return &sessionCreatorAdapter{svc: sessionService}
 }
 
-func provideAgent(log *slog.Logger, manager *workspace.Manager) *agentpkg.Agent {
+func provideAgent(log *slog.Logger, provider bridge.Provider) *agentpkg.Agent {
 	return agentpkg.New(agentpkg.Deps{
-		BridgeProvider: manager,
+		BridgeProvider: provider,
 		Logger:         log,
 	})
 }
@@ -348,7 +386,7 @@ func provideChannelRouter(
 	compactionService *compaction.Service,
 	queries *dbsqlc.Queries,
 	containerdHandler *handlers.ContainerdHandler,
-	manager *workspace.Manager,
+	provider bridge.Provider,
 	pipeline *pipelinepkg.Pipeline,
 	eventStore *pipelinepkg.EventStore,
 	discussDriver *pipelinepkg.DiscussDriver,
@@ -394,7 +432,7 @@ func provideChannelRouter(
 		queries,
 		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},
-		&commandContainerFSAdapter{manager: manager},
+		&commandContainerFSAdapter{provider: provider},
 	)
 	cmdHandler.SetCompactionService(compactionService, queries)
 	processor.SetCommandHandler(cmdHandler)
@@ -479,11 +517,11 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 	}
 }
 
-func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, _ config.Config, manager *workspace.Manager, memoryRegistry *memprovider.Registry, settingsService *settings.Service, _ *handlers.ContainerdHandler) *handlers.MemoryHandler {
+func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, _ config.Config, provider bridge.Provider, memoryRegistry *memprovider.Registry, settingsService *settings.Service, _ *handlers.ContainerdHandler) *handlers.MemoryHandler {
 	h := handlers.NewMemoryHandler(log, botService, accountService)
 	h.SetMemoryRegistry(memoryRegistry)
 	h.SetSettingsService(settingsService)
-	h.SetMCPClientProvider(manager)
+	h.SetMCPClientProvider(provider)
 	return h
 }
 
@@ -502,15 +540,15 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	return handlers.NewSessionHandler(log, sessionService, botService, accountService)
 }
 
-func provideMediaService(log *slog.Logger, manager *workspace.Manager, cfg config.Config) *media.Service {
-	primary := containerfs.New(manager)
+func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
+	primary := containerfs.New(provider)
 	dataRoot := cfg.Workspace.DataRoot
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
 	secondary := localfs.New(filepath.Join(dataRoot, "media"))
-	provider := fallback.New(primary, secondary)
-	return media.NewService(log, provider)
+	storageProvider := fallback.New(primary, secondary)
+	return media.NewService(log, storageProvider)
 }
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
@@ -1094,11 +1132,11 @@ func (a *commandSkillLoaderAdapter) LoadSkills(ctx context.Context, botID string
 }
 
 type commandContainerFSAdapter struct {
-	manager *workspace.Manager
+	provider bridge.Provider
 }
 
 func (a *commandContainerFSAdapter) ListDir(ctx context.Context, botID, dirPath string) ([]command.FSEntry, error) {
-	client, err := a.manager.MCPClient(ctx, botID)
+	client, err := a.provider.MCPClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
@@ -1115,7 +1153,7 @@ func (a *commandContainerFSAdapter) ListDir(ctx context.Context, botID, dirPath 
 }
 
 func (a *commandContainerFSAdapter) ReadFile(ctx context.Context, botID, filePath string) (string, error) {
-	client, err := a.manager.MCPClient(ctx, botID)
+	client, err := a.provider.MCPClient(ctx, botID)
 	if err != nil {
 		return "", err
 	}

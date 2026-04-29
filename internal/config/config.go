@@ -30,6 +30,10 @@ const (
 	DefaultRuntimeDir       = "/opt/memoh/runtime"
 	DefaultBaseImage        = "debian:bookworm-slim"
 	DefaultTimezone         = "UTC"
+
+	ImagePullPolicyIfNotPresent = "if_not_present"
+	ImagePullPolicyAlways       = "always"
+	ImagePullPolicyNever        = "never"
 )
 
 type Config struct {
@@ -38,7 +42,9 @@ type Config struct {
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
 	Timezone       string               `toml:"timezone"`
+	Container      ContainerConfig      `toml:"container"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
+	Kubernetes     KubernetesConfig     `toml:"kubernetes"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
@@ -68,6 +74,10 @@ type AuthConfig struct {
 	JWTExpiresIn string `toml:"jwt_expires_in"`
 }
 
+type ContainerConfig struct {
+	Backend string `toml:"backend"`
+}
+
 type ContainerdConfig struct {
 	SocketPath string           `toml:"socket_path"`
 	Namespace  string           `toml:"namespace"`
@@ -79,14 +89,47 @@ type SocktainerConfig struct {
 	BinaryPath string `toml:"binary_path"`
 }
 
+type KubernetesConfig struct {
+	Namespace          string `toml:"namespace"`
+	Kubeconfig         string `toml:"kubeconfig"`
+	InCluster          bool   `toml:"in_cluster"`
+	ServiceAccountName string `toml:"service_account_name"`
+	ImagePullSecret    string `toml:"image_pull_secret"`
+	PVCStorageClass    string `toml:"pvc_storage_class"`
+	PVCSize            string `toml:"pvc_size"`
+	BridgePort         int    `toml:"bridge_port"`
+}
+
+func (c KubernetesConfig) EffectiveNamespace() string {
+	if strings.TrimSpace(c.Namespace) != "" {
+		return strings.TrimSpace(c.Namespace)
+	}
+	return DefaultNamespace
+}
+
+func (c KubernetesConfig) EffectivePVCSize() string {
+	if strings.TrimSpace(c.PVCSize) != "" {
+		return strings.TrimSpace(c.PVCSize)
+	}
+	return "10Gi"
+}
+
+func (c KubernetesConfig) EffectiveBridgePort() int {
+	if c.BridgePort > 0 {
+		return c.BridgePort
+	}
+	return 9090
+}
+
 type WorkspaceConfig struct {
-	Registry     string `toml:"registry"`
-	DefaultImage string `toml:"default_image"`
-	Snapshotter  string `toml:"snapshotter"`
-	DataRoot     string `toml:"data_root"`
-	CNIBinaryDir string `toml:"cni_bin_dir"`
-	CNIConfigDir string `toml:"cni_conf_dir"`
-	RuntimeDir   string `toml:"runtime_dir"`
+	Registry        string `toml:"registry"`
+	DefaultImage    string `toml:"default_image"`
+	ImagePullPolicy string `toml:"image_pull_policy"`
+	Snapshotter     string `toml:"snapshotter"`
+	DataRoot        string `toml:"data_root"`
+	CNIBinaryDir    string `toml:"cni_bin_dir"`
+	CNIConfigDir    string `toml:"cni_conf_dir"`
+	RuntimeDir      string `toml:"runtime_dir"`
 }
 
 // ImageRef returns the fully qualified image reference for the base image,
@@ -109,6 +152,19 @@ func (c WorkspaceConfig) RuntimePath() string {
 		return c.RuntimeDir
 	}
 	return DefaultRuntimeDir
+}
+
+func (c WorkspaceConfig) EffectiveImagePullPolicy() string {
+	switch strings.TrimSpace(strings.ToLower(c.ImagePullPolicy)) {
+	case ImagePullPolicyAlways:
+		return ImagePullPolicyAlways
+	case ImagePullPolicyNever:
+		return ImagePullPolicyNever
+	case ImagePullPolicyIfNotPresent, "":
+		return ImagePullPolicyIfNotPresent
+	default:
+		return ImagePullPolicyIfNotPresent
+	}
 }
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.
@@ -205,9 +261,18 @@ func Load(path string) (Config, error) {
 			JWTExpiresIn: DefaultJWTExpiresIn,
 		},
 		Timezone: DefaultTimezone,
+		Container: ContainerConfig{
+			Backend: "",
+		},
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
+		},
+		Kubernetes: KubernetesConfig{
+			Namespace:  DefaultNamespace,
+			InCluster:  true,
+			PVCSize:    "10Gi",
+			BridgePort: 9090,
 		},
 		Workspace: WorkspaceConfig{
 			DefaultImage: DefaultBaseImage,

@@ -1,6 +1,6 @@
 # Docker Installation
 
-Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with embedded Containerd and in-process AI agent), and the web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
+Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with an explicit container runtime backend and in-process AI agent), and the web UI — all orchestrated via Docker Compose.
 
 ## Service Architecture
 
@@ -8,7 +8,7 @@ The Docker Compose stack consists of multiple services. Some are always started,
 
 | Service | Profile | Description |
 |---------|---------|-------------|
-| **server** | *(core)* | Main Memoh server with embedded Containerd and in-process AI agent |
+| **server** | *(core)* | Main Memoh server with the configured container runtime backend and in-process AI agent |
 | **web** | *(core)* | Web UI (Vue 3) |
 | **postgres** | *(core)* | PostgreSQL database |
 | **qdrant** | `qdrant` | Qdrant vector database for memory search (sparse and dense modes) |
@@ -158,6 +158,7 @@ For users in mainland China who cannot access Docker Hub directly, uncomment the
 ```toml
 [workspace]
 registry = "memoh.cn"
+image_pull_policy = "if_not_present" # if_not_present, always, or never
 ```
 
 And add the China mirror compose overlay:
@@ -194,8 +195,9 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `[admin]` | Admin account credentials (username, password, email) |
 | `[auth]` | JWT secret and token expiration |
 | `timezone` | Server timezone (default `UTC`) |
+| `[container]` | Required container backend selection (`docker`, `kubernetes`, `containerd`, `apple`) |
 | `[containerd]` | Containerd socket path and namespace |
-| `[workspace]` | Container image, snapshotter, data paths, CNI config, optional registry mirror |
+| `[workspace]` | Container image, pull policy, snapshotter, data paths, CNI config, optional registry mirror |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
 | `[qdrant]` | Qdrant vector database connection (base_url, api_key, timeout) |
 | `[sparse]` | Sparse encoding service URL |

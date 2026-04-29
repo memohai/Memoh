@@ -10925,6 +10925,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "path": {
+                    "description": "container-local filesystem path",
+                    "type": "string"
+                },
                 "platform_key": {
                     "type": "string"
                 },
@@ -10941,6 +10945,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/channel.AttachmentType"
                 },
                 "url": {
+                    "description": "HTTP(S) or data URL",
                     "type": "string"
                 },
                 "width": {
@@ -14166,6 +14171,16 @@ const docTemplate = `{
                 "memory_provider_id": {
                     "type": "string"
                 },
+                "overlay_config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "overlay_enabled": {
+                    "type": "boolean"
+                },
+                "overlay_provider": {
+                    "type": "string"
+                },
                 "persist_full_tool_results": {
                     "type": "boolean"
                 },
@@ -14298,6 +14313,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "memory_provider_id": {
+                    "type": "string"
+                },
+                "overlay_config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "overlay_enabled": {
+                    "type": "boolean"
+                },
+                "overlay_provider": {
                     "type": "string"
                 },
                 "persist_full_tool_results": {

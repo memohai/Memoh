@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -496,13 +495,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
 
-			chatAttachments := make([]conversation.ChatAttachment, 0, len(msg.Attachments))
-			for _, rawAtt := range msg.Attachments {
-				var att conversation.ChatAttachment
-				if err := json.Unmarshal(rawAtt, &att); err == nil {
-					chatAttachments = append(chatAttachments, att)
-				}
-			}
+			chatAttachments := parseWSClientAttachments(msg.Attachments)
 
 			if text == "" && len(chatAttachments) == 0 {
 				writer.SendJSON(map[string]string{"type": "error", "message": "message text or attachments required"})
@@ -755,18 +748,15 @@ func (h *LocalChannelHandler) wsIngestAttachments(ctx context.Context, botID str
 		if !ok {
 			continue
 		}
-		if ch, _ := item["content_hash"].(string); strings.TrimSpace(ch) != "" {
+		bundle := attachmentpkg.BundleFromMap(item)
+		if strings.TrimSpace(bundle.ContentHash) != "" {
 			continue
 		}
-		rawURL, _ := item["url"].(string)
-		if rawURL == "" {
-			rawURL, _ = item["path"].(string)
-		}
-		if rawURL = strings.TrimSpace(rawURL); rawURL == "" {
+		if bundle.Path == "" && bundle.Base64 == "" {
 			continue
 		}
-		if ingested := h.ingestSingleAttachment(ctx, botID, rawURL, item); ingested != nil {
-			rawItems[i] = ingested
+		if ingested, ok := h.ingestSingleAttachment(ctx, botID, bundle); ok {
+			rawItems[i] = applyBundleToItemMap(maps.Clone(item), ingested)
 			changed = true
 		}
 	}
@@ -785,24 +775,26 @@ func (h *LocalChannelHandler) wsIngestAttachments(ctx context.Context, botID str
 	return []json.RawMessage{out}
 }
 
-func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID, rawURL string, item map[string]any) map[string]any {
-	lower := strings.ToLower(rawURL)
-
-	if !strings.HasPrefix(lower, "data:") && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-		asset, err := h.mediaService.IngestContainerFile(ctx, botID, rawURL)
+func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID string, bundle attachmentpkg.Bundle) (attachmentpkg.Bundle, bool) {
+	bundle = bundle.Normalize()
+	if bundle.Path != "" {
+		asset, err := h.mediaService.IngestContainerFile(ctx, botID, bundle.Path)
 		if err != nil {
-			h.logger.Warn("ws ingest container file failed", slog.String("path", rawURL), slog.Any("error", err))
-			return nil
+			h.logger.Warn("ws ingest container file failed", slog.String("path", bundle.Path), slog.Any("error", err))
+			return attachmentpkg.Bundle{}, false
 		}
-		return applyAssetToItem(item, botID, asset)
+		return bundle.WithAsset(botID, asset), true
 	}
 
-	if strings.HasPrefix(lower, "data:") {
-		mimeType := attachmentpkg.MimeFromDataURL(rawURL)
-		decoded, err := attachmentpkg.DecodeBase64(rawURL, media.MaxAssetBytes)
+	if bundle.Base64 != "" {
+		mimeType := bundle.Mime
+		if mimeType == "" {
+			mimeType = attachmentpkg.MimeFromDataURL(bundle.Base64)
+		}
+		decoded, err := attachmentpkg.DecodeBase64(bundle.Base64, media.MaxAssetBytes)
 		if err != nil {
 			h.logger.Warn("ws decode data url failed", slog.Any("error", err))
-			return nil
+			return attachmentpkg.Bundle{}, false
 		}
 		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
 			BotID:    botID,
@@ -812,12 +804,12 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID,
 		})
 		if err != nil {
 			h.logger.Warn("ws ingest data url failed", slog.Any("error", err))
-			return nil
+			return attachmentpkg.Bundle{}, false
 		}
-		return applyAssetToItem(item, botID, asset)
+		return bundle.WithAsset(botID, asset), true
 	}
 
-	return nil
+	return attachmentpkg.Bundle{}, false
 }
 
 // wsSynthesizeSpeech handles speech_delta events by synthesizing audio and
@@ -867,10 +859,10 @@ func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID stri
 }
 
 func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, contentType string, audioData []byte) map[string]any {
-	att := map[string]any{
-		"type": "voice",
-		"mime": contentType,
-		"size": len(audioData),
+	bundle := attachmentpkg.Bundle{
+		Type: "voice",
+		Mime: contentType,
+		Size: int64(len(audioData)),
 	}
 
 	mimeType := attachmentpkg.NormalizeMime(contentType)
@@ -882,109 +874,72 @@ func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, con
 			MaxBytes: media.MaxAssetBytes,
 		})
 		if err == nil {
-			applyAssetToMap(att, botID, asset)
-			return att
+			return bundle.WithAsset(botID, asset).ToMap()
 		}
 		h.logger.Warn("ws tts ingest failed", slog.Any("error", err))
 	}
 
-	att["url"] = "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(audioData)
-	return att
-}
-
-func applyAssetToItem(item map[string]any, botID string, asset media.Asset) map[string]any {
-	result := maps.Clone(item)
-
-	sourcePath := strings.TrimSpace(itemStr(item, "path"))
-	sourceURL := strings.TrimSpace(itemStr(item, "url"))
-
-	existingName, _ := result["name"].(string)
-	if strings.TrimSpace(existingName) == "" {
-		if sourcePath != "" {
-			result["name"] = filepath.Base(sourcePath)
-		} else if sourceURL != "" {
-			result["name"] = filepath.Base(sourceURL)
-		}
-	}
-
-	delete(result, "path")
-	result["url"] = ""
-	applyAssetToMap(result, botID, asset)
-
-	if meta, ok := result["metadata"].(map[string]any); ok {
-		if n, _ := result["name"].(string); n != "" {
-			meta["name"] = n
-		}
-		if sourcePath != "" {
-			meta["source_path"] = sourcePath
-		}
-		if sourceURL != "" {
-			meta["source_url"] = sourceURL
-		}
-	}
-	return result
-}
-
-func itemStr(m map[string]any, key string) string {
-	v, _ := m[key].(string)
-	return v
-}
-
-func applyAssetToMap(m map[string]any, botID string, asset media.Asset) {
-	m["content_hash"] = asset.ContentHash
-	m["metadata"] = map[string]any{
-		"bot_id":      botID,
-		"storage_key": asset.StorageKey,
-	}
-	if mime, _ := m["mime"].(string); strings.TrimSpace(mime) == "" && asset.Mime != "" {
-		m["mime"] = asset.Mime
-	}
-	if size, _ := m["size"].(float64); size == 0 && asset.SizeBytes > 0 {
-		m["size"] = asset.SizeBytes
-	}
+	bundle.Base64 = "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(audioData)
+	return bundle.Normalize().ToMap()
 }
 
 // extractAssetRefsFromProcessedEvent parses a processed attachment_delta
 // event to collect asset refs for post-persist linking.
 func extractAssetRefsFromProcessedEvent(event json.RawMessage) []messagepkg.AssetRef {
 	var envelope struct {
-		Type        string `json:"type"`
-		Attachments []struct {
-			ContentHash string         `json:"content_hash"`
-			Name        string         `json:"name"`
-			Mime        string         `json:"mime"`
-			Size        float64        `json:"size"`
-			Metadata    map[string]any `json:"metadata"`
-		} `json:"attachments"`
+		Type        string           `json:"type"`
+		Attachments []map[string]any `json:"attachments"`
 	}
 	if err := json.Unmarshal(event, &envelope); err != nil || envelope.Type != "attachment_delta" {
 		return nil
 	}
 	var refs []messagepkg.AssetRef
 	for i, att := range envelope.Attachments {
-		ch := strings.TrimSpace(att.ContentHash)
+		bundle := attachmentpkg.BundleFromMap(att)
+		ch := strings.TrimSpace(bundle.ContentHash)
 		if ch == "" {
 			continue
 		}
-		name := strings.TrimSpace(att.Name)
-		if name == "" && att.Metadata != nil {
-			name, _ = att.Metadata["name"].(string)
+		name := strings.TrimSpace(bundle.Name)
+		if name == "" && bundle.Metadata != nil {
+			name, _ = bundle.Metadata["name"].(string)
 		}
 		ref := messagepkg.AssetRef{
 			ContentHash: ch,
 			Role:        "attachment",
 			Ordinal:     i,
 			Name:        name,
-			Mime:        strings.TrimSpace(att.Mime),
-			SizeBytes:   int64(att.Size),
-			Metadata:    att.Metadata,
+			Mime:        strings.TrimSpace(bundle.Mime),
+			SizeBytes:   bundle.Size,
+			Metadata:    bundle.Metadata,
 		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
+		ref.StorageKey = attachmentpkg.MetadataString(bundle.Metadata, attachmentpkg.MetadataKeyStorageKey)
 		refs = append(refs, ref)
 	}
 	return refs
+}
+
+func applyBundleToItemMap(item map[string]any, bundle attachmentpkg.Bundle) map[string]any {
+	return bundle.MergeIntoMap(item)
+}
+
+func parseWSClientAttachments(rawAttachments []json.RawMessage) []conversation.ChatAttachment {
+	if len(rawAttachments) == 0 {
+		return nil
+	}
+	attachments := make([]conversation.ChatAttachment, 0, len(rawAttachments))
+	for _, rawAtt := range rawAttachments {
+		var decoded any
+		if err := json.Unmarshal(rawAtt, &decoded); err != nil {
+			continue
+		}
+		bundles, ok := attachmentpkg.ParseToolInputBundles(decoded)
+		if !ok {
+			continue
+		}
+		for _, bundle := range bundles {
+			attachments = append(attachments, conversation.ChatAttachmentFromBundle(bundle))
+		}
+	}
+	return attachments
 }
