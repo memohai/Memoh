@@ -4,8 +4,9 @@
 </div>  
 
 <div align="center">
-  <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
+  <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
+  <p>可自托管、常在线的容器化 AI 智能体编排</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />
@@ -16,29 +17,28 @@
     <a href="https://deepwiki.com/memohai/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
-    <img src="https://github.com/memohai/Memoh/actions/workflows/docker.yml/badge.svg" alt="Docker" />
+    <a href="https://t.me/memohai">
+      <img src="https://img.shields.io/badge/Telegram-Group-26A5E4?logo=telegram&logoColor=white" alt="Telegram" />
+    </a>
+    <a href="https://docs.memoh.ai">
+      <img src="https://img.shields.io/badge/Docs-memoh.ai-3eaf7c?logo=readthedocs&logoColor=white" alt="Documentation" />
+    </a>
   </div>
-  <div align="center">
-    [<a href="https://t.me/memohai">Telegram 群组</a>]
-    [<a href="https://docs.memoh.ai">文档</a>]
-    [<a href="mailto:business@memoh.net">合作</a>]
-  </div>
-  <hr>
 </div>
 
-Memoh 是一个常驻运行的容器化 AI Agent 系统。你可以创建多个 AI 机器人，每个机器人运行在独立的容器中，拥有持久化记忆，并通过 Telegram、Discord、飞书(Lark)、QQ、Matrix、Misskey、钉钉、企业微信、微信、微信公众号、Email 或内置 Web 界面与之交互。机器人可以执行命令、编辑文件、浏览网页、通过 MCP 调用外部工具，并记住一切 —— 就像给每个 Bot 一台自己的电脑和大脑。
+**Memoh（/ˈmemoʊ/）** 是一套常在线的容器化 AI 智能体编排。你可以建多个机器人，各跑在独立容器里、带持久记忆，在 Telegram、Discord 等渠道里跟它们聊。机器人能跑命令、改文件、逛网页、通过 MCP 接外部工具，并记住聊过的内容——就像给每个机器人各配了一台电脑和一份持续的记忆。
 
 ## 快速开始
 
-一键安装（**需先安装 [Docker](https://www.docker.com/get-started/)**）：
+一键安装（**需先装 [Docker](https://www.docker.com/get-started/)**）：
 
 ```bash
 curl -fsSL https://memoh.sh | sh
 ```
 
-*静默安装（全部默认）：`curl -fsSL ... | sh -s -- -y`*
+*全部默认、静默安装：`curl -fsSL ... | sh -s -- -y`*
 
-或手动部署：
+或手动：
 
 ```bash
 git clone --depth 1 https://github.com/memohai/Memoh.git
@@ -53,169 +53,147 @@ docker compose up -d
 > curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
 > ```
 >
-> **使用中国大陆镜像加速：**
+> **镜像拉取慢时可用国内镜像：**
 > ```bash
 > curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 > ```
 >
-> 不要用 `sudo` 运行整个安装脚本。脚本会在 Docker 需要时只对
-> `docker` 命令使用 `sudo`。macOS 或用户已在 `docker` 用户组中时，
-> Docker 命令通常也无需 `sudo`。
+> 不要对整个安装脚本用 `sudo`。需要时脚本内部会自行调用 `sudo docker`。在 macOS 上，或用户已在 `docker` 组时，连 Docker 也不必 sudo。
 
-启动后访问 <http://localhost:8082>。默认登录：`admin` / `admin123`
+启动后打开 <http://localhost:8082>。默认账号：`admin` / `admin123`
 
-自定义配置与生产部署请参阅 [DEPLOYMENT.md](DEPLOYMENT.md)。
+自定义与生产环境见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 文档入口：
 
-- [产品概览](https://docs.memoh.ai/about)
-- [Providers & Models](https://docs.memoh.ai/getting-started/provider-and-model)
-- [Bot 配置](https://docs.memoh.ai/getting-started/bot)
-- [Sessions / Discuss 模式](https://docs.memoh.ai/getting-started/sessions)
-- [Channels 渠道接入](https://docs.memoh.ai/getting-started/channels)
-- [Skills](https://docs.memoh.ai/getting-started/skills)
-- [Supermarket](https://docs.memoh.ai/getting-started/supermarket)
-- [Slash Commands](https://docs.memoh.ai/getting-started/slash-commands)
+- [关于 Memoh](https://docs.memoh.ai/about)
+- [提供方与模型](https://docs.memoh.ai/getting-started/provider-and-model)
+- [机器人设置](https://docs.memoh.ai/getting-started/bot)
+- [会话与讨论模式](https://docs.memoh.ai/getting-started/sessions)
+- [渠道](https://docs.memoh.ai/getting-started/channels)
+- [技能](https://docs.memoh.ai/getting-started/skills)
+- [应用超市](https://docs.memoh.ai/getting-started/supermarket)
+- [斜杠命令](https://docs.memoh.ai/getting-started/slash-commands)
 
-## 为什么选择 Memoh？
+## 为什么选 Memoh？
 
-Memoh 为**常驻连续运行**而生 —— 一个始终在线的 AI，一份属于你自己的记忆。
+设计取向是**常连不断**：AI 一直在线，数据留在你手里。
 
-- **轻量高效**：Go 语言构建，可作为家庭/工作室基础设施，在边缘设备上高效运行。
-- **默认容器化**：每个 Bot 拥有独立容器，包含专属文件系统、网络和工具。
-- **混合架构**：云端推理获取前沿模型能力，本地记忆和索引保障隐私。
-- **多用户优先**：用户与 Bot 之间具有明确的共享和隐私边界。
-- **全图形化配置**：通过现代 Web 界面配置 Bot、渠道、MCP、技能等所有设置，无需编写代码。
+- **轻、快**：适合家里或小工作室当基础设施，在边缘设备上也能跑得动。
+- **默认容器化**：每个机器人有独立容器，自带文件系统、网络与工具环境。
+- **算力与数据拆着用**：能力可以走云上大模型，记忆和索引以本地为主，隐私更好拆。
+- **多用户设计**：用户之间、机器人和用户之间，分享和隐私有明确边界。
+- **全图形化配置**：机器人、渠道、MCP、技能、各项设置都在网页里配，不必写代码。
 
-## 特性
+## 功能概览
 
 ### 核心
 
-- 🤖 **多 Bot 与多用户**：创建多个 Bot，支持私聊、群聊或 Bot 间协作。Bot 可在群聊中区分不同用户，分别记忆上下文，并支持跨平台身份绑定。
-- 📦 **容器化**：每个 Bot 运行在独立的 containerd 容器中，拥有专属文件系统和网络，宛如各自拥有一台电脑。支持快照、数据导入/导出与版本管理。
-- 🧠 **记忆工程**：LLM 驱动的知识抽取，混合检索（稠密 + 稀疏 + BM25），基于 Provider 的长期记忆、记忆压缩，以及独立的会话上下文压缩。可插拔后端：内置（off / sparse / dense）、[Mem0](https://mem0.ai)、OpenViking。
-- 💬 **广泛渠道接入**：Telegram、Discord、飞书(Lark)、QQ、Matrix、Misskey、钉钉、企业微信、微信、微信公众号、Email（Mailgun / SMTP / Gmail OAuth）及内置 Web 界面。
+- 🤖 **多机多人**：多个机器人，可私聊、可群聊、可互相对话。群聊里能区分不同用户、各自记上下文，并支持跨平台身份绑定。
+- 📦 **容器化**：每个机器人在自己的 containerd 容器里，独立盘与网——和独占一台小机器差不多。支持快照、数据导入导出与版本管理。
+- 🗂️ **持久化文件**：每个机器人有可写的 home 目录，重启、升级、迁移不丢。机器人可自由读写、整理文件；你也可在网页文件管理器里浏览、上传、下载、编辑。
+- 🧠 **记忆工程**：由 LLM 做事实抽取，混合检索（稠密 + 稀疏 + BM25），可按提供方接长期记忆，有记忆整理与会话级上下文整理。可插后端：内置（关/稀疏/稠密）、[Mem0](https://mem0.ai)、OpenViking。
+- 💬 **渠道多**：Telegram、Discord、飞书、QQ、Matrix、Misskey、钉钉、企业微信、微信、公众号、邮件（Mailgun / SMTP / Gmail OAuth），以及自带 Web 界面。
 
-### Agent 能力
+### 智能体能力
 
-- 🔧 **MCP（模型上下文协议）**：完整 MCP 支持（HTTP / SSE / Stdio / OAuth）。连接外部工具服务器进行扩展，每个 Bot 独立管理自己的 MCP 连接。
-- 🌐 **浏览器自动化**：基于 Playwright 的无头 Chromium/Firefox —— 页面导航、点击、填写表单、截图、读取无障碍树、多标签页管理。
-- 🎭 **技能、Supermarket 与子代理**：通过模块化技能文件定义 Bot 行为；从 Supermarket 安装精选技能和 MCP 模板；将复杂任务委派给拥有独立上下文的子代理。
-- 💭 **会话与 Discuss 模式**：支持 chat、discuss、schedule、heartbeat、subagent 等会话类型，并可通过 slash commands 管理。
-- ⏰ **自动化**：基于 Cron 的定时任务和周期性心跳，实现 Bot 自主活动。
+- 🔧 **MCP（Model Context Protocol）**：支持 HTTP / SSE / Stdio / OAuth。可接外部工具服务；每个机器人自己管自己的 MCP 连接。
+- 🌐 **浏览器自动化**：Playwright 驱动无头 Chromium/Firefox，可导航、点击、填表、截屏、读可访问性树、管多标签。
+- 🎭 **技能、应用超市与子智能体**：用模块化技能描述行为，从应用超市装整理好的技能与 MCP 模板，重活可交给有独立上下文的子智能体。
+- 💭 **会话与讨论模式**：聊天、讨论、定时、心跳、子智能体等会话，可用斜杠命令，并查看会话状态。
+- ⏰ **自动化**：基于 Cron 的定时任务，以及周期心跳，让机器人能自主活动。
 
 ### 管理
 
-- 🖥️ **Web 界面**：基于 Vue 3 + Tailwind CSS 的现代面板 —— 流式聊天、工具调用可视化、文件管理器、所有配置可视化操作。深色/浅色主题，中英文支持。
-- 🔐 **访问控制**：基于优先级的 ACL 规则与 preset，支持 allow/deny 效果，可按渠道身份、渠道类型或会话维度控制。
-- 🧪 **多模型**：支持 OpenAI 兼容、Anthropic、Google、OpenAI Codex、GitHub Copilot、Edge TTS 等提供商。每个 Bot 独立配置模型，支持 Provider OAuth 和自动模型导入。
-- 🚀 **一键部署**：Docker Compose 编排，自动迁移、containerd 初始化与 CNI 网络配置。
+- 🖥️ **Web 界面**：现代表盘（Vue 3 + Tailwind）——流式聊天、工具调用展示、文件管理、全套可视化配置。深色/浅色、多语言。
+- 🔐 **访问控制**：基于优先级的 ACL，有预设、允许/拒绝、可按渠道身份、渠道类型或会话作用域配置。
+- 🧪 **多模型**：OpenAI 兼容、Anthropic、Google、OpenAI Codex、GitHub Copilot、Edge TTS 等。可按机器人选模型、提供方 OAuth、自动拉模型列表。
+- 🎙️ **语音与转写**：机器人可经 10+ 家 TTS（Edge、OpenAI、ElevenLabs、Deepgram、Azure、Google、MiniMax、火山、阿里、OpenRouter 等）发声；从 Telegram、Discord 等收到语音会可用 STT（OpenAI / OpenRouter）自动转写，也可用内置工具按需转任意音频。
+- 🚀 **一键部署**：Docker Compose，含自动迁移、containerd 与 CNI 网络。
 
 ## 记忆系统
 
-Memoh 的记忆系统围绕 **Memory Provider（记忆供应商）** 构建 —— 可插拔的后端，控制 Bot 如何存储、检索和管理长期记忆。
+开箱带一套**可完全自托管的记忆引擎**，不依赖外部 API、不必绑 SaaS。每个机器人会跨会话、跨天、跨平台记住你告诉它的事；群聊里会按用户分开记，不会把你和别人混在一起。
 
-| 供应商 | 说明 |
-|--------|------|
-| **Built-in（内置）** | 自托管，随 Memoh 附带。三种模式：**Off**（文件索引，无向量搜索）、**Sparse**（本地神经稀疏向量模型，无 API 费用）、**Dense**（基于嵌入模型的语义搜索，需 Qdrant）。 |
-| **Mem0** | 通过 [Mem0](https://mem0.ai) API 的 SaaS 记忆服务。 |
-| **OpenViking** | 自托管或 SaaS 记忆服务，使用自有 API。 |
+### 内置记忆（默认）
 
-每个 Bot 绑定一个供应商。聊天过程中，Bot 自动从每轮对话中抽取关键事实并存储为结构化记忆。收到新消息时，系统通过混合检索找到最相关的记忆并注入 Bot 上下文 —— 实现跨对话的个性化长期记忆。
+三种模式，在网页上按机器人切换：
 
-其他功能包括记忆压缩（合并冗余条目）、重建、手动创建/编辑，以及向量流形可视化（Top-K 分布与 CDF 曲线）。详见[文档](https://docs.memoh.ai/memory-providers/)。
+| 模式 | 后端 | 适合什么场景 |
+|------|------|-------------|
+| **关** | 仅文件，不做向量检索 | 小范围试用、排错、或想尽量少动件 |
+| **稀疏** | 本机小模型出神经稀疏向量 + BM25 | 无 API 费用、全在本地跑，短事实类回忆效果不错 |
+| **稠密** | 向量模型 + Qdrant | 按语义找记忆，不只靠关键词 |
 
-## 图库
+实现上大致包括：
+
+- **由 LLM 做事实抽取**：每轮对话会解析、去重，存成结构化记忆，不是堆原始整段话。
+- **混合检索**：稠密、稀疏与 BM25 一起参与再排序，于是「某 API key 是什么」（偏字面）和「上周说的那个项目」（偏语义）都能用得上。
+- **记忆整理**：用 LLM 周期合并冗余或过时的条目，索引体量可控，召回更稳。
+- **可检查、可改**：浏览、搜索、手建/手改记忆、整库重建，还能在页面上看向量流形可视化（Top-K 与 CDF 等）。
+
+### 其他提供方
+
+若想接现成的记忆服务，Memoh 也支持把 [**Mem0**](https://mem0.ai)（SaaS）和 **OpenViking**（自管或 SaaS）换进去，绑定和聊天体验一样，只换存储后端。
+
+完整说明见[文档](https://docs.memoh.ai/memory-providers/)。
+
+## 图集
 
 <table>
   <tr>
-    <td><img src="./assets/gallery/01.png" alt="Gallery 1" width="100%"></td>
-    <td><img src="./assets/gallery/02.png" alt="Gallery 2" width="100%"></td>
-    <td><img src="./assets/gallery/03.png" alt="Gallery 3" width="100%"></td>
+    <td><img src="./assets/gallery/01.png" alt="图集 1" width="100%"></td>
+    <td><img src="./assets/gallery/02.png" alt="图集 2" width="100%"></td>
   </tr>
   <tr>
-    <td><strong text-align="center">与 Bot 聊天</strong></td>
-    <td><strong text-align="center">容器与 Bot 管理</strong></td>
-    <td><strong text-align="center">提供商与模型配置</strong></td>
+    <td><strong text-align="center">聊天</strong></td>
+    <td><strong text-align="center">容器</strong></td>
   </tr>
   <tr>
-    <td><img src="./assets/gallery/04.png" alt="Gallery 4" width="100%"></td>
-    <td><img src="./assets/gallery/05.png" alt="Gallery 5" width="100%"></td>
-    <td><img src="./assets/gallery/06.png" alt="Gallery 6" width="100%"></td>
+    <td><img src="./assets/gallery/03.png" alt="图集 3" width="100%"></td>
+    <td><img src="./assets/gallery/04.png" alt="图集 4" width="100%"></td>
   </tr>
   <tr>
-    <td><strong text-align="center">容器文件管理器</strong></td>
+    <td><strong text-align="center">提供方</strong></td>
+    <td><strong text-align="center">文件管理</strong></td>
+  </tr>
+  <tr>
+    <td><img src="./assets/gallery/05.png" alt="图集 5" width="100%"></td>
+    <td><img src="./assets/gallery/06.png" alt="图集 6" width="100%"></td>
+  </tr>
+  <tr>
     <td><strong text-align="center">定时任务</strong></td>
-    <td><strong text-align="center">Token 用量追踪</strong></td>
+    <td><strong text-align="center">Token 用量</strong></td>
   </tr>
 </table>
 
-## 架构
 
-```mermaid
-flowchart TB
-    subgraph Clients [" 客户端 "]
-        direction LR
-        CH["渠道<br/>Telegram · Discord · 飞书 · QQ · Matrix · Misskey<br/>钉钉 · 企业微信 · 微信 · 微信公众号 · Email"]
-        WEB["Web 界面 (Vue 3 :8082)"]
-    end
+## 为本项目拆出的子项目
 
-    CH & WEB --> API
+- [**Twilight AI**](https://github.com/memohai/twilight-ai) — 给 Go 用的轻量、惯用 AI SDK，风格参考 [Vercel AI SDK](https://sdk.vercel.ai/)。与提供方解耦（OpenAI、Anthropic、Google），流式、工具调用、MCP、嵌入一等公民。
 
-    subgraph Server [" 服务端 · Go :8080 "]
-        API["REST API & 渠道适配器"]
-
-        subgraph Agent [" 进程内 AI Agent "]
-            TWILIGHT["Twilight AI SDK<br/>OpenAI · Anthropic · Google"]
-            CONV["对话流<br/>流式输出 · Sential · 循环检测"]
-        end
-
-        subgraph ToolProviders [" 工具提供者 "]
-            direction LR
-            T_CORE["记忆 · 网络搜索<br/>定时任务 · 联系人 · 收件箱"]
-            T_EXT["容器 · 邮件 · 浏览器<br/>子代理 · 技能 · TTS<br/>MCP 联邦"]
-        end
-
-        API --> Agent --> ToolProviders
-    end
-
-    PG[("PostgreSQL")]
-    QD[("Qdrant")]
-    BROWSER["浏览器网关<br/>(Playwright :8083)"]
-
-    subgraph Workspace [" 工作区容器 · containerd "]
-        direction LR
-        BA["Bot A"] ~~~ BB["Bot B"] ~~~ BC["Bot C"]
-    end
-
-    Server --- PG
-    Server --- QD
-    ToolProviders -.-> BROWSER
-    ToolProviders -- "gRPC Bridge over UDS" --> Workspace
-```
-
-## 因本项目而诞生的子项目
-
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — 轻量、地道的 Go AI SDK —— 灵感源自 [Vercel AI SDK](https://sdk.vercel.ai/)。支持多供应商（OpenAI、Anthropic、Google），提供一流的流式输出、工具调用、MCP 支持与嵌入向量生成。
-
-## 路线图
-
-详见 [Roadmap](https://github.com/memohai/Memoh/issues/86)。
-
-## 开发
-
-开发环境配置请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## Star History
+## Star 历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
 
-## Contributors
+## 贡献者
 
 <a href="https://github.com/memohai/Memoh/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
 </a>
 
-**LICENSE**: AGPLv3
+## 社区
 
-Copyright (C) 2026 Memoh. All rights reserved.
+- 🌐 [**网站**](https://memoh.ai)
+- 📚 [**文档**](https://docs.memoh.ai) — 安装、概念与指南
+- 🤝 [**合作**](mailto:business@memoh.net) — business@memoh.net
+- 💬 [**Telegram 群组**](https://t.me/memohai) — 交流与支持
+- 🛒 [**应用超市**](https://github.com/memohai/supermarket) — 整理好的技能与 MCP 模板
+
+---
+
+**许可证**：AGPLv3
+
+Made with ❤️ by MemohAI Team,
+
+Copyright (C) 2026 MemohAI (memoh.ai). All rights reserved.

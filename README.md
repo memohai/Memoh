@@ -6,7 +6,7 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
-  <p>Self hosted, always-on AI agent platform run in containers.</p>
+  <p>Self hosted, always-on AI agent orchestrator in containers.</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
     <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />
@@ -17,16 +17,16 @@
     <a href="https://deepwiki.com/memohai/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
-    <img src="https://github.com/memohai/Memoh/actions/workflows/docker.yml/badge.svg" alt="Docker" />
-  </div>
-  <div align="center">
-    [<a href="https://t.me/memohai">Telegram Group</a>]
-    [<a href="https://docs.memoh.ai">Documentation</a>]
-    [<a href="mailto:business@memoh.net">Cooperation</a>]
+    <a href="https://t.me/memohai">
+      <img src="https://img.shields.io/badge/Telegram-Group-26A5E4?logo=telegram&logoColor=white" alt="Telegram" />
+    </a>
+    <a href="https://docs.memoh.ai">
+      <img src="https://img.shields.io/badge/Docs-memoh.ai-3eaf7c?logo=readthedocs&logoColor=white" alt="Documentation" />
+    </a>
   </div>
 </div>
 
-Memoh is an always-on, containerized AI agent system. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email, or the built-in Web UI. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+**Memoh(/ˈmemoʊ/)** is an always-on, containerized AI agent orchestrator. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord and so on. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
 
 ## Quick Start
 
@@ -93,6 +93,7 @@ Memoh is built for **always-on continuity** — an AI that stays online, and a m
 
 - 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats, remember each person's context, and support cross-platform identity binding.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container with a dedicated filesystem and network — like having its own computer. Supports snapshots, data export/import, and versioning.
+- 🗂️ **Persistent File System**: Every bot has a writable home directory that survives restarts, upgrades, and migrations. Bots can read, write, and organize files freely; you can browse, upload, download, and edit them visually through the web UI's file manager.
 - 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), provider-based long-term memory, memory compaction, and separate session-level context compaction. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.
 - 💬 **Broad Channel Coverage**: Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email (Mailgun / SMTP / Gmail OAuth), and built-in Web UI.
 
@@ -109,21 +110,35 @@ Memoh is built for **always-on continuity** — an AI that stays online, and a m
 - 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) — streaming chat, tool call visualization, file manager, visual configuration for all settings. Dark/light theme, i18n.
 - 🔐 **Access Control**: Priority-based ACL rules with presets, allow/deny effects, and scope by channel identity, channel type, or conversation.
 - 🧪 **Multi-Model**: OpenAI-compatible, Anthropic, Google, OpenAI Codex, GitHub Copilot, and Edge TTS providers. Per-bot model assignment, provider OAuth, and automatic model import.
+- 🎙️ **Speech & Transcription**: Bots can speak through 10+ TTS providers (Edge, OpenAI, ElevenLabs, Deepgram, Azure, Google, MiniMax, Volcengine, Alibaba, OpenRouter) and listen — voice messages received from Telegram, Discord, etc. are auto-transcribed via STT models (OpenAI / OpenRouter), and bots can transcribe any audio file on demand through a built-in tool.
 - 🚀 **One-Click Deploy**: Docker Compose with automatic migration, containerd setup, and CNI networking.
 
 ## Memory System
 
-Memoh's memory system is built around **Memory Providers** — pluggable backends that control how a bot stores, retrieves, and manages long-term memory.
+Memoh ships with a **fully self-hosted memory engine** out of the box — no external API, no SaaS dependency. Every bot remembers what you've told it across sessions, days, and platforms; in group chats, each user's memories are kept separately so the bot doesn't mix you up with the rest.
 
-| Provider | Description |
-|----------|-------------|
-| **Built-in** | Self-hosted, ships with Memoh. Three modes: **Off** (file-based, no vector search), **Sparse** (neural sparse vectors via local model, no API cost), **Dense** (embedding-based semantic search via Qdrant). |
-| **Mem0** | SaaS memory via the [Mem0](https://mem0.ai) API. |
-| **OpenViking** | Self-hosted or SaaS memory with its own API. |
+### Built-in Memory (default)
 
-Each bot binds one provider. During chat, the bot automatically extracts key facts from every conversation turn and stores them as structured memories. On each new message, the most relevant memories are retrieved via hybrid search and injected into the bot's context — giving it personalized, long-term recall across conversations.
+Three modes, switchable per bot from the web UI:
 
-Additional capabilities include memory compaction (merge redundant entries), rebuild, manual creation/editing, and vector manifold visualization (Top-K distribution & CDF curves). See the [documentation](https://docs.memoh.ai/memory-providers/) for setup details.
+| Mode | Backend | When to use |
+|------|---------|-------------|
+| **Off** | Plain file storage, no vector search | Small bots, debugging, or when you want minimal moving parts |
+| **Sparse** | Neural sparse vectors via a local model + BM25 | Zero API cost, runs entirely on your machine, strong recall for short factual memories |
+| **Dense** | Embedding model + Qdrant vector DB | Best semantic recall — finds memories by meaning, not just keywords |
+
+Under the hood:
+
+- **LLM-driven fact extraction** — every conversation turn is parsed, deduplicated, and stored as structured memories rather than raw transcripts.
+- **Hybrid retrieval** — dense vectors, sparse vectors and BM25 are combined and re-ranked, so both "what was that API key" (lexical) and "the project I told you about last week" (semantic) hit reliably.
+- **Memory compaction** — redundant or stale entries are periodically merged by an LLM, keeping the index small and recall sharp.
+- **Inspect & edit anything** — browse, search, manually create/edit memories, rebuild the whole index, and visualize the vector manifold (Top-K distribution & CDF curves) from the web UI.
+
+### Other providers
+
+If you'd rather plug into an existing memory service, Memoh also supports [**Mem0**](https://mem0.ai) (SaaS) and **OpenViking** (self-hosted or SaaS) as drop-in alternatives — same bot binding, same chat experience, just a different backend.
+
+See the [documentation](https://docs.memoh.ai/memory-providers/) for full setup details.
 
 ## Gallery
 
@@ -131,80 +146,33 @@ Additional capabilities include memory compaction (merge redundant entries), reb
   <tr>
     <td><img src="./assets/gallery/01.png" alt="Gallery 1" width="100%"></td>
     <td><img src="./assets/gallery/02.png" alt="Gallery 2" width="100%"></td>
-    <td><img src="./assets/gallery/03.png" alt="Gallery 3" width="100%"></td>
   </tr>
   <tr>
     <td><strong text-align="center">Chat</strong></td>
     <td><strong text-align="center">Container</strong></td>
-    <td><strong text-align="center">Providers</strong></td>
   </tr>
   <tr>
+    <td><img src="./assets/gallery/03.png" alt="Gallery 3" width="100%"></td>
     <td><img src="./assets/gallery/04.png" alt="Gallery 4" width="100%"></td>
+  </tr>
+  <tr>
+    <td><strong text-align="center">Providers</strong></td>
+    <td><strong text-align="center">File Manager</strong></td>
+  </tr>
+  <tr>
     <td><img src="./assets/gallery/05.png" alt="Gallery 5" width="100%"></td>
     <td><img src="./assets/gallery/06.png" alt="Gallery 6" width="100%"></td>
   </tr>
   <tr>
-    <td><strong text-align="center">File Manager</strong></td>
     <td><strong text-align="center">Scheduled Tasks</strong></td>
     <td><strong text-align="center">Token Usage</strong></td>
   </tr>
 </table>
 
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph Clients [" Clients "]
-        direction LR
-        CH["Channels<br/>Telegram · Discord · Feishu · QQ · Matrix · Misskey<br/>DingTalk · WeCom · WeChat · WeChat OA · Email"]
-        WEB["Web UI (Vue 3 :8082)"]
-    end
-
-    CH & WEB --> API
-
-    subgraph Server [" Server · Go :8080 "]
-        API["REST API & Channel Adapters"]
-
-        subgraph Agent [" In-process AI Agent "]
-            TWILIGHT["Twilight AI SDK<br/>OpenAI · Anthropic · Google"]
-            CONV["Conversation Flow<br/>Streaming · Sential · Loop Detection"]
-        end
-
-        subgraph ToolProviders [" Tool Providers "]
-            direction LR
-            T_CORE["Memory · Web Search<br/>Schedule · Contacts · Inbox"]
-            T_EXT["Container · Email · Browser<br/>Subagent · Skill · TTS<br/>MCP Federation"]
-        end
-
-        API --> Agent --> ToolProviders
-    end
-
-    PG[("PostgreSQL")]
-    QD[("Qdrant")]
-    BROWSER["Browser Gateway<br/>(Playwright :8083)"]
-
-    subgraph Workspace [" Workspace Containers · containerd "]
-        direction LR
-        BA["Bot A"] ~~~ BB["Bot B"] ~~~ BC["Bot C"]
-    end
-
-    Server --- PG
-    Server --- QD
-    ToolProviders -.-> BROWSER
-    ToolProviders -- "gRPC Bridge over UDS" --> Workspace
-```
 
 ## Sub-projects Born for This Project
 
 - [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP support, and embeddings.
-
-## Roadmap
-
-Please refer to the [Roadmap](https://github.com/memohai/Memoh/issues/86) for more details.
-
-## Development
-
-Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## Star History
 
@@ -216,6 +184,18 @@ Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
   <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
 </a>
 
+## Community
+
+- 🌐 [**Website**](https://memoh.ai)
+- 📚 [**Documentation**](https://docs.memoh.ai) — setup, concepts, and guides
+- 🤝 [**Cooperation**](mailto:business@memoh.net) — business@memoh.net
+- 💬 [**Telegram Group**](https://t.me/memohai) — community chat & support
+- 🛒 [**Supermarket**](https://github.com/memohai/supermarket) — curated skills & MCP templates
+
+---
+
 **LICENSE**: AGPLv3
 
-Copyright (C) 2026 Memoh. All rights reserved.
+Made with ❤️ by MemohAI Team,
+
+Copyright (C) 2026 MemohAI (memoh.ai). All rights reserved.
