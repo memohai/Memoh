@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -80,7 +79,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	info := ref.info
 	displayName := strings.TrimSpace(snapshotName)
 	runtimeSnapshotName := fmt.Sprintf("%s-snapshot-%d", containerID, time.Now().UnixNano())
-	snapshotter := info.Snapshotter
+	snapshotter := info.StorageRef.Driver
 	normalizedSource := normalizeSnapshotSource(source)
 
 	// The sequence below (stop → commit → replace → start) is atomic from the
@@ -88,7 +87,13 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	// Use a detached context so a cancelled HTTP request cannot break it.
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, runtimeSnapshotName); err != nil {
+	if !m.nativeSnapshotsSupported(dctx) {
+		runtimeSnapshotName = m.archiveSnapshotKey(botID)
+		snapshotter = "archive"
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, runtimeSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
+	} else if err := m.commitSnapshotAndReplaceContainer(dctx, ref, runtimeSnapshotName); err != nil {
 		if !errors.Is(err, ctr.ErrNotSupported) {
 			return nil, err
 		}
@@ -104,7 +109,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		containerID,
 		runtimeSnapshotName,
 		displayName,
-		info.SnapshotKey,
+		info.StorageRef.Key,
 		snapshotter,
 		normalizedSource,
 	)
@@ -155,7 +160,12 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 	dctx := context.WithoutCancel(ctx)
 
 	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
-	if err := m.commitSnapshotAndReplaceContainer(dctx, ref, versionSnapshotName); err != nil {
+	if !m.nativeSnapshotsSupported(dctx) {
+		versionSnapshotName = m.archiveSnapshotKey(botID)
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, versionSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
+	} else if err := m.commitSnapshotAndReplaceContainer(dctx, ref, versionSnapshotName); err != nil {
 		if !errors.Is(err, ctr.ErrNotSupported) {
 			return nil, err
 		}
@@ -170,8 +180,8 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		containerID,
 		versionSnapshotName,
 		"",
-		info.SnapshotKey,
-		archiveAwareSnapshotter(info.Snapshotter, versionSnapshotName),
+		info.StorageRef.Key,
+		archiveAwareSnapshotter(info.StorageRef.Driver, versionSnapshotName),
 		SnapshotSourcePreExec,
 	)
 	if err != nil {
@@ -212,7 +222,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 
 	containerID := ref.containerID
 	info := ref.info
-	snapshotter := strings.TrimSpace(info.Snapshotter)
+	snapshotter := strings.TrimSpace(info.StorageRef.Driver)
 	if snapshotter == "" {
 		snapshotter = m.cfg.Snapshotter
 	}
@@ -220,7 +230,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 		snapshotter = "overlayfs"
 	}
 
-	runtimeSnapshots, err := m.service.ListSnapshots(ctx, snapshotter)
+	runtimeSnapshots, err := m.service.ListSnapshots(ctx, ctr.ListSnapshotsRequest{Driver: snapshotter})
 	if err != nil && !errors.Is(err, ctr.ErrNotSupported) {
 		return nil, err
 	}
@@ -317,7 +327,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 	dctx := context.WithoutCancel(ctx)
 
 	if strings.HasPrefix(strings.TrimSpace(snapshotName), archivePrefix) {
-		if err := m.restoreArchiveSnapshot(dctx, botID, snapshotName); err != nil {
+		if err := m.restoreArchiveSnapshotFromRef(dctx, ref, snapshotName); err != nil {
 			return err
 		}
 		return m.insertEvent(dctx, ref.containerID, "version_rollback", map[string]any{
@@ -364,7 +374,10 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 // deletes the old container, recreates it on the new snapshot, and restarts the task.
 // Caller must pass a detached context (context.WithoutCancel) to guarantee atomicity.
 func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, containerID string, info ctr.ContainerInfo, activeSnapshotName, parentSnapshot string) error {
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, parentSnapshot); err != nil {
+	if err := m.service.PrepareSnapshot(ctx, ctr.PrepareSnapshotRequest{
+		Target: ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
+		Parent: ctr.SnapshotRef{Driver: info.StorageRef.Driver, Key: parentSnapshot},
+	}); err != nil {
 		return err
 	}
 	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
@@ -374,13 +387,12 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	if err != nil {
 		return err
 	}
-	if _, err := m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
-		ID:          containerID,
-		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotName,
-		Snapshotter: info.Snapshotter,
-		Labels:      info.Labels,
-		Spec:        spec,
+	if _, err := m.service.RestoreContainer(ctx, ctr.CreateContainerRequest{
+		ID:         containerID,
+		ImageRef:   info.Image,
+		StorageRef: ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
+		Labels:     info.Labels,
+		Spec:       spec,
 	}); err != nil {
 		return err
 	}
@@ -400,7 +412,15 @@ func (m *Manager) commitSnapshotAndReplaceContainer(ctx context.Context, ref *lo
 	if err := m.safeStopTask(ctx, ref.containerID); err != nil {
 		return err
 	}
-	if err := m.service.CommitSnapshot(ctx, ref.info.Snapshotter, runtimeSnapshotName, ref.info.SnapshotKey); err != nil {
+	if err := m.service.CommitSnapshot(ctx, ctr.CommitSnapshotRequest{
+		Source: ctr.StorageRef{Driver: ref.info.StorageRef.Driver, Key: ref.info.StorageRef.Key, Kind: "active"},
+		Target: ctr.SnapshotRef{Driver: ref.info.StorageRef.Driver, Key: runtimeSnapshotName, Kind: "committed"},
+	}); err != nil {
+		if errors.Is(err, ctr.ErrNotSupported) {
+			m.grpcPool.Remove(ref.botID)
+			_ = m.startTaskAndEnsureNetwork(ctx, ref.botID, ref.containerID)
+			m.grpcPool.Remove(ref.botID)
+		}
 		return err
 	}
 	return m.replaceLockedContainerFromSnapshot(ctx, ref, "active", runtimeSnapshotName)
@@ -409,6 +429,13 @@ func (m *Manager) commitSnapshotAndReplaceContainer(ctx context.Context, ref *lo
 func (m *Manager) replaceLockedContainerFromSnapshot(ctx context.Context, ref *lockedContainerRef, activeLabel, parentSnapshot string) error {
 	activeSnapshotName := fmt.Sprintf("%s-%s-%d", ref.containerID, strings.TrimSpace(activeLabel), time.Now().UnixNano())
 	return m.replaceContainerSnapshot(ctx, ref.botID, ref.containerID, ref.info, activeSnapshotName, parentSnapshot)
+}
+
+func (m *Manager) nativeSnapshotsSupported(ctx context.Context) bool {
+	checker, ok := m.service.(interface {
+		SnapshotSupported(context.Context) bool
+	})
+	return !ok || checker.SnapshotSupported(ctx)
 }
 
 func (m *Manager) buildVersionSpec(ctx context.Context, botID string, cdiDevices []string) (ctr.ContainerSpec, error) {
@@ -427,13 +454,13 @@ func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
 		Timeout: 10 * time.Second,
 		Force:   true,
 	})
-	if err == nil {
-		return nil
+	if err != nil && !ctr.IsNotFound(err) {
+		return err
 	}
-	if errdefs.IsNotFound(err) {
-		return nil
+	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !ctr.IsNotFound(err) {
+		return err
 	}
-	return err
+	return nil
 }
 
 func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ string, imageRef string) (pgtype.UUID, error) {

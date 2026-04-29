@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	containerdclient "github.com/containerd/containerd/v2/client"
-
 	"github.com/memohai/memoh/internal/config"
 	containerapi "github.com/memohai/memoh/internal/container"
 	appleadapter "github.com/memohai/memoh/internal/container/apple"
@@ -14,22 +12,6 @@ import (
 	dockeradapter "github.com/memohai/memoh/internal/container/docker"
 	k8sadapter "github.com/memohai/memoh/internal/container/k8s"
 )
-
-type ClientFactory interface {
-	New(ctx context.Context) (*containerdclient.Client, error)
-}
-
-type DefaultClientFactory struct {
-	SocketPath string
-}
-
-func (f DefaultClientFactory) New(_ context.Context) (*containerdclient.Client, error) {
-	socket := f.SocketPath
-	if socket == "" {
-		socket = containerapi.DefaultSocketPath
-	}
-	return containerdclient.New(socket)
-}
 
 // ProvideService creates the appropriate Service based on the backend type.
 func ProvideService(ctx context.Context, log *slog.Logger, cfg config.Config, backend string) (containerapi.Service, func(), error) {
@@ -53,8 +35,7 @@ func ProvideService(ctx context.Context, log *slog.Logger, cfg config.Config, ba
 	case containerapi.BackendKubernetes, containerapi.BackendK8s:
 		return k8sadapter.NewService(cfg), func() {}, nil
 	case containerapi.BackendContainerd:
-		factory := DefaultClientFactory{SocketPath: cfg.Containerd.SocketPath}
-		client, err := factory.New(ctx)
+		client, err := containerdadapter.NewClient(ctx, cfg.Containerd.SocketPath)
 		if err != nil {
 			return nil, nil, fmt.Errorf("connect containerd: %w", err)
 		}

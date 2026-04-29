@@ -8,6 +8,32 @@ import (
 var (
 	ErrInvalidArgument = errors.New("invalid argument")
 	ErrNotSupported    = errors.New("operation not supported on this backend")
+	ErrNotFound        = errors.New("not found")
+	ErrAlreadyExists   = errors.New("already exists")
+	ErrConflict        = errors.New("conflict")
+	ErrRuntime         = errors.New("runtime operation failed")
+)
+
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound)
+}
+
+func IsAlreadyExists(err error) bool {
+	return errors.Is(err, ErrAlreadyExists)
+}
+
+func IsConflict(err error) bool {
+	return errors.Is(err, ErrConflict)
+}
+
+func IsRuntime(err error) bool {
+	return errors.Is(err, ErrRuntime)
+}
+
+const (
+	// StorageKeyLabel stores the runtime-specific active storage key on backends
+	// whose container metadata does not expose one natively.
+	StorageKeyLabel = "memoh.storage_key"
 )
 
 type TaskStatus int
@@ -36,14 +62,39 @@ func (s TaskStatus) String() string {
 }
 
 type ContainerInfo struct {
-	ID          string
-	Image       string
-	Labels      map[string]string
-	Snapshotter string
-	SnapshotKey string
-	Runtime     RuntimeInfo
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID         string
+	Image      string
+	Labels     map[string]string
+	StorageRef StorageRef
+	Runtime    RuntimeInfo
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type StorageRef struct {
+	Driver string
+	Key    string
+	Kind   string
+}
+
+type SnapshotRef struct {
+	Driver string
+	Key    string
+	Kind   string
+}
+
+type CommitSnapshotRequest struct {
+	Source StorageRef
+	Target SnapshotRef
+}
+
+type ListSnapshotsRequest struct {
+	Driver string
+}
+
+type PrepareSnapshotRequest struct {
+	Target StorageRef
+	Parent SnapshotRef
 }
 
 type RuntimeInfo struct {
@@ -57,11 +108,12 @@ type ImageInfo struct {
 }
 
 type TaskInfo struct {
-	ContainerID string
-	ID          string
-	PID         uint32
-	Status      TaskStatus
-	ExitCode    uint32
+	ContainerID       string
+	ID                string
+	PID               uint32
+	NetworkJoinTarget NetworkJoinTarget
+	Status            TaskStatus
+	ExitCode          uint32
 }
 
 type ContainerMetrics struct {
@@ -73,6 +125,7 @@ type ContainerMetrics struct {
 type CPUMetrics struct {
 	UsagePercent      float64
 	UsageNanoseconds  uint64
+	UsageNanocores    uint64
 	UserNanoseconds   uint64
 	KernelNanoseconds uint64
 }
@@ -112,18 +165,26 @@ type MountSpec struct {
 }
 
 type ContainerSpec struct {
-	Cmd                  []string
-	Env                  []string
-	WorkDir              string
-	User                 string
-	Mounts               []MountSpec
-	DNS                  []string
-	NetworkNamespacePath string
-	AddedCapabilities    []string
+	Cmd               []string
+	Env               []string
+	WorkDir           string
+	User              string
+	Mounts            []MountSpec
+	DNS               []string
+	NetworkJoinTarget NetworkJoinTarget
+	AddedCapabilities []string
 	// CDIDevices contains fully-qualified CDI device names such as
 	// "nvidia.com/gpu=0" or "amd.com/gpu=0".
 	CDIDevices []string
 	TTY        bool
+}
+
+// NetworkJoinTarget is an adapter-provided handle for runtimes that can attach
+// another workload to the same network stack.
+type NetworkJoinTarget struct {
+	Kind  string
+	Value string
+	PID   uint32
 }
 
 type LayerStatus struct {
@@ -136,15 +197,12 @@ type PullProgress struct {
 	Layers []LayerStatus `json:"layers"`
 }
 
-// NetworkRequest describes the host-side wiring required to attach a container
-// task to the default CNI-provided network for basic outbound connectivity.
-// It does not describe future provider/overlay networking.
+// NetworkRequest describes a runtime-level network readiness request for a
+// workspace container. Backend-specific details such as CNI configuration live
+// inside the adapter.
 type NetworkRequest struct {
 	ContainerID string
-	NetNSPath   string
-	PID         uint32
-	CNIBinDir   string
-	CNIConfDir  string
+	JoinTarget  NetworkJoinTarget
 }
 
 // NetworkResult captures the outcome of attaching the container to the default

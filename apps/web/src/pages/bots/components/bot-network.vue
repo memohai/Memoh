@@ -539,7 +539,7 @@ const workspaceStatusFields = computed(() => {
   if (ws.pid != null && ws.pid > 0) {
     items.push({ label: t('bots.settings.networkWorkspaceTaskPID'), value: String(ws.pid) })
   }
-  if (ws.netns_path) items.push({ label: t('bots.settings.networkWorkspaceNetNS'), value: ws.netns_path })
+  if (ws.network_target) items.push({ label: t('bots.settings.networkWorkspaceTarget'), value: ws.network_target })
   if (ws.message) items.push({ label: t('bots.settings.networkWorkspaceMessage'), value: ws.message })
   return items.filter(item => item.value)
 })

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/containerd/errdefs"
+	dockerclient "github.com/docker/docker/client"
 
 	"github.com/memohai/memoh/internal/config"
 	containerapi "github.com/memohai/memoh/internal/container"
@@ -18,8 +18,18 @@ func TestProvideServiceDockerSlot(t *testing.T) {
 		t.Fatalf("ProvideService docker returned error: %v", err)
 	}
 	defer cleanup()
-	if _, err := svc.GetImage(context.Background(), "memohai/definitely-missing:test"); !errdefs.IsNotFound(err) {
-		t.Fatalf("docker GetImage error = %v, want not found", err)
+	imageSvc, ok := svc.(containerapi.ImageService)
+	if !ok {
+		t.Fatal("docker service should expose optional ImageService")
+	}
+	_, imgErr := imageSvc.GetImage(context.Background(), "memohai/definitely-missing:test")
+	switch {
+	case containerapi.IsNotFound(imgErr):
+		return
+	case imgErr != nil && dockerclient.IsErrConnectionFailed(imgErr):
+		t.Skipf("docker daemon unavailable: %v", imgErr)
+	default:
+		t.Fatalf("docker GetImage error = %v, want not found (or skip if daemon unreachable)", imgErr)
 	}
 }
 
@@ -29,8 +39,10 @@ func TestProvideServiceKubernetesSlot(t *testing.T) {
 		t.Fatalf("ProvideService kubernetes returned error: %v", err)
 	}
 	defer cleanup()
-	if _, err := svc.GetImage(context.Background(), "debian"); !errors.Is(err, containerapi.ErrNotSupported) {
-		t.Fatalf("kubernetes placeholder GetImage error = %v, want ErrNotSupported", err)
+	if imageSvc, ok := svc.(containerapi.ImageService); ok {
+		if _, err := imageSvc.GetImage(context.Background(), "debian"); !errors.Is(err, containerapi.ErrNotSupported) {
+			t.Fatalf("kubernetes GetImage error = %v, want ErrNotSupported", err)
+		}
 	}
 }
 

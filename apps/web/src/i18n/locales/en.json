@@ -1123,13 +1123,13 @@
       "networkWorkspaceContainerID": "Container ID",
       "networkWorkspaceTaskStatus": "Task status",
       "networkWorkspaceTaskPID": "Task PID",
-      "networkWorkspaceNetNS": "Network namespace path",
+      "networkWorkspaceTarget": "Network target",
       "networkWorkspaceMessage": "Details",
       "networkWorkspaceState": {
         "workspace_missing": "Workspace container not created",
         "runtime_unavailable": "Cannot query task (runtime unavailable)",
         "task_stopped": "Workspace not running or task not started",
-        "netns_ready": "Workspace running; network namespace available",
+        "network_target_ready": "Workspace running; network target available",
         "unknown": "Unknown"
       },
       "networkActionFailed": "Network check failed",

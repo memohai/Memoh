@@ -7,9 +7,9 @@ import (
 )
 
 type PullImageOptions struct {
-	Unpack      bool
-	Snapshotter string
-	OnProgress  func(PullProgress) // optional, nil = no progress reporting
+	Unpack        bool
+	StorageDriver string
+	OnProgress    func(PullProgress) // optional, nil = no progress reporting
 }
 
 type DeleteImageOptions struct {
@@ -17,12 +17,12 @@ type DeleteImageOptions struct {
 }
 
 type CreateContainerRequest struct {
-	ID          string
-	ImageRef    string
-	SnapshotID  string
-	Snapshotter string
-	Labels      map[string]string
-	Spec        ContainerSpec
+	ID              string
+	ImageRef        string
+	ImagePullPolicy string
+	StorageRef      StorageRef
+	Labels          map[string]string
+	Spec            ContainerSpec
 }
 
 type DeleteContainerOptions struct {
@@ -43,13 +43,8 @@ type DeleteTaskOptions struct {
 	Force bool
 }
 
-type SnapshotCommitResult struct {
-	VersionSnapshotName string
-	ActiveSnapshotName  string
-}
-
 type ListTasksOptions struct {
-	Filter string
+	ContainerID string
 }
 
 // ImageService groups image and registry operations.
@@ -71,11 +66,10 @@ type ContainerService interface {
 	ListContainers(ctx context.Context) ([]ContainerInfo, error)
 	DeleteContainer(ctx context.Context, id string, opts *DeleteContainerOptions) error
 	ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error)
-	CreateContainerFromSnapshot(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
 }
 
-// TaskService groups workload process lifecycle operations.
-type TaskService interface {
+// WorkloadService groups primary workload lifecycle operations.
+type WorkloadService interface {
 	StartContainer(ctx context.Context, containerID string, opts *StartTaskOptions) error
 	StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error
 	DeleteTask(ctx context.Context, containerID string, opts *DeleteTaskOptions) error
@@ -91,20 +85,18 @@ type NetworkService interface {
 	CheckNetwork(ctx context.Context, req NetworkRequest) error
 }
 
-// SnapshotService groups snapshot and rootfs operations.
+// SnapshotService groups snapshot lifecycle operations.
 type SnapshotService interface {
-	CommitSnapshot(ctx context.Context, snapshotter, name, key string) error
-	ListSnapshots(ctx context.Context, snapshotter string) ([]SnapshotInfo, error)
-	PrepareSnapshot(ctx context.Context, snapshotter, key, parent string) error
-	SnapshotUsage(ctx context.Context, snapshotter, key string) (SnapshotUsage, error)
-	SnapshotMounts(ctx context.Context, snapshotter, key string) ([]MountInfo, error)
+	CommitSnapshot(ctx context.Context, req CommitSnapshotRequest) error
+	ListSnapshots(ctx context.Context, req ListSnapshotsRequest) ([]SnapshotInfo, error)
+	PrepareSnapshot(ctx context.Context, req PrepareSnapshotRequest) error
+	RestoreContainer(ctx context.Context, req CreateContainerRequest) (ContainerInfo, error)
 }
 
 // Service is the workspace-facing container runtime abstraction.
 type Service interface {
-	ImageService
 	ContainerService
-	TaskService
+	WorkloadService
 	NetworkService
 	SnapshotService
 }

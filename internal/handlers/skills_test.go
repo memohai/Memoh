@@ -344,7 +344,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 	db := &skillsTestDB{userID: userID, botID: botID, metadataJSON: metadataJSON}
 	queries := postgresstore.NewQueries(sqlc.New(db))
 	accountStore := postgresstore.NewWithQueries(sqlc.New(db))
-	manager := workspace.NewManager(slog.Default(), nil, cfg, "", nil)
+	manager := workspace.NewManager(slog.Default(), nil, nil, cfg, "", nil, queries)
 	handler := NewContainerdHandler(
 		slog.Default(),
 		manager,
@@ -375,7 +375,7 @@ func (e *skillsTestEnv) callJSON(t *testing.T, method, routePath string, body an
 		bodyReader = strings.NewReader(string(data))
 	}
 
-	req := httptest.NewRequest(method, routePath, bodyReader)
+	req := httptest.NewRequestWithContext(context.Background(), method, routePath, bodyReader)
 	if body != nil {
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	}

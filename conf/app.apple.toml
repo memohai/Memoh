@@ -36,6 +36,7 @@ backend = "apple"
 
 [workspace]
 default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
 data_root = "data"
 
 [postgres]

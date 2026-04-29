@@ -80,6 +80,8 @@ import (
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/network/kubeapi"
+	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -172,9 +174,19 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 	return postgresstore.New(conn)
 }
 
-func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config) *netctl.Registry {
+func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
 	registry := netctl.NewRegistry()
-	if err := netctl.RegisterBuiltinProviders(registry, service, cfg.Workspace.DataRoot); err != nil {
+	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
+	var kubeRuntime kubeapi.Runtime
+	if rt, ok := service.(kubeapi.Runtime); ok {
+		kubeRuntime = rt
+	}
+	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
+		SidecarRuntime: service,
+		KubeRuntime:    kubeRuntime,
+		Runtime:        runtime.Descriptor(),
+		StateRoot:      cfg.Workspace.DataRoot,
+	}); err != nil {
 		panic(err)
 	}
 	return registry
@@ -225,8 +237,12 @@ func provideAccountStore(cfg config.Config, postgresStore *postgresstore.Store, 
 	}
 }
 
-func provideWorkspaceManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) *workspace.Manager {
-	return workspace.NewManager(log, service, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
+func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
+	return manage
+}
+
+func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) *workspace.Manager {
+	return workspace.NewManager(log, service, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
 }
 
 func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {
@@ -239,7 +255,7 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbsqlc.Queries, cfg config.Config) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileRuntime := handlers.NewBuiltinMemoryRuntime(provider)
 	fileStore := storefs.New(log, provider)

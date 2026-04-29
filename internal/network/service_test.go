@@ -1,12 +1,47 @@
 package network
 
 import (
+	"context"
+	"errors"
 	"testing"
 )
 
+type validatingProvider struct{}
+
+func (validatingProvider) Kind() string { return "tailscale" }
+
+func (validatingProvider) Descriptor() ProviderDescriptor {
+	return ProviderDescriptor{Kind: "tailscale", DisplayName: "Tailscale", ConfigSchema: ConfigSchema{Version: 1}}
+}
+
+func (validatingProvider) NormalizeConfig(raw map[string]any) (map[string]any, error) {
+	return cloneMap(raw), nil
+}
+
+func (validatingProvider) Status(context.Context, BotOverlayConfig) (ProviderStatus, error) {
+	return ProviderStatus{State: StatusStateReady}, nil
+}
+
+func (validatingProvider) ExecuteAction(context.Context, BotOverlayConfig, string, map[string]any) (ProviderActionExecution, error) {
+	return ProviderActionExecution{}, nil
+}
+
+func (validatingProvider) ListNodes(context.Context, string, BotOverlayConfig) ([]NodeOption, error) {
+	return nil, nil
+}
+
+func (validatingProvider) BuildDriver(cfg BotOverlayConfig) (OverlayDriver, error) {
+	userspace, _ := cfg.Config["userspace"].(bool)
+	exitNode, _ := cfg.Config["exit_node"].(string)
+	if userspace && exitNode != "" {
+		return nil, errors.New("tailscale transparent egress via exit node requires userspace=false")
+	}
+	return NoopOverlayDriver{}, nil
+}
+
 func TestPrepareBotConfigForWriteAllowsDisabledInvalidProviderDraft(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(newTailscaleProvider(nil, t.TempDir())); err != nil {
+	if err := registry.Register(validatingProvider{}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
 	svc := &Service{registry: registry}
@@ -27,7 +62,7 @@ func TestPrepareBotConfigForWriteAllowsDisabledInvalidProviderDraft(t *testing.T
 
 func TestPrepareBotConfigForWriteRejectsExitNodeWithUserspaceEnabled(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(newTailscaleProvider(nil, t.TempDir())); err != nil {
+	if err := registry.Register(validatingProvider{}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
 	svc := &Service{registry: registry}
@@ -48,7 +83,7 @@ func TestPrepareBotConfigForWriteRejectsExitNodeWithUserspaceEnabled(t *testing.
 
 func TestPrepareBotConfigForWriteAllowsExitNodeWithKernelTUN(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(newTailscaleProvider(nil, t.TempDir())); err != nil {
+	if err := registry.Register(validatingProvider{}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
 	svc := &Service{registry: registry}
@@ -67,5 +102,12 @@ func TestPrepareBotConfigForWriteAllowsExitNodeWithKernelTUN(t *testing.T) {
 	}
 	if cfg.Provider != "tailscale" {
 		t.Fatalf("unexpected provider: %+v", cfg)
+	}
+}
+
+func TestKubernetesRuntimeIsNotRejectedBeforeProviderSelection(t *testing.T) {
+	svc := &Service{runtimeKind: "kubernetes"}
+	if svc.overlayRuntimeUnsupported() {
+		t.Fatal("expected kubernetes runtime to be handled by provider driver selection")
 	}
 }

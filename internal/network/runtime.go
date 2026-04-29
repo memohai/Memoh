@@ -21,6 +21,9 @@ type RuntimeDescriptor struct {
 
 // RuntimeCapabilities describes how a runtime can host or join networking.
 type RuntimeCapabilities struct {
+	SidecarWorker        bool `json:"sidecar_worker"`
+	RuntimeNetworkSetup  bool `json:"runtime_network_setup"`
+	ClusterNative        bool `json:"cluster_native"`
 	JoinContainerNetwork bool `json:"join_container_network"`
 	JoinNamespacePath    bool `json:"join_namespace_path"`
 	PodLikeSandbox       bool `json:"pod_like_sandbox"`
@@ -28,4 +31,5 @@ type RuntimeCapabilities struct {
 	Devices              bool `json:"devices"`
 	Capabilities         bool `json:"capabilities"`
 	Privileged           bool `json:"privileged"`
+	KubernetesNative     bool `json:"kubernetes_native"`
 }

@@ -18,7 +18,7 @@ type containerWorkspace interface {
 	ContainerID(ctx context.Context, botID string) (string, error)
 	ResolveWorkspaceImage(ctx context.Context, botID string) (string, error)
 	ResolveWorkspaceGPU(ctx context.Context, botID string) (workspace.WorkspaceGPUConfig, error)
-	PullImage(ctx context.Context, image string, opts *ctr.PullImageOptions) (ctr.ImageInfo, error)
+	PrepareImageForCreate(ctx context.Context, image string, opts *ctr.PullImageOptions) (workspace.ImagePrepareResult, error)
 	HasPreservedData(botID string) bool
 	StartWithResolvedConfig(ctx context.Context, botID, image string, gpu workspace.WorkspaceGPUConfig) error
 	RememberWorkspaceImage(ctx context.Context, botID, image string) error

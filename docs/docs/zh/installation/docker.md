@@ -126,6 +126,7 @@ POSTGRES_PASSWORD=你的库密码 docker compose up -d
 ```toml
 [workspace]
 registry = "memoh.cn"
+image_pull_policy = "if_not_present" # if_not_present、always 或 never
 ```
 
 并叠加国内 overlay：
@@ -161,7 +162,7 @@ docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
 | `[auth]` | JWT 与过期时间 |
 | `timezone` | 服时区，默认 `UTC` |
 | `[containerd]` | socket 与 namespace |
-| `[workspace]` | 镜像、快照、数据路径、CNI、可选仓库镜像 |
+| `[workspace]` | 镜像、拉取策略、快照、数据路径、CNI、可选仓库镜像 |
 | `[postgres]` | 连接串 |
 | `[qdrant]` | Qdrant 地址、密钥、超时 |
 | `[sparse]` | 稀疏服务 URL |

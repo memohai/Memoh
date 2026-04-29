@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/errdefs"
-
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
 	netctl "github.com/memohai/memoh/internal/network"
@@ -30,16 +28,28 @@ type legacyRouteTestService struct {
 	setupNet    int
 
 	getContainerBeforeCreateErr error
+	getImageErr                 error
+	pullErr                     error
+	pullCalls                   int
+	getImageCalls               int
 	setupNetworkResults         []ctr.NetworkResult
 	setupNetworkErrs            []error
 }
 
-func (*legacyRouteTestService) PullImage(context.Context, string, *ctr.PullImageOptions) (ctr.ImageInfo, error) {
-	return ctr.ImageInfo{}, nil
+func (s *legacyRouteTestService) PullImage(_ context.Context, ref string, _ *ctr.PullImageOptions) (ctr.ImageInfo, error) {
+	s.pullCalls++
+	if s.pullErr != nil {
+		return ctr.ImageInfo{}, s.pullErr
+	}
+	return ctr.ImageInfo{Name: ref, ID: ref, Tags: []string{ref}}, nil
 }
 
-func (*legacyRouteTestService) GetImage(context.Context, string) (ctr.ImageInfo, error) {
-	return ctr.ImageInfo{}, nil
+func (s *legacyRouteTestService) GetImage(_ context.Context, ref string) (ctr.ImageInfo, error) {
+	s.getImageCalls++
+	if s.getImageErr != nil {
+		return ctr.ImageInfo{}, s.getImageErr
+	}
+	return ctr.ImageInfo{Name: ref, ID: ref, Tags: []string{ref}}, nil
 }
 
 func (*legacyRouteTestService) ListImages(context.Context) ([]ctr.ImageInfo, error) {
@@ -58,11 +68,10 @@ func (s *legacyRouteTestService) CreateContainer(_ context.Context, req ctr.Crea
 	s.createCalls++
 	s.created = true
 	s.container = ctr.ContainerInfo{
-		ID:          req.ID,
-		Image:       req.ImageRef,
-		Labels:      req.Labels,
-		Snapshotter: req.Snapshotter,
-		SnapshotKey: req.ID,
+		ID:         req.ID,
+		Image:      req.ImageRef,
+		Labels:     req.Labels,
+		StorageRef: ctr.StorageRef{Driver: req.StorageRef.Driver, Key: req.ID, Kind: "active"},
 	}
 	return s.container, nil
 }
@@ -72,7 +81,7 @@ func (s *legacyRouteTestService) GetContainer(context.Context, string) (ctr.Cont
 		if s.getContainerBeforeCreateErr != nil {
 			return ctr.ContainerInfo{}, s.getContainerBeforeCreateErr
 		}
-		return ctr.ContainerInfo{}, errdefs.ErrNotFound
+		return ctr.ContainerInfo{}, ctr.ErrNotFound
 	}
 	return s.container, nil
 }
@@ -109,7 +118,7 @@ func (s *legacyRouteTestService) DeleteTask(context.Context, string, *ctr.Delete
 }
 
 func (*legacyRouteTestService) GetTaskInfo(context.Context, string) (ctr.TaskInfo, error) {
-	return ctr.TaskInfo{}, errdefs.ErrNotFound
+	return ctr.TaskInfo{}, ctr.ErrNotFound
 }
 
 func (*legacyRouteTestService) GetContainerMetrics(context.Context, string) (ctr.ContainerMetrics, error) {
@@ -141,19 +150,19 @@ func (*legacyRouteTestService) CheckNetwork(context.Context, ctr.NetworkRequest)
 	return nil
 }
 
-func (*legacyRouteTestService) CommitSnapshot(context.Context, string, string, string) error {
+func (*legacyRouteTestService) CommitSnapshot(context.Context, ctr.CommitSnapshotRequest) error {
 	return nil
 }
 
-func (*legacyRouteTestService) ListSnapshots(context.Context, string) ([]ctr.SnapshotInfo, error) {
+func (*legacyRouteTestService) ListSnapshots(context.Context, ctr.ListSnapshotsRequest) ([]ctr.SnapshotInfo, error) {
 	return nil, nil
 }
 
-func (*legacyRouteTestService) PrepareSnapshot(context.Context, string, string, string) error {
+func (*legacyRouteTestService) PrepareSnapshot(context.Context, ctr.PrepareSnapshotRequest) error {
 	return nil
 }
 
-func (*legacyRouteTestService) CreateContainerFromSnapshot(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
+func (*legacyRouteTestService) RestoreContainer(context.Context, ctr.CreateContainerRequest) (ctr.ContainerInfo, error) {
 	return ctr.ContainerInfo{}, nil
 }
 

@@ -2,21 +2,15 @@ package network
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
-	"github.com/containerd/errdefs"
-	"github.com/jackc/pgx/v5"
-
 	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 type statusRuntime interface {
@@ -26,7 +20,7 @@ type statusRuntime interface {
 var ErrWorkspaceContainerMissing = errors.New("workspace container is not created")
 
 type Service struct {
-	queries          *sqlc.Queries
+	queries          dbstore.Queries
 	registry         *Registry
 	runtime          statusRuntime
 	controller       Controller
@@ -37,7 +31,7 @@ type Service struct {
 	logger           *slog.Logger
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, registry *Registry, runtime statusRuntime, runtimeKind, cniBinDir, cniConfDir, networkStateRoot string) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, registry *Registry, runtime statusRuntime, runtimeKind, cniBinDir, cniConfDir, networkStateRoot string) *Service {
 	return &Service{
 		queries:          queries,
 		registry:         registry,
@@ -64,26 +58,6 @@ func (s *Service) ListMeta(_ context.Context) []ProviderDescriptor {
 	return s.registry.ListDescriptors()
 }
 
-func (s *Service) Resolve(ctx context.Context, botID string) (BotOverlayConfig, error) {
-	return s.GetBotConfig(ctx, botID)
-}
-
-func (s *Service) GetBotConfig(ctx context.Context, botID string) (BotOverlayConfig, error) {
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return BotOverlayConfig{}, err
-	}
-	row, err := s.queries.GetBotOverlayConfig(ctx, pgBotID)
-	if err != nil {
-		return BotOverlayConfig{}, err
-	}
-	return s.normalizeBotConfig(
-		row.OverlayEnabled,
-		row.OverlayProvider,
-		decodeJSONMap(row.OverlayConfig),
-	)
-}
-
 func (s *Service) PrepareBotConfigForWrite(cfg BotOverlayConfig) (BotOverlayConfig, error) {
 	normalized, err := s.normalizeBotConfig(
 		cfg.Enabled,
@@ -104,75 +78,6 @@ func (s *Service) PrepareBotConfigForWrite(cfg BotOverlayConfig) (BotOverlayConf
 		return BotOverlayConfig{}, err
 	}
 	return normalized, nil
-}
-
-func withWorkspace(st BotStatus, ws WorkspaceRuntimeStatus) BotStatus {
-	w := ws
-	st.Workspace = &w
-	return st
-}
-
-func (s *Service) workspaceRuntimeStatus(ctx context.Context, botID string) WorkspaceRuntimeStatus {
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return WorkspaceRuntimeStatus{State: "unknown", Message: "invalid bot id"}
-	}
-	row, err := s.queries.GetContainerByBotID(ctx, pgBotID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return WorkspaceRuntimeStatus{State: "workspace_missing"}
-		}
-		return WorkspaceRuntimeStatus{State: "unknown", Message: err.Error()}
-	}
-	out := WorkspaceRuntimeStatus{
-		State:       "task_stopped",
-		ContainerID: strings.TrimSpace(row.ContainerID),
-	}
-	if s.runtime == nil {
-		out.State = "runtime_unavailable"
-		return out
-	}
-	task, err := s.runtime.GetTaskInfo(ctx, row.ContainerID)
-	if err != nil {
-		if errdefs.IsNotFound(err) {
-			out.State = "task_stopped"
-			return out
-		}
-		return WorkspaceRuntimeStatus{State: "unknown", Message: err.Error()}
-	}
-	out.TaskStatus = task.Status.String()
-	out.PID = task.PID
-	if task.Status == ctr.TaskStatusRunning && task.PID == 0 {
-		out.State = "runtime_unavailable"
-		if s.overlayRuntimeUnsupported() {
-			out.Message = "current runtime backend does not expose a joinable network namespace"
-		} else {
-			out.Message = "workspace task is running but network namespace metadata is unavailable"
-		}
-		return out
-	}
-	if task.PID > 0 {
-		out.State = "netns_ready"
-		out.NetNSPath = filepath.Join("/proc", strconv.FormatUint(uint64(task.PID), 10), "ns", "net")
-		if s.controller != nil {
-			checkReq := AttachmentRequest{
-				ContainerID: out.ContainerID,
-				Runtime: RuntimeNetworkRequest{
-					ContainerID: out.ContainerID,
-					PID:         task.PID,
-					NetNSPath:   out.NetNSPath,
-					CNIBinDir:   s.cniBinDir,
-					CNIConfDir:  s.cniConfDir,
-				},
-			}
-			if st, err := s.controller.Status(ctx, checkReq); err == nil {
-				out.NetworkAttached = st.Runtime.Attached
-			}
-		}
-	} else {
-		out.State = "task_stopped"
-	}
-	return out
 }
 
 func (s *Service) StatusBot(ctx context.Context, botID string) (BotStatus, error) {
@@ -232,9 +137,13 @@ func (s *Service) ListBotNodes(ctx context.Context, botID string) (NodeListRespo
 	}
 	items, err := provider.ListNodes(ctx, botID, cfg)
 	if err != nil {
+		s.logger.Warn("list network provider nodes failed",
+			slog.String("bot_id", botID),
+			slog.String("provider", cfg.Provider),
+			slog.Any("error", err))
 		return NodeListResponse{
 			Provider: cfg.Provider,
-			Message:  err.Error(),
+			Message:  "network provider nodes are unavailable",
 		}, nil
 	}
 	return NodeListResponse{
@@ -379,43 +288,6 @@ func (s *Service) statusOverlayBot(ctx context.Context, botID string, cfg BotOve
 	return attachmentStatus.Overlay, nil
 }
 
-func (s *Service) buildAttachmentRequest(ctx context.Context, botID string, cfg BotOverlayConfig) (AttachmentRequest, error) {
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return AttachmentRequest{}, err
-	}
-	row, err := s.queries.GetContainerByBotID(ctx, pgBotID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return AttachmentRequest{}, ErrWorkspaceContainerMissing
-		}
-		return AttachmentRequest{}, err
-	}
-	req := AttachmentRequest{
-		BotID:       botID,
-		ContainerID: row.ContainerID,
-		Runtime: RuntimeNetworkRequest{
-			ContainerID: row.ContainerID,
-			CNIBinDir:   s.cniBinDir,
-			CNIConfDir:  s.cniConfDir,
-		},
-		Overlay: cfg,
-	}
-	if s.runtime == nil {
-		return req, nil
-	}
-	task, err := s.runtime.GetTaskInfo(ctx, row.ContainerID)
-	if err == nil && task.PID > 0 {
-		req.Runtime.PID = task.PID
-		req.Runtime.NetNSPath = filepath.Join("/proc", strconv.FormatUint(uint64(task.PID), 10), "ns", "net")
-		return req, nil
-	}
-	if err != nil && !errdefs.IsNotFound(err) {
-		return AttachmentRequest{}, err
-	}
-	return req, nil
-}
-
 func composeBotStatus(cfg BotOverlayConfig, overlay OverlayStatus) BotStatus {
 	status := BotStatus{
 		Provider:     cfg.Provider,
@@ -467,7 +339,7 @@ func (s *Service) ensureOverlayBot(ctx context.Context, botID string, cfg BotOve
 		s.logger.Info("skip overlay ensure because current runtime backend does not support provider sidecars", slog.String("bot_id", botID), slog.String("provider", cfg.Provider), slog.String("runtime", s.runtimeKind))
 		return unsupportedOverlayStatus(cfg), nil
 	}
-	if strings.TrimSpace(req.Runtime.NetNSPath) == "" {
+	if strings.TrimSpace(req.Runtime.JoinTarget.Path) == "" {
 		s.logger.Info("skip overlay ensure because workspace task is not running", slog.String("bot_id", botID), slog.String("provider", cfg.Provider))
 		attachmentStatus, statusErr := s.controller.Status(ctx, req)
 		if statusErr != nil {
@@ -523,15 +395,4 @@ func (s *Service) requireProvider(kind string) (Provider, error) {
 		return nil, fmt.Errorf("unsupported network provider: %s", kind)
 	}
 	return provider, nil
-}
-
-func decodeJSONMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
-		return map[string]any{}
-	}
-	return out
 }

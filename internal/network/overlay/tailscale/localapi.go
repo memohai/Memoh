@@ -1,4 +1,4 @@
-package network
+package tailscale
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-type tailscaleLocalStatus struct {
+type localStatus struct {
 	BackendState string   `json:"BackendState"`
 	AuthURL      string   `json:"AuthURL"`
 	Health       []string `json:"Health"`
@@ -21,10 +21,10 @@ type tailscaleLocalStatus struct {
 		Online       bool     `json:"Online"`
 		TailscaleIPs []string `json:"TailscaleIPs"`
 	} `json:"Self"`
-	Peer map[string]*tailscalePeerStatus `json:"Peer"`
+	Peer map[string]*peerStatus `json:"Peer"`
 }
 
-type tailscalePeerStatus struct {
+type peerStatus struct {
 	ID             string   `json:"ID"`
 	HostName       string   `json:"HostName"`
 	DNSName        string   `json:"DNSName"`
@@ -35,13 +35,13 @@ type tailscalePeerStatus struct {
 	Active         bool     `json:"Active"`
 }
 
-func readTailscaleLocalStatus(ctx context.Context, socketPath string) (tailscaleLocalStatus, error) {
-	return readTailscaleLocalStatusWithPeers(ctx, socketPath, false)
+func readLocalStatus(ctx context.Context, socketPath string) (localStatus, error) {
+	return readLocalStatusWithPeers(ctx, socketPath, false)
 }
 
-func readTailscaleLocalStatusWithPeers(ctx context.Context, socketPath string, includePeers bool) (tailscaleLocalStatus, error) {
+func readLocalStatusWithPeers(ctx context.Context, socketPath string, includePeers bool) (localStatus, error) {
 	if _, err := os.Stat(socketPath); err != nil {
-		return tailscaleLocalStatus{}, err
+		return localStatus{}, err
 	}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -56,22 +56,22 @@ func readTailscaleLocalStatusWithPeers(ctx context.Context, socketPath string, i
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://local-tailscaled.sock/localapi/v0/status?peers=%t", includePeers), nil)
 	if err != nil {
-		return tailscaleLocalStatus{}, err
+		return localStatus{}, err
 	}
 	//nolint:gosec // Requests are sent to a fixed local API endpoint over a unix domain socket.
 	resp, err := client.Do(req)
 	if err != nil {
-		return tailscaleLocalStatus{}, err
+		return localStatus{}, err
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return tailscaleLocalStatus{}, fmt.Errorf("tailscale localapi status: unexpected status %d", resp.StatusCode)
+		return localStatus{}, fmt.Errorf("tailscale localapi status: unexpected status %d", resp.StatusCode)
 	}
-	var status tailscaleLocalStatus
+	var status localStatus
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return tailscaleLocalStatus{}, err
+		return localStatus{}, err
 	}
 	return status, nil
 }

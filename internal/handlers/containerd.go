@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -74,6 +73,12 @@ type createContainerPullProgressEvent struct {
 	Layers []ctr.LayerStatus `json:"layers"`
 }
 
+type createContainerPullStatusEvent struct {
+	Type    string `json:"type"`
+	Image   string `json:"image"`
+	Message string `json:"message,omitempty"`
+}
+
 type createContainerCreatingEvent struct {
 	Type string `json:"type"`
 }
@@ -114,6 +119,7 @@ type ContainerMetricsStatusResponse struct {
 type ContainerCPUMetricsResponse struct {
 	UsagePercent      float64 `json:"usage_percent"`
 	UsageNanoseconds  uint64  `json:"usage_nanoseconds"`
+	UsageNanocores    uint64  `json:"usage_nanocores"`
 	UserNanoseconds   uint64  `json:"user_nanoseconds"`
 	KernelNanoseconds uint64  `json:"kernel_nanoseconds"`
 }
@@ -312,9 +318,9 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	send(createContainerPullingEvent{Type: "pulling", Image: image})
 
 	var pullDone atomic.Bool
-	_, pullErr := h.manager.PullImage(ctx, image, &ctr.PullImageOptions{
-		Unpack:      true,
-		Snapshotter: snapshotter,
+	prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		Unpack:        true,
+		StorageDriver: snapshotter,
 		OnProgress: func(p ctr.PullProgress) {
 			if pullDone.Load() {
 				return
@@ -324,10 +330,16 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	})
 	pullDone.Store(true)
 	if pullErr != nil {
-		h.logger.Error("image pull failed",
+		h.logger.Error("image preparation failed",
 			slog.String("image", image), slog.Any("error", pullErr))
-		sendError("image pull failed: " + pullErr.Error())
+		sendError("image preparation failed: " + pullErr.Error())
 		return nil
+	}
+	switch prepareResult.Mode {
+	case workspace.ImagePrepareSkipped:
+		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
+	case workspace.ImagePrepareDelegated:
+		send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
 	}
 
 	// Phase 2: Create container (image is local, should be fast)
@@ -571,7 +583,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	}
 	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -609,7 +621,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -619,7 +631,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "snapshotter does not match container snapshotter")
 	}
 
-	snapshotKey := strings.TrimSpace(data.Info.SnapshotKey)
+	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
 	if snapshotKey == "" {
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
 	}
@@ -849,6 +861,7 @@ func toContainerCPUMetricsResponse(metrics *ctr.CPUMetrics) *ContainerCPUMetrics
 	return &ContainerCPUMetricsResponse{
 		UsagePercent:      metrics.UsagePercent,
 		UsageNanoseconds:  metrics.UsageNanoseconds,
+		UsageNanocores:    metrics.UsageNanocores,
 		UserNanoseconds:   metrics.UserNanoseconds,
 		KernelNanoseconds: metrics.KernelNanoseconds,
 	}

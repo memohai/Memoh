@@ -23,7 +23,10 @@ SELECT
   browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
-  bots.tool_approval_config
+  bots.tool_approval_config,
+  bots.overlay_provider,
+  bots.overlay_enabled,
+  bots.overlay_config
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
@@ -62,6 +65,9 @@ SET language = sqlc.arg(language),
     persist_full_tool_results = sqlc.arg(persist_full_tool_results),
     show_tool_calls_in_im = sqlc.arg(show_tool_calls_in_im),
     tool_approval_config = sqlc.arg(tool_approval_config),
+    overlay_provider = sqlc.arg(overlay_provider),
+    overlay_enabled = sqlc.arg(overlay_enabled),
+    overlay_config = sqlc.arg(overlay_config),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
 RETURNING
@@ -88,7 +94,10 @@ RETURNING
   browser_context_id,
   persist_full_tool_results,
   show_tool_calls_in_im,
-  tool_approval_config;
+  tool_approval_config,
+  overlay_provider,
+  overlay_enabled,
+  overlay_config;
 
 -- name: DeleteSettingsByBotID :exec
 UPDATE bots
@@ -114,5 +123,8 @@ SET language = 'auto',
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+    overlay_provider = '',
+    overlay_enabled = false,
+    overlay_config = '{}',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id);
