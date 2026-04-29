@@ -1,7 +1,7 @@
--- name: GetBotNetworkConfig :one
+-- name: GetBotOverlayConfig :one
 SELECT
-  network_enabled,
-  network_provider,
-  network_config
+  overlay_enabled,
+  overlay_provider,
+  overlay_config
 FROM bots
 WHERE id = $1;

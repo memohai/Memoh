@@ -44,7 +44,7 @@ func options() fx.Option {
 			boot.ProvideRuntimeConfig,
 			provideLogger,
 			provideContainerService,
-			provideNetworkProviderRegistry,
+			provideOverlayProviderRegistry,
 			provideNetworkService,
 			provideNetworkController,
 			provideDBConn,

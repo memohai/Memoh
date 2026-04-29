@@ -9,10 +9,10 @@ type Provider interface {
 	Kind() string
 	Descriptor() ProviderDescriptor
 	NormalizeConfig(raw map[string]any) (map[string]any, error)
-	Status(ctx context.Context, cfg BotNetworkConfig) (ProviderStatus, error)
-	ExecuteAction(ctx context.Context, cfg BotNetworkConfig, actionID string, input map[string]any) (ProviderActionExecution, error)
-	ListNodes(ctx context.Context, botID string, cfg BotNetworkConfig) ([]NodeOption, error)
-	BuildDriver(cfg BotNetworkConfig) (OverlayDriver, error)
+	Status(ctx context.Context, cfg BotOverlayConfig) (ProviderStatus, error)
+	ExecuteAction(ctx context.Context, cfg BotOverlayConfig, actionID string, input map[string]any) (ProviderActionExecution, error)
+	ListNodes(ctx context.Context, botID string, cfg BotOverlayConfig) ([]NodeOption, error)
+	BuildDriver(cfg BotOverlayConfig) (OverlayDriver, error)
 }
 
 // OverlayDriver is the runtime surface for a concrete configured provider

@@ -1,6 +1,6 @@
 import { client } from '@memohai/sdk/client'
 
-export interface NetworkConfigSchemaField {
+export interface OverlayConfigSchemaField {
   key: string
   type: 'string' | 'secret' | 'number' | 'bool' | 'enum' | 'textarea'
   required?: boolean
@@ -18,13 +18,13 @@ export interface NetworkConfigSchemaField {
   constraint?: { min?: number; max?: number; step?: number } | null
 }
 
-export interface NetworkConfigSchema {
+export interface OverlayConfigSchema {
   version?: number
   title?: string
-  fields?: NetworkConfigSchemaField[]
+  fields?: OverlayConfigSchemaField[]
 }
 
-export interface NetworkProviderAction {
+export interface OverlayProviderAction {
   id: string
   type: string
   label: string
@@ -55,17 +55,17 @@ export interface NetworkBotStatus {
   workspace?: WorkspaceRuntimeStatus | null
 }
 
-export interface NetworkProviderMeta {
+export interface OverlayProviderMeta {
   kind: string
   display_name: string
   description?: string
-  config_schema?: NetworkConfigSchema
-  binding_config_schema?: NetworkConfigSchema
+  config_schema?: OverlayConfigSchema
+  binding_config_schema?: OverlayConfigSchema
   capabilities?: Record<string, boolean>
-  actions?: NetworkProviderAction[]
+  actions?: OverlayProviderAction[]
 }
 
-export interface NetworkProviderActionExecution {
+export interface OverlayProviderActionExecution {
   action_id: string
   status: NetworkBotStatus
   output?: Record<string, unknown>
@@ -101,8 +101,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
   return data as T
 }
 
-export function listNetworkProviderMeta() {
-  return request<NetworkProviderMeta[]>('GET', '/network/meta')
+export function listOverlayProviderMeta() {
+  return request<OverlayProviderMeta[]>('GET', '/network/meta')
 }
 
 export function getBotNetworkStatus(botID: string) {
@@ -114,5 +114,5 @@ export function listBotNetworkNodes(botID: string) {
 }
 
 export function executeBotNetworkAction(botID: string, actionID: string, body: Record<string, unknown>) {
-  return request<NetworkProviderActionExecution>('POST', `/bots/${botID}/network/actions/${actionID}`, body)
+  return request<OverlayProviderActionExecution>('POST', `/bots/${botID}/network/actions/${actionID}`, body)
 }

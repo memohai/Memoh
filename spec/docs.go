@@ -14171,14 +14171,14 @@ const docTemplate = `{
                 "memory_provider_id": {
                     "type": "string"
                 },
-                "network_config": {
+                "overlay_config": {
                     "type": "object",
                     "additionalProperties": {}
                 },
-                "network_enabled": {
+                "overlay_enabled": {
                     "type": "boolean"
                 },
-                "network_provider": {
+                "overlay_provider": {
                     "type": "string"
                 },
                 "persist_full_tool_results": {
@@ -14315,14 +14315,14 @@ const docTemplate = `{
                 "memory_provider_id": {
                     "type": "string"
                 },
-                "network_config": {
+                "overlay_config": {
                     "type": "object",
                     "additionalProperties": {}
                 },
-                "network_enabled": {
+                "overlay_enabled": {
                     "type": "boolean"
                 },
-                "network_provider": {
+                "overlay_provider": {
                     "type": "string"
                 },
                 "persist_full_tool_results": {

@@ -39,6 +39,9 @@ type Bot struct {
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
+	OverlayProvider        string             `json:"overlay_provider"`
+	OverlayEnabled         bool               `json:"overlay_enabled"`
+	OverlayConfig          []byte             `json:"overlay_config"`
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`

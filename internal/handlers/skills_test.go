@@ -341,7 +341,7 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 	}
 	cfg.DataRoot = dataRoot
 	db := &skillsTestDB{userID: userID, botID: botID, metadataJSON: metadataJSON}
-	manager := workspace.NewManager(slog.Default(), nil, cfg, "", nil)
+	manager := workspace.NewManager(slog.Default(), nil, nil, cfg, "", nil)
 	handler := NewContainerdHandler(
 		slog.Default(),
 		manager,

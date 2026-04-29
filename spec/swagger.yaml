@@ -3044,12 +3044,12 @@ definitions:
         type: string
       memory_provider_id:
         type: string
-      network_config:
+      overlay_config:
         additionalProperties: {}
         type: object
-      network_enabled:
+      overlay_enabled:
         type: boolean
-      network_provider:
+      overlay_provider:
         type: string
       persist_full_tool_results:
         type: boolean
@@ -3139,12 +3139,12 @@ definitions:
         type: string
       memory_provider_id:
         type: string
-      network_config:
+      overlay_config:
         additionalProperties: {}
         type: object
-      network_enabled:
+      overlay_enabled:
         type: boolean
-      network_provider:
+      overlay_provider:
         type: string
       persist_full_tool_results:
         type: boolean

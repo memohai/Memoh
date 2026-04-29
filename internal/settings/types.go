@@ -31,9 +31,9 @@ type Settings struct {
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIM      bool               `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     ToolApprovalConfig `json:"tool_approval_config"`
-	NetworkEnabled         bool               `json:"network_enabled"`
-	NetworkProvider        string             `json:"network_provider,omitempty"`
-	NetworkConfig          map[string]any     `json:"network_config,omitempty"`
+	OverlayEnabled         bool               `json:"overlay_enabled"`
+	OverlayProvider        string             `json:"overlay_provider,omitempty"`
+	OverlayConfig          map[string]any     `json:"overlay_config,omitempty"`
 }
 
 type UpsertRequest struct {
@@ -61,9 +61,9 @@ type UpsertRequest struct {
 	PersistFullToolResults *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM      *bool               `json:"show_tool_calls_in_im,omitempty"`
 	ToolApprovalConfig     *ToolApprovalConfig `json:"tool_approval_config,omitempty"`
-	NetworkEnabled         *bool               `json:"network_enabled,omitempty"`
-	NetworkProvider        *string             `json:"network_provider,omitempty"`
-	NetworkConfig          map[string]any      `json:"network_config,omitempty"`
+	OverlayEnabled         *bool               `json:"overlay_enabled,omitempty"`
+	OverlayProvider        *string             `json:"overlay_provider,omitempty"`
+	OverlayConfig          map[string]any      `json:"overlay_config,omitempty"`
 }
 
 type ToolApprovalConfig struct {

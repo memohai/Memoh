@@ -26,8 +26,10 @@ type containerWorkspace interface {
 	RestorePreservedData(ctx context.Context, botID string) error
 	RecordContainerRunning(ctx context.Context, botID, containerID, image string)
 	GetContainerInfo(ctx context.Context, botID string) (*workspace.ContainerStatus, error)
+	GetContainerMetrics(ctx context.Context, botID string) (*workspace.ContainerMetricsResult, error)
 	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
 	StopBot(ctx context.Context, botID string) error
+	ResolveWorkspaceSkillDiscoveryRoots(ctx context.Context, botID string) ([]string, error)
 	CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*workspace.SnapshotCreateInfo, error)
 	ListBotSnapshotData(ctx context.Context, botID string) (*workspace.BotSnapshotData, error)
 	RollbackVersion(ctx context.Context, botID string, version int) error

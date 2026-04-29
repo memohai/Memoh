@@ -11,24 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getBotNetworkConfig = `-- name: GetBotNetworkConfig :one
+const getBotOverlayConfig = `-- name: GetBotOverlayConfig :one
 SELECT
-  network_enabled,
-  network_provider,
-  network_config
+  overlay_enabled,
+  overlay_provider,
+  overlay_config
 FROM bots
 WHERE id = $1
 `
 
-type GetBotNetworkConfigRow struct {
-	NetworkEnabled  bool   `json:"network_enabled"`
-	NetworkProvider string `json:"network_provider"`
-	NetworkConfig   []byte `json:"network_config"`
+type GetBotOverlayConfigRow struct {
+	OverlayEnabled  bool   `json:"overlay_enabled"`
+	OverlayProvider string `json:"overlay_provider"`
+	OverlayConfig   []byte `json:"overlay_config"`
 }
 
-func (q *Queries) GetBotNetworkConfig(ctx context.Context, id pgtype.UUID) (GetBotNetworkConfigRow, error) {
-	row := q.db.QueryRow(ctx, getBotNetworkConfig, id)
-	var i GetBotNetworkConfigRow
-	err := row.Scan(&i.NetworkEnabled, &i.NetworkProvider, &i.NetworkConfig)
+func (q *Queries) GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (GetBotOverlayConfigRow, error) {
+	row := q.db.QueryRow(ctx, getBotOverlayConfig, id)
+	var i GetBotOverlayConfigRow
+	err := row.Scan(&i.OverlayEnabled, &i.OverlayProvider, &i.OverlayConfig)
 	return i, err
 }

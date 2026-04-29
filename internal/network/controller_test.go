@@ -80,19 +80,19 @@ func (*fakeProvider) NormalizeConfig(raw map[string]any) (map[string]any, error)
 	return cloneMap(raw), nil
 }
 
-func (*fakeProvider) Status(context.Context, BotNetworkConfig) (ProviderStatus, error) {
+func (*fakeProvider) Status(context.Context, BotOverlayConfig) (ProviderStatus, error) {
 	return ProviderStatus{State: StatusStateReady}, nil
 }
 
-func (*fakeProvider) ExecuteAction(context.Context, BotNetworkConfig, string, map[string]any) (ProviderActionExecution, error) {
+func (*fakeProvider) ExecuteAction(context.Context, BotOverlayConfig, string, map[string]any) (ProviderActionExecution, error) {
 	return ProviderActionExecution{}, nil
 }
 
-func (*fakeProvider) ListNodes(context.Context, string, BotNetworkConfig) ([]NodeOption, error) {
+func (*fakeProvider) ListNodes(context.Context, string, BotOverlayConfig) ([]NodeOption, error) {
 	return nil, nil
 }
 
-func (p *fakeProvider) BuildDriver(BotNetworkConfig) (OverlayDriver, error) {
+func (p *fakeProvider) BuildDriver(BotOverlayConfig) (OverlayDriver, error) {
 	return p.overlay, nil
 }
 
@@ -113,7 +113,7 @@ func TestControllerEnsureAttachedDelegatesRuntimeAndOverlay(t *testing.T) {
 			CNIBinDir:   "/opt/cni/bin",
 			CNIConfDir:  "/etc/cni/net.d",
 		},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},
@@ -150,7 +150,7 @@ func TestControllerDetachDelegatesOverlayBeforeRuntime(t *testing.T) {
 		BotID:       "bot-1",
 		ContainerID: "workspace-bot-1",
 		Runtime:     RuntimeNetworkRequest{ContainerID: "workspace-bot-1"},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},
@@ -180,7 +180,7 @@ func TestControllerEnsureAttachedOverlayOnly(t *testing.T) {
 		BotID:       "bot-1",
 		ContainerID: "workspace-bot-1",
 		Runtime:     RuntimeNetworkRequest{ContainerID: "workspace-bot-1"},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},
@@ -215,7 +215,7 @@ func TestControllerDetachOverlayOnly(t *testing.T) {
 		BotID:       "bot-1",
 		ContainerID: "workspace-bot-1",
 		Runtime:     RuntimeNetworkRequest{ContainerID: "workspace-bot-1"},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},
@@ -250,7 +250,7 @@ func TestControllerStatusDelegatesRuntimeAndOverlay(t *testing.T) {
 		BotID:       "bot-1",
 		ContainerID: "workspace-bot-1",
 		Runtime:     RuntimeNetworkRequest{ContainerID: "workspace-bot-1"},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},
@@ -281,7 +281,7 @@ func TestControllerEnsureAttachedRollsBackRuntimeOnOverlayError(t *testing.T) {
 		BotID:       "bot-1",
 		ContainerID: "workspace-bot-1",
 		Runtime:     RuntimeNetworkRequest{ContainerID: "workspace-bot-1"},
-		Overlay: BotNetworkConfig{
+		Overlay: BotOverlayConfig{
 			Enabled:  true,
 			Provider: "fake-overlay",
 		},

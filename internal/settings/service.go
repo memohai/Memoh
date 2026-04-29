@@ -70,14 +70,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	networkBindingRow, err := s.queries.GetBotNetworkConfig(ctx, pgID)
+	overlayBindingRow, err := s.queries.GetBotOverlayConfig(ctx, pgID)
 	if err != nil {
 		return Settings{}, err
 	}
-	previousNetworkConfig := settingsNetworkConfigFromRow(networkBindingRow)
+	previousOverlayConfig := settingsOverlayConfigFromRow(overlayBindingRow)
 	if s.network != nil {
 		if resolvedPrevious, resolveErr := s.network.GetBotConfig(ctx, botID); resolveErr == nil {
-			previousNetworkConfig = resolvedPrevious
+			previousOverlayConfig = resolvedPrevious
 		}
 	}
 	aclDefaultEffect, err := s.getDefaultEffect(ctx, botID)
@@ -88,9 +88,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 	}
-	current.NetworkEnabled = networkBindingRow.NetworkEnabled
-	current.NetworkProvider = strings.TrimSpace(networkBindingRow.NetworkProvider)
-	current.NetworkConfig = normalizeJSONObject(networkBindingRow.NetworkConfig)
+	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
+	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
+	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
@@ -135,14 +135,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		timezoneValue = normalized
 	}
-	if req.NetworkEnabled != nil {
-		current.NetworkEnabled = *req.NetworkEnabled
+	if req.OverlayEnabled != nil {
+		current.OverlayEnabled = *req.OverlayEnabled
 	}
-	if req.NetworkProvider != nil {
-		current.NetworkProvider = strings.TrimSpace(*req.NetworkProvider)
+	if req.OverlayProvider != nil {
+		current.OverlayProvider = strings.TrimSpace(*req.OverlayProvider)
 	}
-	if req.NetworkConfig != nil {
-		current.NetworkConfig = req.NetworkConfig
+	if req.OverlayConfig != nil {
+		current.OverlayConfig = req.OverlayConfig
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -231,30 +231,30 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, err
 	}
 
-	normalizedNetwork, err := s.normalizeNetworkConfig(current)
+	normalizedNetwork, err := s.normalizeOverlayConfig(current)
 	if err != nil {
 		return Settings{}, err
 	}
-	nextNetworkConfig := settingsNetworkConfigFromSettings(normalizedNetwork)
-	networkChanged := s.network != nil && !networkConfigsEqual(previousNetworkConfig, nextNetworkConfig)
+	nextOverlayConfig := settingsOverlayConfigFromSettings(normalizedNetwork)
+	networkChanged := s.network != nil && !overlayConfigsEqual(previousOverlayConfig, nextOverlayConfig)
 	rollbackNetworkChange := func(cause error) error {
 		if !networkChanged {
 			return cause
 		}
-		if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextNetworkConfig, previousNetworkConfig); rollbackErr != nil {
+		if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextOverlayConfig, previousOverlayConfig); rollbackErr != nil {
 			return errors.Join(cause, fmt.Errorf("network rollback failed: %w", rollbackErr))
 		}
 		return cause
 	}
 	if networkChanged {
-		if err := s.reconcileBotNetwork(ctx, botID, previousNetworkConfig, nextNetworkConfig); err != nil {
-			if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextNetworkConfig, previousNetworkConfig); rollbackErr != nil {
+		if err := s.reconcileBotNetwork(ctx, botID, previousOverlayConfig, nextOverlayConfig); err != nil {
+			if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextOverlayConfig, previousOverlayConfig); rollbackErr != nil {
 				return Settings{}, errors.Join(fmt.Errorf("reconcile bot network: %w", err), fmt.Errorf("network rollback failed: %w", rollbackErr))
 			}
 			return Settings{}, err
 		}
 	}
-	networkConfigJSON, err := json.Marshal(normalizedNetwork.NetworkConfig)
+	overlayConfigJSON, err := json.Marshal(normalizedNetwork.OverlayConfig)
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
 	}
@@ -283,9 +283,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
-		NetworkProvider:        normalizedNetwork.NetworkProvider,
-		NetworkEnabled:         normalizedNetwork.NetworkEnabled,
-		NetworkConfig:          networkConfigJSON,
+		OverlayProvider:        normalizedNetwork.OverlayProvider,
+		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
+		OverlayConfig:          overlayConfigJSON,
 	})
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(err)
@@ -348,7 +348,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 	if settings.CompactionRatio < 1 || settings.CompactionRatio > 100 {
 		settings.CompactionRatio = 80
 	}
-	settings.NetworkConfig = map[string]any{}
+	settings.OverlayConfig = map[string]any{}
 	return settings
 }
 
@@ -385,9 +385,9 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
-		row.NetworkProvider,
-		row.NetworkEnabled,
-		row.NetworkConfig,
+		row.OverlayProvider,
+		row.OverlayEnabled,
+		row.OverlayConfig,
 	)
 }
 
@@ -415,9 +415,9 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
-		row.NetworkProvider,
-		row.NetworkEnabled,
-		row.NetworkConfig,
+		row.OverlayProvider,
+		row.OverlayEnabled,
+		row.OverlayConfig,
 	)
 }
 
@@ -444,9 +444,9 @@ func normalizeBotSettingsFields(
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
-	networkProvider string,
-	networkEnabled bool,
-	networkConfig []byte,
+	overlayProvider string,
+	overlayEnabled bool,
+	overlayConfig []byte,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
 	if timezone.Valid {
@@ -485,9 +485,9 @@ func normalizeBotSettingsFields(
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
-	settings.NetworkProvider = strings.TrimSpace(networkProvider)
-	settings.NetworkEnabled = networkEnabled
-	settings.NetworkConfig = normalizeJSONObject(networkConfig)
+	settings.OverlayProvider = strings.TrimSpace(overlayProvider)
+	settings.OverlayEnabled = overlayEnabled
+	settings.OverlayConfig = normalizeJSONObject(overlayConfig)
 	return settings
 }
 
@@ -513,30 +513,30 @@ func normalizeJSONObject(raw []byte) map[string]any {
 	return out
 }
 
-func (s *Service) normalizeNetworkConfig(current Settings) (Settings, error) {
-	current.NetworkProvider = strings.TrimSpace(current.NetworkProvider)
-	current.NetworkConfig = cloneSettingsMap(current.NetworkConfig)
-	if current.NetworkProvider == "" {
-		if current.NetworkEnabled {
+func (s *Service) normalizeOverlayConfig(current Settings) (Settings, error) {
+	current.OverlayProvider = strings.TrimSpace(current.OverlayProvider)
+	current.OverlayConfig = cloneSettingsMap(current.OverlayConfig)
+	if current.OverlayProvider == "" {
+		if current.OverlayEnabled {
 			return Settings{}, errors.New("network provider is required when network is enabled")
 		}
-		current.NetworkConfig = map[string]any{}
+		current.OverlayConfig = map[string]any{}
 		return current, nil
 	}
 	if s.network == nil {
 		return Settings{}, errors.New("network service not configured")
 	}
-	cfg, err := s.network.PrepareBotConfigForWrite(netctl.BotNetworkConfig{
-		Enabled:  current.NetworkEnabled,
-		Provider: current.NetworkProvider,
-		Config:   current.NetworkConfig,
+	cfg, err := s.network.PrepareBotConfigForWrite(netctl.BotOverlayConfig{
+		Enabled:  current.OverlayEnabled,
+		Provider: current.OverlayProvider,
+		Config:   current.OverlayConfig,
 	})
 	if err != nil {
 		return Settings{}, err
 	}
-	current.NetworkEnabled = cfg.Enabled
-	current.NetworkProvider = cfg.Provider
-	current.NetworkConfig = cfg.Config
+	current.OverlayEnabled = cfg.Enabled
+	current.OverlayProvider = cfg.Provider
+	current.OverlayConfig = cfg.Config
 	return current, nil
 }
 
@@ -551,31 +551,31 @@ func cloneSettingsMap(in map[string]any) map[string]any {
 	return out
 }
 
-func settingsNetworkConfigFromRow(row sqlc.GetBotNetworkConfigRow) netctl.BotNetworkConfig {
-	return netctl.BotNetworkConfig{
-		Enabled:  row.NetworkEnabled,
-		Provider: strings.TrimSpace(row.NetworkProvider),
-		Config:   normalizeJSONObject(row.NetworkConfig),
+func settingsOverlayConfigFromRow(row sqlc.GetBotOverlayConfigRow) netctl.BotOverlayConfig {
+	return netctl.BotOverlayConfig{
+		Enabled:  row.OverlayEnabled,
+		Provider: strings.TrimSpace(row.OverlayProvider),
+		Config:   normalizeJSONObject(row.OverlayConfig),
 	}
 }
 
-func settingsNetworkConfigFromSettings(current Settings) netctl.BotNetworkConfig {
-	return netctl.BotNetworkConfig{
-		Enabled:  current.NetworkEnabled,
-		Provider: strings.TrimSpace(current.NetworkProvider),
-		Config:   cloneSettingsMap(current.NetworkConfig),
+func settingsOverlayConfigFromSettings(current Settings) netctl.BotOverlayConfig {
+	return netctl.BotOverlayConfig{
+		Enabled:  current.OverlayEnabled,
+		Provider: strings.TrimSpace(current.OverlayProvider),
+		Config:   cloneSettingsMap(current.OverlayConfig),
 	}
 }
 
-func networkConfigsEqual(left, right netctl.BotNetworkConfig) bool {
+func overlayConfigsEqual(left, right netctl.BotOverlayConfig) bool {
 	if left.Enabled != right.Enabled || left.Provider != right.Provider {
 		return false
 	}
 	return jsonEqual(left.Config, right.Config)
 }
 
-func (s *Service) reconcileBotNetwork(ctx context.Context, botID string, previous, next netctl.BotNetworkConfig) error {
-	if s.network == nil || networkConfigsEqual(previous, next) {
+func (s *Service) reconcileBotNetwork(ctx context.Context, botID string, previous, next netctl.BotOverlayConfig) error {
+	if s.network == nil || overlayConfigsEqual(previous, next) {
 		return nil
 	}
 	return s.network.ReconcileBot(ctx, botID, previous, next)

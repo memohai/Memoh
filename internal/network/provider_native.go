@@ -65,7 +65,7 @@ func (p *nativeProvider) NormalizeConfig(raw map[string]any) (map[string]any, er
 	return config, nil
 }
 
-func (p *nativeProvider) Status(_ context.Context, cfg BotNetworkConfig) (ProviderStatus, error) {
+func (p *nativeProvider) Status(_ context.Context, cfg BotOverlayConfig) (ProviderStatus, error) {
 	if !cfg.Enabled {
 		return ProviderStatus{
 			State:       StatusStateNeedsConfig,
@@ -94,7 +94,7 @@ func (p *nativeProvider) Status(_ context.Context, cfg BotNetworkConfig) (Provid
 	}, nil
 }
 
-func (p *nativeProvider) ExecuteAction(ctx context.Context, cfg BotNetworkConfig, actionID string, _ map[string]any) (ProviderActionExecution, error) {
+func (p *nativeProvider) ExecuteAction(ctx context.Context, cfg BotOverlayConfig, actionID string, _ map[string]any) (ProviderActionExecution, error) {
 	switch actionID {
 	case "test_connection":
 		status, err := p.Status(ctx, cfg)
@@ -110,7 +110,7 @@ func (p *nativeProvider) ExecuteAction(ctx context.Context, cfg BotNetworkConfig
 	}
 }
 
-func (p *nativeProvider) ListNodes(ctx context.Context, botID string, cfg BotNetworkConfig) ([]NodeOption, error) {
+func (p *nativeProvider) ListNodes(ctx context.Context, botID string, cfg BotOverlayConfig) ([]NodeOption, error) {
 	if err := p.validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (p *nativeProvider) ListNodes(ctx context.Context, botID string, cfg BotNet
 	}
 }
 
-func (p *nativeProvider) BuildDriver(cfg BotNetworkConfig) (OverlayDriver, error) {
+func (p *nativeProvider) BuildDriver(cfg BotOverlayConfig) (OverlayDriver, error) {
 	config, err := p.NormalizeConfig(cfg.Config)
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func newTailscaleProvider(runtime nativeClientRuntime, stateRoot string) Provide
 	}
 }
 
-func (p *nativeProvider) validateConfig(cfg BotNetworkConfig) error {
+func (p *nativeProvider) validateConfig(cfg BotOverlayConfig) error {
 	if p.kind == "tailscale" && boolConfig(cfg.Config, "userspace") && stringConfig(cfg.Config, "exit_node") != "" {
 		return errors.New("tailscale transparent egress via exit node requires userspace=false")
 	}

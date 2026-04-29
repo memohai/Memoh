@@ -18,19 +18,19 @@ func (testProvider) NormalizeConfig(raw map[string]any) (map[string]any, error) 
 	return raw, nil
 }
 
-func (testProvider) Status(_ context.Context, _ BotNetworkConfig) (ProviderStatus, error) {
+func (testProvider) Status(_ context.Context, _ BotOverlayConfig) (ProviderStatus, error) {
 	return ProviderStatus{State: StatusStateReady}, nil
 }
 
-func (testProvider) ExecuteAction(_ context.Context, _ BotNetworkConfig, _ string, _ map[string]any) (ProviderActionExecution, error) {
+func (testProvider) ExecuteAction(_ context.Context, _ BotOverlayConfig, _ string, _ map[string]any) (ProviderActionExecution, error) {
 	return ProviderActionExecution{}, nil
 }
 
-func (testProvider) ListNodes(_ context.Context, _ string, _ BotNetworkConfig) ([]NodeOption, error) {
+func (testProvider) ListNodes(_ context.Context, _ string, _ BotOverlayConfig) ([]NodeOption, error) {
 	return nil, nil
 }
 
-func (testProvider) BuildDriver(_ BotNetworkConfig) (OverlayDriver, error) {
+func (testProvider) BuildDriver(_ BotOverlayConfig) (OverlayDriver, error) {
 	return NoopOverlayDriver{}, nil
 }
 

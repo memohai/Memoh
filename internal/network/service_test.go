@@ -11,7 +11,7 @@ func TestPrepareBotConfigForWriteAllowsDisabledInvalidProviderDraft(t *testing.T
 	}
 	svc := &Service{registry: registry}
 
-	cfg, err := svc.PrepareBotConfigForWrite(BotNetworkConfig{
+	cfg, err := svc.PrepareBotConfigForWrite(BotOverlayConfig{
 		Enabled:  false,
 		Provider: "tailscale",
 		// Missing auth_key, which would be invalid when enabled.
@@ -32,7 +32,7 @@ func TestPrepareBotConfigForWriteRejectsExitNodeWithUserspaceEnabled(t *testing.
 	}
 	svc := &Service{registry: registry}
 
-	_, err := svc.PrepareBotConfigForWrite(BotNetworkConfig{
+	_, err := svc.PrepareBotConfigForWrite(BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
 		Config: map[string]any{
@@ -53,7 +53,7 @@ func TestPrepareBotConfigForWriteAllowsExitNodeWithKernelTUN(t *testing.T) {
 	}
 	svc := &Service{registry: registry}
 
-	cfg, err := svc.PrepareBotConfigForWrite(BotNetworkConfig{
+	cfg, err := svc.PrepareBotConfigForWrite(BotOverlayConfig{
 		Enabled:  true,
 		Provider: "tailscale",
 		Config: map[string]any{
