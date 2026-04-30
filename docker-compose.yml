@@ -67,6 +67,7 @@ services:
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
+      - containerd_sock:/run/containerd
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
@@ -94,6 +95,30 @@ services:
       CONFIG_PATH: /app/config.toml
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  workerd:
+    image: memohai/server:latest
+    container_name: memoh-workerd
+    entrypoint: ["/app/workerd"]
+    healthcheck:
+      disable: true
+    environment:
+      CONFIG_PATH: /app/config.toml
+    volumes:
+      - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
+      - memoh_data:/opt/memoh/data
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
@@ -109,6 +134,7 @@ services:
       - "8082:8082"
     depends_on:
       - server
+      - workerd
       - verifyd
     restart: unless-stopped
     networks:
@@ -168,6 +194,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  containerd_sock:
     driver: local
   containerd_data:
     driver: local

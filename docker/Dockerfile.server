@@ -53,6 +53,24 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o verifyd ./cmd/verifyd
 
+# ---- Stage 2c: Build workerd binary ----
+FROM build-base AS workerd-builder
+ARG VERSION=dev
+ARG COMMIT_HASH=unknown
+ARG BUILD_TIME=unknown
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    set -eux; \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
+      -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
+      -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+    -o workerd ./cmd/workerd
+
 # ---- Stage 3: Build bridge binary ----
 FROM build-base AS bridge-builder
 ARG TARGETARCH
@@ -126,6 +144,7 @@ COPY --from=toolkit-assembly /assembly /opt/memoh/runtime
 # Server binary, spec, and provider presets
 COPY --from=server-builder /build/memoh-server /app/memoh-server
 COPY --from=verifyd-builder /build/verifyd /app/verifyd
+COPY --from=workerd-builder /build/workerd /app/workerd
 COPY --from=server-builder /build/spec /app/spec
 COPY --from=server-builder /build/conf/providers /app/conf/providers
 
