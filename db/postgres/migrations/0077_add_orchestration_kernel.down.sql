@@ -1,4 +1,4 @@
--- 0068_add_orchestration_kernel (down)
+-- 0077_add_orchestration_kernel (down)
 -- Drop the final orchestration kernel tables.
 
 DROP TABLE IF EXISTS orchestration_workers;

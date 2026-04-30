@@ -44,6 +44,37 @@ ALTER TABLE IF EXISTS orchestration_task_verifications
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_open_run_barrier_unique
   ON orchestration_human_checkpoints (run_id)
   WHERE blocks_run = TRUE AND status = 'open';
+CREATE TABLE IF NOT EXISTS orchestration_action_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id UUID NOT NULL REFERENCES orchestration_runs(id) ON DELETE CASCADE,
+  task_id UUID NOT NULL REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
+  attempt_id UUID,
+  verification_id UUID,
+  action_kind TEXT NOT NULL DEFAULT 'tool_call',
+  status TEXT NOT NULL,
+  tool_name TEXT NOT NULL DEFAULT '',
+  tool_call_id TEXT NOT NULL DEFAULT '',
+  input_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
+  output_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
+  error_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
+  summary TEXT NOT NULL DEFAULT '',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT orchestration_action_ledger_exactly_one_subject CHECK (
+    (attempt_id IS NOT NULL AND verification_id IS NULL)
+    OR (attempt_id IS NULL AND verification_id IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_orchestration_action_ledger_run_started_at
+  ON orchestration_action_ledger(run_id, started_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_action_ledger_attempt_tool_call_unique
+  ON orchestration_action_ledger(attempt_id, tool_call_id)
+  WHERE attempt_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_action_ledger_verification_tool_call_unique
+  ON orchestration_action_ledger(verification_id, tool_call_id)
+  WHERE verification_id IS NOT NULL;
 `); err != nil {
 		pool.Close()
 		t.Skipf("skip integration test: database schema bootstrap failed: %v", err)
@@ -83,6 +114,16 @@ func setIntegrationTaskVerificationPolicy(t *testing.T, ctx context.Context, poo
 	if _, err := pool.Exec(ctx, "UPDATE orchestration_tasks SET verification_policy = $2::jsonb, updated_at = now() WHERE id = $1", pgTaskID, marshalJSON(policy)); err != nil {
 		t.Fatalf("update task verification policy: %v", err)
 	}
+}
+
+func mustParsePGUUID(t *testing.T, raw string) pgtype.UUID {
+	t.Helper()
+
+	parsed, err := db.ParseUUID(raw)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", raw, err)
+	}
+	return parsed
 }
 
 func processRunPlanningIntent(t *testing.T, ctx context.Context, svc *Service) {
@@ -264,6 +305,530 @@ func TestIntegrationTenantScopedAuthorizationRejectsSameSubjectAcrossTenants(t *
 	if page.Items[0].Status != CheckpointStatusOpen {
 		t.Fatalf("checkpoint status after denied resolve = %q, want %q", page.Items[0].Status, CheckpointStatusOpen)
 	}
+}
+
+func TestIntegrationGetRunInspectorIncludesExecutionSpansAndInputManifests(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inspector execution detail contract",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		Input: map[string]any{
+			"builtin_workerd": map[string]any{
+				"request_replan": true,
+				"child_tasks": []map[string]any{
+					{
+						"alias":          "verify-child",
+						"kind":           "child",
+						"goal":           "verified child",
+						"worker_profile": DefaultRootWorkerProfile,
+						"verification_policy": map[string]any{
+							"mode":                      VerificationModeBuiltinBasic,
+							"require_structured_output": true,
+						},
+						"inputs": map[string]any{
+							"builtin_workerd": map[string]any{
+								"summary": "verified child complete",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	rootAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-root",
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	rootRunning, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(root) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     rootRunning.ID,
+		ClaimToken:    rootRunning.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "planned child task",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"child_tasks": []map[string]any{
+				{
+					"alias":          "verify-child",
+					"kind":           "child",
+					"goal":           "verified child",
+					"worker_profile": DefaultRootWorkerProfile,
+					"verification_policy": map[string]any{
+						"mode":                      VerificationModeBuiltinBasic,
+						"require_structured_output": true,
+					},
+					"inputs": map[string]any{
+						"builtin_workerd": map[string]any{
+							"summary": "verified child complete",
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(root) error = %v", err)
+	}
+
+	drainRunPlanningIntents(t, ctx, svc)
+
+	childAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-child",
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	childRunning, err := svc.StartAttempt(ctx, childAttempt.ID, childAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(child) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        childRunning.ID,
+		ClaimToken:       childRunning.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "verified child complete",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(child) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verify-worker",
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseToken:       "lease-" + uuid.NewString(),
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "accepted",
+	}); err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+
+	queries := sqlc.New(pool)
+	runUUID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run id: %v", err)
+	}
+	rootTaskUUID, err := db.ParseUUID(rootAttempt.TaskID)
+	if err != nil {
+		t.Fatalf("parse root task id: %v", err)
+	}
+	rootAttemptUUID, err := db.ParseUUID(rootAttempt.ID)
+	if err != nil {
+		t.Fatalf("parse root attempt id: %v", err)
+	}
+	rootActionRecordUUID, err := db.ParseUUID(uuid.NewString())
+	if err != nil {
+		t.Fatalf("parse root action record id: %v", err)
+	}
+	if _, err := queries.CreateOrchestrationAttemptActionRecord(ctx, sqlc.CreateOrchestrationAttemptActionRecordParams{
+		ID:           rootActionRecordUUID,
+		RunID:        runUUID,
+		TaskID:       rootTaskUUID,
+		AttemptID:    rootAttemptUUID,
+		ActionKind:   "tool_call",
+		Status:       "running",
+		ToolName:     "exec",
+		ToolCallID:   "call-root-exec",
+		InputPayload: []byte(`{"command":"python fib.py"}`),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationAttemptActionRecord() error = %v", err)
+	}
+	if _, err := queries.CompleteOrchestrationAttemptActionRecord(ctx, sqlc.CompleteOrchestrationAttemptActionRecordParams{
+		Status:        "completed",
+		OutputPayload: []byte(`{"stdout":"1346269"}`),
+		ErrorPayload:  []byte("null"),
+		Summary:       "python fib.py",
+		AttemptID:     rootAttemptUUID,
+		ToolCallID:    "call-root-exec",
+	}); err != nil {
+		t.Fatalf("CompleteOrchestrationAttemptActionRecord() error = %v", err)
+	}
+
+	verificationTaskUUID, err := db.ParseUUID(verification.TaskID)
+	if err != nil {
+		t.Fatalf("parse verification task id: %v", err)
+	}
+	verificationUUID, err := db.ParseUUID(verification.ID)
+	if err != nil {
+		t.Fatalf("parse verification id: %v", err)
+	}
+	verificationActionRecordUUID, err := db.ParseUUID(uuid.NewString())
+	if err != nil {
+		t.Fatalf("parse verification action record id: %v", err)
+	}
+	if _, err := queries.CreateOrchestrationVerificationActionRecord(ctx, sqlc.CreateOrchestrationVerificationActionRecordParams{
+		ID:             verificationActionRecordUUID,
+		RunID:          runUUID,
+		TaskID:         verificationTaskUUID,
+		VerificationID: verificationUUID,
+		ActionKind:     "tool_call",
+		Status:         "running",
+		ToolName:       "read",
+		ToolCallID:     "call-verify-read",
+		InputPayload:   []byte(`{"path":"report.json"}`),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationVerificationActionRecord() error = %v", err)
+	}
+	if _, err := queries.CompleteOrchestrationVerificationActionRecord(ctx, sqlc.CompleteOrchestrationVerificationActionRecordParams{
+		Status:         "completed",
+		OutputPayload:  []byte(`{"text":"verified"}`),
+		ErrorPayload:   []byte("null"),
+		Summary:        "report.json",
+		VerificationID: verificationUUID,
+		ToolCallID:     "call-verify-read",
+	}); err != nil {
+		t.Fatalf("CompleteOrchestrationVerificationActionRecord() error = %v", err)
+	}
+
+	inspector, err := svc.GetRunInspector(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunInspector() error = %v", err)
+	}
+
+	if len(inspector.InputManifests) != 2 {
+		t.Fatalf("len(InputManifests) = %d, want 2", len(inspector.InputManifests))
+	}
+	if len(inspector.ExecutionSpans) != 3 {
+		t.Fatalf("len(ExecutionSpans) = %d, want 3", len(inspector.ExecutionSpans))
+	}
+	if len(inspector.ActionRecords) != 2 {
+		t.Fatalf("len(ActionRecords) = %d, want 2", len(inspector.ActionRecords))
+	}
+
+	var rootSpan, childSpan, verificationSpan *RunExecutionSpan
+	for i := range inspector.ExecutionSpans {
+		span := &inspector.ExecutionSpans[i]
+		switch {
+		case span.Kind == "attempt" && span.ID == rootAttempt.ID:
+			rootSpan = span
+		case span.Kind == "attempt" && span.ID == childAttempt.ID:
+			childSpan = span
+		case span.Kind == "verification" && span.ID == verification.ID:
+			verificationSpan = span
+		}
+	}
+	if rootSpan == nil {
+		t.Fatal("root attempt span not found")
+	}
+	if childSpan == nil {
+		t.Fatal("child attempt span not found")
+	}
+	if verificationSpan == nil {
+		t.Fatal("verification span not found")
+	}
+
+	if rootSpan.CreatedSeq == 0 || rootSpan.ClaimedSeq == 0 || rootSpan.StartedSeq == 0 || rootSpan.TerminalSeq == 0 {
+		t.Fatalf("root span seqs = %#v, want non-zero lifecycle seqs", rootSpan)
+	}
+	if rootSpan.InputManifestID == "" || rootSpan.ResultID == "" {
+		t.Fatalf("root span manifest/result = %#v, want non-empty", rootSpan)
+	}
+	if rootSpan.Summary != "planned child task" {
+		t.Fatalf("root span summary = %q, want %q", rootSpan.Summary, "planned child task")
+	}
+	if !reflect.DeepEqual(rootSpan.RelatedEventTypes, []string{
+		"run.event.attempt.created",
+		"run.event.attempt.claimed",
+		"run.event.attempt.binding",
+		"run.event.attempt.running",
+		"run.event.attempt.completed",
+	}) {
+		t.Fatalf("root span related events = %#v", rootSpan.RelatedEventTypes)
+	}
+
+	if childSpan.InputManifestID == "" || childSpan.ResultID == "" {
+		t.Fatalf("child span manifest/result = %#v, want non-empty", childSpan)
+	}
+	if childSpan.Summary != "verified child complete" {
+		t.Fatalf("child span summary = %q, want %q", childSpan.Summary, "verified child complete")
+	}
+
+	if verificationSpan.ResultID == "" || verificationSpan.Verdict != VerificationVerdictAccepted {
+		t.Fatalf("verification span = %#v, want result id and accepted verdict", verificationSpan)
+	}
+	if verificationSpan.CreatedSeq == 0 || verificationSpan.ClaimedSeq == 0 || verificationSpan.StartedSeq == 0 || verificationSpan.TerminalSeq == 0 {
+		t.Fatalf("verification span seqs = %#v, want non-zero lifecycle seqs", verificationSpan)
+	}
+
+	var rootAction, verificationAction *ActionRecord
+	for i := range inspector.ActionRecords {
+		record := &inspector.ActionRecords[i]
+		switch {
+		case record.AttemptID == rootAttempt.ID:
+			rootAction = record
+		case record.VerificationID == verification.ID:
+			verificationAction = record
+		}
+	}
+	if rootAction == nil {
+		t.Fatal("root action record not found")
+	}
+	if verificationAction == nil {
+		t.Fatal("verification action record not found")
+	}
+	if rootAction.ToolName != "exec" || rootAction.Status != "completed" {
+		t.Fatalf("root action record = %#v, want exec completed", rootAction)
+	}
+	if output, ok := rootAction.OutputPayload.(map[string]any); !ok || output["stdout"] != "1346269" {
+		t.Fatalf("root action output = %#v, want stdout 1346269", rootAction.OutputPayload)
+	}
+	if verificationAction.ToolName != "read" || verificationAction.Status != "completed" {
+		t.Fatalf("verification action record = %#v, want read completed", verificationAction)
+	}
+	for _, entry := range inspector.Timeline {
+		if _, ok := entry.Payload["claim_token"]; ok {
+			t.Fatalf("inspector timeline payload leaked claim_token: %#v", entry.Payload)
+		}
+	}
+}
+
+func TestIntegrationGetRunInspectorReportsExpiredAttemptAndWorkerSignals(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inspector should report stale claimed attempt",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-stale-attempt",
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+
+	attemptUUID, err := db.ParseUUID(attempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE orchestration_task_attempts
+SET lease_expires_at = now() - interval '1 minute',
+    last_heartbeat_at = now() - interval '2 minutes',
+    updated_at = now()
+WHERE id = $1
+`, attemptUUID); err != nil {
+		t.Fatalf("expire attempt lease: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE orchestration_workers
+SET lease_expires_at = now() - interval '1 minute',
+    last_heartbeat_at = now() - interval '2 minutes',
+    updated_at = now()
+WHERE id = $1
+`, attempt.WorkerID); err != nil {
+		t.Fatalf("expire worker lease: %v", err)
+	}
+
+	inspector, err := svc.GetRunInspector(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunInspector() error = %v", err)
+	}
+
+	if inspector.Summary.StuckSignalCount != 2 {
+		t.Fatalf("summary.stuck_signal_count = %d, want 2", inspector.Summary.StuckSignalCount)
+	}
+	if inspector.Summary.CriticalSignalCount != 2 {
+		t.Fatalf("summary.critical_signal_count = %d, want 2", inspector.Summary.CriticalSignalCount)
+	}
+
+	codes := make(map[string]RunStuckSignal, len(inspector.StuckSignals))
+	for _, signal := range inspector.StuckSignals {
+		codes[signal.Code] = signal
+	}
+	attemptSignal, ok := codes["attempt_lease_expired"]
+	if !ok {
+		t.Fatalf("attempt_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if attemptSignal.AttemptID != attempt.ID || attemptSignal.TaskID != attempt.TaskID || attemptSignal.WorkerID != attempt.WorkerID {
+		t.Fatalf("attempt signal = %#v, want attempt/task/worker ids populated", attemptSignal)
+	}
+	workerSignal, ok := codes["worker_lease_expired"]
+	if !ok {
+		t.Fatalf("worker_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if workerSignal.WorkerID != attempt.WorkerID {
+		t.Fatalf("worker signal worker_id = %q, want %q", workerSignal.WorkerID, attempt.WorkerID)
+	}
+	if _, ok := codes["task_missing_active_attempt"]; ok {
+		t.Fatalf("unexpected task_missing_active_attempt in %#v", inspector.StuckSignals)
+	}
+}
+
+func TestIntegrationGetRunInspectorReportsExpiredVerificationAndWorkerSignals(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inspector should report stale verification",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"mode": VerificationModeBuiltinBasic,
+	})
+	processRunPlanningIntent(t, ctx, svc)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-verify-source",
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "worker-stale-verification",
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseToken:       "lease-" + uuid.NewString(),
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+
+	verificationUUID, err := db.ParseUUID(verification.ID)
+	if err != nil {
+		t.Fatalf("parse verification uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE orchestration_task_verifications
+SET lease_expires_at = now() - interval '1 minute',
+    last_heartbeat_at = now() - interval '2 minutes',
+    updated_at = now()
+WHERE id = $1
+`, verificationUUID); err != nil {
+		t.Fatalf("expire verification lease: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE orchestration_workers
+SET lease_expires_at = now() - interval '1 minute',
+    last_heartbeat_at = now() - interval '2 minutes',
+    updated_at = now()
+WHERE id = $1
+`, verification.WorkerID); err != nil {
+		t.Fatalf("expire verification worker lease: %v", err)
+	}
+
+	inspector, err := svc.GetRunInspector(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunInspector() error = %v", err)
+	}
+
+	if inspector.Summary.StuckSignalCount != 2 {
+		t.Fatalf("summary.stuck_signal_count = %d, want 2", inspector.Summary.StuckSignalCount)
+	}
+
+	codes := make(map[string]RunStuckSignal, len(inspector.StuckSignals))
+	for _, signal := range inspector.StuckSignals {
+		codes[signal.Code] = signal
+	}
+	verificationSignal, ok := codes["verification_lease_expired"]
+	if !ok {
+		t.Fatalf("verification_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if verificationSignal.VerificationID != verification.ID || verificationSignal.TaskID != verification.TaskID || verificationSignal.WorkerID != verification.WorkerID {
+		t.Fatalf("verification signal = %#v, want verification/task/worker ids populated", verificationSignal)
+	}
+	workerSignal, ok := codes["worker_lease_expired"]
+	if !ok {
+		t.Fatalf("worker_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if workerSignal.WorkerID != verification.WorkerID {
+		t.Fatalf("worker signal worker_id = %q, want %q", workerSignal.WorkerID, verification.WorkerID)
+	}
+}
+
+func TestIntegrationBuildRunStuckSignalsTaskLevelSignalsOmitLeaseTimestamps(t *testing.T) {
+	signals := buildRunStuckSignals([]Task{
+		{
+			ID:     "task-1",
+			Status: TaskStatusDispatching,
+		},
+	}, nil, nil, nil, time.Now().UTC())
+
+	for _, signal := range signals {
+		if signal.Code != "task_missing_active_attempt" {
+			continue
+		}
+		if signal.LastHeartbeatAt != nil || signal.LeaseExpiresAt != nil {
+			t.Fatalf("task_missing_active_attempt timestamps = %#v, want nil", signal)
+		}
+		return
+	}
+	t.Fatalf("task_missing_active_attempt missing from %#v", signals)
 }
 
 func TestIntegrationResolveCheckpointPreservesCheckpointMetadata(t *testing.T) {
@@ -827,6 +1392,202 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 	}
 }
 
+func TestIntegrationCompleteAttemptReplayReturnsTerminalAttempt(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "complete attempt replay should be idempotent",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	input := AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "done",
+		StructuredOutput: map[string]any{
+			"ok": true,
+		},
+	}
+	completedAttempt, err := svc.CompleteAttempt(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	replayedAttempt, err := svc.CompleteAttempt(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteAttempt(replay) error = %v", err)
+	}
+	if replayedAttempt.ID != completedAttempt.ID || replayedAttempt.Status != completedAttempt.Status {
+		t.Fatalf("replayed attempt = %+v, want %+v", replayedAttempt, completedAttempt)
+	}
+}
+
+func TestIntegrationFailedAttemptRequestReplanKeepsRunAliveAndExpandsReplacementTasks(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "failed attempt request_replan should replace subtree",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		Summary:        "root task needs decomposition first",
+		FailureClass:   "needs_decomposition",
+		TerminalReason: "task must be decomposed before execution",
+		RequestReplan:  true,
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"goal":           "replacement child task",
+					"worker_profile": DefaultRootWorkerProfile,
+					"inputs":         map[string]any{"step": "replacement"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(failed request_replan) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshotAfterFinalize, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(after finalize) error = %v", err)
+	}
+	if snapshotAfterFinalize.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status after failed request_replan = %q, want %q", snapshotAfterFinalize.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	if snapshotAfterFinalize.Run.PlanningStatus != PlanningStatusActive {
+		t.Fatalf("run planning_status after failed request_replan = %q, want %q", snapshotAfterFinalize.Run.PlanningStatus, PlanningStatusActive)
+	}
+
+	drainRunPlanningIntents(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replan) error = %v", err)
+	}
+	foundReplacementReady := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "replacement child task" && task.Status == TaskStatusReady {
+			foundReplacementReady = true
+		}
+		if task.ID == handle.RootTaskID {
+			t.Fatalf("root task should be superseded out of current task view, got %+v", task)
+		}
+	}
+	if !foundReplacementReady {
+		t.Fatalf("replacement child task not found in ready state: %+v", taskPage.Items)
+	}
+
+	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask(replacement) error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask(replacement) = false, want true")
+	}
+
+	replacementAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningReplacementAttempt, err := svc.StartAttempt(ctx, replacementAttempt.ID, replacementAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(replacement) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:  runningReplacementAttempt.ID,
+		ClaimToken: runningReplacementAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "replacement complete",
+		StructuredOutput: map[string]any{
+			"done": true,
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(replacement) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	finalSnapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(final) error = %v", err)
+	}
+	if finalSnapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("final run lifecycle_status = %q, want %q", finalSnapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+	if finalSnapshot.Run.TerminalReason != "" {
+		t.Fatalf("final run terminal_reason = %q, want empty", finalSnapshot.Run.TerminalReason)
+	}
+}
+
 func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -943,6 +1704,87 @@ func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
 	}
 }
 
+func TestIntegrationCompleteVerificationReplayReturnsTerminalVerification(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "complete verification replay should be idempotent",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "ready for verification",
+		StructuredOutput: map[string]any{
+			"summary": "done",
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	input := VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "accepted",
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	replayedVerification, err := svc.CompleteVerification(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteVerification(replay) error = %v", err)
+	}
+	if replayedVerification.ID != completedVerification.ID || replayedVerification.Status != completedVerification.Status || replayedVerification.Verdict != completedVerification.Verdict {
+		t.Fatalf("replayed verification = %+v, want %+v", replayedVerification, completedVerification)
+	}
+}
+
 func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -1044,7 +1886,7 @@ func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
 	}
 }
 
-func TestIntegrationKernelEndToEndRunBarrierResumeAndCompletion(t *testing.T) {
+func TestIntegrationKernelRunBarrierResumeAndCompletionManualStateMachine(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
 
@@ -1343,6 +2185,211 @@ func TestIntegrationKernelEndToEndRunBarrierResumeAndCompletion(t *testing.T) {
 	}
 	if completedTasks != len(finalTaskPage.Items) {
 		t.Fatalf("completed task count = %d, want %d; tasks = %+v", completedTasks, len(finalTaskPage.Items), finalTaskPage.Items)
+	}
+}
+
+func TestIntegrationCheckpointResumeIntentDuringCancellationCancelsTaskInsteadOfRequeueing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "resolved checkpoint should not resurrect task during cancellation",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	checkpoint, err := svc.CreateHumanCheckpoint(ctx, caller, CreateHumanCheckpointRequest{
+		RunID:          handle.RunID,
+		TaskID:         handle.RootTaskID,
+		Question:       "continue?",
+		IdempotencyKey: "checkpoint-" + uuid.NewString(),
+		Options: []CheckpointOption{
+			{ID: "continue", Kind: CheckpointOptionKindChoice, Label: "Continue"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateHumanCheckpoint() error = %v", err)
+	}
+	if _, err := svc.ResolveCheckpoint(ctx, caller, checkpoint.Checkpoint.ID, CheckpointResolution{
+		Mode:           CheckpointResolutionModeSelectOption,
+		OptionID:       "continue",
+		IdempotencyKey: "resolve-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("ResolveCheckpoint() error = %v", err)
+	}
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+}
+
+func TestIntegrationAttemptFinalizeStillTransitionsTaskAfterRunFailure(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "attempt finalize should still settle task after another task fails run",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	rootAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningRootAttempt, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(root) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     runningRootAttempt.ID,
+		ClaimToken:    runningRootAttempt.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "expand sibling tasks",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"id":             "task-a",
+					"goal":           "task a",
+					"worker_profile": "parallel.task-a",
+				},
+				map[string]any{
+					"id":             "task-b",
+					"goal":           "task b",
+					"worker_profile": "parallel.task-b",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(root request_replan) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replan) error = %v", err)
+	}
+	var taskA Task
+	var taskB Task
+	for _, task := range taskPage.Items {
+		switch task.Goal {
+		case "task a":
+			taskA = task
+		case "task b":
+			taskB = task
+		}
+	}
+	if taskA.ID == "" || taskB.ID == "" {
+		t.Fatalf("child tasks not found: %+v", taskPage.Items)
+	}
+
+	attemptA := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{"parallel.task-a"},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttemptA, err := svc.StartAttempt(ctx, attemptA.ID, attemptA.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(task a) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttemptA.ID,
+		ClaimToken:       runningAttemptA.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "task a done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(task a) error = %v", err)
+	}
+
+	attemptB := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{"parallel.task-b"},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttemptB, err := svc.StartAttempt(ctx, attemptB.ID, attemptB.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(task b) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:      runningAttemptB.ID,
+		ClaimToken:     runningAttemptB.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		Summary:        "task b failed",
+		FailureClass:   "boom",
+		TerminalReason: "task b failed",
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(task b) error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusFailed {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusFailed)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(final) error = %v", err)
+	}
+	statusByGoal := map[string]string{}
+	for _, task := range taskPage.Items {
+		statusByGoal[task.Goal] = task.Status
+	}
+	if statusByGoal["task a"] != TaskStatusCompleted {
+		t.Fatalf("task a status = %q, want %q", statusByGoal["task a"], TaskStatusCompleted)
+	}
+	if statusByGoal["task b"] != TaskStatusFailed {
+		t.Fatalf("task b status = %q, want %q", statusByGoal["task b"], TaskStatusFailed)
 	}
 }
 
@@ -3163,6 +4210,1042 @@ func TestIntegrationCreateHumanCheckpointCanonicalizesIdempotencyKey(t *testing.
 	}
 	if len(page.Items) != 1 {
 		t.Fatalf("ListRunCheckpoints() len = %d, want 1", len(page.Items))
+	}
+}
+
+func TestIntegrationCancelRunCancelsWaitingCheckpointRun(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel waiting run",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	_, err = svc.CreateHumanCheckpoint(ctx, caller, CreateHumanCheckpointRequest{
+		RunID:          handle.RunID,
+		TaskID:         handle.RootTaskID,
+		Question:       "approve cancellation?",
+		BlocksRun:      true,
+		IdempotencyKey: "checkpoint-" + uuid.NewString(),
+		Options: []CheckpointOption{
+			{ID: "approve", Kind: CheckpointOptionKindChoice, Label: "Approve"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateHumanCheckpoint() error = %v", err)
+	}
+
+	cancelKey := "cancel-" + uuid.NewString()
+	cancelResult, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: cancelKey,
+	})
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelled)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+
+	checkpointPage, err := svc.ListRunCheckpoints(ctx, caller, handle.RunID, ListRunCheckpointsRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunCheckpoints() error = %v", err)
+	}
+	if len(checkpointPage.Items) != 1 || checkpointPage.Items[0].Status != CheckpointStatusCancelled {
+		t.Fatalf("checkpoint page = %+v, want single cancelled checkpoint", checkpointPage.Items)
+	}
+
+	replayed, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: cancelKey,
+	})
+	if err != nil {
+		t.Fatalf("CancelRun(replay) error = %v", err)
+	}
+	if replayed.SnapshotSeq != cancelResult.SnapshotSeq || replayed.LifecycleStatus != cancelResult.LifecycleStatus {
+		t.Fatalf("CancelRun(replay) = %+v, want %+v", replayed, cancelResult)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-new-" + uuid.NewString(),
+	}); !errors.Is(err, ErrRunImmutable) {
+		t.Fatalf("CancelRun(new key on terminal run) error = %v, want %v", err, ErrRunImmutable)
+	}
+}
+
+func TestIntegrationCancelRunClaimedAttemptStartConvergesToCancelled(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel claimed attempt before start",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+
+	cancelResult, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelling {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelling)
+	}
+
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
+		t.Fatalf("StartAttempt(stale claimed attempt) error = %v, want %v", err, ErrAttemptImmutable)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+}
+
+func TestIntegrationCancelRunBindingAttemptStartConvergesToCancelled(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel binding attempt before running",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	if err := svc.ensureAttemptBinding(ctx, mustParsePGUUID(t, attempt.ID), attempt.ClaimToken); err != nil {
+		t.Fatalf("ensureAttemptBinding() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
+		t.Fatalf("StartAttempt(stale binding attempt) error = %v, want %v", err, ErrAttemptImmutable)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunClaimedVerificationWithInjectedPolicyStartConvergesToCancelled(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel claimed verification before start",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"mode": VerificationModeBuiltinBasic,
+	})
+	processRunPlanningIntent(t, ctx, svc)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseToken:       "lease-" + uuid.NewString(),
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+
+	if _, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken); !errors.Is(err, ErrVerificationImmutable) {
+		t.Fatalf("StartVerification(stale claimed verification) error = %v, want %v", err, ErrVerificationImmutable)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunDispatchingTaskWithCreatedAttemptConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel dispatching task with created attempt should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	} else if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(dispatching) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusDispatching {
+		t.Fatalf("task page = %+v, want single dispatching task", taskPage.Items)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(cancelled) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+	attemptPage, err := svc.GetRunInspector(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunInspector() error = %v", err)
+	}
+	if len(attemptPage.Attempts) != 1 || attemptPage.Attempts[0].Status != TaskAttemptStatusFailed {
+		t.Fatalf("attempts = %+v, want single failed created attempt", attemptPage.Attempts)
+	}
+}
+
+func TestIntegrationCancelRunRunningAttemptHeartbeatConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel running attempt heartbeat should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if _, err := svc.HeartbeatAttempt(ctx, AttemptHeartbeat{
+		AttemptID:       runningAttempt.ID,
+		ClaimToken:      runningAttempt.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrAttemptImmutable) {
+		t.Fatalf("HeartbeatAttempt() error = %v, want %v", err, ErrAttemptImmutable)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunRunningAttemptCompletionConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel running attempt completion should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	completedAttempt, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "ignored due to cancellation",
+		StructuredOutput: map[string]any{"ok": true},
+	})
+	if err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	if completedAttempt.Status != TaskAttemptStatusLost {
+		t.Fatalf("attempt status = %q, want %q", completedAttempt.Status, TaskAttemptStatusLost)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunRunningVerificationWithInjectedPolicyHeartbeatConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel running verification heartbeat should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"mode": VerificationModeBuiltinBasic,
+	})
+	processRunPlanningIntent(t, ctx, svc)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if _, err := svc.HeartbeatVerification(ctx, VerificationHeartbeat{
+		VerificationID:  runningVerification.ID,
+		ClaimToken:      runningVerification.ClaimToken,
+		LeaseTTLSeconds: 30,
+	}); !errors.Is(err, ErrVerificationImmutable) {
+		t.Fatalf("HeartbeatVerification() error = %v, want %v", err, ErrVerificationImmutable)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunVerifyingTaskWithCreatedVerificationConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel verifying task with created verification should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"mode": VerificationModeBuiltinBasic,
+	})
+	processRunPlanningIntent(t, ctx, svc)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(verifying) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusVerifying {
+		t.Fatalf("task page = %+v, want single verifying task", taskPage.Items)
+	}
+	verificationRows, err := svc.queries.ListCurrentOrchestrationTaskVerificationsByRun(ctx, mustParsePGUUID(t, handle.RunID))
+	if err != nil {
+		t.Fatalf("ListCurrentOrchestrationTaskVerificationsByRun() error = %v", err)
+	}
+	if len(verificationRows) != 1 {
+		t.Fatalf("verification rows = %+v, want single current verification", verificationRows)
+	}
+	verificationRow := verificationRows[0]
+	if verificationRow.TaskID != mustParsePGUUID(t, handle.RootTaskID) {
+		t.Fatalf("verification task_id = %q, want root task %q", verificationRow.TaskID.String(), handle.RootTaskID)
+	}
+	if verificationRow.Status != TaskVerificationStatusCreated {
+		t.Fatalf("verification status before cancel = %q, want %q", verificationRow.Status, TaskVerificationStatusCreated)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(cancelled) error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+	inspector, err := svc.GetRunInspector(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunInspector() error = %v", err)
+	}
+	if len(inspector.Verifications) != 1 || inspector.Verifications[0].Status != TaskVerificationStatusLost {
+		t.Fatalf("verifications = %+v, want single lost verification", inspector.Verifications)
+	}
+}
+
+func TestIntegrationCancelRunRunningVerificationWithInjectedPolicyCompletionConvergesImmediately(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel running verification completion should converge immediately",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"mode": VerificationModeBuiltinBasic,
+	})
+	processRunPlanningIntent(t, ctx, svc)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	if _, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "ignored due to cancellation",
+	})
+	if err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	if completedVerification.Status != TaskVerificationStatusLost {
+		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusLost)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunAttemptFinalizeIntentConvergesToCancelled(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel run after attempt completion but before finalize intent",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 2)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+
+	cancelResult, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelling {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelling)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusCancelled {
+		t.Fatalf("task page = %+v, want single cancelled task", taskPage.Items)
+	}
+}
+
+func TestIntegrationCancelRunManuallyInsertedStalePlanningIntentConvergesToCancelled(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel run should converge after last stale planning intent fails",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	pgRunID := mustParsePGUUID(t, handle.RunID)
+	runRow, err := svc.queries.GetOrchestrationRunByID(ctx, pgRunID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID() error = %v", err)
+	}
+	_, intentID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               intentID,
+		RunID:            pgRunID,
+		TaskID:           pgtype.UUID{},
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindStartRun,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runRow.PlannerEpoch,
+		Payload:          marshalObject(map[string]any{"source": "test"}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent() error = %v", err)
+	}
+
+	cancelResult, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelling {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelling)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCancelled)
+	}
+}
+
+func TestIntegrationCancelRunCancelsWaitingHumanVerificationCreatedByRunBarrier(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "cancel run should retire requeued verification held behind run barrier",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	rootAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningRootAttempt, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(root) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     runningRootAttempt.ID,
+		ClaimToken:    runningRootAttempt.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "expand child tasks for cancel path",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"id":             "verify-child",
+					"goal":           "verifying sibling",
+					"worker_profile": "kernel-cancel.verify",
+					"priority":       100,
+					"verification_policy": map[string]any{
+						"require_structured_output": true,
+					},
+				},
+				map[string]any{
+					"id":             "checkpoint-child",
+					"goal":           "checkpoint sibling",
+					"worker_profile": "kernel-cancel.checkpoint",
+					"priority":       10,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(root request_replan) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replan) error = %v", err)
+	}
+	var verifyChild Task
+	var checkpointChild Task
+	for _, task := range taskPage.Items {
+		switch task.Goal {
+		case "verifying sibling":
+			verifyChild = task
+		case "checkpoint sibling":
+			checkpointChild = task
+		}
+	}
+	if verifyChild.ID == "" || checkpointChild.ID == "" {
+		t.Fatalf("child tasks not found after replan: %+v", taskPage.Items)
+	}
+
+	verifyAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{"kernel-cancel.verify"},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	if verifyAttempt.TaskID != verifyChild.ID {
+		t.Fatalf("verify child attempt task_id = %q, want %q", verifyAttempt.TaskID, verifyChild.ID)
+	}
+	runningVerifyAttempt, err := svc.StartAttempt(ctx, verifyAttempt.ID, verifyAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(verify child) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningVerifyAttempt.ID,
+		ClaimToken:       runningVerifyAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "verify child produced output",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(verify child) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	claimedVerification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification(verify child) error = %v", err)
+	}
+	if _, err := svc.StartVerification(ctx, claimedVerification.ID, claimedVerification.ClaimToken); err != nil {
+		t.Fatalf("StartVerification(verify child) error = %v", err)
+	}
+
+	checkpointResult, err := svc.CreateHumanCheckpoint(ctx, caller, CreateHumanCheckpointRequest{
+		RunID:          handle.RunID,
+		TaskID:         checkpointChild.ID,
+		Question:       "pause run?",
+		BlocksRun:      true,
+		IdempotencyKey: "checkpoint-" + uuid.NewString(),
+		Options: []CheckpointOption{
+			{ID: "ok", Kind: CheckpointOptionKindChoice, Label: "OK"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateHumanCheckpoint(verifying sibling barrier) error = %v", err)
+	}
+	taskPage, err = svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after barrier open) error = %v", err)
+	}
+	var requeuedVerifyChild Task
+	for _, task := range taskPage.Items {
+		if task.ID == verifyChild.ID {
+			requeuedVerifyChild = task
+			break
+		}
+	}
+	if requeuedVerifyChild.Status != TaskStatusWaitingHuman || requeuedVerifyChild.WaitingScope != "run" {
+		t.Fatalf("verify child after barrier open = %+v, want waiting_human(run)", requeuedVerifyChild)
+	}
+	verificationRow, err := svc.queries.GetOrchestrationTaskVerificationByID(ctx, mustParsePGUUID(t, claimedVerification.ID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskVerificationByID(before cancel) error = %v", err)
+	}
+	if verificationRow.Status != TaskVerificationStatusCreated {
+		t.Fatalf("verification status after barrier open = %q, want %q", verificationRow.Status, TaskVerificationStatusCreated)
+	}
+
+	cancelResult, err := svc.CancelRun(ctx, caller, handle.RunID, CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("CancelRun() error = %v", err)
+	}
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelled)
+	}
+
+	siblingTask, err := svc.queries.GetOrchestrationTaskByID(ctx, mustParsePGUUID(t, verifyChild.ID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(sibling) error = %v", err)
+	}
+	if siblingTask.Status != TaskStatusCancelled {
+		t.Fatalf("sibling task status = %q, want %q", siblingTask.Status, TaskStatusCancelled)
+	}
+	verificationRow, err = svc.queries.GetOrchestrationTaskVerificationByID(ctx, mustParsePGUUID(t, claimedVerification.ID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskVerificationByID() error = %v", err)
+	}
+	if verificationRow.Status != TaskVerificationStatusLost {
+		t.Fatalf("verification status = %q, want %q", verificationRow.Status, TaskVerificationStatusLost)
+	}
+	if verificationRow.TerminalReason != "run cancelled" {
+		t.Fatalf("verification terminal_reason = %q, want %q", verificationRow.TerminalReason, "run cancelled")
+	}
+	checkpointRow, err := svc.queries.GetOrchestrationHumanCheckpointByID(ctx, mustParsePGUUID(t, checkpointResult.Checkpoint.ID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationCheckpointByID() error = %v", err)
+	}
+	if checkpointRow.Status != CheckpointStatusCancelled {
+		t.Fatalf("checkpoint status = %q, want %q", checkpointRow.Status, CheckpointStatusCancelled)
 	}
 }
 
@@ -5151,6 +7234,126 @@ func TestIntegrationOrphanedPlanningIntentFailsAndDoesNotLoopUntilLeaseExpiry(t 
 	}
 }
 
+func TestIntegrationExpiredProcessingPlanningIntentResumesIdempotently(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "expired processing planning intent should fail closed",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	pgRunID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run uuid: %v", err)
+	}
+	pgTaskID, err := db.ParseUUID(handle.RootTaskID)
+	if err != nil {
+		t.Fatalf("parse task uuid: %v", err)
+	}
+
+	_, intentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               intentUUID,
+		RunID:            pgRunID,
+		TaskID:           pgTaskID,
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindStartRun,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: 1,
+		Payload:          marshalJSON(map[string]any{"reason": "expired-processing-test"}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent() error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE orchestration_planning_intents
+SET status = 'processing',
+    claim_epoch = 1,
+    claim_token = 'stale-claim-token',
+    claimed_by = 'planner',
+    lease_expires_at = now() - interval '1 second',
+    last_heartbeat_at = now() - interval '1 minute',
+    updated_at = now()
+WHERE id = $1
+`, intentUUID); err != nil {
+		t.Fatalf("mark planning intent processing+expired: %v", err)
+	}
+
+	processed, err := svc.ProcessNextPlanningIntent(ctx)
+	if err != nil {
+		t.Fatalf("ProcessNextPlanningIntent() error = %v", err)
+	}
+	if !processed {
+		t.Fatal("ProcessNextPlanningIntent() = false, want true")
+	}
+
+	intentRow, err := svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentUUID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationPlanningIntentByID() error = %v", err)
+	}
+	if intentRow.Status != PlanningIntentStatusCompleted {
+		t.Fatalf("planning intent status = %q, want %q", intentRow.Status, PlanningIntentStatusCompleted)
+	}
+	if strings.TrimSpace(intentRow.FailureReason) != "" {
+		t.Fatalf("planning intent failure_reason = %q, want empty", intentRow.FailureReason)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	if snapshot.Run.PlanningStatus != PlanningStatusIdle {
+		t.Fatalf("run planning_status = %q, want %q", snapshot.Run.PlanningStatus, PlanningStatusIdle)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].ID != handle.RootTaskID || taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("task page after stale processing cleanup = %+v, want ready root only", taskPage.Items)
+	}
+
+	eventPage, err := svc.ListRunEvents(ctx, caller, handle.RunID, ListRunEventsRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunEvents() error = %v", err)
+	}
+	var foundCompletedEvent bool
+	for _, event := range eventPage.Items {
+		if event.Type != "run.event.planning_intent.completed" {
+			continue
+		}
+		if planningIntentID, _ := event.Payload["planning_intent_id"].(string); planningIntentID != intentUUID.String() {
+			continue
+		}
+		if kind, _ := event.Payload["kind"].(string); kind == PlanningIntentKindStartRun {
+			foundCompletedEvent = true
+			break
+		}
+	}
+	if !foundCompletedEvent {
+		t.Fatal("ListRunEvents() missing reclaimed planning_intent.completed event")
+	}
+}
+
 func TestIntegrationWorkerLeaseTokenFencesSplitBrainHeartbeat(t *testing.T) {
 	svc, _, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -6473,7 +8676,7 @@ func TestIntegrationCreateHumanCheckpointPausesRunningSibling(t *testing.T) {
 	}
 }
 
-func TestIntegrationCreateHumanCheckpointPausesDispatchingSibling(t *testing.T) {
+func TestIntegrationCreateHumanCheckpointPausesManuallyStagedDispatchingSibling(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
 
@@ -6639,7 +8842,7 @@ func TestIntegrationCreateHumanCheckpointPausesDispatchingSibling(t *testing.T) 
 	}
 }
 
-func TestIntegrationCreateHumanCheckpointRequeuesVerifyingSibling(t *testing.T) {
+func TestIntegrationCreateHumanCheckpointRequeuesManuallyStagedVerifyingSibling(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
 

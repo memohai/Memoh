@@ -1,14 +1,14 @@
--- 0069_add_orchestration_verifications (down)
+-- 0078_add_orchestration_verifications (down)
 -- Drop orchestration verifier work queue.
 
 DO $$
 BEGIN
-  IF EXISTS (
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'orchestration_tasks') AND EXISTS (
     SELECT 1
     FROM orchestration_tasks
     WHERE status = 'verifying'
   ) THEN
-    RAISE EXCEPTION 'cannot roll back 0069 while orchestration_tasks.status contains verifying rows';
+    RAISE EXCEPTION 'cannot roll back 0074 while orchestration_tasks.status contains verifying rows';
   END IF;
 END $$;
 

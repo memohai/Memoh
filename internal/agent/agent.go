@@ -134,6 +134,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	if cfg.ToolCallObserver != nil {
+		sdkTools = wrapToolsWithObserver(sdkTools, cfg.ToolCallObserver)
+	}
 
 	aborted := false
 
@@ -561,6 +564,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
+	if cfg.ToolCallObserver != nil {
+		sdkTools = wrapToolsWithObserver(sdkTools, cfg.ToolCallObserver)
+	}
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -669,6 +675,9 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 		sdk.WithMessages(cfg.Messages),
 		sdk.WithSystem(cfg.System),
 		sdk.WithMaxSteps(-1),
+	}
+	if cfg.ResponseFormat != nil {
+		opts = append(opts, sdk.WithResponseFormat(*cfg.ResponseFormat))
 	}
 	if len(tools) > 0 && cfg.SupportsToolCall {
 		opts = append(opts, sdk.WithTools(tools))
@@ -911,6 +920,66 @@ func wrapToolsWithLoopGuard(tools []sdk.Tool, guard *ToolLoopGuard, abortCallIDs
 				}, nil
 			}
 			return originalExecute(ctx, input)
+		}
+	}
+	return wrapped
+}
+
+func wrapToolsWithObserver(toolList []sdk.Tool, observer ToolCallObserver) []sdk.Tool {
+	if observer == nil || len(toolList) == 0 {
+		return toolList
+	}
+	wrapped := make([]sdk.Tool, len(toolList))
+	for i, tool := range toolList {
+		originalExecute := tool.Execute
+		if originalExecute == nil {
+			wrapped[i] = tool
+			continue
+		}
+		defaultToolName := tool.Name
+		wrapped[i] = tool
+		wrapped[i].Execute = func(execCtx *sdk.ToolExecContext, input any) (any, error) {
+			if execCtx == nil {
+				return nil, errors.New("missing tool execution context")
+			}
+			startedAt := TimeNow()
+			toolName := defaultToolName
+			toolCallID := ""
+			callCtx := execCtx.Context
+			if trimmed := strings.TrimSpace(execCtx.ToolName); trimmed != "" {
+				toolName = trimmed
+			}
+			toolCallID = strings.TrimSpace(execCtx.ToolCallID)
+			if toolCallID == "" {
+				toolCallID = fmt.Sprintf("%s-%d", toolName, startedAt.UnixNano())
+			}
+			startObs := ToolCallObservation{
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Input:      input,
+				StartedAt:  startedAt,
+			}
+			if err := observer.OnToolCallStart(callCtx, startObs); err != nil {
+				return nil, fmt.Errorf("observe tool call start: %w", err)
+			}
+
+			result, err := originalExecute(execCtx, input)
+			finishObs := ToolCallObservation{
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Input:      input,
+				Result:     result,
+				Err:        err,
+				StartedAt:  startedAt,
+				FinishedAt: TimeNow(),
+			}
+			if obsErr := observer.OnToolCallFinish(callCtx, finishObs); obsErr != nil {
+				if err != nil {
+					return nil, errors.Join(err, fmt.Errorf("observe tool call finish: %w", obsErr))
+				}
+				return nil, fmt.Errorf("observe tool call finish: %w", obsErr)
+			}
+			return result, err
 		}
 	}
 	return wrapped

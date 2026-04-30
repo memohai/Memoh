@@ -1,4 +1,4 @@
--- 0070_add_orchestration_worker_lease_fencing
+-- 0079_add_orchestration_worker_lease_fencing
 -- Persist worker lease snapshots on claimed work and enforce one open run barrier per run.
 
 ALTER TABLE orchestration_task_attempts

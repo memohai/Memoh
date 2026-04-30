@@ -51,13 +51,13 @@ func (s *Service) RegisterWorker(ctx context.Context, req WorkerRegistration) (*
 		leaseToken = uuid.NewString()
 	}
 	row, err := s.queries.UpsertOrchestrationWorker(ctx, sqlc.UpsertOrchestrationWorkerParams{
-		ID:             workerID,
-		ExecutorID:     executorID,
-		DisplayName:    displayName,
-		Capabilities:   marshalObject(req.Capabilities),
-		Status:         WorkerStatusActive,
-		LeaseToken:     leaseToken,
-		LeaseExpiresAt: timeToPg(time.Now().Add(normalizeLeaseTTL(req.LeaseTTLSeconds, TaskAttemptDefaultLeaseTTL))),
+		ID:              workerID,
+		ExecutorID:      executorID,
+		DisplayName:     displayName,
+		Capabilities:    marshalObject(req.Capabilities),
+		Status:          WorkerStatusActive,
+		LeaseToken:      leaseToken,
+		LeaseTtlSeconds: leaseTTLSecondsValue(normalizeLeaseTTL(req.LeaseTTLSeconds, TaskAttemptDefaultLeaseTTL)),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -79,10 +79,10 @@ func (s *Service) HeartbeatWorker(ctx context.Context, workerID, leaseToken stri
 		return nil, fmt.Errorf("%w: worker lease token is required", ErrInvalidArgument)
 	}
 	row, err := s.queries.HeartbeatOrchestrationWorker(ctx, sqlc.HeartbeatOrchestrationWorkerParams{
-		ID:             trimmedWorkerID,
-		Status:         WorkerStatusActive,
-		LeaseToken:     trimmedLeaseToken,
-		LeaseExpiresAt: timeToPg(time.Now().Add(normalizeLeaseTTL(leaseTTLSeconds, TaskAttemptDefaultLeaseTTL))),
+		ID:              trimmedWorkerID,
+		Status:          WorkerStatusActive,
+		LeaseToken:      trimmedLeaseToken,
+		LeaseTtlSeconds: leaseTTLSecondsValue(normalizeLeaseTTL(leaseTTLSeconds, TaskAttemptDefaultLeaseTTL)),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -103,9 +103,9 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	qtx := s.queries.WithTx(tx)
 
 	intent, err := qtx.ClaimNextOrchestrationPlanningIntent(ctx, sqlc.ClaimNextOrchestrationPlanningIntentParams{
-		ClaimToken:     uuid.NewString(),
-		ClaimedBy:      "planner",
-		LeaseExpiresAt: timeToPg(time.Now().Add(PlanningIntentDefaultLeaseTTL)),
+		ClaimToken:      uuid.NewString(),
+		ClaimedBy:       "planner",
+		LeaseTtlSeconds: leaseTTLSecondsValue(PlanningIntentDefaultLeaseTTL),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -117,30 +117,11 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, intent.RunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			failedIntent, failErr := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
-				ID:            intent.ID,
-				ClaimToken:    intent.ClaimToken,
-				FailureReason: ErrRunNotFound.Error(),
-			})
+			failedIntent, failErr := s.failPlanningIntentWithEvent(ctx, qtx, intent, ErrRunNotFound.Error())
 			if failErr != nil {
 				return false, fmt.Errorf("fail orphaned planning intent: %w", failErr)
 			}
-			if _, err := s.appendEvent(ctx, qtx, intent.RunID, eventSpec{
-				TaskID:           intent.TaskID,
-				CheckpointID:     intent.CheckpointID,
-				AggregateType:    "planning_intent",
-				AggregateID:      failedIntent.ID,
-				AggregateVersion: failedIntent.ClaimEpoch,
-				Type:             "run.event.planning_intent.failed",
-				Payload: map[string]any{
-					"planning_intent_id": failedIntent.ID.String(),
-					"kind":               failedIntent.Kind,
-					"status":             failedIntent.Status,
-					"failure_reason":     failedIntent.FailureReason,
-				},
-			}); err != nil && !errors.Is(err, ErrRunNotFound) {
-				return false, err
-			}
+			_ = failedIntent
 			if err := tx.Commit(ctx); err != nil {
 				return false, fmt.Errorf("commit failed missing-run planning intent tx: %w", err)
 			}
@@ -150,16 +131,22 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	}
 	if !runAcceptsPlanningIntent(intent.Kind, runRow.LifecycleStatus, intent.BasePlannerEpoch, runRow.PlannerEpoch) {
 		reason := fmt.Sprintf("stale planning intent for run status=%s base_epoch=%d current_epoch=%d", runRow.LifecycleStatus, intent.BasePlannerEpoch, runRow.PlannerEpoch)
-		_, failErr := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
-			ID:            intent.ID,
-			ClaimToken:    intent.ClaimToken,
-			FailureReason: reason,
-		})
+		failedIntent, failErr := s.failPlanningIntentWithEvent(ctx, qtx, intent, reason)
 		if failErr != nil {
 			return false, fmt.Errorf("fail stale planning intent: %w", failErr)
 		}
 		if err := s.syncRunPlanningStatus(ctx, qtx, runRow.ID); err != nil {
 			return false, err
+		}
+		runRow, err = qtx.GetOrchestrationRunByIDForUpdate(ctx, runRow.ID)
+		if err != nil {
+			return false, fmt.Errorf("lock run after stale planning intent failure: %w", err)
+		}
+		if completionEvent, completed, err := s.maybeMarkRunCompletedAfterPlanningIntent(ctx, qtx, runRow, failedIntent); err != nil {
+			return false, err
+		} else {
+			_ = completionEvent
+			_ = completed
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return false, fmt.Errorf("commit stale planning intent tx: %w", err)
@@ -178,16 +165,22 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	case PlanningIntentKindReplan:
 		lastEvent, err = s.processReplanPlanningIntent(ctx, qtx, runRow, intent)
 	default:
-		_, failErr := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
-			ID:            intent.ID,
-			ClaimToken:    intent.ClaimToken,
-			FailureReason: fmt.Sprintf("unsupported planning intent kind %q", intent.Kind),
-		})
+		failedIntent, failErr := s.failPlanningIntentWithEvent(ctx, qtx, intent, fmt.Sprintf("unsupported planning intent kind %q", intent.Kind))
 		if failErr != nil {
 			return false, fmt.Errorf("fail unsupported planning intent: %w", failErr)
 		}
 		if err := s.syncRunPlanningStatus(ctx, qtx, runRow.ID); err != nil {
 			return false, err
+		}
+		runRow, err = qtx.GetOrchestrationRunByIDForUpdate(ctx, runRow.ID)
+		if err != nil {
+			return false, fmt.Errorf("lock run after unsupported planning intent failure: %w", err)
+		}
+		if completionEvent, completed, err := s.maybeMarkRunCompletedAfterPlanningIntent(ctx, qtx, runRow, failedIntent); err != nil {
+			return false, err
+		} else {
+			_ = completionEvent
+			_ = completed
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return false, fmt.Errorf("commit failed unsupported planning intent tx: %w", err)
@@ -196,11 +189,7 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		if shouldFailPlanningIntent(err) {
-			failedIntent, failErr := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
-				ID:            intent.ID,
-				ClaimToken:    intent.ClaimToken,
-				FailureReason: err.Error(),
-			})
+			failedIntent, failErr := s.failPlanningIntentWithEvent(ctx, qtx, intent, err.Error())
 			if failErr != nil {
 				return false, fmt.Errorf("fail planning intent after handler error: %w", failErr)
 			}
@@ -265,6 +254,34 @@ func (s *Service) ProcessNextPlanningIntent(ctx context.Context) (bool, error) {
 	}
 	_ = lastEvent
 	return true, nil
+}
+
+func (s *Service) failPlanningIntentWithEvent(ctx context.Context, qtx *sqlc.Queries, intent sqlc.OrchestrationPlanningIntent, failureReason string) (sqlc.OrchestrationPlanningIntent, error) {
+	failedIntent, err := qtx.FailOrchestrationPlanningIntent(ctx, sqlc.FailOrchestrationPlanningIntentParams{
+		ID:            intent.ID,
+		ClaimToken:    intent.ClaimToken,
+		FailureReason: failureReason,
+	})
+	if err != nil {
+		return sqlc.OrchestrationPlanningIntent{}, err
+	}
+	if _, err := s.appendEvent(ctx, qtx, intent.RunID, eventSpec{
+		TaskID:           intent.TaskID,
+		CheckpointID:     intent.CheckpointID,
+		AggregateType:    "planning_intent",
+		AggregateID:      failedIntent.ID,
+		AggregateVersion: failedIntent.ClaimEpoch,
+		Type:             "run.event.planning_intent.failed",
+		Payload: map[string]any{
+			"planning_intent_id": failedIntent.ID.String(),
+			"kind":               failedIntent.Kind,
+			"status":             failedIntent.Status,
+			"failure_reason":     failedIntent.FailureReason,
+		},
+	}); err != nil && !errors.Is(err, ErrRunNotFound) {
+		return sqlc.OrchestrationPlanningIntent{}, err
+	}
+	return failedIntent, nil
 }
 
 func (s *Service) processStartRunPlanningIntent(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, intent sqlc.OrchestrationPlanningIntent) (sqlc.OrchestrationEvent, error) {
@@ -359,6 +376,32 @@ func (s *Service) processCheckpointResumePlanningIntent(ctx context.Context, qtx
 	}
 
 	var lastEvent sqlc.OrchestrationEvent
+	if runRow.LifecycleStatus == LifecycleStatusCancelling &&
+		taskRow.Status == TaskStatusWaitingHuman &&
+		taskRow.WaitingCheckpointID.Valid &&
+		taskRow.WaitingCheckpointID == checkpointRow.ID {
+		if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, pgtype.UUID{}); err != nil {
+			return sqlc.OrchestrationEvent{}, err
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+			TaskID:           intent.TaskID,
+			CheckpointID:     checkpointRow.ID,
+			AggregateType:    "planning_intent",
+			AggregateID:      intent.ID,
+			AggregateVersion: intent.ClaimEpoch,
+			Type:             "run.event.planning_intent.checkpoint_resume.cancelled",
+			Payload: map[string]any{
+				"planning_intent_id": intent.ID.String(),
+				"task_id":            intent.TaskID.String(),
+				"checkpoint_id":      checkpointRow.ID.String(),
+				"run_status":         runRow.LifecycleStatus,
+			},
+		})
+		if err != nil {
+			return sqlc.OrchestrationEvent{}, err
+		}
+		return lastEvent, nil
+	}
 	if taskRow.Status == TaskStatusWaitingHuman && taskRow.WaitingCheckpointID.Valid && taskRow.WaitingCheckpointID == checkpointRow.ID {
 		openBarrier, hasOpenBarrier, err := findOpenRunBlockingCheckpoint(ctx, qtx, runRow.ID)
 		if err != nil {
@@ -501,6 +544,95 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 	}
 
 	var lastEvent sqlc.OrchestrationEvent
+	if runRow.LifecycleStatus == LifecycleStatusCancelling && taskRow.Status == TaskStatusRunning {
+		if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, attemptRow.ID); err != nil {
+			return sqlc.OrchestrationEvent{}, err
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+			TaskID:           intent.TaskID,
+			AttemptID:        attemptUUID,
+			AggregateType:    "planning_intent",
+			AggregateID:      intent.ID,
+			AggregateVersion: intent.ClaimEpoch,
+			Type:             "run.event.planning_intent.attempt_finalize.cancelled",
+			Payload: map[string]any{
+				"planning_intent_id": intent.ID.String(),
+				"task_id":            intent.TaskID.String(),
+				"attempt_id":         attemptUUID.String(),
+				"run_status":         runRow.LifecycleStatus,
+			},
+		})
+		if err != nil {
+			return sqlc.OrchestrationEvent{}, err
+		}
+		return lastEvent, nil
+	}
+	if runRow.LifecycleStatus == LifecycleStatusFailed && taskRow.Status == TaskStatusRunning {
+		switch completionStatus {
+		case TaskAttemptStatusCompleted:
+			completedTask, err := qtx.MarkOrchestrationTaskCompleted(ctx, sqlc.MarkOrchestrationTaskCompletedParams{
+				ID:             taskRow.ID,
+				LatestResultID: resultUUID,
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task completed from attempt_finalize on failed run: %w", err)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           completedTask.ID,
+				AttemptID:        attemptRow.ID,
+				AggregateType:    "task",
+				AggregateID:      completedTask.ID,
+				AggregateVersion: completedTask.StatusVersion,
+				Type:             "run.event.task.completed",
+				Payload: map[string]any{
+					"task_id":           completedTask.ID.String(),
+					"attempt_id":        attemptRow.ID.String(),
+					"previous_status":   taskRow.Status,
+					"new_status":        completedTask.Status,
+					"latest_result_id":  resultID,
+					"structured_output": structuredOutput,
+					"completion_reason": "run_already_failed",
+				},
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, err
+			}
+		case TaskAttemptStatusFailed, TaskAttemptStatusLost:
+			failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+				ID:             taskRow.ID,
+				LatestResultID: resultUUID,
+				TerminalReason: normalizeAttemptTerminalReason(terminalReason),
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task failed from attempt_finalize on failed run: %w", err)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           failedTask.ID,
+				AttemptID:        attemptRow.ID,
+				AggregateType:    "task",
+				AggregateID:      failedTask.ID,
+				AggregateVersion: failedTask.StatusVersion,
+				Type:             "run.event.task.failed",
+				Payload: map[string]any{
+					"task_id":          failedTask.ID.String(),
+					"attempt_id":       attemptRow.ID.String(),
+					"previous_status":  taskRow.Status,
+					"new_status":       failedTask.Status,
+					"latest_result_id": resultID,
+					"failure_class":    failureClass,
+					"terminal_reason":  failedTask.TerminalReason,
+					"failure_reason":   "run_already_failed",
+				},
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, err
+			}
+		default:
+			return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: unsupported attempt_finalize status %q", ErrPlanningIntentNotFound, completionStatus)
+		}
+		return lastEvent, nil
+	}
+
 	switch completionStatus {
 	case TaskAttemptStatusCompleted:
 		if taskRow.Status == TaskStatusRunning {
@@ -643,6 +775,17 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 			})
 			if err != nil {
 				return sqlc.OrchestrationEvent{}, err
+			}
+			if requestReplan {
+				childPlans := decodePlannedChildTasks(structuredOutput)
+				if len(childPlans) > 0 {
+					if err := validatePlannedChildTasks(childPlans); err == nil {
+						lastEvent, err = s.enqueueReplanPlanningIntent(ctx, qtx, runRow, failedTask, attemptRow, childPlans, "attempt_finalize.failed_request_replan")
+						if err == nil {
+							break
+						}
+					}
+				}
 			}
 			if err := s.propagateTaskFailureToDependents(ctx, qtx, failedTask, attemptRow); err != nil {
 				return sqlc.OrchestrationEvent{}, err
@@ -1136,7 +1279,7 @@ func (s *Service) ClaimNextAttempt(ctx context.Context, claim AttemptClaim) (*Ta
 		WorkerLeaseToken: lease.LeaseToken,
 		WorkerProfiles:   supportedProfiles,
 		ClaimToken:       uuid.NewString(),
-		LeaseExpiresAt:   timeToPg(time.Now().Add(ttl)),
+		LeaseTtlSeconds:  leaseTTLSecondsValue(ttl),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1205,10 +1348,14 @@ func (s *Service) ensureAttemptBinding(ctx context.Context, attemptID pgtype.UUI
 	if strings.TrimSpace(attemptRow.ClaimToken) != claimToken {
 		return ErrAttemptLeaseConflict
 	}
-	if leaseExpired(attemptRow.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if leaseExpiredAt(attemptRow.LeaseExpiresAt, observedAt) {
 		return ErrAttemptLeaseConflict
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken, observedAt); err != nil {
 		return err
 	} else if !ok {
 		return ErrAttemptLeaseConflict
@@ -1239,15 +1386,28 @@ func (s *Service) ensureAttemptBinding(ctx context.Context, attemptID pgtype.UUI
 		return fmt.Errorf("lock task for attempt binding: %w", err)
 	}
 	if runRow.LifecycleStatus != LifecycleStatusRunning || taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
-		if _, retireErr := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+		retirement := attemptRetirementSpec{
 			Status:         TaskAttemptStatusFailed,
 			FailureClass:   "attempt_immutable",
 			TerminalReason: "attempt invalidated before start",
-		}); retireErr != nil {
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			retirement = attemptRetirementSpec{
+				Status:         TaskAttemptStatusLost,
+				TerminalReason: "run cancelled",
+			}
+		}
+		retiredAttempt, retireErr := s.retireAttempt(ctx, qtx, attemptRow, retirement)
+		if retireErr != nil {
 			if errors.Is(retireErr, pgx.ErrNoRows) {
 				return ErrAttemptLeaseConflict
 			}
 			return fmt.Errorf("retire invalid attempt before binding: %w", retireErr)
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, retiredAttempt.ID); err != nil {
+				return err
+			}
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit retired invalid attempt before binding: %w", err)
@@ -1308,10 +1468,14 @@ func (s *Service) advanceAttemptToRunning(ctx context.Context, attemptID pgtype.
 	if strings.TrimSpace(attemptRow.ClaimToken) != claimToken {
 		return nil, ErrAttemptLeaseConflict
 	}
-	if leaseExpired(attemptRow.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(attemptRow.LeaseExpiresAt, observedAt) {
 		return nil, ErrAttemptLeaseConflict
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrAttemptLeaseConflict
@@ -1352,15 +1516,28 @@ func (s *Service) advanceAttemptToRunning(ctx context.Context, attemptID pgtype.
 		return nil, fmt.Errorf("lock task for start attempt: %w", err)
 	}
 	if runRow.LifecycleStatus != LifecycleStatusRunning || taskRow.Status != TaskStatusDispatching || taskRow.WaitingCheckpointID.Valid || taskRow.SupersededByPlannerEpoch.Valid {
-		if _, retireErr := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+		retirement := attemptRetirementSpec{
 			Status:         TaskAttemptStatusFailed,
 			FailureClass:   "attempt_immutable",
 			TerminalReason: "attempt invalidated before start",
-		}); retireErr != nil {
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			retirement = attemptRetirementSpec{
+				Status:         TaskAttemptStatusLost,
+				TerminalReason: "run cancelled",
+			}
+		}
+		retiredAttempt, retireErr := s.retireAttempt(ctx, qtx, attemptRow, retirement)
+		if retireErr != nil {
 			if errors.Is(retireErr, pgx.ErrNoRows) {
 				return nil, ErrAttemptLeaseConflict
 			}
 			return nil, fmt.Errorf("retire invalid bound attempt before running: %w", retireErr)
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, retiredAttempt.ID); err != nil {
+				return nil, err
+			}
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit retired invalid bound attempt before running: %w", err)
@@ -1456,10 +1633,14 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 		attemptRow.Status != TaskAttemptStatusRunning {
 		return nil, ErrAttemptImmutable
 	}
-	if leaseExpired(attemptRow.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(attemptRow.LeaseExpiresAt, observedAt) {
 		return nil, ErrAttemptLeaseConflict
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrAttemptLeaseConflict
@@ -1471,7 +1652,30 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 		}
 		return nil, fmt.Errorf("lock run for attempt heartbeat: %w", err)
 	}
-	if runRow.LifecycleStatus != LifecycleStatusRunning {
+	if runRow.LifecycleStatus != LifecycleStatusRunning && runRow.LifecycleStatus != LifecycleStatusFailed {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			taskRow, taskErr := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
+			if taskErr != nil {
+				if errors.Is(taskErr, pgx.ErrNoRows) {
+					return nil, ErrTaskNotFound
+				}
+				return nil, fmt.Errorf("lock task for attempt heartbeat cancellation: %w", taskErr)
+			}
+			lostAttempt, err := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+				Status:         TaskAttemptStatusLost,
+				TerminalReason: "run cancelled",
+			})
+			if err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, lostAttempt.ID); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit attempt heartbeat cancellation tx: %w", err)
+			}
+			return nil, ErrAttemptImmutable
+		}
 		return nil, ErrAttemptImmutable
 	}
 	taskRow, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
@@ -1496,9 +1700,9 @@ func (s *Service) HeartbeatAttempt(ctx context.Context, input AttemptHeartbeat) 
 		}
 	}
 	row, err := qtx.HeartbeatOrchestrationTaskAttempt(ctx, sqlc.HeartbeatOrchestrationTaskAttemptParams{
-		ID:             pgAttemptID,
-		ClaimToken:     normalizedClaimToken,
-		LeaseExpiresAt: timeToPg(time.Now().Add(normalizeLeaseTTL(input.LeaseTTLSeconds, TaskAttemptDefaultLeaseTTL))),
+		ID:              pgAttemptID,
+		ClaimToken:      normalizedClaimToken,
+		LeaseTtlSeconds: leaseTTLSecondsValue(normalizeLeaseTTL(input.LeaseTTLSeconds, TaskAttemptDefaultLeaseTTL)),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1553,13 +1757,17 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		}
 		return &attempt, nil
 	}
-	if leaseExpired(attemptRow.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(attemptRow.LeaseExpiresAt, observedAt) {
 		return nil, ErrAttemptLeaseConflict
 	}
 	if attemptRow.Status != TaskAttemptStatusRunning {
 		return nil, ErrAttemptImmutable
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, attemptRow.WorkerID, attemptRow.ExecutorID, attemptRow.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrAttemptLeaseConflict
@@ -1573,6 +1781,30 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		return nil, fmt.Errorf("lock run for attempt completion: %w", err)
 	}
 	if runRow.LifecycleStatus != LifecycleStatusRunning {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			taskRow, taskErr := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
+			if taskErr != nil {
+				if errors.Is(taskErr, pgx.ErrNoRows) {
+					return nil, ErrTaskNotFound
+				}
+				return nil, fmt.Errorf("lock task for attempt completion cancellation: %w", taskErr)
+			}
+			lostAttempt, err := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+				Status:         TaskAttemptStatusLost,
+				TerminalReason: "run cancelled",
+			})
+			if err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, lostAttempt.ID); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit attempt completion cancellation tx: %w", err)
+			}
+			attempt := toTaskAttempt(lostAttempt)
+			return &attempt, nil
+		}
 		return nil, ErrAttemptImmutable
 	}
 	taskRow, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, attemptRow.TaskID)
@@ -1786,7 +2018,12 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			}
 			return recovered, fmt.Errorf("lock expired attempt: %w", err)
 		}
-		if isTerminalAttemptStatus(attemptRow.Status) || !leaseExpired(attemptRow.LeaseExpiresAt) {
+		observedAt, err := databaseNow(ctx, tx)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return recovered, err
+		}
+		if isTerminalAttemptStatus(attemptRow.Status) || !leaseExpiredAt(attemptRow.LeaseExpiresAt, observedAt) {
 			_ = tx.Rollback(ctx)
 			continue
 		}
@@ -1801,6 +2038,94 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			return recovered, fmt.Errorf("lock task for expired attempt: %w", err)
 		}
 		if attemptRow.Status == TaskAttemptStatusClaimed || attemptRow.Status == TaskAttemptStatusBinding {
+			if runRow.LifecycleStatus == LifecycleStatusCancelling {
+				lostAttempt, err := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+					Status:         TaskAttemptStatusLost,
+					TerminalReason: "run cancelled",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("retire expired pre-start attempt during cancellation: %w", err)
+				}
+				cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+					ID:             taskRow.ID,
+					TerminalReason: "run cancelled",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("cancel task after expired pre-start attempt during cancellation: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+					TaskID:           cancelledTask.ID,
+					AttemptID:        lostAttempt.ID,
+					AggregateType:    "task",
+					AggregateID:      cancelledTask.ID,
+					AggregateVersion: cancelledTask.StatusVersion,
+					Type:             "run.event.task.cancelled",
+					Payload: map[string]any{
+						"task_id":         cancelledTask.ID.String(),
+						"attempt_id":      lostAttempt.ID.String(),
+						"previous_status": taskRow.Status,
+						"new_status":      cancelledTask.Status,
+						"terminal_reason": cancelledTask.TerminalReason,
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, cancelledTask.ID, lostAttempt.ID); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return recovered, fmt.Errorf("commit cancelled pre-start attempt recovery tx: %w", err)
+				}
+				recovered++
+				continue
+			}
+			if runRow.LifecycleStatus == LifecycleStatusFailed {
+				lostAttempt, err := s.retireAttempt(ctx, qtx, attemptRow, attemptRetirementSpec{
+					Status:         TaskAttemptStatusLost,
+					TerminalReason: "run already failed",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("retire expired pre-start attempt after run failure: %w", err)
+				}
+				failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+					ID:             taskRow.ID,
+					LatestResultID: pgtype.UUID{},
+					TerminalReason: "run already failed",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("fail task after expired pre-start attempt on failed run: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+					TaskID:           failedTask.ID,
+					AttemptID:        lostAttempt.ID,
+					AggregateType:    "task",
+					AggregateID:      failedTask.ID,
+					AggregateVersion: failedTask.StatusVersion,
+					Type:             "run.event.task.failed",
+					Payload: map[string]any{
+						"task_id":         failedTask.ID.String(),
+						"attempt_id":      lostAttempt.ID.String(),
+						"previous_status": taskRow.Status,
+						"new_status":      failedTask.Status,
+						"failure_class":   "run_already_failed",
+						"terminal_reason": failedTask.TerminalReason,
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return recovered, fmt.Errorf("commit failed-run pre-start attempt recovery tx: %w", err)
+				}
+				recovered++
+				continue
+			}
 			requeueReason := "attempt lease expired before execution start"
 			if attemptRow.Status == TaskAttemptStatusBinding {
 				requeueReason = "attempt binding lease expired before execution start"
@@ -1870,6 +2195,43 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			}
 			if err := tx.Commit(ctx); err != nil {
 				return recovered, fmt.Errorf("commit superseded attempt recovery tx: %w", err)
+			}
+			recovered++
+			continue
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+				ID:             taskRow.ID,
+				TerminalReason: "run cancelled",
+			})
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, fmt.Errorf("cancel task from lost attempt during cancellation: %w", err)
+			}
+			if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           cancelledTask.ID,
+				AttemptID:        lostAttempt.ID,
+				AggregateType:    "task",
+				AggregateID:      cancelledTask.ID,
+				AggregateVersion: cancelledTask.StatusVersion,
+				Type:             "run.event.task.cancelled",
+				Payload: map[string]any{
+					"task_id":         cancelledTask.ID.String(),
+					"attempt_id":      lostAttempt.ID.String(),
+					"previous_status": taskRow.Status,
+					"new_status":      cancelledTask.Status,
+					"terminal_reason": cancelledTask.TerminalReason,
+				},
+			}); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, cancelledTask.ID, lostAttempt.ID); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return recovered, fmt.Errorf("commit cancelled running attempt recovery tx: %w", err)
 			}
 			recovered++
 			continue
@@ -1958,6 +2320,9 @@ func (s *Service) maybeMarkRunCompletedAfterPlanningIntent(ctx context.Context, 
 }
 
 func (s *Service) maybeMarkRunCompletedAfterTaskTransition(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, taskID, attemptID pgtype.UUID) (sqlc.OrchestrationEvent, bool, error) {
+	if runRow.LifecycleStatus == LifecycleStatusCancelling {
+		return s.maybeMarkRunCancelledAfterTaskTransition(ctx, qtx, runRow, taskID, attemptID)
+	}
 	if runRow.LifecycleStatus != LifecycleStatusRunning {
 		return sqlc.OrchestrationEvent{}, false, nil
 	}
@@ -2012,6 +2377,67 @@ func (s *Service) maybeMarkRunCompletedAfterTaskTransition(ctx context.Context, 
 			"run_id":          completedRun.ID.String(),
 			"previous_status": runRow.LifecycleStatus,
 			"new_status":      completedRun.LifecycleStatus,
+			"task_id":         uuidString(taskID),
+			"attempt_id":      uuidString(attemptID),
+		},
+	})
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, err
+	}
+	return event, true, nil
+}
+
+func (s *Service) maybeMarkRunCancelledAfterTaskTransition(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, taskID, attemptID pgtype.UUID) (sqlc.OrchestrationEvent, bool, error) {
+	if runRow.LifecycleStatus != LifecycleStatusCancelling {
+		return sqlc.OrchestrationEvent{}, false, nil
+	}
+	activeAttempts, err := qtx.CountActiveOrchestrationTaskAttemptsByRun(ctx, runRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, fmt.Errorf("count active attempts by run: %w", err)
+	}
+	activeIntents, err := qtx.CountActiveOrchestrationPlanningIntentsByRun(ctx, runRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, fmt.Errorf("count active planning intents by run: %w", err)
+	}
+	checkpoints, err := qtx.ListCurrentOrchestrationCheckpointsByRun(ctx, runRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, fmt.Errorf("list checkpoints for run cancellation: %w", err)
+	}
+	openCheckpoints := 0
+	for _, checkpoint := range checkpoints {
+		if checkpoint.Status == CheckpointStatusOpen {
+			openCheckpoints++
+		}
+	}
+	if activeAttempts > 0 || activeIntents > 0 || openCheckpoints > 0 {
+		return sqlc.OrchestrationEvent{}, false, nil
+	}
+	nonTerminalTasks, err := qtx.CountNonTerminalOrchestrationTasksByRun(ctx, runRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, fmt.Errorf("count non-terminal tasks by run: %w", err)
+	}
+	if nonTerminalTasks > 0 {
+		return sqlc.OrchestrationEvent{}, false, nil
+	}
+	cancelledRun, err := qtx.MarkOrchestrationRunCancelled(ctx, sqlc.MarkOrchestrationRunCancelledParams{
+		ID:             runRow.ID,
+		TerminalReason: "run cancelled",
+	})
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, false, fmt.Errorf("mark run cancelled: %w", err)
+	}
+	event, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+		TaskID:           taskID,
+		AttemptID:        attemptID,
+		AggregateType:    "run",
+		AggregateID:      cancelledRun.ID,
+		AggregateVersion: cancelledRun.StatusVersion,
+		Type:             "run.event.cancelled",
+		Payload: map[string]any{
+			"run_id":          cancelledRun.ID.String(),
+			"previous_status": runRow.LifecycleStatus,
+			"new_status":      cancelledRun.LifecycleStatus,
+			"terminal_reason": cancelledRun.TerminalReason,
 			"task_id":         uuidString(taskID),
 			"attempt_id":      uuidString(attemptID),
 		},
@@ -2129,7 +2555,15 @@ func normalizeLeaseTTL(rawSeconds int, fallback time.Duration) time.Duration {
 	return time.Duration(rawSeconds) * time.Second
 }
 
-func ensureWorkerLeaseSnapshot(ctx context.Context, qtx *sqlc.Queries, workerID, executorID, workerLeaseToken string) (bool, error) {
+func leaseTTLSecondsValue(ttl time.Duration) int64 {
+	seconds := int64(ttl / time.Second)
+	if seconds <= 0 {
+		return 1
+	}
+	return seconds
+}
+
+func ensureWorkerLeaseSnapshot(ctx context.Context, qtx *sqlc.Queries, workerID, executorID, workerLeaseToken string, observedAt time.Time) (bool, error) {
 	workerID = strings.TrimSpace(workerID)
 	executorID = strings.TrimSpace(executorID)
 	workerLeaseToken = strings.TrimSpace(workerLeaseToken)
@@ -2149,7 +2583,7 @@ func ensureWorkerLeaseSnapshot(ctx context.Context, qtx *sqlc.Queries, workerID,
 	if strings.TrimSpace(row.LeaseToken) != workerLeaseToken {
 		return false, nil
 	}
-	if leaseExpired(row.LeaseExpiresAt) {
+	if leaseExpiredAt(row.LeaseExpiresAt, observedAt) {
 		return false, nil
 	}
 	return true, nil
@@ -2363,11 +2797,19 @@ func normalizeAttemptTerminalReason(raw string) string {
 	return trimmed
 }
 
-func leaseExpired(value pgtype.Timestamptz) bool {
+func databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	var observedAt time.Time
+	if err := tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&observedAt); err != nil {
+		return time.Time{}, fmt.Errorf("query database clock: %w", err)
+	}
+	return observedAt.UTC(), nil
+}
+
+func leaseExpiredAt(value pgtype.Timestamptz, observedAt time.Time) bool {
 	if !value.Valid {
 		return false
 	}
-	return !db.TimeFromPg(value).After(time.Now())
+	return !db.TimeFromPg(value).After(observedAt)
 }
 
 func isTerminalAttemptStatus(status string) bool {
@@ -2471,14 +2913,14 @@ func toTaskAttempt(row sqlc.OrchestrationTaskAttempt) TaskAttempt {
 		Status:           row.Status,
 		ClaimEpoch:       claimEpoch,
 		ClaimToken:       row.ClaimToken,
-		LeaseExpiresAt:   db.TimeFromPg(row.LeaseExpiresAt),
-		LastHeartbeatAt:  db.TimeFromPg(row.LastHeartbeatAt),
+		LeaseExpiresAt:   optionalTime(db.TimeFromPg(row.LeaseExpiresAt)),
+		LastHeartbeatAt:  optionalTime(db.TimeFromPg(row.LastHeartbeatAt)),
 		InputManifestID:  uuidString(row.InputManifestID),
 		ParkCheckpointID: uuidString(row.ParkCheckpointID),
 		FailureClass:     row.FailureClass,
 		TerminalReason:   row.TerminalReason,
-		StartedAt:        db.TimeFromPg(row.StartedAt),
-		FinishedAt:       db.TimeFromPg(row.FinishedAt),
+		StartedAt:        optionalTime(db.TimeFromPg(row.StartedAt)),
+		FinishedAt:       optionalTime(db.TimeFromPg(row.FinishedAt)),
 		CreatedAt:        db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:        db.TimeFromPg(row.UpdatedAt),
 	}
@@ -2510,18 +2952,31 @@ func normalizeWorkerProfiles(raw []string) []string {
 	if len(raw) == 0 {
 		return nil
 	}
-	profiles := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
-	for _, candidate := range raw {
-		trimmed := strings.TrimSpace(candidate)
+	profiles := make([]string, 0, len(raw)+1)
+	seen := make(map[string]struct{}, len(raw)+1)
+	addProfile := func(value string) {
+		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
-			continue
+			return
 		}
 		if _, ok := seen[trimmed]; ok {
-			continue
+			return
 		}
 		seen[trimmed] = struct{}{}
 		profiles = append(profiles, trimmed)
+	}
+	for _, candidate := range raw {
+		addProfile(candidate)
+	}
+	if _, ok := seen[DefaultRootWorkerProfile]; ok {
+		// The default workerd can still claim explicit builtin echo tasks used
+		// by tests and mock runs, while normal runs use the LLM profile.
+		addProfile(BuiltinEchoWorkerProfile)
+	}
+	if _, ok := seen[DefaultVerifierProfile]; ok {
+		// The default verifyd can still claim explicit builtin.basic
+		// verifications, while normal verification uses the LLM profile.
+		addProfile(BuiltinBasicVerifierProfile)
 	}
 	if len(profiles) == 0 {
 		return nil

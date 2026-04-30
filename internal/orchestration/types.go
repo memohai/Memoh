@@ -47,10 +47,12 @@ const (
 	WorkerStatusUnavailable            = "unavailable"
 	DefaultWorkerExecutorID            = "builtin.workerd"
 	DefaultWorkerDisplayName           = "Builtin Workerd"
-	DefaultRootWorkerProfile           = "builtin.echo"
+	DefaultRootWorkerProfile           = "llm.default"
+	BuiltinEchoWorkerProfile           = "builtin.echo"
 	DefaultVerifierExecutorID          = "builtin.verifyd"
 	DefaultVerifierDisplayName         = "Builtin Verifyd"
-	DefaultVerifierProfile             = "builtin.basic"
+	DefaultVerifierProfile             = "llm.verifier"
+	BuiltinBasicVerifierProfile        = "builtin.basic"
 
 	TaskStatusCreated      = "created"
 	TaskStatusReady        = "ready"
@@ -93,6 +95,7 @@ const (
 
 	methodStartRun              = "StartRun"
 	methodCreateHumanCheckpoint = "CreateHumanCheckpoint"
+	methodCancelRun             = "CancelRun"
 	methodCommitArtifact        = "CommitArtifact"
 	methodResolveCheckpoint     = "ResolveCheckpoint"
 	methodCompleteAttempt       = "CompleteAttempt"
@@ -107,6 +110,7 @@ type ControlIdentity struct {
 
 type StartRunRequest struct {
 	Goal                   string         `json:"goal" validate:"required"`
+	BotID                  string         `json:"bot_id,omitempty"`
 	Input                  map[string]any `json:"input"`
 	OutputSchema           map[string]any `json:"output_schema"`
 	IdempotencyKey         string         `json:"idempotency_key" validate:"required"`
@@ -141,12 +145,42 @@ type Run struct {
 	TerminalReason         string         `json:"terminal_reason,omitempty"`
 	CreatedAt              time.Time      `json:"created_at"`
 	UpdatedAt              time.Time      `json:"updated_at"`
-	FinishedAt             time.Time      `json:"finished_at,omitempty"`
+	FinishedAt             *time.Time     `json:"finished_at,omitempty"`
 }
 
 type RunSnapshot struct {
 	Run         Run    `json:"run"`
 	SnapshotSeq uint64 `json:"snapshot_seq"`
+}
+
+type ListBotRunsRequest struct {
+	Limit int `json:"limit"`
+}
+
+type RunListItem struct {
+	ID              string     `json:"id"`
+	Goal            string     `json:"goal"`
+	LifecycleStatus string     `json:"lifecycle_status"`
+	PlanningStatus  string     `json:"planning_status"`
+	RootTaskID      string     `json:"root_task_id"`
+	TerminalReason  string     `json:"terminal_reason,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+}
+
+type RunListPage struct {
+	Items []RunListItem `json:"items"`
+}
+
+type CancelRunRequest struct {
+	IdempotencyKey string `json:"idempotency_key" validate:"required"`
+}
+
+type CancelRunResult struct {
+	RunID           string `json:"run_id"`
+	LifecycleStatus string `json:"lifecycle_status"`
+	SnapshotSeq     uint64 `json:"snapshot_seq"`
 }
 
 type ListRunEventsRequest struct {
@@ -200,6 +234,200 @@ type ArtifactPage struct {
 	SnapshotSeq uint64     `json:"snapshot_seq"`
 }
 
+type TaskResult struct {
+	ID               string           `json:"id"`
+	RunID            string           `json:"run_id"`
+	TaskID           string           `json:"task_id"`
+	AttemptID        string           `json:"attempt_id,omitempty"`
+	Status           string           `json:"status"`
+	Summary          string           `json:"summary,omitempty"`
+	FailureClass     string           `json:"failure_class,omitempty"`
+	RequestReplan    bool             `json:"request_replan"`
+	ArtifactIntents  []map[string]any `json:"artifact_intents"`
+	StructuredOutput map[string]any   `json:"structured_output"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+}
+
+type TaskDependency struct {
+	ID                       string    `json:"id"`
+	RunID                    string    `json:"run_id"`
+	PredecessorTaskID        string    `json:"predecessor_task_id"`
+	SuccessorTaskID          string    `json:"successor_task_id"`
+	PlannerEpoch             uint64    `json:"planner_epoch"`
+	SupersededByPlannerEpoch uint64    `json:"superseded_by_planner_epoch,omitempty"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
+type RunInspectorSummary struct {
+	OpenCheckpointCount     int `json:"open_checkpoint_count" validate:"required"`
+	ReadyTaskCount          int `json:"ready_task_count" validate:"required"`
+	DispatchingTaskCount    int `json:"dispatching_task_count" validate:"required"`
+	RunningTaskCount        int `json:"running_task_count" validate:"required"`
+	VerifyingTaskCount      int `json:"verifying_task_count" validate:"required"`
+	WaitingHumanTaskCount   int `json:"waiting_human_task_count" validate:"required"`
+	CompletedTaskCount      int `json:"completed_task_count" validate:"required"`
+	BlockedTaskCount        int `json:"blocked_task_count" validate:"required"`
+	FailedTaskCount         int `json:"failed_task_count" validate:"required"`
+	CancelledTaskCount      int `json:"cancelled_task_count" validate:"required"`
+	ActiveAttemptCount      int `json:"active_attempt_count" validate:"required"`
+	ActiveVerificationCount int `json:"active_verification_count" validate:"required"`
+	ActiveWorkerCount       int `json:"active_worker_count" validate:"required"`
+	StuckSignalCount        int `json:"stuck_signal_count" validate:"required"`
+	CriticalSignalCount     int `json:"critical_signal_count" validate:"required"`
+}
+
+type RunStuckSignal struct {
+	Code            string     `json:"code"`
+	Severity        string     `json:"severity"`
+	Message         string     `json:"message"`
+	TaskID          string     `json:"task_id,omitempty"`
+	AttemptID       string     `json:"attempt_id,omitempty"`
+	VerificationID  string     `json:"verification_id,omitempty"`
+	WorkerID        string     `json:"worker_id,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
+	ObservedAt      time.Time  `json:"observed_at"`
+}
+
+type RunTimelineEntry struct {
+	Seq           uint64         `json:"seq"`
+	Type          string         `json:"type"`
+	AggregateType string         `json:"aggregate_type"`
+	AggregateID   string         `json:"aggregate_id"`
+	TaskID        string         `json:"task_id,omitempty"`
+	AttemptID     string         `json:"attempt_id,omitempty"`
+	CheckpointID  string         `json:"checkpoint_id,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	Payload       map[string]any `json:"payload"`
+}
+
+type RunInspector struct {
+	Run            Run                     `json:"run" validate:"required"`
+	Summary        RunInspectorSummary     `json:"summary" validate:"required"`
+	StuckSignals   []RunStuckSignal        `json:"stuck_signals" validate:"required"`
+	Tasks          []Task                  `json:"tasks" validate:"required"`
+	Dependencies   []TaskDependency        `json:"dependencies" validate:"required"`
+	Results        []TaskResult            `json:"results" validate:"required"`
+	Attempts       []InspectorAttempt      `json:"attempts" validate:"required"`
+	Verifications  []InspectorVerification `json:"verifications" validate:"required"`
+	InputManifests []InputManifest         `json:"input_manifests" validate:"required"`
+	ExecutionSpans []RunExecutionSpan      `json:"execution_spans" validate:"required"`
+	ActionRecords  []ActionRecord          `json:"action_records" validate:"required"`
+	Checkpoints    []HumanCheckpoint       `json:"checkpoints" validate:"required"`
+	Artifacts      []Artifact              `json:"artifacts" validate:"required"`
+	Workers        []InspectorWorkerLease  `json:"workers" validate:"required"`
+	Timeline       []RunTimelineEntry      `json:"timeline" validate:"required"`
+}
+
+type InspectorAttempt struct {
+	ID               string     `json:"id"`
+	RunID            string     `json:"run_id"`
+	TaskID           string     `json:"task_id"`
+	AttemptNo        int        `json:"attempt_no"`
+	WorkerID         string     `json:"worker_id,omitempty"`
+	ExecutorID       string     `json:"executor_id,omitempty"`
+	Status           string     `json:"status"`
+	ClaimEpoch       uint64     `json:"claim_epoch"`
+	LeaseExpiresAt   *time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  *time.Time `json:"last_heartbeat_at,omitempty"`
+	InputManifestID  string     `json:"input_manifest_id,omitempty"`
+	ParkCheckpointID string     `json:"park_checkpoint_id,omitempty"`
+	FailureClass     string     `json:"failure_class,omitempty"`
+	TerminalReason   string     `json:"terminal_reason,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type InspectorWorkerLease struct {
+	ID              string         `json:"id"`
+	ExecutorID      string         `json:"executor_id"`
+	DisplayName     string         `json:"display_name"`
+	Capabilities    map[string]any `json:"capabilities"`
+	Status          string         `json:"status"`
+	LastHeartbeatAt time.Time      `json:"last_heartbeat_at"`
+	LeaseExpiresAt  time.Time      `json:"lease_expires_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+type InspectorVerification struct {
+	ID              string     `json:"id"`
+	RunID           string     `json:"run_id"`
+	TaskID          string     `json:"task_id"`
+	ResultID        string     `json:"result_id"`
+	AttemptNo       int        `json:"attempt_no"`
+	WorkerID        string     `json:"worker_id,omitempty"`
+	ExecutorID      string     `json:"executor_id,omitempty"`
+	VerifierProfile string     `json:"verifier_profile,omitempty"`
+	Status          string     `json:"status"`
+	ClaimEpoch      uint64     `json:"claim_epoch"`
+	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	Verdict         string     `json:"verdict,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	FailureClass    string     `json:"failure_class,omitempty"`
+	TerminalReason  string     `json:"terminal_reason,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type RunExecutionSpan struct {
+	Kind               string         `json:"kind"`
+	ID                 string         `json:"id"`
+	RunID              string         `json:"run_id"`
+	TaskID             string         `json:"task_id"`
+	AttemptNo          int            `json:"attempt_no"`
+	Status             string         `json:"status"`
+	WorkerID           string         `json:"worker_id,omitempty"`
+	ExecutorID         string         `json:"executor_id,omitempty"`
+	VerifierProfile    string         `json:"verifier_profile,omitempty"`
+	StartedAt          *time.Time     `json:"started_at,omitempty"`
+	FinishedAt         *time.Time     `json:"finished_at,omitempty"`
+	LastHeartbeatAt    *time.Time     `json:"last_heartbeat_at,omitempty"`
+	LeaseExpiresAt     *time.Time     `json:"lease_expires_at,omitempty"`
+	InputManifestID    string         `json:"input_manifest_id,omitempty"`
+	ResultID           string         `json:"result_id,omitempty"`
+	CheckpointID       string         `json:"checkpoint_id,omitempty"`
+	FailureClass       string         `json:"failure_class,omitempty"`
+	TerminalReason     string         `json:"terminal_reason,omitempty"`
+	Summary            string         `json:"summary,omitempty"`
+	Verdict            string         `json:"verdict,omitempty"`
+	CompletionMetadata map[string]any `json:"completion_metadata,omitempty"`
+	CreatedSeq         uint64         `json:"created_seq,omitempty"`
+	ClaimedSeq         uint64         `json:"claimed_seq,omitempty"`
+	StartedSeq         uint64         `json:"started_seq,omitempty"`
+	TerminalSeq        uint64         `json:"terminal_seq,omitempty"`
+	RequeueSeq         uint64         `json:"requeue_seq,omitempty"`
+	RelatedEventTypes  []string       `json:"related_event_types,omitempty"`
+}
+
+type ActionRecord struct {
+	ID             string     `json:"id"`
+	RunID          string     `json:"run_id"`
+	TaskID         string     `json:"task_id"`
+	AttemptID      string     `json:"attempt_id,omitempty"`
+	VerificationID string     `json:"verification_id,omitempty"`
+	ActionKind     string     `json:"action_kind"`
+	Status         string     `json:"status"`
+	ToolName       string     `json:"tool_name"`
+	ToolCallID     string     `json:"tool_call_id"`
+	InputPayload   any        `json:"input_payload"`
+	OutputPayload  any        `json:"output_payload"`
+	ErrorPayload   any        `json:"error_payload"`
+	Summary        string     `json:"summary,omitempty"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
 type CreateHumanCheckpointResult struct {
 	Checkpoint  HumanCheckpoint `json:"checkpoint"`
 	SnapshotSeq uint64          `json:"snapshot_seq"`
@@ -223,7 +451,7 @@ type Task struct {
 	WaitingCheckpointID      string         `json:"waiting_checkpoint_id,omitempty"`
 	WaitingScope             string         `json:"waiting_scope,omitempty"`
 	LatestResultID           string         `json:"latest_result_id,omitempty"`
-	ReadyAt                  time.Time      `json:"ready_at,omitempty"`
+	ReadyAt                  *time.Time     `json:"ready_at,omitempty"`
 	BlockedReason            string         `json:"blocked_reason,omitempty"`
 	TerminalReason           string         `json:"terminal_reason,omitempty"`
 	BlackboardScope          string         `json:"blackboard_scope,omitempty"`
@@ -242,8 +470,8 @@ type PlanningIntent struct {
 	ClaimEpoch       uint64         `json:"claim_epoch"`
 	ClaimToken       string         `json:"claim_token,omitempty"`
 	ClaimedBy        string         `json:"claimed_by,omitempty"`
-	LeaseExpiresAt   time.Time      `json:"lease_expires_at,omitempty"`
-	LastHeartbeatAt  time.Time      `json:"last_heartbeat_at,omitempty"`
+	LeaseExpiresAt   *time.Time     `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  *time.Time     `json:"last_heartbeat_at,omitempty"`
 	FailureReason    string         `json:"failure_reason,omitempty"`
 	Payload          map[string]any `json:"payload"`
 	CreatedAt        time.Time      `json:"created_at"`
@@ -262,25 +490,25 @@ type InputManifest struct {
 }
 
 type TaskAttempt struct {
-	ID               string    `json:"id"`
-	RunID            string    `json:"run_id"`
-	TaskID           string    `json:"task_id"`
-	AttemptNo        int       `json:"attempt_no"`
-	WorkerID         string    `json:"worker_id,omitempty"`
-	ExecutorID       string    `json:"executor_id,omitempty"`
-	Status           string    `json:"status"`
-	ClaimEpoch       uint64    `json:"claim_epoch"`
-	ClaimToken       string    `json:"claim_token,omitempty"`
-	LeaseExpiresAt   time.Time `json:"lease_expires_at,omitempty"`
-	LastHeartbeatAt  time.Time `json:"last_heartbeat_at,omitempty"`
-	InputManifestID  string    `json:"input_manifest_id,omitempty"`
-	ParkCheckpointID string    `json:"park_checkpoint_id,omitempty"`
-	FailureClass     string    `json:"failure_class,omitempty"`
-	TerminalReason   string    `json:"terminal_reason,omitempty"`
-	StartedAt        time.Time `json:"started_at,omitempty"`
-	FinishedAt       time.Time `json:"finished_at,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string     `json:"id"`
+	RunID            string     `json:"run_id"`
+	TaskID           string     `json:"task_id"`
+	AttemptNo        int        `json:"attempt_no"`
+	WorkerID         string     `json:"worker_id,omitempty"`
+	ExecutorID       string     `json:"executor_id,omitempty"`
+	Status           string     `json:"status"`
+	ClaimEpoch       uint64     `json:"claim_epoch"`
+	ClaimToken       string     `json:"claim_token,omitempty"`
+	LeaseExpiresAt   *time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt  *time.Time `json:"last_heartbeat_at,omitempty"`
+	InputManifestID  string     `json:"input_manifest_id,omitempty"`
+	ParkCheckpointID string     `json:"park_checkpoint_id,omitempty"`
+	FailureClass     string     `json:"failure_class,omitempty"`
+	TerminalReason   string     `json:"terminal_reason,omitempty"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type WorkerRegistration struct {
@@ -344,27 +572,27 @@ type WorkerLease struct {
 }
 
 type TaskVerification struct {
-	ID              string    `json:"id"`
-	RunID           string    `json:"run_id"`
-	TaskID          string    `json:"task_id"`
-	ResultID        string    `json:"result_id"`
-	AttemptNo       int       `json:"attempt_no"`
-	WorkerID        string    `json:"worker_id,omitempty"`
-	ExecutorID      string    `json:"executor_id,omitempty"`
-	VerifierProfile string    `json:"verifier_profile,omitempty"`
-	Status          string    `json:"status"`
-	ClaimEpoch      uint64    `json:"claim_epoch"`
-	ClaimToken      string    `json:"claim_token,omitempty"`
-	LeaseExpiresAt  time.Time `json:"lease_expires_at,omitempty"`
-	LastHeartbeatAt time.Time `json:"last_heartbeat_at,omitempty"`
-	Verdict         string    `json:"verdict,omitempty"`
-	Summary         string    `json:"summary,omitempty"`
-	FailureClass    string    `json:"failure_class,omitempty"`
-	TerminalReason  string    `json:"terminal_reason,omitempty"`
-	StartedAt       time.Time `json:"started_at,omitempty"`
-	FinishedAt      time.Time `json:"finished_at,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string     `json:"id"`
+	RunID           string     `json:"run_id"`
+	TaskID          string     `json:"task_id"`
+	ResultID        string     `json:"result_id"`
+	AttemptNo       int        `json:"attempt_no"`
+	WorkerID        string     `json:"worker_id,omitempty"`
+	ExecutorID      string     `json:"executor_id,omitempty"`
+	VerifierProfile string     `json:"verifier_profile,omitempty"`
+	Status          string     `json:"status"`
+	ClaimEpoch      uint64     `json:"claim_epoch"`
+	ClaimToken      string     `json:"claim_token,omitempty"`
+	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	Verdict         string     `json:"verdict,omitempty"`
+	Summary         string     `json:"summary,omitempty"`
+	FailureClass    string     `json:"failure_class,omitempty"`
+	TerminalReason  string     `json:"terminal_reason,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type VerificationClaim struct {
@@ -422,12 +650,12 @@ type HumanCheckpoint struct {
 	Options                  []CheckpointOption       `json:"options"`
 	DefaultAction            *CheckpointDefaultAction `json:"default_action,omitempty"`
 	ResumePolicy             *CheckpointResumePolicy  `json:"resume_policy,omitempty"`
-	TimeoutAt                time.Time                `json:"timeout_at,omitempty"`
+	TimeoutAt                *time.Time               `json:"timeout_at,omitempty"`
 	ResolvedBy               string                   `json:"resolved_by,omitempty"`
 	ResolvedMode             string                   `json:"resolved_mode,omitempty"`
 	ResolvedOptionID         string                   `json:"resolved_option_id,omitempty"`
 	ResolvedFreeformInput    string                   `json:"resolved_freeform_input,omitempty"`
-	ResolvedAt               time.Time                `json:"resolved_at,omitempty"`
+	ResolvedAt               *time.Time               `json:"resolved_at,omitempty"`
 	Metadata                 map[string]any           `json:"metadata"`
 	CreatedAt                time.Time                `json:"created_at"`
 	UpdatedAt                time.Time                `json:"updated_at"`
@@ -464,7 +692,7 @@ type RunEvent struct {
 	IdempotencyKey   string         `json:"idempotency_key,omitempty"`
 	Payload          map[string]any `json:"payload"`
 	CreatedAt        time.Time      `json:"created_at"`
-	PublishedAt      time.Time      `json:"published_at,omitempty"`
+	PublishedAt      *time.Time     `json:"published_at,omitempty"`
 }
 
 type ResolveCheckpointResult struct {

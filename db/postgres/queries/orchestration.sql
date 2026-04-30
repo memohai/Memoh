@@ -50,6 +50,15 @@ FROM orchestration_runs
 WHERE id = sqlc.arg(id)
 FOR UPDATE;
 
+-- name: ListOrchestrationRunsByBot :many
+SELECT *
+FROM orchestration_runs
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND owner_subject = sqlc.arg(owner_subject)
+  AND COALESCE(source_metadata->>'bot_id', '') = sqlc.arg(bot_id)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(limit_count);
+
 -- name: AllocateOrchestrationRunEventSeqs :one
 UPDATE orchestration_runs
 SET last_event_seq = last_event_seq + sqlc.arg(delta)::bigint,
@@ -68,6 +77,14 @@ RETURNING *;
 -- name: MarkOrchestrationRunWaitingHuman :one
 UPDATE orchestration_runs
 SET lifecycle_status = 'waiting_human',
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkOrchestrationRunCancelling :one
+UPDATE orchestration_runs
+SET lifecycle_status = 'cancelling',
     status_version = status_version + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -108,6 +125,16 @@ RETURNING *;
 -- name: MarkOrchestrationRunFailed :one
 UPDATE orchestration_runs
 SET lifecycle_status = 'failed',
+    status_version = status_version + 1,
+    terminal_reason = sqlc.arg(terminal_reason),
+    updated_at = now(),
+    finished_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkOrchestrationRunCancelled :one
+UPDATE orchestration_runs
+SET lifecycle_status = 'cancelled',
     status_version = status_version + 1,
     terminal_reason = sqlc.arg(terminal_reason),
     updated_at = now(),
@@ -353,6 +380,17 @@ SET status = 'failed',
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: MarkOrchestrationTaskCancelled :one
+UPDATE orchestration_tasks
+SET status = 'cancelled',
+    status_version = status_version + 1,
+    waiting_checkpoint_id = NULL,
+    waiting_scope = '',
+    terminal_reason = sqlc.arg(terminal_reason),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: CreateOrchestrationPlanningIntent :one
 INSERT INTO orchestration_planning_intents (
   id,
@@ -379,6 +417,9 @@ SELECT *
 FROM orchestration_planning_intents
 WHERE id = sqlc.arg(id);
 
+-- name: GetDatabaseClockTimestamp :one
+SELECT clock_timestamp();
+
 -- name: ClaimNextOrchestrationPlanningIntent :one
 WITH next_intent AS (
   SELECT id
@@ -400,7 +441,7 @@ SET status = 'processing',
     claim_epoch = claim_epoch + 1,
     claim_token = sqlc.arg(claim_token),
     claimed_by = sqlc.arg(claimed_by),
-    lease_expires_at = sqlc.arg(lease_expires_at),
+    lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_intent)
@@ -408,7 +449,7 @@ RETURNING *;
 
 -- name: HeartbeatOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
-SET lease_expires_at = sqlc.arg(lease_expires_at),
+SET lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -549,6 +590,84 @@ FROM orchestration_task_verifications
 WHERE run_id = sqlc.arg(run_id)
 ORDER BY created_at ASC, id ASC;
 
+-- name: CreateOrchestrationAttemptActionRecord :one
+INSERT INTO orchestration_action_ledger (
+  id,
+  run_id,
+  task_id,
+  attempt_id,
+  action_kind,
+  status,
+  tool_name,
+  tool_call_id,
+  input_payload
+) VALUES (
+  sqlc.arg(id),
+  sqlc.arg(run_id),
+  sqlc.arg(task_id),
+  sqlc.arg(attempt_id),
+  sqlc.arg(action_kind),
+  sqlc.arg(status),
+  sqlc.arg(tool_name),
+  sqlc.arg(tool_call_id),
+  sqlc.arg(input_payload)
+) RETURNING *;
+
+-- name: CreateOrchestrationVerificationActionRecord :one
+INSERT INTO orchestration_action_ledger (
+  id,
+  run_id,
+  task_id,
+  verification_id,
+  action_kind,
+  status,
+  tool_name,
+  tool_call_id,
+  input_payload
+) VALUES (
+  sqlc.arg(id),
+  sqlc.arg(run_id),
+  sqlc.arg(task_id),
+  sqlc.arg(verification_id),
+  sqlc.arg(action_kind),
+  sqlc.arg(status),
+  sqlc.arg(tool_name),
+  sqlc.arg(tool_call_id),
+  sqlc.arg(input_payload)
+) RETURNING *;
+
+-- name: CompleteOrchestrationAttemptActionRecord :one
+UPDATE orchestration_action_ledger
+SET status = sqlc.arg(status),
+    output_payload = sqlc.arg(output_payload),
+    error_payload = sqlc.arg(error_payload),
+    summary = sqlc.arg(summary),
+    finished_at = now(),
+    updated_at = now()
+WHERE attempt_id = sqlc.arg(attempt_id)
+  AND tool_call_id = sqlc.arg(tool_call_id)
+  AND status = 'running'
+RETURNING *;
+
+-- name: CompleteOrchestrationVerificationActionRecord :one
+UPDATE orchestration_action_ledger
+SET status = sqlc.arg(status),
+    output_payload = sqlc.arg(output_payload),
+    error_payload = sqlc.arg(error_payload),
+    summary = sqlc.arg(summary),
+    finished_at = now(),
+    updated_at = now()
+WHERE verification_id = sqlc.arg(verification_id)
+  AND tool_call_id = sqlc.arg(tool_call_id)
+  AND status = 'running'
+RETURNING *;
+
+-- name: ListCurrentOrchestrationActionRecordsByRun :many
+SELECT *
+FROM orchestration_action_ledger
+WHERE run_id = sqlc.arg(run_id)
+ORDER BY started_at ASC, created_at ASC, id ASC;
+
 -- name: ClaimNextCreatedOrchestrationTaskVerification :one
 WITH next_verification AS (
   SELECT verifications.id
@@ -573,7 +692,7 @@ SET status = 'claimed',
     worker_lease_token = sqlc.arg(worker_lease_token),
     claim_epoch = claim_epoch + 1,
     claim_token = sqlc.arg(claim_token),
-    lease_expires_at = sqlc.arg(lease_expires_at),
+    lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_verification)
@@ -581,7 +700,7 @@ RETURNING *;
 
 -- name: HeartbeatOrchestrationTaskVerification :one
 UPDATE orchestration_task_verifications
-SET lease_expires_at = sqlc.arg(lease_expires_at),
+SET lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -668,6 +787,25 @@ WHERE id = sqlc.arg(id)
   AND claim_epoch = sqlc.arg(claim_epoch)
 RETURNING *;
 
+-- name: CancelOrchestrationTaskVerification :one
+UPDATE orchestration_task_verifications
+SET status = 'lost',
+    worker_id = '',
+    executor_id = '',
+    worker_lease_token = '',
+    claim_token = '',
+    verdict = sqlc.arg(verdict),
+    summary = sqlc.arg(summary),
+    failure_class = sqlc.arg(failure_class),
+    terminal_reason = sqlc.arg(terminal_reason),
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    finished_at = COALESCE(finished_at, now()),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status IN ('created', 'claimed', 'running')
+RETURNING *;
+
 -- name: MarkOrchestrationTaskVerificationLost :one
 UPDATE orchestration_task_verifications
 SET status = 'lost',
@@ -717,7 +855,7 @@ SET status = 'claimed',
     worker_lease_token = sqlc.arg(worker_lease_token),
     claim_epoch = claim_epoch + 1,
     claim_token = sqlc.arg(claim_token),
-    lease_expires_at = sqlc.arg(lease_expires_at),
+    lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_attempt)
@@ -725,7 +863,7 @@ RETURNING *;
 
 -- name: HeartbeatOrchestrationTaskAttempt :one
 UPDATE orchestration_task_attempts
-SET lease_expires_at = sqlc.arg(lease_expires_at),
+SET lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)
@@ -886,7 +1024,7 @@ INSERT INTO orchestration_workers (
   sqlc.arg(status),
   sqlc.arg(lease_token),
   now(),
-  sqlc.arg(lease_expires_at)
+  clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second')
 ) ON CONFLICT (id) DO UPDATE
 SET executor_id = EXCLUDED.executor_id,
     display_name = EXCLUDED.display_name,
@@ -897,19 +1035,25 @@ SET executor_id = EXCLUDED.executor_id,
     lease_expires_at = EXCLUDED.lease_expires_at,
     updated_at = now()
 WHERE orchestration_workers.lease_token = EXCLUDED.lease_token
-   OR orchestration_workers.lease_expires_at <= now()
+   OR orchestration_workers.lease_expires_at <= clock_timestamp()
 RETURNING *;
 
 -- name: HeartbeatOrchestrationWorker :one
 UPDATE orchestration_workers
 SET status = sqlc.arg(status),
     last_heartbeat_at = now(),
-    lease_expires_at = sqlc.arg(lease_expires_at),
+    lease_expires_at = clock_timestamp() + (sqlc.arg(lease_ttl_seconds)::bigint * interval '1 second'),
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND lease_token = sqlc.arg(lease_token)
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING *;
+
+-- name: ListOrchestrationWorkersByIDs :many
+SELECT *
+FROM orchestration_workers
+WHERE id = ANY(sqlc.arg(ids)::text[])
+ORDER BY id ASC;
 
 -- name: CreateOrchestrationTaskResult :one
 INSERT INTO orchestration_task_results (
@@ -948,6 +1092,12 @@ RETURNING *;
 SELECT *
 FROM orchestration_task_results
 WHERE id = sqlc.arg(id);
+
+-- name: ListCurrentOrchestrationTaskResultsByRun :many
+SELECT *
+FROM orchestration_task_results
+WHERE run_id = sqlc.arg(run_id)
+ORDER BY created_at ASC, id ASC;
 
 -- name: ListCurrentOrchestrationArtifactsByRun :many
 SELECT *
@@ -1053,6 +1203,14 @@ SET status = 'resolved',
     resolved_option_id = sqlc.arg(resolved_option_id),
     resolved_freeform_input = sqlc.arg(resolved_freeform_input),
     resolved_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkOrchestrationHumanCheckpointCancelled :one
+UPDATE orchestration_human_checkpoints
+SET status = 'cancelled',
+    status_version = status_version + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;

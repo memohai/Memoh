@@ -68,6 +68,70 @@ func (q *Queries) AllocateOrchestrationRunEventSeqs(ctx context.Context, arg All
 	return last_event_seq, err
 }
 
+const cancelOrchestrationTaskVerification = `-- name: CancelOrchestrationTaskVerification :one
+UPDATE orchestration_task_verifications
+SET status = 'lost',
+    worker_id = '',
+    executor_id = '',
+    worker_lease_token = '',
+    claim_token = '',
+    verdict = $1,
+    summary = $2,
+    failure_class = $3,
+    terminal_reason = $4,
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    finished_at = COALESCE(finished_at, now()),
+    updated_at = now()
+WHERE id = $5
+  AND status IN ('created', 'claimed', 'running')
+RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, worker_lease_token, verifier_profile, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, verdict, summary, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
+`
+
+type CancelOrchestrationTaskVerificationParams struct {
+	Verdict        string      `json:"verdict"`
+	Summary        string      `json:"summary"`
+	FailureClass   string      `json:"failure_class"`
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) CancelOrchestrationTaskVerification(ctx context.Context, arg CancelOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
+	row := q.db.QueryRow(ctx, cancelOrchestrationTaskVerification,
+		arg.Verdict,
+		arg.Summary,
+		arg.FailureClass,
+		arg.TerminalReason,
+		arg.ID,
+	)
+	var i OrchestrationTaskVerification
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.ResultID,
+		&i.AttemptNo,
+		&i.WorkerID,
+		&i.ExecutorID,
+		&i.WorkerLeaseToken,
+		&i.VerifierProfile,
+		&i.Status,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.Verdict,
+		&i.Summary,
+		&i.FailureClass,
+		&i.TerminalReason,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimNextCreatedOrchestrationTaskAttempt = `-- name: ClaimNextCreatedOrchestrationTaskAttempt :one
 WITH next_attempt AS (
   SELECT attempts.id
@@ -93,7 +157,7 @@ SET status = 'claimed',
     worker_lease_token = $3,
     claim_epoch = claim_epoch + 1,
     claim_token = $4,
-    lease_expires_at = $5,
+    lease_expires_at = clock_timestamp() + ($5::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_attempt)
@@ -101,12 +165,12 @@ RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_
 `
 
 type ClaimNextCreatedOrchestrationTaskAttemptParams struct {
-	WorkerID         string             `json:"worker_id"`
-	ExecutorID       string             `json:"executor_id"`
-	WorkerLeaseToken string             `json:"worker_lease_token"`
-	ClaimToken       string             `json:"claim_token"`
-	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
-	WorkerProfiles   []string           `json:"worker_profiles"`
+	WorkerID         string   `json:"worker_id"`
+	ExecutorID       string   `json:"executor_id"`
+	WorkerLeaseToken string   `json:"worker_lease_token"`
+	ClaimToken       string   `json:"claim_token"`
+	LeaseTtlSeconds  int64    `json:"lease_ttl_seconds"`
+	WorkerProfiles   []string `json:"worker_profiles"`
 }
 
 func (q *Queries) ClaimNextCreatedOrchestrationTaskAttempt(ctx context.Context, arg ClaimNextCreatedOrchestrationTaskAttemptParams) (OrchestrationTaskAttempt, error) {
@@ -115,7 +179,7 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskAttempt(ctx context.Context, 
 		arg.ExecutorID,
 		arg.WorkerLeaseToken,
 		arg.ClaimToken,
-		arg.LeaseExpiresAt,
+		arg.LeaseTtlSeconds,
 		arg.WorkerProfiles,
 	)
 	var i OrchestrationTaskAttempt
@@ -168,7 +232,7 @@ SET status = 'claimed',
     worker_lease_token = $3,
     claim_epoch = claim_epoch + 1,
     claim_token = $4,
-    lease_expires_at = $5,
+    lease_expires_at = clock_timestamp() + ($5::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_verification)
@@ -176,12 +240,12 @@ RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, wo
 `
 
 type ClaimNextCreatedOrchestrationTaskVerificationParams struct {
-	WorkerID         string             `json:"worker_id"`
-	ExecutorID       string             `json:"executor_id"`
-	WorkerLeaseToken string             `json:"worker_lease_token"`
-	ClaimToken       string             `json:"claim_token"`
-	LeaseExpiresAt   pgtype.Timestamptz `json:"lease_expires_at"`
-	VerifierProfiles []string           `json:"verifier_profiles"`
+	WorkerID         string   `json:"worker_id"`
+	ExecutorID       string   `json:"executor_id"`
+	WorkerLeaseToken string   `json:"worker_lease_token"`
+	ClaimToken       string   `json:"claim_token"`
+	LeaseTtlSeconds  int64    `json:"lease_ttl_seconds"`
+	VerifierProfiles []string `json:"verifier_profiles"`
 }
 
 func (q *Queries) ClaimNextCreatedOrchestrationTaskVerification(ctx context.Context, arg ClaimNextCreatedOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
@@ -190,7 +254,7 @@ func (q *Queries) ClaimNextCreatedOrchestrationTaskVerification(ctx context.Cont
 		arg.ExecutorID,
 		arg.WorkerLeaseToken,
 		arg.ClaimToken,
-		arg.LeaseExpiresAt,
+		arg.LeaseTtlSeconds,
 		arg.VerifierProfiles,
 	)
 	var i OrchestrationTaskVerification
@@ -242,7 +306,7 @@ SET status = 'processing',
     claim_epoch = claim_epoch + 1,
     claim_token = $1,
     claimed_by = $2,
-    lease_expires_at = $3,
+    lease_expires_at = clock_timestamp() + ($3::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = (SELECT id FROM next_intent)
@@ -250,13 +314,13 @@ RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, 
 `
 
 type ClaimNextOrchestrationPlanningIntentParams struct {
-	ClaimToken     string             `json:"claim_token"`
-	ClaimedBy      string             `json:"claimed_by"`
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	ClaimToken      string `json:"claim_token"`
+	ClaimedBy       string `json:"claimed_by"`
+	LeaseTtlSeconds int64  `json:"lease_ttl_seconds"`
 }
 
 func (q *Queries) ClaimNextOrchestrationPlanningIntent(ctx context.Context, arg ClaimNextOrchestrationPlanningIntentParams) (OrchestrationPlanningIntent, error) {
-	row := q.db.QueryRow(ctx, claimNextOrchestrationPlanningIntent, arg.ClaimToken, arg.ClaimedBy, arg.LeaseExpiresAt)
+	row := q.db.QueryRow(ctx, claimNextOrchestrationPlanningIntent, arg.ClaimToken, arg.ClaimedBy, arg.LeaseTtlSeconds)
 	var i OrchestrationPlanningIntent
 	err := row.Scan(
 		&i.ID,
@@ -273,6 +337,61 @@ func (q *Queries) ClaimNextOrchestrationPlanningIntent(ctx context.Context, arg 
 		&i.LastHeartbeatAt,
 		&i.FailureReason,
 		&i.Payload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeOrchestrationAttemptActionRecord = `-- name: CompleteOrchestrationAttemptActionRecord :one
+UPDATE orchestration_action_ledger
+SET status = $1,
+    output_payload = $2,
+    error_payload = $3,
+    summary = $4,
+    finished_at = now(),
+    updated_at = now()
+WHERE attempt_id = $5
+  AND tool_call_id = $6
+  AND status = 'running'
+RETURNING id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
+`
+
+type CompleteOrchestrationAttemptActionRecordParams struct {
+	Status        string      `json:"status"`
+	OutputPayload []byte      `json:"output_payload"`
+	ErrorPayload  []byte      `json:"error_payload"`
+	Summary       string      `json:"summary"`
+	AttemptID     pgtype.UUID `json:"attempt_id"`
+	ToolCallID    string      `json:"tool_call_id"`
+}
+
+func (q *Queries) CompleteOrchestrationAttemptActionRecord(ctx context.Context, arg CompleteOrchestrationAttemptActionRecordParams) (OrchestrationActionLedger, error) {
+	row := q.db.QueryRow(ctx, completeOrchestrationAttemptActionRecord,
+		arg.Status,
+		arg.OutputPayload,
+		arg.ErrorPayload,
+		arg.Summary,
+		arg.AttemptID,
+		arg.ToolCallID,
+	)
+	var i OrchestrationActionLedger
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.VerificationID,
+		&i.ActionKind,
+		&i.Status,
+		&i.ToolName,
+		&i.ToolCallID,
+		&i.InputPayload,
+		&i.OutputPayload,
+		&i.ErrorPayload,
+		&i.Summary,
+		&i.StartedAt,
+		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -365,6 +484,61 @@ func (q *Queries) CompleteOrchestrationPlanningIntent(ctx context.Context, arg C
 		&i.LastHeartbeatAt,
 		&i.FailureReason,
 		&i.Payload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completeOrchestrationVerificationActionRecord = `-- name: CompleteOrchestrationVerificationActionRecord :one
+UPDATE orchestration_action_ledger
+SET status = $1,
+    output_payload = $2,
+    error_payload = $3,
+    summary = $4,
+    finished_at = now(),
+    updated_at = now()
+WHERE verification_id = $5
+  AND tool_call_id = $6
+  AND status = 'running'
+RETURNING id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
+`
+
+type CompleteOrchestrationVerificationActionRecordParams struct {
+	Status         string      `json:"status"`
+	OutputPayload  []byte      `json:"output_payload"`
+	ErrorPayload   []byte      `json:"error_payload"`
+	Summary        string      `json:"summary"`
+	VerificationID pgtype.UUID `json:"verification_id"`
+	ToolCallID     string      `json:"tool_call_id"`
+}
+
+func (q *Queries) CompleteOrchestrationVerificationActionRecord(ctx context.Context, arg CompleteOrchestrationVerificationActionRecordParams) (OrchestrationActionLedger, error) {
+	row := q.db.QueryRow(ctx, completeOrchestrationVerificationActionRecord,
+		arg.Status,
+		arg.OutputPayload,
+		arg.ErrorPayload,
+		arg.Summary,
+		arg.VerificationID,
+		arg.ToolCallID,
+	)
+	var i OrchestrationActionLedger
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.VerificationID,
+		&i.ActionKind,
+		&i.Status,
+		&i.ToolName,
+		&i.ToolCallID,
+		&i.InputPayload,
+		&i.OutputPayload,
+		&i.ErrorPayload,
+		&i.Summary,
+		&i.StartedAt,
+		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -528,6 +702,77 @@ func (q *Queries) CreateOrchestrationArtifact(ctx context.Context, arg CreateOrc
 		&i.Summary,
 		&i.Metadata,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createOrchestrationAttemptActionRecord = `-- name: CreateOrchestrationAttemptActionRecord :one
+INSERT INTO orchestration_action_ledger (
+  id,
+  run_id,
+  task_id,
+  attempt_id,
+  action_kind,
+  status,
+  tool_name,
+  tool_call_id,
+  input_payload
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7,
+  $8,
+  $9
+) RETURNING id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
+`
+
+type CreateOrchestrationAttemptActionRecordParams struct {
+	ID           pgtype.UUID `json:"id"`
+	RunID        pgtype.UUID `json:"run_id"`
+	TaskID       pgtype.UUID `json:"task_id"`
+	AttemptID    pgtype.UUID `json:"attempt_id"`
+	ActionKind   string      `json:"action_kind"`
+	Status       string      `json:"status"`
+	ToolName     string      `json:"tool_name"`
+	ToolCallID   string      `json:"tool_call_id"`
+	InputPayload []byte      `json:"input_payload"`
+}
+
+func (q *Queries) CreateOrchestrationAttemptActionRecord(ctx context.Context, arg CreateOrchestrationAttemptActionRecordParams) (OrchestrationActionLedger, error) {
+	row := q.db.QueryRow(ctx, createOrchestrationAttemptActionRecord,
+		arg.ID,
+		arg.RunID,
+		arg.TaskID,
+		arg.AttemptID,
+		arg.ActionKind,
+		arg.Status,
+		arg.ToolName,
+		arg.ToolCallID,
+		arg.InputPayload,
+	)
+	var i OrchestrationActionLedger
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.VerificationID,
+		&i.ActionKind,
+		&i.Status,
+		&i.ToolName,
+		&i.ToolCallID,
+		&i.InputPayload,
+		&i.OutputPayload,
+		&i.ErrorPayload,
+		&i.Summary,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1349,6 +1594,77 @@ func (q *Queries) CreateOrchestrationTaskVerification(ctx context.Context, arg C
 	return i, err
 }
 
+const createOrchestrationVerificationActionRecord = `-- name: CreateOrchestrationVerificationActionRecord :one
+INSERT INTO orchestration_action_ledger (
+  id,
+  run_id,
+  task_id,
+  verification_id,
+  action_kind,
+  status,
+  tool_name,
+  tool_call_id,
+  input_payload
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7,
+  $8,
+  $9
+) RETURNING id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
+`
+
+type CreateOrchestrationVerificationActionRecordParams struct {
+	ID             pgtype.UUID `json:"id"`
+	RunID          pgtype.UUID `json:"run_id"`
+	TaskID         pgtype.UUID `json:"task_id"`
+	VerificationID pgtype.UUID `json:"verification_id"`
+	ActionKind     string      `json:"action_kind"`
+	Status         string      `json:"status"`
+	ToolName       string      `json:"tool_name"`
+	ToolCallID     string      `json:"tool_call_id"`
+	InputPayload   []byte      `json:"input_payload"`
+}
+
+func (q *Queries) CreateOrchestrationVerificationActionRecord(ctx context.Context, arg CreateOrchestrationVerificationActionRecordParams) (OrchestrationActionLedger, error) {
+	row := q.db.QueryRow(ctx, createOrchestrationVerificationActionRecord,
+		arg.ID,
+		arg.RunID,
+		arg.TaskID,
+		arg.VerificationID,
+		arg.ActionKind,
+		arg.Status,
+		arg.ToolName,
+		arg.ToolCallID,
+		arg.InputPayload,
+	)
+	var i OrchestrationActionLedger
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.VerificationID,
+		&i.ActionKind,
+		&i.Status,
+		&i.ToolName,
+		&i.ToolCallID,
+		&i.InputPayload,
+		&i.OutputPayload,
+		&i.ErrorPayload,
+		&i.Summary,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const failOrchestrationPlanningIntent = `-- name: FailOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
 SET status = 'failed',
@@ -1393,6 +1709,17 @@ func (q *Queries) FailOrchestrationPlanningIntent(ctx context.Context, arg FailO
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getDatabaseClockTimestamp = `-- name: GetDatabaseClockTimestamp :one
+SELECT clock_timestamp()
+`
+
+func (q *Queries) GetDatabaseClockTimestamp(ctx context.Context) (interface{}, error) {
+	row := q.db.QueryRow(ctx, getDatabaseClockTimestamp)
+	var clock_timestamp interface{}
+	err := row.Scan(&clock_timestamp)
+	return clock_timestamp, err
 }
 
 const getNextOrchestrationTaskAttemptNo = `-- name: GetNextOrchestrationTaskAttemptNo :one
@@ -1946,7 +2273,7 @@ func (q *Queries) GetOrchestrationWorkerByIDForUpdate(ctx context.Context, id st
 
 const heartbeatOrchestrationPlanningIntent = `-- name: HeartbeatOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
-SET lease_expires_at = $1,
+SET lease_expires_at = clock_timestamp() + ($1::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = $2
@@ -1958,13 +2285,13 @@ RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, 
 `
 
 type HeartbeatOrchestrationPlanningIntentParams struct {
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	ID             pgtype.UUID        `json:"id"`
-	ClaimToken     string             `json:"claim_token"`
+	LeaseTtlSeconds int64       `json:"lease_ttl_seconds"`
+	ID              pgtype.UUID `json:"id"`
+	ClaimToken      string      `json:"claim_token"`
 }
 
 func (q *Queries) HeartbeatOrchestrationPlanningIntent(ctx context.Context, arg HeartbeatOrchestrationPlanningIntentParams) (OrchestrationPlanningIntent, error) {
-	row := q.db.QueryRow(ctx, heartbeatOrchestrationPlanningIntent, arg.LeaseExpiresAt, arg.ID, arg.ClaimToken)
+	row := q.db.QueryRow(ctx, heartbeatOrchestrationPlanningIntent, arg.LeaseTtlSeconds, arg.ID, arg.ClaimToken)
 	var i OrchestrationPlanningIntent
 	err := row.Scan(
 		&i.ID,
@@ -1989,7 +2316,7 @@ func (q *Queries) HeartbeatOrchestrationPlanningIntent(ctx context.Context, arg 
 
 const heartbeatOrchestrationTaskAttempt = `-- name: HeartbeatOrchestrationTaskAttempt :one
 UPDATE orchestration_task_attempts
-SET lease_expires_at = $1,
+SET lease_expires_at = clock_timestamp() + ($1::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = $2
@@ -2001,13 +2328,13 @@ RETURNING id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_
 `
 
 type HeartbeatOrchestrationTaskAttemptParams struct {
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	ID             pgtype.UUID        `json:"id"`
-	ClaimToken     string             `json:"claim_token"`
+	LeaseTtlSeconds int64       `json:"lease_ttl_seconds"`
+	ID              pgtype.UUID `json:"id"`
+	ClaimToken      string      `json:"claim_token"`
 }
 
 func (q *Queries) HeartbeatOrchestrationTaskAttempt(ctx context.Context, arg HeartbeatOrchestrationTaskAttemptParams) (OrchestrationTaskAttempt, error) {
-	row := q.db.QueryRow(ctx, heartbeatOrchestrationTaskAttempt, arg.LeaseExpiresAt, arg.ID, arg.ClaimToken)
+	row := q.db.QueryRow(ctx, heartbeatOrchestrationTaskAttempt, arg.LeaseTtlSeconds, arg.ID, arg.ClaimToken)
 	var i OrchestrationTaskAttempt
 	err := row.Scan(
 		&i.ID,
@@ -2036,7 +2363,7 @@ func (q *Queries) HeartbeatOrchestrationTaskAttempt(ctx context.Context, arg Hea
 
 const heartbeatOrchestrationTaskVerification = `-- name: HeartbeatOrchestrationTaskVerification :one
 UPDATE orchestration_task_verifications
-SET lease_expires_at = $1,
+SET lease_expires_at = clock_timestamp() + ($1::bigint * interval '1 second'),
     last_heartbeat_at = now(),
     updated_at = now()
 WHERE id = $2
@@ -2048,13 +2375,13 @@ RETURNING id, run_id, task_id, result_id, attempt_no, worker_id, executor_id, wo
 `
 
 type HeartbeatOrchestrationTaskVerificationParams struct {
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	ID             pgtype.UUID        `json:"id"`
-	ClaimToken     string             `json:"claim_token"`
+	LeaseTtlSeconds int64       `json:"lease_ttl_seconds"`
+	ID              pgtype.UUID `json:"id"`
+	ClaimToken      string      `json:"claim_token"`
 }
 
 func (q *Queries) HeartbeatOrchestrationTaskVerification(ctx context.Context, arg HeartbeatOrchestrationTaskVerificationParams) (OrchestrationTaskVerification, error) {
-	row := q.db.QueryRow(ctx, heartbeatOrchestrationTaskVerification, arg.LeaseExpiresAt, arg.ID, arg.ClaimToken)
+	row := q.db.QueryRow(ctx, heartbeatOrchestrationTaskVerification, arg.LeaseTtlSeconds, arg.ID, arg.ClaimToken)
 	var i OrchestrationTaskVerification
 	err := row.Scan(
 		&i.ID,
@@ -2087,25 +2414,25 @@ const heartbeatOrchestrationWorker = `-- name: HeartbeatOrchestrationWorker :one
 UPDATE orchestration_workers
 SET status = $1,
     last_heartbeat_at = now(),
-    lease_expires_at = $2,
+    lease_expires_at = clock_timestamp() + ($2::bigint * interval '1 second'),
     updated_at = now()
 WHERE id = $3
   AND lease_token = $4
-  AND lease_expires_at > now()
+  AND lease_expires_at > clock_timestamp()
 RETURNING id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
 `
 
 type HeartbeatOrchestrationWorkerParams struct {
-	Status         string             `json:"status"`
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	ID             string             `json:"id"`
-	LeaseToken     string             `json:"lease_token"`
+	Status          string `json:"status"`
+	LeaseTtlSeconds int64  `json:"lease_ttl_seconds"`
+	ID              string `json:"id"`
+	LeaseToken      string `json:"lease_token"`
 }
 
 func (q *Queries) HeartbeatOrchestrationWorker(ctx context.Context, arg HeartbeatOrchestrationWorkerParams) (OrchestrationWorker, error) {
 	row := q.db.QueryRow(ctx, heartbeatOrchestrationWorker,
 		arg.Status,
-		arg.LeaseExpiresAt,
+		arg.LeaseTtlSeconds,
 		arg.ID,
 		arg.LeaseToken,
 	)
@@ -2186,6 +2513,51 @@ func (q *Queries) ListActiveOrchestrationTaskDependenciesBySuccessor(ctx context
 			&i.SuccessorTaskID,
 			&i.PlannerEpoch,
 			&i.SupersededByPlannerEpoch,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCurrentOrchestrationActionRecordsByRun = `-- name: ListCurrentOrchestrationActionRecordsByRun :many
+SELECT id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
+FROM orchestration_action_ledger
+WHERE run_id = $1
+ORDER BY started_at ASC, created_at ASC, id ASC
+`
+
+func (q *Queries) ListCurrentOrchestrationActionRecordsByRun(ctx context.Context, runID pgtype.UUID) ([]OrchestrationActionLedger, error) {
+	rows, err := q.db.Query(ctx, listCurrentOrchestrationActionRecordsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationActionLedger
+	for rows.Next() {
+		var i OrchestrationActionLedger
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.AttemptID,
+			&i.VerificationID,
+			&i.ActionKind,
+			&i.Status,
+			&i.ToolName,
+			&i.ToolCallID,
+			&i.InputPayload,
+			&i.OutputPayload,
+			&i.ErrorPayload,
+			&i.Summary,
+			&i.StartedAt,
+			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2359,6 +2731,46 @@ func (q *Queries) ListCurrentOrchestrationTaskDependenciesByRun(ctx context.Cont
 			&i.SuccessorTaskID,
 			&i.PlannerEpoch,
 			&i.SupersededByPlannerEpoch,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCurrentOrchestrationTaskResultsByRun = `-- name: ListCurrentOrchestrationTaskResultsByRun :many
+SELECT id, run_id, task_id, attempt_id, status, summary, failure_class, request_replan, artifact_intents, structured_output, created_at, updated_at
+FROM orchestration_task_results
+WHERE run_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListCurrentOrchestrationTaskResultsByRun(ctx context.Context, runID pgtype.UUID) ([]OrchestrationTaskResult, error) {
+	rows, err := q.db.Query(ctx, listCurrentOrchestrationTaskResultsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationTaskResult
+	for rows.Next() {
+		var i OrchestrationTaskResult
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.AttemptID,
+			&i.Status,
+			&i.Summary,
+			&i.FailureClass,
+			&i.RequestReplan,
+			&i.ArtifactIntents,
+			&i.StructuredOutput,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2728,6 +3140,108 @@ func (q *Queries) ListOrchestrationRunEvents(ctx context.Context, arg ListOrches
 	return items, nil
 }
 
+const listOrchestrationRunsByBot = `-- name: ListOrchestrationRunsByBot :many
+SELECT id, tenant_id, owner_subject, lifecycle_status, planning_status, status_version, planner_epoch, last_event_seq, root_task_id, goal, input, output_schema, requested_control_policy, control_policy, source_metadata, policies, created_by, terminal_reason, created_at, updated_at, finished_at
+FROM orchestration_runs
+WHERE tenant_id = $1
+  AND owner_subject = $2
+  AND COALESCE(source_metadata->>'bot_id', '') = $3
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListOrchestrationRunsByBotParams struct {
+	TenantID     string `json:"tenant_id"`
+	OwnerSubject string `json:"owner_subject"`
+	BotID        []byte `json:"bot_id"`
+	LimitCount   int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListOrchestrationRunsByBot(ctx context.Context, arg ListOrchestrationRunsByBotParams) ([]OrchestrationRun, error) {
+	rows, err := q.db.Query(ctx, listOrchestrationRunsByBot,
+		arg.TenantID,
+		arg.OwnerSubject,
+		arg.BotID,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationRun
+	for rows.Next() {
+		var i OrchestrationRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OwnerSubject,
+			&i.LifecycleStatus,
+			&i.PlanningStatus,
+			&i.StatusVersion,
+			&i.PlannerEpoch,
+			&i.LastEventSeq,
+			&i.RootTaskID,
+			&i.Goal,
+			&i.Input,
+			&i.OutputSchema,
+			&i.RequestedControlPolicy,
+			&i.ControlPolicy,
+			&i.SourceMetadata,
+			&i.Policies,
+			&i.CreatedBy,
+			&i.TerminalReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrchestrationWorkersByIDs = `-- name: ListOrchestrationWorkersByIDs :many
+SELECT id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
+FROM orchestration_workers
+WHERE id = ANY($1::text[])
+ORDER BY id ASC
+`
+
+func (q *Queries) ListOrchestrationWorkersByIDs(ctx context.Context, ids []string) ([]OrchestrationWorker, error) {
+	rows, err := q.db.Query(ctx, listOrchestrationWorkersByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationWorker
+	for rows.Next() {
+		var i OrchestrationWorker
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExecutorID,
+			&i.DisplayName,
+			&i.Capabilities,
+			&i.Status,
+			&i.LeaseToken,
+			&i.LastHeartbeatAt,
+			&i.LeaseExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSchedulableOrchestrationTasks = `-- name: ListSchedulableOrchestrationTasks :many
 SELECT t.id, t.run_id, t.decomposed_from_task_id, t.kind, t.goal, t.inputs, t.planner_epoch, t.superseded_by_planner_epoch, t.worker_profile, t.priority, t.retry_policy, t.verification_policy, t.status, t.status_version, t.waiting_checkpoint_id, t.waiting_scope, t.latest_result_id, t.ready_at, t.blocked_reason, t.terminal_reason, t.blackboard_scope, t.created_at, t.updated_at
 FROM orchestration_tasks t
@@ -2782,6 +3296,44 @@ func (q *Queries) ListSchedulableOrchestrationTasks(ctx context.Context) ([]Orch
 	return items, nil
 }
 
+const markOrchestrationHumanCheckpointCancelled = `-- name: MarkOrchestrationHumanCheckpointCancelled :one
+UPDATE orchestration_human_checkpoints
+SET status = 'cancelled',
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, run_id, task_id, blocks_run, planner_epoch, superseded_by_planner_epoch, status, status_version, question, options, default_action, resume_policy, timeout_at, resolved_by, resolved_mode, resolved_option_id, resolved_freeform_input, resolved_at, metadata, created_at, updated_at
+`
+
+func (q *Queries) MarkOrchestrationHumanCheckpointCancelled(ctx context.Context, id pgtype.UUID) (OrchestrationHumanCheckpoint, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationHumanCheckpointCancelled, id)
+	var i OrchestrationHumanCheckpoint
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.BlocksRun,
+		&i.PlannerEpoch,
+		&i.SupersededByPlannerEpoch,
+		&i.Status,
+		&i.StatusVersion,
+		&i.Question,
+		&i.Options,
+		&i.DefaultAction,
+		&i.ResumePolicy,
+		&i.TimeoutAt,
+		&i.ResolvedBy,
+		&i.ResolvedMode,
+		&i.ResolvedOptionID,
+		&i.ResolvedFreeformInput,
+		&i.ResolvedAt,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markOrchestrationHumanCheckpointSuperseded = `-- name: MarkOrchestrationHumanCheckpointSuperseded :one
 UPDATE orchestration_human_checkpoints
 SET status = 'superseded',
@@ -2823,6 +3375,89 @@ func (q *Queries) MarkOrchestrationHumanCheckpointSuperseded(ctx context.Context
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationRunCancelled = `-- name: MarkOrchestrationRunCancelled :one
+UPDATE orchestration_runs
+SET lifecycle_status = 'cancelled',
+    status_version = status_version + 1,
+    terminal_reason = $1,
+    updated_at = now(),
+    finished_at = now()
+WHERE id = $2
+RETURNING id, tenant_id, owner_subject, lifecycle_status, planning_status, status_version, planner_epoch, last_event_seq, root_task_id, goal, input, output_schema, requested_control_policy, control_policy, source_metadata, policies, created_by, terminal_reason, created_at, updated_at, finished_at
+`
+
+type MarkOrchestrationRunCancelledParams struct {
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) MarkOrchestrationRunCancelled(ctx context.Context, arg MarkOrchestrationRunCancelledParams) (OrchestrationRun, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationRunCancelled, arg.TerminalReason, arg.ID)
+	var i OrchestrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerSubject,
+		&i.LifecycleStatus,
+		&i.PlanningStatus,
+		&i.StatusVersion,
+		&i.PlannerEpoch,
+		&i.LastEventSeq,
+		&i.RootTaskID,
+		&i.Goal,
+		&i.Input,
+		&i.OutputSchema,
+		&i.RequestedControlPolicy,
+		&i.ControlPolicy,
+		&i.SourceMetadata,
+		&i.Policies,
+		&i.CreatedBy,
+		&i.TerminalReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationRunCancelling = `-- name: MarkOrchestrationRunCancelling :one
+UPDATE orchestration_runs
+SET lifecycle_status = 'cancelling',
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, owner_subject, lifecycle_status, planning_status, status_version, planner_epoch, last_event_seq, root_task_id, goal, input, output_schema, requested_control_policy, control_policy, source_metadata, policies, created_by, terminal_reason, created_at, updated_at, finished_at
+`
+
+func (q *Queries) MarkOrchestrationRunCancelling(ctx context.Context, id pgtype.UUID) (OrchestrationRun, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationRunCancelling, id)
+	var i OrchestrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerSubject,
+		&i.LifecycleStatus,
+		&i.PlanningStatus,
+		&i.StatusVersion,
+		&i.PlannerEpoch,
+		&i.LastEventSeq,
+		&i.RootTaskID,
+		&i.Goal,
+		&i.Input,
+		&i.OutputSchema,
+		&i.RequestedControlPolicy,
+		&i.ControlPolicy,
+		&i.SourceMetadata,
+		&i.Policies,
+		&i.CreatedBy,
+		&i.TerminalReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }
@@ -3322,6 +3957,54 @@ type MarkOrchestrationTaskBlockedParams struct {
 
 func (q *Queries) MarkOrchestrationTaskBlocked(ctx context.Context, arg MarkOrchestrationTaskBlockedParams) (OrchestrationTask, error) {
 	row := q.db.QueryRow(ctx, markOrchestrationTaskBlocked, arg.BlockedReason, arg.ID)
+	var i OrchestrationTask
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.DecomposedFromTaskID,
+		&i.Kind,
+		&i.Goal,
+		&i.Inputs,
+		&i.PlannerEpoch,
+		&i.SupersededByPlannerEpoch,
+		&i.WorkerProfile,
+		&i.Priority,
+		&i.RetryPolicy,
+		&i.VerificationPolicy,
+		&i.Status,
+		&i.StatusVersion,
+		&i.WaitingCheckpointID,
+		&i.WaitingScope,
+		&i.LatestResultID,
+		&i.ReadyAt,
+		&i.BlockedReason,
+		&i.TerminalReason,
+		&i.BlackboardScope,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markOrchestrationTaskCancelled = `-- name: MarkOrchestrationTaskCancelled :one
+UPDATE orchestration_tasks
+SET status = 'cancelled',
+    status_version = status_version + 1,
+    waiting_checkpoint_id = NULL,
+    waiting_scope = '',
+    terminal_reason = $1,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
+`
+
+type MarkOrchestrationTaskCancelledParams struct {
+	TerminalReason string      `json:"terminal_reason"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) MarkOrchestrationTaskCancelled(ctx context.Context, arg MarkOrchestrationTaskCancelledParams) (OrchestrationTask, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskCancelled, arg.TerminalReason, arg.ID)
 	var i OrchestrationTask
 	err := row.Scan(
 		&i.ID,
@@ -4423,7 +5106,7 @@ INSERT INTO orchestration_workers (
   $5,
   $6,
   now(),
-  $7
+  clock_timestamp() + ($7::bigint * interval '1 second')
 ) ON CONFLICT (id) DO UPDATE
 SET executor_id = EXCLUDED.executor_id,
     display_name = EXCLUDED.display_name,
@@ -4434,18 +5117,18 @@ SET executor_id = EXCLUDED.executor_id,
     lease_expires_at = EXCLUDED.lease_expires_at,
     updated_at = now()
 WHERE orchestration_workers.lease_token = EXCLUDED.lease_token
-   OR orchestration_workers.lease_expires_at <= now()
+   OR orchestration_workers.lease_expires_at <= clock_timestamp()
 RETURNING id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
 `
 
 type UpsertOrchestrationWorkerParams struct {
-	ID             string             `json:"id"`
-	ExecutorID     string             `json:"executor_id"`
-	DisplayName    string             `json:"display_name"`
-	Capabilities   []byte             `json:"capabilities"`
-	Status         string             `json:"status"`
-	LeaseToken     string             `json:"lease_token"`
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	ID              string `json:"id"`
+	ExecutorID      string `json:"executor_id"`
+	DisplayName     string `json:"display_name"`
+	Capabilities    []byte `json:"capabilities"`
+	Status          string `json:"status"`
+	LeaseToken      string `json:"lease_token"`
+	LeaseTtlSeconds int64  `json:"lease_ttl_seconds"`
 }
 
 func (q *Queries) UpsertOrchestrationWorker(ctx context.Context, arg UpsertOrchestrationWorkerParams) (OrchestrationWorker, error) {
@@ -4456,7 +5139,7 @@ func (q *Queries) UpsertOrchestrationWorker(ctx context.Context, arg UpsertOrche
 		arg.Capabilities,
 		arg.Status,
 		arg.LeaseToken,
-		arg.LeaseExpiresAt,
+		arg.LeaseTtlSeconds,
 	)
 	var i OrchestrationWorker
 	err := row.Scan(

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +19,8 @@ import (
 )
 
 const verificationCompletionRetryInterval = 250 * time.Millisecond
+
+var replayVerificationCompletionAckLossInjected atomic.Bool
 
 type VerificationLeaseRuntime interface {
 	HeartbeatVerification(context.Context, VerificationHeartbeat) (*TaskVerification, error)
@@ -66,7 +70,7 @@ func (s *Service) ClaimNextVerification(ctx context.Context, claim VerificationC
 		WorkerLeaseToken: lease.LeaseToken,
 		VerifierProfiles: supportedProfiles,
 		ClaimToken:       uuid.NewString(),
-		LeaseExpiresAt:   timeToPg(time.Now().Add(ttl)),
+		LeaseTtlSeconds:  leaseTTLSecondsValue(ttl),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -106,14 +110,15 @@ func (s *Service) ProcessNextVerification(ctx context.Context, workerID, leaseTo
 	if strings.TrimSpace(workerID) == "" {
 		return false, fmt.Errorf("%w: worker_id is required", ErrInvalidArgument)
 	}
-	if len(normalizeWorkerProfiles(verifierProfiles)) == 0 {
+	builtinProfiles := builtinVerifierProfiles(verifierProfiles)
+	if len(builtinProfiles) == 0 {
 		return false, fmt.Errorf("%w: verifier_profiles is required", ErrInvalidArgument)
 	}
 
 	verification, err := s.ClaimNextVerification(ctx, VerificationClaim{
 		WorkerID:         workerID,
 		ExecutorID:       DefaultVerifierExecutorID,
-		VerifierProfiles: verifierProfiles,
+		VerifierProfiles: builtinProfiles,
 		LeaseToken:       leaseToken,
 		LeaseTTLSeconds:  leaseTTLSeconds,
 	})
@@ -132,7 +137,7 @@ func (s *Service) ProcessNextVerification(ctx context.Context, workerID, leaseTo
 		return false, err
 	}
 
-	leaseLost := RunClaimedVerification(ctx, s, s.logger, *runningVerification, leaseTTLSeconds, verifierProfiles, func(execCtx context.Context, verification TaskVerification, _ []string) VerificationCompletion {
+	leaseLost := RunClaimedVerification(ctx, s, s.logger, *runningVerification, leaseTTLSeconds, builtinProfiles, func(execCtx context.Context, verification TaskVerification, _ []string) VerificationCompletion {
 		return ExecuteBuiltinVerification(execCtx, s.queries, verification)
 	})
 	if leaseLost {
@@ -141,10 +146,20 @@ func (s *Service) ProcessNextVerification(ctx context.Context, workerID, leaseTo
 	return true, nil
 }
 
+func builtinVerifierProfiles(verifierProfiles []string) []string {
+	normalized := normalizeWorkerProfiles(verifierProfiles)
+	for _, profile := range normalized {
+		if profile == BuiltinBasicVerifierProfile || profile == DefaultVerifierProfile {
+			return []string{BuiltinBasicVerifierProfile}
+		}
+	}
+	return nil
+}
+
 func (s *Service) RunVerifierLoop(ctx context.Context) {
 	workerID := "server-verifyd-" + uuid.NewString()
 	leaseToken := uuid.NewString()
-	profiles := []string{DefaultVerifierProfile}
+	profiles := []string{BuiltinBasicVerifierProfile}
 	runBoolLoop(ctx, s.logger, "verifier", 200*time.Millisecond, func(loopCtx context.Context) (bool, error) {
 		return s.ProcessNextVerification(loopCtx, workerID, leaseToken, profiles, int(TaskVerificationDefaultLeaseTTL/time.Second))
 	})
@@ -177,10 +192,14 @@ func (s *Service) StartVerification(ctx context.Context, verificationID, claimTo
 	if strings.TrimSpace(row.ClaimToken) != normalizedClaimToken {
 		return nil, ErrVerificationLeaseConflict
 	}
-	if leaseExpired(row.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(row.LeaseExpiresAt, observedAt) {
 		return nil, ErrVerificationLeaseConflict
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrVerificationLeaseConflict
@@ -197,13 +216,57 @@ func (s *Service) StartVerification(ctx context.Context, verificationID, claimTo
 		return nil, fmt.Errorf("lock run for start verification: %w", err)
 	}
 	if runRow.LifecycleStatus != LifecycleStatusRunning {
-		if row.Status == TaskVerificationStatusClaimed {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling && row.Status == TaskVerificationStatusClaimed {
+			taskRow, taskErr := qtx.GetOrchestrationTaskByIDForUpdate(ctx, row.TaskID)
+			if taskErr != nil {
+				if errors.Is(taskErr, pgx.ErrNoRows) {
+					return nil, ErrTaskNotFound
+				}
+				return nil, fmt.Errorf("lock task for invalid verification claim after run state change: %w", taskErr)
+			}
+			lostRow, releaseErr := qtx.MarkOrchestrationTaskVerificationLost(ctx, sqlc.MarkOrchestrationTaskVerificationLostParams{
+				ID:             row.ID,
+				ClaimEpoch:     row.ClaimEpoch,
+				Verdict:        VerificationVerdictRejected,
+				Summary:        "run cancelled",
+				FailureClass:   "run_cancelled",
+				TerminalReason: "run cancelled",
+			})
+			if releaseErr != nil {
+				if errors.Is(releaseErr, pgx.ErrNoRows) {
+					return nil, ErrVerificationLeaseConflict
+				}
+				return nil, fmt.Errorf("retire invalid verification claim after run state change: %w", releaseErr)
+			}
+			if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+				TaskID:           lostRow.TaskID,
+				AggregateType:    "verification",
+				AggregateID:      lostRow.ID,
+				AggregateVersion: lostRow.ClaimEpoch,
+				Type:             "run.event.verification.lost",
+				Payload: map[string]any{
+					"verification_id": lostRow.ID.String(),
+					"task_id":         lostRow.TaskID.String(),
+					"previous_status": row.Status,
+					"new_status":      lostRow.Status,
+					"terminal_reason": lostRow.TerminalReason,
+				},
+			}); err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, pgtype.UUID{}); err != nil {
+				return nil, err
+			}
+		} else if row.Status == TaskVerificationStatusClaimed {
 			if _, releaseErr := qtx.ReleaseOrchestrationTaskVerificationClaim(ctx, sqlc.ReleaseOrchestrationTaskVerificationClaimParams{
 				ID:         row.ID,
 				ClaimToken: normalizedClaimToken,
 			}); releaseErr != nil && !errors.Is(releaseErr, pgx.ErrNoRows) {
 				return nil, fmt.Errorf("release invalid verification claim after run state change: %w", releaseErr)
 			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit invalid verification claim after run state change: %w", err)
 		}
 		return nil, ErrVerificationImmutable
 	}
@@ -216,13 +279,50 @@ func (s *Service) StartVerification(ctx context.Context, verificationID, claimTo
 		return nil, fmt.Errorf("lock task for start verification: %w", err)
 	}
 	if taskRow.Status != TaskStatusVerifying || taskRow.SupersededByPlannerEpoch.Valid {
-		if row.Status == TaskVerificationStatusClaimed {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling && row.Status == TaskVerificationStatusClaimed {
+			lostRow, releaseErr := qtx.MarkOrchestrationTaskVerificationLost(ctx, sqlc.MarkOrchestrationTaskVerificationLostParams{
+				ID:             row.ID,
+				ClaimEpoch:     row.ClaimEpoch,
+				Verdict:        VerificationVerdictRejected,
+				Summary:        "run cancelled",
+				FailureClass:   "run_cancelled",
+				TerminalReason: "run cancelled",
+			})
+			if releaseErr != nil {
+				if errors.Is(releaseErr, pgx.ErrNoRows) {
+					return nil, ErrVerificationLeaseConflict
+				}
+				return nil, fmt.Errorf("retire invalid verification claim after task state change: %w", releaseErr)
+			}
+			if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+				TaskID:           lostRow.TaskID,
+				AggregateType:    "verification",
+				AggregateID:      lostRow.ID,
+				AggregateVersion: lostRow.ClaimEpoch,
+				Type:             "run.event.verification.lost",
+				Payload: map[string]any{
+					"verification_id": lostRow.ID.String(),
+					"task_id":         lostRow.TaskID.String(),
+					"previous_status": row.Status,
+					"new_status":      lostRow.Status,
+					"terminal_reason": lostRow.TerminalReason,
+				},
+			}); err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, pgtype.UUID{}); err != nil {
+				return nil, err
+			}
+		} else if row.Status == TaskVerificationStatusClaimed {
 			if _, releaseErr := qtx.ReleaseOrchestrationTaskVerificationClaim(ctx, sqlc.ReleaseOrchestrationTaskVerificationClaimParams{
 				ID:         row.ID,
 				ClaimToken: normalizedClaimToken,
 			}); releaseErr != nil && !errors.Is(releaseErr, pgx.ErrNoRows) {
 				return nil, fmt.Errorf("release invalid verification claim after task state change: %w", releaseErr)
 			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit invalid verification claim after task state change: %w", err)
 		}
 		return nil, ErrVerificationImmutable
 	}
@@ -297,10 +397,14 @@ func (s *Service) HeartbeatVerification(ctx context.Context, input VerificationH
 	if row.Status != TaskVerificationStatusClaimed && row.Status != TaskVerificationStatusRunning {
 		return nil, ErrVerificationImmutable
 	}
-	if leaseExpired(row.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(row.LeaseExpiresAt, observedAt) {
 		return nil, ErrVerificationLeaseConflict
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrVerificationLeaseConflict
@@ -313,7 +417,27 @@ func (s *Service) HeartbeatVerification(ctx context.Context, input VerificationH
 		}
 		return nil, fmt.Errorf("lock run for verification heartbeat: %w", err)
 	}
-	if runRow.LifecycleStatus != LifecycleStatusRunning {
+	runAlreadyFailed := runRow.LifecycleStatus == LifecycleStatusFailed
+	if runRow.LifecycleStatus != LifecycleStatusRunning && !runAlreadyFailed {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			taskRow, taskErr := qtx.GetOrchestrationTaskByIDForUpdate(ctx, row.TaskID)
+			if taskErr != nil {
+				if errors.Is(taskErr, pgx.ErrNoRows) {
+					return nil, ErrTaskNotFound
+				}
+				return nil, fmt.Errorf("lock task for verification heartbeat cancellation: %w", taskErr)
+			}
+			if _, err := s.retireVerificationDuringRunCancellation(ctx, qtx, runRow, row); err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, pgtype.UUID{}); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit verification heartbeat cancellation tx: %w", err)
+			}
+			return nil, ErrVerificationImmutable
+		}
 		return nil, ErrVerificationImmutable
 	}
 
@@ -329,9 +453,9 @@ func (s *Service) HeartbeatVerification(ctx context.Context, input VerificationH
 	}
 
 	updated, err := qtx.HeartbeatOrchestrationTaskVerification(ctx, sqlc.HeartbeatOrchestrationTaskVerificationParams{
-		ID:             pgVerificationID,
-		ClaimToken:     normalizedClaimToken,
-		LeaseExpiresAt: timeToPg(time.Now().Add(normalizeLeaseTTL(input.LeaseTTLSeconds, TaskVerificationDefaultLeaseTTL))),
+		ID:              pgVerificationID,
+		ClaimToken:      normalizedClaimToken,
+		LeaseTtlSeconds: leaseTTLSecondsValue(normalizeLeaseTTL(input.LeaseTTLSeconds, TaskVerificationDefaultLeaseTTL)),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -405,13 +529,17 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		}
 		return &verification, nil
 	}
-	if leaseExpired(row.LeaseExpiresAt) {
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if leaseExpiredAt(row.LeaseExpiresAt, observedAt) {
 		return nil, ErrVerificationLeaseConflict
 	}
 	if row.Status != TaskVerificationStatusRunning {
 		return nil, ErrVerificationImmutable
 	}
-	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken); err != nil {
+	if ok, err := ensureWorkerLeaseSnapshot(ctx, qtx, row.WorkerID, row.ExecutorID, row.WorkerLeaseToken, observedAt); err != nil {
 		return nil, err
 	} else if !ok {
 		return nil, ErrVerificationLeaseConflict
@@ -424,7 +552,29 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		}
 		return nil, fmt.Errorf("lock run for verification completion: %w", err)
 	}
-	if runRow.LifecycleStatus != LifecycleStatusRunning {
+	runAlreadyFailed := runRow.LifecycleStatus == LifecycleStatusFailed
+	if runRow.LifecycleStatus != LifecycleStatusRunning && !runAlreadyFailed {
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			taskRow, taskErr := qtx.GetOrchestrationTaskByIDForUpdate(ctx, row.TaskID)
+			if taskErr != nil {
+				if errors.Is(taskErr, pgx.ErrNoRows) {
+					return nil, ErrTaskNotFound
+				}
+				return nil, fmt.Errorf("lock task for verification completion cancellation: %w", taskErr)
+			}
+			cancelledVerification, err := s.retireVerificationDuringRunCancellation(ctx, qtx, runRow, row)
+			if err != nil {
+				return nil, err
+			}
+			if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, taskRow, pgtype.UUID{}); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit verification completion cancellation tx: %w", err)
+			}
+			verification := toTaskVerification(cancelledVerification)
+			return &verification, nil
+		}
 		return nil, ErrVerificationImmutable
 	}
 
@@ -530,6 +680,9 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		}); err != nil {
 			return nil, err
 		}
+		if runAlreadyFailed {
+			break
+		}
 		if resultRow.RequestReplan {
 			childPlans := decodePlannedChildTasks(decodeJSONObject(resultRow.StructuredOutput))
 			if len(childPlans) == 0 {
@@ -560,6 +713,14 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			return nil, err
 		}
 	case input.RequestReplan:
+		if runAlreadyFailed {
+			failedTask, err := s.failTaskFromVerification(ctx, qtx, taskRow, row.ResultID, finalRow, "run_already_failed")
+			if err != nil {
+				return nil, err
+			}
+			_ = failedTask
+			break
+		}
 		failedTask, err := s.failTaskFromVerification(ctx, qtx, taskRow, row.ResultID, finalRow, "verification_requested_replan")
 		if err != nil {
 			return nil, err
@@ -600,6 +761,14 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			return nil, err
 		}
 	default:
+		if runAlreadyFailed {
+			failedTask, err := s.failTaskFromVerification(ctx, qtx, taskRow, row.ResultID, finalRow, "run_already_failed")
+			if err != nil {
+				return nil, err
+			}
+			_ = failedTask
+			break
+		}
 		failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
 			ID:             taskRow.ID,
 			LatestResultID: row.ResultID,
@@ -662,7 +831,12 @@ func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) 
 			}
 			return recovered, fmt.Errorf("lock expired verification: %w", err)
 		}
-		if isTerminalVerificationStatus(row.Status) || !leaseExpired(row.LeaseExpiresAt) {
+		observedAt, err := databaseNow(ctx, tx)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return recovered, err
+		}
+		if isTerminalVerificationStatus(row.Status) || !leaseExpiredAt(row.LeaseExpiresAt, observedAt) {
 			_ = tx.Rollback(ctx)
 			continue
 		}
@@ -679,6 +853,134 @@ func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) 
 		}
 
 		if row.Status == TaskVerificationStatusClaimed {
+			if runRow.LifecycleStatus == LifecycleStatusCancelling {
+				lostRow, err := qtx.MarkOrchestrationTaskVerificationLost(ctx, sqlc.MarkOrchestrationTaskVerificationLostParams{
+					ID:             row.ID,
+					ClaimEpoch:     row.ClaimEpoch,
+					Verdict:        VerificationVerdictRejected,
+					Summary:        "run cancelled",
+					FailureClass:   "run_cancelled",
+					TerminalReason: "run cancelled",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("mark claimed verification lost during cancellation: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+					TaskID:           lostRow.TaskID,
+					AggregateType:    "verification",
+					AggregateID:      lostRow.ID,
+					AggregateVersion: lostRow.ClaimEpoch,
+					Type:             "run.event.verification.lost",
+					Payload: map[string]any{
+						"verification_id": lostRow.ID.String(),
+						"task_id":         lostRow.TaskID.String(),
+						"previous_status": row.Status,
+						"new_status":      lostRow.Status,
+						"terminal_reason": lostRow.TerminalReason,
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+					ID:             taskRow.ID,
+					TerminalReason: "run cancelled",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("cancel task after claimed verification cancellation: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+					TaskID:           cancelledTask.ID,
+					AggregateType:    "task",
+					AggregateID:      cancelledTask.ID,
+					AggregateVersion: cancelledTask.StatusVersion,
+					Type:             "run.event.task.cancelled",
+					Payload: map[string]any{
+						"task_id":         cancelledTask.ID.String(),
+						"previous_status": taskRow.Status,
+						"new_status":      cancelledTask.Status,
+						"terminal_reason": cancelledTask.TerminalReason,
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, cancelledTask.ID, pgtype.UUID{}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return recovered, fmt.Errorf("commit claimed verification cancellation recovery tx: %w", err)
+				}
+				recovered++
+				continue
+			}
+			if runRow.LifecycleStatus == LifecycleStatusFailed {
+				lostRow, err := qtx.MarkOrchestrationTaskVerificationLost(ctx, sqlc.MarkOrchestrationTaskVerificationLostParams{
+					ID:             row.ID,
+					ClaimEpoch:     row.ClaimEpoch,
+					Verdict:        VerificationVerdictRejected,
+					Summary:        "run already failed",
+					FailureClass:   "run_already_failed",
+					TerminalReason: "run already failed",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("mark claimed verification lost after run failure: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+					TaskID:           lostRow.TaskID,
+					AggregateType:    "verification",
+					AggregateID:      lostRow.ID,
+					AggregateVersion: lostRow.ClaimEpoch,
+					Type:             "run.event.verification.lost",
+					Payload: map[string]any{
+						"verification_id": lostRow.ID.String(),
+						"task_id":         lostRow.TaskID.String(),
+						"previous_status": row.Status,
+						"new_status":      lostRow.Status,
+						"terminal_reason": lostRow.TerminalReason,
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+					ID:             taskRow.ID,
+					LatestResultID: row.ResultID,
+					TerminalReason: "run already failed",
+				})
+				if err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, fmt.Errorf("fail task after claimed verification on failed run: %w", err)
+				}
+				if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+					TaskID:           failedTask.ID,
+					AggregateType:    "task",
+					AggregateID:      failedTask.ID,
+					AggregateVersion: failedTask.StatusVersion,
+					Type:             "run.event.task.failed",
+					Payload: map[string]any{
+						"task_id":          failedTask.ID.String(),
+						"previous_status":  taskRow.Status,
+						"new_status":       failedTask.Status,
+						"latest_result_id": row.ResultID.String(),
+						"failure_class":    "run_already_failed",
+						"terminal_reason":  failedTask.TerminalReason,
+						"failure_reason":   "run_already_failed",
+					},
+				}); err != nil {
+					_ = tx.Rollback(ctx)
+					return recovered, err
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return recovered, fmt.Errorf("commit failed-run claimed verification recovery tx: %w", err)
+				}
+				recovered++
+				continue
+			}
 			releasedRow, err := qtx.ReleaseOrchestrationTaskVerificationClaim(ctx, sqlc.ReleaseOrchestrationTaskVerificationClaimParams{
 				ID:         row.ID,
 				ClaimToken: row.ClaimToken,
@@ -747,6 +1049,41 @@ func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) 
 		if taskRow.SupersededByPlannerEpoch.Valid {
 			if err := tx.Commit(ctx); err != nil {
 				return recovered, fmt.Errorf("commit superseded verification recovery tx: %w", err)
+			}
+			recovered++
+			continue
+		}
+		if runRow.LifecycleStatus == LifecycleStatusCancelling {
+			cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+				ID:             taskRow.ID,
+				TerminalReason: "run cancelled",
+			})
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, fmt.Errorf("cancel task from lost verification during cancellation: %w", err)
+			}
+			if _, err := s.appendEvent(ctx, qtx, row.RunID, eventSpec{
+				TaskID:           cancelledTask.ID,
+				AggregateType:    "task",
+				AggregateID:      cancelledTask.ID,
+				AggregateVersion: cancelledTask.StatusVersion,
+				Type:             "run.event.task.cancelled",
+				Payload: map[string]any{
+					"task_id":         cancelledTask.ID.String(),
+					"previous_status": taskRow.Status,
+					"new_status":      cancelledTask.Status,
+					"terminal_reason": cancelledTask.TerminalReason,
+				},
+			}); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, cancelledTask.ID, pgtype.UUID{}); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return recovered, fmt.Errorf("commit running verification cancellation recovery tx: %w", err)
 			}
 			recovered++
 			continue
@@ -874,9 +1211,14 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime Verificatio
 		_, completeErr := runtime.CompleteVerification(completeCtx, completion)
 		cancelComplete()
 		if completeErr == nil {
-			cancelHeartbeat()
-			_, leaseLost := checkHeartbeat(true)
-			return leaseLost
+			if shouldReplayVerificationCompletionAckLoss() {
+				log.Warn("simulating lost verification completion ack after commit", slog.String("verification_id", verification.ID))
+				completeErr = errors.New("simulated verification completion ack loss after commit")
+			} else {
+				cancelHeartbeat()
+				_, leaseLost := checkHeartbeat(true)
+				return leaseLost
+			}
 		}
 
 		log.Error("complete verification failed", slog.String("verification_id", verification.ID), slog.Any("error", completeErr))
@@ -900,6 +1242,16 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime Verificatio
 		case <-time.After(verificationCompletionRetryInterval):
 		}
 	}
+}
+
+func shouldReplayVerificationCompletionAckLoss() bool {
+	if replayVerificationCompletionAckLossInjected.Load() {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("VERIFIER_REPLAY_COMPLETION_ONCE")) == "" {
+		return false
+	}
+	return replayVerificationCompletionAckLossInjected.CompareAndSwap(false, true)
 }
 
 func workerShutdownVerificationCompletion(verification TaskVerification) VerificationCompletion {
@@ -1023,14 +1375,14 @@ func toTaskVerification(row sqlc.OrchestrationTaskVerification) TaskVerification
 		Status:          row.Status,
 		ClaimEpoch:      claimEpoch,
 		ClaimToken:      row.ClaimToken,
-		LeaseExpiresAt:  db.TimeFromPg(row.LeaseExpiresAt),
-		LastHeartbeatAt: db.TimeFromPg(row.LastHeartbeatAt),
+		LeaseExpiresAt:  optionalTime(db.TimeFromPg(row.LeaseExpiresAt)),
+		LastHeartbeatAt: optionalTime(db.TimeFromPg(row.LastHeartbeatAt)),
 		Verdict:         row.Verdict,
 		Summary:         row.Summary,
 		FailureClass:    row.FailureClass,
 		TerminalReason:  row.TerminalReason,
-		StartedAt:       db.TimeFromPg(row.StartedAt),
-		FinishedAt:      db.TimeFromPg(row.FinishedAt),
+		StartedAt:       optionalTime(db.TimeFromPg(row.StartedAt)),
+		FinishedAt:      optionalTime(db.TimeFromPg(row.FinishedAt)),
 		CreatedAt:       db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:       db.TimeFromPg(row.UpdatedAt),
 	}
@@ -1047,6 +1399,9 @@ func requiresTaskVerification(policy map[string]any) bool {
 func verifierProfileForTaskPolicy(policy map[string]any) string {
 	if profile := strings.TrimSpace(stringValue(policy["verifier_profile"])); profile != "" {
 		return profile
+	}
+	if strings.TrimSpace(stringValue(policy["mode"])) == VerificationModeBuiltinBasic {
+		return BuiltinBasicVerifierProfile
 	}
 	return DefaultVerifierProfile
 }

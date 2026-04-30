@@ -41,6 +41,116 @@ func TestStartRunRequestHashTreatsNilMapsLikeEmptyMaps(t *testing.T) {
 	}
 }
 
+func TestStartRunRequestHashNormalizesTopLevelBotIDIntoSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	withTopLevelBotID, err := startRunRequestHash(StartRunRequest{
+		Goal:           "plan a release",
+		BotID:          "bot-1",
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(bot_id) error = %v", err)
+	}
+
+	withSourceMetadataBotID, err := startRunRequestHash(StartRunRequest{
+		Goal:           "plan a release",
+		IdempotencyKey: "idem-1",
+		SourceMetadata: map[string]any{"bot_id": "bot-1"},
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(source_metadata.bot_id) error = %v", err)
+	}
+
+	if withTopLevelBotID != withSourceMetadataBotID {
+		t.Fatalf("startRunRequestHash bot_id normalization mismatch: %q != %q", withTopLevelBotID, withSourceMetadataBotID)
+	}
+}
+
+func TestNormalizeStartRunSourceMetadataRejectsConflictingBotIDs(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeStartRunSourceMetadata(StartRunRequest{
+		BotID:          "bot-a",
+		SourceMetadata: map[string]any{"bot_id": "bot-b"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeStartRunSourceMetadata() error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestRootWorkerProfileUsesLLMForBotRunsAndBuiltinForMocks(t *testing.T) {
+	t.Parallel()
+
+	if got := rootWorkerProfile(nil, nil); got != BuiltinEchoWorkerProfile {
+		t.Fatalf("rootWorkerProfile(nil) = %q, want %q", got, BuiltinEchoWorkerProfile)
+	}
+	if got := rootWorkerProfile(nil, map[string]any{"bot_id": "bot-1"}); got != DefaultRootWorkerProfile {
+		t.Fatalf("rootWorkerProfile(bot) = %q, want %q", got, DefaultRootWorkerProfile)
+	}
+	if got := rootWorkerProfile(map[string]any{"builtin_workerd": map[string]any{"summary": "ok"}}, map[string]any{"bot_id": "bot-1"}); got != BuiltinEchoWorkerProfile {
+		t.Fatalf("rootWorkerProfile(builtin) = %q, want %q", got, BuiltinEchoWorkerProfile)
+	}
+}
+
+func TestNormalizeWorkerProfilesLetsDefaultWorkerClaimBuiltinEcho(t *testing.T) {
+	t.Parallel()
+
+	profiles := normalizeWorkerProfiles([]string{DefaultRootWorkerProfile})
+	if !containsStringForTest(profiles, DefaultRootWorkerProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, DefaultRootWorkerProfile)
+	}
+	if !containsStringForTest(profiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, BuiltinEchoWorkerProfile)
+	}
+}
+
+func TestNormalizeWorkerProfilesLetsDefaultVerifierClaimBuiltinBasic(t *testing.T) {
+	t.Parallel()
+
+	profiles := normalizeWorkerProfiles([]string{DefaultVerifierProfile})
+	if !containsStringForTest(profiles, DefaultVerifierProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, DefaultVerifierProfile)
+	}
+	if !containsStringForTest(profiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, BuiltinBasicVerifierProfile)
+	}
+}
+
+func TestVerifierProfileForTaskPolicyUsesLLMByDefaultAndBuiltinWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	if got := verifierProfileForTaskPolicy(map[string]any{"require_structured_output": true}); got != DefaultVerifierProfile {
+		t.Fatalf("verifierProfileForTaskPolicy(default) = %q, want %q", got, DefaultVerifierProfile)
+	}
+	if got := verifierProfileForTaskPolicy(map[string]any{"mode": VerificationModeBuiltinBasic}); got != BuiltinBasicVerifierProfile {
+		t.Fatalf("verifierProfileForTaskPolicy(builtin) = %q, want %q", got, BuiltinBasicVerifierProfile)
+	}
+	if got := verifierProfileForTaskPolicy(map[string]any{"mode": VerificationModeBuiltinBasic, "verifier_profile": "custom.verify"}); got != "custom.verify" {
+		t.Fatalf("verifierProfileForTaskPolicy(custom) = %q, want custom.verify", got)
+	}
+}
+
+func TestBuiltinVerifierProfilesKeepsServerVerifierOnBuiltinProfile(t *testing.T) {
+	t.Parallel()
+
+	if got := builtinVerifierProfiles([]string{DefaultVerifierProfile}); len(got) != 1 || got[0] != BuiltinBasicVerifierProfile {
+		t.Fatalf("builtinVerifierProfiles(default) = %#v, want [%q]", got, BuiltinBasicVerifierProfile)
+	}
+	if got := builtinVerifierProfiles([]string{"custom.llm"}); len(got) != 0 {
+		t.Fatalf("builtinVerifierProfiles(custom) = %#v, want empty", got)
+	}
+}
+
+func containsStringForTest(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestNormalizeCheckpointResolutionUsesDefaultAction(t *testing.T) {
 	t.Parallel()
 

@@ -58,6 +58,11 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 	if normalizedIdempotencyKey == "" {
 		return RunHandle{}, fmt.Errorf("%w: idempotency_key is required", ErrInvalidArgument)
 	}
+	sourceMetadata, err := normalizeStartRunSourceMetadata(req)
+	if err != nil {
+		return RunHandle{}, err
+	}
+	req.SourceMetadata = sourceMetadata
 
 	hash, err := startRunRequestHash(req)
 	if err != nil {
@@ -110,7 +115,7 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		OutputSchema:           marshalObject(req.OutputSchema),
 		RequestedControlPolicy: marshalObject(req.RequestedControlPolicy),
 		ControlPolicy:          marshalJSON(buildPhase1ControlPolicy(caller)),
-		SourceMetadata:         marshalObject(req.SourceMetadata),
+		SourceMetadata:         marshalObject(sourceMetadata),
 		Policies:               marshalObject(req.Policies),
 		CreatedBy:              caller.Subject,
 		TerminalReason:         "",
@@ -146,7 +151,7 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		Goal:                 normalizedGoal,
 		Inputs:               marshalObject(req.Input),
 		PlannerEpoch:         1,
-		WorkerProfile:        DefaultRootWorkerProfile,
+		WorkerProfile:        rootWorkerProfile(req.Input, sourceMetadata),
 		Priority:             0,
 		RetryPolicy:          marshalObject(nil),
 		VerificationPolicy:   marshalObject(nil),
@@ -253,6 +258,36 @@ func (s *Service) GetRunSnapshot(ctx context.Context, caller ControlIdentity, ru
 	return s.GetRunSnapshotAtSeq(ctx, caller, runID, 0)
 }
 
+func (s *Service) ListBotRuns(ctx context.Context, caller ControlIdentity, botID string, req ListBotRunsRequest) (*RunListPage, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	normalizedBotID, err := normalizeRequiredUUID(botID, "bot id")
+	if err != nil {
+		return nil, err
+	}
+	limitCount, err := int32FromInt(normalizedListLimit(req.Limit), "run list limit")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListOrchestrationRunsByBot(ctx, sqlc.ListOrchestrationRunsByBotParams{
+		TenantID:     caller.TenantID,
+		OwnerSubject: caller.Subject,
+		BotID:        []byte(normalizedBotID),
+		LimitCount:   limitCount,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration runs by bot: %w", err)
+	}
+	items := make([]RunListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toRunListItem(row))
+	}
+	return &RunListPage{Items: items}, nil
+}
+
 func (s *Service) GetRunSnapshotAtSeq(ctx context.Context, caller ControlIdentity, runID string, asOfSeq uint64) (*RunSnapshot, error) {
 	var err error
 	caller, err = normalizeControlIdentity(caller)
@@ -288,6 +323,222 @@ func (s *Service) GetRunSnapshotAtSeq(ctx context.Context, caller ControlIdentit
 	return &RunSnapshot{
 		Run:         runSnapshot,
 		SnapshotSeq: snapshotSeq,
+	}, nil
+}
+
+func (s *Service) GetRunInspector(ctx context.Context, caller ControlIdentity, runID string) (*RunInspector, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	pgRunID, err := db.ParseUUID(runID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid run id", ErrInvalidArgument)
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("begin run inspector tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	row, err := qtx.GetOrchestrationRunByID(ctx, pgRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("get orchestration run: %w", err)
+	}
+	if err := authorizeRun(caller, row); err != nil {
+		return nil, ErrRunNotFound
+	}
+	currentSeq, err := uint64FromInt64(row.LastEventSeq, "run last_event_seq")
+	if err != nil {
+		return nil, err
+	}
+	runSnapshot := toRun(row)
+
+	taskRows, err := qtx.ListCurrentOrchestrationTasksByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list current orchestration tasks: %w", err)
+	}
+	tasks := make([]Task, 0, len(taskRows))
+	for _, taskRow := range taskRows {
+		tasks = append(tasks, toTask(taskRow))
+	}
+
+	checkpointRows, err := qtx.ListCurrentOrchestrationCheckpointsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list current orchestration checkpoints: %w", err)
+	}
+	checkpoints := make([]HumanCheckpoint, 0, len(checkpointRows))
+	for _, checkpointRow := range checkpointRows {
+		checkpoints = append(checkpoints, toHumanCheckpoint(checkpointRow))
+	}
+
+	artifactRows, err := qtx.ListCurrentOrchestrationArtifactsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list current orchestration artifacts: %w", err)
+	}
+	artifacts := make([]Artifact, 0, len(artifactRows))
+	for _, artifactRow := range artifactRows {
+		artifacts = append(artifacts, toArtifact(artifactRow))
+	}
+
+	dependencyRows, err := qtx.ListCurrentOrchestrationTaskDependenciesByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration task dependencies: %w", err)
+	}
+	dependencies := make([]TaskDependency, 0, len(dependencyRows))
+	for _, dependencyRow := range dependencyRows {
+		dependencies = append(dependencies, toTaskDependency(dependencyRow))
+	}
+
+	resultRows, err := qtx.ListCurrentOrchestrationTaskResultsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration task results: %w", err)
+	}
+	results := make([]TaskResult, 0, len(resultRows))
+	for _, resultRow := range resultRows {
+		results = append(results, toTaskResult(resultRow))
+	}
+
+	attemptRows, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration task attempts: %w", err)
+	}
+	attempts := make([]InspectorAttempt, 0, len(attemptRows))
+	workerIDs := make(map[string]struct{})
+	for _, attemptRow := range attemptRows {
+		attempts = append(attempts, toInspectorAttempt(attemptRow))
+		if workerID := strings.TrimSpace(attemptRow.WorkerID); workerID != "" {
+			workerIDs[workerID] = struct{}{}
+		}
+	}
+
+	inputManifests := make([]InputManifest, 0)
+	if len(attemptRows) > 0 {
+		manifestIDs := make([]string, 0, len(attemptRows))
+		seenManifestIDs := make(map[string]struct{}, len(attemptRows))
+		for _, attemptRow := range attemptRows {
+			manifestID := attemptRow.InputManifestID.String()
+			if manifestID == "" {
+				continue
+			}
+			if _, seen := seenManifestIDs[manifestID]; seen {
+				continue
+			}
+			seenManifestIDs[manifestID] = struct{}{}
+			manifestIDs = append(manifestIDs, manifestID)
+		}
+		sort.Strings(manifestIDs)
+		inputManifests = make([]InputManifest, 0, len(manifestIDs))
+		for _, manifestID := range manifestIDs {
+			pgManifestID, parseErr := db.ParseUUID(manifestID)
+			if parseErr != nil {
+				return nil, fmt.Errorf("parse orchestration input manifest id: %w", parseErr)
+			}
+			manifestRow, loadErr := qtx.GetOrchestrationInputManifestByID(ctx, pgManifestID)
+			if loadErr != nil {
+				return nil, fmt.Errorf("get orchestration input manifest by id: %w", loadErr)
+			}
+			inputManifests = append(inputManifests, toInputManifest(manifestRow))
+		}
+	}
+
+	verificationRows, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration task verifications: %w", err)
+	}
+	verifications := make([]InspectorVerification, 0, len(verificationRows))
+	for _, verificationRow := range verificationRows {
+		verifications = append(verifications, toInspectorVerification(verificationRow))
+		if workerID := strings.TrimSpace(verificationRow.WorkerID); workerID != "" {
+			workerIDs[workerID] = struct{}{}
+		}
+	}
+
+	actionRecordRows, err := qtx.ListCurrentOrchestrationActionRecordsByRun(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration action records: %w", err)
+	}
+	actionRecords := make([]ActionRecord, 0, len(actionRecordRows))
+	for _, actionRecordRow := range actionRecordRows {
+		actionRecords = append(actionRecords, toActionRecord(actionRecordRow))
+	}
+
+	workers := make([]InspectorWorkerLease, 0, len(workerIDs))
+	if len(workerIDs) > 0 {
+		ids := make([]string, 0, len(workerIDs))
+		for workerID := range workerIDs {
+			ids = append(ids, workerID)
+		}
+		sort.Strings(ids)
+		workerRows, loadErr := qtx.ListOrchestrationWorkersByIDs(ctx, ids)
+		if loadErr != nil {
+			return nil, fmt.Errorf("list orchestration workers: %w", loadErr)
+		}
+		workers = make([]InspectorWorkerLease, 0, len(workerRows))
+		for _, workerRow := range workerRows {
+			workers = append(workers, toInspectorWorkerLease(workerRow))
+		}
+	}
+	observedAt, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	afterSeq := uint64(0)
+	if currentSeq > uint64(maxEventLimit) {
+		afterSeq = currentSeq - uint64(maxEventLimit)
+	}
+	timelineAfterSeq, err := int64FromUint64(afterSeq, "timeline after_seq")
+	if err != nil {
+		return nil, err
+	}
+	timelineUntilSeq, err := int64FromUint64(currentSeq, "timeline until_seq")
+	if err != nil {
+		return nil, err
+	}
+	eventRows, err := qtx.ListOrchestrationRunEvents(ctx, sqlc.ListOrchestrationRunEventsParams{
+		RunID:      row.ID,
+		AfterSeq:   timelineAfterSeq,
+		UntilSeq:   timelineUntilSeq,
+		LimitCount: int32(maxEventLimit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list orchestration timeline events: %w", err)
+	}
+	timeline := make([]RunTimelineEntry, 0, len(eventRows))
+	for _, eventRow := range eventRows {
+		timeline = append(timeline, toRunTimelineEntry(eventRow))
+	}
+
+	executionSpans := buildRunExecutionSpans(attemptRows, verificationRows, resultRows, eventRows)
+	stuckSignals := buildRunStuckSignals(tasks, attempts, verifications, workers, observedAt.UTC())
+	summary := summarizeRunInspector(tasks, checkpoints, attempts, verifications, workers, stuckSignals)
+
+	return &RunInspector{
+		Run:            runSnapshot,
+		Summary:        summary,
+		StuckSignals:   stuckSignals,
+		Tasks:          tasks,
+		Dependencies:   dependencies,
+		Results:        results,
+		Attempts:       attempts,
+		Verifications:  verifications,
+		InputManifests: inputManifests,
+		ExecutionSpans: executionSpans,
+		ActionRecords:  actionRecords,
+		Checkpoints:    checkpoints,
+		Artifacts:      artifacts,
+		Workers:        workers,
+		Timeline:       timeline,
 	}, nil
 }
 
@@ -448,6 +699,232 @@ func (s *Service) ListRunEvents(ctx context.Context, caller ControlIdentity, run
 		Items:    events,
 		UntilSeq: untilSeq,
 	}, nil
+}
+
+func (s *Service) CancelRun(ctx context.Context, caller ControlIdentity, runID string, req CancelRunRequest) (*CancelRunResult, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	normalizedIdempotencyKey := normalizeIdempotencyKey(req.IdempotencyKey)
+	if normalizedIdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrInvalidArgument)
+	}
+	pgRunID, err := db.ParseUUID(runID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid run id", ErrInvalidArgument)
+	}
+	normalizedRunID := pgRunID.String()
+	hash, err := cancelRunRequestHash(normalizedRunID, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin cancel run tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	existing, existingFound, err := getIdempotencyRecord(ctx, qtx, caller, methodCancelRun, normalizedRunID, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+
+	runRow, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, pgRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("lock run for cancel: %w", err)
+	}
+	if err := authorizeRun(caller, runRow); err != nil {
+		return nil, ErrRunNotFound
+	}
+	if existingFound {
+		if existing.RequestHash != hash {
+			return nil, ErrIdempotencyConflict
+		}
+		if existing.State != "completed" {
+			return nil, ErrIdempotencyIncomplete
+		}
+		result, err := decodeCancelRunResult(existing.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed cancel run tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	record, replay, err := ensureIdempotencyRecord(ctx, qtx, caller, methodCancelRun, normalizedRunID, normalizedIdempotencyKey, hash)
+	if err != nil {
+		return nil, err
+	}
+	if replay {
+		result, err := decodeCancelRunResult(record.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed cancel run tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	switch runRow.LifecycleStatus {
+	case LifecycleStatusCompleted, LifecycleStatusFailed, LifecycleStatusCancelled:
+		return nil, ErrRunImmutable
+	}
+
+	lastEvent := sqlc.OrchestrationEvent{}
+	if runRow.LifecycleStatus != LifecycleStatusCancelling {
+		cancellingRun, err := qtx.MarkOrchestrationRunCancelling(ctx, runRow.ID)
+		if err != nil {
+			return nil, fmt.Errorf("mark run cancelling: %w", err)
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+			AggregateType:    "run",
+			AggregateID:      cancellingRun.ID,
+			AggregateVersion: cancellingRun.StatusVersion,
+			Type:             "run.event.cancelling",
+			IdempotencyKey:   normalizedIdempotencyKey,
+			Payload: map[string]any{
+				"run_id":          cancellingRun.ID.String(),
+				"previous_status": runRow.LifecycleStatus,
+				"new_status":      cancellingRun.LifecycleStatus,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		runRow = cancellingRun
+	}
+
+	runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, runRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list run attempts for cancel: %w", err)
+	}
+	runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list run verifications for cancel: %w", err)
+	}
+	checkpoints, err := qtx.ListCurrentOrchestrationCheckpointsByRun(ctx, runRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoints for cancel: %w", err)
+	}
+	for _, checkpoint := range checkpoints {
+		if checkpoint.Status != CheckpointStatusOpen {
+			continue
+		}
+		cancelledCheckpoint, err := qtx.MarkOrchestrationHumanCheckpointCancelled(ctx, checkpoint.ID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel open checkpoint: %w", err)
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+			TaskID:           cancelledCheckpoint.TaskID,
+			CheckpointID:     cancelledCheckpoint.ID,
+			AggregateType:    "checkpoint",
+			AggregateID:      cancelledCheckpoint.ID,
+			AggregateVersion: cancelledCheckpoint.StatusVersion,
+			Type:             "run.event.hitl.cancelled",
+			IdempotencyKey:   normalizedIdempotencyKey,
+			Payload: map[string]any{
+				"checkpoint_id":   cancelledCheckpoint.ID.String(),
+				"task_id":         cancelledCheckpoint.TaskID.String(),
+				"previous_status": checkpoint.Status,
+				"new_status":      cancelledCheckpoint.Status,
+				"status":          cancelledCheckpoint.Status,
+				"blocks_run":      cancelledCheckpoint.BlocksRun,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	tasks, err := qtx.ListCurrentOrchestrationTasksByRun(ctx, runRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks for cancel: %w", err)
+	}
+	for _, task := range tasks {
+		if taskSuperseded(task) || !taskCancellableImmediately(task, runAttempts, runVerifications) {
+			continue
+		}
+		if err := s.cancelTaskVerificationsDuringRunCancellation(ctx, qtx, runRow.ID, task, runVerifications); err != nil {
+			return nil, err
+		}
+		cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+			ID:             task.ID,
+			TerminalReason: "run cancelled",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cancel task: %w", err)
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+			TaskID:           cancelledTask.ID,
+			AggregateType:    "task",
+			AggregateID:      cancelledTask.ID,
+			AggregateVersion: cancelledTask.StatusVersion,
+			Type:             "run.event.task.cancelled",
+			IdempotencyKey:   normalizedIdempotencyKey,
+			Payload: map[string]any{
+				"task_id":         cancelledTask.ID.String(),
+				"previous_status": task.Status,
+				"new_status":      cancelledTask.Status,
+				"terminal_reason": cancelledTask.TerminalReason,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	runRow, err = qtx.GetOrchestrationRunByIDForUpdate(ctx, runRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lock run after cancel mutations: %w", err)
+	}
+	if terminalEvent, terminal, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, pgtype.UUID{}, pgtype.UUID{}); err != nil {
+		return nil, err
+	} else if terminal {
+		lastEvent = terminalEvent
+		runRow, err = qtx.GetOrchestrationRunByIDForUpdate(ctx, runRow.ID)
+		if err != nil {
+			return nil, fmt.Errorf("lock run after cancel completion: %w", err)
+		}
+	}
+	snapshotSeq, err := uint64FromInt64(runRow.LastEventSeq, "cancel run event seq")
+	if err != nil {
+		return nil, err
+	}
+	if snapshotSeq == 0 && lastEvent.Seq > 0 {
+		snapshotSeq, err = uint64FromInt64(lastEvent.Seq, "cancel run last event seq")
+		if err != nil {
+			return nil, err
+		}
+	}
+	result := CancelRunResult{
+		RunID:           normalizedRunID,
+		LifecycleStatus: runRow.LifecycleStatus,
+		SnapshotSeq:     snapshotSeq,
+	}
+	if _, err := qtx.CompleteOrchestrationIdempotencyRecord(ctx, sqlc.CompleteOrchestrationIdempotencyRecordParams{
+		ResponsePayload: marshalJSON(result),
+		TenantID:        caller.TenantID,
+		CallerSubject:   caller.Subject,
+		Method:          methodCancelRun,
+		TargetID:        normalizedRunID,
+		IdempotencyKey:  normalizedIdempotencyKey,
+	}); err != nil {
+		return nil, fmt.Errorf("complete cancel run idempotency: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit cancel run tx: %w", err)
+	}
+	return &result, nil
 }
 
 func (s *Service) ResolveCheckpoint(ctx context.Context, caller ControlIdentity, checkpointID string, input CheckpointResolution) (*ResolveCheckpointResult, error) {
@@ -1472,6 +1949,17 @@ func runAcceptsExternalMutations(status string) bool {
 }
 
 func runAcceptsPlanningIntent(kind, status string, basePlannerEpoch, currentPlannerEpoch int64) bool {
+	if status == LifecycleStatusCancelling {
+		switch kind {
+		case PlanningIntentKindAttemptFinalize, PlanningIntentKindCheckpointResume:
+			return true
+		default:
+			return false
+		}
+	}
+	if status == LifecycleStatusFailed {
+		return kind == PlanningIntentKindAttemptFinalize
+	}
 	if !runAcceptsExternalMutations(status) {
 		return false
 	}
@@ -1485,6 +1973,18 @@ func normalizeOptionalUUID(raw string, field string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", nil
+	}
+	parsed, err := db.ParseUUID(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("%w: invalid %s", ErrInvalidArgument, field)
+	}
+	return parsed.String(), nil
+}
+
+func normalizeRequiredUUID(raw string, field string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("%w: %s is required", ErrInvalidArgument, field)
 	}
 	parsed, err := db.ParseUUID(trimmed)
 	if err != nil {
@@ -1541,6 +2041,214 @@ func taskBlocksRunBarrier(task sqlc.OrchestrationTask) bool {
 	default:
 		return true
 	}
+}
+
+func taskCancellableImmediately(task sqlc.OrchestrationTask, attempts []sqlc.OrchestrationTaskAttempt, verifications []sqlc.OrchestrationTaskVerification) bool {
+	switch task.Status {
+	case TaskStatusCreated, TaskStatusReady, TaskStatusBlocked, TaskStatusWaitingHuman:
+		return true
+	case TaskStatusDispatching:
+		return !hasLeasedAttemptForTask(task.ID, attempts)
+	case TaskStatusVerifying:
+		return !hasLeasedVerificationForTask(task.ID, verifications)
+	case TaskStatusRunning, TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
+		return false
+	default:
+		return false
+	}
+}
+
+func (s *Service) cancelTaskDuringRunCancellation(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, taskRow sqlc.OrchestrationTask, attemptID pgtype.UUID) error {
+	if taskRow.Status == TaskStatusCancelled {
+		_, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, taskRow.ID, attemptID)
+		return err
+	}
+	runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, runRow.ID)
+	if err != nil {
+		return fmt.Errorf("list task attempts during run cancellation: %w", err)
+	}
+	if err := s.cancelTaskAttemptsDuringRunCancellation(ctx, qtx, runRow.ID, taskRow, runAttempts); err != nil {
+		return err
+	}
+	runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runRow.ID)
+	if err != nil {
+		return fmt.Errorf("list task verifications during run cancellation: %w", err)
+	}
+	if err := s.cancelTaskVerificationsDuringRunCancellation(ctx, qtx, runRow.ID, taskRow, runVerifications); err != nil {
+		return err
+	}
+	cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
+		ID:             taskRow.ID,
+		TerminalReason: "run cancelled",
+	})
+	if err != nil {
+		return fmt.Errorf("cancel task during run cancellation: %w", err)
+	}
+	payload := map[string]any{
+		"task_id":         cancelledTask.ID.String(),
+		"previous_status": taskRow.Status,
+		"new_status":      cancelledTask.Status,
+		"terminal_reason": cancelledTask.TerminalReason,
+	}
+	if attemptID.Valid {
+		payload["attempt_id"] = attemptID.String()
+	}
+	if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+		TaskID:           cancelledTask.ID,
+		AttemptID:        attemptID,
+		AggregateType:    "task",
+		AggregateID:      cancelledTask.ID,
+		AggregateVersion: cancelledTask.StatusVersion,
+		Type:             "run.event.task.cancelled",
+		Payload:          payload,
+	}); err != nil {
+		return err
+	}
+	if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, cancelledTask.ID, attemptID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) cancelTaskAttemptsDuringRunCancellation(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runID pgtype.UUID,
+	taskRow sqlc.OrchestrationTask,
+	runAttempts []sqlc.OrchestrationTaskAttempt,
+) error {
+	for _, attempt := range runAttempts {
+		if attempt.TaskID != taskRow.ID || isTerminalAttemptStatus(attempt.Status) {
+			continue
+		}
+		lockedAttempt, err := qtx.GetOrchestrationTaskAttemptByIDForUpdate(ctx, attempt.ID)
+		if err != nil {
+			return fmt.Errorf("lock task attempt during run cancellation: %w", err)
+		}
+		if isTerminalAttemptStatus(lockedAttempt.Status) {
+			continue
+		}
+		switch lockedAttempt.Status {
+		case TaskAttemptStatusCreated:
+			finalAttempt, err := qtx.RetireCreatedOrchestrationTaskAttemptFailed(ctx, sqlc.RetireCreatedOrchestrationTaskAttemptFailedParams{
+				ID:             lockedAttempt.ID,
+				FailureClass:   "run_cancelled",
+				TerminalReason: "run cancelled",
+			})
+			if err != nil {
+				return fmt.Errorf("retire created attempt during run cancellation: %w", err)
+			}
+			if _, err := s.appendEvent(ctx, qtx, runID, eventSpec{
+				TaskID:           finalAttempt.TaskID,
+				AttemptID:        finalAttempt.ID,
+				AggregateType:    "attempt",
+				AggregateID:      finalAttempt.ID,
+				AggregateVersion: finalAttempt.ClaimEpoch,
+				Type:             "run.event.attempt.failed",
+				Payload: map[string]any{
+					"attempt_id":      finalAttempt.ID.String(),
+					"task_id":         finalAttempt.TaskID.String(),
+					"previous_status": lockedAttempt.Status,
+					"new_status":      finalAttempt.Status,
+					"failure_class":   finalAttempt.FailureClass,
+					"terminal_reason": finalAttempt.TerminalReason,
+				},
+			}); err != nil {
+				return err
+			}
+		case TaskAttemptStatusClaimed, TaskAttemptStatusBinding, TaskAttemptStatusRunning:
+			if _, err := s.retireAttempt(ctx, qtx, lockedAttempt, attemptRetirementSpec{
+				Status:         TaskAttemptStatusLost,
+				FailureClass:   "run_cancelled",
+				TerminalReason: "run cancelled",
+			}); err != nil {
+				return fmt.Errorf("retire leased attempt during run cancellation: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) retireVerificationDuringRunCancellation(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runRow sqlc.OrchestrationRun,
+	verificationRow sqlc.OrchestrationTaskVerification,
+) (sqlc.OrchestrationTaskVerification, error) {
+	if isTerminalVerificationStatus(verificationRow.Status) {
+		return verificationRow, nil
+	}
+	cancelledVerification, err := qtx.CancelOrchestrationTaskVerification(ctx, sqlc.CancelOrchestrationTaskVerificationParams{
+		ID:             verificationRow.ID,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "run cancelled",
+		FailureClass:   "run_cancelled",
+		TerminalReason: "run cancelled",
+	})
+	if err != nil {
+		return sqlc.OrchestrationTaskVerification{}, fmt.Errorf("cancel verification during run cancellation: %w", err)
+	}
+	if _, err := s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+		TaskID:           cancelledVerification.TaskID,
+		AggregateType:    "verification",
+		AggregateID:      cancelledVerification.ID,
+		AggregateVersion: cancelledVerification.ClaimEpoch,
+		Type:             "run.event.verification.lost",
+		Payload: map[string]any{
+			"verification_id": cancelledVerification.ID.String(),
+			"task_id":         cancelledVerification.TaskID.String(),
+			"previous_status": verificationRow.Status,
+			"new_status":      cancelledVerification.Status,
+			"terminal_reason": cancelledVerification.TerminalReason,
+		},
+	}); err != nil {
+		return sqlc.OrchestrationTaskVerification{}, err
+	}
+	return cancelledVerification, nil
+}
+
+func (s *Service) cancelTaskVerificationsDuringRunCancellation(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runID pgtype.UUID,
+	taskRow sqlc.OrchestrationTask,
+	runVerifications []sqlc.OrchestrationTaskVerification,
+) error {
+	for _, verification := range runVerifications {
+		if verification.TaskID != taskRow.ID || isTerminalVerificationStatus(verification.Status) {
+			continue
+		}
+		if _, err := s.retireVerificationDuringRunCancellation(ctx, qtx, sqlc.OrchestrationRun{ID: runID}, verification); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hasLeasedAttemptForTask(taskID pgtype.UUID, attempts []sqlc.OrchestrationTaskAttempt) bool {
+	for _, attempt := range attempts {
+		if attempt.TaskID != taskID {
+			continue
+		}
+		switch attempt.Status {
+		case TaskAttemptStatusClaimed, TaskAttemptStatusBinding, TaskAttemptStatusRunning:
+			return true
+		}
+	}
+	return false
+}
+
+func hasLeasedVerificationForTask(taskID pgtype.UUID, verifications []sqlc.OrchestrationTaskVerification) bool {
+	for _, verification := range verifications {
+		if verification.TaskID != taskID {
+			continue
+		}
+		switch verification.Status {
+		case TaskVerificationStatusClaimed, TaskVerificationStatusRunning:
+			return true
+		}
+	}
+	return false
 }
 
 func taskWaitingOnRunBarrier(task sqlc.OrchestrationTask, checkpointID pgtype.UUID) bool {
@@ -1804,7 +2512,21 @@ func commitArtifactRequestHash(req CommitArtifactRequest, idempotencyKey string)
 	return hashJSON(normalized)
 }
 
+func cancelRunRequestHash(runID, idempotencyKey string) (string, error) {
+	return hashJSON(struct {
+		RunID          string `json:"run_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		RunID:          runID,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
 func startRunRequestHash(req StartRunRequest) (string, error) {
+	sourceMetadata, err := normalizeStartRunSourceMetadata(req)
+	if err != nil {
+		return "", err
+	}
 	normalized := struct {
 		Goal                   string         `json:"goal"`
 		Input                  map[string]any `json:"input"`
@@ -1819,10 +2541,24 @@ func startRunRequestHash(req StartRunRequest) (string, error) {
 		OutputSchema:           normalizeObject(req.OutputSchema),
 		IdempotencyKey:         normalizeIdempotencyKey(req.IdempotencyKey),
 		RequestedControlPolicy: normalizeObject(req.RequestedControlPolicy),
-		SourceMetadata:         normalizeObject(req.SourceMetadata),
+		SourceMetadata:         sourceMetadata,
 		Policies:               normalizeObject(req.Policies),
 	}
 	return hashJSON(normalized)
+}
+
+func normalizeStartRunSourceMetadata(req StartRunRequest) (map[string]any, error) {
+	sourceMetadata := normalizeObject(req.SourceMetadata)
+	botID := strings.TrimSpace(req.BotID)
+	if botID == "" {
+		return sourceMetadata, nil
+	}
+	existingBotID := strings.TrimSpace(stringValue(sourceMetadata["bot_id"]))
+	if existingBotID != "" && existingBotID != botID {
+		return nil, fmt.Errorf("%w: bot_id does not match source_metadata.bot_id", ErrInvalidArgument)
+	}
+	sourceMetadata["bot_id"] = botID
+	return sourceMetadata, nil
 }
 
 func buildPhase1ControlPolicy(caller ControlIdentity) map[string]any {
@@ -1830,6 +2566,16 @@ func buildPhase1ControlPolicy(caller ControlIdentity) map[string]any {
 		"mode":          ControlPolicyModeOwnerOnly,
 		"owner_subject": caller.Subject,
 	}
+}
+
+func rootWorkerProfile(input, sourceMetadata map[string]any) string {
+	if _, ok := normalizeObject(input)["builtin_workerd"]; ok {
+		return BuiltinEchoWorkerProfile
+	}
+	if strings.TrimSpace(stringValue(normalizeObject(sourceMetadata)["bot_id"])) == "" {
+		return BuiltinEchoWorkerProfile
+	}
+	return DefaultRootWorkerProfile
 }
 
 func normalizeCheckpointResolution(checkpoint sqlc.OrchestrationHumanCheckpoint, input CheckpointResolution) (CheckpointResolution, string, error) {
@@ -2062,6 +2808,14 @@ func decodeResolveCheckpointResult(raw []byte) (ResolveCheckpointResult, error) 
 	var result ResolveCheckpointResult
 	if err := unmarshalJSON(raw, &result); err != nil {
 		return ResolveCheckpointResult{}, fmt.Errorf("decode idempotent resolve checkpoint result: %w", err)
+	}
+	return result, nil
+}
+
+func decodeCancelRunResult(raw []byte) (CancelRunResult, error) {
+	var result CancelRunResult
+	if err := unmarshalJSON(raw, &result); err != nil {
+		return CancelRunResult{}, fmt.Errorf("decode idempotent cancel run result: %w", err)
 	}
 	return result, nil
 }
@@ -2467,6 +3221,13 @@ func timeToPg(value time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: value.UTC(), Valid: true}
 }
 
+func uuidToString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String()
+}
+
 func timeForJSON(value time.Time) any {
 	if value.IsZero() {
 		return nil
@@ -2530,6 +3291,31 @@ func decodeJSONObject(raw []byte) map[string]any {
 	return normalizeObject(value)
 }
 
+func decodeJSONValue(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil
+	}
+	return value
+}
+
+func decodeJSONArrayObjects(raw []byte) []map[string]any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []map[string]any{}
+	}
+	var value []map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return []map[string]any{}
+	}
+	for i := range value {
+		value[i] = normalizeObject(value[i])
+	}
+	return value
+}
+
 func uint64FromInt64(value int64, field string) (uint64, error) {
 	parsed, err := strconv.ParseUint(strconv.FormatInt(value, 10), 10, 64)
 	if err != nil {
@@ -2583,7 +3369,7 @@ func toRun(row sqlc.OrchestrationRun) Run {
 		TerminalReason:         row.TerminalReason,
 		CreatedAt:              db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:              db.TimeFromPg(row.UpdatedAt),
-		FinishedAt:             db.TimeFromPg(row.FinishedAt),
+		FinishedAt:             optionalTime(db.TimeFromPg(row.FinishedAt)),
 	}
 }
 
@@ -2606,12 +3392,56 @@ func toTask(row sqlc.OrchestrationTask) Task {
 		WaitingCheckpointID:      row.WaitingCheckpointID.String(),
 		WaitingScope:             row.WaitingScope,
 		LatestResultID:           row.LatestResultID.String(),
-		ReadyAt:                  db.TimeFromPg(row.ReadyAt),
+		ReadyAt:                  optionalTime(db.TimeFromPg(row.ReadyAt)),
 		BlockedReason:            row.BlockedReason,
 		TerminalReason:           row.TerminalReason,
 		BlackboardScope:          row.BlackboardScope,
 		CreatedAt:                db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:                db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func toRunListItem(row sqlc.OrchestrationRun) RunListItem {
+	return RunListItem{
+		ID:              row.ID.String(),
+		Goal:            row.Goal,
+		LifecycleStatus: row.LifecycleStatus,
+		PlanningStatus:  row.PlanningStatus,
+		RootTaskID:      row.RootTaskID.String(),
+		TerminalReason:  row.TerminalReason,
+		CreatedAt:       db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:       db.TimeFromPg(row.UpdatedAt),
+		FinishedAt:      optionalTime(db.TimeFromPg(row.FinishedAt)),
+	}
+}
+
+func toTaskDependency(row sqlc.OrchestrationTaskDependency) TaskDependency {
+	return TaskDependency{
+		ID:                       row.ID.String(),
+		RunID:                    row.RunID.String(),
+		PredecessorTaskID:        row.PredecessorTaskID.String(),
+		SuccessorTaskID:          row.SuccessorTaskID.String(),
+		PlannerEpoch:             mustUint64FromInt64(row.PlannerEpoch, "task_dependency.planner_epoch"),
+		SupersededByPlannerEpoch: mustUint64FromInt64(row.SupersededByPlannerEpoch.Int64, "task_dependency.superseded_by_planner_epoch"),
+		CreatedAt:                db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:                db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func toTaskResult(row sqlc.OrchestrationTaskResult) TaskResult {
+	return TaskResult{
+		ID:               row.ID.String(),
+		RunID:            row.RunID.String(),
+		TaskID:           row.TaskID.String(),
+		AttemptID:        row.AttemptID.String(),
+		Status:           row.Status,
+		Summary:          row.Summary,
+		FailureClass:     row.FailureClass,
+		RequestReplan:    row.RequestReplan,
+		ArtifactIntents:  decodeJSONArrayObjects(row.ArtifactIntents),
+		StructuredOutput: decodeJSONObject(row.StructuredOutput),
+		CreatedAt:        db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:        db.TimeFromPg(row.UpdatedAt),
 	}
 }
 
@@ -2632,12 +3462,12 @@ func toHumanCheckpoint(row sqlc.OrchestrationHumanCheckpoint) HumanCheckpoint {
 		Options:                  options,
 		DefaultAction:            defaultAction,
 		ResumePolicy:             resumePolicy,
-		TimeoutAt:                db.TimeFromPg(row.TimeoutAt),
+		TimeoutAt:                optionalTime(db.TimeFromPg(row.TimeoutAt)),
 		ResolvedBy:               row.ResolvedBy,
 		ResolvedMode:             row.ResolvedMode,
 		ResolvedOptionID:         row.ResolvedOptionID,
 		ResolvedFreeformInput:    row.ResolvedFreeformInput,
-		ResolvedAt:               db.TimeFromPg(row.ResolvedAt),
+		ResolvedAt:               optionalTime(db.TimeFromPg(row.ResolvedAt)),
 		Metadata:                 decodeJSONObject(row.Metadata),
 		CreatedAt:                db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:                db.TimeFromPg(row.UpdatedAt),
@@ -2676,8 +3506,511 @@ func toRunEvent(row sqlc.OrchestrationEvent) RunEvent {
 		CausationEventID: row.CausationEventID.String(),
 		CorrelationID:    row.CorrelationID,
 		IdempotencyKey:   row.IdempotencyKey,
-		Payload:          decodeJSONObject(row.Payload),
+		Payload:          sanitizeEventPayload(decodeJSONObject(row.Payload)),
 		CreatedAt:        db.TimeFromPg(row.CreatedAt),
-		PublishedAt:      db.TimeFromPg(row.PublishedAt),
+		PublishedAt:      optionalTime(db.TimeFromPg(row.PublishedAt)),
 	}
+}
+
+func toRunTimelineEntry(row sqlc.OrchestrationEvent) RunTimelineEntry {
+	return RunTimelineEntry{
+		Seq:           mustUint64FromInt64(row.Seq, "timeline.seq"),
+		Type:          row.Type,
+		AggregateType: row.AggregateType,
+		AggregateID:   row.AggregateID.String(),
+		TaskID:        row.TaskID.String(),
+		AttemptID:     row.AttemptID.String(),
+		CheckpointID:  row.CheckpointID.String(),
+		CreatedAt:     db.TimeFromPg(row.CreatedAt),
+		Payload:       sanitizeEventPayload(decodeJSONObject(row.Payload)),
+	}
+}
+
+func toInspectorAttempt(row sqlc.OrchestrationTaskAttempt) InspectorAttempt {
+	return InspectorAttempt{
+		ID:               row.ID.String(),
+		RunID:            row.RunID.String(),
+		TaskID:           row.TaskID.String(),
+		AttemptNo:        int(row.AttemptNo),
+		WorkerID:         row.WorkerID,
+		ExecutorID:       row.ExecutorID,
+		Status:           row.Status,
+		ClaimEpoch:       mustUint64FromInt64(row.ClaimEpoch, "attempt.claim_epoch"),
+		LeaseExpiresAt:   optionalTime(db.TimeFromPg(row.LeaseExpiresAt)),
+		LastHeartbeatAt:  optionalTime(db.TimeFromPg(row.LastHeartbeatAt)),
+		InputManifestID:  row.InputManifestID.String(),
+		ParkCheckpointID: row.ParkCheckpointID.String(),
+		FailureClass:     row.FailureClass,
+		TerminalReason:   row.TerminalReason,
+		StartedAt:        optionalTime(db.TimeFromPg(row.StartedAt)),
+		FinishedAt:       optionalTime(db.TimeFromPg(row.FinishedAt)),
+		CreatedAt:        db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:        db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func toInspectorVerification(row sqlc.OrchestrationTaskVerification) InspectorVerification {
+	return InspectorVerification{
+		ID:              row.ID.String(),
+		RunID:           row.RunID.String(),
+		TaskID:          row.TaskID.String(),
+		ResultID:        row.ResultID.String(),
+		AttemptNo:       int(row.AttemptNo),
+		WorkerID:        row.WorkerID,
+		ExecutorID:      row.ExecutorID,
+		VerifierProfile: row.VerifierProfile,
+		Status:          row.Status,
+		ClaimEpoch:      mustUint64FromInt64(row.ClaimEpoch, "verification.claim_epoch"),
+		LeaseExpiresAt:  optionalTime(db.TimeFromPg(row.LeaseExpiresAt)),
+		LastHeartbeatAt: optionalTime(db.TimeFromPg(row.LastHeartbeatAt)),
+		Verdict:         row.Verdict,
+		Summary:         row.Summary,
+		FailureClass:    row.FailureClass,
+		TerminalReason:  row.TerminalReason,
+		StartedAt:       optionalTime(db.TimeFromPg(row.StartedAt)),
+		FinishedAt:      optionalTime(db.TimeFromPg(row.FinishedAt)),
+		CreatedAt:       db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:       db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func toInspectorWorkerLease(row sqlc.OrchestrationWorker) InspectorWorkerLease {
+	return InspectorWorkerLease{
+		ID:              row.ID,
+		ExecutorID:      row.ExecutorID,
+		DisplayName:     row.DisplayName,
+		Capabilities:    decodeJSONObject(row.Capabilities),
+		Status:          row.Status,
+		LastHeartbeatAt: db.TimeFromPg(row.LastHeartbeatAt),
+		LeaseExpiresAt:  db.TimeFromPg(row.LeaseExpiresAt),
+		CreatedAt:       db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:       db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func sanitizeEventPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return payload
+	}
+	delete(payload, "claim_token")
+	delete(payload, "lease_token")
+	return payload
+}
+
+func toInputManifest(row sqlc.OrchestrationInputManifest) InputManifest {
+	return InputManifest{
+		ID:                          row.ID.String(),
+		RunID:                       row.RunID.String(),
+		TaskID:                      row.TaskID.String(),
+		CapturedTaskInputs:          decodeJSONObject(row.CapturedTaskInputs),
+		CapturedArtifactVersions:    decodeJSONArrayObjects(row.CapturedArtifactVersions),
+		CapturedBlackboardRevisions: decodeJSONArrayObjects(row.CapturedBlackboardRevisions),
+		ProjectionHash:              row.ProjectionHash,
+		CreatedAt:                   db.TimeFromPg(row.CreatedAt),
+	}
+}
+
+func toActionRecord(row sqlc.OrchestrationActionLedger) ActionRecord {
+	return ActionRecord{
+		ID:             row.ID.String(),
+		RunID:          row.RunID.String(),
+		TaskID:         row.TaskID.String(),
+		AttemptID:      uuidToString(row.AttemptID),
+		VerificationID: uuidToString(row.VerificationID),
+		ActionKind:     strings.TrimSpace(row.ActionKind),
+		Status:         strings.TrimSpace(row.Status),
+		ToolName:       strings.TrimSpace(row.ToolName),
+		ToolCallID:     strings.TrimSpace(row.ToolCallID),
+		InputPayload:   decodeJSONValue(row.InputPayload),
+		OutputPayload:  decodeJSONValue(row.OutputPayload),
+		ErrorPayload:   decodeJSONValue(row.ErrorPayload),
+		Summary:        strings.TrimSpace(row.Summary),
+		StartedAt:      optionalTime(db.TimeFromPg(row.StartedAt)),
+		FinishedAt:     optionalTime(db.TimeFromPg(row.FinishedAt)),
+		CreatedAt:      db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:      db.TimeFromPg(row.UpdatedAt),
+	}
+}
+
+func buildRunExecutionSpans(
+	attemptRows []sqlc.OrchestrationTaskAttempt,
+	verificationRows []sqlc.OrchestrationTaskVerification,
+	resultRows []sqlc.OrchestrationTaskResult,
+	eventRows []sqlc.OrchestrationEvent,
+) []RunExecutionSpan {
+	resultByAttemptID := make(map[string]sqlc.OrchestrationTaskResult, len(resultRows))
+	resultByID := make(map[string]sqlc.OrchestrationTaskResult, len(resultRows))
+	for _, resultRow := range resultRows {
+		resultByID[resultRow.ID.String()] = resultRow
+		if resultRow.AttemptID.Valid {
+			resultByAttemptID[resultRow.AttemptID.String()] = resultRow
+		}
+	}
+
+	spans := make([]RunExecutionSpan, 0, len(attemptRows)+len(verificationRows))
+	attemptSpanByID := make(map[string]*RunExecutionSpan, len(attemptRows))
+	for _, attemptRow := range attemptRows {
+		span := RunExecutionSpan{
+			Kind:               "attempt",
+			ID:                 attemptRow.ID.String(),
+			RunID:              attemptRow.RunID.String(),
+			TaskID:             attemptRow.TaskID.String(),
+			AttemptNo:          int(attemptRow.AttemptNo),
+			Status:             attemptRow.Status,
+			WorkerID:           strings.TrimSpace(attemptRow.WorkerID),
+			ExecutorID:         strings.TrimSpace(attemptRow.ExecutorID),
+			StartedAt:          optionalTime(db.TimeFromPg(attemptRow.StartedAt)),
+			FinishedAt:         optionalTime(db.TimeFromPg(attemptRow.FinishedAt)),
+			LastHeartbeatAt:    optionalTime(db.TimeFromPg(attemptRow.LastHeartbeatAt)),
+			LeaseExpiresAt:     optionalTime(db.TimeFromPg(attemptRow.LeaseExpiresAt)),
+			InputManifestID:    attemptRow.InputManifestID.String(),
+			CheckpointID:       attemptRow.ParkCheckpointID.String(),
+			FailureClass:       strings.TrimSpace(attemptRow.FailureClass),
+			TerminalReason:     strings.TrimSpace(attemptRow.TerminalReason),
+			CompletionMetadata: map[string]any{},
+			RelatedEventTypes:  make([]string, 0, 6),
+		}
+		if resultRow, ok := resultByAttemptID[span.ID]; ok {
+			span.ResultID = resultRow.ID.String()
+			span.Summary = strings.TrimSpace(resultRow.Summary)
+			if span.FailureClass == "" {
+				span.FailureClass = strings.TrimSpace(resultRow.FailureClass)
+			}
+		}
+		spans = append(spans, span)
+		attemptSpanByID[span.ID] = &spans[len(spans)-1]
+	}
+
+	verificationSpanByID := make(map[string]*RunExecutionSpan, len(verificationRows))
+	for _, verificationRow := range verificationRows {
+		span := RunExecutionSpan{
+			Kind:               "verification",
+			ID:                 verificationRow.ID.String(),
+			RunID:              verificationRow.RunID.String(),
+			TaskID:             verificationRow.TaskID.String(),
+			AttemptNo:          int(verificationRow.AttemptNo),
+			Status:             verificationRow.Status,
+			WorkerID:           strings.TrimSpace(verificationRow.WorkerID),
+			ExecutorID:         strings.TrimSpace(verificationRow.ExecutorID),
+			VerifierProfile:    strings.TrimSpace(verificationRow.VerifierProfile),
+			StartedAt:          optionalTime(db.TimeFromPg(verificationRow.StartedAt)),
+			FinishedAt:         optionalTime(db.TimeFromPg(verificationRow.FinishedAt)),
+			LastHeartbeatAt:    optionalTime(db.TimeFromPg(verificationRow.LastHeartbeatAt)),
+			LeaseExpiresAt:     optionalTime(db.TimeFromPg(verificationRow.LeaseExpiresAt)),
+			ResultID:           verificationRow.ResultID.String(),
+			FailureClass:       strings.TrimSpace(verificationRow.FailureClass),
+			TerminalReason:     strings.TrimSpace(verificationRow.TerminalReason),
+			Summary:            strings.TrimSpace(verificationRow.Summary),
+			Verdict:            strings.TrimSpace(verificationRow.Verdict),
+			CompletionMetadata: map[string]any{},
+			RelatedEventTypes:  make([]string, 0, 6),
+		}
+		if resultRow, ok := resultByID[span.ResultID]; ok && span.Summary == "" {
+			span.Summary = strings.TrimSpace(resultRow.Summary)
+		}
+		spans = append(spans, span)
+		verificationSpanByID[span.ID] = &spans[len(spans)-1]
+	}
+
+	for _, eventRow := range eventRows {
+		eventType := strings.TrimSpace(eventRow.Type)
+		if eventType == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(eventType, "run.event.attempt."):
+			span := attemptSpanByID[eventRow.AttemptID.String()]
+			if span == nil {
+				continue
+			}
+			span.RelatedEventTypes = appendUniqueString(span.RelatedEventTypes, eventType)
+			switch eventType {
+			case "run.event.attempt.created":
+				span.CreatedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.attempt.created_seq")
+			case "run.event.attempt.claimed":
+				span.ClaimedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.attempt.claimed_seq")
+			case "run.event.attempt.running":
+				span.StartedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.attempt.started_seq")
+			case "run.event.attempt.completed", "run.event.attempt.failed", "run.event.attempt.lost":
+				span.TerminalSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.attempt.terminal_seq")
+			case "run.event.attempt.requeued":
+				span.RequeueSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.attempt.requeue_seq")
+			}
+		case strings.HasPrefix(eventType, "run.event.verification."):
+			payload := decodeJSONObject(eventRow.Payload)
+			verificationID := strings.TrimSpace(stringValue(payload["verification_id"]))
+			if verificationID == "" {
+				verificationID = eventRow.AggregateID.String()
+			}
+			span := verificationSpanByID[verificationID]
+			if span == nil {
+				continue
+			}
+			span.RelatedEventTypes = appendUniqueString(span.RelatedEventTypes, eventType)
+			switch eventType {
+			case "run.event.verification.created":
+				span.CreatedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.verification.created_seq")
+			case "run.event.verification.claimed":
+				span.ClaimedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.verification.claimed_seq")
+			case "run.event.verification.running":
+				span.StartedSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.verification.started_seq")
+			case "run.event.verification.passed", "run.event.verification.rejected", "run.event.verification.lost":
+				span.TerminalSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.verification.terminal_seq")
+			case "run.event.verification.requeued":
+				span.RequeueSeq = mustUint64FromInt64(eventRow.Seq, "execution_span.verification.requeue_seq")
+			}
+		}
+	}
+
+	sort.SliceStable(spans, func(i, j int) bool {
+		leftSeq := executionSpanSortSeq(spans[i])
+		rightSeq := executionSpanSortSeq(spans[j])
+		if leftSeq != rightSeq {
+			return leftSeq < rightSeq
+		}
+		if spans[i].TaskID != spans[j].TaskID {
+			return spans[i].TaskID < spans[j].TaskID
+		}
+		if spans[i].Kind != spans[j].Kind {
+			return spans[i].Kind < spans[j].Kind
+		}
+		return spans[i].ID < spans[j].ID
+	})
+
+	return spans
+}
+
+func executionSpanSortSeq(span RunExecutionSpan) uint64 {
+	if span.CreatedSeq != 0 {
+		return span.CreatedSeq
+	}
+	if span.ClaimedSeq != 0 {
+		return span.ClaimedSeq
+	}
+	if span.StartedSeq != 0 {
+		return span.StartedSeq
+	}
+	if span.TerminalSeq != 0 {
+		return span.TerminalSeq
+	}
+	if span.RequeueSeq != 0 {
+		return span.RequeueSeq
+	}
+	return 0
+}
+
+func appendUniqueString(items []string, value string) []string {
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
+func summarizeRunInspector(tasks []Task, checkpoints []HumanCheckpoint, attempts []InspectorAttempt, verifications []InspectorVerification, workers []InspectorWorkerLease, stuckSignals []RunStuckSignal) RunInspectorSummary {
+	summary := RunInspectorSummary{}
+	for _, checkpoint := range checkpoints {
+		if checkpoint.Status == CheckpointStatusOpen {
+			summary.OpenCheckpointCount++
+		}
+	}
+	for _, task := range tasks {
+		switch task.Status {
+		case TaskStatusReady:
+			summary.ReadyTaskCount++
+		case TaskStatusDispatching:
+			summary.DispatchingTaskCount++
+		case TaskStatusRunning:
+			summary.RunningTaskCount++
+		case TaskStatusVerifying:
+			summary.VerifyingTaskCount++
+		case TaskStatusWaitingHuman:
+			summary.WaitingHumanTaskCount++
+		case TaskStatusCompleted:
+			summary.CompletedTaskCount++
+		case TaskStatusBlocked:
+			summary.BlockedTaskCount++
+		case TaskStatusFailed:
+			summary.FailedTaskCount++
+		case TaskStatusCancelled:
+			summary.CancelledTaskCount++
+		}
+	}
+	for _, attempt := range attempts {
+		switch attempt.Status {
+		case TaskAttemptStatusCreated, TaskAttemptStatusClaimed, TaskAttemptStatusBinding, TaskAttemptStatusRunning:
+			summary.ActiveAttemptCount++
+		}
+	}
+	for _, verification := range verifications {
+		switch verification.Status {
+		case TaskVerificationStatusCreated, TaskVerificationStatusClaimed, TaskVerificationStatusRunning:
+			summary.ActiveVerificationCount++
+		}
+	}
+	for _, worker := range workers {
+		if worker.Status == WorkerStatusActive {
+			summary.ActiveWorkerCount++
+		}
+	}
+	summary.StuckSignalCount = len(stuckSignals)
+	for _, signal := range stuckSignals {
+		if signal.Severity == "critical" {
+			summary.CriticalSignalCount++
+		}
+	}
+	return summary
+}
+
+func buildRunStuckSignals(tasks []Task, attempts []InspectorAttempt, verifications []InspectorVerification, workers []InspectorWorkerLease, observedAt time.Time) []RunStuckSignal {
+	activeAttemptsByTask := make(map[string][]InspectorAttempt)
+	activeVerificationsByTask := make(map[string][]InspectorVerification)
+	activeWorkByWorker := make(map[string]struct{})
+	signals := make([]RunStuckSignal, 0)
+
+	for _, attempt := range attempts {
+		if !isActiveAttemptStatus(attempt.Status) {
+			continue
+		}
+		activeAttemptsByTask[attempt.TaskID] = append(activeAttemptsByTask[attempt.TaskID], attempt)
+		if workerID := strings.TrimSpace(attempt.WorkerID); workerID != "" {
+			activeWorkByWorker[workerID] = struct{}{}
+		}
+		if inspectorLeaseExpired(attempt.LeaseExpiresAt, observedAt) {
+			signals = append(signals, RunStuckSignal{
+				Code:            "attempt_lease_expired",
+				Severity:        "critical",
+				Message:         "active attempt lease expired before recovery completed",
+				TaskID:          attempt.TaskID,
+				AttemptID:       attempt.ID,
+				WorkerID:        attempt.WorkerID,
+				Status:          attempt.Status,
+				LastHeartbeatAt: attempt.LastHeartbeatAt,
+				LeaseExpiresAt:  attempt.LeaseExpiresAt,
+				ObservedAt:      observedAt,
+			})
+		}
+	}
+	for _, verification := range verifications {
+		if !isActiveVerificationStatus(verification.Status) {
+			continue
+		}
+		activeVerificationsByTask[verification.TaskID] = append(activeVerificationsByTask[verification.TaskID], verification)
+		if workerID := strings.TrimSpace(verification.WorkerID); workerID != "" {
+			activeWorkByWorker[workerID] = struct{}{}
+		}
+		if inspectorLeaseExpired(verification.LeaseExpiresAt, observedAt) {
+			signals = append(signals, RunStuckSignal{
+				Code:            "verification_lease_expired",
+				Severity:        "critical",
+				Message:         "active verification lease expired before recovery completed",
+				TaskID:          verification.TaskID,
+				VerificationID:  verification.ID,
+				WorkerID:        verification.WorkerID,
+				Status:          verification.Status,
+				LastHeartbeatAt: verification.LastHeartbeatAt,
+				LeaseExpiresAt:  verification.LeaseExpiresAt,
+				ObservedAt:      observedAt,
+			})
+		}
+	}
+	for _, task := range tasks {
+		switch task.Status {
+		case TaskStatusDispatching, TaskStatusRunning:
+			if len(activeAttemptsByTask[task.ID]) == 0 {
+				signals = append(signals, RunStuckSignal{
+					Code:       "task_missing_active_attempt",
+					Severity:   "critical",
+					Message:    "task is active but has no active attempt",
+					TaskID:     task.ID,
+					Status:     task.Status,
+					ObservedAt: observedAt,
+				})
+			}
+		case TaskStatusVerifying:
+			if len(activeVerificationsByTask[task.ID]) == 0 {
+				signals = append(signals, RunStuckSignal{
+					Code:       "task_missing_active_verification",
+					Severity:   "critical",
+					Message:    "task is verifying but has no active verification",
+					TaskID:     task.ID,
+					Status:     task.Status,
+					ObservedAt: observedAt,
+				})
+			}
+		}
+	}
+	for _, worker := range workers {
+		if worker.Status != WorkerStatusActive {
+			continue
+		}
+		if _, ok := activeWorkByWorker[worker.ID]; !ok {
+			continue
+		}
+		if !inspectorLeaseExpired(optionalTime(worker.LeaseExpiresAt), observedAt) {
+			continue
+		}
+		signals = append(signals, RunStuckSignal{
+			Code:            "worker_lease_expired",
+			Severity:        "critical",
+			Message:         "worker lease expired while run still references it as active",
+			WorkerID:        worker.ID,
+			Status:          worker.Status,
+			LastHeartbeatAt: optionalTime(worker.LastHeartbeatAt),
+			LeaseExpiresAt:  optionalTime(worker.LeaseExpiresAt),
+			ObservedAt:      observedAt,
+		})
+	}
+
+	sort.Slice(signals, func(i, j int) bool {
+		if signals[i].Severity != signals[j].Severity {
+			return signals[i].Severity < signals[j].Severity
+		}
+		if signals[i].Code != signals[j].Code {
+			return signals[i].Code < signals[j].Code
+		}
+		if signals[i].TaskID != signals[j].TaskID {
+			return signals[i].TaskID < signals[j].TaskID
+		}
+		if signals[i].AttemptID != signals[j].AttemptID {
+			return signals[i].AttemptID < signals[j].AttemptID
+		}
+		if signals[i].VerificationID != signals[j].VerificationID {
+			return signals[i].VerificationID < signals[j].VerificationID
+		}
+		return signals[i].WorkerID < signals[j].WorkerID
+	})
+
+	return signals
+}
+
+func isActiveAttemptStatus(status string) bool {
+	switch status {
+	case TaskAttemptStatusCreated, TaskAttemptStatusClaimed, TaskAttemptStatusBinding, TaskAttemptStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func isActiveVerificationStatus(status string) bool {
+	switch status {
+	case TaskVerificationStatusCreated, TaskVerificationStatusClaimed, TaskVerificationStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func inspectorLeaseExpired(leaseExpiresAt *time.Time, observedAt time.Time) bool {
+	return leaseExpiresAt != nil && !leaseExpiresAt.After(observedAt)
+}
+
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	cloned := value
+	return &cloned
 }

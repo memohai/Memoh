@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,12 +14,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
+	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/config"
+	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/logger"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/orchestration"
+	"github.com/memohai/memoh/internal/orchestrationexec"
+	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type verificationRuntime interface {
@@ -57,6 +67,13 @@ func run() error {
 
 	queries := dbsqlc.New(pool)
 	svc := orchestration.NewService(log, pool, queries)
+	llmRuntime, cleanupLLMRuntime, err := buildLLMRuntime(ctx, log, cfg, pool, queries)
+	if err != nil {
+		log.Warn("llm runtime unavailable, verifier will use builtin fallback", slog.Any("error", err))
+	}
+	if cleanupLLMRuntime != nil {
+		defer cleanupLLMRuntime()
+	}
 
 	workerID := strings.TrimSpace(os.Getenv("VERIFIER_ID"))
 	if workerID == "" {
@@ -66,7 +83,7 @@ func run() error {
 	if executorID == "" {
 		executorID = orchestration.DefaultVerifierExecutorID
 	}
-	verifierProfiles := envCSV("VERIFIER_PROFILES", []string{orchestration.DefaultVerifierProfile})
+	verifierProfiles := expandDefaultVerifierProfiles(envCSV("VERIFIER_PROFILES", []string{orchestration.DefaultVerifierProfile}))
 	leaseTTLSeconds := envInt("VERIFIER_LEASE_TTL_SECONDS", 30)
 	pollInterval := time.Duration(envInt("VERIFIER_POLL_INTERVAL_MS", 500)) * time.Millisecond
 
@@ -133,7 +150,7 @@ func run() error {
 		}
 
 		leaseLost := runVerification(ctx, svc, log, *runningVerification, leaseTTLSeconds, verifierProfiles, func(execCtx context.Context, verification orchestration.TaskVerification, profiles []string) orchestration.VerificationCompletion {
-			return executeVerification(execCtx, queries, verification, profiles)
+			return executeVerification(execCtx, queries, llmRuntime, verification, profiles)
 		})
 		if leaseLost {
 			log.Warn("dropping stale verification completion after lease loss", slog.String("verification_id", runningVerification.ID))
@@ -185,11 +202,65 @@ func runWorkerHeartbeatLoop(ctx context.Context, svc *orchestration.Service, log
 	}
 }
 
-func executeVerification(ctx context.Context, queries *dbsqlc.Queries, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
+func executeVerification(ctx context.Context, queries *dbsqlc.Queries, llmRuntime *orchestrationexec.Runtime, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
 	if err := sleepWithContext(ctx, time.Duration(envInt("VERIFIER_EXECUTION_DELAY_MS", 0))*time.Millisecond); err != nil {
 		return workerShutdownVerificationCompletion(verification)
 	}
-	return orchestration.ExecuteBuiltinVerification(ctx, queries, verification)
+
+	if strings.TrimSpace(verification.VerifierProfile) == orchestration.BuiltinBasicVerifierProfile {
+		return orchestration.ExecuteBuiltinVerification(ctx, queries, verification)
+	}
+
+	runID, err := db.ParseUUID(verification.RunID)
+	if err != nil {
+		return llmVerificationUnavailable(verification, "invalid_run_id", err.Error())
+	}
+	runRow, err := queries.GetOrchestrationRunByID(ctx, runID)
+	if err != nil {
+		return llmVerificationUnavailable(verification, "run_lookup_failed", err.Error())
+	}
+	sourceMetadata := decodeObject(runRow.SourceMetadata)
+	botID := strings.TrimSpace(stringValue(sourceMetadata["bot_id"]))
+	if llmRuntime != nil && botID != "" {
+		return llmRuntime.ExecuteVerification(ctx, verification)
+	}
+	if botID == "" {
+		return llmVerificationUnavailable(verification, "llm_runtime_unavailable", "llm verifier profile requires run source_metadata.bot_id")
+	}
+	return llmVerificationUnavailable(verification, "llm_runtime_unavailable", "llm runtime is not configured")
+}
+
+func llmVerificationUnavailable(verification orchestration.TaskVerification, failureClass, reason string) orchestration.VerificationCompletion {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "llm verification runtime is not available"
+	}
+	return orchestration.VerificationCompletion{
+		VerificationID: verification.ID,
+		ClaimToken:     verification.ClaimToken,
+		Status:         orchestration.TaskVerificationStatusFailed,
+		Verdict:        orchestration.VerificationVerdictRejected,
+		Summary:        reason,
+		FailureClass:   failureClass,
+		TerminalReason: reason,
+	}
+}
+
+func expandDefaultVerifierProfiles(values []string) []string {
+	if !containsString(values, orchestration.DefaultVerifierProfile) ||
+		containsString(values, orchestration.BuiltinBasicVerifierProfile) {
+		return values
+	}
+	return append(values, orchestration.BuiltinBasicVerifierProfile)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func heartbeatInterval(leaseTTLSeconds int) time.Duration {
@@ -264,6 +335,55 @@ func sleepWithContext(ctx context.Context, duration time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func buildLLMRuntime(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg config.Config,
+	pool *pgxpool.Pool,
+	queries *dbsqlc.Queries,
+) (*orchestrationexec.Runtime, func(), error) {
+	rc, err := boot.ProvideRuntimeConfig(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	containerSvc, cleanup, err := ctr.ProvideService(ctx, log, cfg, rc.ContainerBackend)
+	if err != nil {
+		return nil, nil, err
+	}
+	manager := workspace.NewManager(log, containerSvc, cfg.Workspace, cfg.Containerd.Namespace, pool)
+	a := agentpkg.New(agentpkg.Deps{
+		BridgeProvider: manager,
+		Logger:         log,
+	})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		agenttools.NewContainerProvider(log, manager, nil, config.DefaultDataMount),
+	})
+	return orchestrationexec.NewRuntime(
+		log,
+		queries,
+		settings.NewService(log, queries, nil),
+		models.NewService(log, queries),
+		a,
+		rc.TimezoneLocation,
+	), cleanup, nil
+}
+
+func decodeObject(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
+		return map[string]any{}
+	}
+	return payload
+}
+
+func stringValue(raw any) string {
+	value, _ := raw.(string)
+	return value
 }
 
 func workerShutdownVerificationCompletion(verification orchestration.TaskVerification) orchestration.VerificationCompletion {

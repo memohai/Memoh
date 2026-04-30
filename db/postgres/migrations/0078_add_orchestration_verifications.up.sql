@@ -1,4 +1,4 @@
--- 0069_add_orchestration_verifications
+-- 0078_add_orchestration_verifications
 -- Add verifier work queue for orchestration task result validation.
 
 ALTER TABLE orchestration_tasks

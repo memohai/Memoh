@@ -1,4 +1,4 @@
--- 0068_add_orchestration_kernel
+-- 0077_add_orchestration_kernel
 -- Add the final orchestration kernel schema, including runtime tables and integrity constraints.
 
 CREATE TABLE IF NOT EXISTS orchestration_runs (
@@ -356,7 +356,7 @@ BEGIN
     ALTER TABLE orchestration_planning_intents
       ADD CONSTRAINT orchestration_planning_intents_checkpoint_run_fk
       FOREIGN KEY (checkpoint_id, run_id, task_id) REFERENCES orchestration_human_checkpoints(id, run_id, task_id)
-      ON DELETE SET NULL (checkpoint_id);
+      ON DELETE CASCADE;
   END IF;
 END $$;
 
@@ -393,7 +393,7 @@ BEGIN
     ALTER TABLE orchestration_task_attempts
       ADD CONSTRAINT orchestration_task_attempts_manifest_fk
       FOREIGN KEY (input_manifest_id, run_id, task_id) REFERENCES orchestration_input_manifests(id, run_id, task_id)
-      ON DELETE SET NULL (input_manifest_id);
+      ON DELETE SET NULL;
   END IF;
 END $$;
 
@@ -403,7 +403,7 @@ BEGIN
     ALTER TABLE orchestration_task_attempts
       ADD CONSTRAINT orchestration_task_attempts_checkpoint_fk
       FOREIGN KEY (park_checkpoint_id, run_id, task_id) REFERENCES orchestration_human_checkpoints(id, run_id, task_id)
-      ON DELETE SET NULL (park_checkpoint_id);
+      ON DELETE SET NULL;
   END IF;
 END $$;
 

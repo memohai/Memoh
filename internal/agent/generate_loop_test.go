@@ -18,8 +18,27 @@ type staticToolProvider struct {
 	tools []sdk.Tool
 }
 
+type testToolCallObserver struct {
+	onStart  func(context.Context, ToolCallObservation) error
+	onFinish func(context.Context, ToolCallObservation) error
+}
+
 func (p staticToolProvider) Tools(context.Context, agenttools.SessionContext) ([]sdk.Tool, error) {
 	return p.tools, nil
+}
+
+func (o testToolCallObserver) OnToolCallStart(ctx context.Context, observation ToolCallObservation) error {
+	if o.onStart == nil {
+		return nil
+	}
+	return o.onStart(ctx, observation)
+}
+
+func (o testToolCallObserver) OnToolCallFinish(ctx context.Context, observation ToolCallObservation) error {
+	if o.onFinish == nil {
+		return nil
+	}
+	return o.onFinish(ctx, observation)
 }
 
 type atomicMockProvider struct {
@@ -86,6 +105,161 @@ func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.GeneratePa
 		}
 	}()
 	return &sdk.StreamResult{Stream: ch}, nil
+}
+
+func TestAgentGenerateStopsOnToolLoopAbort(t *testing.T) {
+	t.Parallel()
+
+	modelProvider := &atomicMockProvider{
+		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{{
+					ToolCallID: "call-same",
+					ToolName:   "loop_tool",
+					Input:      map[string]any{"query": "same"},
+				}},
+			}, nil
+		},
+	}
+
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{
+			tools: []sdk.Tool{{
+				Name:       "loop_tool",
+				Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+					return map[string]any{"ok": true}, nil
+				},
+			}},
+		},
+	})
+
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("loop")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+		LoopDetection:    LoopDetectionConfig{Enabled: true},
+	})
+	if !errors.Is(err, ErrToolLoopDetected) {
+		t.Fatalf("expected ErrToolLoopDetected, got %v", err)
+	}
+	if modelProvider.calls.Load() >= 20 {
+		t.Fatalf("expected tool loop to stop generation, got %d provider calls", modelProvider.calls.Load())
+	}
+}
+
+func TestAgentGenerateStopsOnTextLoopAbort(t *testing.T) {
+	t.Parallel()
+
+	repeatedText := "abcdefghijklmnopqrstuvwxyz0123456789 repeated text chunk for loop detection"
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{
+				Text:         repeatedText,
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{{
+					ToolCallID: "call-text",
+					ToolName:   "noop_tool",
+					Input:      map[string]any{"step": call},
+				}},
+			}, nil
+		},
+	}
+
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{
+			tools: []sdk.Tool{{
+				Name:       "noop_tool",
+				Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+					return map[string]any{"ok": true}, nil
+				},
+			}},
+		},
+	})
+
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("loop text")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+		LoopDetection:    LoopDetectionConfig{Enabled: true},
+	})
+	if !errors.Is(err, ErrTextLoopDetected) {
+		t.Fatalf("expected ErrTextLoopDetected, got %v", err)
+	}
+	if modelProvider.calls.Load() >= 10 {
+		t.Fatalf("expected text loop to stop generation, got %d provider calls", modelProvider.calls.Load())
+	}
+}
+
+func TestWrapToolsWithObserverSeesExecutedToolCalls(t *testing.T) {
+	t.Parallel()
+
+	type observedCall struct {
+		toolCallID string
+		toolName   string
+		status     string
+	}
+	var observed []observedCall
+	observer := testToolCallObserver{
+		onStart: func(_ context.Context, observation ToolCallObservation) error {
+			observed = append(observed, observedCall{
+				toolCallID: observation.ToolCallID,
+				toolName:   observation.ToolName,
+				status:     "start",
+			})
+			return nil
+		},
+		onFinish: func(_ context.Context, observation ToolCallObservation) error {
+			status := "completed"
+			if observation.Err != nil {
+				status = "failed"
+			}
+			observed = append(observed, observedCall{
+				toolCallID: observation.ToolCallID,
+				toolName:   observation.ToolName,
+				status:     status,
+			})
+			return nil
+		},
+	}
+
+	wrapped := wrapToolsWithObserver([]sdk.Tool{{
+		Name:       "observe_tool",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
+			args, _ := input.(map[string]any)
+			return map[string]any{"echo": args["value"]}, nil
+		},
+	}}, observer)
+
+	result, err := wrapped[0].Execute(&sdk.ToolExecContext{
+		Context:    context.Background(),
+		ToolCallID: "call-observed",
+		ToolName:   "observe_tool",
+	}, map[string]any{"value": 31})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	got, ok := result.(map[string]any)
+	if !ok || got["echo"] != 31 {
+		t.Fatalf("Execute() result = %#v, want echo 31", result)
+	}
+
+	if len(observed) != 2 {
+		t.Fatalf("observed count = %d, want 2", len(observed))
+	}
+	if observed[0].status != "start" || observed[1].status != "completed" {
+		t.Fatalf("observed statuses = %#v, want start then completed", observed)
+	}
+	if observed[0].toolCallID != "call-observed" || observed[1].toolCallID != "call-observed" {
+		t.Fatalf("observed tool call ids = %#v, want call-observed", observed)
+	}
 }
 
 func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {

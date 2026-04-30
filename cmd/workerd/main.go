@@ -10,16 +10,26 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
+	agenttools "github.com/memohai/memoh/internal/agent/tools"
+	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/config"
+	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/logger"
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/orchestration"
+	"github.com/memohai/memoh/internal/orchestrationexec"
+	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/workspace"
 )
 
 type attemptRuntime interface {
@@ -30,6 +40,8 @@ type attemptRuntime interface {
 type attemptExecutor func(context.Context, orchestration.TaskAttempt, []string) orchestration.AttemptCompletion
 
 const completionRetryInterval = 250 * time.Millisecond
+
+var replayAttemptCompletionAckLossInjected atomic.Bool
 
 func main() {
 	if err := run(); err != nil {
@@ -60,6 +72,13 @@ func run() error {
 
 	queries := dbsqlc.New(pool)
 	svc := orchestration.NewService(log, pool, queries)
+	llmRuntime, cleanupLLMRuntime, err := buildLLMRuntime(ctx, log, cfg, pool, queries)
+	if err != nil {
+		log.Warn("llm runtime unavailable, worker will use builtin fallback", slog.Any("error", err))
+	}
+	if cleanupLLMRuntime != nil {
+		defer cleanupLLMRuntime()
+	}
 
 	workerID := strings.TrimSpace(os.Getenv("WORKER_ID"))
 	if workerID == "" {
@@ -69,7 +88,7 @@ func run() error {
 	if executorID == "" {
 		executorID = orchestration.DefaultWorkerExecutorID
 	}
-	workerProfiles := envCSV("WORKER_PROFILES", []string{orchestration.DefaultRootWorkerProfile})
+	workerProfiles := expandDefaultWorkerProfiles(envCSV("WORKER_PROFILES", []string{orchestration.DefaultRootWorkerProfile}))
 	leaseTTLSeconds := envInt("WORKER_LEASE_TTL_SECONDS", 30)
 	pollInterval := time.Duration(envInt("WORKER_POLL_INTERVAL_MS", 500)) * time.Millisecond
 
@@ -136,7 +155,7 @@ func run() error {
 		}
 
 		leaseLost := runAttempt(ctx, svc, log, *runningAttempt, leaseTTLSeconds, workerProfiles, func(execCtx context.Context, attempt orchestration.TaskAttempt, profiles []string) orchestration.AttemptCompletion {
-			return executeAttempt(execCtx, queries, attempt, profiles)
+			return executeAttempt(execCtx, queries, llmRuntime, attempt, profiles)
 		})
 		if leaseLost {
 			log.Warn("dropping stale attempt completion after lease loss", slog.String("attempt_id", runningAttempt.ID))
@@ -207,9 +226,14 @@ func runAttemptWithInterval(ctx context.Context, svc attemptRuntime, log *slog.L
 		_, completeErr := svc.CompleteAttempt(completeCtx, completion)
 		cancelComplete()
 		if completeErr == nil {
-			cancelHeartbeat()
-			_, leaseLost := checkHeartbeat(true)
-			return leaseLost
+			if shouldReplayAttemptCompletionAckLoss() {
+				log.Warn("simulating lost attempt completion ack after commit", slog.String("attempt_id", attempt.ID))
+				completeErr = errors.New("simulated attempt completion ack loss after commit")
+			} else {
+				cancelHeartbeat()
+				_, leaseLost := checkHeartbeat(true)
+				return leaseLost
+			}
 		}
 
 		log.Error("complete attempt failed", slog.String("attempt_id", attempt.ID), slog.Any("error", completeErr))
@@ -233,6 +257,16 @@ func runAttemptWithInterval(ctx context.Context, svc attemptRuntime, log *slog.L
 		case <-time.After(completionRetryInterval):
 		}
 	}
+}
+
+func shouldReplayAttemptCompletionAckLoss() bool {
+	if replayAttemptCompletionAckLossInjected.Load() {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("WORKER_REPLAY_COMPLETION_ONCE")) == "" {
+		return false
+	}
+	return replayAttemptCompletionAckLossInjected.CompareAndSwap(false, true)
 }
 
 func workerShutdownCompletion(attempt orchestration.TaskAttempt) orchestration.AttemptCompletion {
@@ -311,7 +345,7 @@ func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.Can
 	}
 }
 
-func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, attempt orchestration.TaskAttempt, workerProfiles []string) orchestration.AttemptCompletion {
+func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, llmRuntime *orchestrationexec.Runtime, attempt orchestration.TaskAttempt, workerProfiles []string) orchestration.AttemptCompletion {
 	completion := orchestration.AttemptCompletion{
 		AttemptID:          attempt.ID,
 		ClaimToken:         attempt.ClaimToken,
@@ -338,6 +372,20 @@ func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, attempt orches
 	}
 
 	inputs := decodeObject(taskRow.Inputs)
+	runID, err := db.ParseUUID(attempt.RunID)
+	if err != nil {
+		completion.Status = orchestration.TaskAttemptStatusFailed
+		completion.FailureClass = "invalid_run_id"
+		completion.TerminalReason = err.Error()
+		return completion
+	}
+	runRow, err := queries.GetOrchestrationRunByID(ctx, runID)
+	if err != nil {
+		completion.Status = orchestration.TaskAttemptStatusFailed
+		completion.FailureClass = "run_lookup_failed"
+		completion.TerminalReason = err.Error()
+		return completion
+	}
 	builtinOptions := decodeObjectFromAny(inputs["builtin_workerd"])
 	if err := sleepWithContext(ctx, time.Duration(intValue(builtinOptions["sleep_ms"]))*time.Millisecond); err != nil {
 		return workerShutdownCompletion(attempt)
@@ -357,6 +405,24 @@ func executeAttempt(ctx context.Context, queries *dbsqlc.Queries, attempt orches
 		completion.Status = orchestration.TaskAttemptStatusFailed
 		completion.FailureClass = "unsupported_worker_profile"
 		completion.TerminalReason = fmt.Sprintf("unsupported worker profile %q", taskRow.WorkerProfile)
+		completion.Summary = completion.TerminalReason
+		completion.StructuredOutput = output
+		return completion
+	}
+	sourceMetadata := decodeObject(runRow.SourceMetadata)
+	botID := strings.TrimSpace(stringValue(sourceMetadata["bot_id"]))
+	usesBuiltinEcho := strings.TrimSpace(taskRow.WorkerProfile) == orchestration.BuiltinEchoWorkerProfile || len(builtinOptions) > 0
+	if !usesBuiltinEcho {
+		if llmRuntime != nil && botID != "" {
+			return llmRuntime.ExecuteAttempt(ctx, attempt)
+		}
+		completion.Status = orchestration.TaskAttemptStatusFailed
+		completion.FailureClass = "llm_runtime_unavailable"
+		if botID == "" {
+			completion.TerminalReason = "llm worker profile requires run source_metadata.bot_id"
+		} else {
+			completion.TerminalReason = "llm runtime is not configured"
+		}
 		completion.Summary = completion.TerminalReason
 		completion.StructuredOutput = output
 		return completion
@@ -513,6 +579,47 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func expandDefaultWorkerProfiles(values []string) []string {
+	if !containsString(values, orchestration.DefaultRootWorkerProfile) ||
+		containsString(values, orchestration.BuiltinEchoWorkerProfile) {
+		return values
+	}
+	return append(values, orchestration.BuiltinEchoWorkerProfile)
+}
+
+func buildLLMRuntime(
+	ctx context.Context,
+	log *slog.Logger,
+	cfg config.Config,
+	pool *pgxpool.Pool,
+	queries *dbsqlc.Queries,
+) (*orchestrationexec.Runtime, func(), error) {
+	rc, err := boot.ProvideRuntimeConfig(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	containerSvc, cleanup, err := ctr.ProvideService(ctx, log, cfg, rc.ContainerBackend)
+	if err != nil {
+		return nil, nil, err
+	}
+	manager := workspace.NewManager(log, containerSvc, cfg.Workspace, cfg.Containerd.Namespace, pool)
+	a := agentpkg.New(agentpkg.Deps{
+		BridgeProvider: manager,
+		Logger:         log,
+	})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		agenttools.NewContainerProvider(log, manager, nil, config.DefaultDataMount),
+	})
+	return orchestrationexec.NewRuntime(
+		log,
+		queries,
+		settings.NewService(log, queries, nil),
+		models.NewService(log, queries),
+		a,
+		rc.TimezoneLocation,
+	), cleanup, nil
 }
 
 func heartbeatInterval(leaseTTLSeconds int) time.Duration {

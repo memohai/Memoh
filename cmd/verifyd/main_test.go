@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -11,10 +12,11 @@ import (
 )
 
 type fakeVerificationRuntime struct {
-	heartbeatErrs  []error
-	completions    []orchestration.VerificationCompletion
-	completeErrs   []error
-	heartbeatCalls int
+	heartbeatErrs    []error
+	completions      []orchestration.VerificationCompletion
+	completeErrs     []error
+	completeCallback func(orchestration.VerificationCompletion, int) error
+	heartbeatCalls   int
 }
 
 func (f *fakeVerificationRuntime) HeartbeatVerification(_ context.Context, input orchestration.VerificationHeartbeat) (*orchestration.TaskVerification, error) {
@@ -31,6 +33,11 @@ func (f *fakeVerificationRuntime) HeartbeatVerification(_ context.Context, input
 
 func (f *fakeVerificationRuntime) CompleteVerification(_ context.Context, input orchestration.VerificationCompletion) (*orchestration.TaskVerification, error) {
 	f.completions = append(f.completions, input)
+	if f.completeCallback != nil {
+		if err := f.completeCallback(input, len(f.completions)); err != nil {
+			return nil, err
+		}
+	}
 	if len(f.completeErrs) > 0 {
 		err := f.completeErrs[0]
 		f.completeErrs = f.completeErrs[1:]
@@ -133,6 +140,45 @@ func TestRunVerificationRetriesTransientCompletionFailures(t *testing.T) {
 	}
 	if len(runtime.completions) != 2 {
 		t.Fatalf("completion count = %d, want 2", len(runtime.completions))
+	}
+}
+
+func TestRunVerificationRetriesAfterCompletionAckLossAndConverges(t *testing.T) {
+	var committed bool
+	runtime := &fakeVerificationRuntime{
+		completeCallback: func(_ orchestration.VerificationCompletion, call int) error {
+			if call == 1 {
+				committed = true
+				return errors.New("completion ack lost after commit")
+			}
+			if !committed {
+				t.Fatal("second completion arrived before simulated commit")
+			}
+			return nil
+		},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runVerificationWithInterval(context.Background(), runtime, log, orchestration.TaskVerification{
+		ID:         "verification-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{orchestration.DefaultVerifierProfile}, func(_ context.Context, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
+		return orchestration.VerificationCompletion{
+			VerificationID: verification.ID,
+			ClaimToken:     verification.ClaimToken,
+			Status:         orchestration.TaskVerificationStatusCompleted,
+			Verdict:        orchestration.VerificationVerdictAccepted,
+			Summary:        "passed",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runVerificationWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(runtime.completions))
+	}
+	if !reflect.DeepEqual(runtime.completions[0], runtime.completions[1]) {
+		t.Fatalf("replayed completion mismatch: first=%+v second=%+v", runtime.completions[0], runtime.completions[1])
 	}
 }
 

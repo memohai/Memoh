@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ type fakeAttemptRuntime struct {
 	heartbeatCalls    int
 	completions       []orchestration.AttemptCompletion
 	completeErrs      []error
+	completeCallback  func(orchestration.AttemptCompletion, int) error
 	heartbeatCallback func()
 }
 
@@ -42,6 +44,11 @@ func (f *fakeAttemptRuntime) CompleteAttempt(_ context.Context, input orchestrat
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.completions = append(f.completions, input)
+	if f.completeCallback != nil {
+		if err := f.completeCallback(input, len(f.completions)); err != nil {
+			return nil, err
+		}
+	}
 	if len(f.completeErrs) > 0 {
 		err := f.completeErrs[0]
 		f.completeErrs = f.completeErrs[1:]
@@ -241,5 +248,43 @@ func TestRunAttemptRetriesTransientCompletionFailuresWhileHeartbeatContinues(t *
 	}
 	if runtime.heartbeatCalls == 0 {
 		t.Fatal("heartbeatCalls = 0, want heartbeat loop to keep renewing lease during completion retry")
+	}
+}
+
+func TestRunAttemptRetriesAfterCompletionAckLossAndConverges(t *testing.T) {
+	var committed bool
+	runtime := &fakeAttemptRuntime{
+		completeCallback: func(_ orchestration.AttemptCompletion, call int) error {
+			if call == 1 {
+				committed = true
+				return errors.New("completion ack lost after commit")
+			}
+			if !committed {
+				t.Fatal("second completion arrived before simulated commit")
+			}
+			return nil
+		},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runAttemptWithInterval(context.Background(), runtime, log, orchestration.TaskAttempt{
+		ID:         "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Millisecond, []string{"root"}, func(_ context.Context, attempt orchestration.TaskAttempt, _ []string) orchestration.AttemptCompletion {
+		return orchestration.AttemptCompletion{
+			AttemptID:  attempt.ID,
+			ClaimToken: attempt.ClaimToken,
+			Status:     orchestration.TaskAttemptStatusCompleted,
+			Summary:    "done",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runAttemptWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(runtime.completions))
+	}
+	if !reflect.DeepEqual(runtime.completions[0], runtime.completions[1]) {
+		t.Fatalf("replayed completion mismatch: first=%+v second=%+v", runtime.completions[0], runtime.completions[1])
 	}
 }
