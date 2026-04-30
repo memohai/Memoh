@@ -53,9 +53,37 @@ stores exist.
 | Transactions | `BindCodeStore.Consume`, `WorkspaceStore.RecordSnapshotVersion`, route create race | Same behavior via `BEGIN IMMEDIATE` or store-local locking |
 | Query semantics | message search, token usage, settings upsert, identity search | Same expected rows and pagination |
 
+## Transitional Risks
+
+- `dbstore.Queries` is a broad compatibility interface that still exposes
+  PostgreSQL sqlc and `pgtype` types. It exists only to keep the full backend
+  running while individual domains move to typed store interfaces.
+- `internal/db/sqlite/store/queries.go` is a reflection adapter from the
+  PostgreSQL-shaped `dbstore.Queries` interface to SQLite sqlc. It has runtime
+  conversion risk and should not become the long-term persistence API.
+- SQLite store code currently imports `pgtype` because the transitional
+  interface still requires PostgreSQL-shaped parameters and return values. This
+  dependency should disappear as domains move to typed stores.
+- SQLite `WithTx` on the broad adapter does not provide PostgreSQL row-lock
+  semantics. High-integrity flows such as bind-code consume, workspace version
+  recording, and route creation need typed SQLite store methods backed by
+  `database/sql.Tx` / `BEGIN IMMEDIATE`.
+
+## Migration Priorities
+
+1. Move high-traffic history paths to typed stores first:
+   `MessageRepository`, `SessionRepository`, and `ChatRepository`.
+2. Move model/provider/settings lookups to typed stores to remove most
+   PostgreSQL sqlc type leakage from agent execution paths.
+3. Move transactional paths to backend-specific typed methods:
+   bind-code consume, workspace snapshot/version creation, and route resolution.
+4. Retire `dbstore.Queries` and the SQLite reflection adapter once all domains
+   have typed store implementations.
+
 ## Current Status
 
 The repository has parallel PostgreSQL and SQLite sqlc tracks. SQLite currently
-has a single baseline migration (`0001_init`) and account-level sqlc/store code.
-The rest of the backend still uses the transitional `dbstore.Queries` interface,
-which is backed by PostgreSQL sqlc until each domain receives a SQLite store.
+has a single baseline migration (`0001_init`), a full SQLite query set, and a
+runtime adapter for the transitional `dbstore.Queries` interface. The long-term
+direction remains typed domain stores; `AccountStore` is the first completed
+example.
