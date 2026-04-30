@@ -8,8 +8,8 @@ on:
       - "go.mod"
       - "go.sum"
       - ".golangci.yml"
-      - "db/queries/**/*.sql"
-      - "db/migrations/**/*.sql"
+      - "db/postgres/queries/**/*.sql"
+      - "db/postgres/migrations/**/*.sql"
       - ".github/workflows/go-ci.yml"
   pull_request:
     branches: ["main"]
@@ -18,8 +18,8 @@ on:
       - "go.mod"
       - "go.sum"
       - ".golangci.yml"
-      - "db/queries/**/*.sql"
-      - "db/migrations/**/*.sql"
+      - "db/postgres/queries/**/*.sql"
+      - "db/postgres/migrations/**/*.sql"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
 

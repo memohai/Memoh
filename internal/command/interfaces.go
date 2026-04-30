@@ -34,7 +34,7 @@ type ContainerFS interface {
 }
 
 // CommandQueries captures the sqlc methods used by slash commands.
-// *dbsqlc.Queries satisfies this interface directly.
+// dbstore.Queries satisfies this interface directly.
 type CommandQueries interface {
 	GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error)
 	CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)

@@ -12,6 +12,7 @@ import (
 
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // Session represents a chat session within a bot.
@@ -51,12 +52,12 @@ type CreateInput struct {
 
 // Service manages bot chat sessions.
 type Service struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewService creates a session service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
@@ -41,7 +42,7 @@ type denseModelSpec struct {
 	dimensions int
 }
 
-func newDenseRuntime(providerConfig map[string]any, queries *dbsqlc.Queries, cfg config.Config, store *storefs.Service) (*denseRuntime, error) {
+func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, cfg config.Config, store *storefs.Service) (*denseRuntime, error) {
 	if queries == nil {
 		return nil, errors.New("dense runtime: queries are required")
 	}
@@ -526,7 +527,7 @@ func (r *denseRuntime) upsertSourceItems(ctx context.Context, botID string, item
 	return nil
 }
 
-func resolveDenseEmbeddingModel(ctx context.Context, queries *dbsqlc.Queries, modelRef string) (denseModelSpec, error) {
+func resolveDenseEmbeddingModel(ctx context.Context, queries dbstore.Queries, modelRef string) (denseModelSpec, error) {
 	modelRef = strings.TrimSpace(modelRef)
 	if modelRef == "" {
 		return denseModelSpec{}, errors.New("dense runtime: embedding_model_id is required")

@@ -415,7 +415,7 @@ func loadDBStatusCmd() tea.Cmd {
 		if err != nil {
 			return dbStatusMsg{err: err}
 		}
-		status, err := dbpkg.ReadMigrationStatus(cfg.Postgres, MigrationsFS())
+		status, err := dbpkg.ReadMigrationStatusConfig(cfg, MigrationsFS())
 		if err != nil {
 			return dbStatusMsg{err: err}
 		}

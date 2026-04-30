@@ -15,11 +15,12 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 type Service struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	acl     *acl.Service
 	logger  *slog.Logger
 }
@@ -29,7 +30,7 @@ var (
 	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, aclService *acl.Service) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service) *Service {
 	return &Service{
 		queries: queries,
 		acl:     aclService,

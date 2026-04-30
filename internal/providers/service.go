@@ -18,19 +18,20 @@ import (
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 )
 
 // Service handles provider operations.
 type Service struct {
-	queries     *sqlc.Queries
+	queries     dbstore.Queries
 	logger      *slog.Logger
 	httpClient  *http.Client
 	callbackURL string
 }
 
 // NewService creates a new provider service.
-func NewService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // Connection represents a stored MCP connection for a bot.
@@ -73,12 +74,12 @@ type ExportResponse struct {
 
 // ConnectionService handles CRUD operations for MCP connections.
 type ConnectionService struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewConnectionService creates a ConnectionService backed by sqlc queries.
-func NewConnectionService(log *slog.Logger, queries *sqlc.Queries) *ConnectionService {
+func NewConnectionService(log *slog.Logger, queries dbstore.Queries) *ConnectionService {
 	if log == nil {
 		log = slog.Default()
 	}

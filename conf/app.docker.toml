@@ -19,6 +19,9 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[database]
+driver = "postgres"
+
 ## Docker configuration
 [containerd]
 socket_path = "/run/containerd/containerd.sock"
@@ -39,6 +42,11 @@ user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
+
+[sqlite]
+path = "/opt/memoh/data/memoh.db"
+wal = true
+busy_timeout_ms = 5000
 
 ## Qdrant configuration
 [qdrant]

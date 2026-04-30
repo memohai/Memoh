@@ -15,9 +15,10 @@ import (
 
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func setupIntegrationTest(t *testing.T) (*identities.Service, *sqlc.Queries, func()) {
+func setupIntegrationTest(t *testing.T) (*identities.Service, dbstore.Queries, func()) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_POSTGRES_DSN")

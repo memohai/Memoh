@@ -8,15 +8,16 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // OutboxService manages the email outbox audit log.
 type OutboxService struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
-func NewOutboxService(log *slog.Logger, queries *sqlc.Queries) *OutboxService {
+func NewOutboxService(log *slog.Logger, queries dbstore.Queries) *OutboxService {
 	return &OutboxService{
 		queries: queries,
 		logger:  log.With(slog.String("service", "email_outbox")),

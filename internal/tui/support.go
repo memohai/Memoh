@@ -19,7 +19,7 @@ func ProvideConfig() (config.Config, error) {
 }
 
 func MigrationsFS() fs.FS {
-	sub, err := fs.Sub(dbembed.MigrationsFS, "migrations")
+	sub, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
 	if err != nil {
 		panic(fmt.Sprintf("embedded migrations: %v", err))
 	}

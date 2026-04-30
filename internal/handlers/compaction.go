@@ -11,7 +11,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/compaction"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
@@ -23,7 +23,7 @@ type CompactionHandler struct {
 	accountService   *accounts.Service
 	settingsService  *settings.Service
 	modelsService    *models.Service
-	queries          *sqlc.Queries
+	queries          dbstore.Queries
 	providersService *providers.Service
 	logger           *slog.Logger
 }
@@ -35,7 +35,7 @@ func NewCompactionHandler(
 	accountService *accounts.Service,
 	settingsService *settings.Service,
 	modelsService *models.Service,
-	queries *sqlc.Queries,
+	queries dbstore.Queries,
 	providersService *providers.Service,
 ) *CompactionHandler {
 	return &CompactionHandler{

@@ -9,6 +9,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // OAuthToken holds a stored OAuth2 token for an email provider.
@@ -32,10 +33,10 @@ type OAuthTokenStore interface {
 
 // DBOAuthTokenStore is the DB-backed implementation of OAuthTokenStore.
 type DBOAuthTokenStore struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 }
 
-func NewDBOAuthTokenStore(queries *sqlc.Queries) *DBOAuthTokenStore {
+func NewDBOAuthTokenStore(queries dbstore.Queries) *DBOAuthTokenStore {
 	return &DBOAuthTokenStore{queries: queries}
 }
 

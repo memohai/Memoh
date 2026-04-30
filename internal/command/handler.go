@@ -9,7 +9,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/compaction"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
 	"github.com/memohai/memoh/internal/mcp"
@@ -60,7 +60,7 @@ type Handler struct {
 	heartbeatService   *heartbeat.Service
 	compactionService  *compaction.Service
 	queries            CommandQueries
-	sqlcQueries        *sqlc.Queries
+	sqlcQueries        dbstore.Queries
 	aclEvaluator       AccessEvaluator
 	skillLoader        SkillLoader
 	containerFS        ContainerFS
@@ -129,7 +129,7 @@ func NewHandler(
 }
 
 // SetCompactionService configures the compaction service for the /compact command.
-func (h *Handler) SetCompactionService(s *compaction.Service, q *sqlc.Queries) {
+func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries) {
 	h.compactionService = s
 	h.sqlcQueries = q
 }

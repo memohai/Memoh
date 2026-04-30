@@ -14,9 +14,10 @@ import (
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func setupBindConsumeIntegrationTest(t *testing.T) (*sqlc.Queries, *identities.Service, *bind.Service, func()) {
+func setupBindConsumeIntegrationTest(t *testing.T) (dbstore.Queries, *identities.Service, *bind.Service, func()) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -41,7 +42,7 @@ func setupBindConsumeIntegrationTest(t *testing.T) (*sqlc.Queries, *identities.S
 	return queries, channelIdentitySvc, bindSvc, func() { pool.Close() }
 }
 
-func createUserForBind(ctx context.Context, queries *sqlc.Queries) (string, error) {
+func createUserForBind(ctx context.Context, queries dbstore.Queries) (string, error) {
 	row, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
 		IsActive: true,
 		Metadata: []byte("{}"),

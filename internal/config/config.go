@@ -20,11 +20,14 @@ const (
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
 	DefaultCNIConfigDir     = "/etc/cni/net.d"
 	DefaultJWTExpiresIn     = "24h"
+	DefaultDatabaseDriver   = "postgres"
 	DefaultPGHost           = "127.0.0.1"
 	DefaultPGPort           = 5432
 	DefaultPGUser           = "postgres"
 	DefaultPGDatabase       = "memoh"
 	DefaultPGSSLMode        = "disable"
+	DefaultSQLitePath       = "data/memoh.db"
+	DefaultSQLiteBusyMS     = 5000
 	DefaultQdrantURL        = "http://127.0.0.1:6334"
 	DefaultQdrantCollection = "memory"
 	DefaultRuntimeDir       = "/opt/memoh/runtime"
@@ -38,9 +41,11 @@ type Config struct {
 	Admin          AdminConfig          `toml:"admin"`
 	Auth           AuthConfig           `toml:"auth"`
 	Timezone       string               `toml:"timezone"`
+	Database       DatabaseConfig       `toml:"database"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
+	SQLite         SQLiteConfig         `toml:"sqlite"`
 	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
@@ -66,6 +71,18 @@ type AdminConfig struct {
 type AuthConfig struct {
 	JWTSecret    string `toml:"jwt_secret"    json:"-"`
 	JWTExpiresIn string `toml:"jwt_expires_in"`
+}
+
+type DatabaseConfig struct {
+	Driver string `toml:"driver"`
+}
+
+func (c DatabaseConfig) DriverOrDefault() string {
+	driver := strings.TrimSpace(strings.ToLower(c.Driver))
+	if driver == "" {
+		return DefaultDatabaseDriver
+	}
+	return driver
 }
 
 type ContainerdConfig struct {
@@ -131,6 +148,13 @@ type PostgresConfig struct {
 	Password string `toml:"password" json:"-"`
 	Database string `toml:"database"`
 	SSLMode  string `toml:"sslmode"`
+}
+
+type SQLiteConfig struct {
+	Path          string `toml:"path"`
+	DSN           string `toml:"dsn"`
+	WAL           bool   `toml:"wal"`
+	BusyTimeoutMS int    `toml:"busy_timeout_ms"`
 }
 
 type QdrantConfig struct {
@@ -205,6 +229,9 @@ func Load(path string) (Config, error) {
 			JWTExpiresIn: DefaultJWTExpiresIn,
 		},
 		Timezone: DefaultTimezone,
+		Database: DatabaseConfig{
+			Driver: DefaultDatabaseDriver,
+		},
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
@@ -221,6 +248,11 @@ func Load(path string) (Config, error) {
 			User:     DefaultPGUser,
 			Database: DefaultPGDatabase,
 			SSLMode:  DefaultPGSSLMode,
+		},
+		SQLite: SQLiteConfig{
+			Path:          DefaultSQLitePath,
+			WAL:           true,
+			BusyTimeoutMS: DefaultSQLiteBusyMS,
 		},
 		BrowserGateway: BrowserGatewayConfig{
 			Host: "127.0.0.1",

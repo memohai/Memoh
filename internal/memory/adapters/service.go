@@ -11,17 +11,18 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 )
 
 type Service struct {
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	registry *Registry
 	logger   *slog.Logger
 	cfg      config.Config
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, cfg config.Config) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *Service {
 	return &Service{
 		queries: queries,
 		logger:  log.With(slog.String("service", "memory_providers")),

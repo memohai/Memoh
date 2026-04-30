@@ -9,16 +9,17 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // Service manages email provider CRUD and bindings.
 type Service struct {
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	logger   *slog.Logger
 	registry *Registry
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, registry *Registry) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, registry *Registry) *Service {
 	return &Service{
 		queries:  queries,
 		logger:   log.With(slog.String("service", "email")),

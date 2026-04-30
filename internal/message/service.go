@@ -13,18 +13,19 @@ import (
 
 	dbpkg "github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message/event"
 )
 
 // DBService persists and reads bot history messages.
 type DBService struct {
-	queries   *sqlc.Queries
+	queries   dbstore.Queries
 	logger    *slog.Logger
 	publisher event.Publisher
 }
 
 // NewService creates a message service.
-func NewService(log *slog.Logger, queries *sqlc.Queries, publishers ...event.Publisher) *DBService {
+func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.Publisher) *DBService {
 	if log == nil {
 		log = slog.Default()
 	}

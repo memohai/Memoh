@@ -19,6 +19,9 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+[database]
+driver = "postgres"
+
 [containerd]
 # Windows containerd usually exposes a named pipe endpoint.
 # If your environment uses another pipe name or tcp endpoint, change this value.
@@ -38,6 +41,11 @@ user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
+
+[sqlite]
+path = "data/memoh.db"
+wal = true
+busy_timeout_ms = 5000
 
 [qdrant]
 base_url = "http://127.0.0.1:6334"

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/config"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
@@ -25,7 +25,7 @@ const (
 // runtime for "off" or unknown modes. Returns an error if a sparse or dense
 // runtime was explicitly requested but failed to initialise, so that callers
 // can surface configuration problems rather than silently degrading.
-func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries *dbsqlc.Queries, cfg config.Config) (any, error) {
+func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries dbstore.Queries, cfg config.Config) (any, error) {
 	mode := BuiltinMemoryMode(strings.TrimSpace(adapters.StringFromConfig(providerConfig, "memory_mode")))
 
 	switch mode {

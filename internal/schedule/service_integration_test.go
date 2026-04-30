@@ -14,10 +14,11 @@ import (
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/schedule"
 )
 
-func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, *sqlc.Queries, *pgxpool.Pool, *mockTriggerer, func()) {
+func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Queries, *pgxpool.Pool, *mockTriggerer, func()) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -59,7 +60,7 @@ func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload
 	return schedule.TriggerResult{Status: "ok"}, nil
 }
 
-func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries *sqlc.Queries) (ownerUserID, botID, scheduleID string) {
+func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore.Queries) (ownerUserID, botID, scheduleID string) {
 	t.Helper()
 
 	userRow, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
@@ -109,7 +110,7 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries *sqlc.Q
 	return ownerUserID, botID, scheduleID
 }
 
-func cleanupScheduleTestData(ctx context.Context, t *testing.T, queries *sqlc.Queries, pool *pgxpool.Pool, ownerUserID, botID, scheduleID string) {
+func cleanupScheduleTestData(ctx context.Context, t *testing.T, queries dbstore.Queries, pool *pgxpool.Pool, ownerUserID, botID, scheduleID string) {
 	t.Helper()
 	schedID, _ := db.ParseUUID(scheduleID)
 	_ = queries.DeleteSchedule(ctx, schedID)

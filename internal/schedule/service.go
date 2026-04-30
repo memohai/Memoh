@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // SessionCreator creates sessions for schedule runs.
@@ -27,7 +28,7 @@ type SessionCreator interface {
 }
 
 type Service struct {
-	queries         *sqlc.Queries
+	queries         dbstore.Queries
 	cron            *cron.Cron
 	parser          cron.Parser
 	triggerer       Triggerer
@@ -39,7 +40,7 @@ type Service struct {
 	jobs            map[string]cron.EntryID
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	location := time.UTC
 	if runtimeConfig != nil && runtimeConfig.TimezoneLocation != nil {

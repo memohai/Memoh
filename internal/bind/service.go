@@ -16,6 +16,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 const (
@@ -26,12 +27,12 @@ const (
 // Service manages channel identity->user bind code lifecycle.
 type Service struct {
 	pool    *pgxpool.Pool
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewService creates a bind code service.
-func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, pool *pgxpool.Pool, queries dbstore.Queries) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

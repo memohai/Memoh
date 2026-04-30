@@ -17,6 +17,7 @@ import (
 	conversation "github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message"
 )
 
@@ -24,7 +25,7 @@ type chatPresenceFixture struct {
 	chatSvc            *conversation.Service
 	messageSvc         message.Service
 	channelIdentitySvc *identities.Service
-	queries            *sqlc.Queries
+	queries            dbstore.Queries
 	cleanup            func()
 }
 
@@ -58,7 +59,7 @@ func setupChatPresenceIntegrationTest(t *testing.T) chatPresenceFixture {
 	}
 }
 
-func createUserForChatPresence(ctx context.Context, queries *sqlc.Queries) (string, error) {
+func createUserForChatPresence(ctx context.Context, queries dbstore.Queries) (string, error) {
 	row, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
 		IsActive: true,
 		Metadata: []byte("{}"),
@@ -69,7 +70,7 @@ func createUserForChatPresence(ctx context.Context, queries *sqlc.Queries) (stri
 	return row.ID.String(), nil
 }
 
-func createBotForChatPresence(ctx context.Context, queries *sqlc.Queries, ownerUserID string) (string, error) {
+func createBotForChatPresence(ctx context.Context, queries dbstore.Queries, ownerUserID string) (string, error) {
 	pgOwnerID, err := db.ParseUUID(ownerUserID)
 	if err != nil {
 		return "", err

@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 const heartbeatTokenTTL = 10 * time.Minute
@@ -31,7 +32,7 @@ type SessionCreator interface {
 }
 
 type Service struct {
-	queries        *sqlc.Queries
+	queries        dbstore.Queries
 	cron           *cron.Cron
 	triggerer      Triggerer
 	sessionCreator SessionCreator
@@ -41,7 +42,7 @@ type Service struct {
 	jobs           map[string]cron.EntryID
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, runtimeConfig *boot.RuntimeConfig) *Service {
 	c := cron.New()
 	service := &Service{
 		queries:        queries,

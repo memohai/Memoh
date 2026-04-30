@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "db/migrations/**"
+      - "db/postgres/migrations/**"
   pull_request:
     branches: [main]
     paths:
-      - "db/migrations/**"
+      - "db/postgres/migrations/**"
 
 concurrency:
   group: migrations-${{ github.ref }}

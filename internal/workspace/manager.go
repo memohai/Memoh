@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/identity"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -76,7 +77,7 @@ type Manager struct {
 	cfg             config.WorkspaceConfig
 	namespace       string
 	db              *pgxpool.Pool
-	queries         *dbsqlc.Queries
+	queries         dbstore.Queries
 	logger          *slog.Logger
 	containerLockMu sync.Mutex
 	containerLocks  map[string]*sync.Mutex

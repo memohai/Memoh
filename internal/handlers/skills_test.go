@@ -30,6 +30,7 @@ import (
 	"github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/db/postgresstore"
 	"github.com/memohai/memoh/internal/db/sqlc"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
@@ -341,14 +342,16 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 	}
 	cfg.DataRoot = dataRoot
 	db := &skillsTestDB{userID: userID, botID: botID, metadataJSON: metadataJSON}
+	queries := sqlc.New(db)
+	accountStore := postgresstore.NewWithQueries(queries)
 	manager := workspace.NewManager(slog.Default(), nil, cfg, "", nil)
 	handler := NewContainerdHandler(
 		slog.Default(),
 		manager,
 		cfg,
 		"",
-		bots.NewService(slog.Default(), sqlc.New(db)),
-		accounts.NewService(slog.Default(), sqlc.New(db)),
+		bots.NewService(slog.Default(), queries),
+		accounts.NewService(slog.Default(), accountStore),
 		nil,
 	)
 

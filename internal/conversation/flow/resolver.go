@@ -26,6 +26,7 @@ import (
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -73,7 +74,7 @@ type botChannelConfigReader interface {
 type Resolver struct {
 	agent             *agentpkg.Agent
 	modelsService     *models.Service
-	queries           *sqlc.Queries
+	queries           dbstore.Queries
 	memoryRegistry    *memprovider.Registry
 	conversationSvc   ConversationSettingsReader
 	messageService    messagepkg.Service
@@ -103,7 +104,7 @@ type Resolver struct {
 func NewResolver(
 	log *slog.Logger,
 	modelsService *models.Service,
-	queries *sqlc.Queries,
+	queries dbstore.Queries,
 	conversationSvc ConversationSettingsReader,
 	messageService messagepkg.Service,
 	settingsService *settings.Service,
