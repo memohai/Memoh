@@ -131,6 +131,29 @@ type RunHandle struct {
 	SnapshotSeq uint64 `json:"snapshot_seq"`
 }
 
+type PlannedTaskSpec struct {
+	Alias              string         `json:"alias,omitempty"`
+	Kind               string         `json:"kind,omitempty"`
+	Goal               string         `json:"goal"`
+	Inputs             map[string]any `json:"inputs"`
+	DependsOnAliases   []string       `json:"depends_on,omitempty"`
+	WorkerProfile      string         `json:"worker_profile,omitempty"`
+	Priority           int            `json:"priority,omitempty"`
+	RetryPolicy        map[string]any `json:"retry_policy"`
+	VerificationPolicy map[string]any `json:"verification_policy"`
+	BlackboardScope    string         `json:"blackboard_scope,omitempty"`
+}
+
+type StartRunPlanningInput struct {
+	Run      Run  `json:"run"`
+	RootTask Task `json:"root_task"`
+}
+
+type StartRunPlanningResult struct {
+	Summary    string            `json:"summary,omitempty"`
+	ChildTasks []PlannedTaskSpec `json:"child_tasks"`
+}
+
 type Run struct {
 	ID                     string         `json:"id"`
 	TenantID               string         `json:"tenant_id"`

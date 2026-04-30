@@ -32,13 +32,17 @@ import (
 
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/accounts"
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/handlers"
+	"github.com/memohai/memoh/internal/models"
 	orch "github.com/memohai/memoh/internal/orchestration"
+	"github.com/memohai/memoh/internal/orchestrationexec"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 type blackboxHarnessOptions struct {
@@ -97,10 +101,12 @@ const (
 	fakeLLMChildTaskGoal     = "compute Fibonacci and return verified result"
 	fakeLLMToolActionGoal    = "blackbox llm tool action trace"
 	fakeLLMFailureReplanGoal = "blackbox llm failure-triggered replan path"
+	fakeLLMInitialPlanGoal   = "blackbox initial planner should decompose before execution"
 )
 
 type fakeOpenAICompletionsServer struct {
 	server        *httptest.Server
+	plannerCalls  atomic.Int32
 	workerCalls   atomic.Int32
 	verifierCalls atomic.Int32
 }
@@ -317,14 +323,19 @@ func TestBlackboxRuntimeReplanVerificationAndVerifierCompletion(t *testing.T) {
 			},
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 10*time.Second)
 	h.waitForEventType(t, handle.RunID, "run.event.verification.passed", 15*time.Second)
 	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
 
 	taskPage := h.listTasks(t, handle.RunID)
-	if len(taskPage.Items) < 2 {
-		t.Fatalf("task count = %d, want at least 2", len(taskPage.Items))
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Goal != "verified child" || taskPage.Items[0].Status != orch.TaskStatusCompleted {
+		t.Fatalf("task page = %+v, want single completed verified child", taskPage.Items)
 	}
 }
 
@@ -339,13 +350,13 @@ func TestBlackboxRuntimeLLMWorkerVerifierExecuteAndComplete(t *testing.T) {
 
 	botID := h.createLLMBot(t, fakeLLM.URL())
 
-	h.startWorkerd(t, workerdProcessOptions{
+	workerd := h.startWorkerd(t, workerdProcessOptions{
 		workerID: "blackbox-llm-workerd-" + uuid.NewString(),
 		profiles: []string{orch.DefaultRootWorkerProfile},
 		pollMS:   50,
 		leaseTTL: 2,
 	})
-	h.startVerifyd(t, verifydProcessOptions{
+	verifyd := h.startVerifyd(t, verifydProcessOptions{
 		workerID: "blackbox-llm-verifyd-" + uuid.NewString(),
 		profiles: []string{orch.DefaultVerifierProfile},
 		pollMS:   50,
@@ -360,6 +371,15 @@ func TestBlackboxRuntimeLLMWorkerVerifierExecuteAndComplete(t *testing.T) {
 			"source": "blackbox-llm-e2e",
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+			t.Logf("workerd stdout:\n%s", strings.TrimSpace(workerd.stdout.String()))
+			t.Logf("workerd stderr:\n%s", strings.TrimSpace(workerd.stderr.String()))
+			t.Logf("verifyd stdout:\n%s", strings.TrimSpace(verifyd.stdout.String()))
+			t.Logf("verifyd stderr:\n%s", strings.TrimSpace(verifyd.stderr.String()))
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 10*time.Second)
 	h.waitForEventType(t, handle.RunID, "run.event.attempt.completed", 15*time.Second)
@@ -375,6 +395,56 @@ func TestBlackboxRuntimeLLMWorkerVerifierExecuteAndComplete(t *testing.T) {
 	}
 }
 
+func TestBlackboxStartRunPlannerDecomposesInitialDAGOverHTTP(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           fakeLLMInitialPlanGoal,
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-start-run-planner",
+		},
+	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+			t.Logf("fake llm planner calls=%d worker calls=%d verifier calls=%d",
+				fakeLLM.plannerCalls.Load(),
+				fakeLLM.workerCalls.Load(),
+				fakeLLM.verifierCalls.Load(),
+			)
+		}
+	}()
+
+	rootTask := h.waitForTaskStatus(t, handle.RunID, handle.RootTaskID, orch.TaskStatusCompleted, 10*time.Second)
+	if rootTask.DecomposedFromTaskID != "" {
+		t.Fatalf("root task decomposed_from_task_id = %q, want empty", rootTask.DecomposedFromTaskID)
+	}
+	prepareTask := h.waitForTaskGoalStatus(t, handle.RunID, "prepare fibonacci inputs", orch.TaskStatusReady, 10*time.Second)
+	verifyTask := h.waitForTaskGoalStatus(t, handle.RunID, "verify fibonacci result", orch.TaskStatusCreated, 10*time.Second)
+
+	inspector := h.getInspector(t, handle.RunID)
+	if len(inspector.Dependencies) != 1 {
+		t.Fatalf("len(Dependencies) = %d, want 1", len(inspector.Dependencies))
+	}
+	dep := inspector.Dependencies[0]
+	if dep.PredecessorTaskID != prepareTask.ID || dep.SuccessorTaskID != verifyTask.ID {
+		t.Fatalf("dependency = %+v, want %s -> %s", dep, prepareTask.ID, verifyTask.ID)
+	}
+	if got := fakeLLM.plannerCalls.Load(); got < 1 {
+		t.Fatalf("fake llm planner calls = %d, want at least 1", got)
+	}
+	if got := fakeLLM.workerCalls.Load(); got != 0 {
+		t.Fatalf("fake llm worker calls = %d, want 0 before scheduler starts", got)
+	}
+}
+
 func TestBlackboxRuntimeLLMFailureTriggeredReplanAndComplete(t *testing.T) {
 	h := setupBlackboxHarness(t, blackboxHarnessOptions{
 		startScheduler: true,
@@ -386,7 +456,7 @@ func TestBlackboxRuntimeLLMFailureTriggeredReplanAndComplete(t *testing.T) {
 
 	botID := h.createLLMBot(t, fakeLLM.URL())
 
-	h.startWorkerd(t, workerdProcessOptions{
+	workerd := h.startWorkerd(t, workerdProcessOptions{
 		workerID: "blackbox-llm-replan-workerd-" + uuid.NewString(),
 		profiles: []string{orch.DefaultRootWorkerProfile},
 		pollMS:   50,
@@ -401,6 +471,13 @@ func TestBlackboxRuntimeLLMFailureTriggeredReplanAndComplete(t *testing.T) {
 			"source": "blackbox-llm-failure-replan",
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+			t.Logf("workerd stdout:\n%s", strings.TrimSpace(workerd.stdout.String()))
+			t.Logf("workerd stderr:\n%s", strings.TrimSpace(workerd.stderr.String()))
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.attempt.failed", 15*time.Second)
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 15*time.Second)
@@ -796,11 +873,21 @@ func TestBlackboxRuntimeHTTPSnapshotCutsAcrossReadModelsConsistently(t *testing.
 						"kind":           "child",
 						"goal":           "barrier child",
 						"worker_profile": "barrier-profile",
+						"inputs": map[string]any{
+							"builtin_workerd": map[string]any{
+								"summary": "barrier child complete",
+							},
+						},
 					},
 				},
 			},
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 10*time.Second)
 	artifactChild := h.waitForTaskGoalStatus(t, handle.RunID, "artifact child", orch.TaskStatusReady, 10*time.Second)
@@ -988,6 +1075,11 @@ func TestBlackboxRuntimeHTTPRunBarrierPausesSiblingTasks(t *testing.T) {
 						"kind":           "child",
 						"goal":           "barrier child",
 						"worker_profile": "barrier-profile",
+						"inputs": map[string]any{
+							"builtin_workerd": map[string]any{
+								"summary": "barrier child complete",
+							},
+						},
 					},
 					{
 						"alias":          "slow-child",
@@ -1005,6 +1097,11 @@ func TestBlackboxRuntimeHTTPRunBarrierPausesSiblingTasks(t *testing.T) {
 			},
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 10*time.Second)
 	barrierChild := h.waitForTaskGoalStatus(t, handle.RunID, "barrier child", orch.TaskStatusReady, 10*time.Second)
@@ -1163,6 +1260,11 @@ func TestBlackboxRuntimeCancelRunningAttemptConvergesToCancelled(t *testing.T) {
 		Goal:           "cancel running attempt should converge to cancelled",
 		IdempotencyKey: "start-" + uuid.NewString(),
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
 
 	h.waitForEventType(t, handle.RunID, "run.event.attempt.running", 10*time.Second)
 	cancelResult := h.cancelRun(t, handle.RunID, orch.CancelRunRequest{
@@ -1217,6 +1319,11 @@ func TestBlackboxRuntimeCancelRunningVerificationViaLLMReplanConvergesToCancelle
 			"source": "blackbox-llm-cancel-verification",
 		},
 	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
 	h.startWorkerd(t, workerdProcessOptions{
 		workerID: "blackbox-cancel-workerd-" + uuid.NewString(),
 		profiles: []string{orch.DefaultRootWorkerProfile},
@@ -1245,21 +1352,38 @@ func TestBlackboxRuntimeCancelRunningVerificationViaLLMReplanConvergesToCancelle
 	if countEventsByType(eventPage.Items, "run.event.verification.passed") != 0 {
 		t.Fatalf("run.event.verification.passed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.verification.passed"))
 	}
-	if countEventsByType(eventPage.Items, "run.event.task.completed") != 0 {
-		t.Fatalf("run.event.task.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.task.completed"))
+	if countEventsByType(eventPage.Items, "run.event.verification.lost") != 1 {
+		t.Fatalf("run.event.verification.lost count = %d, want 1", countEventsByType(eventPage.Items, "run.event.verification.lost"))
 	}
 	if countEventsByType(eventPage.Items, "run.event.completed") != 0 {
 		t.Fatalf("run.event.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.cancelled") != 1 {
+		t.Fatalf("run.event.cancelled count = %d, want 1", countEventsByType(eventPage.Items, "run.event.cancelled"))
 	}
 	if countEventsByType(eventPage.Items, "run.event.failed") != 0 {
 		t.Fatalf("run.event.failed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.failed"))
 	}
 	inspector := h.getInspector(t, handle.RunID)
-	if len(inspector.Verifications) != 1 || inspector.Verifications[0].Status != orch.TaskVerificationStatusLost {
-		t.Fatalf("inspector verifications = %+v, want single lost verification", inspector.Verifications)
+	lostVerificationFound := false
+	for _, verification := range inspector.Verifications {
+		if verification.Status == orch.TaskVerificationStatusLost {
+			lostVerificationFound = true
+			break
+		}
 	}
-	if len(inspector.Tasks) != 1 || inspector.Tasks[0].Status != orch.TaskStatusCancelled {
-		t.Fatalf("inspector tasks = %+v, want single cancelled task", inspector.Tasks)
+	if !lostVerificationFound {
+		t.Fatalf("inspector verifications = %+v, want at least one lost verification", inspector.Verifications)
+	}
+	cancelledTaskFound := false
+	for _, task := range inspector.Tasks {
+		if task.Status == orch.TaskStatusCancelled {
+			cancelledTaskFound = true
+			break
+		}
+	}
+	if !cancelledTaskFound {
+		t.Fatalf("inspector tasks = %+v, want at least one cancelled task", inspector.Tasks)
 	}
 	if got := fakeLLM.workerCalls.Load(); got < 2 {
 		t.Fatalf("fake llm worker calls = %d, want at least 2", got)
@@ -1307,6 +1431,14 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 	logger := slog.New(slog.DiscardHandler)
 	service := orch.NewService(logger, appPool, queries)
 	botService := bots.NewService(logger, queries)
+	service.SetStartRunPlanner(orchestrationexec.NewRuntime(
+		logger,
+		queries,
+		settings.NewService(logger, queries, nil),
+		models.NewService(logger, queries),
+		agentpkg.New(agentpkg.Deps{Logger: logger}),
+		time.UTC,
+	))
 
 	listenCfg := net.ListenConfig{}
 	listener, err := listenCfg.Listen(ctx, "tcp", "127.0.0.1:0")
@@ -2188,14 +2320,22 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 		var body struct {
 			Model    string              `json:"model"`
 			Messages []fakeOpenAIMessage `json:"messages"`
+			Stream   bool                `json:"stream"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode fake llm request: %v", err)
 		}
 
 		prompt := flattenOpenAIMessageContent(body.Messages)
+		isStartRunPlannerPrompt := strings.Contains(prompt, "You are the initial planner for a Memoh orchestration run.")
 		payload := `{"status":"failed","summary":"unexpected fake llm prompt","failure_class":"unexpected_prompt","terminal_reason":"unexpected fake llm prompt","request_replan":false,"structured_output":{}}`
 		switch {
+		case isStartRunPlannerPrompt && strings.Contains(prompt, fakeLLMInitialPlanGoal):
+			fake.plannerCalls.Add(1)
+			payload = `{"summary":"decomposed initial run into execution and verification","child_tasks":[{"alias":"prepare","kind":"step","goal":"prepare fibonacci inputs","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""},{"alias":"verify","kind":"step","goal":"verify fibonacci result","inputs":{},"depends_on":["prepare"],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{"mode":"builtin_basic","require_structured_output":true},"blackboard_scope":""}]}`
+		case isStartRunPlannerPrompt:
+			fake.plannerCalls.Add(1)
+			payload = `{"summary":"execute root task directly","child_tasks":[]}`
 		case strings.Contains(prompt, "Verify the following orchestration task result."):
 			fake.verifierCalls.Add(1)
 			payload = `{"status":"completed","verdict":"accepted","summary":"verification accepted","failure_class":"","terminal_reason":"","request_replan":false}`
@@ -2204,6 +2344,10 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 			if hasToolResult(body.Messages, "call_list_trace") {
 				payload = `{"status":"completed","summary":"listed workspace via tool","failure_class":"","terminal_reason":"","request_replan":false,"artifact_intents":[],"structured_output":{"execution":"tool","observed":"workspace_listed"}}`
 			} else {
+				if body.Stream {
+					writeFakeOpenAIStreamToolCall(t, w, body.Model, "call_list_trace", "list", `{"path":".","limit":20}`, "tool_calls")
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(map[string]any{
 					"id":      "chatcmpl-blackbox-tool",
@@ -2244,7 +2388,12 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 			payload = `{"status":"failed","summary":"decomposition required before execution","failure_class":"needs_decomposition","terminal_reason":"task must be decomposed before execution","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-recovery","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""}],"structured_output":{}}`
 		case strings.Contains(prompt, "blackbox llm worker verifier path"):
 			fake.workerCalls.Add(1)
-			payload = `{"status":"completed","summary":"planned verification child task","failure_class":"","terminal_reason":"","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-verify","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{"mode":"builtin_basic","require_structured_output":true},"blackboard_scope":""}],"structured_output":{}}`
+			payload = `{"status":"completed","summary":"planned verification child task","failure_class":"","terminal_reason":"","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-verify","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{"require_structured_output":true},"blackboard_scope":""}],"structured_output":{}}`
+		}
+
+		if body.Stream {
+			writeFakeOpenAIStreamContent(t, w, body.Model, payload, "stop")
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -2271,6 +2420,109 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 		}
 	}))
 	return fake
+}
+
+func writeFakeOpenAIStreamContent(t *testing.T, w http.ResponseWriter, model, content, finishReason string) {
+	t.Helper()
+
+	streamFakeOpenAIChunks(t, w, model,
+		map[string]any{
+			"choices": []map[string]any{{
+				"index": 0,
+				"delta": map[string]any{
+					"role":    "assistant",
+					"content": content,
+				},
+			}},
+		},
+		map[string]any{
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         map[string]any{},
+				"finish_reason": finishReason,
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     32,
+				"completion_tokens": 16,
+				"total_tokens":      48,
+			},
+		},
+	)
+}
+
+func writeFakeOpenAIStreamToolCall(t *testing.T, w http.ResponseWriter, model, callID, toolName, arguments, finishReason string) {
+	t.Helper()
+
+	streamFakeOpenAIChunks(t, w, model,
+		map[string]any{
+			"choices": []map[string]any{{
+				"index": 0,
+				"delta": map[string]any{
+					"role": "assistant",
+					"tool_calls": []map[string]any{{
+						"index": 0,
+						"id":    callID,
+						"type":  "function",
+						"function": map[string]any{
+							"name":      toolName,
+							"arguments": arguments,
+						},
+					}},
+				},
+			}},
+		},
+		map[string]any{
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         map[string]any{},
+				"finish_reason": finishReason,
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     24,
+				"completion_tokens": 12,
+				"total_tokens":      36,
+			},
+		},
+	)
+}
+
+func streamFakeOpenAIChunks(t *testing.T, w http.ResponseWriter, model string, chunks ...map[string]any) {
+	t.Helper()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		t.Fatal("fake llm response writer does not support flushing")
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	for _, chunk := range chunks {
+		payload := map[string]any{
+			"id":      "chatcmpl-blackbox-stream",
+			"object":  "chat.completion.chunk",
+			"created": 1700000000,
+			"model":   "blackbox-llm-model",
+		}
+		for key, value := range chunk {
+			payload[key] = value
+		}
+		if model != "" {
+			payload["model"] = model
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal fake llm stream chunk: %v", err)
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+			t.Fatalf("write fake llm stream chunk: %v", err)
+		}
+		flusher.Flush()
+	}
+	if _, err := fmt.Fprint(w, "data: [DONE]\n\n"); err != nil {
+		t.Fatalf("write fake llm stream done marker: %v", err)
+	}
+	flusher.Flush()
 }
 
 func (f *fakeOpenAICompletionsServer) Close() {

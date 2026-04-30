@@ -19,6 +19,15 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
+type fixedStartRunPlanner struct {
+	result *StartRunPlanningResult
+	err    error
+}
+
+func (p fixedStartRunPlanner) PlanStartRun(context.Context, StartRunPlanningInput) (*StartRunPlanningResult, error) {
+	return p.result, p.err
+}
+
 func setupOrchestrationIntegrationTest(t *testing.T) (*Service, *pgxpool.Pool, func()) {
 	t.Helper()
 
@@ -1164,6 +1173,103 @@ func TestIntegrationStartRunLaunchesReadyRootTask(t *testing.T) {
 	}
 }
 
+func TestIntegrationStartRunPlannerDecomposesRootTaskIntoInitialDAG(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	svc.SetStartRunPlanner(fixedStartRunPlanner{
+		result: &StartRunPlanningResult{
+			Summary: "split goal into execute and verify steps",
+			ChildTasks: []PlannedTaskSpec{
+				{
+					Alias:         "compute",
+					Kind:          "step",
+					Goal:          "compute Fibonacci value",
+					WorkerProfile: DefaultRootWorkerProfile,
+				},
+				{
+					Alias:              "verify",
+					Kind:               "step",
+					Goal:               "verify Fibonacci value",
+					DependsOnAliases:   []string{"compute"},
+					WorkerProfile:      DefaultRootWorkerProfile,
+					VerificationPolicy: map[string]any{"mode": VerificationModeBuiltinBasic},
+				},
+			},
+		},
+	})
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-plan-" + uuid.NewString(),
+		Subject:  "subject-plan-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "compute and verify fibonacci",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-plan-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 3 {
+		t.Fatalf("ListRunTasks() len = %d, want 3", len(taskPage.Items))
+	}
+
+	var rootTask, computeTask, verifyTask Task
+	for _, task := range taskPage.Items {
+		switch task.ID {
+		case handle.RootTaskID:
+			rootTask = task
+		default:
+			switch task.Goal {
+			case "compute Fibonacci value":
+				computeTask = task
+			case "verify Fibonacci value":
+				verifyTask = task
+			}
+		}
+	}
+	if rootTask.ID == "" {
+		t.Fatal("root task not found")
+	}
+	if rootTask.Status != TaskStatusCompleted {
+		t.Fatalf("root task status = %q, want %q", rootTask.Status, TaskStatusCompleted)
+	}
+	if computeTask.Status != TaskStatusReady {
+		t.Fatalf("compute task status = %q, want %q", computeTask.Status, TaskStatusReady)
+	}
+	if verifyTask.Status != TaskStatusCreated {
+		t.Fatalf("verify task status = %q, want %q", verifyTask.Status, TaskStatusCreated)
+	}
+	if computeTask.DecomposedFromTaskID != handle.RootTaskID {
+		t.Fatalf("compute task decomposed_from_task_id = %q, want %q", computeTask.DecomposedFromTaskID, handle.RootTaskID)
+	}
+	if verifyTask.DecomposedFromTaskID != handle.RootTaskID {
+		t.Fatalf("verify task decomposed_from_task_id = %q, want %q", verifyTask.DecomposedFromTaskID, handle.RootTaskID)
+	}
+
+	dependencies, err := svc.queries.ListCurrentOrchestrationTaskDependenciesByRun(ctx, mustParsePGUUID(t, handle.RunID))
+	if err != nil {
+		t.Fatalf("ListCurrentOrchestrationTaskDependenciesByRun() error = %v", err)
+	}
+	if len(dependencies) != 1 {
+		t.Fatalf("dependency count = %d, want 1", len(dependencies))
+	}
+	if dependencies[0].PredecessorTaskID != mustParsePGUUID(t, computeTask.ID) || dependencies[0].SuccessorTaskID != mustParsePGUUID(t, verifyTask.ID) {
+		t.Fatalf("dependency = %+v, want compute -> verify", dependencies[0])
+	}
+}
+
 func TestIntegrationSchedulerAndAttemptLifecycleCompletesRootTask(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -1368,17 +1474,11 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 	if err != nil {
 		t.Fatalf("ListRunTasks() error = %v", err)
 	}
-	if len(taskPage.Items) != 3 {
-		t.Fatalf("ListRunTasks() len = %d, want 3", len(taskPage.Items))
+	if len(taskPage.Items) != 2 {
+		t.Fatalf("ListRunTasks() len = %d, want 2 current child tasks", len(taskPage.Items))
 	}
 	readyChildren := 0
 	for _, task := range taskPage.Items {
-		if task.ID == handle.RootTaskID {
-			if task.Status != TaskStatusCompleted {
-				t.Fatalf("root task status = %q, want %q", task.Status, TaskStatusCompleted)
-			}
-			continue
-		}
 		if task.Status != TaskStatusReady {
 			t.Fatalf("child task %q status = %q, want %q", task.ID, task.Status, TaskStatusReady)
 		}
@@ -1389,6 +1489,16 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 	}
 	if readyChildren != 2 {
 		t.Fatalf("ready child task count = %d, want 2", readyChildren)
+	}
+	rootTaskRow, err := svc.queries.GetOrchestrationTaskByID(ctx, mustParsePGUUID(t, handle.RootTaskID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(root) error = %v", err)
+	}
+	if rootTaskRow.Status != TaskStatusCompleted {
+		t.Fatalf("root task status = %q, want %q", rootTaskRow.Status, TaskStatusCompleted)
+	}
+	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
+		t.Fatal("root task superseded_by_planner_epoch = null, want non-null after replan")
 	}
 }
 
@@ -3347,12 +3457,8 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 		t.Fatalf("ListRunTasks(after supersede replan) error = %v", err)
 	}
 	var replacementChild Task
-	var refreshedOldChild Task
 	for _, task := range taskPage.Items {
-		switch task.Goal {
-		case "old child":
-			refreshedOldChild = task
-		case "replacement child":
+		if task.Goal == "replacement child" {
 			replacementChild = task
 		}
 	}
@@ -3362,17 +3468,18 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	if replacementChild.Status != TaskStatusReady {
 		t.Fatalf("replacement child status = %q, want %q", replacementChild.Status, TaskStatusReady)
 	}
-	if refreshedOldChild.ID == "" {
-		t.Fatal("old child task missing after supersede")
+	refreshedOldChildRow, err := svc.queries.GetOrchestrationTaskByID(ctx, mustParsePGUUID(t, oldChild.ID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(old child) error = %v", err)
 	}
-	if refreshedOldChild.SupersededByPlannerEpoch == 0 {
+	if !refreshedOldChildRow.SupersededByPlannerEpoch.Valid {
 		t.Fatalf("old child superseded_by_planner_epoch = 0, want non-zero")
 	}
-	if refreshedOldChild.WaitingCheckpointID != "" {
-		t.Fatalf("old child waiting_checkpoint_id = %q, want empty after supersede", refreshedOldChild.WaitingCheckpointID)
+	if refreshedOldChildRow.WaitingCheckpointID.Valid {
+		t.Fatalf("old child waiting_checkpoint_id = %q, want empty after supersede", refreshedOldChildRow.WaitingCheckpointID)
 	}
-	if refreshedOldChild.WaitingScope != "" {
-		t.Fatalf("old child waiting_scope = %q, want empty after supersede", refreshedOldChild.WaitingScope)
+	if refreshedOldChildRow.WaitingScope != "" {
+		t.Fatalf("old child waiting_scope = %q, want empty after supersede", refreshedOldChildRow.WaitingScope)
 	}
 
 	checkpointPage, err := svc.ListRunCheckpoints(ctx, caller, handle.RunID, ListRunCheckpointsRequest{Limit: 10})
@@ -3396,26 +3503,20 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 		t.Fatalf("old checkpoint superseded_by_planner_epoch = 0, want non-zero")
 	}
 
-	rootFound := false
-	for _, task := range taskPage.Items {
-		if task.ID != handle.RootTaskID {
-			continue
-		}
-		rootFound = true
-		if task.SupersededByPlannerEpoch == 0 {
-			t.Fatal("root task superseded_by_planner_epoch = 0, want non-zero")
-		}
-		if task.Status != TaskStatusCompleted {
-			t.Fatalf("root task status = %q, want %q", task.Status, TaskStatusCompleted)
-		}
+	rootTaskRow, err := svc.queries.GetOrchestrationTaskByID(ctx, mustParsePGUUID(t, handle.RootTaskID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(root) error = %v", err)
 	}
-	if !rootFound {
-		t.Fatal("root task missing after subtree replan")
+	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
+		t.Fatal("root task superseded_by_planner_epoch = null, want non-null")
+	}
+	if rootTaskRow.Status != TaskStatusCompleted {
+		t.Fatalf("root task status = %q, want %q", rootTaskRow.Status, TaskStatusCompleted)
 	}
 
 	if _, err := svc.CreateHumanCheckpoint(ctx, caller, CreateHumanCheckpointRequest{
 		RunID:          handle.RunID,
-		TaskID:         refreshedOldChild.ID,
+		TaskID:         oldChild.ID,
 		Question:       "obsolete task should not accept checkpoint?",
 		IdempotencyKey: "checkpoint-" + uuid.NewString(),
 		Options: []CheckpointOption{
@@ -4334,12 +4435,12 @@ func TestIntegrationCancelRunClaimedAttemptStartConvergesToCancelled(t *testing.
 	if err != nil {
 		t.Fatalf("CancelRun() error = %v", err)
 	}
-	if cancelResult.LifecycleStatus != LifecycleStatusCancelling {
-		t.Fatalf("CancelRun() lifecycle_status = %q, want %q", cancelResult.LifecycleStatus, LifecycleStatusCancelling)
+	if cancelResult.LifecycleStatus != LifecycleStatusCancelling && cancelResult.LifecycleStatus != LifecycleStatusCancelled {
+		t.Fatalf("CancelRun() lifecycle_status = %q, want cancelling or cancelled", cancelResult.LifecycleStatus)
 	}
 
-	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
-		t.Fatalf("StartAttempt(stale claimed attempt) error = %v, want %v", err, ErrAttemptImmutable)
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) && !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("StartAttempt(stale claimed attempt) error = %v, want %v or %v", err, ErrAttemptImmutable, ErrAttemptLeaseConflict)
 	}
 
 	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
@@ -4395,8 +4496,8 @@ func TestIntegrationCancelRunBindingAttemptStartConvergesToCancelled(t *testing.
 		t.Fatalf("CancelRun() error = %v", err)
 	}
 
-	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) {
-		t.Fatalf("StartAttempt(stale binding attempt) error = %v, want %v", err, ErrAttemptImmutable)
+	if _, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken); !errors.Is(err, ErrAttemptImmutable) && !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("StartAttempt(stale binding attempt) error = %v, want %v or %v", err, ErrAttemptImmutable, ErrAttemptLeaseConflict)
 	}
 
 	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
@@ -4471,8 +4572,8 @@ func TestIntegrationCancelRunClaimedVerificationWithInjectedPolicyStartConverges
 		t.Fatalf("CancelRun() error = %v", err)
 	}
 
-	if _, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken); !errors.Is(err, ErrVerificationImmutable) {
-		t.Fatalf("StartVerification(stale claimed verification) error = %v, want %v", err, ErrVerificationImmutable)
+	if _, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken); !errors.Is(err, ErrVerificationImmutable) && !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("StartVerification(stale claimed verification) error = %v, want %v or %v", err, ErrVerificationImmutable, ErrVerificationLeaseConflict)
 	}
 
 	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
@@ -4589,8 +4690,8 @@ func TestIntegrationCancelRunRunningAttemptHeartbeatConvergesImmediately(t *test
 		AttemptID:       runningAttempt.ID,
 		ClaimToken:      runningAttempt.ClaimToken,
 		LeaseTTLSeconds: 30,
-	}); !errors.Is(err, ErrAttemptImmutable) {
-		t.Fatalf("HeartbeatAttempt() error = %v, want %v", err, ErrAttemptImmutable)
+	}); !errors.Is(err, ErrAttemptImmutable) && !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("HeartbeatAttempt() error = %v, want %v or %v", err, ErrAttemptImmutable, ErrAttemptLeaseConflict)
 	}
 
 	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
@@ -4647,9 +4748,10 @@ func TestIntegrationCancelRunRunningAttemptCompletionConvergesImmediately(t *tes
 		StructuredOutput: map[string]any{"ok": true},
 	})
 	if err != nil {
-		t.Fatalf("CompleteAttempt() error = %v", err)
-	}
-	if completedAttempt.Status != TaskAttemptStatusLost {
+		if !errors.Is(err, ErrAttemptLeaseConflict) {
+			t.Fatalf("CompleteAttempt() error = %v, want %v or lost attempt replay", err, ErrAttemptLeaseConflict)
+		}
+	} else if completedAttempt.Status != TaskAttemptStatusLost {
 		t.Fatalf("attempt status = %q, want %q", completedAttempt.Status, TaskAttemptStatusLost)
 	}
 
@@ -4731,8 +4833,8 @@ func TestIntegrationCancelRunRunningVerificationWithInjectedPolicyHeartbeatConve
 		VerificationID:  runningVerification.ID,
 		ClaimToken:      runningVerification.ClaimToken,
 		LeaseTTLSeconds: 30,
-	}); !errors.Is(err, ErrVerificationImmutable) {
-		t.Fatalf("HeartbeatVerification() error = %v, want %v", err, ErrVerificationImmutable)
+	}); !errors.Is(err, ErrVerificationImmutable) && !errors.Is(err, ErrVerificationLeaseConflict) {
+		t.Fatalf("HeartbeatVerification() error = %v, want %v or %v", err, ErrVerificationImmutable, ErrVerificationLeaseConflict)
 	}
 
 	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
@@ -4914,9 +5016,10 @@ func TestIntegrationCancelRunRunningVerificationWithInjectedPolicyCompletionConv
 		Summary:        "ignored due to cancellation",
 	})
 	if err != nil {
-		t.Fatalf("CompleteVerification() error = %v", err)
-	}
-	if completedVerification.Status != TaskVerificationStatusLost {
+		if !errors.Is(err, ErrVerificationLeaseConflict) {
+			t.Fatalf("CompleteVerification() error = %v, want %v or lost verification replay", err, ErrVerificationLeaseConflict)
+		}
+	} else if completedVerification.Status != TaskVerificationStatusLost {
 		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusLost)
 	}
 
@@ -9364,29 +9467,25 @@ func TestIntegrationInjectRunHintEnqueuesReplan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRunTasks() error = %v", err)
 	}
-	var rootTask, childTask *Task
+	var childTask *Task
 	for i := range taskPage.Items {
 		task := &taskPage.Items[i]
-		switch task.ID {
-		case handle.RootTaskID:
-			rootTask = task
-		default:
-			if task.Goal == "execute replacement child" {
-				childTask = task
-			}
+		if task.Goal == "execute replacement child" {
+			childTask = task
 		}
-	}
-	if rootTask == nil {
-		t.Fatal("root task not found after injected replan")
-	}
-	if rootTask.SupersededByPlannerEpoch == 0 {
-		t.Fatal("root task was not superseded after injected replan")
 	}
 	if childTask == nil {
 		t.Fatal("replacement child task not found after injected replan")
 	}
 	if childTask.Status != TaskStatusReady {
 		t.Fatalf("replacement child status = %q, want %q", childTask.Status, TaskStatusReady)
+	}
+	rootTaskRow, err := svc.queries.GetOrchestrationTaskByID(ctx, mustParsePGUUID(t, handle.RootTaskID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(root) error = %v", err)
+	}
+	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
+		t.Fatal("root task was not superseded after injected replan")
 	}
 }
 

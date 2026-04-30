@@ -53,6 +53,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -84,6 +85,7 @@ import (
 	"github.com/memohai/memoh/internal/network/kubeapi"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	"github.com/memohai/memoh/internal/orchestration"
+	"github.com/memohai/memoh/internal/orchestrationexec"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -174,6 +176,13 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 		return nil, nil
 	}
 	return postgresstore.New(conn)
+}
+
+func providePostgresSQLC(store *postgresstore.Store) *dbsqlc.Queries {
+	if store == nil {
+		return nil
+	}
+	return store.SQLC()
 }
 
 func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
@@ -369,6 +378,25 @@ func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, provi
 			sp.SetModelCreator(agentpkg.SpawnModelCreatorFunc())
 		}
 	}
+}
+
+func configureOrchestrationStartRunPlanner(
+	log *slog.Logger,
+	queries *dbsqlc.Queries,
+	settingsService *settings.Service,
+	modelsService *models.Service,
+	agent *agentpkg.Agent,
+	rc *boot.RuntimeConfig,
+	orchestrationService *orchestration.Service,
+) {
+	orchestrationService.SetStartRunPlanner(orchestrationexec.NewRuntime(
+		log,
+		queries,
+		settingsService,
+		modelsService,
+		agent,
+		rc.TimezoneLocation,
+	))
 }
 
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, channelStore *channel.Store, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service) *flow.Resolver {

@@ -30,6 +30,11 @@ type Service struct {
 	queries            *sqlc.Queries
 	logger             *slog.Logger
 	attemptAssignments AttemptAssignmentPublisher
+	startRunPlanner    StartRunPlanner
+}
+
+type StartRunPlanner interface {
+	PlanStartRun(context.Context, StartRunPlanningInput) (*StartRunPlanningResult, error)
 }
 
 func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Service {
@@ -42,6 +47,10 @@ func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Se
 		logger:             log.With(slog.String("service", "orchestration")),
 		attemptAssignments: noopAttemptAssignmentPublisher{},
 	}
+}
+
+func (s *Service) SetStartRunPlanner(planner StartRunPlanner) {
+	s.startRunPlanner = planner
 }
 
 func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req StartRunRequest) (RunHandle, error) {
@@ -564,6 +573,7 @@ func (s *Service) ListRunTasks(ctx context.Context, caller ControlIdentity, runI
 	if err != nil {
 		return nil, err
 	}
+	items = filterCurrentTasks(items)
 	items = filterTasks(items, req.Status)
 	pageItems, nextAfter, err := paginateTasks(items, req.After, normalizedListLimit(req.Limit), snapshotSeq, filterHash(req.Status))
 	if err != nil {
@@ -1398,14 +1408,6 @@ func (s *Service) CancelRun(ctx context.Context, caller ControlIdentity, runID s
 		runRow = cancellingRun
 	}
 
-	runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, runRow.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list run attempts for cancel: %w", err)
-	}
-	runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, runRow.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list run verifications for cancel: %w", err)
-	}
 	checkpoints, err := qtx.ListCurrentOrchestrationCheckpointsByRun(ctx, runRow.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list checkpoints for cancel: %w", err)
@@ -1445,34 +1447,14 @@ func (s *Service) CancelRun(ctx context.Context, caller ControlIdentity, runID s
 		return nil, fmt.Errorf("list tasks for cancel: %w", err)
 	}
 	for _, task := range tasks {
-		if taskSuperseded(task) || !taskCancellableImmediately(task, runAttempts, runVerifications) {
+		if taskSuperseded(task) {
 			continue
 		}
-		if err := s.cancelTaskVerificationsDuringRunCancellation(ctx, qtx, runRow.ID, task, runVerifications); err != nil {
-			return nil, err
+		switch task.Status {
+		case TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
+			continue
 		}
-		cancelledTask, err := qtx.MarkOrchestrationTaskCancelled(ctx, sqlc.MarkOrchestrationTaskCancelledParams{
-			ID:             task.ID,
-			TerminalReason: "run cancelled",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("cancel task: %w", err)
-		}
-		lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
-			TaskID:           cancelledTask.ID,
-			AggregateType:    "task",
-			AggregateID:      cancelledTask.ID,
-			AggregateVersion: cancelledTask.StatusVersion,
-			Type:             "run.event.task.cancelled",
-			IdempotencyKey:   normalizedIdempotencyKey,
-			Payload: map[string]any{
-				"task_id":         cancelledTask.ID.String(),
-				"previous_status": task.Status,
-				"new_status":      cancelledTask.Status,
-				"terminal_reason": cancelledTask.TerminalReason,
-			},
-		})
-		if err != nil {
+		if err := s.cancelTaskDuringRunCancellation(ctx, qtx, runRow, task, pgtype.UUID{}); err != nil {
 			return nil, err
 		}
 	}
@@ -1925,6 +1907,23 @@ func (s *Service) CreateHumanCheckpoint(ctx context.Context, caller ControlIdent
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if lockedTask.Status != TaskStatusReady {
+		runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, pgRunID)
+		if err != nil {
+			return nil, fmt.Errorf("list run attempts for checkpoint create: %w", err)
+		}
+		runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, pgRunID)
+		if err != nil {
+			return nil, fmt.Errorf("list run verifications for checkpoint create: %w", err)
+		}
+		if err := s.pauseRunBarrierSiblingWork(ctx, qtx, pgRunID, checkpointUUID, lockedTask, runAttempts, runVerifications); err != nil {
+			if errors.Is(err, ErrRunBarrierUnsupported) {
+				return nil, ErrTaskCheckpointUnsupported
+			}
+			return nil, err
+		}
 	}
 
 	waitingTask, err := qtx.MarkOrchestrationTaskWaitingHuman(ctx, sqlc.MarkOrchestrationTaskWaitingHumanParams{
@@ -2606,7 +2605,12 @@ func taskAcceptsHumanCheckpoint(status string) bool {
 }
 
 func taskSupportsHumanCheckpoint(status string) bool {
-	return status == TaskStatusReady
+	switch status {
+	case TaskStatusReady, TaskStatusDispatching, TaskStatusRunning, TaskStatusVerifying:
+		return true
+	default:
+		return false
+	}
 }
 
 func taskAcceptsConstraintUpdate(status string) bool {
@@ -2653,19 +2657,33 @@ func taskBlocksRunBarrier(task sqlc.OrchestrationTask) bool {
 	}
 }
 
-func taskCancellableImmediately(task sqlc.OrchestrationTask, attempts []sqlc.OrchestrationTaskAttempt, verifications []sqlc.OrchestrationTaskVerification) bool {
-	switch task.Status {
-	case TaskStatusCreated, TaskStatusReady, TaskStatusBlocked, TaskStatusWaitingHuman:
-		return true
-	case TaskStatusDispatching:
-		return !hasLeasedAttemptForTask(task.ID, attempts)
-	case TaskStatusVerifying:
-		return !hasLeasedVerificationForTask(task.ID, verifications)
-	case TaskStatusRunning, TaskStatusCompleted, TaskStatusFailed, TaskStatusCancelled:
-		return false
-	default:
-		return false
+func verifierProfileForRunAndTask(runRow sqlc.OrchestrationRun, taskRow sqlc.OrchestrationTask, policy map[string]any) string {
+	profile := verifierProfileForTaskPolicy(policy)
+	if profile != DefaultVerifierProfile {
+		return profile
 	}
+	sourceMetadata := decodeJSONObject(runRow.SourceMetadata)
+	if strings.TrimSpace(stringValue(sourceMetadata["bot_id"])) != "" {
+		return profile
+	}
+	if strings.TrimSpace(taskRow.WorkerProfile) == BuiltinEchoWorkerProfile {
+		return BuiltinBasicVerifierProfile
+	}
+	return BuiltinBasicVerifierProfile
+}
+
+func filterCurrentTasks(items []Task) []Task {
+	if len(items) == 0 {
+		return items
+	}
+	filtered := make([]Task, 0, len(items))
+	for _, item := range items {
+		if item.SupersededByPlannerEpoch != 0 {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func (s *Service) cancelTaskDuringRunCancellation(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, taskRow sqlc.OrchestrationTask, attemptID pgtype.UUID) error {
@@ -2833,32 +2851,6 @@ func (s *Service) cancelTaskVerificationsDuringRunCancellation(
 		}
 	}
 	return nil
-}
-
-func hasLeasedAttemptForTask(taskID pgtype.UUID, attempts []sqlc.OrchestrationTaskAttempt) bool {
-	for _, attempt := range attempts {
-		if attempt.TaskID != taskID {
-			continue
-		}
-		switch attempt.Status {
-		case TaskAttemptStatusClaimed, TaskAttemptStatusBinding, TaskAttemptStatusRunning:
-			return true
-		}
-	}
-	return false
-}
-
-func hasLeasedVerificationForTask(taskID pgtype.UUID, verifications []sqlc.OrchestrationTaskVerification) bool {
-	for _, verification := range verifications {
-		if verification.TaskID != taskID {
-			continue
-		}
-		switch verification.Status {
-		case TaskVerificationStatusClaimed, TaskVerificationStatusRunning:
-			return true
-		}
-	}
-	return false
 }
 
 func taskWaitingOnRunBarrier(task sqlc.OrchestrationTask, checkpointID pgtype.UUID) bool {

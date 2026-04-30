@@ -142,6 +142,18 @@ func TestBuiltinVerifierProfilesKeepsServerVerifierOnBuiltinProfile(t *testing.T
 	}
 }
 
+func TestValidatePlannedChildTasksRejectsCycles(t *testing.T) {
+	t.Parallel()
+
+	err := validatePlannedChildTasks([]plannedChildTask{
+		{Alias: "a", Goal: "task a", DependsOnAliases: []string{"b"}},
+		{Alias: "b", Goal: "task b", DependsOnAliases: []string{"a"}},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validatePlannedChildTasks(cycle) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
 func containsStringForTest(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -539,8 +551,11 @@ func TestTaskSupportsHumanCheckpoint(t *testing.T) {
 	if !taskSupportsHumanCheckpoint(TaskStatusReady) {
 		t.Fatal("taskSupportsHumanCheckpoint(ready) = false, want true")
 	}
-	if taskSupportsHumanCheckpoint(TaskStatusRunning) {
-		t.Fatal("taskSupportsHumanCheckpoint(running) = true, want false")
+	if !taskSupportsHumanCheckpoint(TaskStatusRunning) {
+		t.Fatal("taskSupportsHumanCheckpoint(running) = false, want true")
+	}
+	if !taskSupportsHumanCheckpoint(TaskStatusVerifying) {
+		t.Fatal("taskSupportsHumanCheckpoint(verifying) = false, want true")
 	}
 }
 

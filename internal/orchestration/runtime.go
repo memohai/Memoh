@@ -296,7 +296,50 @@ func (s *Service) processStartRunPlanningIntent(ctx context.Context, qtx *sqlc.Q
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("lock task for start_run intent: %w", err)
 	}
 	var lastEvent sqlc.OrchestrationEvent
+	initiallyDecomposed := false
 	if taskRow.Status == TaskStatusCreated {
+		if childPlans, planSummary, planErr := s.planStartRunTask(ctx, runRow, taskRow); planErr != nil {
+			s.logger.Warn("start run planner failed; falling back to direct execution",
+				slog.String("run_id", runRow.ID.String()),
+				slog.String("task_id", taskRow.ID.String()),
+				slog.Any("error", planErr),
+			)
+		} else if len(childPlans) > 0 {
+			if _, err := s.expandChildTasksFromPlans(ctx, qtx, runRow, taskRow, pgtype.UUID{}, childPlans, "planning_intent.start_run"); err != nil {
+				return sqlc.OrchestrationEvent{}, err
+			}
+			completedTask, err := qtx.MarkOrchestrationTaskCompleted(ctx, sqlc.MarkOrchestrationTaskCompletedParams{
+				ID:             taskRow.ID,
+				LatestResultID: pgtype.UUID{},
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, fmt.Errorf("mark root task completed from start_run intent: %w", err)
+			}
+			completionPayload := map[string]any{
+				"task_id":           completedTask.ID.String(),
+				"previous_status":   taskRow.Status,
+				"new_status":        completedTask.Status,
+				"completion_reason": "planning_intent.start_run.decomposed",
+			}
+			if strings.TrimSpace(planSummary) != "" {
+				completionPayload["planning_summary"] = strings.TrimSpace(planSummary)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, runRow.ID, eventSpec{
+				TaskID:           completedTask.ID,
+				AggregateType:    "task",
+				AggregateID:      completedTask.ID,
+				AggregateVersion: completedTask.StatusVersion,
+				Type:             "run.event.task.completed",
+				Payload:          completionPayload,
+			})
+			if err != nil {
+				return sqlc.OrchestrationEvent{}, err
+			}
+			taskRow = completedTask
+			initiallyDecomposed = true
+		}
+	}
+	if taskRow.Status == TaskStatusCreated && !initiallyDecomposed {
 		readyTask, err := qtx.MarkOrchestrationTaskReadyFromCheckpoint(ctx, taskRow.ID)
 		if err != nil {
 			return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task ready from start_run intent: %w", err)
@@ -340,6 +383,34 @@ func (s *Service) processStartRunPlanningIntent(ctx context.Context, qtx *sqlc.Q
 		}
 	}
 	return lastEvent, nil
+}
+
+func (s *Service) planStartRunTask(ctx context.Context, runRow sqlc.OrchestrationRun, taskRow sqlc.OrchestrationTask) ([]plannedChildTask, string, error) {
+	if s == nil || s.startRunPlanner == nil {
+		return nil, "", nil
+	}
+	if strings.TrimSpace(taskRow.WorkerProfile) != DefaultRootWorkerProfile {
+		return nil, "", nil
+	}
+	sourceMetadata := decodeJSONObject(runRow.SourceMetadata)
+	if strings.TrimSpace(stringValue(sourceMetadata["bot_id"])) == "" {
+		return nil, "", nil
+	}
+	result, err := s.startRunPlanner.PlanStartRun(ctx, StartRunPlanningInput{
+		Run:      toRun(runRow),
+		RootTask: toTask(taskRow),
+	})
+	if err != nil || result == nil {
+		return nil, "", err
+	}
+	childPlans := plannedChildTasksFromSpecs(result.ChildTasks)
+	if len(childPlans) == 0 {
+		return nil, strings.TrimSpace(result.Summary), nil
+	}
+	if err := validatePlannedChildTasks(childPlans); err != nil {
+		return nil, "", err
+	}
+	return childPlans, strings.TrimSpace(result.Summary), nil
 }
 
 func (s *Service) processCheckpointResumePlanningIntent(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, intent sqlc.OrchestrationPlanningIntent) (sqlc.OrchestrationEvent, error) {
@@ -674,7 +745,7 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 					TaskID:          taskRow.ID,
 					ResultID:        resultUUID,
 					AttemptNo:       attemptRow.AttemptNo,
-					VerifierProfile: verifierProfileForTaskPolicy(verificationPolicy),
+					VerifierProfile: verifierProfileForRunAndTask(runRow, taskRow, verificationPolicy),
 					Status:          TaskVerificationStatusCreated,
 				})
 				if err != nil {
@@ -3212,6 +3283,8 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 		return fmt.Errorf("%w: planned child tasks are required", ErrPlanningIntentInvalid)
 	}
 	aliases := make(map[string]struct{}, len(childPlans))
+	dependencyCount := make(map[string]int, len(childPlans))
+	dependents := make(map[string][]string, len(childPlans))
 	for _, plan := range childPlans {
 		alias := strings.TrimSpace(plan.Alias)
 		if alias == "" {
@@ -3223,20 +3296,82 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 		aliases[alias] = struct{}{}
 	}
 	for _, plan := range childPlans {
+		alias := strings.TrimSpace(plan.Alias)
 		for _, depAlias := range plan.DependsOnAliases {
 			trimmedDepAlias := strings.TrimSpace(depAlias)
 			if trimmedDepAlias == "" {
 				continue
 			}
-			if trimmedDepAlias == strings.TrimSpace(plan.Alias) {
+			if trimmedDepAlias == alias {
 				return fmt.Errorf("%w: child task %q cannot depend on itself", ErrPlanningIntentInvalid, plan.Alias)
 			}
 			if _, exists := aliases[trimmedDepAlias]; !exists {
 				return fmt.Errorf("%w: unknown child task dependency alias %q", ErrPlanningIntentInvalid, trimmedDepAlias)
 			}
+			if alias != "" {
+				dependencyCount[alias]++
+				dependents[trimmedDepAlias] = append(dependents[trimmedDepAlias], alias)
+			}
 		}
 	}
+	remaining := 0
+	queue := make([]string, 0, len(aliases))
+	for alias := range aliases {
+		remaining++
+		if dependencyCount[alias] == 0 {
+			queue = append(queue, alias)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, successor := range dependents[current] {
+			dependencyCount[successor]--
+			if dependencyCount[successor] == 0 {
+				queue = append(queue, successor)
+			}
+		}
+	}
+	if remaining > 0 && visited != remaining {
+		return fmt.Errorf("%w: child task dependencies must form an acyclic graph", ErrPlanningIntentInvalid)
+	}
 	return nil
+}
+
+func plannedChildTasksFromSpecs(specs []PlannedTaskSpec) []plannedChildTask {
+	if len(specs) == 0 {
+		return nil
+	}
+	plans := make([]plannedChildTask, 0, len(specs))
+	for _, spec := range specs {
+		goal := strings.TrimSpace(spec.Goal)
+		if goal == "" {
+			continue
+		}
+		workerProfile := strings.TrimSpace(spec.WorkerProfile)
+		if workerProfile == "" {
+			workerProfile = DefaultRootWorkerProfile
+		}
+		kind := strings.TrimSpace(spec.Kind)
+		if kind == "" {
+			kind = "child"
+		}
+		plans = append(plans, plannedChildTask{
+			Alias:              strings.TrimSpace(spec.Alias),
+			Kind:               kind,
+			Goal:               goal,
+			Inputs:             normalizeObject(spec.Inputs),
+			DependsOnAliases:   normalizeStringSlice(spec.DependsOnAliases),
+			WorkerProfile:      workerProfile,
+			Priority:           spec.Priority,
+			RetryPolicy:        normalizeObject(spec.RetryPolicy),
+			VerificationPolicy: normalizeObject(spec.VerificationPolicy),
+			BlackboardScope:    strings.TrimSpace(spec.BlackboardScope),
+		})
+	}
+	return plans
 }
 
 func isActiveExecutionTaskStatus(status string) bool {
@@ -3551,6 +3686,24 @@ func stringSliceValue(raw any) []string {
 		return nil
 	}
 	return values
+}
+
+func normalizeStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func dependencyPredecessorIDs(deps []sqlc.OrchestrationTaskDependency) []string {
