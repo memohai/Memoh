@@ -195,6 +195,13 @@ func TestOrchestrationToolStatusSummarizesRun(t *testing.T) {
 	if payload["failed_tasks"] != 1 {
 		t.Fatalf("failed_tasks = %#v, want %d", payload["failed_tasks"], 1)
 	}
+	activeTasks, ok := payload["active_tasks"].([]map[string]any)
+	if !ok {
+		t.Fatalf("active_tasks type = %T", payload["active_tasks"])
+	}
+	if len(activeTasks) != 2 {
+		t.Fatalf("len(active_tasks) = %d, want 2", len(activeTasks))
+	}
 	openCheckpoints, ok := payload["open_checkpoints"].([]map[string]any)
 	if !ok {
 		t.Fatalf("open_checkpoints type = %T", payload["open_checkpoints"])
@@ -346,6 +353,9 @@ func TestOrchestrationToolRetryForwardsRequest(t *testing.T) {
 			if taskID != "task-1" {
 				t.Fatalf("taskID = %q", taskID)
 			}
+			if req.ExpectedRunID != "run-1" {
+				t.Fatalf("expected_run_id = %q, want %q", req.ExpectedRunID, "run-1")
+			}
 			if req.Reason != "retry after review" {
 				t.Fatalf("reason = %q", req.Reason)
 			}
@@ -370,6 +380,7 @@ func TestOrchestrationToolRetryForwardsRequest(t *testing.T) {
 	}
 	result, err := tools[0].Execute(nil, map[string]any{
 		"action":          "retry",
+		"run_id":          "run-1",
 		"task_id":         "task-1",
 		"summary":         "retry after review",
 		"idempotency_key": "retry-1",

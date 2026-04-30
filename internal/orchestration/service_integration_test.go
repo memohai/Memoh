@@ -9390,6 +9390,131 @@ func TestIntegrationInjectRunHintEnqueuesReplan(t *testing.T) {
 	}
 }
 
+func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-hint-active-replan-" + uuid.NewString(),
+		Subject:  "subject-hint-active-replan-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject injected replans against active subtree",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask(root) = false, want true")
+	}
+	rootAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt(root) error = %v", err)
+	}
+	runningRootAttempt, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(root) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     runningRootAttempt.ID,
+		ClaimToken:    runningRootAttempt.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "create child subtree",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{"id": "active", "goal": "active child"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(root request_replan) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after first replan) error = %v", err)
+	}
+	var activeChild Task
+	for _, task := range taskPage.Items {
+		if task.Goal == "active child" {
+			activeChild = task
+			break
+		}
+	}
+	if activeChild.ID == "" {
+		t.Fatal("active child task not found")
+	}
+
+	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask(active child) error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask(active child) = false, want true")
+	}
+	activeAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt(active child) error = %v", err)
+	}
+	if _, err := svc.StartAttempt(ctx, activeAttempt.ID, activeAttempt.ClaimToken); err != nil {
+		t.Fatalf("StartAttempt(active child) error = %v", err)
+	}
+
+	_, err = svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace active subtree",
+			TargetTaskID: activeChild.ID,
+			Details: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{
+						map[string]any{"alias": "replacement", "kind": "step", "goal": "replacement"},
+					},
+				},
+			},
+		},
+		IdempotencyKey: "inject-active-replan-" + uuid.NewString(),
+	})
+	if !errors.Is(err, ErrRunHintUnsupported) {
+		t.Fatalf("InjectRunHint(active subtree replan) error = %v, want %v", err, ErrRunHintUnsupported)
+	}
+	var pendingHintIntentCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE run_id = $1
+		  AND kind = $2
+		  AND status = $3
+	`, mustParsePGUUID(t, handle.RunID), PlanningIntentKindReplan, PlanningIntentStatusPending).Scan(&pendingHintIntentCount); err != nil {
+		t.Fatalf("count pending injected replan intents: %v", err)
+	}
+	if pendingHintIntentCount != 0 {
+		t.Fatalf("pending injected replan intents = %d, want 0", pendingHintIntentCount)
+	}
+}
+
 func TestIntegrationInjectRunHintContextUpdateMergesRunInput(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -9494,6 +9619,52 @@ func TestIntegrationInjectRunHintConstraintUpdateMergesTaskInputs(t *testing.T) 
 	}
 }
 
+func TestIntegrationInjectRunHintConstraintUpdateRejectsCompletedTask(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-constraint-completed", Subject: "user-hint-constraint-completed"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject completed task constraint update",
+		IdempotencyKey: "inject-constraint-completed-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	rootTaskID := mustParsePGUUID(t, handle.RootTaskID)
+	updatedTask, err := svc.queries.MarkOrchestrationTaskCompleted(ctx, sqlc.MarkOrchestrationTaskCompletedParams{
+		ID:             rootTaskID,
+		LatestResultID: pgtype.UUID{},
+	})
+	if err != nil {
+		t.Fatalf("MarkOrchestrationTaskCompleted() error = %v", err)
+	}
+	if updatedTask.Status != TaskStatusCompleted {
+		t.Fatalf("completed task status = %q, want %q", updatedTask.Status, TaskStatusCompleted)
+	}
+
+	_, err = svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindConstraintUpdate,
+			Summary:      "should be rejected for completed task",
+			TargetTaskID: handle.RootTaskID,
+			Details: map[string]any{
+				"constraints": map[string]any{"network": "disabled"},
+			},
+		},
+		IdempotencyKey: "inject-constraint-completed-hint",
+	})
+	if !errors.Is(err, ErrRunHintUnsupported) {
+		t.Fatalf("InjectRunHint(completed constraint_update) error = %v, want %v", err, ErrRunHintUnsupported)
+	}
+}
+
 func TestIntegrationRetryTaskMarksFailedTaskReady(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -9524,9 +9695,21 @@ func TestIntegrationRetryTaskMarksFailedTaskReady(t *testing.T) {
 	if failedTask.Status != TaskStatusFailed {
 		t.Fatalf("failed task status = %q, want %q", failedTask.Status, TaskStatusFailed)
 	}
+	runUUID := mustParsePGUUID(t, handle.RunID)
+	failedRun, err := svc.queries.MarkOrchestrationRunFailed(ctx, sqlc.MarkOrchestrationRunFailedParams{
+		ID:             runUUID,
+		TerminalReason: "simulated failure",
+	})
+	if err != nil {
+		t.Fatalf("MarkOrchestrationRunFailed() error = %v", err)
+	}
+	if failedRun.LifecycleStatus != LifecycleStatusFailed {
+		t.Fatalf("failed run lifecycle_status = %q, want %q", failedRun.LifecycleStatus, LifecycleStatusFailed)
+	}
 
 	result, err := svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
 		Reason:         "retry after transient failure",
+		ExpectedRunID:  handle.RunID,
 		IdempotencyKey: "retry-task",
 	})
 	if err != nil {
@@ -9555,5 +9738,283 @@ func TestIntegrationRetryTaskMarksFailedTaskReady(t *testing.T) {
 	}
 	if rootTask.TerminalReason != "" {
 		t.Fatalf("root task terminal_reason after retry = %q, want empty", rootTask.TerminalReason)
+	}
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status after retry = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	if snapshot.Run.TerminalReason != "" {
+		t.Fatalf("run terminal_reason after retry = %q, want empty", snapshot.Run.TerminalReason)
+	}
+}
+
+func TestIntegrationRetryTaskRejectsVerifiedFailedTask(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-retry-verified", Subject: "user-retry-verified"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject retry for verified failed task",
+		IdempotencyKey: "retry-task-verified-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	runUUID := mustParsePGUUID(t, handle.RunID)
+	taskUUID := mustParsePGUUID(t, handle.RootTaskID)
+	taskResult, err := svc.queries.CreateOrchestrationTaskResult(ctx, sqlc.CreateOrchestrationTaskResultParams{
+		RunID:            runUUID,
+		TaskID:           taskUUID,
+		AttemptID:        pgtype.UUID{},
+		Status:           "failed",
+		Summary:          "failed result",
+		FailureClass:     "verification_required",
+		RequestReplan:    false,
+		ArtifactIntents:  marshalJSON([]map[string]any{}),
+		StructuredOutput: marshalObject(map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("CreateOrchestrationTaskResult() error = %v", err)
+	}
+	_, verificationUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID() error = %v", err)
+	}
+	verification, err := svc.queries.CreateOrchestrationTaskVerification(ctx, sqlc.CreateOrchestrationTaskVerificationParams{
+		ID:              verificationUUID,
+		RunID:           runUUID,
+		TaskID:          taskUUID,
+		ResultID:        taskResult.ID,
+		AttemptNo:       1,
+		VerifierProfile: "builtin.echo",
+		Status:          TaskVerificationStatusCompleted,
+	})
+	if err != nil {
+		t.Fatalf("CreateOrchestrationTaskVerification() error = %v", err)
+	}
+	if verification.Status != TaskVerificationStatusCompleted {
+		t.Fatalf("verification status = %q, want %q", verification.Status, TaskVerificationStatusCompleted)
+	}
+	_, err = svc.queries.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+		ID:             taskUUID,
+		LatestResultID: taskResult.ID,
+		TerminalReason: "failed after verification",
+	})
+	if err != nil {
+		t.Fatalf("MarkOrchestrationTaskFailed() error = %v", err)
+	}
+	_, err = svc.queries.MarkOrchestrationRunFailed(ctx, sqlc.MarkOrchestrationRunFailedParams{
+		ID:             runUUID,
+		TerminalReason: "failed after verification",
+	})
+	if err != nil {
+		t.Fatalf("MarkOrchestrationRunFailed() error = %v", err)
+	}
+
+	_, err = svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
+		Reason:         "retry after verification",
+		ExpectedRunID:  handle.RunID,
+		IdempotencyKey: "retry-task-verified",
+	})
+	if !errors.Is(err, ErrTaskRetryUnsupported) {
+		t.Fatalf("RetryTask(verified failed task) error = %v, want %v", err, ErrTaskRetryUnsupported)
+	}
+}
+
+func TestIntegrationRetryTaskRejectsMismatchedRunID(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-retry-run-mismatch", Subject: "user-retry-run-mismatch"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject retry for mismatched run id",
+		IdempotencyKey: "retry-task-run-mismatch-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	rootTaskID := mustParsePGUUID(t, handle.RootTaskID)
+	if _, err := svc.queries.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+		ID:             rootTaskID,
+		LatestResultID: pgtype.UUID{},
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationTaskFailed() error = %v", err)
+	}
+	runUUID := mustParsePGUUID(t, handle.RunID)
+	if _, err := svc.queries.MarkOrchestrationRunFailed(ctx, sqlc.MarkOrchestrationRunFailedParams{
+		ID:             runUUID,
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationRunFailed() error = %v", err)
+	}
+
+	_, err = svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
+		Reason:         "retry with wrong run id",
+		ExpectedRunID:  "11111111-1111-1111-1111-111111111111",
+		IdempotencyKey: "retry-task-run-mismatch",
+	})
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("RetryTask(mismatched run id) error = %v, want %v", err, ErrTaskNotFound)
+	}
+}
+
+func TestIntegrationRetryTaskRejectsActivePlanningIntent(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-retry-active-intent", Subject: "user-retry-active-intent"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject retry when run still has active planning intent",
+		IdempotencyKey: "retry-task-active-intent-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskUUID := mustParsePGUUID(t, handle.RootTaskID)
+	runUUID := mustParsePGUUID(t, handle.RunID)
+	if _, err := svc.queries.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+		ID:             taskUUID,
+		LatestResultID: pgtype.UUID{},
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationTaskFailed() error = %v", err)
+	}
+	if _, err := svc.queries.MarkOrchestrationRunFailed(ctx, sqlc.MarkOrchestrationRunFailedParams{
+		ID:             runUUID,
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationRunFailed() error = %v", err)
+	}
+	_, intentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               intentUUID,
+		RunID:            runUUID,
+		TaskID:           taskUUID,
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: 1,
+		Payload:          marshalObject(map[string]any{"run_id": handle.RunID}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent() error = %v", err)
+	}
+
+	_, err = svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
+		Reason:         "retry while intent pending",
+		ExpectedRunID:  handle.RunID,
+		IdempotencyKey: "retry-task-active-intent",
+	})
+	if !errors.Is(err, ErrTaskRetryUnsupported) {
+		t.Fatalf("RetryTask(active planning intent) error = %v, want %v", err, ErrTaskRetryUnsupported)
+	}
+}
+
+func TestIntegrationRetryTaskRejectsSiblingActiveAttempt(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-retry-sibling-attempt", Subject: "user-retry-sibling-attempt"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject retry when sibling attempt is still active",
+		IdempotencyKey: "retry-task-sibling-attempt-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	runUUID := mustParsePGUUID(t, handle.RunID)
+	rootTaskUUID := mustParsePGUUID(t, handle.RootTaskID)
+	if _, err := svc.queries.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+		ID:             rootTaskUUID,
+		LatestResultID: pgtype.UUID{},
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationTaskFailed() error = %v", err)
+	}
+	if _, err := svc.queries.MarkOrchestrationRunFailed(ctx, sqlc.MarkOrchestrationRunFailedParams{
+		ID:             runUUID,
+		TerminalReason: "simulated failure",
+	}); err != nil {
+		t.Fatalf("MarkOrchestrationRunFailed() error = %v", err)
+	}
+
+	_, siblingTaskUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(sibling task) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationTask(ctx, sqlc.CreateOrchestrationTaskParams{
+		ID:                   siblingTaskUUID,
+		RunID:                runUUID,
+		DecomposedFromTaskID: pgtype.UUID{},
+		Kind:                 "child",
+		Goal:                 "active sibling",
+		Inputs:               marshalObject(map[string]any{"kind": "sibling"}),
+		PlannerEpoch:         1,
+		WorkerProfile:        DefaultRootWorkerProfile,
+		Priority:             0,
+		RetryPolicy:          marshalObject(nil),
+		VerificationPolicy:   marshalObject(nil),
+		Status:               TaskStatusRunning,
+		StatusVersion:        1,
+		WaitingScope:         "",
+		BlockedReason:        "",
+		TerminalReason:       "",
+		BlackboardScope:      "run.retry.sibling",
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationTask(sibling) error = %v", err)
+	}
+	_, siblingAttemptUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(sibling attempt) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationTaskAttempt(ctx, sqlc.CreateOrchestrationTaskAttemptParams{
+		ID:               siblingAttemptUUID,
+		RunID:            runUUID,
+		TaskID:           siblingTaskUUID,
+		AttemptNo:        1,
+		Status:           TaskAttemptStatusRunning,
+		InputManifestID:  pgtype.UUID{},
+		ParkCheckpointID: pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationTaskAttempt(sibling) error = %v", err)
+	}
+
+	_, err = svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
+		Reason:         "retry while sibling attempt active",
+		ExpectedRunID:  handle.RunID,
+		IdempotencyKey: "retry-task-sibling-attempt",
+	})
+	if !errors.Is(err, ErrTaskRetryUnsupported) {
+		t.Fatalf("RetryTask(sibling active attempt) error = %v, want %v", err, ErrTaskRetryUnsupported)
 	}
 }

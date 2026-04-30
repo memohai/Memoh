@@ -69,6 +69,8 @@ RETURNING last_event_seq;
 -- name: MarkOrchestrationRunRunning :one
 UPDATE orchestration_runs
 SET lifecycle_status = 'running',
+    terminal_reason = '',
+    finished_at = NULL,
     status_version = status_version + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)

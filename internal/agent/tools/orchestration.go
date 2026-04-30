@@ -53,7 +53,7 @@ func (p *OrchestrationProvider) Tools(ctx context.Context, session SessionContex
 	sess := session
 	return []sdk.Tool{{
 		Name:        "orchestrate",
-		Description: "Manage orchestration runs for the current bot. Supported actions: start, status, hint, retry, resolve, cancel.",
+		Description: "Manage orchestration runs owned by the current bot owner. Supported actions: start, status, hint, retry, resolve, cancel.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -65,7 +65,7 @@ func (p *OrchestrationProvider) Tools(ctx context.Context, session SessionContex
 				"goal":            map[string]any{"type": "string", "description": "Run goal for action=start."},
 				"input":           map[string]any{"type": "object", "description": "Optional structured run input for action=start."},
 				"output_schema":   map[string]any{"type": "object", "description": "Optional output schema for action=start."},
-				"run_id":          map[string]any{"type": "string", "description": "Run ID for action=status, action=hint, or action=cancel."},
+				"run_id":          map[string]any{"type": "string", "description": "Run ID for action=status, action=hint, action=retry, or action=cancel."},
 				"task_id":         map[string]any{"type": "string", "description": "Task ID for action=retry or targeted action=hint."},
 				"hint_kind":       map[string]any{"type": "string", "description": "Hint kind for action=hint."},
 				"summary":         map[string]any{"type": "string", "description": "Human-readable summary for action=hint or action=retry."},
@@ -74,7 +74,7 @@ func (p *OrchestrationProvider) Tools(ctx context.Context, session SessionContex
 				"mode":            map[string]any{"type": "string", "description": "Checkpoint resolution mode for action=resolve."},
 				"option_id":       map[string]any{"type": "string", "description": "Checkpoint option ID for action=resolve."},
 				"freeform_input":  map[string]any{"type": "string", "description": "Freeform checkpoint response for action=resolve."},
-				"idempotency_key": map[string]any{"type": "string", "description": "Idempotency key for action=start, action=resolve, and action=cancel."},
+				"idempotency_key": map[string]any{"type": "string", "description": "Idempotency key for action=start, action=hint, action=retry, action=resolve, and action=cancel."},
 			},
 			"required": []string{"action"},
 		},
@@ -194,6 +194,8 @@ func (p *OrchestrationProvider) executeStatus(ctx context.Context, caller orches
 			completedTasks++
 		case orchestration.TaskStatusFailed:
 			failedTasks++
+		case orchestration.TaskStatusCancelled:
+			continue
 		default:
 			activeTasks = append(activeTasks, summarizeTask(task))
 		}
@@ -293,6 +295,10 @@ func (p *OrchestrationProvider) executeHint(ctx context.Context, caller orchestr
 }
 
 func (p *OrchestrationProvider) executeRetry(ctx context.Context, caller orchestration.ControlIdentity, args map[string]any) (any, error) {
+	runID := StringArg(args, "run_id")
+	if runID == "" {
+		return nil, errors.New("run_id is required for action=retry")
+	}
 	taskID := StringArg(args, "task_id")
 	if taskID == "" {
 		return nil, errors.New("task_id is required for action=retry")
@@ -302,6 +308,7 @@ func (p *OrchestrationProvider) executeRetry(ctx context.Context, caller orchest
 		return nil, errors.New("idempotency_key is required for action=retry")
 	}
 	result, err := p.service.RetryTask(ctx, caller, taskID, orchestration.RetryTaskRequest{
+		ExpectedRunID:  runID,
 		Reason:         StringArg(args, "summary"),
 		IdempotencyKey: idempotencyKey,
 	})

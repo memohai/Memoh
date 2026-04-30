@@ -864,6 +864,9 @@ func (s *Service) InjectRunHint(ctx context.Context, caller ControlIdentity, run
 		if taskSuperseded(lockedTask) {
 			return nil, ErrTaskImmutable
 		}
+		if normalizedHint.Kind == RunHintKindConstraintUpdate && !taskAcceptsConstraintUpdate(lockedTask.Status) {
+			return nil, ErrRunHintUnsupported
+		}
 	}
 
 	record, replay, err := ensureIdempotencyRecord(ctx, qtx, caller, methodInjectRunHint, normalizedRunID, normalizedIdempotencyKey, requestHash)
@@ -887,6 +890,18 @@ func (s *Service) InjectRunHint(ctx context.Context, caller ControlIdentity, run
 	)
 	switch normalizedHint.Kind {
 	case RunHintKindReplanRequest:
+		allTasks, listTasksErr := qtx.ListCurrentOrchestrationTasksByRun(ctx, lockedRun.ID)
+		if listTasksErr != nil {
+			return nil, fmt.Errorf("list current tasks for replan hint: %w", listTasksErr)
+		}
+		subtreeTaskIDs := buildTaskSubtreeSet(allTasks, lockedTask.ID)
+		allDependencies, listDepsErr := qtx.ListCurrentOrchestrationTaskDependenciesByRun(ctx, lockedRun.ID)
+		if listDepsErr != nil {
+			return nil, fmt.Errorf("list current task dependencies for replan hint: %w", listDepsErr)
+		}
+		if err := validateReplanSubtreeIsQuiescent(ctx, qtx, lockedRun.ID, subtreeTaskIDs, allTasks, allDependencies); err != nil {
+			return nil, errors.Join(ErrRunHintUnsupported, err)
+		}
 		planningIntentID, lastEvent, err = s.injectReplanHint(ctx, qtx, lockedRun, lockedTask, normalizedHint, normalizedIdempotencyKey)
 		if err != nil {
 			return nil, err
@@ -1024,6 +1039,18 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid task_id", ErrInvalidArgument)
 	}
+	normalizedExpectedRunID := strings.TrimSpace(req.ExpectedRunID)
+	var pgExpectedRunID pgtype.UUID
+	if normalizedExpectedRunID != "" {
+		normalizedExpectedRunID, err = normalizeRequiredUUID(normalizedExpectedRunID, "run_id")
+		if err != nil {
+			return nil, err
+		}
+		pgExpectedRunID, err = db.ParseUUID(normalizedExpectedRunID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid run_id", ErrInvalidArgument)
+		}
+	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -1053,6 +1080,23 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 		return &result, nil
 	}
 
+	taskPreview, err := qtx.GetOrchestrationTaskByID(ctx, pgTaskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("load task for retry: %w", err)
+	}
+	if pgExpectedRunID.Valid && taskPreview.RunID != pgExpectedRunID {
+		return nil, ErrTaskNotFound
+	}
+	lockedRun, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, taskPreview.RunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("lock run for retry: %w", err)
+	}
 	lockedTask, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, pgTaskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1060,17 +1104,13 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 		}
 		return nil, fmt.Errorf("lock task for retry: %w", err)
 	}
-	lockedRun, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, lockedTask.RunID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrRunNotFound
-		}
-		return nil, fmt.Errorf("lock run for retry: %w", err)
+	if lockedTask.RunID != lockedRun.ID {
+		return nil, ErrTaskNotFound
 	}
 	if err := authorizeRun(caller, lockedRun); err != nil {
 		return nil, ErrTaskNotFound
 	}
-	if !runAcceptsExternalMutations(lockedRun.LifecycleStatus) {
+	if !runAcceptsRetry(lockedRun.LifecycleStatus) {
 		return nil, ErrRunImmutable
 	}
 	if taskSuperseded(lockedTask) || lockedTask.Status != TaskStatusFailed {
@@ -1084,12 +1124,28 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 	if activeAttempts > 0 {
 		return nil, ErrTaskRetryUnsupported
 	}
+	activePlanningIntents, err := qtx.CountActiveOrchestrationPlanningIntentsByRun(ctx, lockedRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("count active planning intents for retry: %w", err)
+	}
+	if activePlanningIntents > 0 {
+		return nil, ErrTaskRetryUnsupported
+	}
+	runAttempts, err := qtx.ListCurrentOrchestrationTaskAttemptsByRun(ctx, lockedRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list run attempts for retry: %w", err)
+	}
+	for _, attempt := range runAttempts {
+		if attempt.TaskID != lockedTask.ID && isActiveAttemptStatus(attempt.Status) {
+			return nil, ErrTaskRetryUnsupported
+		}
+	}
 	runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, lockedRun.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list task verifications for retry: %w", err)
 	}
 	for _, verification := range runVerifications {
-		if verification.TaskID == lockedTask.ID && !isTerminalVerificationStatus(verification.Status) {
+		if verification.TaskID == lockedTask.ID || isActiveVerificationStatus(verification.Status) {
 			return nil, ErrTaskRetryUnsupported
 		}
 	}
@@ -1112,6 +1168,30 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, lockedTask.ID)
 	if err != nil {
 		return nil, fmt.Errorf("mark task ready for retry: %w", err)
+	}
+	if lockedRun.LifecycleStatus == LifecycleStatusFailed {
+		runningRun, markRunErr := qtx.MarkOrchestrationRunRunning(ctx, lockedRun.ID)
+		if markRunErr != nil {
+			return nil, fmt.Errorf("mark failed run running for retry: %w", markRunErr)
+		}
+		if _, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+			TaskID:           readyTask.ID,
+			AggregateType:    "run",
+			AggregateID:      runningRun.ID,
+			AggregateVersion: runningRun.StatusVersion,
+			IdempotencyKey:   normalizedIdempotencyKey,
+			Type:             "run.event.running",
+			Payload: map[string]any{
+				"run_id":          runningRun.ID.String(),
+				"previous_status": lockedRun.LifecycleStatus,
+				"new_status":      runningRun.LifecycleStatus,
+				"entry_reason":    "retry_task",
+				"task_id":         readyTask.ID.String(),
+			},
+		}); err != nil {
+			return nil, err
+		}
+		lockedRun = runningRun
 	}
 	lastEvent, err := s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
 		TaskID:           readyTask.ID,
@@ -2462,6 +2542,13 @@ func runAcceptsExternalMutations(status string) bool {
 	}
 }
 
+func runAcceptsRetry(status string) bool {
+	if status == LifecycleStatusFailed {
+		return true
+	}
+	return runAcceptsExternalMutations(status)
+}
+
 func runAcceptsPlanningIntent(kind, status string, basePlannerEpoch, currentPlannerEpoch int64) bool {
 	if status == LifecycleStatusCancelling {
 		switch kind {
@@ -2520,6 +2607,15 @@ func taskAcceptsHumanCheckpoint(status string) bool {
 
 func taskSupportsHumanCheckpoint(status string) bool {
 	return status == TaskStatusReady
+}
+
+func taskAcceptsConstraintUpdate(status string) bool {
+	switch status {
+	case TaskStatusCreated, TaskStatusReady, TaskStatusBlocked, TaskStatusWaitingHuman, TaskStatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func taskSuperseded(task sqlc.OrchestrationTask) bool {
@@ -3082,10 +3178,12 @@ func cancelRunRequestHash(runID, idempotencyKey string) (string, error) {
 func retryTaskRequestHash(taskID string, req RetryTaskRequest, idempotencyKey string) (string, error) {
 	return hashJSON(struct {
 		TaskID         string `json:"task_id"`
+		ExpectedRunID  string `json:"expected_run_id"`
 		Reason         string `json:"reason"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}{
 		TaskID:         strings.TrimSpace(taskID),
+		ExpectedRunID:  strings.TrimSpace(req.ExpectedRunID),
 		Reason:         strings.TrimSpace(req.Reason),
 		IdempotencyKey: idempotencyKey,
 	})

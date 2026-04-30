@@ -225,6 +225,7 @@ type InjectRunHintResult struct {
 type RetryTaskRequest struct {
 	Reason         string `json:"reason"`
 	IdempotencyKey string `json:"idempotency_key" validate:"required"`
+	ExpectedRunID  string `json:"-"`
 }
 
 type RetryTaskResult struct {

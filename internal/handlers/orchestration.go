@@ -106,6 +106,8 @@ func (h *OrchestrationHandler) CancelRun(c echo.Context) error {
 // @Success 201 {object} orchestration.RunHandle
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /orchestration/runs [post].
@@ -329,15 +331,14 @@ func (h *OrchestrationHandler) WatchRun(c echo.Context) error {
 		return h.httpError(err)
 	}
 
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
-	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
-
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
 	writer := bufio.NewWriter(c.Response().Writer)
 	heartbeatTicker := time.NewTicker(20 * time.Second)
 	defer heartbeatTicker.Stop()
@@ -583,6 +584,7 @@ func (h *OrchestrationHandler) RetryTask(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	req.ExpectedRunID = strings.TrimSpace(c.Param("run_id"))
 	result, err := h.service.RetryTask(c.Request().Context(), caller, strings.TrimSpace(c.Param("task_id")), req)
 	if err != nil {
 		return h.httpError(err)

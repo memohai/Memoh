@@ -730,6 +730,9 @@ func TestOrchestrationRetryTaskReturnsResult(t *testing.T) {
 		if taskID != "task-1" {
 			t.Fatalf("taskID = %q", taskID)
 		}
+		if req.ExpectedRunID != "run-1" {
+			t.Fatalf("expected_run_id = %q, want %q", req.ExpectedRunID, "run-1")
+		}
 		if req.Reason != "retry after operator review" {
 			t.Fatalf("reason = %q", req.Reason)
 		}
