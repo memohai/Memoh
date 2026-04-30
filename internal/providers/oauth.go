@@ -21,7 +21,7 @@ import (
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
 )

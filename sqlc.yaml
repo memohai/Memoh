@@ -6,9 +6,18 @@ sql:
     gen:
       go:
         package: "sqlc"
-        out: "internal/db/sqlc"
+        out: "internal/db/postgres/sqlc"
         sql_package: "pgx/v5"
         emit_json_tags: true
         overrides:
           - db_type: "user_role"
             go_type: "string"
+  - engine: "sqlite"
+    schema: "db/sqlite/migrations"
+    queries: "db/sqlite/queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/db/sqlite/sqlc"
+        sql_package: "database/sql"
+        emit_json_tags: true

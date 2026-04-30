@@ -7,10 +7,12 @@ existing PostgreSQL backend.
 
 - PostgreSQL migrations: `db/postgres/migrations`
 - PostgreSQL queries: `db/postgres/queries`
-- PostgreSQL sqlc output: `internal/db/sqlc`
+- PostgreSQL sqlc output: `internal/db/postgres/sqlc`
+- PostgreSQL store implementation: `internal/db/postgres/store`
 - SQLite migrations: `db/sqlite/migrations`
 - SQLite queries: `db/sqlite/queries`
-- SQLite sqlc output: `internal/db/sqlitesqlc`
+- SQLite sqlc output: `internal/db/sqlite/sqlc`
+- SQLite store implementation: `internal/db/sqlite/store`
 
 ## Type Mapping
 
@@ -53,6 +55,7 @@ stores exist.
 
 ## Current Status
 
-The repository has the directory layout and Go-facing database/store contracts.
-The SQLite schema, SQLite queries, and concrete SQLite stores are intentionally
-not wired into `sqlc.yaml` yet, so regular PostgreSQL generation remains stable.
+The repository has parallel PostgreSQL and SQLite sqlc tracks. SQLite currently
+has a single baseline migration (`0001_init`) and account-level sqlc/store code.
+The rest of the backend still uses the transitional `dbstore.Queries` interface,
+which is backed by PostgreSQL sqlc until each domain receives a SQLite store.

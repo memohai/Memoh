@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +51,8 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgresstore"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
@@ -125,6 +127,9 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db connect: %w", err)
 	}
+	if conn == nil {
+		return nil, nil
+	}
 	lc.Append(fx.Hook{
 		OnStop: func(_ context.Context) error {
 			conn.Close()
@@ -134,20 +139,72 @@ func provideDBConn(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
 	return conn, nil
 }
 
+func provideSQLiteConn(lc fx.Lifecycle, cfg config.Config) (*sql.DB, error) {
+	if db.DriverFromConfig(cfg) != db.DriverSQLite {
+		return nil, nil
+	}
+	conn, err := db.OpenSQLite(context.Background(), cfg.SQLite)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite connect: %w", err)
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(_ context.Context) error {
+			return conn.Close()
+		},
+	})
+	return conn, nil
+}
+
 func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
+	if conn == nil {
+		return nil, nil
+	}
 	return postgresstore.New(conn)
 }
 
-func provideDBQueries(store *postgresstore.Store) dbstore.Queries {
-	return store.SQLC()
+func provideSQLiteStore(conn *sql.DB) (*sqlitestore.Store, error) {
+	if conn == nil {
+		return nil, nil
+	}
+	return sqlitestore.New(conn)
 }
 
-func provideAccountStore(store *postgresstore.Store) dbstore.AccountStore {
-	return store
+func provideDBQueries(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (dbstore.Queries, error) {
+	switch db.DriverFromConfig(cfg) {
+	case db.DriverPostgres:
+		if postgresStore == nil {
+			return nil, errors.New("postgres store not configured")
+		}
+		return postgresstore.NewQueries(postgresStore.SQLC()), nil
+	case db.DriverSQLite:
+		if sqliteStore == nil {
+			return nil, errors.New("sqlite store not configured")
+		}
+		return sqlitestore.NewQueries(sqliteStore), nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
+	}
 }
 
-func provideWorkspaceManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool) *workspace.Manager {
-	return workspace.NewManager(log, service, cfg.Workspace, cfg.Containerd.Namespace, conn)
+func provideAccountStore(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (dbstore.AccountStore, error) {
+	switch db.DriverFromConfig(cfg) {
+	case db.DriverPostgres:
+		if postgresStore == nil {
+			return nil, errors.New("postgres account store not configured")
+		}
+		return postgresStore, nil
+	case db.DriverSQLite:
+		if sqliteStore == nil {
+			return nil, errors.New("sqlite account store not configured")
+		}
+		return sqliteStore, nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
+	}
+}
+
+func provideWorkspaceManager(log *slog.Logger, service ctr.Service, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) *workspace.Manager {
+	return workspace.NewManager(log, service, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
 }
 
 func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {

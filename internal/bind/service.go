@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
@@ -89,7 +89,7 @@ func (s *Service) Get(ctx context.Context, token string) (Code, error) {
 	}
 	row, err := s.queries.GetBindCode(ctx, strings.TrimSpace(token))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return Code{}, ErrCodeNotFound
 		}
 		return Code{}, err
@@ -99,7 +99,7 @@ func (s *Service) Get(ctx context.Context, token string) (Code, error) {
 
 // Consume validates and consumes a bind code and links the channel identity to issuer user.
 func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID string) error {
-	if s.queries == nil || s.pool == nil {
+	if s.queries == nil {
 		return errors.New("bind service not configured")
 	}
 
@@ -123,16 +123,21 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 		return err
 	}
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin bind consume tx: %w", err)
+	qtx := s.queries
+	var tx pgx.Tx
+	if s.pool != nil {
+		var err error
+		tx, err = s.pool.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return fmt.Errorf("begin bind consume tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		qtx = s.queries.WithTx(tx)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.queries.WithTx(tx)
 
 	lockedCodeRow, err := qtx.GetBindCodeForUpdate(ctx, token)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return ErrCodeNotFound
 		}
 		return fmt.Errorf("lock bind code: %w", err)
@@ -158,14 +163,14 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 	}
 
 	if _, err := qtx.GetChannelIdentityByIDForUpdate(ctx, pgSourceIdentityID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return errors.New("channel identity not found")
 		}
 		return fmt.Errorf("lock source identity: %w", err)
 	}
 	sourceIdentity, err := qtx.GetChannelIdentityByIDForUpdate(ctx, pgSourceIdentityID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return errors.New("channel identity not found")
 		}
 		return fmt.Errorf("reload source identity: %w", err)
@@ -186,14 +191,16 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 		ID:                      lockedCodeRow.ID,
 		UsedByChannelIdentityID: pgSourceIdentityID,
 	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return ErrCodeUsed
 		}
 		return fmt.Errorf("mark bind code used: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit bind consume tx: %w", err)
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit bind consume tx: %w", err)
+		}
 	}
 
 	s.logger.Info("bind code consumed",
@@ -203,6 +210,10 @@ func (s *Service) Consume(ctx context.Context, code Code, channelIdentityID stri
 		slog.String("target_user", targetUserID),
 	)
 	return nil
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound)
 }
 
 func toCode(row sqlc.ChannelIdentityBindCode) Code {

@@ -11,7 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 )
 
 // fakeRow implements pgx.Row with a custom scan function.
@@ -132,7 +133,7 @@ func TestAuthorizeAccess(t *testing.T) {
 					return makeBotRow(botUUID, ownerUUID)
 				},
 			}
-			svc := NewService(nil, sqlc.New(db))
+			svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 
 			_, err := svc.AuthorizeAccess(context.Background(), tt.userID, botID, tt.isAdmin)
 			if tt.wantErr {
@@ -167,7 +168,7 @@ func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 		},
 	}
 
-	svc := NewService(nil, sqlc.New(db))
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{
 		DisplayName: "test-bot",
 		AclPreset:   "not_a_real_preset",

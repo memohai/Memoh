@@ -1,0 +1,66 @@
+# Memoh development configuration
+# Connects to devenv/docker-compose.yml infrastructure
+
+[log]
+level = "debug"
+format = "text"
+
+[server]
+addr = ":8080"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "dev@memoh.local"
+
+[auth]
+jwt_secret = "memoh-dev-secret-do-not-use-in-production"
+jwt_expires_in = "168h"
+
+timezone = "UTC"
+
+[database]
+driver = "sqlite"
+
+[containerd]
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[workspace]
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+default_image = "debian:bookworm-slim"
+snapshotter = "overlayfs"
+data_root = "/opt/memoh/data"
+runtime_dir = "/opt/memoh/runtime"
+cni_bin_dir = "/opt/cni/bin"
+cni_conf_dir = "/etc/cni/net.d"
+
+[postgres]
+host = "postgres"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[sqlite]
+path = "/opt/memoh/data/memoh.sqlite.db"
+wal = true
+busy_timeout_ms = 5000
+
+[qdrant]
+base_url = "http://qdrant:6334"
+api_key = ""
+timeout_seconds = 10
+
+[sparse]
+base_url = "http://sparse:8085"
+
+[browser_gateway]
+host = "browser"
+port = 8083
+server_addr = "server:8080"
+
+[web]
+host = "0.0.0.0"
+port = 8082

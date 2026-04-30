@@ -21,7 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"

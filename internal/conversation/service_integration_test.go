@@ -16,7 +16,8 @@ import (
 	"github.com/memohai/memoh/internal/channel/identities"
 	conversation "github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/message"
 )
@@ -48,7 +49,7 @@ func setupChatPresenceIntegrationTest(t *testing.T) chatPresenceFixture {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	queries := sqlc.New(pool)
+	queries := postgresstore.NewQueries(sqlc.New(pool))
 
 	return chatPresenceFixture{
 		chatSvc:            conversation.NewService(logger, queries),

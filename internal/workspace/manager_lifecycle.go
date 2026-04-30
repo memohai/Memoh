@@ -14,7 +14,7 @@ import (
 
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 // ---------------------------------------------------------------------------

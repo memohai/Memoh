@@ -16,7 +16,8 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/identity"
 	skillset "github.com/memohai/memoh/internal/skills"
@@ -86,16 +87,22 @@ type Manager struct {
 	legacyIPs       map[string]string // botID → IP for pre-bridge containers
 }
 
-func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool) *Manager {
+func NewManager(log *slog.Logger, service ctr.Service, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
 	if namespace == "" {
 		namespace = config.DefaultNamespace
+	}
+	var queries dbstore.Queries
+	if len(queryOverride) > 0 {
+		queries = queryOverride[0]
+	} else if conn != nil {
+		queries = postgresstore.NewQueries(dbsqlc.New(conn))
 	}
 	m := &Manager{
 		service:        service,
 		cfg:            cfg,
 		namespace:      namespace,
 		db:             conn,
-		queries:        dbsqlc.New(conn),
+		queries:        queries,
 		logger:         log.With(slog.String("component", "workspace")),
 		containerLocks: make(map[string]*sync.Mutex),
 		legacyIPs:      make(map[string]string),

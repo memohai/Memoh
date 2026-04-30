@@ -11,12 +11,13 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/containerd"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 const (
@@ -59,7 +60,7 @@ type BotSnapshotData struct {
 }
 
 func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, source string) (*SnapshotCreateInfo, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
@@ -135,7 +136,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 }
 
 func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
@@ -233,7 +234,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 	}
 
 	managedMeta := make(map[string]ManagedSnapshotMeta)
-	if m.db != nil && m.queries != nil {
+	if m.queries != nil {
 		rows, err := m.queries.ListSnapshotsWithVersionByContainerID(ctx, containerID)
 		if err != nil {
 			return nil, err
@@ -265,7 +266,7 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 }
 
 func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil, errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
@@ -297,7 +298,7 @@ func (m *Manager) ListVersions(ctx context.Context, botID string) ([]VersionInfo
 }
 
 func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int) error {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
@@ -343,7 +344,7 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 }
 
 func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version int) (string, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return "", errors.New("db is not configured")
 	}
 	if err := validateBotID(botID); err != nil {
@@ -463,13 +464,17 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 		return "", 0, time.Time{}, ctr.ErrInvalidArgument
 	}
 
-	tx, err := m.db.Begin(ctx)
-	if err != nil {
-		return "", 0, time.Time{}, err
+	qtx := m.queries
+	var tx pgx.Tx
+	if m.db != nil {
+		var err error
+		tx, err = m.db.Begin(ctx)
+		if err != nil {
+			return "", 0, time.Time{}, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		qtx = m.queries.WithTx(tx)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	qtx := m.queries.WithTx(tx)
 
 	parent := pgtype.Text{}
 	normalizedParent := strings.TrimSpace(parentRuntimeSnapshotName)
@@ -502,8 +507,10 @@ func (m *Manager) recordSnapshotVersion(ctx context.Context, containerID, runtim
 		return "", 0, time.Time{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return "", 0, time.Time{}, err
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return "", 0, time.Time{}, err
+		}
 	}
 
 	createdAt := time.Time{}

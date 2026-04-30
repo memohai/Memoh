@@ -13,7 +13,8 @@ import (
 
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/schedule"
 )
@@ -36,7 +37,7 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Quer
 		t.Skipf("skip integration test: database ping failed: %v", err)
 	}
 
-	queries := sqlc.New(pool)
+	queries := postgresstore.NewQueries(sqlc.New(pool))
 	mock := &mockTriggerer{}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := &boot.RuntimeConfig{JwtSecret: "integration-test-jwt-secret"}

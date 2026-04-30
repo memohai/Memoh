@@ -23,8 +23,8 @@ func provideConfig() (config.Config, error) {
 	return cfg, nil
 }
 
-func migrationsFS() fs.FS {
-	sub, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
+func migrationsFS(cfg config.Config) fs.FS {
+	sub, err := db.MigrationsFSForConfig(cfg, dbembed.MigrationsFS)
 	if err != nil {
 		panic(fmt.Sprintf("embedded migrations: %v", err))
 	}
@@ -50,7 +50,7 @@ func runMigrate(args []string) error {
 		migrateArgs = args[1:]
 	}
 
-	if err := db.RunMigrateConfig(log, cfg, migrationsFS(), migrateCmd, migrateArgs); err != nil {
+	if err := db.RunMigrateConfig(log, cfg, migrationsFS(cfg), migrateCmd, migrateArgs); err != nil {
 		log.Error("migration failed", slog.Any("error", err))
 		return err
 	}

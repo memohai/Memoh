@@ -7,6 +7,7 @@ import (
 
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/config"
+	dbpkg "github.com/memohai/memoh/internal/db"
 )
 
 func ProvideConfig() (config.Config, error) {
@@ -18,8 +19,8 @@ func ProvideConfig() (config.Config, error) {
 	return cfg, nil
 }
 
-func MigrationsFS() fs.FS {
-	sub, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
+func MigrationsFS(cfg config.Config) fs.FS {
+	sub, err := dbpkg.MigrationsFSForConfig(cfg, dbembed.MigrationsFS)
 	if err != nil {
 		panic(fmt.Sprintf("embedded migrations: %v", err))
 	}

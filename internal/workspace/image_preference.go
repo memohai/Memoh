@@ -11,7 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 const (
@@ -214,7 +214,7 @@ func withoutWorkspaceSkillDiscoveryRoots(metadata map[string]any) map[string]any
 }
 
 func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string) (string, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return "", nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -236,7 +236,7 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 }
 
 func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, image string, clearPreference bool) error {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -280,7 +280,7 @@ func (m *Manager) ClearWorkspaceImagePreference(ctx context.Context, botID strin
 }
 
 func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (WorkspaceGPUConfig, bool, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return WorkspaceGPUConfig{}, false, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -303,7 +303,7 @@ func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (
 }
 
 func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context, botID string) ([]string, bool, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil, false, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -326,7 +326,7 @@ func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context,
 }
 
 func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID string, gpu WorkspaceGPUConfig, clearPreference bool) error {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -391,7 +391,7 @@ func SkillDiscoveryRootsFromMetadata(metadata map[string]any) []string {
 }
 
 func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (string, error) {
-	if m.db != nil && m.queries != nil {
+	if m.queries != nil {
 		pgBotID, err := db.ParseUUID(botID)
 		if err == nil {
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)

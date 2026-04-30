@@ -14,7 +14,7 @@ func Open(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	case DriverPostgres:
 		return OpenPostgres(ctx, cfg.Postgres)
 	case DriverSQLite:
-		return nil, fmt.Errorf("database driver %q is configured but SQLite stores are not implemented yet", driver)
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported database driver %q", driver)
 	}

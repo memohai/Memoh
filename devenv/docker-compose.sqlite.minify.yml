@@ -1,0 +1,170 @@
+name: "memoh-dev-sqlite"
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: memoh-dev-sqlite-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "${MEMOH_SQLITE_DEV_QDRANT_HTTP_PORT:-17333}:6333"
+      - "${MEMOH_SQLITE_DEV_QDRANT_GRPC_PORT:-17334}:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  deps:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.web
+    container_name: memoh-dev-sqlite-deps
+    working_dir: /workspace
+    command: ["pnpm", "install"]
+    environment:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
+    restart: "no"
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-sqlite-migrate
+    working_dir: /workspace
+    entrypoint: []
+    command: ["go", "run", "./cmd/agent", "migrate", "up"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.sqlite.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - memoh_data:/opt/memoh/data
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-sqlite-server
+    working_dir: /workspace
+    privileged: true
+    pid: host
+    command: ["air", "-c", ".air.toml"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.sqlite.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - containerd_data:/var/lib/containerd
+      - server_cni_state:/var/lib/cni
+      - memoh_data:/opt/memoh/data
+      # Toolkit: run ./docker/toolkit/install.sh once before first use
+      - ../.toolkit:/opt/memoh/runtime/toolkit
+      - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
+      - ../cmd/bridge/template:/opt/memoh/runtime/templates
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${MEMOH_SQLITE_DEV_SERVER_PORT:-19080}:8080"
+      - "${MEMOH_SQLITE_DEV_OAUTH_PORT:-1555}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.web
+    container_name: memoh-dev-sqlite-web
+    working_dir: /workspace/apps/web
+    command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "8082"]
+    environment:
+      MEMOH_CONFIG_PATH: /workspace/devenv/app.sqlite.dev.toml
+      MEMOH_WEB_PROXY_TARGET: http://server:8080
+    volumes:
+      - ..:/workspace
+      - node_modules:/workspace/node_modules
+    ports:
+      - "${MEMOH_SQLITE_DEV_WEB_PORT:-19082}:8082"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # browser:
+  #   build:
+  #     context: ..
+  #     dockerfile: devenv/Dockerfile.browser
+  #     args:
+  #       BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
+  #   container_name: memoh-dev-sqlite-browser
+  #   working_dir: /workspace/apps/browser
+  #   command: ["bun", "run", "--watch", "src/index.ts"]
+  #   environment:
+  #     - MEMOH_CONFIG_PATH=/workspace/devenv/app.sqlite.dev.toml
+  #     - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
+  #   volumes:
+  #     - ..:/workspace
+  #     - node_modules:/workspace/node_modules
+  #   ports:
+  #     - "${MEMOH_SQLITE_DEV_BROWSER_PORT:-19083}:8083"
+  #   depends_on:
+  #     deps:
+  #       condition: service_completed_successfully
+  #     server:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # sparse:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile.sparse
+  #   container_name: memoh-dev-sqlite-sparse
+  #   ports:
+  #     - "${MEMOH_SQLITE_DEV_SPARSE_PORT:-19085}:8085"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/health')\" || exit 1"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     start_period: 30s
+  #     retries: 3
+  #   restart: unless-stopped
+
+volumes:
+  qdrant_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
+    driver: local
+  containerd_data:
+    driver: local
+  memoh_data:
+    driver: local
+  server_cni_state:
+    driver: local
+  node_modules:
+    driver: local
+  pnpm_store:
+    driver: local

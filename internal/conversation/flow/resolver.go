@@ -25,7 +25,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	messagepkg "github.com/memohai/memoh/internal/message"

@@ -16,7 +16,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"

@@ -9,6 +9,8 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	// Register postgres driver for golang-migrate.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	// Register sqlite driver for golang-migrate.
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
 	"github.com/memohai/memoh/internal/config"
@@ -42,9 +44,6 @@ func RunMigrateTarget(logger *slog.Logger, target MigrationTarget, migrationsFS 
 	}
 	if command == "force" && len(args) == 0 {
 		return errors.New("force requires a version number argument")
-	}
-	if target.Driver == DriverSQLite {
-		return errors.New("sqlite migrations are not wired yet")
 	}
 	if target.DSN == "" {
 		return errors.New("migration target DSN is empty")
@@ -114,9 +113,6 @@ func ReadMigrationStatusConfig(cfg config.Config, migrationsFS fs.FS) (Migration
 }
 
 func ReadMigrationStatusTarget(target MigrationTarget, migrationsFS fs.FS) (MigrationStatus, error) {
-	if target.Driver == DriverSQLite {
-		return MigrationStatus{}, errors.New("sqlite migrations are not wired yet")
-	}
 	if target.DSN == "" {
 		return MigrationStatus{}, errors.New("migration target DSN is empty")
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 

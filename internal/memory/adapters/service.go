@@ -10,7 +10,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 )

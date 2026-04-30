@@ -13,7 +13,8 @@ import (
 
 	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
@@ -35,7 +36,7 @@ func setupBindConsumeIntegrationTest(t *testing.T) (dbstore.Queries, *identities
 		t.Skipf("skip integration test: database ping failed: %v", err)
 	}
 
-	queries := sqlc.New(pool)
+	queries := postgresstore.NewQueries(sqlc.New(pool))
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	channelIdentitySvc := identities.NewService(logger, queries)
 	bindSvc := bind.NewService(logger, pool, queries)

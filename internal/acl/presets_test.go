@@ -11,7 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 )
 
 func TestResolvePreset(t *testing.T) {
@@ -119,7 +120,7 @@ func TestApplyPreset(t *testing.T) {
 		},
 	}
 
-	err := ApplyPreset(context.Background(), sqlc.New(db), botUUID.String(), "", PresetGroupAndThreadOnly)
+	err := ApplyPreset(context.Background(), postgresstore.NewQueries(sqlc.New(db)), botUUID.String(), "", PresetGroupAndThreadOnly)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

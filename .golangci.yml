@@ -43,7 +43,8 @@ linters:
   exclusions:
     generated: lax
     paths:
-      - internal/db/sqlc
+      - internal/db/postgres/sqlc
+      - internal/db/sqlite/sqlc
       - ^.*\.(pb|l|y)\.go$
   settings:
     govet:

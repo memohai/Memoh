@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/models"
 )
 

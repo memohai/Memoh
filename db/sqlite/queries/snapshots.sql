@@ -1,0 +1,52 @@
+-- name: UpsertSnapshot :one
+INSERT INTO snapshots (
+  id, container_id, runtime_snapshot_name, display_name,
+  parent_runtime_snapshot_name, snapshotter, source
+)
+VALUES (
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  sqlc.arg(container_id),
+  sqlc.arg(runtime_snapshot_name),
+  sqlc.arg(display_name),
+  sqlc.arg(parent_runtime_snapshot_name),
+  sqlc.arg(snapshotter),
+  sqlc.arg(source)
+)
+ON CONFLICT (container_id, runtime_snapshot_name) DO UPDATE
+SET
+  display_name = EXCLUDED.display_name,
+  parent_runtime_snapshot_name = EXCLUDED.parent_runtime_snapshot_name,
+  snapshotter = EXCLUDED.snapshotter,
+  source = EXCLUDED.source
+RETURNING id, container_id, runtime_snapshot_name, display_name, parent_runtime_snapshot_name, snapshotter, source, created_at;
+
+-- name: ListSnapshotsByContainerID :many
+SELECT
+  id, container_id, runtime_snapshot_name, display_name,
+  parent_runtime_snapshot_name, snapshotter, source, created_at
+FROM snapshots
+WHERE container_id = sqlc.arg(container_id)
+ORDER BY created_at DESC;
+
+-- name: ListSnapshotsWithVersionByContainerID :many
+SELECT
+  s.id, s.container_id, s.runtime_snapshot_name, s.display_name,
+  s.parent_runtime_snapshot_name, s.snapshotter, s.source, s.created_at,
+  cv.version
+FROM snapshots s
+LEFT JOIN container_versions cv ON cv.snapshot_id = s.id
+WHERE s.container_id = sqlc.arg(container_id)
+ORDER BY s.created_at DESC;
+
+-- name: GetSnapshotByContainerAndRuntimeName :one
+SELECT
+  id, container_id, runtime_snapshot_name, display_name,
+  parent_runtime_snapshot_name, snapshotter, source, created_at
+FROM snapshots
+WHERE container_id = sqlc.arg(container_id)
+  AND runtime_snapshot_name = sqlc.arg(runtime_snapshot_name)
+LIMIT 1;
