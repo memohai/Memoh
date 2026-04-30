@@ -1590,6 +1590,26 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
+export type OrchestrationActionRecord = {
+    action_kind?: string;
+    attempt_id?: string;
+    created_at?: string;
+    error_payload?: unknown;
+    finished_at?: string;
+    id?: string;
+    input_payload?: unknown;
+    output_payload?: unknown;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    tool_call_id?: string;
+    tool_name?: string;
+    updated_at?: string;
+    verification_id?: string;
+};
+
 export type OrchestrationArtifact = {
     attempt_id?: string;
     content_type?: string;
@@ -1610,6 +1630,16 @@ export type OrchestrationArtifact = {
 export type OrchestrationArtifactPage = {
     items?: Array<OrchestrationArtifact>;
     next_after?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationCancelRunRequest = {
+    idempotency_key: string;
+};
+
+export type OrchestrationCancelRunResult = {
+    lifecycle_status?: string;
+    run_id?: string;
     snapshot_seq?: number;
 };
 
@@ -1690,6 +1720,81 @@ export type OrchestrationHumanCheckpointPage = {
     snapshot_seq?: number;
 };
 
+export type OrchestrationInputManifest = {
+    captured_artifact_versions?: Array<{
+        [key: string]: unknown;
+    }>;
+    captured_blackboard_revisions?: Array<{
+        [key: string]: unknown;
+    }>;
+    captured_task_inputs?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    projection_hash?: string;
+    run_id?: string;
+    task_id?: string;
+};
+
+export type OrchestrationInspectorAttempt = {
+    attempt_no?: number;
+    claim_epoch?: number;
+    created_at?: string;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    input_manifest_id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    park_checkpoint_id?: string;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationInspectorVerification = {
+    attempt_no?: number;
+    claim_epoch?: number;
+    created_at?: string;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    result_id?: string;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+    verdict?: string;
+    verifier_profile?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationInspectorWorkerLease = {
+    capabilities?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    display_name?: string;
+    executor_id?: string;
+    id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    status?: string;
+    updated_at?: string;
+};
+
 export type OrchestrationResolveCheckpointResult = {
     checkpoint_id?: string;
     snapshot_seq?: number;
@@ -1756,10 +1861,94 @@ export type OrchestrationRunEventPage = {
     until_seq?: number;
 };
 
+export type OrchestrationRunExecutionSpan = {
+    attempt_no?: number;
+    checkpoint_id?: string;
+    claimed_seq?: number;
+    completion_metadata?: {
+        [key: string]: unknown;
+    };
+    created_seq?: number;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    input_manifest_id?: string;
+    kind?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    related_event_types?: Array<string>;
+    requeue_seq?: number;
+    result_id?: string;
+    run_id?: string;
+    started_at?: string;
+    started_seq?: number;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    terminal_seq?: number;
+    verdict?: string;
+    verifier_profile?: string;
+    worker_id?: string;
+};
+
 export type OrchestrationRunHandle = {
     root_task_id?: string;
     run_id?: string;
     snapshot_seq?: number;
+};
+
+export type OrchestrationRunInspector = {
+    action_records: Array<OrchestrationActionRecord>;
+    artifacts: Array<OrchestrationArtifact>;
+    attempts: Array<OrchestrationInspectorAttempt>;
+    checkpoints: Array<OrchestrationHumanCheckpoint>;
+    dependencies: Array<OrchestrationTaskDependency>;
+    execution_spans: Array<OrchestrationRunExecutionSpan>;
+    input_manifests: Array<OrchestrationInputManifest>;
+    results: Array<OrchestrationTaskResult>;
+    run: OrchestrationRun;
+    stuck_signals: Array<OrchestrationRunStuckSignal>;
+    summary: OrchestrationRunInspectorSummary;
+    tasks: Array<OrchestrationTask>;
+    timeline: Array<OrchestrationRunTimelineEntry>;
+    verifications: Array<OrchestrationInspectorVerification>;
+    workers: Array<OrchestrationInspectorWorkerLease>;
+};
+
+export type OrchestrationRunInspectorSummary = {
+    active_attempt_count: number;
+    active_verification_count: number;
+    active_worker_count: number;
+    blocked_task_count: number;
+    cancelled_task_count: number;
+    completed_task_count: number;
+    critical_signal_count: number;
+    dispatching_task_count: number;
+    failed_task_count: number;
+    open_checkpoint_count: number;
+    ready_task_count: number;
+    running_task_count: number;
+    stuck_signal_count: number;
+    verifying_task_count: number;
+    waiting_human_task_count: number;
+};
+
+export type OrchestrationRunListItem = {
+    created_at?: string;
+    finished_at?: string;
+    goal?: string;
+    id?: string;
+    lifecycle_status?: string;
+    planning_status?: string;
+    root_task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+};
+
+export type OrchestrationRunListPage = {
+    items?: Array<OrchestrationRunListItem>;
 };
 
 export type OrchestrationRunSnapshot = {
@@ -1767,7 +1956,36 @@ export type OrchestrationRunSnapshot = {
     snapshot_seq?: number;
 };
 
+export type OrchestrationRunStuckSignal = {
+    attempt_id?: string;
+    code?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    message?: string;
+    observed_at?: string;
+    severity?: string;
+    status?: string;
+    task_id?: string;
+    verification_id?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationRunTimelineEntry = {
+    aggregate_id?: string;
+    aggregate_type?: string;
+    attempt_id?: string;
+    checkpoint_id?: string;
+    created_at?: string;
+    payload?: {
+        [key: string]: unknown;
+    };
+    seq?: number;
+    task_id?: string;
+    type?: string;
+};
+
 export type OrchestrationStartRunRequest = {
+    bot_id?: string;
     goal: string;
     idempotency_key: string;
     input?: {
@@ -1819,10 +2037,40 @@ export type OrchestrationTask = {
     worker_profile?: string;
 };
 
+export type OrchestrationTaskDependency = {
+    created_at?: string;
+    id?: string;
+    planner_epoch?: number;
+    predecessor_task_id?: string;
+    run_id?: string;
+    successor_task_id?: string;
+    superseded_by_planner_epoch?: number;
+    updated_at?: string;
+};
+
 export type OrchestrationTaskPage = {
     items?: Array<OrchestrationTask>;
     next_after?: string;
     snapshot_seq?: number;
+};
+
+export type OrchestrationTaskResult = {
+    artifact_intents?: Array<{
+        [key: string]: unknown;
+    }>;
+    attempt_id?: string;
+    created_at?: string;
+    failure_class?: string;
+    id?: string;
+    request_replan?: boolean;
+    run_id?: string;
+    status?: string;
+    structured_output?: {
+        [key: string]: unknown;
+    };
+    summary?: string;
+    task_id?: string;
+    updated_at?: string;
 };
 
 export type ProvidersCountResponse = {
@@ -8061,6 +8309,49 @@ export type PostModelsByIdTestResponses = {
 
 export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
 
+export type GetOrchestrationBotsByBotIdRunsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Maximum number of runs
+         */
+        limit?: number;
+    };
+    url: '/orchestration/bots/{bot_id}/runs';
+};
+
+export type GetOrchestrationBotsByBotIdRunsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationBotsByBotIdRunsError = GetOrchestrationBotsByBotIdRunsErrors[keyof GetOrchestrationBotsByBotIdRunsErrors];
+
+export type GetOrchestrationBotsByBotIdRunsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunListPage;
+};
+
+export type GetOrchestrationBotsByBotIdRunsResponse = GetOrchestrationBotsByBotIdRunsResponses[keyof GetOrchestrationBotsByBotIdRunsResponses];
+
 export type PostOrchestrationCheckpointsByCheckpointIdResolveData = {
     /**
      * Checkpoint resolution
@@ -8085,10 +8376,6 @@ export type PostOrchestrationCheckpointsByCheckpointIdResolveErrors = {
      * Unauthorized
      */
     401: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
     /**
      * Not Found
      */
@@ -8133,10 +8420,6 @@ export type PostOrchestrationRunsErrors = {
      * Unauthorized
      */
     401: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
     /**
      * Conflict
      */
@@ -8201,10 +8484,6 @@ export type GetOrchestrationRunsByRunIdArtifactsErrors = {
      */
     401: HandlersErrorResponse;
     /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
      * Not Found
      */
     404: HandlersErrorResponse;
@@ -8224,6 +8503,55 @@ export type GetOrchestrationRunsByRunIdArtifactsResponses = {
 };
 
 export type GetOrchestrationRunsByRunIdArtifactsResponse = GetOrchestrationRunsByRunIdArtifactsResponses[keyof GetOrchestrationRunsByRunIdArtifactsResponses];
+
+export type PostOrchestrationRunsByRunIdCancelData = {
+    /**
+     * Cancel run request
+     */
+    body: OrchestrationCancelRunRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/cancel';
+};
+
+export type PostOrchestrationRunsByRunIdCancelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdCancelError = PostOrchestrationRunsByRunIdCancelErrors[keyof PostOrchestrationRunsByRunIdCancelErrors];
+
+export type PostOrchestrationRunsByRunIdCancelResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationCancelRunResult;
+};
+
+export type PostOrchestrationRunsByRunIdCancelResponse = PostOrchestrationRunsByRunIdCancelResponses[keyof PostOrchestrationRunsByRunIdCancelResponses];
 
 export type GetOrchestrationRunsByRunIdCheckpointsData = {
     body?: never;
@@ -8263,10 +8591,6 @@ export type GetOrchestrationRunsByRunIdCheckpointsErrors = {
      * Unauthorized
      */
     401: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
     /**
      * Not Found
      */
@@ -8323,10 +8647,6 @@ export type GetOrchestrationRunsByRunIdEventsErrors = {
      */
     401: HandlersErrorResponse;
     /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
      * Not Found
      */
     404: HandlersErrorResponse;
@@ -8347,7 +8667,7 @@ export type GetOrchestrationRunsByRunIdEventsResponses = {
 
 export type GetOrchestrationRunsByRunIdEventsResponse = GetOrchestrationRunsByRunIdEventsResponses[keyof GetOrchestrationRunsByRunIdEventsResponses];
 
-export type GetOrchestrationRunsByRunIdSnapshotData = {
+export type GetOrchestrationRunsByRunIdInspectorData = {
     body?: never;
     path: {
         /**
@@ -8356,6 +8676,53 @@ export type GetOrchestrationRunsByRunIdSnapshotData = {
         run_id: string;
     };
     query?: never;
+    url: '/orchestration/runs/{run_id}/inspector';
+};
+
+export type GetOrchestrationRunsByRunIdInspectorErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdInspectorError = GetOrchestrationRunsByRunIdInspectorErrors[keyof GetOrchestrationRunsByRunIdInspectorErrors];
+
+export type GetOrchestrationRunsByRunIdInspectorResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunInspector;
+};
+
+export type GetOrchestrationRunsByRunIdInspectorResponse = GetOrchestrationRunsByRunIdInspectorResponses[keyof GetOrchestrationRunsByRunIdInspectorResponses];
+
+export type GetOrchestrationRunsByRunIdSnapshotData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Committed snapshot sequence
+         */
+        as_of_seq?: number;
+    };
     url: '/orchestration/runs/{run_id}/snapshot';
 };
 
@@ -8368,10 +8735,6 @@ export type GetOrchestrationRunsByRunIdSnapshotErrors = {
      * Unauthorized
      */
     401: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
     /**
      * Not Found
      */
@@ -8432,10 +8795,6 @@ export type GetOrchestrationRunsByRunIdTasksErrors = {
      */
     401: HandlersErrorResponse;
     /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
      * Not Found
      */
     404: HandlersErrorResponse;
@@ -8484,10 +8843,6 @@ export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsErrors = {
      * Unauthorized
      */
     401: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
     /**
      * Not Found
      */

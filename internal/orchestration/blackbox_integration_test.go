@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 	dbembed "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -39,6 +42,7 @@ import (
 )
 
 type blackboxHarnessOptions struct {
+	disablePlanner            bool
 	startScheduler            bool
 	startRecovery             bool
 	startVerificationRecovery bool
@@ -87,6 +91,34 @@ type managedProcess struct {
 type blackboxBinarySet struct {
 	workerd string
 	verifyd string
+}
+
+const (
+	fakeLLMChildTaskGoal     = "compute Fibonacci and return verified result"
+	fakeLLMToolActionGoal    = "blackbox llm tool action trace"
+	fakeLLMFailureReplanGoal = "blackbox llm failure-triggered replan path"
+)
+
+type fakeOpenAICompletionsServer struct {
+	server        *httptest.Server
+	workerCalls   atomic.Int32
+	verifierCalls atomic.Int32
+}
+
+type fakeOpenAIMessage struct {
+	Role       string               `json:"role"`
+	Content    any                  `json:"content"`
+	ToolCalls  []fakeOpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string               `json:"tool_call_id,omitempty"`
+}
+
+type fakeOpenAIToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 var (
@@ -172,6 +204,75 @@ func TestBlackboxRuntimeCheckpointPauseResolveResumeAndComplete(t *testing.T) {
 	h.waitForEventType(t, handle.RunID, "run.event.task.ready", 5*time.Second)
 }
 
+func TestBlackboxRuntimeHTTPCheckpointResumeSurvivesPlannerEpochDrift(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		disablePlanner: true,
+	})
+	defer h.Close()
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "http checkpoint resume should survive planner epoch drift",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+
+	processed, err := h.service.ProcessNextPlanningIntent(h.ctx)
+	if err != nil {
+		t.Fatalf("ProcessNextPlanningIntent(start_run) error = %v", err)
+	}
+	if !processed {
+		t.Fatal("ProcessNextPlanningIntent(start_run) = false, want true")
+	}
+
+	task := h.waitForTaskStatus(t, handle.RunID, handle.RootTaskID, orch.TaskStatusReady, 5*time.Second)
+	checkpoint := h.createCheckpoint(t, handle.RunID, task.ID, orch.CreateHumanCheckpointRequest{
+		RunID:          handle.RunID,
+		TaskID:         task.ID,
+		Question:       "continue?",
+		IdempotencyKey: "checkpoint-" + uuid.NewString(),
+		Options: []orch.CheckpointOption{
+			{ID: "continue", Kind: orch.CheckpointOptionKindChoice, Label: "Continue"},
+		},
+	})
+	h.waitForTaskStatus(t, handle.RunID, handle.RootTaskID, orch.TaskStatusWaitingHuman, 5*time.Second)
+
+	resolve := h.resolveCheckpoint(t, checkpoint.Checkpoint.ID, orch.CheckpointResolution{
+		Mode:           orch.CheckpointResolutionModeSelectOption,
+		OptionID:       "continue",
+		IdempotencyKey: "resolve-" + uuid.NewString(),
+	})
+	if resolve.SnapshotSeq == 0 {
+		t.Fatal("ResolveCheckpoint() snapshot_seq = 0, want non-zero")
+	}
+
+	runUUID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run uuid: %v", err)
+	}
+	if _, err := h.appPool.Exec(h.ctx, "UPDATE orchestration_runs SET planner_epoch = planner_epoch + 1, updated_at = now() WHERE id = $1", runUUID); err != nil {
+		t.Fatalf("bump planner epoch: %v", err)
+	}
+
+	processed, err = h.service.ProcessNextPlanningIntent(h.ctx)
+	if err != nil {
+		t.Fatalf("ProcessNextPlanningIntent(checkpoint_resume) error = %v", err)
+	}
+	if !processed {
+		t.Fatal("ProcessNextPlanningIntent(checkpoint_resume) = false, want true")
+	}
+
+	h.waitForTaskStatus(t, handle.RunID, handle.RootTaskID, orch.TaskStatusReady, 5*time.Second)
+
+	h.startPlannerLoop()
+	h.startSchedulerLoop()
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 15*time.Second)
+}
+
 func TestBlackboxRuntimeReplanVerificationAndVerifierCompletion(t *testing.T) {
 	h := setupBlackboxHarness(t, blackboxHarnessOptions{
 		startScheduler: true,
@@ -224,6 +325,390 @@ func TestBlackboxRuntimeReplanVerificationAndVerifierCompletion(t *testing.T) {
 	taskPage := h.listTasks(t, handle.RunID)
 	if len(taskPage.Items) < 2 {
 		t.Fatalf("task count = %d, want at least 2", len(taskPage.Items))
+	}
+}
+
+func TestBlackboxRuntimeLLMWorkerVerifierExecuteAndComplete(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-llm-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+	h.startVerifyd(t, verifydProcessOptions{
+		workerID: "blackbox-llm-verifyd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultVerifierProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "blackbox llm worker verifier path",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-llm-e2e",
+		},
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 10*time.Second)
+	h.waitForEventType(t, handle.RunID, "run.event.attempt.completed", 15*time.Second)
+	h.waitForEventType(t, handle.RunID, "run.event.verification.passed", 15*time.Second)
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+	h.waitForTaskGoalStatus(t, handle.RunID, fakeLLMChildTaskGoal, orch.TaskStatusCompleted, 10*time.Second)
+
+	if got := fakeLLM.workerCalls.Load(); got < 2 {
+		t.Fatalf("fake llm worker calls = %d, want at least 2", got)
+	}
+	if got := fakeLLM.verifierCalls.Load(); got < 1 {
+		t.Fatalf("fake llm verifier calls = %d, want at least 1", got)
+	}
+}
+
+func TestBlackboxRuntimeLLMFailureTriggeredReplanAndComplete(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-llm-replan-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           fakeLLMFailureReplanGoal,
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-llm-failure-replan",
+		},
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.attempt.failed", 15*time.Second)
+	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 15*time.Second)
+	h.waitForTaskGoalStatus(t, handle.RunID, fakeLLMChildTaskGoal, orch.TaskStatusCompleted, 15*time.Second)
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+}
+
+func TestBlackboxRuntimeWorkerCompletionReplayAfterAckLossConverges(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	workerd := h.startWorkerd(t, workerdProcessOptions{
+		workerID:             "blackbox-replay-workerd-" + uuid.NewString(),
+		profiles:             []string{orch.DefaultRootWorkerProfile},
+		pollMS:               50,
+		leaseTTL:             2,
+		replayCompletionOnce: true,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "worker completion replay after ack loss should converge",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		Input: map[string]any{
+			"builtin_workerd": map[string]any{
+				"summary": "worker replay converged",
+			},
+		},
+	})
+
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+	eventPage := h.listEvents(t, handle.RunID)
+	if countEventsByType(eventPage.Items, "run.event.attempt.completed") != 1 {
+		t.Fatalf("run.event.attempt.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.attempt.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.task.completed") != 1 {
+		t.Fatalf("run.event.task.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.task.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.completed") != 1 {
+		t.Fatalf("run.event.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+	assertProcessLogContains(t, workerd, "simulating lost attempt completion ack after commit")
+}
+
+func TestBlackboxRuntimeVerifierCompletionReplayAfterAckLossConverges(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-replay-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+	verifyd := h.startVerifyd(t, verifydProcessOptions{
+		workerID:             "blackbox-replay-verifyd-" + uuid.NewString(),
+		profiles:             []string{orch.DefaultVerifierProfile},
+		pollMS:               50,
+		leaseTTL:             2,
+		replayCompletionOnce: true,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "verifier completion replay after ack loss should converge",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		Input: map[string]any{
+			"builtin_workerd": map[string]any{
+				"summary": "verification replay converged",
+			},
+		},
+	})
+	taskUUID, err := db.ParseUUID(handle.RootTaskID)
+	if err != nil {
+		t.Fatalf("parse root task uuid: %v", err)
+	}
+	if _, err := h.appPool.Exec(h.ctx, "UPDATE orchestration_tasks SET verification_policy = $2::jsonb, updated_at = now() WHERE id = $1", taskUUID, mustMarshalJSON(t, map[string]any{
+		"require_structured_output": true,
+	})); err != nil {
+		t.Fatalf("update root task verification policy: %v", err)
+	}
+
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+	eventPage := h.listEvents(t, handle.RunID)
+	if countEventsByType(eventPage.Items, "run.event.verification.passed") != 1 {
+		t.Fatalf("run.event.verification.passed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.verification.passed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.task.completed") != 1 {
+		t.Fatalf("run.event.task.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.task.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.completed") != 1 {
+		t.Fatalf("run.event.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+	assertProcessLogContains(t, verifyd, "simulating lost verification completion ack after commit")
+}
+
+func TestBlackboxRuntimeInspectorExposesExecutionSpansAndInputManifests(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-inspector-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+	h.startVerifyd(t, verifydProcessOptions{
+		workerID: "blackbox-inspector-verifyd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultVerifierProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "blackbox inspector execution detail",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		Input: map[string]any{
+			"builtin_workerd": map[string]any{
+				"request_replan": true,
+				"child_tasks": []map[string]any{
+					{
+						"alias":          "verify-child",
+						"kind":           "child",
+						"goal":           "inspector verified child",
+						"worker_profile": orch.DefaultRootWorkerProfile,
+						"verification_policy": map[string]any{
+							"require_structured_output": true,
+						},
+						"inputs": map[string]any{
+							"builtin_workerd": map[string]any{
+								"summary": "inspector child complete",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.verification.passed", 15*time.Second)
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+
+	inspector := h.getInspector(t, handle.RunID)
+	if len(inspector.InputManifests) < 2 {
+		t.Fatalf("len(InputManifests) = %d, want at least 2", len(inspector.InputManifests))
+	}
+	if len(inspector.ExecutionSpans) < 3 {
+		t.Fatalf("len(ExecutionSpans) = %d, want at least 3", len(inspector.ExecutionSpans))
+	}
+
+	attemptCount := 0
+	verificationCount := 0
+	for _, span := range inspector.ExecutionSpans {
+		switch span.Kind {
+		case "attempt":
+			attemptCount++
+			if span.CreatedSeq == 0 || span.ClaimedSeq == 0 || span.StartedSeq == 0 || span.TerminalSeq == 0 {
+				t.Fatalf("attempt span lifecycle seqs = %#v, want non-zero", span)
+			}
+			if span.InputManifestID == "" {
+				t.Fatalf("attempt span input_manifest_id = empty for %#v", span)
+			}
+		case "verification":
+			verificationCount++
+			if span.CreatedSeq == 0 || span.ClaimedSeq == 0 || span.StartedSeq == 0 || span.TerminalSeq == 0 {
+				t.Fatalf("verification span lifecycle seqs = %#v, want non-zero", span)
+			}
+			if span.ResultID == "" {
+				t.Fatalf("verification span result_id = empty for %#v", span)
+			}
+		}
+	}
+	if attemptCount < 2 {
+		t.Fatalf("attempt span count = %d, want at least 2", attemptCount)
+	}
+	if verificationCount < 1 {
+		t.Fatalf("verification span count = %d, want at least 1", verificationCount)
+	}
+}
+
+func TestBlackboxRuntimeInspectorExposesToolActionLedger(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-tool-ledger-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           fakeLLMToolActionGoal,
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-tool-ledger",
+		},
+	})
+
+	if !h.waitForAnyEventTypeWithTimeout(t, handle.RunID, 20*time.Second, "run.event.attempt.completed", "run.event.attempt.failed") {
+		h.dumpRunDiagnostics(t, handle.RunID)
+		t.Fatalf("run %s did not emit a terminal attempt event within %s", handle.RunID, 20*time.Second)
+	}
+	terminalRun := h.waitForRunTerminalStatus(t, handle.RunID, 20*time.Second)
+
+	inspector := h.getInspector(t, handle.RunID)
+	if len(inspector.ActionRecords) < 1 {
+		t.Fatalf("len(ActionRecords) = %d, want at least 1", len(inspector.ActionRecords))
+	}
+
+	var listRecord *orch.ActionRecord
+	for i := range inspector.ActionRecords {
+		record := &inspector.ActionRecords[i]
+		if record.ToolName == "list" {
+			listRecord = record
+			break
+		}
+	}
+	if listRecord == nil {
+		t.Fatalf("list action record not found in %#v", inspector.ActionRecords)
+	}
+	if listRecord.AttemptID == "" {
+		t.Fatalf("list action attempt_id = empty, want attempt binding")
+	}
+	switch listRecord.Status {
+	case "completed":
+		output, ok := listRecord.OutputPayload.(map[string]any)
+		if !ok {
+			t.Fatalf("list action output = %#v, want object payload", listRecord.OutputPayload)
+		}
+		if !strings.Contains(strings.ToLower(fmt.Sprint(output)), "entries") {
+			t.Fatalf("list action output = %#v, want directory listing payload", listRecord.OutputPayload)
+		}
+	case "failed":
+		if listRecord.ErrorPayload == nil {
+			t.Fatalf("list action error payload = nil for failed action: %#v", listRecord)
+		}
+		if terminalRun.LifecycleStatus == "" {
+			t.Fatalf("run status = empty for failed action")
+		}
+	default:
+		t.Fatalf("list action status = %q, want completed or failed", listRecord.Status)
+	}
+}
+
+func TestBlackboxRuntimeInspectorReportsExpiredAttemptSignals(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	slowWorker := h.startWorkerd(t, workerdProcessOptions{
+		workerID:   "blackbox-stuck-workerd-" + uuid.NewString(),
+		profiles:   []string{orch.DefaultRootWorkerProfile},
+		pollMS:     50,
+		leaseTTL:   2,
+		startDelay: 4000,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "inspector should report stale attempt before recovery",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.attempt.claimed", 10*time.Second)
+	slowWorker.stop(t)
+
+	var inspector orch.RunInspector
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		inspector = h.getInspector(t, handle.RunID)
+		if hasStuckSignal(inspector.StuckSignals, "attempt_lease_expired") && hasStuckSignal(inspector.StuckSignals, "worker_lease_expired") {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !hasStuckSignal(inspector.StuckSignals, "attempt_lease_expired") {
+		t.Fatalf("attempt_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if !hasStuckSignal(inspector.StuckSignals, "worker_lease_expired") {
+		t.Fatalf("worker_lease_expired missing from %#v", inspector.StuckSignals)
+	}
+	if inspector.Summary.StuckSignalCount < 2 {
+		t.Fatalf("summary.stuck_signal_count = %d, want at least 2", inspector.Summary.StuckSignalCount)
+	}
+	for _, entry := range inspector.Timeline {
+		if _, ok := entry.Payload["claim_token"]; ok {
+			t.Fatalf("inspector timeline leaked claim_token: %#v", entry.Payload)
+		}
+	}
+	eventPage := h.listEvents(t, handle.RunID)
+	for _, event := range eventPage.Items {
+		if _, ok := event.Payload["claim_token"]; ok {
+			t.Fatalf("event payload leaked claim_token: %#v", event.Payload)
+		}
 	}
 }
 
@@ -532,7 +1017,7 @@ func TestBlackboxRuntimeHTTPRunBarrierPausesSiblingTasks(t *testing.T) {
 		leaseTTL:   2,
 		startDelay: 4000,
 	})
-	h.waitForEventType(t, handle.RunID, "run.event.attempt.claimed", 10*time.Second)
+	h.waitForEventTypeForTask(t, handle.RunID, slowChild.ID, "run.event.attempt.claimed", 10*time.Second)
 
 	checkpoint := h.createCheckpoint(t, handle.RunID, barrierChild.ID, orch.CreateHumanCheckpointRequest{
 		RunID:          handle.RunID,
@@ -659,6 +1144,128 @@ func TestBlackboxRuntimeHTTPVerificationLeaseExpiryRecovery(t *testing.T) {
 	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
 }
 
+func TestBlackboxRuntimeCancelRunningAttemptConvergesToCancelled(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+		startRecovery:  true,
+	})
+	defer h.Close()
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID:       "blackbox-cancel-workerd-" + uuid.NewString(),
+		profiles:       []string{orch.DefaultRootWorkerProfile},
+		pollMS:         50,
+		leaseTTL:       30,
+		executionDelay: 15000,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "cancel running attempt should converge to cancelled",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.attempt.running", 10*time.Second)
+	cancelResult := h.cancelRun(t, handle.RunID, orch.CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if cancelResult.LifecycleStatus != orch.LifecycleStatusCancelling && cancelResult.LifecycleStatus != orch.LifecycleStatusCancelled {
+		t.Fatalf("cancel lifecycle_status = %q, want cancelling or cancelled", cancelResult.LifecycleStatus)
+	}
+	h.waitForEventType(t, handle.RunID, "run.event.attempt.lost", 5*time.Second)
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCancelled, 5*time.Second)
+
+	eventPage := h.listEvents(t, handle.RunID)
+	if countEventsByType(eventPage.Items, "run.event.attempt.completed") != 0 {
+		t.Fatalf("run.event.attempt.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.attempt.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.task.completed") != 0 {
+		t.Fatalf("run.event.task.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.task.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.completed") != 0 {
+		t.Fatalf("run.event.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.failed") != 0 {
+		t.Fatalf("run.event.failed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.failed"))
+	}
+	inspector := h.getInspector(t, handle.RunID)
+	if len(inspector.Attempts) != 1 || inspector.Attempts[0].Status != orch.TaskAttemptStatusLost {
+		t.Fatalf("inspector attempts = %+v, want single lost attempt", inspector.Attempts)
+	}
+	if len(inspector.Tasks) != 1 || inspector.Tasks[0].Status != orch.TaskStatusCancelled {
+		t.Fatalf("inspector tasks = %+v, want single cancelled task", inspector.Tasks)
+	}
+}
+
+func TestBlackboxRuntimeCancelRunningVerificationViaLLMReplanConvergesToCancelled(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler:            true,
+		startRecovery:             true,
+		startVerificationRecovery: true,
+	})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "blackbox llm worker verifier path",
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-llm-cancel-verification",
+		},
+	})
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-cancel-workerd-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 30,
+	})
+	h.startVerifyd(t, verifydProcessOptions{
+		workerID:       "blackbox-cancel-verifyd-" + uuid.NewString(),
+		profiles:       []string{orch.DefaultVerifierProfile},
+		pollMS:         50,
+		leaseTTL:       30,
+		executionDelay: 15000,
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.verification.running", 15*time.Second)
+	cancelResult := h.cancelRun(t, handle.RunID, orch.CancelRunRequest{
+		IdempotencyKey: "cancel-" + uuid.NewString(),
+	})
+	if cancelResult.LifecycleStatus != orch.LifecycleStatusCancelling && cancelResult.LifecycleStatus != orch.LifecycleStatusCancelled {
+		t.Fatalf("cancel lifecycle_status = %q, want cancelling or cancelled", cancelResult.LifecycleStatus)
+	}
+	h.waitForEventType(t, handle.RunID, "run.event.verification.lost", 5*time.Second)
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCancelled, 5*time.Second)
+
+	eventPage := h.listEvents(t, handle.RunID)
+	if countEventsByType(eventPage.Items, "run.event.verification.passed") != 0 {
+		t.Fatalf("run.event.verification.passed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.verification.passed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.task.completed") != 0 {
+		t.Fatalf("run.event.task.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.task.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.completed") != 0 {
+		t.Fatalf("run.event.completed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.failed") != 0 {
+		t.Fatalf("run.event.failed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.failed"))
+	}
+	inspector := h.getInspector(t, handle.RunID)
+	if len(inspector.Verifications) != 1 || inspector.Verifications[0].Status != orch.TaskVerificationStatusLost {
+		t.Fatalf("inspector verifications = %+v, want single lost verification", inspector.Verifications)
+	}
+	if len(inspector.Tasks) != 1 || inspector.Tasks[0].Status != orch.TaskStatusCancelled {
+		t.Fatalf("inspector tasks = %+v, want single cancelled task", inspector.Tasks)
+	}
+	if got := fakeLLM.workerCalls.Load(); got < 2 {
+		t.Fatalf("fake llm worker calls = %d, want at least 2", got)
+	}
+}
+
 func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHarness {
 	t.Helper()
 
@@ -699,6 +1306,7 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 
 	logger := slog.New(slog.DiscardHandler)
 	service := orch.NewService(logger, appPool, queries)
+	botService := bots.NewService(logger, queries)
 
 	listenCfg := net.ListenConfig{}
 	listener, err := listenCfg.Listen(ctx, "tcp", "127.0.0.1:0")
@@ -718,7 +1326,7 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 	}))
 	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "ok") })
 	handlers.NewAuthHandler(logger, accounts.NewService(logger, queries), blackboxJWTSecret, 24*time.Hour).Register(e)
-	handlers.NewOrchestrationHandler(logger, service).Register(e)
+	handlers.NewOrchestrationHandler(logger, service, botService).Register(e)
 
 	serverErrCh := make(chan error, 1)
 	server := &http.Server{
@@ -754,7 +1362,9 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 		secret:      blackboxJWTSecret,
 	}
 	h.configPath = writeRuntimeConfig(t, dbCfg)
-	h.startPlannerLoop()
+	if !opts.disablePlanner {
+		h.startPlannerLoop()
+	}
 	if opts.startScheduler {
 		h.startSchedulerLoop()
 	}
@@ -810,6 +1420,7 @@ func (h *blackboxHarness) waitForPing(t *testing.T) {
 		if reqErr != nil {
 			t.Fatalf("build ping request: %v", reqErr)
 		}
+		// #nosec G704 -- blackbox harness targets its own local test server via h.baseURL.
 		resp, err := h.httpClient.Do(req)
 		if err == nil {
 			if closeErr := resp.Body.Close(); closeErr != nil {
@@ -872,12 +1483,13 @@ func (h *blackboxHarness) startVerificationRecoveryLoop() {
 }
 
 type workerdProcessOptions struct {
-	workerID       string
-	profiles       []string
-	pollMS         int
-	leaseTTL       int
-	startDelay     int
-	executionDelay int
+	workerID             string
+	profiles             []string
+	pollMS               int
+	leaseTTL             int
+	startDelay           int
+	executionDelay       int
+	replayCompletionOnce bool
 }
 
 func (h *blackboxHarness) startWorkerd(t *testing.T, opts workerdProcessOptions) *managedProcess {
@@ -892,16 +1504,20 @@ func (h *blackboxHarness) startWorkerd(t *testing.T, opts workerdProcessOptions)
 		fmt.Sprintf("WORKER_START_DELAY_MS=%d", maxInt(opts.startDelay, 0)),
 		fmt.Sprintf("WORKER_EXECUTION_DELAY_MS=%d", maxInt(opts.executionDelay, 0)),
 	}
+	if opts.replayCompletionOnce {
+		env = append(env, "WORKER_REPLAY_COMPLETION_ONCE=1")
+	}
 	return h.startManagedProcess(t, "workerd", binaries.workerd, env)
 }
 
 type verifydProcessOptions struct {
-	workerID       string
-	profiles       []string
-	pollMS         int
-	leaseTTL       int
-	startDelay     int
-	executionDelay int
+	workerID             string
+	profiles             []string
+	pollMS               int
+	leaseTTL             int
+	startDelay           int
+	executionDelay       int
+	replayCompletionOnce bool
 }
 
 func (h *blackboxHarness) startVerifyd(t *testing.T, opts verifydProcessOptions) *managedProcess {
@@ -915,6 +1531,9 @@ func (h *blackboxHarness) startVerifyd(t *testing.T, opts verifydProcessOptions)
 		fmt.Sprintf("VERIFIER_LEASE_TTL_SECONDS=%d", choosePositive(opts.leaseTTL, 2)),
 		fmt.Sprintf("VERIFIER_START_DELAY_MS=%d", maxInt(opts.startDelay, 0)),
 		fmt.Sprintf("VERIFIER_EXECUTION_DELAY_MS=%d", maxInt(opts.executionDelay, 0)),
+	}
+	if opts.replayCompletionOnce {
+		env = append(env, "VERIFIER_REPLAY_COMPLETION_ONCE=1")
 	}
 	return h.startManagedProcess(t, "verifyd", binaries.verifyd, env)
 }
@@ -947,6 +1566,17 @@ func (p *managedProcess) stop(t *testing.T) {
 	_ = p.cmd.Wait()
 }
 
+func assertProcessLogContains(t *testing.T, process *managedProcess, needle string) {
+	t.Helper()
+	if process == nil {
+		t.Fatalf("process = nil, want log containing %q", needle)
+	}
+	output := process.stdout.String() + "\n" + process.stderr.String()
+	if !strings.Contains(output, needle) {
+		t.Fatalf("%s logs missing %q\nstdout:\n%s\nstderr:\n%s", process.name, needle, strings.TrimSpace(process.stdout.String()), strings.TrimSpace(process.stderr.String()))
+	}
+}
+
 func (h *blackboxHarness) login(t *testing.T) string {
 	t.Helper()
 	body := handlers.LoginRequest{
@@ -969,6 +1599,13 @@ func (h *blackboxHarness) startRun(t *testing.T, req orch.StartRunRequest) orch.
 		t.Fatalf("invalid run handle: %+v", handle)
 	}
 	return handle
+}
+
+func (h *blackboxHarness) cancelRun(t *testing.T, runID string, req orch.CancelRunRequest) orch.CancelRunResult {
+	t.Helper()
+	var result orch.CancelRunResult
+	h.mustJSON(t, http.MethodPost, "/orchestration/runs/"+runID+"/cancel", req, h.token, &result, http.StatusOK)
+	return result
 }
 
 func (h *blackboxHarness) createCheckpoint(t *testing.T, runID, taskID string, req orch.CreateHumanCheckpointRequest) orch.CreateHumanCheckpointResult {
@@ -1004,6 +1641,22 @@ func (h *blackboxHarness) getSnapshotAt(t *testing.T, runID string, asOfSeq uint
 	var snapshot orch.RunSnapshot
 	h.mustJSON(t, http.MethodGet, "/orchestration/runs/"+runID+"/snapshot?as_of_seq="+strconv.FormatUint(asOfSeq, 10), nil, h.token, &snapshot, http.StatusOK)
 	return snapshot
+}
+
+func (h *blackboxHarness) getInspector(t *testing.T, runID string) orch.RunInspector {
+	t.Helper()
+	var inspector orch.RunInspector
+	h.mustJSON(t, http.MethodGet, "/orchestration/runs/"+runID+"/inspector", nil, h.token, &inspector, http.StatusOK)
+	return inspector
+}
+
+func hasStuckSignal(signals []orch.RunStuckSignal, code string) bool {
+	for _, signal := range signals {
+		if signal.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *blackboxHarness) listEvents(t *testing.T, runID string) orch.RunEventPage {
@@ -1126,6 +1779,70 @@ func (h *blackboxHarness) waitForEventType(t *testing.T, runID, eventType string
 	return orch.RunEvent{}
 }
 
+func (h *blackboxHarness) waitForEventTypeForTask(t *testing.T, runID, taskID, eventType string, timeout time.Duration) orch.RunEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		page := h.listEvents(t, runID)
+		for _, event := range page.Items {
+			if event.Type == eventType && event.TaskID == taskID {
+				return event
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not emit event %q for task %s within %s", runID, eventType, taskID, timeout)
+	return orch.RunEvent{}
+}
+
+func (h *blackboxHarness) waitForAnyEventTypeWithTimeout(t *testing.T, runID string, timeout time.Duration, eventTypes ...string) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		page := h.listEvents(t, runID)
+		for _, event := range page.Items {
+			for _, eventType := range eventTypes {
+				if event.Type == eventType {
+					return true
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+func (h *blackboxHarness) waitForRunTerminalStatus(t *testing.T, runID string, timeout time.Duration) orch.Run {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		snapshot := h.getSnapshot(t, runID)
+		switch snapshot.Run.LifecycleStatus {
+		case orch.LifecycleStatusCompleted, orch.LifecycleStatusFailed, orch.LifecycleStatusCancelled:
+			return snapshot.Run
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not reach terminal status within %s", runID, timeout)
+	return orch.Run{}
+}
+
+func (h *blackboxHarness) dumpRunDiagnostics(t *testing.T, runID string) {
+	t.Helper()
+	snapshot := h.getSnapshot(t, runID)
+	events := h.listEvents(t, runID)
+	inspector := h.getInspector(t, runID)
+	t.Logf("diagnostic snapshot: lifecycle=%s planning=%s snapshot_seq=%d", snapshot.Run.LifecycleStatus, snapshot.Run.PlanningStatus, snapshot.SnapshotSeq)
+	t.Logf("diagnostic events: %#v", events.Items)
+	t.Logf("diagnostic inspector actions=%#v spans=%#v", inspector.ActionRecords, inspector.ExecutionSpans)
+	h.processMu.Lock()
+	defer h.processMu.Unlock()
+	for _, process := range h.processes {
+		t.Logf("%s stdout:\n%s", process.name, strings.TrimSpace(process.stdout.String()))
+		t.Logf("%s stderr:\n%s", process.name, strings.TrimSpace(process.stderr.String()))
+	}
+}
+
 func (h *blackboxHarness) mustJSON(t *testing.T, method, path string, payload any, token string, dest any, wantStatus int) {
 	t.Helper()
 	var body io.Reader
@@ -1146,6 +1863,7 @@ func (h *blackboxHarness) mustJSON(t *testing.T, method, path string, payload an
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	// #nosec G704 -- blackbox harness issues requests only to its own local test server.
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s request: %v", method, path, err)
@@ -1168,6 +1886,87 @@ func (h *blackboxHarness) mustJSON(t *testing.T, method, path string, payload an
 	if err := json.Unmarshal(raw, dest); err != nil {
 		t.Fatalf("decode %s %s response: %v; body=%s", method, path, err, strings.TrimSpace(string(raw)))
 	}
+}
+
+func (h *blackboxHarness) createLLMBot(t *testing.T, providerBaseURL string) string {
+	t.Helper()
+
+	ctx := context.Background()
+	owner, err := h.queries.GetAccountByIdentity(ctx, pgtype.Text{String: h.username, Valid: true})
+	if err != nil {
+		t.Fatalf("GetAccountByIdentity() error = %v", err)
+	}
+
+	provider, err := h.queries.CreateProvider(ctx, sqlc.CreateProviderParams{
+		Name:       "blackbox-openai-" + uuid.NewString(),
+		ClientType: "openai-completions",
+		Icon:       pgtype.Text{},
+		Enable:     true,
+		Config: mustMarshalJSON(t, map[string]any{
+			"base_url": providerBaseURL,
+			"api_key":  "test-key",
+		}),
+		Metadata: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v", err)
+	}
+
+	model, err := h.queries.CreateModel(ctx, sqlc.CreateModelParams{
+		ModelID:    "blackbox-llm-" + uuid.NewString(),
+		Name:       pgtype.Text{String: "Blackbox LLM", Valid: true},
+		ProviderID: provider.ID,
+		Type:       "chat",
+		Config: mustMarshalJSON(t, map[string]any{
+			"compatibilities": []string{"tool-call"},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("CreateModel() error = %v", err)
+	}
+
+	bot, err := h.queries.CreateBot(ctx, sqlc.CreateBotParams{
+		OwnerUserID: owner.ID,
+		DisplayName: pgtype.Text{String: "Blackbox Bot", Valid: true},
+		AvatarUrl:   pgtype.Text{},
+		Timezone:    pgtype.Text{String: "Asia/Shanghai", Valid: true},
+		IsActive:    true,
+		Metadata:    []byte("{}"),
+		Status:      bots.BotStatusReady,
+	})
+	if err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+
+	if _, err := h.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
+		Language:               "auto",
+		ReasoningEnabled:       false,
+		ReasoningEffort:        "medium",
+		HeartbeatEnabled:       false,
+		HeartbeatInterval:      30,
+		HeartbeatPrompt:        "",
+		CompactionEnabled:      false,
+		CompactionThreshold:    100000,
+		CompactionRatio:        80,
+		Timezone:               pgtype.Text{String: "Asia/Shanghai", Valid: true},
+		ChatModelID:            model.ID,
+		HeartbeatModelID:       pgtype.UUID{},
+		CompactionModelID:      pgtype.UUID{},
+		TitleModelID:           pgtype.UUID{},
+		SearchProviderID:       pgtype.UUID{},
+		MemoryProviderID:       pgtype.UUID{},
+		ImageModelID:           pgtype.UUID{},
+		TtsModelID:             pgtype.UUID{},
+		TranscriptionModelID:   pgtype.UUID{},
+		BrowserContextID:       pgtype.UUID{},
+		PersistFullToolResults: false,
+		ShowToolCallsInIm:      false,
+		ID:                     bot.ID,
+	}); err != nil {
+		t.Fatalf("UpsertBotSettings() error = %v", err)
+	}
+
+	return uuidString(t, bot.ID)
 }
 
 func buildBlackboxBinaries(t *testing.T) blackboxBinarySet {
@@ -1305,6 +2104,15 @@ func writeRuntimeConfig(t *testing.T, dbCfg config.PostgresConfig) string {
 level = "info"
 format = "text"
 
+[server]
+addr = "127.0.0.1:0"
+
+[auth]
+jwt_secret = %q
+jwt_expires_in = "24h"
+
+timezone = "Asia/Shanghai"
+
 [postgres]
 host = %q
 port = %d
@@ -1312,7 +2120,7 @@ user = %q
 password = %q
 database = %q
 sslmode = %q
-`, dbCfg.Host, dbCfg.Port, dbCfg.User, dbCfg.Password, dbCfg.Database, chooseString(dbCfg.SSLMode, "disable"))
+`, blackboxJWTSecret, dbCfg.Host, dbCfg.Port, dbCfg.User, dbCfg.Password, dbCfg.Database, chooseString(dbCfg.SSLMode, "disable"))
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o600); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
@@ -1360,6 +2168,183 @@ func chooseString(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
+	t.Helper()
+
+	fake := &fakeOpenAICompletionsServer{}
+	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("fake llm method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("fake llm path = %s, want /chat/completions", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("fake llm auth header = %q, want Bearer test-key", got)
+		}
+
+		var body struct {
+			Model    string              `json:"model"`
+			Messages []fakeOpenAIMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode fake llm request: %v", err)
+		}
+
+		prompt := flattenOpenAIMessageContent(body.Messages)
+		payload := `{"status":"failed","summary":"unexpected fake llm prompt","failure_class":"unexpected_prompt","terminal_reason":"unexpected fake llm prompt","request_replan":false,"structured_output":{}}`
+		switch {
+		case strings.Contains(prompt, "Verify the following orchestration task result."):
+			fake.verifierCalls.Add(1)
+			payload = `{"status":"completed","verdict":"accepted","summary":"verification accepted","failure_class":"","terminal_reason":"","request_replan":false}`
+		case strings.Contains(prompt, fakeLLMToolActionGoal):
+			fake.workerCalls.Add(1)
+			if hasToolResult(body.Messages, "call_list_trace") {
+				payload = `{"status":"completed","summary":"listed workspace via tool","failure_class":"","terminal_reason":"","request_replan":false,"artifact_intents":[],"structured_output":{"execution":"tool","observed":"workspace_listed"}}`
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(map[string]any{
+					"id":      "chatcmpl-blackbox-tool",
+					"object":  "chat.completion",
+					"created": 1700000001,
+					"model":   chooseString(body.Model, "blackbox-llm-model"),
+					"choices": []map[string]any{{
+						"index":         0,
+						"finish_reason": "tool_calls",
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": "",
+							"tool_calls": []map[string]any{{
+								"id":   "call_list_trace",
+								"type": "function",
+								"function": map[string]any{
+									"name":      "list",
+									"arguments": `{"path":".","limit":20}`,
+								},
+							}},
+						},
+					}},
+					"usage": map[string]any{
+						"prompt_tokens":     24,
+						"completion_tokens": 12,
+						"total_tokens":      36,
+					},
+				}); err != nil {
+					t.Fatalf("encode fake llm tool-call response: %v", err)
+				}
+				return
+			}
+		case strings.Contains(prompt, fakeLLMChildTaskGoal):
+			fake.workerCalls.Add(1)
+			payload = `{"status":"completed","summary":"computed fib(31)=1346269","failure_class":"","terminal_reason":"","request_replan":false,"artifact_intents":[],"structured_output":{"value":1346269,"algorithm":"python","verified":true}}`
+		case strings.Contains(prompt, fakeLLMFailureReplanGoal):
+			fake.workerCalls.Add(1)
+			payload = `{"status":"failed","summary":"decomposition required before execution","failure_class":"needs_decomposition","terminal_reason":"task must be decomposed before execution","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-recovery","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""}],"structured_output":{}}`
+		case strings.Contains(prompt, "blackbox llm worker verifier path"):
+			fake.workerCalls.Add(1)
+			payload = `{"status":"completed","summary":"planned verification child task","failure_class":"","terminal_reason":"","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-verify","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{"mode":"builtin_basic","require_structured_output":true},"blackboard_scope":""}],"structured_output":{}}`
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-blackbox",
+			"object":  "chat.completion",
+			"created": 1700000000,
+			"model":   chooseString(body.Model, "blackbox-llm-model"),
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": payload,
+				},
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     32,
+				"completion_tokens": 16,
+				"total_tokens":      48,
+			},
+		}); err != nil {
+			t.Fatalf("encode fake llm response: %v", err)
+		}
+	}))
+	return fake
+}
+
+func (f *fakeOpenAICompletionsServer) Close() {
+	if f != nil && f.server != nil {
+		f.server.Close()
+	}
+}
+
+func (f *fakeOpenAICompletionsServer) URL() string {
+	if f == nil || f.server == nil {
+		return ""
+	}
+	return f.server.URL
+}
+
+func flattenOpenAIMessageContent(messages []fakeOpenAIMessage) string {
+	var parts []string
+	for _, message := range messages {
+		switch content := message.Content.(type) {
+		case string:
+			if trimmed := strings.TrimSpace(content); trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		case []any:
+			for _, item := range content {
+				part, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if text := strings.TrimSpace(stringValue(part["text"])); text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func hasToolResult(messages []fakeOpenAIMessage, toolCallID string) bool {
+	for _, message := range messages {
+		if message.Role != "tool" {
+			continue
+		}
+		if strings.TrimSpace(message.ToolCallID) == strings.TrimSpace(toolCallID) {
+			return true
+		}
+	}
+	return false
+}
+
+func mustMarshalJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return raw
+}
+
+func uuidString(t *testing.T, value pgtype.UUID) string {
+	t.Helper()
+	if !value.Valid {
+		t.Fatal("uuid is invalid")
+	}
+	parsed, err := uuid.FromBytes(value.Bytes[:])
+	if err != nil {
+		t.Fatalf("uuid.FromBytes() error = %v", err)
+	}
+	return parsed.String()
+}
+
+func stringValue(raw any) string {
+	value, _ := raw.(string)
+	return value
 }
 
 func countEventsByType(items []orch.RunEvent, eventType string) int {

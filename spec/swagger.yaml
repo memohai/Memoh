@@ -2660,6 +2660,40 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  orchestration.ActionRecord:
+    properties:
+      action_kind:
+        type: string
+      attempt_id:
+        type: string
+      created_at:
+        type: string
+      error_payload: {}
+      finished_at:
+        type: string
+      id:
+        type: string
+      input_payload: {}
+      output_payload: {}
+      run_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      task_id:
+        type: string
+      tool_call_id:
+        type: string
+      tool_name:
+        type: string
+      updated_at:
+        type: string
+      verification_id:
+        type: string
+    type: object
   orchestration.Artifact:
     properties:
       attempt_id:
@@ -2695,6 +2729,22 @@ definitions:
           $ref: '#/definitions/orchestration.Artifact'
         type: array
       next_after:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
+  orchestration.CancelRunRequest:
+    properties:
+      idempotency_key:
+        type: string
+    required:
+    - idempotency_key
+    type: object
+  orchestration.CancelRunResult:
+    properties:
+      lifecycle_status:
+        type: string
+      run_id:
         type: string
       snapshot_seq:
         type: integer
@@ -2841,6 +2891,136 @@ definitions:
       snapshot_seq:
         type: integer
     type: object
+  orchestration.InputManifest:
+    properties:
+      captured_artifact_versions:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      captured_blackboard_revisions:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      captured_task_inputs:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      projection_hash:
+        type: string
+      run_id:
+        type: string
+      task_id:
+        type: string
+    type: object
+  orchestration.InspectorAttempt:
+    properties:
+      attempt_no:
+        type: integer
+      claim_epoch:
+        type: integer
+      created_at:
+        type: string
+      executor_id:
+        type: string
+      failure_class:
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      input_manifest_id:
+        type: string
+      last_heartbeat_at:
+        type: string
+      lease_expires_at:
+        type: string
+      park_checkpoint_id:
+        type: string
+      run_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      task_id:
+        type: string
+      terminal_reason:
+        type: string
+      updated_at:
+        type: string
+      worker_id:
+        type: string
+    type: object
+  orchestration.InspectorVerification:
+    properties:
+      attempt_no:
+        type: integer
+      claim_epoch:
+        type: integer
+      created_at:
+        type: string
+      executor_id:
+        type: string
+      failure_class:
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      last_heartbeat_at:
+        type: string
+      lease_expires_at:
+        type: string
+      result_id:
+        type: string
+      run_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      task_id:
+        type: string
+      terminal_reason:
+        type: string
+      updated_at:
+        type: string
+      verdict:
+        type: string
+      verifier_profile:
+        type: string
+      worker_id:
+        type: string
+    type: object
+  orchestration.InspectorWorkerLease:
+    properties:
+      capabilities:
+        additionalProperties: {}
+        type: object
+      created_at:
+        type: string
+      display_name:
+        type: string
+      executor_id:
+        type: string
+      id:
+        type: string
+      last_heartbeat_at:
+        type: string
+      lease_expires_at:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
   orchestration.ResolveCheckpointResult:
     properties:
       checkpoint_id:
@@ -2942,6 +3122,66 @@ definitions:
       until_seq:
         type: integer
     type: object
+  orchestration.RunExecutionSpan:
+    properties:
+      attempt_no:
+        type: integer
+      checkpoint_id:
+        type: string
+      claimed_seq:
+        type: integer
+      completion_metadata:
+        additionalProperties: {}
+        type: object
+      created_seq:
+        type: integer
+      executor_id:
+        type: string
+      failure_class:
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      input_manifest_id:
+        type: string
+      kind:
+        type: string
+      last_heartbeat_at:
+        type: string
+      lease_expires_at:
+        type: string
+      related_event_types:
+        items:
+          type: string
+        type: array
+      requeue_seq:
+        type: integer
+      result_id:
+        type: string
+      run_id:
+        type: string
+      started_at:
+        type: string
+      started_seq:
+        type: integer
+      status:
+        type: string
+      summary:
+        type: string
+      task_id:
+        type: string
+      terminal_reason:
+        type: string
+      terminal_seq:
+        type: integer
+      verdict:
+        type: string
+      verifier_profile:
+        type: string
+      worker_id:
+        type: string
+    type: object
   orchestration.RunHandle:
     properties:
       root_task_id:
@@ -2951,6 +3191,158 @@ definitions:
       snapshot_seq:
         type: integer
     type: object
+  orchestration.RunInspector:
+    properties:
+      action_records:
+        items:
+          $ref: '#/definitions/orchestration.ActionRecord'
+        type: array
+      artifacts:
+        items:
+          $ref: '#/definitions/orchestration.Artifact'
+        type: array
+      attempts:
+        items:
+          $ref: '#/definitions/orchestration.InspectorAttempt'
+        type: array
+      checkpoints:
+        items:
+          $ref: '#/definitions/orchestration.HumanCheckpoint'
+        type: array
+      dependencies:
+        items:
+          $ref: '#/definitions/orchestration.TaskDependency'
+        type: array
+      execution_spans:
+        items:
+          $ref: '#/definitions/orchestration.RunExecutionSpan'
+        type: array
+      input_manifests:
+        items:
+          $ref: '#/definitions/orchestration.InputManifest'
+        type: array
+      results:
+        items:
+          $ref: '#/definitions/orchestration.TaskResult'
+        type: array
+      run:
+        $ref: '#/definitions/orchestration.Run'
+      stuck_signals:
+        items:
+          $ref: '#/definitions/orchestration.RunStuckSignal'
+        type: array
+      summary:
+        $ref: '#/definitions/orchestration.RunInspectorSummary'
+      tasks:
+        items:
+          $ref: '#/definitions/orchestration.Task'
+        type: array
+      timeline:
+        items:
+          $ref: '#/definitions/orchestration.RunTimelineEntry'
+        type: array
+      verifications:
+        items:
+          $ref: '#/definitions/orchestration.InspectorVerification'
+        type: array
+      workers:
+        items:
+          $ref: '#/definitions/orchestration.InspectorWorkerLease'
+        type: array
+    required:
+    - action_records
+    - artifacts
+    - attempts
+    - checkpoints
+    - dependencies
+    - execution_spans
+    - input_manifests
+    - results
+    - run
+    - stuck_signals
+    - summary
+    - tasks
+    - timeline
+    - verifications
+    - workers
+    type: object
+  orchestration.RunInspectorSummary:
+    properties:
+      active_attempt_count:
+        type: integer
+      active_verification_count:
+        type: integer
+      active_worker_count:
+        type: integer
+      blocked_task_count:
+        type: integer
+      cancelled_task_count:
+        type: integer
+      completed_task_count:
+        type: integer
+      critical_signal_count:
+        type: integer
+      dispatching_task_count:
+        type: integer
+      failed_task_count:
+        type: integer
+      open_checkpoint_count:
+        type: integer
+      ready_task_count:
+        type: integer
+      running_task_count:
+        type: integer
+      stuck_signal_count:
+        type: integer
+      verifying_task_count:
+        type: integer
+      waiting_human_task_count:
+        type: integer
+    required:
+    - active_attempt_count
+    - active_verification_count
+    - active_worker_count
+    - blocked_task_count
+    - cancelled_task_count
+    - completed_task_count
+    - critical_signal_count
+    - dispatching_task_count
+    - failed_task_count
+    - open_checkpoint_count
+    - ready_task_count
+    - running_task_count
+    - stuck_signal_count
+    - verifying_task_count
+    - waiting_human_task_count
+    type: object
+  orchestration.RunListItem:
+    properties:
+      created_at:
+        type: string
+      finished_at:
+        type: string
+      goal:
+        type: string
+      id:
+        type: string
+      lifecycle_status:
+        type: string
+      planning_status:
+        type: string
+      root_task_id:
+        type: string
+      terminal_reason:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  orchestration.RunListPage:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/orchestration.RunListItem'
+        type: array
+    type: object
   orchestration.RunSnapshot:
     properties:
       run:
@@ -2958,8 +3350,57 @@ definitions:
       snapshot_seq:
         type: integer
     type: object
+  orchestration.RunStuckSignal:
+    properties:
+      attempt_id:
+        type: string
+      code:
+        type: string
+      last_heartbeat_at:
+        type: string
+      lease_expires_at:
+        type: string
+      message:
+        type: string
+      observed_at:
+        type: string
+      severity:
+        type: string
+      status:
+        type: string
+      task_id:
+        type: string
+      verification_id:
+        type: string
+      worker_id:
+        type: string
+    type: object
+  orchestration.RunTimelineEntry:
+    properties:
+      aggregate_id:
+        type: string
+      aggregate_type:
+        type: string
+      attempt_id:
+        type: string
+      checkpoint_id:
+        type: string
+      created_at:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      seq:
+        type: integer
+      task_id:
+        type: string
+      type:
+        type: string
+    type: object
   orchestration.StartRunRequest:
     properties:
+      bot_id:
+        type: string
       goal:
         type: string
       idempotency_key:
@@ -3035,6 +3476,25 @@ definitions:
       worker_profile:
         type: string
     type: object
+  orchestration.TaskDependency:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      planner_epoch:
+        type: integer
+      predecessor_task_id:
+        type: string
+      run_id:
+        type: string
+      successor_task_id:
+        type: string
+      superseded_by_planner_epoch:
+        type: integer
+      updated_at:
+        type: string
+    type: object
   orchestration.TaskPage:
     properties:
       items:
@@ -3045,6 +3505,37 @@ definitions:
         type: string
       snapshot_seq:
         type: integer
+    type: object
+  orchestration.TaskResult:
+    properties:
+      artifact_intents:
+        items:
+          additionalProperties: {}
+          type: object
+        type: array
+      attempt_id:
+        type: string
+      created_at:
+        type: string
+      failure_class:
+        type: string
+      id:
+        type: string
+      request_replan:
+        type: boolean
+      run_id:
+        type: string
+      status:
+        type: string
+      structured_output:
+        additionalProperties: {}
+        type: object
+      summary:
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        type: string
     type: object
   providers.CountResponse:
     properties:
@@ -8378,6 +8869,42 @@ paths:
       summary: Update model by model ID
       tags:
       - models
+  /orchestration/bots/{bot_id}/runs:
+    get:
+      description: List orchestration runs started under the authenticated user for
+        a specific bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Maximum number of runs
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.RunListPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List orchestration runs for a bot
+      tags:
+      - orchestration
   /orchestration/checkpoints/{checkpoint_id}/resolve:
     post:
       description: Resolve an open checkpoint using a committed idempotent resolution
@@ -8404,10 +8931,6 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
@@ -8448,10 +8971,6 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "409":
@@ -8509,10 +9028,6 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -8524,6 +9039,51 @@ paths:
       security:
       - BearerAuth: []
       summary: List orchestration artifacts
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/cancel:
+    post:
+      description: Cancel a run using an idempotent control request
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Cancel run request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.CancelRunRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.CancelRunResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel an orchestration run
       tags:
       - orchestration
   /orchestration/runs/{run_id}/checkpoints:
@@ -8562,10 +9122,6 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
@@ -8615,10 +9171,6 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -8632,6 +9184,41 @@ paths:
       summary: List committed orchestration events
       tags:
       - orchestration
+  /orchestration/runs/{run_id}/inspector:
+    get:
+      description: Return aggregated orchestration runtime state for a run
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.RunInspector'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get orchestration run inspector
+      tags:
+      - orchestration
   /orchestration/runs/{run_id}/snapshot:
     get:
       description: Return the current run aggregate snapshot
@@ -8641,6 +9228,10 @@ paths:
         name: run_id
         required: true
         type: string
+      - description: Committed snapshot sequence
+        in: query
+        name: as_of_seq
+        type: integer
       responses:
         "200":
           description: OK
@@ -8652,10 +9243,6 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":
@@ -8709,10 +9296,6 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -8758,10 +9341,6 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":

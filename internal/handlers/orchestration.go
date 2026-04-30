@@ -11,13 +11,17 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/auth"
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/orchestration"
 )
 
 type orchestrationAPI interface {
 	StartRun(context.Context, orchestration.ControlIdentity, orchestration.StartRunRequest) (orchestration.RunHandle, error)
+	CancelRun(context.Context, orchestration.ControlIdentity, string, orchestration.CancelRunRequest) (*orchestration.CancelRunResult, error)
 	GetRunSnapshot(context.Context, orchestration.ControlIdentity, string) (*orchestration.RunSnapshot, error)
 	GetRunSnapshotAtSeq(context.Context, orchestration.ControlIdentity, string, uint64) (*orchestration.RunSnapshot, error)
+	ListBotRuns(context.Context, orchestration.ControlIdentity, string, orchestration.ListBotRunsRequest) (*orchestration.RunListPage, error)
+	GetRunInspector(context.Context, orchestration.ControlIdentity, string) (*orchestration.RunInspector, error)
 	ListRunTasks(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error)
 	CreateHumanCheckpoint(context.Context, orchestration.ControlIdentity, orchestration.CreateHumanCheckpointRequest) (*orchestration.CreateHumanCheckpointResult, error)
 	ListRunCheckpoints(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
@@ -28,19 +32,24 @@ type orchestrationAPI interface {
 
 type OrchestrationHandler struct {
 	service orchestrationAPI
+	bots    *bots.Service
 	logger  *slog.Logger
 }
 
-func NewOrchestrationHandler(log *slog.Logger, service *orchestration.Service) *OrchestrationHandler {
+func NewOrchestrationHandler(log *slog.Logger, service *orchestration.Service, botService *bots.Service) *OrchestrationHandler {
 	return &OrchestrationHandler{
 		service: service,
+		bots:    botService,
 		logger:  log.With(slog.String("handler", "orchestration")),
 	}
 }
 
 func (h *OrchestrationHandler) Register(e *echo.Echo) {
 	group := e.Group("/orchestration")
+	group.GET("/bots/:bot_id/runs", h.ListBotRuns)
 	group.POST("/runs", h.StartRun)
+	group.POST("/runs/:run_id/cancel", h.CancelRun)
+	group.GET("/runs/:run_id/inspector", h.GetRunInspector)
 	group.GET("/runs/:run_id/snapshot", h.GetRunSnapshot)
 	group.GET("/runs/:run_id/tasks", h.ListRunTasks)
 	group.POST("/runs/:run_id/tasks/:task_id/checkpoints", h.CreateHumanCheckpoint)
@@ -48,6 +57,36 @@ func (h *OrchestrationHandler) Register(e *echo.Echo) {
 	group.GET("/runs/:run_id/artifacts", h.ListRunArtifacts)
 	group.GET("/runs/:run_id/events", h.ListRunEvents)
 	group.POST("/checkpoints/:checkpoint_id/resolve", h.ResolveCheckpoint)
+}
+
+// CancelRun godoc
+// @Summary Cancel an orchestration run
+// @Description Cancel a run using an idempotent control request
+// @Tags orchestration
+// @Security BearerAuth
+// @Param run_id path string true "Run ID"
+// @Param payload body orchestration.CancelRunRequest true "Cancel run request"
+// @Success 200 {object} orchestration.CancelRunResult
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/runs/{run_id}/cancel [post].
+func (h *OrchestrationHandler) CancelRun(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	var req orchestration.CancelRunRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	result, err := h.service.CancelRun(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
+	if err != nil {
+		return h.httpError(err)
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 // StartRun godoc
@@ -71,11 +110,79 @@ func (h *OrchestrationHandler) StartRun(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if botID := strings.TrimSpace(req.BotID); botID != "" {
+		if h.bots == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "bot service unavailable")
+		}
+		if _, err := h.bots.AuthorizeAccess(c.Request().Context(), caller.Subject, botID, false); err != nil {
+			switch {
+			case errors.Is(err, bots.ErrBotNotFound):
+				return echo.NewHTTPError(http.StatusNotFound, "bot not found")
+			case errors.Is(err, bots.ErrBotAccessDenied):
+				return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
+			default:
+				return h.httpError(err)
+			}
+		}
+	}
 	handle, err := h.service.StartRun(c.Request().Context(), caller, req)
 	if err != nil {
 		return h.httpError(err)
 	}
 	return c.JSON(http.StatusCreated, handle)
+}
+
+// ListBotRuns godoc
+// @Summary List orchestration runs for a bot
+// @Description List orchestration runs started under the authenticated user for a specific bot
+// @Tags orchestration
+// @Security BearerAuth
+// @Param bot_id path string true "Bot ID"
+// @Param limit query int false "Maximum number of runs"
+// @Success 200 {object} orchestration.RunListPage
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/bots/{bot_id}/runs [get].
+func (h *OrchestrationHandler) ListBotRuns(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	req := orchestration.ListBotRunsRequest{}
+	req.Limit, err = parsePositiveIntQuery(c, "limit")
+	if err != nil {
+		return err
+	}
+	page, err := h.service.ListBotRuns(c.Request().Context(), caller, strings.TrimSpace(c.Param("bot_id")), req)
+	if err != nil {
+		return h.httpError(err)
+	}
+	return c.JSON(http.StatusOK, page)
+}
+
+// GetRunInspector godoc
+// @Summary Get orchestration run inspector
+// @Description Return aggregated orchestration runtime state for a run
+// @Tags orchestration
+// @Security BearerAuth
+// @Param run_id path string true "Run ID"
+// @Success 200 {object} orchestration.RunInspector
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/runs/{run_id}/inspector [get].
+func (h *OrchestrationHandler) GetRunInspector(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	inspector, err := h.service.GetRunInspector(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")))
+	if err != nil {
+		return h.httpError(err)
+	}
+	return c.JSON(http.StatusOK, inspector)
 }
 
 // GetRunSnapshot godoc

@@ -7231,6 +7231,61 @@
                 }
             }
         },
+        "/orchestration/bots/{bot_id}/runs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List orchestration runs started under the authenticated user for a specific bot",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "List orchestration runs for a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of runs",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.RunListPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/orchestration/checkpoints/{checkpoint_id}/resolve": {
             "post": {
                 "security": [
@@ -7276,12 +7331,6 @@
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7345,12 +7394,6 @@
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7440,14 +7483,78 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cancel a run using an idempotent control request",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Cancel an orchestration run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancel run request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.CancelRunRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.CancelRunResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7525,12 +7632,6 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -7604,8 +7705,57 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orchestration/runs/{run_id}/inspector": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return aggregated orchestration runtime state for a run",
+                "tags": [
+                    "orchestration"
+                ],
+                "summary": "Get orchestration run inspector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/orchestration.RunInspector"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7644,6 +7794,12 @@
                         "name": "run_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Committed snapshot sequence",
+                        "name": "as_of_seq",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7661,12 +7817,6 @@
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7750,12 +7900,6 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -7823,12 +7967,6 @@
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -14215,6 +14353,56 @@
                 }
             }
         },
+        "orchestration.ActionRecord": {
+            "type": "object",
+            "properties": {
+                "action_kind": {
+                    "type": "string"
+                },
+                "attempt_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_payload": {},
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input_payload": {},
+                "output_payload": {},
+                "run_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "tool_name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verification_id": {
+                    "type": "string"
+                }
+            }
+        },
         "orchestration.Artifact": {
             "type": "object",
             "properties": {
@@ -14267,6 +14455,31 @@
                     }
                 },
                 "next_after": {
+                    "type": "string"
+                },
+                "snapshot_seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.CancelRunRequest": {
+            "type": "object",
+            "required": [
+                "idempotency_key"
+            ],
+            "properties": {
+                "idempotency_key": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.CancelRunResult": {
+            "type": "object",
+            "properties": {
+                "lifecycle_status": {
+                    "type": "string"
+                },
+                "run_id": {
                     "type": "string"
                 },
                 "snapshot_seq": {
@@ -14487,6 +14700,201 @@
                 }
             }
         },
+        "orchestration.InputManifest": {
+            "type": "object",
+            "properties": {
+                "captured_artifact_versions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "captured_blackboard_revisions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "captured_task_inputs": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "projection_hash": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.InspectorAttempt": {
+            "type": "object",
+            "properties": {
+                "attempt_no": {
+                    "type": "integer"
+                },
+                "claim_epoch": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "executor_id": {
+                    "type": "string"
+                },
+                "failure_class": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input_manifest_id": {
+                    "type": "string"
+                },
+                "last_heartbeat_at": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "park_checkpoint_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worker_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.InspectorVerification": {
+            "type": "object",
+            "properties": {
+                "attempt_no": {
+                    "type": "integer"
+                },
+                "claim_epoch": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "executor_id": {
+                    "type": "string"
+                },
+                "failure_class": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_heartbeat_at": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "result_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verdict": {
+                    "type": "string"
+                },
+                "verifier_profile": {
+                    "type": "string"
+                },
+                "worker_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.InspectorWorkerLease": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "executor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_heartbeat_at": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "orchestration.ResolveCheckpointResult": {
             "type": "object",
             "properties": {
@@ -14637,6 +15045,96 @@
                 }
             }
         },
+        "orchestration.RunExecutionSpan": {
+            "type": "object",
+            "properties": {
+                "attempt_no": {
+                    "type": "integer"
+                },
+                "checkpoint_id": {
+                    "type": "string"
+                },
+                "claimed_seq": {
+                    "type": "integer"
+                },
+                "completion_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_seq": {
+                    "type": "integer"
+                },
+                "executor_id": {
+                    "type": "string"
+                },
+                "failure_class": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input_manifest_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "last_heartbeat_at": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "related_event_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "requeue_seq": {
+                    "type": "integer"
+                },
+                "result_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "started_seq": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "terminal_seq": {
+                    "type": "integer"
+                },
+                "verdict": {
+                    "type": "string"
+                },
+                "verifier_profile": {
+                    "type": "string"
+                },
+                "worker_id": {
+                    "type": "string"
+                }
+            }
+        },
         "orchestration.RunHandle": {
             "type": "object",
             "properties": {
@@ -14651,6 +15149,222 @@
                 }
             }
         },
+        "orchestration.RunInspector": {
+            "type": "object",
+            "required": [
+                "action_records",
+                "artifacts",
+                "attempts",
+                "checkpoints",
+                "dependencies",
+                "execution_spans",
+                "input_manifests",
+                "results",
+                "run",
+                "stuck_signals",
+                "summary",
+                "tasks",
+                "timeline",
+                "verifications",
+                "workers"
+            ],
+            "properties": {
+                "action_records": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.ActionRecord"
+                    }
+                },
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.Artifact"
+                    }
+                },
+                "attempts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.InspectorAttempt"
+                    }
+                },
+                "checkpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.HumanCheckpoint"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.TaskDependency"
+                    }
+                },
+                "execution_spans": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.RunExecutionSpan"
+                    }
+                },
+                "input_manifests": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.InputManifest"
+                    }
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.TaskResult"
+                    }
+                },
+                "run": {
+                    "$ref": "#/definitions/orchestration.Run"
+                },
+                "stuck_signals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.RunStuckSignal"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/orchestration.RunInspectorSummary"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.Task"
+                    }
+                },
+                "timeline": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.RunTimelineEntry"
+                    }
+                },
+                "verifications": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.InspectorVerification"
+                    }
+                },
+                "workers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.InspectorWorkerLease"
+                    }
+                }
+            }
+        },
+        "orchestration.RunInspectorSummary": {
+            "type": "object",
+            "required": [
+                "active_attempt_count",
+                "active_verification_count",
+                "active_worker_count",
+                "blocked_task_count",
+                "cancelled_task_count",
+                "completed_task_count",
+                "critical_signal_count",
+                "dispatching_task_count",
+                "failed_task_count",
+                "open_checkpoint_count",
+                "ready_task_count",
+                "running_task_count",
+                "stuck_signal_count",
+                "verifying_task_count",
+                "waiting_human_task_count"
+            ],
+            "properties": {
+                "active_attempt_count": {
+                    "type": "integer"
+                },
+                "active_verification_count": {
+                    "type": "integer"
+                },
+                "active_worker_count": {
+                    "type": "integer"
+                },
+                "blocked_task_count": {
+                    "type": "integer"
+                },
+                "cancelled_task_count": {
+                    "type": "integer"
+                },
+                "completed_task_count": {
+                    "type": "integer"
+                },
+                "critical_signal_count": {
+                    "type": "integer"
+                },
+                "dispatching_task_count": {
+                    "type": "integer"
+                },
+                "failed_task_count": {
+                    "type": "integer"
+                },
+                "open_checkpoint_count": {
+                    "type": "integer"
+                },
+                "ready_task_count": {
+                    "type": "integer"
+                },
+                "running_task_count": {
+                    "type": "integer"
+                },
+                "stuck_signal_count": {
+                    "type": "integer"
+                },
+                "verifying_task_count": {
+                    "type": "integer"
+                },
+                "waiting_human_task_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "orchestration.RunListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lifecycle_status": {
+                    "type": "string"
+                },
+                "planning_status": {
+                    "type": "string"
+                },
+                "root_task_id": {
+                    "type": "string"
+                },
+                "terminal_reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.RunListPage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/orchestration.RunListItem"
+                    }
+                }
+            }
+        },
         "orchestration.RunSnapshot": {
             "type": "object",
             "properties": {
@@ -14662,6 +15376,77 @@
                 }
             }
         },
+        "orchestration.RunStuckSignal": {
+            "type": "object",
+            "properties": {
+                "attempt_id": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "last_heartbeat_at": {
+                    "type": "string"
+                },
+                "lease_expires_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "observed_at": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "verification_id": {
+                    "type": "string"
+                },
+                "worker_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "orchestration.RunTimelineEntry": {
+            "type": "object",
+            "properties": {
+                "aggregate_id": {
+                    "type": "string"
+                },
+                "aggregate_type": {
+                    "type": "string"
+                },
+                "attempt_id": {
+                    "type": "string"
+                },
+                "checkpoint_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "orchestration.StartRunRequest": {
             "type": "object",
             "required": [
@@ -14669,6 +15454,9 @@
                 "idempotency_key"
             ],
             "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
                 "goal": {
                     "type": "string"
                 },
@@ -14774,6 +15562,35 @@
                 }
             }
         },
+        "orchestration.TaskDependency": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "planner_epoch": {
+                    "type": "integer"
+                },
+                "predecessor_task_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "successor_task_id": {
+                    "type": "string"
+                },
+                "superseded_by_planner_epoch": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "orchestration.TaskPage": {
             "type": "object",
             "properties": {
@@ -14788,6 +15605,52 @@
                 },
                 "snapshot_seq": {
                     "type": "integer"
+                }
+            }
+        },
+        "orchestration.TaskResult": {
+            "type": "object",
+            "properties": {
+                "artifact_intents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "attempt_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "failure_class": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "request_replan": {
+                    "type": "boolean"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "structured_output": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
