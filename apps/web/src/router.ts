@@ -28,6 +28,14 @@ const routes = [
           breadcrumb: i18nRef('sidebar.chat'),
         },
       },
+      {
+        name: 'orchestration',
+        path: '/orchestration',
+        component: () => import('@/pages/orchestration/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.orchestration'),
+        },
+      },
     ],
   },
   {

@@ -86,6 +86,17 @@
         <SidebarMenu class="gap-2.5">
           <SidebarMenuItem>
             <SidebarMenuButton
+              :tooltip="t('sidebar.orchestration')"
+              class="h-9 px-2.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+              :is-active="isOrchestrationActive"
+              @click="router.push('/orchestration')"
+            >
+              <Workflow class="size-3.5" />
+              <span class="text-xs font-medium group-data-[collapsible=icon]:hidden">{{ t('sidebar.orchestration') }}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
               :tooltip="t('sidebar.settings')"
               class="h-9 px-2.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
               :is-active="isSettingsActive"
@@ -126,7 +137,7 @@ import {
   SidebarRail,
   useSidebar,
 } from '@memohai/ui'
-import { Plus, LoaderCircle, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { Plus, LoaderCircle, Settings, PanelLeftClose, PanelLeftOpen, Workflow } from 'lucide-vue-next'
 import BotItem from './bot-item.vue'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 import { DesktopShellKey } from '@/lib/desktop-shell'
@@ -142,4 +153,5 @@ const { data: botData, isLoading } = useQuery(getBotsQuery())
 const bots = computed<BotsBot[]>(() => sortBots(botData.value?.items ?? []))
 
 const isSettingsActive = computed(() => route.path.startsWith('/settings'))
+const isOrchestrationActive = computed(() => route.path.startsWith('/orchestration'))
 </script>
