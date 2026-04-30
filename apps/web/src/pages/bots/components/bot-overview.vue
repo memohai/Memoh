@@ -121,7 +121,7 @@ function checkStatusVariant(status: BotCheck['status']): 'default' | 'secondary'
 </script>
 
 <template>
-  <div>
+  <div class="max-w-2xl mx-auto pb-12 space-y-5">
     <div class="rounded-md border p-4">
       <div class="flex items-center justify-between gap-2">
         <div>

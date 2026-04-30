@@ -15,7 +15,7 @@
         role="combobox"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select search provider'"
-        class="w-full justify-between font-normal"
+        class="w-full justify-between font-normal text-xs shadow-none h-9"
       >
         <span class="flex min-w-0 items-center gap-2 truncate">
           <SearchProviderLogo

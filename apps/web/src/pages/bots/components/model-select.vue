@@ -6,7 +6,7 @@
         role="combobox"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select model'"
-        class="w-full justify-between font-normal"
+        class="w-full justify-between font-normal shadow-none h-9 text-xs"
       >
         <span
           class="truncate"
@@ -20,7 +20,7 @@
       </Button>
     </PopoverTrigger>
     <PopoverContent
-      class="w-[--reka-popover-trigger-width] p-0"
+      class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-[8px]"
       align="start"
     >
       <ModelOptions

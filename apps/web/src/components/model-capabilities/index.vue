@@ -3,7 +3,7 @@
     v-for="cap in compatibilities"
     :key="cap"
     :title="$t(`models.compatibility.${cap}`, cap)"
-    class="inline-flex items-center justify-center rounded-md border-0 size-5 shrink-0"
+    class="inline-flex items-center justify-center rounded-md border size-5 shrink-0 bg-transparent"
     :class="styleOf(cap)"
   >
     <component
@@ -29,10 +29,10 @@ const ICONS: Record<string, Component> = {
 }
 
 const CLASSES: Record<string, string> = {
-  'tool-call': 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
-  'vision': 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
-  'image-output': 'bg-pink-50 text-pink-700 dark:bg-pink-950 dark:text-pink-300',
-  'reasoning': 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  'tool-call': 'border-blue-500/30 text-blue-600 dark:border-blue-400/30 dark:text-blue-400',
+  'vision': 'border-purple-500/30 text-purple-600 dark:border-purple-400/30 dark:text-purple-400',
+  'image-output': 'border-pink-500/30 text-pink-600 dark:border-pink-400/30 dark:text-pink-400',
+  'reasoning': 'border-amber-500/30 text-amber-600 dark:border-amber-400/30 dark:text-amber-400',
 }
 
 function iconOf(cap: string): Component {
@@ -40,6 +40,6 @@ function iconOf(cap: string): Component {
 }
 
 function styleOf(cap: string): string {
-  return CLASSES[cap] ?? 'bg-accent text-foreground'
+  return CLASSES[cap] ?? 'border-border text-foreground'
 }
 </script>

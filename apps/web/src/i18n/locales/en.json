@@ -9,6 +9,7 @@
     "edit": "Edit",
     "delete": "Delete",
     "search": "Search",
+    "noData": "No data",
     "loading": "Loading...",
     "operation": "Actions",
     "enable": "Enable",
@@ -330,7 +331,7 @@
     "compatibility": {
       "vision": "Vision",
       "tool-call": "Tool Call",
-      "image-output": "Image Output",
+      "image-output": "Image",
       "reasoning": "Reasoning"
     },
     "contextWindow": "Context Window",
@@ -1099,7 +1100,21 @@
       "save": "Save Settings",
       "dangerZone": "Danger Zone",
       "deleteBotDescription": "Deleting this bot cannot be undone. Proceed with caution.",
-      "deleteBot": "Delete Bot"
+      "deleteBot": "Delete Bot",
+      "blocks": {
+        "global": "Global Settings",
+        "interaction": "Core Dialogue & Behavior",
+        "context": "Knowledge & Context",
+        "multimedia": "Multimedia Interaction",
+        "globalDescription": "Base environment and language preferences.",
+        "interactionDescription": "Configure the dialogue brain and response behavior.",
+        "contextDescription": "Enhance real-time search and long-term memory.",
+        "multimediaDescription": "Configure voice interaction and image generation."
+      },
+      "showMemoryDetails": "Show Detailed Index Status",
+      "hideMemoryDetails": "Hide Detailed Index Status",
+      "chatLanguage": "Chat Language",
+      "chatLanguagePlaceholder": "Auto Detect"
     },
     "access": {
       "title": "Access Control",
@@ -1541,5 +1556,17 @@
     "skillInstallTitle": "Install Skill",
     "loadError": "Failed to load from Supermarket",
     "submit": "Submit"
+  },
+  "languages": {
+    "auto": "Auto Detect",
+    "zh-CN": "Chinese (Simplified)",
+    "en-US": "English (United States)",
+    "ja-JP": "Japanese",
+    "ko-KR": "Korean",
+    "fr-FR": "French",
+    "de-DE": "German",
+    "es-ES": "Spanish",
+    "ru-RU": "Russian",
+    "it-IT": "Italian"
   }
 }
