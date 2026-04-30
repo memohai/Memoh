@@ -10,6 +10,7 @@ FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.role = 'assistant'
   AND m.usage IS NOT NULL
+  AND json_valid(m.usage)
 ORDER BY m.created_at DESC
 LIMIT 1;
 
@@ -20,7 +21,8 @@ SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheWriteTokens') AS INTEGER)), 0) AS cache_write_tokens
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.usage IS NOT NULL;
+  AND m.usage IS NOT NULL
+  AND json_valid(m.usage);
 
 -- name: GetLatestSessionIDByBot :one
 SELECT s.id
@@ -33,18 +35,32 @@ LIMIT 1;
 
 -- name: GetSessionUsedSkills :many
 SELECT DISTINCT
-  json_extract(j.value, '$.input.skillName') AS skill_name
+  COALESCE(
+    json_extract(j.value, '$.input.skillName'),
+    json_extract(j.value, '$.input.skill_name'),
+    json_extract(j.value, '$.input.name')
+  ) AS skill_name
 FROM bot_history_messages m,
   json_each(
-    CASE WHEN json_type(json_extract(m.content, '$.content')) = 'array'
+    CASE WHEN json_valid(m.content) AND json_type(m.content, '$.content') = 'array'
          THEN json_extract(m.content, '$.content')
-         ELSE '[]'
+         WHEN json_valid(m.content) AND json_type(m.content) = 'array'
+         THEN m.content
+         ELSE json('[]')
     END
   ) AS j
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.role = 'assistant'
   AND json_extract(j.value, '$.type') = 'tool-call'
-  AND json_extract(j.value, '$.toolName') = 'use_skill'
-  AND json_extract(j.value, '$.input.skillName') IS NOT NULL
-  AND json_extract(j.value, '$.input.skillName') != ''
+  AND COALESCE(json_extract(j.value, '$.toolName'), json_extract(j.value, '$.tool_name')) = 'use_skill'
+  AND COALESCE(
+    json_extract(j.value, '$.input.skillName'),
+    json_extract(j.value, '$.input.skill_name'),
+    json_extract(j.value, '$.input.name')
+  ) IS NOT NULL
+  AND COALESCE(
+    json_extract(j.value, '$.input.skillName'),
+    json_extract(j.value, '$.input.skill_name'),
+    json_extract(j.value, '$.input.name')
+  ) != ''
 ORDER BY skill_name;

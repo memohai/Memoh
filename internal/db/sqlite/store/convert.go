@@ -39,6 +39,21 @@ func assignValue(src reflect.Value, dst reflect.Value) error {
 		}
 		src = src.Elem()
 	}
+	if src.Kind() == reflect.Interface {
+		if src.IsNil() {
+			dst.Set(reflect.Zero(dst.Type()))
+			return nil
+		}
+		src = src.Elem()
+	}
+	if dst.Kind() == reflect.Interface {
+		if !validValue(src) {
+			dst.Set(reflect.Zero(dst.Type()))
+			return nil
+		}
+		dst.Set(reflect.ValueOf(interfaceValue(src)))
+		return nil
+	}
 	if src.Type().AssignableTo(dst.Type()) {
 		dst.Set(src)
 		return nil
@@ -61,6 +76,10 @@ func assignValue(src reflect.Value, dst reflect.Value) error {
 	}
 	if isPGTimestamptz(dst.Type()) {
 		dst.Set(pgTimestamptz(timeValue(src), validValue(src)))
+		return nil
+	}
+	if isPGDate(dst.Type()) {
+		dst.Set(pgDate(timeValue(src), validValue(src)))
 		return nil
 	}
 	switch dst.Kind() {
@@ -211,6 +230,12 @@ func stringValue(value reflect.Value) string {
 		}
 		return value.FieldByName("Time").Interface().(time.Time).UTC().Format(time.RFC3339Nano)
 	}
+	if isPGDate(value.Type()) {
+		if !value.FieldByName("Valid").Bool() {
+			return ""
+		}
+		return value.FieldByName("Time").Interface().(time.Time).UTC().Format("2006-01-02")
+	}
 	switch value.Kind() {
 	case reflect.String:
 		return value.String()
@@ -229,6 +254,35 @@ func stringValue(value reflect.Value) string {
 		return strconv.FormatUint(value.Uint(), 10)
 	}
 	return fmt.Sprint(value.Interface())
+}
+
+func interfaceValue(value reflect.Value) any {
+	if !value.IsValid() {
+		return nil
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return nil
+		}
+		value = value.Elem()
+	}
+	if value.Type() == reflect.TypeOf(sql.NullString{}) || isPGText(value.Type()) || isPGUUID(value.Type()) || isPGTimestamptz(value.Type()) || isPGDate(value.Type()) {
+		return stringValue(value)
+	}
+	if value.Kind() == reflect.Slice && value.Type().Elem().Kind() == reflect.Uint8 {
+		return string(value.Bytes())
+	}
+	switch value.Kind() {
+	case reflect.Bool:
+		return boolValue(value)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return intValue(value)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return intValue(value)
+	case reflect.String:
+		return value.String()
+	}
+	return value.Interface()
 }
 
 func boolValue(value reflect.Value) bool {
@@ -303,8 +357,14 @@ func timeValue(value reflect.Value) time.Time {
 		}
 		return value.FieldByName("Time").Interface().(time.Time)
 	}
+	if isPGDate(value.Type()) {
+		if !value.FieldByName("Valid").Bool() {
+			return time.Time{}
+		}
+		return value.FieldByName("Time").Interface().(time.Time)
+	}
 	raw := stringValue(value)
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
 		if parsed, err := time.Parse(layout, raw); err == nil {
 			return parsed
 		}
@@ -328,6 +388,10 @@ func isPGTimestamptz(t reflect.Type) bool {
 	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Timestamptz"
 }
 
+func isPGDate(t reflect.Type) bool {
+	return t.PkgPath() == "github.com/jackc/pgx/v5/pgtype" && t.Name() == "Date"
+}
+
 func sqlNullString(value string, valid bool) reflect.Value {
 	return reflect.ValueOf(sql.NullString{String: value, Valid: valid})
 }
@@ -346,4 +410,8 @@ func pgUUID(value string, valid bool) reflect.Value {
 
 func pgTimestamptz(value time.Time, valid bool) reflect.Value {
 	return reflect.ValueOf(pgtype.Timestamptz{Time: value, Valid: valid && !value.IsZero()})
+}
+
+func pgDate(value time.Time, valid bool) reflect.Value {
+	return reflect.ValueOf(pgtype.Date{Time: value, Valid: valid && !value.IsZero()})
 }

@@ -17,8 +17,9 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
 WHERE m.bot_id = ?1
   AND m.usage IS NOT NULL
-  AND m.created_at >= ?2
-  AND m.created_at < ?3
+  AND json_valid(m.usage)
+  AND datetime(m.created_at) >= datetime(?2)
+  AND datetime(m.created_at) < datetime(?3)
   AND (?4 IS NULL OR m.model_id = ?4)
   AND (
     ?5 IS NULL
@@ -31,8 +32,8 @@ WHERE m.bot_id = ?1
 
 type CountTokenUsageRecordsParams struct {
 	BotID       string      `json:"bot_id"`
-	FromTime    string      `json:"from_time"`
-	ToTime      string      `json:"to_time"`
+	FromTime    interface{} `json:"from_time"`
+	ToTime      interface{} `json:"to_time"`
 	ModelID     interface{} `json:"model_id"`
 	SessionType interface{} `json:"session_type"`
 }
@@ -56,7 +57,7 @@ SELECT
     CASE WHEN s.type = 'subagent' THEN COALESCE(ps.type, 'chat') ELSE s.type END,
     'chat'
   ) AS session_type,
-  date(m.created_at) AS day,
+  date(datetime(m.created_at)) AS day,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS input_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.outputTokens') AS INTEGER)), 0) AS output_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens,
@@ -67,8 +68,9 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id
 WHERE m.bot_id = ?1
   AND m.usage IS NOT NULL
-  AND m.created_at >= ?2
-  AND m.created_at < ?3
+  AND json_valid(m.usage)
+  AND datetime(m.created_at) >= datetime(?2)
+  AND datetime(m.created_at) < datetime(?3)
   AND (?4 IS NULL OR m.model_id = ?4)
 GROUP BY session_type, day
 ORDER BY day, session_type
@@ -76,8 +78,8 @@ ORDER BY day, session_type
 
 type GetTokenUsageByDayAndTypeParams struct {
 	BotID    string      `json:"bot_id"`
-	FromTime string      `json:"from_time"`
-	ToTime   string      `json:"to_time"`
+	FromTime interface{} `json:"from_time"`
+	ToTime   interface{} `json:"to_time"`
 	ModelID  interface{} `json:"model_id"`
 }
 
@@ -140,16 +142,17 @@ LEFT JOIN models mo ON mo.id = m.model_id
 LEFT JOIN providers lp ON lp.id = mo.provider_id
 WHERE m.bot_id = ?1
   AND m.usage IS NOT NULL
-  AND m.created_at >= ?2
-  AND m.created_at < ?3
+  AND json_valid(m.usage)
+  AND datetime(m.created_at) >= datetime(?2)
+  AND datetime(m.created_at) < datetime(?3)
 GROUP BY m.model_id, mo.model_id, mo.name, lp.name
 ORDER BY input_tokens DESC
 `
 
 type GetTokenUsageByModelParams struct {
-	BotID    string `json:"bot_id"`
-	FromTime string `json:"from_time"`
-	ToTime   string `json:"to_time"`
+	BotID    string      `json:"bot_id"`
+	FromTime interface{} `json:"from_time"`
+	ToTime   interface{} `json:"to_time"`
 }
 
 type GetTokenUsageByModelRow struct {
@@ -216,8 +219,9 @@ LEFT JOIN models mo ON mo.id = m.model_id
 LEFT JOIN providers lp ON lp.id = mo.provider_id
 WHERE m.bot_id = ?1
   AND m.usage IS NOT NULL
-  AND m.created_at >= ?2
-  AND m.created_at < ?3
+  AND json_valid(m.usage)
+  AND datetime(m.created_at) >= datetime(?2)
+  AND datetime(m.created_at) < datetime(?3)
   AND (?4 IS NULL OR m.model_id = ?4)
   AND (
     ?5 IS NULL
@@ -233,8 +237,8 @@ OFFSET ?6
 
 type ListTokenUsageRecordsParams struct {
 	BotID       string      `json:"bot_id"`
-	FromTime    string      `json:"from_time"`
-	ToTime      string      `json:"to_time"`
+	FromTime    interface{} `json:"from_time"`
+	ToTime      interface{} `json:"to_time"`
 	ModelID     interface{} `json:"model_id"`
 	SessionType interface{} `json:"session_type"`
 	PageOffset  int64       `json:"page_offset"`
