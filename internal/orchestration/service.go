@@ -701,6 +701,520 @@ func (s *Service) ListRunEvents(ctx context.Context, caller ControlIdentity, run
 	}, nil
 }
 
+func (s *Service) WatchRun(ctx context.Context, caller ControlIdentity, runID string, req WatchRunRequest) (<-chan RunEvent, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := s.GetRunSnapshot(ctx, caller, runID)
+	if err != nil {
+		return nil, err
+	}
+	if req.AfterSeq > snapshot.SnapshotSeq {
+		return nil, fmt.Errorf("%w: after_seq exceeds current snapshot", ErrInvalidArgument)
+	}
+
+	events := make(chan RunEvent, 128)
+	go func() {
+		defer close(events)
+
+		afterSeq := req.AfterSeq
+		flushUntil := func(targetSeq uint64) bool {
+			for afterSeq < targetSeq {
+				page, listErr := s.ListRunEvents(ctx, caller, runID, ListRunEventsRequest{
+					AfterSeq: afterSeq,
+					UntilSeq: targetSeq,
+					Limit:    defaultEventLimit,
+				})
+				if listErr != nil {
+					s.logger.Warn("watch run list events failed", slog.String("run_id", runID), slog.Any("error", listErr))
+					return false
+				}
+				if len(page.Items) == 0 {
+					return true
+				}
+				for _, event := range page.Items {
+					select {
+					case <-ctx.Done():
+						return false
+					case events <- event:
+					}
+					afterSeq = event.Seq
+				}
+			}
+			return true
+		}
+
+		if !flushUntil(snapshot.SnapshotSeq) {
+			return
+		}
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				currentSnapshot, snapshotErr := s.GetRunSnapshot(ctx, caller, runID)
+				if snapshotErr != nil {
+					s.logger.Warn("watch run refresh failed", slog.String("run_id", runID), slog.Any("error", snapshotErr))
+					return
+				}
+				if currentSnapshot.SnapshotSeq <= afterSeq {
+					continue
+				}
+				if !flushUntil(currentSnapshot.SnapshotSeq) {
+					return
+				}
+			}
+		}
+	}()
+
+	return events, nil
+}
+
+func (s *Service) InjectRunHint(ctx context.Context, caller ControlIdentity, runID string, req InjectRunHintRequest) (*InjectRunHintResult, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	normalizedRunID, err := normalizeRequiredUUID(runID, "run_id")
+	if err != nil {
+		return nil, err
+	}
+	normalizedIdempotencyKey := normalizeIdempotencyKey(req.IdempotencyKey)
+	if normalizedIdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrInvalidArgument)
+	}
+	normalizedHint, targetTaskID, requestHash, err := normalizeInjectRunHintRequest(req, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pgRunID, err := db.ParseUUID(normalizedRunID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid run_id", ErrInvalidArgument)
+	}
+	pgTaskID := pgtype.UUID{}
+	if strings.TrimSpace(targetTaskID) != "" {
+		pgTaskID, err = db.ParseUUID(targetTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid target_task_id", ErrInvalidArgument)
+		}
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin inject run hint tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	existing, existingFound, err := getIdempotencyRecord(ctx, qtx, caller, methodInjectRunHint, normalizedRunID, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if existingFound {
+		if existing.RequestHash != requestHash {
+			return nil, ErrIdempotencyConflict
+		}
+		if existing.State != "completed" {
+			return nil, ErrIdempotencyIncomplete
+		}
+		result, err := decodeInjectRunHintResult(existing.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed inject run hint tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	lockedRun, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, pgRunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("lock run for inject hint: %w", err)
+	}
+	if err := authorizeRun(caller, lockedRun); err != nil {
+		return nil, ErrRunNotFound
+	}
+	if !runAcceptsExternalMutations(lockedRun.LifecycleStatus) {
+		return nil, ErrRunImmutable
+	}
+
+	var lockedTask sqlc.OrchestrationTask
+	if pgTaskID.Valid {
+		lockedTask, err = qtx.GetOrchestrationTaskByIDForUpdate(ctx, pgTaskID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrTaskNotFound
+			}
+			return nil, fmt.Errorf("lock target task for inject hint: %w", err)
+		}
+		if lockedTask.RunID != lockedRun.ID {
+			return nil, ErrTaskNotFound
+		}
+		if taskSuperseded(lockedTask) {
+			return nil, ErrTaskImmutable
+		}
+	}
+
+	record, replay, err := ensureIdempotencyRecord(ctx, qtx, caller, methodInjectRunHint, normalizedRunID, normalizedIdempotencyKey, requestHash)
+	if err != nil {
+		return nil, err
+	}
+	if replay {
+		result, err := decodeInjectRunHintResult(record.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed inject run hint tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	var (
+		lastEvent        sqlc.OrchestrationEvent
+		planningIntentID string
+	)
+	switch normalizedHint.Kind {
+	case RunHintKindReplanRequest:
+		planningIntentID, lastEvent, err = s.injectReplanHint(ctx, qtx, lockedRun, lockedTask, normalizedHint, normalizedIdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.syncRunPlanningStatus(ctx, qtx, lockedRun.ID); err != nil {
+			return nil, err
+		}
+	case RunHintKindContextUpdate:
+		updatedInput := mergeObjects(decodeJSONObject(lockedRun.Input), normalizedHint.Details)
+		updatedRun, updateErr := qtx.UpdateOrchestrationRunInput(ctx, sqlc.UpdateOrchestrationRunInputParams{
+			ID:    lockedRun.ID,
+			Input: marshalObject(updatedInput),
+		})
+		if updateErr != nil {
+			return nil, fmt.Errorf("update run input for context hint: %w", updateErr)
+		}
+		lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+			AggregateType:    "run",
+			AggregateID:      updatedRun.ID,
+			AggregateVersion: updatedRun.StatusVersion,
+			IdempotencyKey:   normalizedIdempotencyKey,
+			Type:             "run.event.hint.injected",
+			Payload: map[string]any{
+				"run_id":      updatedRun.ID.String(),
+				"hint_kind":   normalizedHint.Kind,
+				"summary":     normalizedHint.Summary,
+				"details":     normalizedHint.Details,
+				"target_kind": "run",
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+	case RunHintKindConstraintUpdate:
+		if pgTaskID.Valid {
+			updatedInputs := mergeObjects(decodeJSONObject(lockedTask.Inputs), normalizedHint.Details)
+			updatedTask, updateErr := qtx.UpdateOrchestrationTaskInputs(ctx, sqlc.UpdateOrchestrationTaskInputsParams{
+				ID:     lockedTask.ID,
+				Inputs: marshalObject(updatedInputs),
+			})
+			if updateErr != nil {
+				return nil, fmt.Errorf("update task inputs for constraint hint: %w", updateErr)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+				TaskID:           updatedTask.ID,
+				AggregateType:    "task",
+				AggregateID:      updatedTask.ID,
+				AggregateVersion: updatedTask.StatusVersion,
+				IdempotencyKey:   normalizedIdempotencyKey,
+				Type:             "run.event.hint.injected",
+				Payload: map[string]any{
+					"run_id":         lockedRun.ID.String(),
+					"task_id":        updatedTask.ID.String(),
+					"hint_kind":      normalizedHint.Kind,
+					"summary":        normalizedHint.Summary,
+					"details":        normalizedHint.Details,
+					"target_kind":    "task",
+					"target_task_id": updatedTask.ID.String(),
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			updatedInput := mergeObjects(decodeJSONObject(lockedRun.Input), normalizedHint.Details)
+			updatedRun, updateErr := qtx.UpdateOrchestrationRunInput(ctx, sqlc.UpdateOrchestrationRunInputParams{
+				ID:    lockedRun.ID,
+				Input: marshalObject(updatedInput),
+			})
+			if updateErr != nil {
+				return nil, fmt.Errorf("update run input for constraint hint: %w", updateErr)
+			}
+			lastEvent, err = s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+				AggregateType:    "run",
+				AggregateID:      updatedRun.ID,
+				AggregateVersion: updatedRun.StatusVersion,
+				IdempotencyKey:   normalizedIdempotencyKey,
+				Type:             "run.event.hint.injected",
+				Payload: map[string]any{
+					"run_id":      updatedRun.ID.String(),
+					"hint_kind":   normalizedHint.Kind,
+					"summary":     normalizedHint.Summary,
+					"details":     normalizedHint.Details,
+					"target_kind": "run",
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+	default:
+		return nil, fmt.Errorf("%w: unsupported hint kind %q", ErrInvalidArgument, normalizedHint.Kind)
+	}
+
+	result := InjectRunHintResult{
+		RunID:            normalizedRunID,
+		PlanningIntentID: planningIntentID,
+		SnapshotSeq:      mustUint64FromInt64(lastEvent.Seq, "inject_run_hint.event_seq"),
+	}
+	if _, err := qtx.CompleteOrchestrationIdempotencyRecord(ctx, sqlc.CompleteOrchestrationIdempotencyRecordParams{
+		ResponsePayload: marshalJSON(result),
+		TenantID:        caller.TenantID,
+		CallerSubject:   caller.Subject,
+		Method:          methodInjectRunHint,
+		TargetID:        normalizedRunID,
+		IdempotencyKey:  normalizedIdempotencyKey,
+	}); err != nil {
+		return nil, fmt.Errorf("complete inject run hint idempotency: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit inject run hint tx: %w", err)
+	}
+	return &result, nil
+}
+
+func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID string, req RetryTaskRequest) (*RetryTaskResult, error) {
+	var err error
+	caller, err = normalizeControlIdentity(caller)
+	if err != nil {
+		return nil, err
+	}
+	normalizedTaskID, err := normalizeRequiredUUID(taskID, "task_id")
+	if err != nil {
+		return nil, err
+	}
+	normalizedIdempotencyKey := normalizeIdempotencyKey(req.IdempotencyKey)
+	if normalizedIdempotencyKey == "" {
+		return nil, fmt.Errorf("%w: idempotency_key is required", ErrInvalidArgument)
+	}
+	requestHash, err := retryTaskRequestHash(normalizedTaskID, req, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	pgTaskID, err := db.ParseUUID(normalizedTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid task_id", ErrInvalidArgument)
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin retry task tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	existing, existingFound, err := getIdempotencyRecord(ctx, qtx, caller, methodRetryTask, normalizedTaskID, normalizedIdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if existingFound {
+		if existing.RequestHash != requestHash {
+			return nil, ErrIdempotencyConflict
+		}
+		if existing.State != "completed" {
+			return nil, ErrIdempotencyIncomplete
+		}
+		result, err := decodeRetryTaskResult(existing.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed retry task tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	lockedTask, err := qtx.GetOrchestrationTaskByIDForUpdate(ctx, pgTaskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("lock task for retry: %w", err)
+	}
+	lockedRun, err := qtx.GetOrchestrationRunByIDForUpdate(ctx, lockedTask.RunID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrRunNotFound
+		}
+		return nil, fmt.Errorf("lock run for retry: %w", err)
+	}
+	if err := authorizeRun(caller, lockedRun); err != nil {
+		return nil, ErrTaskNotFound
+	}
+	if !runAcceptsExternalMutations(lockedRun.LifecycleStatus) {
+		return nil, ErrRunImmutable
+	}
+	if taskSuperseded(lockedTask) || lockedTask.Status != TaskStatusFailed {
+		return nil, ErrTaskRetryUnsupported
+	}
+
+	activeAttempts, err := qtx.CountActiveOrchestrationTaskAttemptsByTask(ctx, lockedTask.ID)
+	if err != nil {
+		return nil, fmt.Errorf("count active task attempts for retry: %w", err)
+	}
+	if activeAttempts > 0 {
+		return nil, ErrTaskRetryUnsupported
+	}
+	runVerifications, err := qtx.ListCurrentOrchestrationTaskVerificationsByRun(ctx, lockedRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list task verifications for retry: %w", err)
+	}
+	for _, verification := range runVerifications {
+		if verification.TaskID == lockedTask.ID && !isTerminalVerificationStatus(verification.Status) {
+			return nil, ErrTaskRetryUnsupported
+		}
+	}
+
+	record, replay, err := ensureIdempotencyRecord(ctx, qtx, caller, methodRetryTask, normalizedTaskID, normalizedIdempotencyKey, requestHash)
+	if err != nil {
+		return nil, err
+	}
+	if replay {
+		result, err := decodeRetryTaskResult(record.ResponsePayload)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit replayed retry task tx: %w", err)
+		}
+		return &result, nil
+	}
+
+	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, lockedTask.ID)
+	if err != nil {
+		return nil, fmt.Errorf("mark task ready for retry: %w", err)
+	}
+	lastEvent, err := s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+		TaskID:           readyTask.ID,
+		CheckpointID:     pgtype.UUID{},
+		AggregateType:    "task",
+		AggregateID:      readyTask.ID,
+		AggregateVersion: readyTask.StatusVersion,
+		IdempotencyKey:   normalizedIdempotencyKey,
+		Type:             "run.event.task.ready",
+		Payload: map[string]any{
+			"task_id":         readyTask.ID.String(),
+			"previous_status": lockedTask.Status,
+			"new_status":      readyTask.Status,
+			"ready_reason":    "retry_task",
+			"retry_reason":    strings.TrimSpace(req.Reason),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result := RetryTaskResult{
+		TaskID:      normalizedTaskID,
+		RunID:       lockedRun.ID.String(),
+		SnapshotSeq: mustUint64FromInt64(lastEvent.Seq, "retry_task.event_seq"),
+	}
+	if _, err := qtx.CompleteOrchestrationIdempotencyRecord(ctx, sqlc.CompleteOrchestrationIdempotencyRecordParams{
+		ResponsePayload: marshalJSON(result),
+		TenantID:        caller.TenantID,
+		CallerSubject:   caller.Subject,
+		Method:          methodRetryTask,
+		TargetID:        normalizedTaskID,
+		IdempotencyKey:  normalizedIdempotencyKey,
+	}); err != nil {
+		return nil, fmt.Errorf("complete retry task idempotency: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit retry task tx: %w", err)
+	}
+	return &result, nil
+}
+
+func (s *Service) injectReplanHint(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	lockedRun sqlc.OrchestrationRun,
+	lockedTask sqlc.OrchestrationTask,
+	normalizedHint RunHint,
+	idempotencyKey string,
+) (string, sqlc.OrchestrationEvent, error) {
+	planningIntentID, planningIntentUUID, err := newPGUUID()
+	if err != nil {
+		return "", sqlc.OrchestrationEvent{}, err
+	}
+	planningIntent, err := qtx.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               planningIntentUUID,
+		RunID:            lockedRun.ID,
+		TaskID:           lockedTask.ID,
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: lockedRun.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":             lockedRun.ID.String(),
+			"source_task_id":     lockedTask.ID.String(),
+			"reason":             strings.TrimSpace(normalizedHint.Summary),
+			"base_planner_epoch": lockedRun.PlannerEpoch,
+			"replacement_plan":   normalizeObject(mapValue(normalizedHint.Details["replacement_plan"])),
+			"injected_hint": map[string]any{
+				"kind":           normalizedHint.Kind,
+				"summary":        normalizedHint.Summary,
+				"details":        normalizedHint.Details,
+				"target_task_id": normalizedHint.TargetTaskID,
+			},
+		}),
+	})
+	if err != nil {
+		return "", sqlc.OrchestrationEvent{}, fmt.Errorf("create injected run hint planning intent: %w", err)
+	}
+	lastEvent, err := s.appendEvent(ctx, qtx, lockedRun.ID, eventSpec{
+		TaskID:           lockedTask.ID,
+		CheckpointID:     pgtype.UUID{},
+		AggregateType:    "planning_intent",
+		AggregateID:      planningIntent.ID,
+		AggregateVersion: 1,
+		IdempotencyKey:   idempotencyKey,
+		Type:             "run.event.planning_intent.enqueued",
+		Payload: map[string]any{
+			"planning_intent_id": planningIntentID,
+			"run_id":             lockedRun.ID.String(),
+			"task_id":            lockedTask.ID.String(),
+			"kind":               planningIntent.Kind,
+			"status":             planningIntent.Status,
+			"reason":             strings.TrimSpace(normalizedHint.Summary),
+			"hint_kind":          normalizedHint.Kind,
+		},
+	})
+	if err != nil {
+		return "", sqlc.OrchestrationEvent{}, err
+	}
+	return planningIntentID, lastEvent, nil
+}
+
 func (s *Service) CancelRun(ctx context.Context, caller ControlIdentity, runID string, req CancelRunRequest) (*CancelRunResult, error) {
 	var err error
 	caller, err = normalizeControlIdentity(caller)
@@ -2425,6 +2939,49 @@ func normalizeIdempotencyKey(value string) string {
 	return strings.TrimSpace(value)
 }
 
+func normalizeInjectRunHintRequest(req InjectRunHintRequest, idempotencyKey string) (RunHint, string, string, error) {
+	normalized := RunHint{
+		Kind:         strings.TrimSpace(req.Hint.Kind),
+		Summary:      strings.TrimSpace(req.Hint.Summary),
+		Details:      normalizeObject(req.Hint.Details),
+		TargetTaskID: strings.TrimSpace(req.Hint.TargetTaskID),
+	}
+	switch normalized.Kind {
+	case RunHintKindReplanRequest:
+		if normalized.TargetTaskID == "" {
+			return RunHint{}, "", "", fmt.Errorf("%w: target_task_id is required for replan_request", ErrInvalidArgument)
+		}
+		if _, ok := normalized.Details["replacement_plan"].(map[string]any); !ok {
+			return RunHint{}, "", "", fmt.Errorf("%w: replacement_plan is required for replan_request", ErrRunHintUnsupported)
+		}
+	case RunHintKindContextUpdate:
+		if normalized.TargetTaskID != "" {
+			return RunHint{}, "", "", fmt.Errorf("%w: target_task_id must be empty for context_update", ErrInvalidArgument)
+		}
+		if len(normalized.Details) == 0 {
+			return RunHint{}, "", "", fmt.Errorf("%w: details are required for context_update", ErrInvalidArgument)
+		}
+	case RunHintKindConstraintUpdate:
+		if len(normalized.Details) == 0 {
+			return RunHint{}, "", "", fmt.Errorf("%w: details are required for constraint_update", ErrInvalidArgument)
+		}
+	default:
+		return RunHint{}, "", "", fmt.Errorf("%w: unsupported hint kind %q", ErrInvalidArgument, normalized.Kind)
+	}
+
+	hash, err := hashJSON(struct {
+		Hint           RunHint `json:"hint"`
+		IdempotencyKey string  `json:"idempotency_key"`
+	}{
+		Hint:           normalized,
+		IdempotencyKey: idempotencyKey,
+	})
+	if err != nil {
+		return RunHint{}, "", "", err
+	}
+	return normalized, normalized.TargetTaskID, hash, nil
+}
+
 func createHumanCheckpointRequestHash(
 	req CreateHumanCheckpointRequest,
 	options []CheckpointOption,
@@ -2518,6 +3075,18 @@ func cancelRunRequestHash(runID, idempotencyKey string) (string, error) {
 		IdempotencyKey string `json:"idempotency_key"`
 	}{
 		RunID:          runID,
+		IdempotencyKey: idempotencyKey,
+	})
+}
+
+func retryTaskRequestHash(taskID string, req RetryTaskRequest, idempotencyKey string) (string, error) {
+	return hashJSON(struct {
+		TaskID         string `json:"task_id"`
+		Reason         string `json:"reason"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		TaskID:         strings.TrimSpace(taskID),
+		Reason:         strings.TrimSpace(req.Reason),
 		IdempotencyKey: idempotencyKey,
 	})
 }
@@ -2820,10 +3389,26 @@ func decodeCancelRunResult(raw []byte) (CancelRunResult, error) {
 	return result, nil
 }
 
+func decodeInjectRunHintResult(raw []byte) (InjectRunHintResult, error) {
+	var result InjectRunHintResult
+	if err := unmarshalJSON(raw, &result); err != nil {
+		return InjectRunHintResult{}, fmt.Errorf("decode idempotent inject run hint result: %w", err)
+	}
+	return result, nil
+}
+
 func decodeCommitArtifactResult(raw []byte) (CommitArtifactResult, error) {
 	var result CommitArtifactResult
 	if err := unmarshalJSON(raw, &result); err != nil {
 		return CommitArtifactResult{}, fmt.Errorf("decode idempotent artifact result: %w", err)
+	}
+	return result, nil
+}
+
+func decodeRetryTaskResult(raw []byte) (RetryTaskResult, error) {
+	var result RetryTaskResult
+	if err := unmarshalJSON(raw, &result); err != nil {
+		return RetryTaskResult{}, fmt.Errorf("decode idempotent retry task result: %w", err)
 	}
 	return result, nil
 }
@@ -3132,6 +3717,21 @@ func normalizeObject(input map[string]any) map[string]any {
 		out[key] = normalizeJSONValue(value)
 	}
 	return out
+}
+
+func mergeObjects(base, overlay map[string]any) map[string]any {
+	merged := normalizeObject(base)
+	for key, value := range normalizeObject(overlay) {
+		existing, hasExisting := merged[key]
+		existingObject, existingIsObject := existing.(map[string]any)
+		valueObject, valueIsObject := value.(map[string]any)
+		if hasExisting && existingIsObject && valueIsObject {
+			merged[key] = mergeObjects(existingObject, valueObject)
+			continue
+		}
+		merged[key] = value
+	}
+	return merged
 }
 
 func normalizeJSONValue(value any) any {

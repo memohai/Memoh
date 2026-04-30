@@ -16,7 +16,9 @@ type fakeOrchestrationToolService struct {
 	listRunTasks       func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error)
 	listRunCheckpoints func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
 	listRunEvents      func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error)
+	injectRunHint      func(context.Context, orchestration.ControlIdentity, string, orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error)
 	resolveCheckpoint  func(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error)
+	retryTask          func(context.Context, orchestration.ControlIdentity, string, orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error)
 }
 
 func (f fakeOrchestrationToolService) StartRun(ctx context.Context, caller orchestration.ControlIdentity, req orchestration.StartRunRequest) (orchestration.RunHandle, error) {
@@ -43,8 +45,16 @@ func (f fakeOrchestrationToolService) ListRunEvents(ctx context.Context, caller 
 	return f.listRunEvents(ctx, caller, runID, req)
 }
 
+func (f fakeOrchestrationToolService) InjectRunHint(ctx context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error) {
+	return f.injectRunHint(ctx, caller, runID, req)
+}
+
 func (f fakeOrchestrationToolService) ResolveCheckpoint(ctx context.Context, caller orchestration.ControlIdentity, checkpointID string, req orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error) {
 	return f.resolveCheckpoint(ctx, caller, checkpointID, req)
+}
+
+func (f fakeOrchestrationToolService) RetryTask(ctx context.Context, caller orchestration.ControlIdentity, taskID string, req orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error) {
+	return f.retryTask(ctx, caller, taskID, req)
 }
 
 type fakeOrchestrationBotReader struct {
@@ -262,6 +272,120 @@ func TestOrchestrationToolCancelForwardsRequest(t *testing.T) {
 	}
 	if payload["snapshot_seq"] != uint64(19) {
 		t.Fatalf("snapshot_seq = %#v, want %d", payload["snapshot_seq"], 19)
+	}
+}
+
+func TestOrchestrationToolHintForwardsRequest(t *testing.T) {
+	provider := NewOrchestrationProvider(nil, fakeOrchestrationToolService{
+		injectRunHint: func(_ context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error) {
+			if caller != (orchestration.ControlIdentity{TenantID: "owner-1", Subject: "owner-1"}) {
+				t.Fatalf("caller = %+v", caller)
+			}
+			if runID != "run-1" {
+				t.Fatalf("runID = %q", runID)
+			}
+			if req.IdempotencyKey != "hint-1" {
+				t.Fatalf("idempotency_key = %q", req.IdempotencyKey)
+			}
+			if req.Hint.Kind != orchestration.RunHintKindConstraintUpdate {
+				t.Fatalf("hint.kind = %q", req.Hint.Kind)
+			}
+			if req.Hint.TargetTaskID != "task-1" {
+				t.Fatalf("hint.target_task_id = %q", req.Hint.TargetTaskID)
+			}
+			if req.Hint.Summary != "tighten constraint" {
+				t.Fatalf("hint.summary = %q", req.Hint.Summary)
+			}
+			constraints, _ := req.Hint.Details["constraints"].(map[string]any)
+			if constraints["network"] != "disabled" {
+				t.Fatalf("hint.details = %#v", req.Hint.Details)
+			}
+			return &orchestration.InjectRunHintResult{
+				RunID:            runID,
+				PlanningIntentID: "",
+				SnapshotSeq:      23,
+			}, nil
+		},
+	}, fakeOrchestrationBotReader{
+		get: func(_ context.Context, _ string) (bots.Bot, error) {
+			return bots.Bot{ID: "bot-1", OwnerUserID: "owner-1"}, nil
+		},
+	})
+
+	tools, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	result, err := tools[0].Execute(nil, map[string]any{
+		"action":          "hint",
+		"run_id":          "run-1",
+		"task_id":         "task-1",
+		"hint_kind":       orchestration.RunHintKindConstraintUpdate,
+		"summary":         "tighten constraint",
+		"details":         map[string]any{"constraints": map[string]any{"network": "disabled"}},
+		"idempotency_key": "hint-1",
+	})
+	if err != nil {
+		t.Fatalf("Execute(hint) error = %v", err)
+	}
+	payload := result.(map[string]any)
+	if payload["run_id"] != "run-1" {
+		t.Fatalf("run_id = %#v, want %q", payload["run_id"], "run-1")
+	}
+	if payload["snapshot_seq"] != uint64(23) {
+		t.Fatalf("snapshot_seq = %#v, want %d", payload["snapshot_seq"], 23)
+	}
+}
+
+func TestOrchestrationToolRetryForwardsRequest(t *testing.T) {
+	provider := NewOrchestrationProvider(nil, fakeOrchestrationToolService{
+		retryTask: func(_ context.Context, caller orchestration.ControlIdentity, taskID string, req orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error) {
+			if caller != (orchestration.ControlIdentity{TenantID: "owner-1", Subject: "owner-1"}) {
+				t.Fatalf("caller = %+v", caller)
+			}
+			if taskID != "task-1" {
+				t.Fatalf("taskID = %q", taskID)
+			}
+			if req.Reason != "retry after review" {
+				t.Fatalf("reason = %q", req.Reason)
+			}
+			if req.IdempotencyKey != "retry-1" {
+				t.Fatalf("idempotency_key = %q", req.IdempotencyKey)
+			}
+			return &orchestration.RetryTaskResult{
+				RunID:       "run-1",
+				TaskID:      taskID,
+				SnapshotSeq: 29,
+			}, nil
+		},
+	}, fakeOrchestrationBotReader{
+		get: func(_ context.Context, _ string) (bots.Bot, error) {
+			return bots.Bot{ID: "bot-1", OwnerUserID: "owner-1"}, nil
+		},
+	})
+
+	tools, err := provider.Tools(context.Background(), SessionContext{BotID: "bot-1"})
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	result, err := tools[0].Execute(nil, map[string]any{
+		"action":          "retry",
+		"task_id":         "task-1",
+		"summary":         "retry after review",
+		"idempotency_key": "retry-1",
+	})
+	if err != nil {
+		t.Fatalf("Execute(retry) error = %v", err)
+	}
+	payload := result.(map[string]any)
+	if payload["run_id"] != "run-1" {
+		t.Fatalf("run_id = %#v, want %q", payload["run_id"], "run-1")
+	}
+	if payload["task_id"] != "task-1" {
+		t.Fatalf("task_id = %#v, want %q", payload["task_id"], "task-1")
+	}
+	if payload["snapshot_seq"] != uint64(29) {
+		t.Fatalf("snapshot_seq = %#v, want %d", payload["snapshot_seq"], 29)
 	}
 }
 

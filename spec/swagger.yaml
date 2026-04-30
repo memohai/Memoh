@@ -2891,6 +2891,25 @@ definitions:
       snapshot_seq:
         type: integer
     type: object
+  orchestration.InjectRunHintRequest:
+    properties:
+      hint:
+        $ref: '#/definitions/orchestration.RunHint'
+      idempotency_key:
+        type: string
+    required:
+    - hint
+    - idempotency_key
+    type: object
+  orchestration.InjectRunHintResult:
+    properties:
+      planning_intent_id:
+        type: string
+      run_id:
+        type: string
+      snapshot_seq:
+        type: integer
+    type: object
   orchestration.InputManifest:
     properties:
       captured_artifact_versions:
@@ -3027,6 +3046,24 @@ definitions:
         type: string
       snapshot_seq:
         type: integer
+    type: object
+  orchestration.RetryTaskRequest:
+    properties:
+      idempotency_key:
+        type: string
+      reason:
+        type: string
+    required:
+    - idempotency_key
+    type: object
+  orchestration.RetryTaskResult:
+    properties:
+      run_id:
+        type: string
+      snapshot_seq:
+        type: integer
+      task_id:
+        type: string
     type: object
   orchestration.Run:
     properties:
@@ -3190,6 +3227,20 @@ definitions:
         type: string
       snapshot_seq:
         type: integer
+    type: object
+  orchestration.RunHint:
+    properties:
+      details:
+        additionalProperties: {}
+        type: object
+      kind:
+        type: string
+      summary:
+        type: string
+      target_task_id:
+        type: string
+    required:
+    - kind
     type: object
   orchestration.RunInspector:
     properties:
@@ -9184,6 +9235,51 @@ paths:
       summary: List committed orchestration events
       tags:
       - orchestration
+  /orchestration/runs/{run_id}/hints:
+    post:
+      description: Submit a control-plane hint for a run
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Inject run hint request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.InjectRunHintRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.InjectRunHintResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Inject a run hint
+      tags:
+      - orchestration
   /orchestration/runs/{run_id}/inspector:
     get:
       description: Return aggregated orchestration runtime state for a run
@@ -9358,6 +9454,97 @@ paths:
       security:
       - BearerAuth: []
       summary: Create a human checkpoint for a task
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/tasks/{task_id}/retry:
+    post:
+      description: Requeue a failed orchestration task for another execution attempt
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Retry task request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/orchestration.RetryTaskRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestration.RetryTaskResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Retry a failed task
+      tags:
+      - orchestration
+  /orchestration/runs/{run_id}/watch:
+    get:
+      description: Stream committed orchestration events with SSE
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Exclusive committed event cursor
+        in: query
+        name: after_seq
+        type: integer
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Watch committed run events
       tags:
       - orchestration
   /ping:

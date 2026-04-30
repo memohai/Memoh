@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -27,7 +29,10 @@ type orchestrationAPI interface {
 	ListRunCheckpoints(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
 	ListRunArtifacts(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunArtifactsRequest) (*orchestration.ArtifactPage, error)
 	ListRunEvents(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error)
+	WatchRun(context.Context, orchestration.ControlIdentity, string, orchestration.WatchRunRequest) (<-chan orchestration.RunEvent, error)
+	InjectRunHint(context.Context, orchestration.ControlIdentity, string, orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error)
 	ResolveCheckpoint(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error)
+	RetryTask(context.Context, orchestration.ControlIdentity, string, orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error)
 }
 
 type OrchestrationHandler struct {
@@ -52,7 +57,10 @@ func (h *OrchestrationHandler) Register(e *echo.Echo) {
 	group.GET("/runs/:run_id/inspector", h.GetRunInspector)
 	group.GET("/runs/:run_id/snapshot", h.GetRunSnapshot)
 	group.GET("/runs/:run_id/tasks", h.ListRunTasks)
+	group.POST("/runs/:run_id/hints", h.InjectRunHint)
+	group.GET("/runs/:run_id/watch", h.WatchRun)
 	group.POST("/runs/:run_id/tasks/:task_id/checkpoints", h.CreateHumanCheckpoint)
+	group.POST("/runs/:run_id/tasks/:task_id/retry", h.RetryTask)
 	group.GET("/runs/:run_id/checkpoints", h.ListRunCheckpoints)
 	group.GET("/runs/:run_id/artifacts", h.ListRunArtifacts)
 	group.GET("/runs/:run_id/events", h.ListRunEvents)
@@ -261,6 +269,98 @@ func (h *OrchestrationHandler) ListRunTasks(c echo.Context) error {
 	return c.JSON(http.StatusOK, page)
 }
 
+// InjectRunHint godoc
+// @Summary Inject a run hint
+// @Description Submit a control-plane hint for a run
+// @Tags orchestration
+// @Security BearerAuth
+// @Param run_id path string true "Run ID"
+// @Param payload body orchestration.InjectRunHintRequest true "Inject run hint request"
+// @Success 200 {object} orchestration.InjectRunHintResult
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/runs/{run_id}/hints [post].
+func (h *OrchestrationHandler) InjectRunHint(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	var req orchestration.InjectRunHintRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	result, err := h.service.InjectRunHint(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), req)
+	if err != nil {
+		return h.httpError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// WatchRun godoc
+// @Summary Watch committed run events
+// @Description Stream committed orchestration events with SSE
+// @Tags orchestration
+// @Security BearerAuth
+// @Produce text/event-stream
+// @Param run_id path string true "Run ID"
+// @Param after_seq query int false "Exclusive committed event cursor"
+// @Success 200 {string} string "SSE stream"
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/runs/{run_id}/watch [get].
+func (h *OrchestrationHandler) WatchRun(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	afterSeq, err := parseUint64Query(c, "after_seq")
+	if err != nil {
+		return err
+	}
+	stream, err := h.service.WatchRun(c.Request().Context(), caller, strings.TrimSpace(c.Param("run_id")), orchestration.WatchRunRequest{
+		AfterSeq: afterSeq,
+	})
+	if err != nil {
+		return h.httpError(err)
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	}
+	writer := bufio.NewWriter(c.Response().Writer)
+	heartbeatTicker := time.NewTicker(20 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	for {
+		select {
+		case <-c.Request().Context().Done():
+			return nil
+		case <-heartbeatTicker.C:
+			if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
+				return nil
+			}
+		case event, ok := <-stream:
+			if !ok {
+				return nil
+			}
+			if err := writeSSEJSON(writer, flusher, event); err != nil {
+				return nil
+			}
+		}
+	}
+}
+
 // CreateHumanCheckpoint godoc
 // @Summary Create a human checkpoint for a task
 // @Description Create an open HITL checkpoint on a run task for the authenticated user
@@ -459,6 +559,37 @@ func (h *OrchestrationHandler) ResolveCheckpoint(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
+// RetryTask godoc
+// @Summary Retry a failed task
+// @Description Requeue a failed orchestration task for another execution attempt
+// @Tags orchestration
+// @Security BearerAuth
+// @Param run_id path string true "Run ID"
+// @Param task_id path string true "Task ID"
+// @Param payload body orchestration.RetryTaskRequest true "Retry task request"
+// @Success 200 {object} orchestration.RetryTaskResult
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /orchestration/runs/{run_id}/tasks/{task_id}/retry [post].
+func (h *OrchestrationHandler) RetryTask(c echo.Context) error {
+	caller, err := controlIdentity(c)
+	if err != nil {
+		return err
+	}
+	var req orchestration.RetryTaskRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	result, err := h.service.RetryTask(c.Request().Context(), caller, strings.TrimSpace(c.Param("task_id")), req)
+	if err != nil {
+		return h.httpError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 func controlIdentity(c echo.Context) (orchestration.ControlIdentity, error) {
 	if strings.TrimSpace(c.QueryParam("token")) != "" {
 		return orchestration.ControlIdentity{}, echo.NewHTTPError(http.StatusUnauthorized, "authorization header required")
@@ -499,7 +630,8 @@ func (h *OrchestrationHandler) httpError(err error) error {
 	case errors.Is(err, orchestration.ErrInvalidControlIdentity),
 		errors.Is(err, orchestration.ErrInvalidArgument),
 		errors.Is(err, orchestration.ErrInvalidCursor),
-		errors.Is(err, orchestration.ErrInvalidCheckpointResolution):
+		errors.Is(err, orchestration.ErrInvalidCheckpointResolution),
+		errors.Is(err, orchestration.ErrRunHintUnsupported):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, orchestration.ErrAccessDenied):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
@@ -513,6 +645,7 @@ func (h *OrchestrationHandler) httpError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, orchestration.ErrRunImmutable),
 		errors.Is(err, orchestration.ErrTaskImmutable),
+		errors.Is(err, orchestration.ErrTaskRetryUnsupported),
 		errors.Is(err, orchestration.ErrTaskCheckpointUnsupported),
 		errors.Is(err, orchestration.ErrTaskAlreadyWaitingHuman),
 		errors.Is(err, orchestration.ErrRunBarrierAlreadyOpen),

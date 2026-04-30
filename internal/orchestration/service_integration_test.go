@@ -9253,3 +9253,307 @@ func TestIntegrationCreateHumanCheckpointRejectsVerifyingSiblingWithoutVerificat
 		t.Fatalf("CreateHumanCheckpoint(verifying sibling without verification) error = %v, want %v", err, ErrRunBarrierUnsupported)
 	}
 }
+
+func TestIntegrationWatchRunStreamsHistoricalAndLiveEvents(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	caller := ControlIdentity{TenantID: "tenant-watch", Subject: "user-watch"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "watch orchestration events",
+		IdempotencyKey: "watch-run-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, context.Background(), pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, context.Background(), pool, caller.TenantID, caller.Subject)
+
+	stream, err := svc.WatchRun(ctx, caller, handle.RunID, WatchRunRequest{})
+	if err != nil {
+		t.Fatalf("WatchRun() error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	var (
+		seenCreated bool
+		seenReady   bool
+		lastSeq     uint64
+	)
+	for !seenCreated || !seenReady {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("watch stream timed out: created=%v ready=%v", seenCreated, seenReady)
+		case event, ok := <-stream:
+			if !ok {
+				t.Fatal("watch stream closed before expected events arrived")
+			}
+			if event.Seq <= lastSeq {
+				t.Fatalf("watch stream seq = %d, want strictly increasing after %d", event.Seq, lastSeq)
+			}
+			lastSeq = event.Seq
+			switch event.Type {
+			case "run.event.created":
+				seenCreated = true
+			case "run.event.task.ready":
+				seenReady = true
+			}
+		}
+	}
+}
+
+func TestIntegrationInjectRunHintEnqueuesReplan(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint", Subject: "user-hint"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject replacement plan",
+		IdempotencyKey: "inject-run-hint-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	result, err := svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root with one child task",
+			TargetTaskID: handle.RootTaskID,
+			Details: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{
+						map[string]any{
+							"alias":               "child-one",
+							"kind":                "step",
+							"goal":                "execute replacement child",
+							"inputs":              map[string]any{"source": "hint"},
+							"worker_profile":      DefaultRootWorkerProfile,
+							"priority":            0,
+							"retry_policy":        map[string]any{},
+							"verification_policy": map[string]any{},
+						},
+					},
+				},
+			},
+		},
+		IdempotencyKey: "inject-run-hint",
+	})
+	if err != nil {
+		t.Fatalf("InjectRunHint() error = %v", err)
+	}
+	if result.RunID != handle.RunID {
+		t.Fatalf("InjectRunHint().RunID = %q, want %q", result.RunID, handle.RunID)
+	}
+	if strings.TrimSpace(result.PlanningIntentID) == "" {
+		t.Fatal("InjectRunHint().PlanningIntentID is empty")
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	var rootTask, childTask *Task
+	for i := range taskPage.Items {
+		task := &taskPage.Items[i]
+		switch task.ID {
+		case handle.RootTaskID:
+			rootTask = task
+		default:
+			if task.Goal == "execute replacement child" {
+				childTask = task
+			}
+		}
+	}
+	if rootTask == nil {
+		t.Fatal("root task not found after injected replan")
+	}
+	if rootTask.SupersededByPlannerEpoch == 0 {
+		t.Fatal("root task was not superseded after injected replan")
+	}
+	if childTask == nil {
+		t.Fatal("replacement child task not found after injected replan")
+	}
+	if childTask.Status != TaskStatusReady {
+		t.Fatalf("replacement child status = %q, want %q", childTask.Status, TaskStatusReady)
+	}
+}
+
+func TestIntegrationInjectRunHintContextUpdateMergesRunInput(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-context", Subject: "user-hint-context"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject context update",
+		Input:          map[string]any{"existing": map[string]any{"keep": true}},
+		IdempotencyKey: "inject-context-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	result, err := svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:    RunHintKindContextUpdate,
+			Summary: "add extra context",
+			Details: map[string]any{
+				"existing": map[string]any{"new": "value"},
+				"region":   "us-east-1",
+			},
+		},
+		IdempotencyKey: "inject-context-hint",
+	})
+	if err != nil {
+		t.Fatalf("InjectRunHint(context_update) error = %v", err)
+	}
+	if result.PlanningIntentID != "" {
+		t.Fatalf("PlanningIntentID = %q, want empty for context_update", result.PlanningIntentID)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	existing, _ := snapshot.Run.Input["existing"].(map[string]any)
+	if existing["keep"] != true || existing["new"] != "value" {
+		t.Fatalf("merged existing input = %#v", existing)
+	}
+	if snapshot.Run.Input["region"] != "us-east-1" {
+		t.Fatalf("region = %#v, want %q", snapshot.Run.Input["region"], "us-east-1")
+	}
+}
+
+func TestIntegrationInjectRunHintConstraintUpdateMergesTaskInputs(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-constraint", Subject: "user-hint-constraint"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject task constraint update",
+		IdempotencyKey: "inject-constraint-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	result, err := svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindConstraintUpdate,
+			Summary:      "limit target task behavior",
+			TargetTaskID: handle.RootTaskID,
+			Details: map[string]any{
+				"constraints": map[string]any{
+					"network": "disabled",
+				},
+			},
+		},
+		IdempotencyKey: "inject-constraint-hint",
+	})
+	if err != nil {
+		t.Fatalf("InjectRunHint(constraint_update) error = %v", err)
+	}
+	if result.PlanningIntentID != "" {
+		t.Fatalf("PlanningIntentID = %q, want empty for constraint_update", result.PlanningIntentID)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	var rootTask *Task
+	for i := range taskPage.Items {
+		if taskPage.Items[i].ID == handle.RootTaskID {
+			rootTask = &taskPage.Items[i]
+			break
+		}
+	}
+	if rootTask == nil {
+		t.Fatal("root task not found after constraint update")
+	}
+	constraints, _ := rootTask.Inputs["constraints"].(map[string]any)
+	if constraints["network"] != "disabled" {
+		t.Fatalf("constraints = %#v, want network=disabled", constraints)
+	}
+}
+
+func TestIntegrationRetryTaskMarksFailedTaskReady(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-retry", Subject: "user-retry"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "retry failed task",
+		IdempotencyKey: "retry-task-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	rootTaskID := mustParsePGUUID(t, handle.RootTaskID)
+	failedTask, err := svc.queries.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
+		ID:             rootTaskID,
+		LatestResultID: pgtype.UUID{},
+		TerminalReason: "simulated failure",
+	})
+	if err != nil {
+		t.Fatalf("MarkOrchestrationTaskFailed() error = %v", err)
+	}
+	if failedTask.Status != TaskStatusFailed {
+		t.Fatalf("failed task status = %q, want %q", failedTask.Status, TaskStatusFailed)
+	}
+
+	result, err := svc.RetryTask(ctx, caller, handle.RootTaskID, RetryTaskRequest{
+		Reason:         "retry after transient failure",
+		IdempotencyKey: "retry-task",
+	})
+	if err != nil {
+		t.Fatalf("RetryTask() error = %v", err)
+	}
+	if result.TaskID != handle.RootTaskID {
+		t.Fatalf("RetryTask().TaskID = %q, want %q", result.TaskID, handle.RootTaskID)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	var rootTask *Task
+	for i := range taskPage.Items {
+		if taskPage.Items[i].ID == handle.RootTaskID {
+			rootTask = &taskPage.Items[i]
+			break
+		}
+	}
+	if rootTask == nil {
+		t.Fatal("root task not found after retry")
+	}
+	if rootTask.Status != TaskStatusReady {
+		t.Fatalf("root task status after retry = %q, want %q", rootTask.Status, TaskStatusReady)
+	}
+	if rootTask.TerminalReason != "" {
+		t.Fatalf("root task terminal_reason after retry = %q, want empty", rootTask.TerminalReason)
+	}
+}

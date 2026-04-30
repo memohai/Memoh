@@ -106,6 +106,14 @@ SET planning_status = 'idle',
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpdateOrchestrationRunInput :one
+UPDATE orchestration_runs
+SET input = sqlc.arg(input),
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: AdvanceOrchestrationRunPlannerEpoch :one
 UPDATE orchestration_runs
 SET planner_epoch = planner_epoch + 1,
@@ -307,6 +315,27 @@ SET status = 'ready',
     status_version = status_version + 1,
     waiting_checkpoint_id = NULL,
     waiting_scope = '',
+    ready_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: UpdateOrchestrationTaskInputs :one
+UPDATE orchestration_tasks
+SET inputs = sqlc.arg(inputs),
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkOrchestrationTaskReadyForRetry :one
+UPDATE orchestration_tasks
+SET status = 'ready',
+    status_version = status_version + 1,
+    waiting_checkpoint_id = NULL,
+    waiting_scope = '',
+    blocked_reason = '',
+    terminal_reason = '',
     ready_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id)

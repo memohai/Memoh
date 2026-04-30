@@ -20,7 +20,9 @@ type orchestrationService interface {
 	ListRunTasks(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunTasksRequest) (*orchestration.TaskPage, error)
 	ListRunCheckpoints(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
 	ListRunEvents(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error)
+	InjectRunHint(context.Context, orchestration.ControlIdentity, string, orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error)
 	ResolveCheckpoint(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error)
+	RetryTask(context.Context, orchestration.ControlIdentity, string, orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error)
 }
 
 type orchestrationBotReader interface {
@@ -51,19 +53,23 @@ func (p *OrchestrationProvider) Tools(ctx context.Context, session SessionContex
 	sess := session
 	return []sdk.Tool{{
 		Name:        "orchestrate",
-		Description: "Manage orchestration runs for the current bot. Supported actions: start, status, resolve, cancel.",
+		Description: "Manage orchestration runs for the current bot. Supported actions: start, status, hint, retry, resolve, cancel.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []string{"start", "status", "resolve", "cancel"},
+					"enum":        []string{"start", "status", "hint", "retry", "resolve", "cancel"},
 					"description": "Operation to execute.",
 				},
 				"goal":            map[string]any{"type": "string", "description": "Run goal for action=start."},
 				"input":           map[string]any{"type": "object", "description": "Optional structured run input for action=start."},
 				"output_schema":   map[string]any{"type": "object", "description": "Optional output schema for action=start."},
-				"run_id":          map[string]any{"type": "string", "description": "Run ID for action=status or action=cancel."},
+				"run_id":          map[string]any{"type": "string", "description": "Run ID for action=status, action=hint, or action=cancel."},
+				"task_id":         map[string]any{"type": "string", "description": "Task ID for action=retry or targeted action=hint."},
+				"hint_kind":       map[string]any{"type": "string", "description": "Hint kind for action=hint."},
+				"summary":         map[string]any{"type": "string", "description": "Human-readable summary for action=hint or action=retry."},
+				"details":         map[string]any{"type": "object", "description": "Structured hint details for action=hint."},
 				"checkpoint_id":   map[string]any{"type": "string", "description": "Checkpoint ID for action=resolve."},
 				"mode":            map[string]any{"type": "string", "description": "Checkpoint resolution mode for action=resolve."},
 				"option_id":       map[string]any{"type": "string", "description": "Checkpoint option ID for action=resolve."},
@@ -93,6 +99,10 @@ func (p *OrchestrationProvider) execute(ctx context.Context, session SessionCont
 		return p.executeStart(ctx, session, caller, args)
 	case "status":
 		return p.executeStatus(ctx, caller, args)
+	case "hint":
+		return p.executeHint(ctx, caller, args)
+	case "retry":
+		return p.executeRetry(ctx, caller, args)
 	case "resolve":
 		return p.executeResolve(ctx, caller, args)
 	case "cancel":
@@ -246,6 +256,63 @@ func (p *OrchestrationProvider) executeResolve(ctx context.Context, caller orche
 		"checkpoint_id":  checkpointID,
 		"snapshot_seq":   result.SnapshotSeq,
 		"status_message": "checkpoint resolved",
+	}, nil
+}
+
+func (p *OrchestrationProvider) executeHint(ctx context.Context, caller orchestration.ControlIdentity, args map[string]any) (any, error) {
+	runID := StringArg(args, "run_id")
+	if runID == "" {
+		return nil, errors.New("run_id is required for action=hint")
+	}
+	hintKind := StringArg(args, "hint_kind")
+	if hintKind == "" {
+		return nil, errors.New("hint_kind is required for action=hint")
+	}
+	idempotencyKey := StringArg(args, "idempotency_key")
+	if idempotencyKey == "" {
+		return nil, errors.New("idempotency_key is required for action=hint")
+	}
+	result, err := p.service.InjectRunHint(ctx, caller, runID, orchestration.InjectRunHintRequest{
+		Hint: orchestration.RunHint{
+			Kind:         hintKind,
+			Summary:      StringArg(args, "summary"),
+			Details:      objectArg(args, "details"),
+			TargetTaskID: StringArg(args, "task_id"),
+		},
+		IdempotencyKey: idempotencyKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"run_id":             result.RunID,
+		"planning_intent_id": result.PlanningIntentID,
+		"snapshot_seq":       result.SnapshotSeq,
+		"status_message":     "orchestration hint injected",
+	}, nil
+}
+
+func (p *OrchestrationProvider) executeRetry(ctx context.Context, caller orchestration.ControlIdentity, args map[string]any) (any, error) {
+	taskID := StringArg(args, "task_id")
+	if taskID == "" {
+		return nil, errors.New("task_id is required for action=retry")
+	}
+	idempotencyKey := StringArg(args, "idempotency_key")
+	if idempotencyKey == "" {
+		return nil, errors.New("idempotency_key is required for action=retry")
+	}
+	result, err := p.service.RetryTask(ctx, caller, taskID, orchestration.RetryTaskRequest{
+		Reason:         StringArg(args, "summary"),
+		IdempotencyKey: idempotencyKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"run_id":         result.RunID,
+		"task_id":        result.TaskID,
+		"snapshot_seq":   result.SnapshotSeq,
+		"status_message": "task retry requested",
 	}, nil
 }
 

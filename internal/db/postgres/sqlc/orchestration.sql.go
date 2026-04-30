@@ -4199,6 +4199,51 @@ func (q *Queries) MarkOrchestrationTaskFailed(ctx context.Context, arg MarkOrche
 	return i, err
 }
 
+const markOrchestrationTaskReadyForRetry = `-- name: MarkOrchestrationTaskReadyForRetry :one
+UPDATE orchestration_tasks
+SET status = 'ready',
+    status_version = status_version + 1,
+    waiting_checkpoint_id = NULL,
+    waiting_scope = '',
+    blocked_reason = '',
+    terminal_reason = '',
+    ready_at = now(),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
+`
+
+func (q *Queries) MarkOrchestrationTaskReadyForRetry(ctx context.Context, id pgtype.UUID) (OrchestrationTask, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskReadyForRetry, id)
+	var i OrchestrationTask
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.DecomposedFromTaskID,
+		&i.Kind,
+		&i.Goal,
+		&i.Inputs,
+		&i.PlannerEpoch,
+		&i.SupersededByPlannerEpoch,
+		&i.WorkerProfile,
+		&i.Priority,
+		&i.RetryPolicy,
+		&i.VerificationPolicy,
+		&i.Status,
+		&i.StatusVersion,
+		&i.WaitingCheckpointID,
+		&i.WaitingScope,
+		&i.LatestResultID,
+		&i.ReadyAt,
+		&i.BlockedReason,
+		&i.TerminalReason,
+		&i.BlackboardScope,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markOrchestrationTaskReadyFromCheckpoint = `-- name: MarkOrchestrationTaskReadyFromCheckpoint :one
 UPDATE orchestration_tasks
 SET status = 'ready',
@@ -5082,6 +5127,94 @@ func (q *Queries) TryCreateOrchestrationIdempotencyRecord(ctx context.Context, a
 		&i.RequestHash,
 		&i.State,
 		&i.ResponsePayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateOrchestrationRunInput = `-- name: UpdateOrchestrationRunInput :one
+UPDATE orchestration_runs
+SET input = $1,
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, tenant_id, owner_subject, lifecycle_status, planning_status, status_version, planner_epoch, last_event_seq, root_task_id, goal, input, output_schema, requested_control_policy, control_policy, source_metadata, policies, created_by, terminal_reason, created_at, updated_at, finished_at
+`
+
+type UpdateOrchestrationRunInputParams struct {
+	Input []byte      `json:"input"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateOrchestrationRunInput(ctx context.Context, arg UpdateOrchestrationRunInputParams) (OrchestrationRun, error) {
+	row := q.db.QueryRow(ctx, updateOrchestrationRunInput, arg.Input, arg.ID)
+	var i OrchestrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerSubject,
+		&i.LifecycleStatus,
+		&i.PlanningStatus,
+		&i.StatusVersion,
+		&i.PlannerEpoch,
+		&i.LastEventSeq,
+		&i.RootTaskID,
+		&i.Goal,
+		&i.Input,
+		&i.OutputSchema,
+		&i.RequestedControlPolicy,
+		&i.ControlPolicy,
+		&i.SourceMetadata,
+		&i.Policies,
+		&i.CreatedBy,
+		&i.TerminalReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const updateOrchestrationTaskInputs = `-- name: UpdateOrchestrationTaskInputs :one
+UPDATE orchestration_tasks
+SET inputs = $1,
+    status_version = status_version + 1,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
+`
+
+type UpdateOrchestrationTaskInputsParams struct {
+	Inputs []byte      `json:"inputs"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateOrchestrationTaskInputs(ctx context.Context, arg UpdateOrchestrationTaskInputsParams) (OrchestrationTask, error) {
+	row := q.db.QueryRow(ctx, updateOrchestrationTaskInputs, arg.Inputs, arg.ID)
+	var i OrchestrationTask
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.DecomposedFromTaskID,
+		&i.Kind,
+		&i.Goal,
+		&i.Inputs,
+		&i.PlannerEpoch,
+		&i.SupersededByPlannerEpoch,
+		&i.WorkerProfile,
+		&i.Priority,
+		&i.RetryPolicy,
+		&i.VerificationPolicy,
+		&i.Status,
+		&i.StatusVersion,
+		&i.WaitingCheckpointID,
+		&i.WaitingScope,
+		&i.LatestResultID,
+		&i.ReadyAt,
+		&i.BlockedReason,
+		&i.TerminalReason,
+		&i.BlackboardScope,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

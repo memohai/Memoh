@@ -1720,6 +1720,17 @@ export type OrchestrationHumanCheckpointPage = {
     snapshot_seq?: number;
 };
 
+export type OrchestrationInjectRunHintRequest = {
+    hint: OrchestrationRunHint;
+    idempotency_key: string;
+};
+
+export type OrchestrationInjectRunHintResult = {
+    planning_intent_id?: string;
+    run_id?: string;
+    snapshot_seq?: number;
+};
+
 export type OrchestrationInputManifest = {
     captured_artifact_versions?: Array<{
         [key: string]: unknown;
@@ -1798,6 +1809,17 @@ export type OrchestrationInspectorWorkerLease = {
 export type OrchestrationResolveCheckpointResult = {
     checkpoint_id?: string;
     snapshot_seq?: number;
+};
+
+export type OrchestrationRetryTaskRequest = {
+    idempotency_key: string;
+    reason?: string;
+};
+
+export type OrchestrationRetryTaskResult = {
+    run_id?: string;
+    snapshot_seq?: number;
+    task_id?: string;
 };
 
 export type OrchestrationRun = {
@@ -1897,6 +1919,15 @@ export type OrchestrationRunHandle = {
     root_task_id?: string;
     run_id?: string;
     snapshot_seq?: number;
+};
+
+export type OrchestrationRunHint = {
+    details?: {
+        [key: string]: unknown;
+    };
+    kind: string;
+    summary?: string;
+    target_task_id?: string;
 };
 
 export type OrchestrationRunInspector = {
@@ -8667,6 +8698,55 @@ export type GetOrchestrationRunsByRunIdEventsResponses = {
 
 export type GetOrchestrationRunsByRunIdEventsResponse = GetOrchestrationRunsByRunIdEventsResponses[keyof GetOrchestrationRunsByRunIdEventsResponses];
 
+export type PostOrchestrationRunsByRunIdHintsData = {
+    /**
+     * Inject run hint request
+     */
+    body: OrchestrationInjectRunHintRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/hints';
+};
+
+export type PostOrchestrationRunsByRunIdHintsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdHintsError = PostOrchestrationRunsByRunIdHintsErrors[keyof PostOrchestrationRunsByRunIdHintsErrors];
+
+export type PostOrchestrationRunsByRunIdHintsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationInjectRunHintResult;
+};
+
+export type PostOrchestrationRunsByRunIdHintsResponse = PostOrchestrationRunsByRunIdHintsResponses[keyof PostOrchestrationRunsByRunIdHintsResponses];
+
 export type GetOrchestrationRunsByRunIdInspectorData = {
     body?: never;
     path: {
@@ -8867,6 +8947,106 @@ export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses = {
 };
 
 export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponse = PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses[keyof PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryData = {
+    /**
+     * Retry task request
+     */
+    body: OrchestrationRetryTaskRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/tasks/{task_id}/retry';
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryError = PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors[keyof PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRetryTaskResult;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponse = PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses[keyof PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses];
+
+export type GetOrchestrationRunsByRunIdWatchData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Exclusive committed event cursor
+         */
+        after_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/watch';
+};
+
+export type GetOrchestrationRunsByRunIdWatchErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdWatchError = GetOrchestrationRunsByRunIdWatchErrors[keyof GetOrchestrationRunsByRunIdWatchErrors];
+
+export type GetOrchestrationRunsByRunIdWatchResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetOrchestrationRunsByRunIdWatchResponse = GetOrchestrationRunsByRunIdWatchResponses[keyof GetOrchestrationRunsByRunIdWatchResponses];
 
 export type GetPingData = {
     body?: never;

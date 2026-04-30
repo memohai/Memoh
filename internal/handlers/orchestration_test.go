@@ -30,7 +30,10 @@ type fakeOrchestrationService struct {
 	listRunCheckpoints    func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunCheckpointsRequest) (*orchestration.HumanCheckpointPage, error)
 	listRunArtifacts      func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunArtifactsRequest) (*orchestration.ArtifactPage, error)
 	listRunEvents         func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error)
+	watchRun              func(context.Context, orchestration.ControlIdentity, string, orchestration.WatchRunRequest) (<-chan orchestration.RunEvent, error)
+	injectRunHint         func(context.Context, orchestration.ControlIdentity, string, orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error)
 	resolveCheckpoint     func(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error)
+	retryTask             func(context.Context, orchestration.ControlIdentity, string, orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error)
 }
 
 func (f fakeOrchestrationService) StartRun(ctx context.Context, caller orchestration.ControlIdentity, req orchestration.StartRunRequest) (orchestration.RunHandle, error) {
@@ -77,8 +80,20 @@ func (f fakeOrchestrationService) ListRunEvents(ctx context.Context, caller orch
 	return f.listRunEvents(ctx, caller, runID, req)
 }
 
+func (f fakeOrchestrationService) WatchRun(ctx context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.WatchRunRequest) (<-chan orchestration.RunEvent, error) {
+	return f.watchRun(ctx, caller, runID, req)
+}
+
+func (f fakeOrchestrationService) InjectRunHint(ctx context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error) {
+	return f.injectRunHint(ctx, caller, runID, req)
+}
+
 func (f fakeOrchestrationService) ResolveCheckpoint(ctx context.Context, caller orchestration.ControlIdentity, checkpointID string, req orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error) {
 	return f.resolveCheckpoint(ctx, caller, checkpointID, req)
+}
+
+func (f fakeOrchestrationService) RetryTask(ctx context.Context, caller orchestration.ControlIdentity, taskID string, req orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error) {
+	return f.retryTask(ctx, caller, taskID, req)
 }
 
 func newNoopOrchestrationService() fakeOrchestrationService {
@@ -116,8 +131,19 @@ func newNoopOrchestrationService() fakeOrchestrationService {
 		listRunEvents: func(context.Context, orchestration.ControlIdentity, string, orchestration.ListRunEventsRequest) (*orchestration.RunEventPage, error) {
 			return &orchestration.RunEventPage{}, nil
 		},
+		watchRun: func(context.Context, orchestration.ControlIdentity, string, orchestration.WatchRunRequest) (<-chan orchestration.RunEvent, error) {
+			ch := make(chan orchestration.RunEvent)
+			close(ch)
+			return ch, nil
+		},
+		injectRunHint: func(context.Context, orchestration.ControlIdentity, string, orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error) {
+			return &orchestration.InjectRunHintResult{}, nil
+		},
 		resolveCheckpoint: func(context.Context, orchestration.ControlIdentity, string, orchestration.CheckpointResolution) (*orchestration.ResolveCheckpointResult, error) {
 			return &orchestration.ResolveCheckpointResult{}, nil
+		},
+		retryTask: func(context.Context, orchestration.ControlIdentity, string, orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error) {
+			return &orchestration.RetryTaskResult{}, nil
 		},
 	}
 }
@@ -368,6 +394,51 @@ func TestOrchestrationRegisterIncludesRunCancelRoute(t *testing.T) {
 	t.Fatalf("Register() missing route %s %s", http.MethodPost, want)
 }
 
+func TestOrchestrationRegisterIncludesRunHintRoute(t *testing.T) {
+	e := echo.New()
+	handler := &OrchestrationHandler{}
+
+	handler.Register(e)
+
+	want := "/orchestration/runs/:run_id/hints"
+	for _, route := range e.Routes() {
+		if route.Method == http.MethodPost && route.Path == want {
+			return
+		}
+	}
+	t.Fatalf("Register() missing route %s %s", http.MethodPost, want)
+}
+
+func TestOrchestrationRegisterIncludesRunWatchRoute(t *testing.T) {
+	e := echo.New()
+	handler := &OrchestrationHandler{}
+
+	handler.Register(e)
+
+	want := "/orchestration/runs/:run_id/watch"
+	for _, route := range e.Routes() {
+		if route.Method == http.MethodGet && route.Path == want {
+			return
+		}
+	}
+	t.Fatalf("Register() missing route %s %s", http.MethodGet, want)
+}
+
+func TestOrchestrationRegisterIncludesTaskRetryRoute(t *testing.T) {
+	e := echo.New()
+	handler := &OrchestrationHandler{}
+
+	handler.Register(e)
+
+	want := "/orchestration/runs/:run_id/tasks/:task_id/retry"
+	for _, route := range e.Routes() {
+		if route.Method == http.MethodPost && route.Path == want {
+			return
+		}
+	}
+	t.Fatalf("Register() missing route %s %s", http.MethodPost, want)
+}
+
 func TestOrchestrationCreateHumanCheckpointRejectsBodyPathMismatch(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/orchestration/runs/run-1/tasks/task-1/checkpoints", strings.NewReader(`{"run_id":"other-run","task_id":"task-1","question":"approve?","idempotency_key":"checkpoint-1","options":[{"id":"ok","kind":"choice","label":"OK"}]}`))
@@ -601,6 +672,129 @@ func TestOrchestrationListBotRunsPassesPathAndLimit(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET bot runs status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestOrchestrationInjectRunHintReturnsResult(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/runs/run-1/hints", `{"hint":{"kind":"context_update","summary":"add context","details":{"region":"ap-south-1"}},"idempotency_key":"hint-1"}`)
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.injectRunHint = func(_ context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.InjectRunHintRequest) (*orchestration.InjectRunHintResult, error) {
+		called = true
+		if caller != (orchestration.ControlIdentity{TenantID: "tenant-123", Subject: "user-123"}) {
+			t.Fatalf("caller = %+v", caller)
+		}
+		if runID != "run-1" {
+			t.Fatalf("runID = %q", runID)
+		}
+		if req.IdempotencyKey != "hint-1" {
+			t.Fatalf("idempotency_key = %q", req.IdempotencyKey)
+		}
+		if req.Hint.Kind != orchestration.RunHintKindContextUpdate {
+			t.Fatalf("hint.kind = %q", req.Hint.Kind)
+		}
+		if req.Hint.Details["region"] != "ap-south-1" {
+			t.Fatalf("hint.details = %#v", req.Hint.Details)
+		}
+		return &orchestration.InjectRunHintResult{RunID: runID, SnapshotSeq: 17}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /runs/:run_id/hints status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("InjectRunHint was not called")
+	}
+	var body orchestration.InjectRunHintResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.RunID != "run-1" || body.SnapshotSeq != 17 {
+		t.Fatalf("response = %+v", body)
+	}
+}
+
+func TestOrchestrationRetryTaskReturnsResult(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodPost, "/orchestration/runs/run-1/tasks/task-1/retry", `{"reason":"retry after operator review","idempotency_key":"retry-1"}`)
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.retryTask = func(_ context.Context, caller orchestration.ControlIdentity, taskID string, req orchestration.RetryTaskRequest) (*orchestration.RetryTaskResult, error) {
+		called = true
+		if caller != (orchestration.ControlIdentity{TenantID: "tenant-123", Subject: "user-123"}) {
+			t.Fatalf("caller = %+v", caller)
+		}
+		if taskID != "task-1" {
+			t.Fatalf("taskID = %q", taskID)
+		}
+		if req.Reason != "retry after operator review" {
+			t.Fatalf("reason = %q", req.Reason)
+		}
+		if req.IdempotencyKey != "retry-1" {
+			t.Fatalf("idempotency_key = %q", req.IdempotencyKey)
+		}
+		return &orchestration.RetryTaskResult{RunID: "run-1", TaskID: taskID, SnapshotSeq: 31}, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /runs/:run_id/tasks/:task_id/retry status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("RetryTask was not called")
+	}
+	var body orchestration.RetryTaskResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.RunID != "run-1" || body.TaskID != "task-1" || body.SnapshotSeq != 31 {
+		t.Fatalf("response = %+v", body)
+	}
+}
+
+func TestOrchestrationWatchRunStreamsEvents(t *testing.T) {
+	e, rec, req := newAuthedEcho(http.MethodGet, "/orchestration/runs/run-1/watch?after_seq=7", "")
+	var called bool
+	svc := newNoopOrchestrationService()
+	svc.watchRun = func(_ context.Context, caller orchestration.ControlIdentity, runID string, req orchestration.WatchRunRequest) (<-chan orchestration.RunEvent, error) {
+		called = true
+		if caller != (orchestration.ControlIdentity{TenantID: "tenant-123", Subject: "user-123"}) {
+			t.Fatalf("caller = %+v", caller)
+		}
+		if runID != "run-1" {
+			t.Fatalf("runID = %q", runID)
+		}
+		if req.AfterSeq != 7 {
+			t.Fatalf("after_seq = %d, want %d", req.AfterSeq, 7)
+		}
+		ch := make(chan orchestration.RunEvent, 1)
+		ch <- orchestration.RunEvent{Seq: 8, Type: "run.event.task.ready", TaskID: "task-1"}
+		close(ch)
+		return ch, nil
+	}
+	handler := &OrchestrationHandler{service: svc, logger: slog.New(slog.DiscardHandler)}
+	handler.Register(e)
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /runs/:run_id/watch status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Fatal("WatchRun was not called")
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "data: ") {
+		t.Fatalf("watch response missing SSE data frame: %q", body)
+	}
+	if !strings.Contains(body, `"type":"run.event.task.ready"`) {
+		t.Fatalf("watch response missing streamed event: %q", body)
 	}
 }
 

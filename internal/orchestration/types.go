@@ -96,11 +96,17 @@ const (
 	methodStartRun              = "StartRun"
 	methodCreateHumanCheckpoint = "CreateHumanCheckpoint"
 	methodCancelRun             = "CancelRun"
+	methodInjectRunHint         = "InjectRunHint"
 	methodCommitArtifact        = "CommitArtifact"
 	methodResolveCheckpoint     = "ResolveCheckpoint"
+	methodRetryTask             = "RetryTask"
 	methodCompleteAttempt       = "CompleteAttempt"
 	methodFailAttempt           = "FailAttempt"
 	methodCompleteVerification  = "CompleteVerification"
+
+	RunHintKindContextUpdate    = "context_update"
+	RunHintKindConstraintUpdate = "constraint_update"
+	RunHintKindReplanRequest    = "replan_request"
 )
 
 type ControlIdentity struct {
@@ -192,6 +198,39 @@ type ListRunEventsRequest struct {
 type RunEventPage struct {
 	Items    []RunEvent `json:"items"`
 	UntilSeq uint64     `json:"until_seq"`
+}
+
+type WatchRunRequest struct {
+	AfterSeq uint64 `json:"after_seq"`
+}
+
+type RunHint struct {
+	Kind         string         `json:"kind" validate:"required"`
+	Summary      string         `json:"summary"`
+	Details      map[string]any `json:"details"`
+	TargetTaskID string         `json:"target_task_id"`
+}
+
+type InjectRunHintRequest struct {
+	Hint           RunHint `json:"hint" validate:"required"`
+	IdempotencyKey string  `json:"idempotency_key" validate:"required"`
+}
+
+type InjectRunHintResult struct {
+	RunID            string `json:"run_id"`
+	PlanningIntentID string `json:"planning_intent_id"`
+	SnapshotSeq      uint64 `json:"snapshot_seq"`
+}
+
+type RetryTaskRequest struct {
+	Reason         string `json:"reason"`
+	IdempotencyKey string `json:"idempotency_key" validate:"required"`
+}
+
+type RetryTaskResult struct {
+	TaskID      string `json:"task_id"`
+	RunID       string `json:"run_id"`
+	SnapshotSeq uint64 `json:"snapshot_seq"`
 }
 
 type ListRunCheckpointsRequest struct {
