@@ -1086,6 +1086,13 @@ FROM orchestration_workers
 WHERE id = ANY(sqlc.arg(ids)::text[])
 ORDER BY id ASC;
 
+-- name: ListActiveOrchestrationWorkers :many
+SELECT *
+FROM orchestration_workers
+WHERE status = 'active'
+  AND lease_expires_at > clock_timestamp()
+ORDER BY id ASC;
+
 -- name: CreateOrchestrationTaskResult :one
 INSERT INTO orchestration_task_results (
   run_id,

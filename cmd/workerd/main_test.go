@@ -74,8 +74,8 @@ func TestRunAttemptHeartbeatLoopCancelsAfterRepeatedFailures(t *testing.T) {
 	defer cancelExec()
 	done := make(chan bool, 1)
 
-	go runAttemptHeartbeatLoopWithInterval(ctx, cancelExec, runtime, log, orchestration.TaskAttempt{
-		ID:         "attempt-1",
+	go runAttemptHeartbeatLoopWithInterval(ctx, cancelExec, runtime, log, orchestration.AttemptFence{
+		AttemptID:  "attempt-1",
 		ClaimToken: "claim-1",
 	}, 30, time.Millisecond, done)
 

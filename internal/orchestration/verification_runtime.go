@@ -22,11 +22,6 @@ const verificationCompletionRetryInterval = 250 * time.Millisecond
 
 var replayVerificationCompletionAckLossInjected atomic.Bool
 
-type VerificationLeaseRuntime interface {
-	HeartbeatVerification(context.Context, VerificationHeartbeat) (*TaskVerification, error)
-	CompleteVerification(context.Context, VerificationCompletion) (*TaskVerification, error)
-}
-
 type VerificationExecutor func(context.Context, TaskVerification, []string) VerificationCompletion
 
 func (s *Service) ClaimNextVerification(ctx context.Context, claim VerificationClaim) (*TaskVerification, error) {
@@ -129,7 +124,7 @@ func (s *Service) ProcessNextVerification(ctx context.Context, workerID, leaseTo
 		return false, err
 	}
 
-	runningVerification, err := s.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	runningVerification, err := s.StartClaimedVerification(ctx, NewVerificationFence(*verification))
 	if err != nil {
 		if errors.Is(err, ErrVerificationImmutable) || errors.Is(err, ErrVerificationLeaseConflict) {
 			return true, nil
@@ -365,6 +360,10 @@ func (s *Service) StartVerification(ctx context.Context, verificationID, claimTo
 	}
 	verification := toTaskVerification(running)
 	return &verification, nil
+}
+
+func (s *Service) StartClaimedVerification(ctx context.Context, fence VerificationFence) (*TaskVerification, error) {
+	return s.StartVerification(ctx, fence.VerificationID, fence.ClaimToken)
 }
 
 func (s *Service) HeartbeatVerification(ctx context.Context, input VerificationHeartbeat) (*TaskVerification, error) {
@@ -1153,20 +1152,21 @@ func (s *Service) RunVerificationRecoveryLoop(ctx context.Context) {
 	}
 }
 
-func RunClaimedVerification(ctx context.Context, runtime VerificationLeaseRuntime, log *slog.Logger, verification TaskVerification, leaseTTLSeconds int, verifierProfiles []string, execute VerificationExecutor) bool {
+func RunClaimedVerification(ctx context.Context, runtime ClaimedVerificationRuntime, log *slog.Logger, verification TaskVerification, leaseTTLSeconds int, verifierProfiles []string, execute VerificationExecutor) bool {
 	return RunClaimedVerificationWithInterval(ctx, runtime, log, verification, leaseTTLSeconds, heartbeatInterval(leaseTTLSeconds), verifierProfiles, execute)
 }
 
-func RunClaimedVerificationWithInterval(ctx context.Context, runtime VerificationLeaseRuntime, log *slog.Logger, verification TaskVerification, leaseTTLSeconds int, heartbeatEvery time.Duration, verifierProfiles []string, execute VerificationExecutor) bool {
+func RunClaimedVerificationWithInterval(ctx context.Context, runtime ClaimedVerificationRuntime, log *slog.Logger, verification TaskVerification, leaseTTLSeconds int, heartbeatEvery time.Duration, verifierProfiles []string, execute VerificationExecutor) bool {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	defer cancelExec()
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
 
+	fence := NewVerificationFence(verification)
 	verificationHeartbeatDone := make(chan bool, 1)
-	go runVerificationHeartbeatLoopWithInterval(heartbeatCtx, cancelExec, runtime, log, verification, leaseTTLSeconds, heartbeatEvery, verificationHeartbeatDone)
+	go runVerificationHeartbeatLoopWithInterval(heartbeatCtx, cancelExec, runtime, log, fence, leaseTTLSeconds, heartbeatEvery, verificationHeartbeatDone)
 
-	completion := execute(execCtx, verification, verifierProfiles)
+	completion := fence.Completion(execute(execCtx, verification, verifierProfiles))
 	heartbeatResultRead := false
 	checkHeartbeat := func(block bool) (bool, bool) {
 		if heartbeatResultRead {
@@ -1192,7 +1192,7 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime Verificatio
 			return true
 		}
 		if ctx.Err() != nil {
-			completion = workerShutdownVerificationCompletion(verification)
+			completion = fence.Completion(workerShutdownVerificationCompletion(verification))
 		} else {
 			return false
 		}
@@ -1204,7 +1204,7 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime Verificatio
 		}
 
 		if ctx.Err() != nil && completion.Status == TaskVerificationStatusCompleted {
-			completion = workerShutdownVerificationCompletion(verification)
+			completion = fence.Completion(workerShutdownVerificationCompletion(verification))
 		}
 
 		completeCtx, cancelComplete := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -1267,7 +1267,7 @@ func workerShutdownVerificationCompletion(verification TaskVerification) Verific
 	}
 }
 
-func runVerificationHeartbeatLoopWithInterval(ctx context.Context, cancel context.CancelFunc, runtime VerificationLeaseRuntime, log *slog.Logger, verification TaskVerification, leaseTTLSeconds int, interval time.Duration, done chan<- bool) {
+func runVerificationHeartbeatLoopWithInterval(ctx context.Context, cancel context.CancelFunc, runtime ClaimedVerificationRuntime, log *slog.Logger, fence VerificationFence, leaseTTLSeconds int, interval time.Duration, done chan<- bool) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -1277,12 +1277,8 @@ func runVerificationHeartbeatLoopWithInterval(ctx context.Context, cancel contex
 			done <- false
 			return
 		case <-ticker.C:
-			if _, err := runtime.HeartbeatVerification(ctx, VerificationHeartbeat{
-				VerificationID:  verification.ID,
-				ClaimToken:      verification.ClaimToken,
-				LeaseTTLSeconds: leaseTTLSeconds,
-			}); err != nil {
-				log.Warn("verification heartbeat failed", slog.String("verification_id", verification.ID), slog.Any("error", err))
+			if _, err := runtime.HeartbeatVerification(ctx, fence.Heartbeat(leaseTTLSeconds)); err != nil {
+				log.Warn("verification heartbeat failed", slog.String("verification_id", fence.VerificationID), slog.Any("error", err))
 				if errors.Is(err, ErrVerificationLeaseConflict) {
 					cancel()
 					done <- true
@@ -1295,7 +1291,7 @@ func runVerificationHeartbeatLoopWithInterval(ctx context.Context, cancel contex
 				}
 				consecutiveFailures++
 				if consecutiveFailures >= 3 {
-					log.Error("verification lease renewal failed repeatedly; cancelling execution", slog.String("verification_id", verification.ID))
+					log.Error("verification lease renewal failed repeatedly; cancelling execution", slog.String("verification_id", fence.VerificationID))
 					cancel()
 					done <- true
 					return
@@ -1386,10 +1382,6 @@ func toTaskVerification(row sqlc.OrchestrationTaskVerification) TaskVerification
 		CreatedAt:       db.TimeFromPg(row.CreatedAt),
 		UpdatedAt:       db.TimeFromPg(row.UpdatedAt),
 	}
-}
-
-func verifierCapabilities(verifierProfiles []string) map[string]any {
-	return profileCapabilities("verifier_profiles", verifierProfiles)
 }
 
 func requiresTaskVerification(policy map[string]any) bool {

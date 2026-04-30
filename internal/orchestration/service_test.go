@@ -117,6 +117,76 @@ func TestNormalizeWorkerProfilesLetsDefaultVerifierClaimBuiltinBasic(t *testing.
 	}
 }
 
+func TestProfileCapabilitiesUseNormalizedProfiles(t *testing.T) {
+	t.Parallel()
+
+	workerCaps := WorkerProfileCapabilities([]string{DefaultRootWorkerProfile})
+	workerProfiles := profileValuesForTest(workerCaps, "worker_profiles")
+	if !containsAnyStringForTest(workerProfiles, DefaultRootWorkerProfile) || !containsAnyStringForTest(workerProfiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("worker capabilities = %#v, want default and builtin echo profiles", workerCaps)
+	}
+
+	verifierCaps := VerifierProfileCapabilities([]string{DefaultVerifierProfile})
+	verifierProfiles := profileValuesForTest(verifierCaps, "verifier_profiles")
+	if !containsAnyStringForTest(verifierProfiles, DefaultVerifierProfile) || !containsAnyStringForTest(verifierProfiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("verifier capabilities = %#v, want default and builtin basic profiles", verifierCaps)
+	}
+}
+
+func TestWorkerProfileAllowed(t *testing.T) {
+	t.Parallel()
+
+	if !workerProfileAllowed("custom.profile", nil) {
+		t.Fatal("workerProfileAllowed(nil set) = false, want true")
+	}
+	if workerProfileAllowed(DefaultRootWorkerProfile, map[string]struct{}{}) {
+		t.Fatal("workerProfileAllowed(empty set) = true, want false")
+	}
+	profileSet := executionProfileSet([]string{DefaultRootWorkerProfile})
+	if !workerProfileAllowed(DefaultRootWorkerProfile, profileSet) {
+		t.Fatalf("workerProfileAllowed(default) = false, want true")
+	}
+	if workerProfileAllowed("custom.profile", profileSet) {
+		t.Fatalf("workerProfileAllowed(custom.profile) = true, want false")
+	}
+
+	normalizedDefaultSet := executionProfileSet(NormalizeExecutionProfiles([]string{DefaultRootWorkerProfile}))
+	if !workerProfileAllowed(BuiltinEchoWorkerProfile, normalizedDefaultSet) {
+		t.Fatalf("workerProfileAllowed(builtin echo fallback) = false, want true")
+	}
+}
+
+func TestActiveWorkerProfilesOnlyUsesWorkerCapabilities(t *testing.T) {
+	t.Parallel()
+
+	profiles := activeWorkerProfiles([]WorkerLease{
+		{
+			ID:           "workerd",
+			Capabilities: WorkerProfileCapabilities([]string{DefaultRootWorkerProfile}),
+		},
+		{
+			ID:           "verifyd",
+			Capabilities: VerifierProfileCapabilities([]string{DefaultVerifierProfile}),
+		},
+		{
+			ID: "custom",
+			Capabilities: map[string]any{
+				"worker_profiles": []any{"custom.profile", DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	if !containsStringForTest(profiles, DefaultRootWorkerProfile) || !containsStringForTest(profiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("activeWorkerProfiles() = %#v, want normalized default worker profiles", profiles)
+	}
+	if !containsStringForTest(profiles, "custom.profile") {
+		t.Fatalf("activeWorkerProfiles() = %#v, missing custom.profile", profiles)
+	}
+	if containsStringForTest(profiles, DefaultVerifierProfile) || containsStringForTest(profiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("activeWorkerProfiles() = %#v, want verifier profiles ignored", profiles)
+	}
+}
+
 func TestVerifierProfileForTaskPolicyUsesLLMByDefaultAndBuiltinWhenRequested(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +225,20 @@ func TestValidatePlannedChildTasksRejectsCycles(t *testing.T) {
 }
 
 func containsStringForTest(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func profileValuesForTest(capabilities map[string]any, key string) []any {
+	values, _ := capabilities[key].([]any)
+	return values
+}
+
+func containsAnyStringForTest(values []any, target string) bool {
 	for _, value := range values {
 		if value == target {
 			return true

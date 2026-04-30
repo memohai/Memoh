@@ -2526,6 +2526,45 @@ func (q *Queries) ListActiveOrchestrationTaskDependenciesBySuccessor(ctx context
 	return items, nil
 }
 
+const listActiveOrchestrationWorkers = `-- name: ListActiveOrchestrationWorkers :many
+SELECT id, executor_id, display_name, capabilities, status, lease_token, last_heartbeat_at, lease_expires_at, created_at, updated_at
+FROM orchestration_workers
+WHERE status = 'active'
+  AND lease_expires_at > clock_timestamp()
+ORDER BY id ASC
+`
+
+func (q *Queries) ListActiveOrchestrationWorkers(ctx context.Context) ([]OrchestrationWorker, error) {
+	rows, err := q.db.Query(ctx, listActiveOrchestrationWorkers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationWorker
+	for rows.Next() {
+		var i OrchestrationWorker
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExecutorID,
+			&i.DisplayName,
+			&i.Capabilities,
+			&i.Status,
+			&i.LeaseToken,
+			&i.LastHeartbeatAt,
+			&i.LeaseExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCurrentOrchestrationActionRecordsByRun = `-- name: ListCurrentOrchestrationActionRecordsByRun :many
 SELECT id, run_id, task_id, attempt_id, verification_id, action_kind, status, tool_name, tool_call_id, input_payload, output_payload, error_payload, summary, started_at, finished_at, created_at, updated_at
 FROM orchestration_action_ledger

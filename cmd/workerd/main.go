@@ -32,11 +32,6 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-type attemptRuntime interface {
-	HeartbeatAttempt(context.Context, orchestration.AttemptHeartbeat) (*orchestration.TaskAttempt, error)
-	CompleteAttempt(context.Context, orchestration.AttemptCompletion) (*orchestration.TaskAttempt, error)
-}
-
 type attemptExecutor func(context.Context, orchestration.TaskAttempt, []string) orchestration.AttemptCompletion
 
 const completionRetryInterval = 250 * time.Millisecond
@@ -72,6 +67,8 @@ func run() error {
 
 	queries := dbsqlc.New(pool)
 	svc := orchestration.NewService(log, pool, queries)
+	var executor orchestration.AttemptExecutor = svc
+	var workerLeases orchestration.WorkerLeaseRuntime = svc
 	llmRuntime, cleanupLLMRuntime, err := buildLLMRuntime(ctx, log, cfg, pool, queries)
 	if err != nil {
 		log.Warn("llm runtime unavailable, worker will use builtin fallback", slog.Any("error", err))
@@ -88,7 +85,7 @@ func run() error {
 	if executorID == "" {
 		executorID = orchestration.DefaultWorkerExecutorID
 	}
-	workerProfiles := expandDefaultWorkerProfiles(envCSV("WORKER_PROFILES", []string{orchestration.DefaultRootWorkerProfile}))
+	workerProfiles := orchestration.NormalizeExecutionProfiles(envCSV("WORKER_PROFILES", []string{orchestration.DefaultRootWorkerProfile}))
 	leaseTTLSeconds := envInt("WORKER_LEASE_TTL_SECONDS", 30)
 	pollInterval := time.Duration(envInt("WORKER_POLL_INTERVAL_MS", 500)) * time.Millisecond
 
@@ -96,7 +93,7 @@ func run() error {
 		WorkerID:        workerID,
 		ExecutorID:      executorID,
 		DisplayName:     workerID,
-		Capabilities:    map[string]any{"worker_profiles": stringSliceToAny(workerProfiles)},
+		Capabilities:    orchestration.WorkerProfileCapabilities(workerProfiles),
 		LeaseTTLSeconds: leaseTTLSeconds,
 	})
 	if err != nil {
@@ -104,14 +101,14 @@ func run() error {
 	}
 	workerLeaseToken := workerLease.LeaseToken
 
-	go runWorkerHeartbeatLoop(ctx, svc, log, workerID, workerLeaseToken, leaseTTLSeconds, cancel)
+	go runWorkerHeartbeatLoop(ctx, workerLeases, log, workerID, workerLeaseToken, leaseTTLSeconds, cancel)
 
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		attempt, err := svc.ClaimNextAttempt(ctx, orchestration.AttemptClaim{
+		attempt, err := executor.ClaimNextAttempt(ctx, orchestration.AttemptClaim{
 			WorkerID:        workerID,
 			ExecutorID:      executorID,
 			WorkerProfiles:  workerProfiles,
@@ -143,7 +140,8 @@ func run() error {
 		if err := sleepWithContext(ctx, time.Duration(envInt("WORKER_START_DELAY_MS", 0))*time.Millisecond); err != nil {
 			return nil
 		}
-		runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+		claimedFence := orchestration.NewAttemptFence(*attempt)
+		runningAttempt, err := executor.StartClaimedAttempt(ctx, claimedFence)
 		if err != nil {
 			log.Error("start attempt failed", slog.String("attempt_id", attempt.ID), slog.Any("error", err))
 			select {
@@ -154,7 +152,7 @@ func run() error {
 			}
 		}
 
-		leaseLost := runAttempt(ctx, svc, log, *runningAttempt, leaseTTLSeconds, workerProfiles, func(execCtx context.Context, attempt orchestration.TaskAttempt, profiles []string) orchestration.AttemptCompletion {
+		leaseLost := runAttempt(ctx, executor, log, *runningAttempt, leaseTTLSeconds, workerProfiles, func(execCtx context.Context, attempt orchestration.TaskAttempt, profiles []string) orchestration.AttemptCompletion {
 			return executeAttempt(execCtx, queries, llmRuntime, attempt, profiles)
 		})
 		if leaseLost {
@@ -167,19 +165,20 @@ func run() error {
 	}
 }
 
-func runAttempt(ctx context.Context, svc attemptRuntime, log *slog.Logger, attempt orchestration.TaskAttempt, leaseTTLSeconds int, workerProfiles []string, execute attemptExecutor) bool {
+func runAttempt(ctx context.Context, svc orchestration.ClaimedAttemptRuntime, log *slog.Logger, attempt orchestration.TaskAttempt, leaseTTLSeconds int, workerProfiles []string, execute attemptExecutor) bool {
 	return runAttemptWithInterval(ctx, svc, log, attempt, leaseTTLSeconds, heartbeatInterval(leaseTTLSeconds), workerProfiles, execute)
 }
 
-func runAttemptWithInterval(ctx context.Context, svc attemptRuntime, log *slog.Logger, attempt orchestration.TaskAttempt, leaseTTLSeconds int, heartbeatEvery time.Duration, workerProfiles []string, execute attemptExecutor) bool {
+func runAttemptWithInterval(ctx context.Context, svc orchestration.ClaimedAttemptRuntime, log *slog.Logger, attempt orchestration.TaskAttempt, leaseTTLSeconds int, heartbeatEvery time.Duration, workerProfiles []string, execute attemptExecutor) bool {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	defer cancelExec()
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
+	fence := orchestration.NewAttemptFence(attempt)
 	attemptHeartbeatDone := make(chan bool, 1)
-	go runAttemptHeartbeatLoopWithInterval(heartbeatCtx, cancelExec, svc, log, attempt, leaseTTLSeconds, heartbeatEvery, attemptHeartbeatDone)
+	go runAttemptHeartbeatLoopWithInterval(heartbeatCtx, cancelExec, svc, log, fence, leaseTTLSeconds, heartbeatEvery, attemptHeartbeatDone)
 
-	completion := execute(execCtx, attempt, workerProfiles)
+	completion := fence.Completion(execute(execCtx, attempt, workerProfiles))
 
 	heartbeatResultRead := false
 	checkHeartbeat := func(block bool) (bool, bool) {
@@ -206,7 +205,7 @@ func runAttemptWithInterval(ctx context.Context, svc attemptRuntime, log *slog.L
 			return true
 		}
 		if ctx.Err() != nil {
-			completion = workerShutdownCompletion(attempt)
+			completion = fence.Completion(workerShutdownCompletion(attempt))
 		}
 	}
 
@@ -280,7 +279,7 @@ func workerShutdownCompletion(attempt orchestration.TaskAttempt) orchestration.A
 	}
 }
 
-func runWorkerHeartbeatLoop(ctx context.Context, svc *orchestration.Service, log *slog.Logger, workerID, leaseToken string, leaseTTLSeconds int, cancel context.CancelFunc) {
+func runWorkerHeartbeatLoop(ctx context.Context, svc orchestration.WorkerLeaseRuntime, log *slog.Logger, workerID, leaseToken string, leaseTTLSeconds int, cancel context.CancelFunc) {
 	ticker := time.NewTicker(heartbeatInterval(leaseTTLSeconds))
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -309,7 +308,7 @@ func runWorkerHeartbeatLoop(ctx context.Context, svc *orchestration.Service, log
 	}
 }
 
-func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.CancelFunc, svc attemptRuntime, log *slog.Logger, attempt orchestration.TaskAttempt, leaseTTLSeconds int, interval time.Duration, done chan<- bool) {
+func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.CancelFunc, svc orchestration.ClaimedAttemptRuntime, log *slog.Logger, fence orchestration.AttemptFence, leaseTTLSeconds int, interval time.Duration, done chan<- bool) {
 	defer close(done)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -320,12 +319,8 @@ func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.Can
 			done <- false
 			return
 		case <-ticker.C:
-			if _, err := svc.HeartbeatAttempt(ctx, orchestration.AttemptHeartbeat{
-				AttemptID:       attempt.ID,
-				ClaimToken:      attempt.ClaimToken,
-				LeaseTTLSeconds: leaseTTLSeconds,
-			}); err != nil {
-				log.Warn("attempt heartbeat failed", slog.String("attempt_id", attempt.ID), slog.Any("error", err))
+			if _, err := svc.HeartbeatAttempt(ctx, fence.Heartbeat(leaseTTLSeconds)); err != nil {
+				log.Warn("attempt heartbeat failed", slog.String("attempt_id", fence.AttemptID), slog.Any("error", err))
 				if errors.Is(err, orchestration.ErrAttemptLeaseConflict) || errors.Is(err, orchestration.ErrAttemptImmutable) {
 					cancel()
 					done <- true
@@ -333,7 +328,7 @@ func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.Can
 				}
 				consecutiveFailures++
 				if consecutiveFailures >= 3 {
-					log.Error("attempt lease renewal failed repeatedly; cancelling execution", slog.String("attempt_id", attempt.ID))
+					log.Error("attempt lease renewal failed repeatedly; cancelling execution", slog.String("attempt_id", fence.AttemptID))
 					cancel()
 					done <- true
 					return
@@ -564,14 +559,6 @@ func envCSV(name string, fallback []string) []string {
 	return values
 }
 
-func stringSliceToAny(values []string) []any {
-	items := make([]any, 0, len(values))
-	for _, value := range values {
-		items = append(items, value)
-	}
-	return items
-}
-
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -579,14 +566,6 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func expandDefaultWorkerProfiles(values []string) []string {
-	if !containsString(values, orchestration.DefaultRootWorkerProfile) ||
-		containsString(values, orchestration.BuiltinEchoWorkerProfile) {
-		return values
-	}
-	return append(values, orchestration.BuiltinEchoWorkerProfile)
 }
 
 func buildLLMRuntime(

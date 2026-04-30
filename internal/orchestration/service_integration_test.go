@@ -200,6 +200,22 @@ func drainRunPlanningIntents(t *testing.T, ctx context.Context, svc *Service) {
 	}
 }
 
+func dispatchNextReadyTaskForTest(ctx context.Context, svc *Service) (bool, error) {
+	return svc.DispatchNextReadyTaskForWorkerProfiles(ctx, []string{
+		DefaultRootWorkerProfile,
+		"kernel-e2e.verify",
+		"kernel-e2e.checkpoint",
+		"parallel.task-a",
+		"parallel.task-b",
+		"kernel-cancel.verify",
+		"kernel-cancel.checkpoint",
+		"run-barrier-running-sibling",
+		"run-barrier-dispatching-sibling",
+		"run-barrier-dispatching-missing-attempt",
+		"run-barrier-running-missing-attempt",
+	})
+}
+
 func dispatchAndClaimAttemptForProfiles(t *testing.T, ctx context.Context, svc *Service, claim AttemptClaim, maxDispatches int) *TaskAttempt {
 	t.Helper()
 
@@ -215,7 +231,7 @@ func dispatchAndClaimAttemptForProfiles(t *testing.T, ctx context.Context, svc *
 		if !errors.Is(err, ErrNoRunnableAttempt) {
 			t.Fatalf("ClaimNextAttempt() error = %v", err)
 		}
-		dispatched, dispatchErr := svc.DispatchNextReadyTask(ctx)
+		dispatched, dispatchErr := dispatchNextReadyTaskForTest(ctx, svc)
 		if dispatchErr != nil {
 			t.Fatalf("DispatchNextReadyTask() error = %v", dispatchErr)
 		}
@@ -1291,7 +1307,7 @@ func TestIntegrationSchedulerAndAttemptLifecycleCompletesRootTask(t *testing.T) 
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -1380,7 +1396,7 @@ func TestIntegrationAttemptCompletionRequestReplanCreatesReadyChildTasks(t *test
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -1523,7 +1539,7 @@ func TestIntegrationCompleteAttemptReplayReturnsTerminalAttempt(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -1585,7 +1601,7 @@ func TestIntegrationFailedAttemptRequestReplanKeepsRunAliveAndExpandsReplacement
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -1655,7 +1671,7 @@ func TestIntegrationFailedAttemptRequestReplanKeepsRunAliveAndExpandsReplacement
 		t.Fatalf("replacement child task not found in ready state: %+v", taskPage.Items)
 	}
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(replacement) error = %v", err)
 	}
@@ -1722,7 +1738,7 @@ func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
 		"require_structured_output": true,
 	})
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -1919,7 +1935,7 @@ func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -2017,7 +2033,7 @@ func TestIntegrationKernelRunBarrierResumeAndCompletionManualStateMachine(t *tes
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask(root) = false, want true")
@@ -2090,7 +2106,7 @@ func TestIntegrationKernelRunBarrierResumeAndCompletionManualStateMachine(t *tes
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask(verify child) error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask(verify child) = false, want true")
@@ -2529,7 +2545,7 @@ func TestIntegrationVerificationRejectRequestReplanEnqueuesReplan(t *testing.T) 
 		"on_reject":               VerificationRejectActionReplan,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -2660,7 +2676,7 @@ func TestIntegrationVerificationRejectRequestReplanEnqueuesReplan(t *testing.T) 
 		t.Fatalf("verification row status = %q, want %q", verificationRows[0].Status, TaskVerificationStatusCompleted)
 	}
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask(replacement) error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask(replacement) = false, want true")
@@ -2726,7 +2742,7 @@ func TestIntegrationProcessNextVerificationExecutesCreatedVerification(t *testin
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -2840,7 +2856,7 @@ func TestIntegrationVerificationAcceptedRequestReplanEnqueuesReplan(t *testing.T
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -2957,7 +2973,7 @@ func TestIntegrationCompleteVerificationRejectsUnauthorizedRequestReplan(t *test
 		"on_reject":               VerificationRejectActionFailTask,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -3045,7 +3061,7 @@ func TestIntegrationCompleteVerificationRejectsAcceptedFailedCombination(t *test
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -3123,7 +3139,7 @@ func TestIntegrationVerificationLeaseExpiryRecoveryFailsRunOnce(t *testing.T) {
 		"require_structured_output": true,
 	})
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -3254,7 +3270,7 @@ func TestIntegrationInvalidRequestReplanFailsIntentWithoutStrandingRun(t *testin
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -3349,7 +3365,7 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -3551,7 +3567,7 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	}
 	processRunPlanningIntent(t, ctx, svc)
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(replacement) error = %v", err)
 	}
@@ -3601,7 +3617,7 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -3652,7 +3668,7 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 		t.Fatal("active child task not found")
 	}
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(active child) error = %v", err)
 	}
@@ -3759,7 +3775,7 @@ func TestIntegrationSupersededRunningAttemptIsRejectedAndRecoveredWithoutFailing
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -3859,7 +3875,7 @@ func TestIntegrationDependentChildTaskWaitsForCompletedPredecessor(t *testing.T)
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -3929,7 +3945,7 @@ func TestIntegrationDependentChildTaskWaitsForCompletedPredecessor(t *testing.T)
 		t.Fatalf("second child status = %q, want %q", secondChild.Status, TaskStatusCreated)
 	}
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(first child) error = %v", err)
 	}
@@ -3962,7 +3978,7 @@ func TestIntegrationDependentChildTaskWaitsForCompletedPredecessor(t *testing.T)
 	}
 	processRunPlanningIntent(t, ctx, svc)
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(dependent child) error = %v", err)
 	}
@@ -4004,7 +4020,7 @@ func TestIntegrationFailedDependencyBlocksSuccessorTask(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -4041,7 +4057,7 @@ func TestIntegrationFailedDependencyBlocksSuccessorTask(t *testing.T) {
 	}
 	drainRunPlanningIntents(t, ctx, svc)
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(first child) error = %v", err)
 	}
@@ -4116,7 +4132,7 @@ func TestIntegrationJoinTaskAutoCompletesAfterPredecessors(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -4155,7 +4171,7 @@ func TestIntegrationJoinTaskAutoCompletesAfterPredecessors(t *testing.T) {
 	drainRunPlanningIntents(t, ctx, svc)
 
 	for i := 0; i < 2; i++ {
-		dispatched, err = svc.DispatchNextReadyTask(ctx)
+		dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 		if err != nil {
 			t.Fatalf("DispatchNextReadyTask(branch %d) error = %v", i+1, err)
 		}
@@ -4186,7 +4202,7 @@ func TestIntegrationJoinTaskAutoCompletesAfterPredecessors(t *testing.T) {
 		processRunPlanningIntent(t, ctx, svc)
 	}
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(join activation) error = %v", err)
 	}
@@ -4606,7 +4622,7 @@ func TestIntegrationCancelRunDispatchingTaskWithCreatedAttemptConvergesImmediate
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	if dispatched, err := svc.DispatchNextReadyTask(ctx); err != nil {
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	} else if !dispatched {
 		t.Fatal("DispatchNextReadyTask() = false, want true")
@@ -5988,7 +6004,7 @@ func TestIntegrationCommitArtifactHidesForeignRunTaskAndAttempt(t *testing.T) {
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, otherTenantCaller.TenantID, otherTenantCaller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6411,7 +6427,7 @@ func TestIntegrationChildTaskFailureFailsRun(t *testing.T) {
 		t.Fatalf("CreateOrchestrationTask(child) error = %v", err)
 	}
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6473,7 +6489,7 @@ func TestIntegrationAttemptLeaseExpiryIsStrictlyFenced(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6532,7 +6548,7 @@ func TestIntegrationCompleteAttemptRejectsExpiredLeaseAndRecoveryFailsRunOnce(t 
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6631,7 +6647,7 @@ func TestIntegrationStartAttemptEmitsBindingBeforeRunning(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6706,7 +6722,7 @@ func TestIntegrationStartAttemptReplayPreservesRunningAttempt(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6796,7 +6812,7 @@ func TestIntegrationBindingAttemptHeartbeatAndRecovery(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6900,7 +6916,7 @@ func TestIntegrationStartAttemptRetiresClaimWhenRunBecomesImmutable(t *testing.T
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -6986,7 +7002,7 @@ func TestIntegrationStartAttemptAdvancesPersistedBindingToRunning(t *testing.T) 
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -7041,7 +7057,7 @@ func TestIntegrationStartAttemptRetiresBoundAttemptWhenRunBecomesImmutable(t *te
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -7108,7 +7124,7 @@ func TestIntegrationStartAttemptRetiresClaimWhenTaskBecomesImmutable(t *testing.
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask() error = %v", err)
 	}
@@ -9510,7 +9526,7 @@ func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := svc.DispatchNextReadyTask(ctx)
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
 	}
@@ -9561,7 +9577,7 @@ func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
 		t.Fatal("active child task not found")
 	}
 
-	dispatched, err = svc.DispatchNextReadyTask(ctx)
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
 	if err != nil {
 		t.Fatalf("DispatchNextReadyTask(active child) error = %v", err)
 	}

@@ -1146,7 +1146,31 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 	return lastEvent, nil
 }
 
-func (s *Service) DispatchNextReadyTask(ctx context.Context) (bool, error) {
+func (s *Service) DispatchNextReadyTaskForWorkerProfiles(ctx context.Context, workerProfiles []string) (bool, error) {
+	profiles := NormalizeExecutionProfiles(workerProfiles)
+	if len(profiles) == 0 {
+		return false, fmt.Errorf("%w: worker_profiles is required", ErrInvalidArgument)
+	}
+	return s.dispatchNextReadyTask(ctx, executionProfileSet(profiles))
+}
+
+func (s *Service) DispatchNextReadyTaskForActiveWorkers(ctx context.Context) (bool, error) {
+	workers, err := s.queries.ListActiveOrchestrationWorkers(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list active orchestration workers: %w", err)
+	}
+	leases := make([]WorkerLease, 0, len(workers))
+	for _, worker := range workers {
+		leases = append(leases, toWorkerLease(worker))
+	}
+	profiles := activeWorkerProfiles(leases)
+	if len(profiles) == 0 {
+		return s.dispatchNextReadyTask(ctx, map[string]struct{}{})
+	}
+	return s.DispatchNextReadyTaskForWorkerProfiles(ctx, profiles)
+}
+
+func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet map[string]struct{}) (bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, fmt.Errorf("begin scheduler tx: %w", err)
@@ -1197,6 +1221,9 @@ func (s *Service) DispatchNextReadyTask(ctx context.Context) (bool, error) {
 			continue
 		}
 		if taskRow.RunID != runRow.ID {
+			continue
+		}
+		if !workerProfileAllowed(taskRow.WorkerProfile, workerProfileSet) {
 			continue
 		}
 		activeAttempts, err := qtx.CountActiveOrchestrationTaskAttemptsByTask(ctx, taskRow.ID)
@@ -1309,6 +1336,32 @@ func (s *Service) DispatchNextReadyTask(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+func executionProfileSet(profiles []string) map[string]struct{} {
+	if len(profiles) == 0 {
+		return nil
+	}
+	profileSet := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		trimmed := strings.TrimSpace(profile)
+		if trimmed == "" {
+			continue
+		}
+		profileSet[trimmed] = struct{}{}
+	}
+	if len(profileSet) == 0 {
+		return nil
+	}
+	return profileSet
+}
+
+func workerProfileAllowed(workerProfile string, profileSet map[string]struct{}) bool {
+	if profileSet == nil {
+		return true
+	}
+	_, ok := profileSet[strings.TrimSpace(workerProfile)]
+	return ok
+}
+
 func (s *Service) ClaimNextAttempt(ctx context.Context, claim AttemptClaim) (*TaskAttempt, error) {
 	workerID := strings.TrimSpace(claim.WorkerID)
 	if workerID == "" {
@@ -1399,6 +1452,10 @@ func (s *Service) StartAttempt(ctx context.Context, attemptID, claimToken string
 		return nil, err
 	}
 	return s.advanceAttemptToRunning(ctx, pgAttemptID, normalizedClaimToken)
+}
+
+func (s *Service) StartClaimedAttempt(ctx context.Context, fence AttemptFence) (*TaskAttempt, error) {
+	return s.StartAttempt(ctx, fence.AttemptID, fence.ClaimToken)
 }
 
 func (s *Service) ensureAttemptBinding(ctx context.Context, attemptID pgtype.UUID, claimToken string) error {
@@ -2353,7 +2410,7 @@ func (s *Service) RunPlannerLoop(ctx context.Context) {
 }
 
 func (s *Service) RunSchedulerLoop(ctx context.Context) {
-	runBoolLoop(ctx, s.logger, "scheduler", 200*time.Millisecond, s.DispatchNextReadyTask)
+	runBoolLoop(ctx, s.logger, "scheduler", 200*time.Millisecond, s.DispatchNextReadyTaskForActiveWorkers)
 }
 
 func (s *Service) RunRecoveryLoop(ctx context.Context) {
@@ -3020,6 +3077,10 @@ func uuidString(value pgtype.UUID) string {
 }
 
 func normalizeWorkerProfiles(raw []string) []string {
+	return NormalizeExecutionProfiles(raw)
+}
+
+func NormalizeExecutionProfiles(raw []string) []string {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -3056,7 +3117,19 @@ func normalizeWorkerProfiles(raw []string) []string {
 }
 
 func workerCapabilities(workerProfiles []string) map[string]any {
-	return profileCapabilities("worker_profiles", workerProfiles)
+	return WorkerProfileCapabilities(workerProfiles)
+}
+
+func verifierCapabilities(verifierProfiles []string) map[string]any {
+	return VerifierProfileCapabilities(verifierProfiles)
+}
+
+func WorkerProfileCapabilities(workerProfiles []string) map[string]any {
+	return profileCapabilities("worker_profiles", NormalizeExecutionProfiles(workerProfiles))
+}
+
+func VerifierProfileCapabilities(verifierProfiles []string) map[string]any {
+	return profileCapabilities("verifier_profiles", NormalizeExecutionProfiles(verifierProfiles))
 }
 
 func profileCapabilities(capabilityKey string, profiles []string) map[string]any {
@@ -3069,6 +3142,41 @@ func profileCapabilities(capabilityKey string, profiles []string) map[string]any
 	}
 	return map[string]any{
 		capabilityKey: items,
+	}
+}
+
+func activeWorkerProfiles(workers []WorkerLease) []string {
+	if len(workers) == 0 {
+		return nil
+	}
+	profiles := make([]string, 0, len(workers))
+	for _, worker := range workers {
+		profiles = append(profiles, stringSliceCapability(worker.Capabilities, "worker_profiles")...)
+	}
+	return NormalizeExecutionProfiles(profiles)
+}
+
+func stringSliceCapability(capabilities map[string]any, key string) []string {
+	if len(capabilities) == 0 {
+		return nil
+	}
+	raw, ok := capabilities[key]
+	if !ok {
+		return nil
+	}
+	switch values := raw.(type) {
+	case []any:
+		items := make([]string, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				items = append(items, text)
+			}
+		}
+		return items
+	case []string:
+		return append([]string(nil), values...)
+	default:
+		return nil
 	}
 }
 

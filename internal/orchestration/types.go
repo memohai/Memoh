@@ -591,6 +591,17 @@ type AttemptClaim struct {
 	LeaseTTLSeconds int      `json:"lease_ttl_seconds"`
 }
 
+type AttemptFence struct {
+	AttemptID      string     `json:"attempt_id"`
+	RunID          string     `json:"run_id"`
+	TaskID         string     `json:"task_id"`
+	WorkerID       string     `json:"worker_id,omitempty"`
+	ExecutorID     string     `json:"executor_id,omitempty"`
+	ClaimEpoch     uint64     `json:"claim_epoch"`
+	ClaimToken     string     `json:"claim_token"`
+	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
+}
+
 type AttemptHeartbeat struct {
 	AttemptID       string `json:"attempt_id"`
 	ClaimToken      string `json:"claim_token"`
@@ -664,6 +675,19 @@ type VerificationClaim struct {
 	VerifierProfiles []string `json:"verifier_profiles"`
 	LeaseToken       string   `json:"lease_token,omitempty"`
 	LeaseTTLSeconds  int      `json:"lease_ttl_seconds"`
+}
+
+type VerificationFence struct {
+	VerificationID  string     `json:"verification_id"`
+	RunID           string     `json:"run_id"`
+	TaskID          string     `json:"task_id"`
+	ResultID        string     `json:"result_id"`
+	WorkerID        string     `json:"worker_id,omitempty"`
+	ExecutorID      string     `json:"executor_id,omitempty"`
+	VerifierProfile string     `json:"verifier_profile,omitempty"`
+	ClaimEpoch      uint64     `json:"claim_epoch"`
+	ClaimToken      string     `json:"claim_token"`
+	LeaseExpiresAt  *time.Time `json:"lease_expires_at,omitempty"`
 }
 
 type VerificationHeartbeat struct {

@@ -31,11 +31,6 @@ import (
 	"github.com/memohai/memoh/internal/workspace"
 )
 
-type verificationRuntime interface {
-	HeartbeatVerification(context.Context, orchestration.VerificationHeartbeat) (*orchestration.TaskVerification, error)
-	CompleteVerification(context.Context, orchestration.VerificationCompletion) (*orchestration.TaskVerification, error)
-}
-
 type verificationExecutor = orchestration.VerificationExecutor
 
 func main() {
@@ -67,6 +62,8 @@ func run() error {
 
 	queries := dbsqlc.New(pool)
 	svc := orchestration.NewService(log, pool, queries)
+	var executor orchestration.VerificationWorkExecutor = svc
+	var workerLeases orchestration.WorkerLeaseRuntime = svc
 	llmRuntime, cleanupLLMRuntime, err := buildLLMRuntime(ctx, log, cfg, pool, queries)
 	if err != nil {
 		log.Warn("llm runtime unavailable, verifier will use builtin fallback", slog.Any("error", err))
@@ -83,7 +80,7 @@ func run() error {
 	if executorID == "" {
 		executorID = orchestration.DefaultVerifierExecutorID
 	}
-	verifierProfiles := expandDefaultVerifierProfiles(envCSV("VERIFIER_PROFILES", []string{orchestration.DefaultVerifierProfile}))
+	verifierProfiles := orchestration.NormalizeExecutionProfiles(envCSV("VERIFIER_PROFILES", []string{orchestration.DefaultVerifierProfile}))
 	leaseTTLSeconds := envInt("VERIFIER_LEASE_TTL_SECONDS", 30)
 	pollInterval := time.Duration(envInt("VERIFIER_POLL_INTERVAL_MS", 500)) * time.Millisecond
 
@@ -91,7 +88,7 @@ func run() error {
 		WorkerID:        workerID,
 		ExecutorID:      executorID,
 		DisplayName:     workerID,
-		Capabilities:    map[string]any{"verifier_profiles": stringSliceToAny(verifierProfiles)},
+		Capabilities:    orchestration.VerifierProfileCapabilities(verifierProfiles),
 		LeaseTTLSeconds: leaseTTLSeconds,
 	})
 	if err != nil {
@@ -99,14 +96,14 @@ func run() error {
 	}
 	workerLeaseToken := workerLease.LeaseToken
 
-	go runWorkerHeartbeatLoop(ctx, svc, log, workerID, workerLeaseToken, leaseTTLSeconds, cancel)
+	go runWorkerHeartbeatLoop(ctx, workerLeases, log, workerID, workerLeaseToken, leaseTTLSeconds, cancel)
 
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		verification, err := svc.ClaimNextVerification(ctx, orchestration.VerificationClaim{
+		verification, err := executor.ClaimNextVerification(ctx, orchestration.VerificationClaim{
 			WorkerID:         workerID,
 			ExecutorID:       executorID,
 			VerifierProfiles: verifierProfiles,
@@ -138,7 +135,8 @@ func run() error {
 		if err := sleepWithContext(ctx, time.Duration(envInt("VERIFIER_START_DELAY_MS", 0))*time.Millisecond); err != nil {
 			return nil
 		}
-		runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+		claimedFence := orchestration.NewVerificationFence(*verification)
+		runningVerification, err := executor.StartClaimedVerification(ctx, claimedFence)
 		if err != nil {
 			log.Error("start verification failed", slog.String("verification_id", verification.ID), slog.Any("error", err))
 			select {
@@ -149,7 +147,7 @@ func run() error {
 			}
 		}
 
-		leaseLost := runVerification(ctx, svc, log, *runningVerification, leaseTTLSeconds, verifierProfiles, func(execCtx context.Context, verification orchestration.TaskVerification, profiles []string) orchestration.VerificationCompletion {
+		leaseLost := runVerification(ctx, executor, log, *runningVerification, leaseTTLSeconds, verifierProfiles, func(execCtx context.Context, verification orchestration.TaskVerification, profiles []string) orchestration.VerificationCompletion {
 			return executeVerification(execCtx, queries, llmRuntime, verification, profiles)
 		})
 		if leaseLost {
@@ -162,18 +160,18 @@ func run() error {
 	}
 }
 
-func runVerification(ctx context.Context, svc verificationRuntime, log *slog.Logger, verification orchestration.TaskVerification, leaseTTLSeconds int, verifierProfiles []string, execute verificationExecutor) bool {
+func runVerification(ctx context.Context, svc orchestration.ClaimedVerificationRuntime, log *slog.Logger, verification orchestration.TaskVerification, leaseTTLSeconds int, verifierProfiles []string, execute verificationExecutor) bool {
 	return orchestration.RunClaimedVerification(ctx, svc, log, verification, leaseTTLSeconds, verifierProfiles, execute)
 }
 
-func runVerificationWithInterval(ctx context.Context, svc verificationRuntime, log *slog.Logger, verification orchestration.TaskVerification, leaseTTLSeconds int, heartbeatEvery time.Duration, verifierProfiles []string, execute verificationExecutor) bool {
+func runVerificationWithInterval(ctx context.Context, svc orchestration.ClaimedVerificationRuntime, log *slog.Logger, verification orchestration.TaskVerification, leaseTTLSeconds int, heartbeatEvery time.Duration, verifierProfiles []string, execute verificationExecutor) bool {
 	if heartbeatEvery <= 0 {
 		return orchestration.RunClaimedVerification(ctx, svc, log, verification, leaseTTLSeconds, verifierProfiles, execute)
 	}
 	return orchestration.RunClaimedVerificationWithInterval(ctx, svc, log, verification, leaseTTLSeconds, heartbeatEvery, verifierProfiles, execute)
 }
 
-func runWorkerHeartbeatLoop(ctx context.Context, svc *orchestration.Service, log *slog.Logger, workerID, leaseToken string, leaseTTLSeconds int, cancel context.CancelFunc) {
+func runWorkerHeartbeatLoop(ctx context.Context, svc orchestration.WorkerLeaseRuntime, log *slog.Logger, workerID, leaseToken string, leaseTTLSeconds int, cancel context.CancelFunc) {
 	ticker := time.NewTicker(heartbeatInterval(leaseTTLSeconds))
 	defer ticker.Stop()
 	consecutiveFailures := 0
@@ -246,23 +244,6 @@ func llmVerificationUnavailable(verification orchestration.TaskVerification, fai
 	}
 }
 
-func expandDefaultVerifierProfiles(values []string) []string {
-	if !containsString(values, orchestration.DefaultVerifierProfile) ||
-		containsString(values, orchestration.BuiltinBasicVerifierProfile) {
-		return values
-	}
-	return append(values, orchestration.BuiltinBasicVerifierProfile)
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
 func heartbeatInterval(leaseTTLSeconds int) time.Duration {
 	ttl := time.Duration(leaseTTLSeconds) * time.Second
 	if ttl <= 0 {
@@ -310,17 +291,6 @@ func envCSV(key string, fallback []string) []string {
 		return fallback
 	}
 	return items
-}
-
-func stringSliceToAny(items []string) []any {
-	if len(items) == 0 {
-		return nil
-	}
-	values := make([]any, 0, len(items))
-	for _, item := range items {
-		values = append(values, item)
-	}
-	return values
 }
 
 func sleepWithContext(ctx context.Context, duration time.Duration) error {
