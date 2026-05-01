@@ -1,6 +1,19 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+// Cross-window query-cache invalidation payload. Mirrors the subset of
+// Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
+// serialization across the IPC boundary (no functions / predicates).
+export interface CrossWindowInvalidatePayload {
+  filters?: {
+    key?: unknown
+    exact?: boolean
+    stale?: boolean | null
+    status?: unknown
+  }
+  refetchActive?: boolean | 'all'
+}
+
 // Renderer-facing API surface. Keep this intentionally small — it is the
 // full security boundary between chromium renderer processes and the
 // node-privileged main process.
@@ -11,6 +24,18 @@ const api = {
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
+    // Tell the main process to fan a query-cache invalidation out to every
+    // other BrowserWindow. Used by `setupCrossWindowCacheSync` to mirror
+    // mutations performed in one renderer onto siblings.
+    broadcastInvalidate: (payload: CrossWindowInvalidatePayload): Promise<void> =>
+      ipcRenderer.invoke('desktop:broadcast-invalidate', payload),
+    // Subscribe to invalidation events forwarded from sibling windows.
+    // Listener lives for the entire window lifetime.
+    onInvalidate: (cb: (payload: CrossWindowInvalidatePayload) => void): void => {
+      ipcRenderer.on('desktop:invalidate', (_event: IpcRendererEvent, payload: CrossWindowInvalidatePayload) => {
+        cb(payload)
+      })
+    },
   },
   window: {
     // Focus (or create) the settings window. When `target` is supplied —

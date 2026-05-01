@@ -4,7 +4,7 @@
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { PiniaColada } from '@pinia/colada'
+import { PiniaColada, useQueryCache } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import i18n from '@memohai/web/i18n'
@@ -18,6 +18,7 @@ import 'katex/dist/katex.min.css'
 
 import App from './settings/App.vue'
 import router from './settings/router'
+import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
   setupApiClient({
@@ -38,12 +39,17 @@ async function bootstrap() {
     void router.push(target)
   })
 
-  createApp(App)
+  const app = createApp(App)
     .use(createPinia().use(piniaPluginPersistedstate))
     .use(PiniaColada)
     .use(router)
     .use(i18n)
-    .mount('#app')
+
+  // Bridge query-cache invalidations between chat and settings windows.
+  // Must run after `PiniaColada` is installed so the store is registered.
+  setupCrossWindowCacheSync(useQueryCache())
+
+  app.mount('#app')
 }
 
 void bootstrap()

@@ -184,6 +184,24 @@ app.whenReady().then(async () => {
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
 
+  // Cross-window Pinia Colada query-cache invalidation. Each renderer owns
+  // an independent in-memory cache (separate Vue/Pinia instances per
+  // BrowserWindow), so a mutation in the settings window can't directly
+  // refresh the chat window's bot list. The renderer wraps
+  // `queryCache.invalidateQueries` so that every local invalidation also
+  // posts the (serializable) filter here; we fan it back out to every other
+  // BrowserWindow's webContents, which then re-applies the same
+  // invalidation against its local cache. The sender is excluded so we
+  // don't echo back into the originating window.
+  ipcMain.handle('desktop:broadcast-invalidate', (event, payload: unknown) => {
+    const senderId = event.sender.id
+    for (const target of BrowserWindow.getAllWindows()) {
+      if (target.isDestroyed()) continue
+      if (target.webContents.id === senderId) continue
+      target.webContents.send('desktop:invalidate', payload)
+    }
+  })
+
   chatWindow = createChatWindow()
 
   app.on('activate', () => {
