@@ -683,7 +683,10 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			break
 		}
 		if resultRow.RequestReplan {
-			childPlans := decodePlannedChildTasks(decodeJSONObject(resultRow.StructuredOutput))
+			childPlans, err := decodePlannedChildTasks(decodeJSONObject(resultRow.StructuredOutput))
+			if err != nil {
+				return nil, err
+			}
 			if len(childPlans) == 0 {
 				return nil, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
 			}
@@ -724,24 +727,18 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		if err != nil {
 			return nil, err
 		}
-		childPlans := decodePlannedChildTasks(decodeJSONObject(resultRow.StructuredOutput))
+		childPlans, err := decodePlannedChildTasks(decodeJSONObject(resultRow.StructuredOutput))
+		if err != nil {
+			return nil, err
+		}
 		if len(childPlans) == 0 {
-			if err := s.markRunFailedFromVerificationFailure(ctx, qtx, runRow, failedTask, finalRow); err != nil {
-				return nil, err
-			}
-			break
+			return nil, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
 		}
 		if err := validatePlannedChildTasks(childPlans); err != nil {
-			if err := s.markRunFailedFromVerificationFailure(ctx, qtx, runRow, failedTask, finalRow); err != nil {
-				return nil, err
-			}
-			break
+			return nil, err
 		}
 		if !resultRow.AttemptID.Valid {
-			if err := s.markRunFailedFromVerificationFailure(ctx, qtx, runRow, failedTask, finalRow); err != nil {
-				return nil, err
-			}
-			break
+			return nil, fmt.Errorf("%w: request_replan requires attempt_id", ErrPlanningIntentInvalid)
 		}
 		attemptRow, err := qtx.GetOrchestrationTaskAttemptByID(ctx, resultRow.AttemptID)
 		if err != nil {

@@ -212,6 +212,40 @@ func TestBuiltinVerifierProfilesKeepsServerVerifierOnBuiltinProfile(t *testing.T
 	}
 }
 
+func TestPlannedChildTasksFromSpecsRejectsEmptyGoal(t *testing.T) {
+	t.Parallel()
+
+	_, err := plannedChildTasksFromSpecs([]PlannedTaskSpec{
+		{Alias: "empty-goal"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("plannedChildTasksFromSpecs(empty goal) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestPlannedChildTasksFromSpecsNormalizesDefaults(t *testing.T) {
+	t.Parallel()
+
+	plans, err := plannedChildTasksFromSpecs([]PlannedTaskSpec{
+		{
+			Goal:             " child task ",
+			DependsOnAliases: []string{" parent "},
+		},
+	})
+	if err != nil {
+		t.Fatalf("plannedChildTasksFromSpecs() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans len = %d, want 1", len(plans))
+	}
+	if plans[0].Goal != "child task" || plans[0].Kind != "child" || plans[0].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("plan = %#v, want normalized defaults", plans[0])
+	}
+	if len(plans[0].DependsOnAliases) != 1 || plans[0].DependsOnAliases[0] != "parent" {
+		t.Fatalf("depends_on = %#v, want trimmed parent", plans[0].DependsOnAliases)
+	}
+}
+
 func TestValidatePlannedChildTasksRejectsCycles(t *testing.T) {
 	t.Parallel()
 
@@ -426,10 +460,10 @@ func TestResolvePageAsOfSeqRejectsSnapshotMismatch(t *testing.T) {
 func TestDecodePlannedChildTasksNormalizesMinimalPlan(t *testing.T) {
 	t.Parallel()
 
-	plans := decodePlannedChildTasks(map[string]any{
+	plans, err := decodePlannedChildTasks(map[string]any{
 		"child_tasks": []any{
 			map[string]any{
-				"id":             "first",
+				"alias":          "first",
 				"goal":           " first child ",
 				"worker_profile": " " + DefaultRootWorkerProfile + " ",
 				"priority":       float64(2),
@@ -445,13 +479,16 @@ func TestDecodePlannedChildTasksNormalizesMinimalPlan(t *testing.T) {
 				"depends_on": []any{"first"},
 			},
 			map[string]any{
-				"goal": "   ",
+				"goal": "third child",
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("decodePlannedChildTasks() error = %v", err)
+	}
 
-	if len(plans) != 2 {
-		t.Fatalf("decodePlannedChildTasks() len = %d, want 2", len(plans))
+	if len(plans) != 3 {
+		t.Fatalf("decodePlannedChildTasks() len = %d, want 3", len(plans))
 	}
 	if plans[0].Goal != "first child" {
 		t.Fatalf("first child goal = %q, want %q", plans[0].Goal, "first child")
@@ -476,6 +513,110 @@ func TestDecodePlannedChildTasksNormalizesMinimalPlan(t *testing.T) {
 	}
 	if len(plans[1].DependsOnAliases) != 1 || plans[1].DependsOnAliases[0] != "first" {
 		t.Fatalf("second child depends_on = %#v, want [first]", plans[1].DependsOnAliases)
+	}
+}
+
+func TestDecodePlannedChildTasksRejectsInvalidSchema(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "unknown field",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "id": "legacy-id"},
+				},
+			},
+		},
+		{
+			name: "empty goal",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": " "},
+				},
+			},
+		},
+		{
+			name: "non object child task",
+			payload: map[string]any{
+				"child_tasks": []any{"step"},
+			},
+		},
+		{
+			name: "fractional priority",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "priority": float64(1.5)},
+				},
+			},
+		},
+		{
+			name: "legacy depends_on_aliases",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "depends_on_aliases": []any{"parent"}},
+				},
+			},
+		},
+		{
+			name: "non string dependency",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "depends_on": []any{float64(1)}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := decodePlannedChildTasks(tt.payload)
+			if !errors.Is(err, ErrPlanningIntentInvalid) {
+				t.Fatalf("decodePlannedChildTasks() error = %v, want %v", err, ErrPlanningIntentInvalid)
+			}
+		})
+	}
+}
+
+func TestDecodeReplanChildTasksPropagatesInvalidReplacementPlan(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "replacement plan not object",
+			payload: map[string]any{
+				"replacement_plan": []any{},
+			},
+		},
+		{
+			name: "invalid child task",
+			payload: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{
+						map[string]any{"goal": "step", "extra": true},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := decodeReplanChildTasks(tt.payload)
+			if !errors.Is(err, ErrPlanningIntentInvalid) {
+				t.Fatalf("decodeReplanChildTasks() error = %v, want %v", err, ErrPlanningIntentInvalid)
+			}
+		})
 	}
 }
 
