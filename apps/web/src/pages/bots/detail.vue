@@ -269,9 +269,25 @@ const { data: bot } = useQuery({
   },
   enabled: () => !!botId.value,
 })
+
+function workspaceBackendFromMetadata(metadata: unknown): string {
+  if (!metadata || typeof metadata !== 'object') return ''
+  const workspace = (metadata as Record<string, unknown>).workspace
+  if (!workspace || typeof workspace !== 'object') return ''
+  const backend = (workspace as Record<string, unknown>).backend
+  return typeof backend === 'string' ? backend.trim().toLowerCase() : ''
+}
+
+const containerInfo = ref<BotContainerInfo | null>(null)
+
+const isLocalWorkspace = computed(() =>
+  workspaceBackendFromMetadata(bot.value?.metadata) === 'local'
+  || containerInfo.value?.workspace_backend === 'local',
+)
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
-  return [
+  const tabs = [
     {
       value: 'overview', label: 'bots.tabs.overview', component: BotOverview, params: {}
     },
@@ -289,6 +305,10 @@ const tabList = computed(() => {
     { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
   ]
+  if (isLocalWorkspace.value) {
+    return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network')
+  }
+  return tabs
 })
 
 
@@ -340,6 +360,11 @@ watch(bot, (val) => {
 }, { immediate: true })
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
+watch([tabList, activeTab], ([tabs, tab]) => {
+  if (!tabs.some(item => item.value === tab)) {
+    activeTab.value = 'overview'
+  }
+}, { immediate: true })
 const avatarDialogOpen = ref(false)
 const avatarUrlDraft = ref('')
 const avatarFallback = useAvatarInitials(() => bot.value?.display_name || botId.value || '')
@@ -374,7 +399,6 @@ const botTypeLabel = computed(() => {
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
 
-const containerInfo = ref<BotContainerInfo | null>(null)
 const containerMissing = ref(false)
 const containerLoading = ref(false)
 const snapshotsLoading = ref(false)
