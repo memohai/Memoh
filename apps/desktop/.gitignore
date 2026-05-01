@@ -10,6 +10,9 @@ dist
 # bundle assets (icons etc.) — root .gitignore has `build/`, re-include here.
 !build/
 !build/**
+resources/config/
+resources/runtime/
+resources/server/
 
 # editor
 .vscode/*

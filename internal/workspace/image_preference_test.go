@@ -52,6 +52,34 @@ func TestWithoutWorkspaceImagePreferenceRemovesOnlyImageKey(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBackendMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	metadata := map[string]any{
+		workspaceMetadataKey: map[string]any{
+			"keep": "value",
+		},
+	}
+	updated := withWorkspaceBackendPreference(metadata, "local", "/Users/example/.memoh/workspaces/bot")
+
+	if got := workspaceBackendFromMetadata(updated); got != "local" {
+		t.Fatalf("workspace backend = %q, want local", got)
+	}
+	if got := localWorkspacePathFromMetadata(updated); got != "/Users/example/.memoh/workspaces/bot" {
+		t.Fatalf("local workspace path = %q", got)
+	}
+	workspace, ok := updated[workspaceMetadataKey].(map[string]any)
+	if !ok {
+		t.Fatal("expected workspace metadata section")
+	}
+	if workspace["keep"] != "value" {
+		t.Fatalf("expected existing workspace metadata to be preserved, got %#v", workspace)
+	}
+	if _, exists := metadata[workspaceMetadataKey].(map[string]any)[workspaceBackendMetadataKey]; exists {
+		t.Fatal("expected original metadata map to remain unchanged")
+	}
+}
+
 func TestWorkspaceGPUMetadataRoundTrip(t *testing.T) {
 	t.Parallel()
 

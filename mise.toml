@@ -271,10 +271,15 @@ echo '  Dev web UI will be available at http://localhost:18082'
 [tasks."desktop:dev"]
 description = "Start Electron desktop app in dev mode (renderer reuses @memohai/web)"
 dir = "{{config_root}}/apps/desktop"
-env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18080" }
+env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18731", CONFIG_PATH = "../../conf/app.local.toml" }
 run = "pnpm dev"
 
 [tasks."desktop:build"]
 description = "Build Electron desktop app for release (electron-builder)"
 dir = "{{config_root}}/apps/desktop"
 run = "pnpm build"
+
+[tasks."desktop:build:dir"]
+description = "Build unpacked Electron desktop app with bundled local server"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:dir"

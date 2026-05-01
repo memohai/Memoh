@@ -464,6 +464,7 @@ CREATE TABLE IF NOT EXISTS containers (
   namespace TEXT NOT NULL DEFAULT 'default',
   auto_start BOOLEAN NOT NULL DEFAULT true,
   container_path TEXT NOT NULL DEFAULT '/data',
+  workspace_backend TEXT NOT NULL DEFAULT 'container',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_started_at TIMESTAMPTZ,

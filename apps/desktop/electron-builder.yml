@@ -13,6 +13,13 @@ files:
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
 asarUnpack:
   - resources/**
+extraResources:
+  - from: resources/server
+    to: server
+  - from: resources/runtime
+    to: runtime
+  - from: resources/config
+    to: config
 mac:
   category: public.app-category.productivity
   target:

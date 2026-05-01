@@ -235,19 +235,20 @@ type ChannelIdentityBindCode struct {
 }
 
 type Container struct {
-	ID            pgtype.UUID        `json:"id"`
-	BotID         pgtype.UUID        `json:"bot_id"`
-	ContainerID   string             `json:"container_id"`
-	ContainerName string             `json:"container_name"`
-	Image         string             `json:"image"`
-	Status        string             `json:"status"`
-	Namespace     string             `json:"namespace"`
-	AutoStart     bool               `json:"auto_start"`
-	ContainerPath string             `json:"container_path"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	LastStartedAt pgtype.Timestamptz `json:"last_started_at"`
-	LastStoppedAt pgtype.Timestamptz `json:"last_stopped_at"`
+	ID               pgtype.UUID        `json:"id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	ContainerID      string             `json:"container_id"`
+	ContainerName    string             `json:"container_name"`
+	Image            string             `json:"image"`
+	Status           string             `json:"status"`
+	Namespace        string             `json:"namespace"`
+	AutoStart        bool               `json:"auto_start"`
+	ContainerPath    string             `json:"container_path"`
+	WorkspaceBackend string             `json:"workspace_backend"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	LastStartedAt    pgtype.Timestamptz `json:"last_started_at"`
+	LastStoppedAt    pgtype.Timestamptz `json:"last_stopped_at"`
 }
 
 type ContainerVersion struct {

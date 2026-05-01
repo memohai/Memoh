@@ -19,13 +19,18 @@ import 'katex/dist/katex.min.css'
 import App from './chat/App.vue'
 import router from './chat/router'
 
-setupApiClient({
-  onUnauthorized: () => router.replace({ name: 'Login' }),
-})
+async function bootstrap() {
+  setupApiClient({
+    baseUrl: await window.api.desktop.apiBaseUrl(),
+    onUnauthorized: () => router.replace({ name: 'Login' }),
+  })
 
-createApp(App)
-  .use(createPinia().use(piniaPluginPersistedstate))
-  .use(PiniaColada)
-  .use(router)
-  .use(i18n)
-  .mount('#app')
+  createApp(App)
+    .use(createPinia().use(piniaPluginPersistedstate))
+    .use(PiniaColada)
+    .use(router)
+    .use(i18n)
+    .mount('#app')
+}
+
+void bootstrap()

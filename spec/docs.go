@@ -11817,6 +11817,9 @@ const docTemplate = `{
                 "kernel_nanoseconds": {
                     "type": "integer"
                 },
+                "usage_nanocores": {
+                    "type": "integer"
+                },
                 "usage_nanoseconds": {
                     "type": "integer"
                 },
@@ -11909,10 +11912,16 @@ const docTemplate = `{
                 "image": {
                     "type": "string"
                 },
+                "local_workspace_path": {
+                    "type": "string"
+                },
                 "restore_data": {
                     "type": "boolean"
                 },
                 "snapshotter": {
+                    "type": "string"
+                },
+                "workspace_backend": {
                     "type": "string"
                 }
             }
@@ -11929,6 +11938,9 @@ const docTemplate = `{
                 "container_id": {
                     "type": "string"
                 },
+                "container_path": {
+                    "type": "string"
+                },
                 "data_restored": {
                     "type": "boolean"
                 },
@@ -11943,6 +11955,9 @@ const docTemplate = `{
                 },
                 "started": {
                     "type": "boolean"
+                },
+                "workspace_backend": {
+                    "type": "string"
                 }
             }
         },
@@ -12175,6 +12190,9 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "workspace_backend": {
+                    "type": "string"
                 }
             }
         },
@@ -12342,6 +12360,9 @@ const docTemplate = `{
                 },
                 "container_backend": {
                     "type": "string"
+                },
+                "local_workspace_enabled": {
+                    "type": "boolean"
                 },
                 "snapshot_supported": {
                     "type": "boolean"

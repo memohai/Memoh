@@ -15,7 +15,7 @@ export interface SettingsRouteSpec {
 }
 
 export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
-  { name: 'bots', path: '/settings/bots', loader: () => import('@memohai/web/pages/bots/index.vue') },
+  { name: 'bots', path: '/settings/bots', loader: () => import('../pages/bots/index.vue') },
   { name: 'bot-detail', path: '/settings/bots/:botId', loader: () => import('@memohai/web/pages/bots/detail.vue') },
   { name: 'providers', path: '/settings/providers', loader: () => import('@memohai/web/pages/providers/index.vue') },
   { name: 'web-search', path: '/settings/web-search', loader: () => import('@memohai/web/pages/web-search/index.vue') },

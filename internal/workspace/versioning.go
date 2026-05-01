@@ -17,6 +17,7 @@ import (
 	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -474,16 +475,17 @@ func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ str
 
 	containerPath := config.DefaultDataMount
 	if err := m.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
-		BotID:         botUUID,
-		ContainerID:   containerID,
-		ContainerName: containerID,
-		Image:         imageRef,
-		Status:        "created",
-		Namespace:     "default",
-		AutoStart:     true,
-		ContainerPath: containerPath,
-		LastStartedAt: pgtype.Timestamptz{},
-		LastStoppedAt: pgtype.Timestamptz{},
+		BotID:            botUUID,
+		ContainerID:      containerID,
+		ContainerName:    containerID,
+		Image:            imageRef,
+		Status:           "created",
+		Namespace:        "default",
+		AutoStart:        true,
+		ContainerPath:    containerPath,
+		WorkspaceBackend: bridge.WorkspaceBackendContainer,
+		LastStartedAt:    pgtype.Timestamptz{},
+		LastStoppedAt:    pgtype.Timestamptz{},
 	}); err != nil {
 		return pgtype.UUID{}, err
 	}

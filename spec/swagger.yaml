@@ -1494,6 +1494,8 @@ definitions:
     properties:
       kernel_nanoseconds:
         type: integer
+      usage_nanocores:
+        type: integer
       usage_nanoseconds:
         type: integer
       usage_percent:
@@ -1553,9 +1555,13 @@ definitions:
         $ref: '#/definitions/handlers.ContainerGPURequest'
       image:
         type: string
+      local_workspace_path:
+        type: string
       restore_data:
         type: boolean
       snapshotter:
+        type: string
+      workspace_backend:
         type: string
     type: object
   handlers.CreateContainerResponse:
@@ -1565,6 +1571,8 @@ definitions:
           type: string
         type: array
       container_id:
+        type: string
+      container_path:
         type: string
       data_restored:
         type: boolean
@@ -1576,6 +1584,8 @@ definitions:
         type: string
       started:
         type: boolean
+      workspace_backend:
+        type: string
     type: object
   handlers.CreateSnapshotRequest:
     properties:
@@ -1726,6 +1736,8 @@ definitions:
         type: boolean
       updated_at:
         type: string
+      workspace_backend:
+        type: string
     type: object
   handlers.InstallMcpRequest:
     properties:
@@ -1834,6 +1846,8 @@ definitions:
         type: string
       container_backend:
         type: string
+      local_workspace_enabled:
+        type: boolean
       snapshot_supported:
         type: boolean
       status:

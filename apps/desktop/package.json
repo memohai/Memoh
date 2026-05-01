@@ -13,12 +13,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "build": "electron-vite build && electron-builder --publish never",
-    "build:dir": "electron-vite build && electron-builder --dir --publish never",
-    "build:unpack": "electron-vite build && electron-builder --dir --publish never",
-    "build:mac": "electron-vite build && electron-builder --mac --publish never",
-    "build:linux": "electron-vite build && electron-builder --linux --publish never",
-    "build:win": "electron-vite build && electron-builder --win --publish never",
+    "prepare:local-server": "node scripts/prepare-local-server.mjs",
+    "build": "pnpm run prepare:local-server && electron-vite build && electron-builder --publish never",
+    "build:dir": "pnpm run prepare:local-server && electron-vite build && electron-builder --dir --publish never",
+    "build:unpack": "pnpm run prepare:local-server && electron-vite build && electron-builder --dir --publish never",
+    "build:mac": "pnpm run prepare:local-server && electron-vite build && electron-builder --mac --publish never",
+    "build:linux": "pnpm run prepare:local-server && electron-vite build && electron-builder --linux --publish never",
+    "build:win": "pnpm run prepare:local-server && electron-vite build && electron-builder --win --publish never",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
@@ -30,7 +31,11 @@
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
     "@memohai/ui": "workspace:*",
-    "@memohai/web": "workspace:*"
+    "@memohai/web": "workspace:*",
+    "@vee-validate/zod": "^4.15.1",
+    "lucide-vue-next": "^0.562.0",
+    "vee-validate": "^4.15.1",
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",

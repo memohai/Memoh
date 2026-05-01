@@ -19,26 +19,31 @@ import 'katex/dist/katex.min.css'
 import App from './settings/App.vue'
 import router from './settings/router'
 
-setupApiClient({
-  // Settings is a satellite window — it doesn't host the login screen.
-  // On 401 we close ourselves and let the chat window route to login.
-  onUnauthorized: () => {
-    void window.api.window.closeSelf()
-  },
-})
+async function bootstrap() {
+  setupApiClient({
+    baseUrl: await window.api.desktop.apiBaseUrl(),
+    // Settings is a satellite window — it doesn't host the login screen.
+    // On 401 we close ourselves and let the chat window route to login.
+    onUnauthorized: () => {
+      void window.api.window.closeSelf()
+    },
+  })
 
-// Cross-window navigation: chat-side `router.push('/settings/...')` calls
-// reach us as IPC `settings:navigate` events forwarded by the main
-// process. Wire the listener up before mounting so the very first event
-// (sent on cold-start replay right after `did-finish-load`) is captured.
-window.api.window.onSettingsNavigate((target) => {
-  if (router.currentRoute.value.fullPath === target) return
-  void router.push(target)
-})
+  // Cross-window navigation: chat-side `router.push('/settings/...')` calls
+  // reach us as IPC `settings:navigate` events forwarded by the main
+  // process. Wire the listener up before mounting so the very first event
+  // (sent on cold-start replay right after `did-finish-load`) is captured.
+  window.api.window.onSettingsNavigate((target) => {
+    if (router.currentRoute.value.fullPath === target) return
+    void router.push(target)
+  })
 
-createApp(App)
-  .use(createPinia().use(piniaPluginPersistedstate))
-  .use(PiniaColada)
-  .use(router)
-  .use(i18n)
-  .mount('#app')
+  createApp(App)
+    .use(createPinia().use(piniaPluginPersistedstate))
+    .use(PiniaColada)
+    .use(router)
+    .use(i18n)
+    .mount('#app')
+}
+
+void bootstrap()

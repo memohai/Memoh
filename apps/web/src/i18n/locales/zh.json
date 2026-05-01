@@ -740,6 +740,16 @@
     "searchPlaceholder": "搜索 Bot…",
     "createBot": "新建 Bot",
     "createBotWaitHint": "首次创建时可能需要拉取基础镜像，提交后请耐心等待片刻。",
+    "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
+    "workspaceBackend": "工作区",
+    "workspaceBackendHint": "容器工作区提供隔离；Local 工作区会直接在这台电脑上运行。",
+    "workspaceBackends": {
+      "container": "容器",
+      "local": "本地文件夹"
+    },
+    "localWorkspacePath": "本地工作区文件夹",
+    "localWorkspacePathPlaceholder": "选择这台电脑上的文件夹",
+    "localWorkspaceWarning": "Local 工作区会以 server 用户权限访问宿主文件和执行命令。",
     "editBot": "编辑 Bot",
     "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",

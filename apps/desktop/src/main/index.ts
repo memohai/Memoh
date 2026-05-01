@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
+import { defaultWorkspacePath, ensureLocalServer, getLocalServerStatus } from './local-server'
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
@@ -153,8 +154,9 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
   window.webContents.send('settings:navigate', target)
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('ai.memoh.desktop')
+  await ensureLocalServer()
 
   if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(iconPng)
@@ -175,6 +177,11 @@ app.whenReady().then(() => {
   ipcMain.handle('window:close-self', (event) => {
     const sender = BrowserWindow.fromWebContents(event.sender)
     sender?.close()
+  })
+  ipcMain.handle('desktop:server-status', () => getLocalServerStatus())
+  ipcMain.handle('desktop:api-base-url', () => getLocalServerStatus().baseUrl)
+  ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
+    return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
 
   chatWindow = createChatWindow()

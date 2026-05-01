@@ -236,19 +236,20 @@ type ChannelIdentityBindCode struct {
 }
 
 type Container struct {
-	ID            string         `json:"id"`
-	BotID         string         `json:"bot_id"`
-	ContainerID   string         `json:"container_id"`
-	ContainerName string         `json:"container_name"`
-	Image         string         `json:"image"`
-	Status        string         `json:"status"`
-	Namespace     string         `json:"namespace"`
-	AutoStart     int64          `json:"auto_start"`
-	ContainerPath string         `json:"container_path"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
-	LastStartedAt sql.NullString `json:"last_started_at"`
-	LastStoppedAt sql.NullString `json:"last_stopped_at"`
+	ID               string         `json:"id"`
+	BotID            string         `json:"bot_id"`
+	ContainerID      string         `json:"container_id"`
+	ContainerName    string         `json:"container_name"`
+	Image            string         `json:"image"`
+	Status           string         `json:"status"`
+	Namespace        string         `json:"namespace"`
+	AutoStart        int64          `json:"auto_start"`
+	ContainerPath    string         `json:"container_path"`
+	CreatedAt        string         `json:"created_at"`
+	UpdatedAt        string         `json:"updated_at"`
+	LastStartedAt    sql.NullString `json:"last_started_at"`
+	LastStoppedAt    sql.NullString `json:"last_stopped_at"`
+	WorkspaceBackend string         `json:"workspace_backend"`
 }
 
 type ContainerVersion struct {

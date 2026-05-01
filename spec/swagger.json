@@ -11808,6 +11808,9 @@
                 "kernel_nanoseconds": {
                     "type": "integer"
                 },
+                "usage_nanocores": {
+                    "type": "integer"
+                },
                 "usage_nanoseconds": {
                     "type": "integer"
                 },
@@ -11900,10 +11903,16 @@
                 "image": {
                     "type": "string"
                 },
+                "local_workspace_path": {
+                    "type": "string"
+                },
                 "restore_data": {
                     "type": "boolean"
                 },
                 "snapshotter": {
+                    "type": "string"
+                },
+                "workspace_backend": {
                     "type": "string"
                 }
             }
@@ -11920,6 +11929,9 @@
                 "container_id": {
                     "type": "string"
                 },
+                "container_path": {
+                    "type": "string"
+                },
                 "data_restored": {
                     "type": "boolean"
                 },
@@ -11934,6 +11946,9 @@
                 },
                 "started": {
                     "type": "boolean"
+                },
+                "workspace_backend": {
+                    "type": "string"
                 }
             }
         },
@@ -12166,6 +12181,9 @@
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "workspace_backend": {
+                    "type": "string"
                 }
             }
         },
@@ -12333,6 +12351,9 @@
                 },
                 "container_backend": {
                     "type": "string"
+                },
+                "local_workspace_enabled": {
+                    "type": "boolean"
                 },
                 "snapshot_supported": {
                     "type": "boolean"

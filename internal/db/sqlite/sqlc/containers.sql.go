@@ -20,7 +20,7 @@ func (q *Queries) DeleteContainerByBotID(ctx context.Context, botID string) erro
 }
 
 const getContainerByBotID = `-- name: GetContainerByBotID :one
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE bot_id = ?1 ORDER BY updated_at DESC LIMIT 1
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at, workspace_backend FROM containers WHERE bot_id = ?1 ORDER BY updated_at DESC LIMIT 1
 `
 
 func (q *Queries) GetContainerByBotID(ctx context.Context, botID string) (Container, error) {
@@ -40,12 +40,13 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID string) (Contai
 		&i.UpdatedAt,
 		&i.LastStartedAt,
 		&i.LastStoppedAt,
+		&i.WorkspaceBackend,
 	)
 	return i, err
 }
 
 const listAutoStartContainers = `-- name: ListAutoStartContainers :many
-SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at FROM containers WHERE auto_start = true ORDER BY updated_at DESC
+SELECT id, bot_id, container_id, container_name, image, status, namespace, auto_start, container_path, created_at, updated_at, last_started_at, last_stopped_at, workspace_backend FROM containers WHERE auto_start = true ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, error) {
@@ -71,6 +72,7 @@ func (q *Queries) ListAutoStartContainers(ctx context.Context) ([]Container, err
 			&i.UpdatedAt,
 			&i.LastStartedAt,
 			&i.LastStoppedAt,
+			&i.WorkspaceBackend,
 		); err != nil {
 			return nil, err
 		}
@@ -126,7 +128,7 @@ func (q *Queries) UpdateContainerStopped(ctx context.Context, botID string) erro
 const upsertContainer = `-- name: UpsertContainer :exec
 INSERT INTO containers (
   id, bot_id, container_id, container_name, image, status, namespace, auto_start,
-  container_path, last_started_at, last_stopped_at
+  container_path, workspace_backend, last_started_at, last_stopped_at
 )
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
@@ -143,7 +145,8 @@ VALUES (
   ?7,
   ?8,
   ?9,
-  ?10
+  ?10,
+  ?11
 )
 ON CONFLICT (container_id) DO UPDATE SET
   bot_id = EXCLUDED.bot_id,
@@ -153,22 +156,24 @@ ON CONFLICT (container_id) DO UPDATE SET
   namespace = EXCLUDED.namespace,
   auto_start = EXCLUDED.auto_start,
   container_path = EXCLUDED.container_path,
+  workspace_backend = EXCLUDED.workspace_backend,
   last_started_at = EXCLUDED.last_started_at,
   last_stopped_at = EXCLUDED.last_stopped_at,
   updated_at = CURRENT_TIMESTAMP
 `
 
 type UpsertContainerParams struct {
-	BotID         string         `json:"bot_id"`
-	ContainerID   string         `json:"container_id"`
-	ContainerName string         `json:"container_name"`
-	Image         string         `json:"image"`
-	Status        string         `json:"status"`
-	Namespace     string         `json:"namespace"`
-	AutoStart     int64          `json:"auto_start"`
-	ContainerPath string         `json:"container_path"`
-	LastStartedAt sql.NullString `json:"last_started_at"`
-	LastStoppedAt sql.NullString `json:"last_stopped_at"`
+	BotID            string         `json:"bot_id"`
+	ContainerID      string         `json:"container_id"`
+	ContainerName    string         `json:"container_name"`
+	Image            string         `json:"image"`
+	Status           string         `json:"status"`
+	Namespace        string         `json:"namespace"`
+	AutoStart        int64          `json:"auto_start"`
+	ContainerPath    string         `json:"container_path"`
+	WorkspaceBackend string         `json:"workspace_backend"`
+	LastStartedAt    sql.NullString `json:"last_started_at"`
+	LastStoppedAt    sql.NullString `json:"last_stopped_at"`
 }
 
 func (q *Queries) UpsertContainer(ctx context.Context, arg UpsertContainerParams) error {
@@ -181,6 +186,7 @@ func (q *Queries) UpsertContainer(ctx context.Context, arg UpsertContainerParams
 		arg.Namespace,
 		arg.AutoStart,
 		arg.ContainerPath,
+		arg.WorkspaceBackend,
 		arg.LastStartedAt,
 		arg.LastStoppedAt,
 	)

@@ -5,6 +5,13 @@ import { electronAPI } from '@electron-toolkit/preload'
 // full security boundary between chromium renderer processes and the
 // node-privileged main process.
 const api = {
+  desktop: {
+    getServerStatus: (): Promise<{ baseUrl: string, ready: boolean, managed: boolean, error?: string }> =>
+      ipcRenderer.invoke('desktop:server-status'),
+    apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
+    defaultWorkspacePath: (displayName: string): Promise<string> =>
+      ipcRenderer.invoke('desktop:default-workspace-path', displayName),
+  },
   window: {
     // Focus (or create) the settings window. When `target` is supplied —
     // e.g. `/settings/bots/<botId>?tab=mcp` resolved by the chat router —
