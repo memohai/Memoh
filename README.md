@@ -48,6 +48,12 @@ cp conf/app.docker.toml config.toml
 docker compose up -d
 ```
 
+Kubernetes deployment (**uses Kubernetes workspaces by default**):
+
+```bash
+kubectl apply -k deploy/kubernetes
+```
+
 > **Install a specific version:**
 > ```bash
 > curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
