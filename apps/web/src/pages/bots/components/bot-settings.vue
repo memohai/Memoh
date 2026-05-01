@@ -1,54 +1,68 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-12 space-y-5">
-    <SettingsGlobalCard :form="form" />
-    
-    <SettingsInteractionCard
-      :form="form"
-      :models="models"
-      :providers="providers"
-    />
-
-    <SettingsContextCard
-      :form="form"
-      :search-providers="searchProviders"
-      :browser-contexts="browserContexts"
-      :memory-providers="memoryProviders"
-      :persisted-memory-provider-i-d="persistedMemoryProviderID"
-      :memory-status="memoryStatus"
-      :is-memory-status-loading="isMemoryStatusLoading"
-      :is-rebuilding="isRebuilding"
-      @sync-memory="handleMemorySync"
-    />
-    
-    <SettingsMultimediaCard
-      :form="form"
-      :tts-models="ttsModels"
-      :tts-providers="ttsProviders"
-      :transcription-models="transcriptionModels"
-      :image-capable-models="imageCapableModels"
-      :providers="providers"
-    />
-    
-    <div class="flex justify-end pt-2 pr-5">
+  <div class="max-w-2xl mx-auto pb-6 space-y-4">
+    <!-- Top Action Bar -->
+    <div class="flex items-start justify-between pb-4 border-b border-border/50">
+      <div class="space-y-1">
+        <h3 class="text-sm font-semibold text-foreground">
+          {{ $t('bots.tabs.settings') }}
+        </h3>
+        <p class="text-[11px] text-muted-foreground">
+          Manage system behaviors and global parameters.
+        </p>
+      </div>
       <Button
+        size="sm"
         :disabled="!hasChanges || saveLoading"
-        class="min-w-32"
+        class="h-8 text-xs font-medium min-w-24 shadow-none mt-1"
         @click="handleSave"
       >
         <Spinner
           v-if="saveLoading"
-          class="mr-1.5"
+          class="mr-1.5 size-3"
         />
         {{ $t('bots.settings.save') }}
       </Button>
     </div>
 
-    <Separator class="bg-border" />
+    <!-- Standardized Card Container -->
+    <div class="space-y-4">
+      <SettingsGlobalCard :form="form" />
+      
+      <SettingsInteractionCard
+        :form="form"
+        :models="models"
+        :providers="providers"
+      />
 
-    <SettingsDangerZone
-      :delete-loading="deleteLoading"
-      @delete="handleDeleteBot"
-    />
+      <SettingsContextCard
+        :form="form"
+        :search-providers="searchProviders"
+        :browser-contexts="browserContexts"
+        :memory-providers="memoryProviders"
+        :persisted-memory-provider-i-d="persistedMemoryProviderID"
+        :memory-status="memoryStatus"
+        :is-memory-status-loading="isMemoryStatusLoading"
+        :is-rebuilding="isRebuilding"
+        @sync-memory="handleMemorySync"
+      />
+      
+      <SettingsMultimediaCard
+        :form="form"
+        :tts-models="ttsModels"
+        :tts-providers="ttsProviders"
+        :transcription-models="transcriptionModels"
+        :image-capable-models="imageCapableModels"
+        :providers="providers"
+      />
+    </div>
+
+    <!-- Danger Zone: Isolated with top margin -->
+    <div class="pt-4">
+      <SettingsDangerZone
+        :delete-loading="deleteLoading"
+        @delete="handleDeleteBot"
+      />
+    </div>
   </div>
 </template>
 
@@ -56,7 +70,6 @@
 import {
   Button,
   Spinner,
-  Separator,
 } from '@memohai/ui'
 import { reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'

@@ -791,11 +791,11 @@
     },
     "checks": {
       "title": "Runtime Checks",
-      "subtitle": "View current health status and issue details.",
+      "subtitle": "Monitor system services and troubleshoot runtime errors.",
       "ok": "No issues",
       "hasIssue": "Has issues",
       "issueCount": "{count} issues",
-      "empty": "No check items",
+      "empty": "No active checks registered for this environment.",
       "loadFailed": "Failed to load runtime checks",
       "actions": {},
       "titles": {
@@ -818,8 +818,19 @@
         "ok": "OK",
         "warn": "WARN",
         "error": "ERROR",
-        "unknown": "UNKNOWN"
-      }
+        "unknown": "UNKNOWN",
+        "issue": "Issue Detected",
+        "stable": "Operational"
+      },
+      "statusTitle": "Status",
+      "vitalityTitle": "Health Score",
+      "vitalityUnit": "checks",
+      "actionsTitle": "Actions",
+      "lastSync": "Last updated: {time}",
+      "diagnosticTitle": "Diagnostic Log",
+      "diagnosticSubtitle": "Detailed system traces and runtime logs.",
+      "expandAll": "Expand All",
+      "collapse": "Collapse"
     },
     "tabs": {
       "overview": "Overview",
@@ -1103,13 +1114,13 @@
       "deleteBot": "Delete Bot",
       "blocks": {
         "global": "Global Settings",
-        "interaction": "Core Dialogue & Behavior",
+        "interaction": "Models & Behavior",
         "context": "Knowledge & Context",
         "multimedia": "Multimedia Interaction",
         "globalDescription": "Base environment and language preferences.",
-        "interactionDescription": "Configure the dialogue brain and response behavior.",
-        "contextDescription": "Enhance real-time search and long-term memory.",
-        "multimediaDescription": "Configure voice interaction and image generation."
+        "interactionDescription": "Configure AI models and core response behaviors.",
+        "contextDescription": "Set up web search, browser environments, and long-term memory.",
+        "multimediaDescription": "Configure specialized models for voice and image processing."
       },
       "showMemoryDetails": "Show Detailed Index Status",
       "hideMemoryDetails": "Hide Detailed Index Status",

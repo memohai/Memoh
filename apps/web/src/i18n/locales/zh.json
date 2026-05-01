@@ -786,12 +786,12 @@
       "deleteFailed": "删除失败"
     },
     "checks": {
-      "title": "运行时检查",
-      "subtitle": "查看当前健康状态与异常详情。",
-      "ok": "无异常",
+      "title": "系统自检",
+      "subtitle": "监控核心服务的运行状况与错误日志。",
+      "ok": "一切正常",
       "hasIssue": "存在异常",
-      "issueCount": "{count} 个异常",
-      "empty": "暂无检查项",
+      "issueCount": "{count} 项告警",
+      "empty": "当前系统未注册任何自检项。",
       "loadFailed": "加载运行时检查失败",
       "actions": {},
       "titles": {
@@ -814,8 +814,19 @@
         "ok": "正常",
         "warn": "警告",
         "error": "错误",
-        "unknown": "未知"
-      }
+        "unknown": "未知",
+        "issue": "运行异常",
+        "stable": "运行平稳"
+      },
+      "statusTitle": "当前状态",
+      "vitalityTitle": "健康度",
+      "vitalityUnit": "项",
+      "actionsTitle": "快捷操作",
+      "lastSync": "上次刷新：{time}",
+      "diagnosticTitle": "诊断日志",
+      "diagnosticSubtitle": "查看底层的调用链路与报错堆栈。",
+      "expandAll": "全部展开",
+      "collapse": "全部收起"
     },
     "tabs": {
       "overview": "概览",
@@ -1099,13 +1110,13 @@
       "deleteBot": "删除 Bot",
       "blocks": {
         "global": "全局设置",
-        "interaction": "核心对话与行为",
+        "interaction": "模型与行为",
         "context": "知识与上下文",
         "multimedia": "多媒体交互",
         "globalDescription": "基础运行环境与语言偏好。",
-        "interactionDescription": "配置机器人的对话大脑及回复行为。",
-        "contextDescription": "增强机器人的实时搜索与长期记忆能力。",
-        "multimediaDescription": "配置机器人的语音交互与图像生成能力。"
+        "interactionDescription": "设置驱动对话的核心大模型及其输出偏好。",
+        "contextDescription": "配置联网搜索、浏览器环境与长期记忆数据库。",
+        "multimediaDescription": "设置语音合成、语音识别及图像生成的专属模型。"
       },
       "showMemoryDetails": "展开详细索引状态",
       "hideMemoryDetails": "收起详细索引状态",

@@ -1,17 +1,19 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-5 rounded-md border border-border bg-transparent p-4 shadow-none">
-    <div class="space-y-1">
-      <h3 class="text-sm font-semibold text-foreground">
+  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+    <!-- Header Section -->
+    <div class="space-y-0.5">
+      <h4 class="text-xs font-medium text-foreground">
         {{ $t('bots.settings.blocks.multimedia') }}
-      </h3>
-      <p class="text-xs text-muted-foreground leading-relaxed">
+      </h4>
+      <p class="text-[11px] text-muted-foreground">
         {{ $t('bots.settings.blocks.multimediaDescription') }}
       </p>
     </div>
     
-    <div class="space-y-4">
-      <div class="space-y-2">
+    <!-- Configuration inputs with compact spacing -->
+    <div class="space-y-3 pt-1">
+      <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.ttsModel') }}</Label>
         <TtsModelSelect
           v-model="form.tts_model_id"
@@ -22,7 +24,7 @@
         />
       </div>
 
-      <div class="space-y-2">
+      <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.transcriptionModel') }}</Label>
         <TtsModelSelect
           v-model="form.transcription_model_id"
@@ -33,11 +35,13 @@
         />
       </div>
 
-      <div class="space-y-2">
-        <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.imageModel') }}</Label>
-        <p class="text-[11px] text-muted-foreground leading-relaxed">
-          {{ $t('bots.settings.imageModelDescription') }}
-        </p>
+      <div class="space-y-1.5">
+        <div class="space-y-0.5">
+          <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.imageModel') }}</Label>
+          <p class="text-[10px] text-muted-foreground">
+            {{ $t('bots.settings.imageModelDescription') }}
+          </p>
+        </div>
         <ModelSelect
           v-model="form.image_model_id"
           :models="imageCapableModels"

@@ -1,17 +1,19 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-5 rounded-md border border-border bg-transparent p-4 shadow-none">
-    <div class="space-y-1">
-      <h3 class="text-sm font-semibold text-foreground">
+  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+    <!-- Header Section -->
+    <div class="space-y-0.5">
+      <h4 class="text-xs font-medium text-foreground">
         {{ $t('bots.settings.blocks.interaction') }}
-      </h3>
-      <p class="text-xs text-muted-foreground leading-relaxed">
+      </h4>
+      <p class="text-[11px] text-muted-foreground">
         {{ $t('bots.settings.blocks.interactionDescription') }}
       </p>
     </div>
     
-    <div class="space-y-4">
-      <div class="space-y-2">
+    <!-- Model selection inputs with compact spacing -->
+    <div class="space-y-3 pt-1">
+      <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.chatModel') }}</Label>
         <ModelSelect
           v-model="form.chat_model_id"
@@ -22,11 +24,13 @@
         />
       </div>
 
-      <div class="space-y-2">
-        <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.titleModel') }}</Label>
-        <p class="text-[11px] text-muted-foreground leading-relaxed">
-          {{ $t('bots.settings.titleModelDescription') }}
-        </p>
+      <div class="space-y-1.5">
+        <div class="space-y-0.5">
+          <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.titleModel') }}</Label>
+          <p class="text-[10px] text-muted-foreground">
+            {{ $t('bots.settings.titleModelDescription') }}
+          </p>
+        </div>
         <ModelSelect
           v-model="form.title_model_id"
           :models="models"
@@ -37,10 +41,10 @@
       </div>
     </div>
 
-    <Separator class="bg-border" />
+    <Separator class="bg-border my-4" />
 
-    <div class="space-y-4">
-      <div class="space-y-2">
+    <div class="space-y-3">
+      <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.reasoningEffort') }}</Label>
         <Popover v-model:open="reasoningPopoverOpen">
           <PopoverTrigger as-child>
@@ -48,11 +52,11 @@
               variant="outline"
               role="combobox"
               :disabled="!chatModelSupportsReasoning"
-              class="w-full justify-between font-normal shadow-none h-9 text-xs"
+              class="w-full justify-between font-normal shadow-none h-8 bg-transparent text-xs"
             >
               <span class="flex items-center gap-2">
                 <Lightbulb
-                  class="size-3.5"
+                  class="size-3"
                   :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
                 />
                 {{ reasoningFormValue === 'off' ? $t('chat.reasoningOff') : $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}
@@ -61,7 +65,7 @@
             </Button>
           </PopoverTrigger>
           <PopoverContent
-            class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-[8px]"
+            class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-md"
             align="start"
           >
             <ReasoningEffortSelect
@@ -73,16 +77,16 @@
         </Popover>
       </div>
 
-      <div class="flex items-start justify-between gap-4 rounded-md border border-border p-3 shadow-none bg-accent/5">
-        <div class="space-y-1">
+      <div class="flex items-center justify-between gap-4 rounded-md border border-border p-3 shadow-none bg-background">
+        <div class="space-y-0.5">
           <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.showToolCallsInIM') }}</Label>
-          <p class="text-[11px] text-muted-foreground leading-relaxed">
+          <p class="text-[10px] text-muted-foreground">
             {{ $t('bots.settings.showToolCallsInIMDescription') }}
           </p>
         </div>
         <Switch
           :model-value="form.show_tool_calls_in_im"
-          class="shadow-none scale-90 origin-right"
+          class="shadow-none scale-[0.8] origin-right"
           @update:model-value="(val) => form.show_tool_calls_in_im = !!val"
         />
       </div>
