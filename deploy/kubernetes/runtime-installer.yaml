@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: memoh-runtime-installer
+  namespace: memoh
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoh-runtime-installer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoh-runtime-installer
+    spec:
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: install-runtime
+          image: memohai/server:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /host-runtime
+              cp -a /opt/memoh/runtime/. /host-runtime/
+              chmod -R a+rX /host-runtime
+              echo "Memoh workspace runtime installed at /opt/memoh/runtime on $(hostname)"
+              sleep infinity
+          volumeMounts:
+            - name: runtime
+              mountPath: /host-runtime
+      volumes:
+        - name: runtime
+          hostPath:
+            path: /opt/memoh/runtime
+            type: DirectoryOrCreate

@@ -1,38 +1,12 @@
 name: "memoh"
 services:
-  postgres:
-    image: postgres:18-alpine
-    container_name: memoh-postgres
-    environment:
-      POSTGRES_DB: memoh
-      POSTGRES_USER: memoh
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoh123}
-    volumes:
-      - postgres_data:/var/lib/postgresql
-      - /etc/localtime:/etc/localtime:ro
-    expose:
-      - "5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U memoh"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
   migrate:
     image: memohai/server:latest
     container_name: memoh-migrate
     entrypoint: ["/app/memoh-server", "migrate", "up"]
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
-      # Required for SQLite: migrations must write to the same persistent
-      # database file later opened by the server container.
       - memoh_data:/opt/memoh/data
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: "no"
     networks:
       - memoh-network
@@ -126,8 +100,6 @@ services:
       - memoh-network
 
 volumes:
-  postgres_data:
-    driver: local
   containerd_data:
     driver: local
   memoh_data:

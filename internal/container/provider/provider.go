@@ -18,8 +18,8 @@ func ProvideService(ctx context.Context, log *slog.Logger, cfg config.Config, ba
 	switch backend {
 	case containerapi.BackendApple:
 		svc, err := appleadapter.NewService(ctx, log, appleadapter.ServiceConfig{
-			SocketPath: cfg.Containerd.Socktainer.SocketPath,
-			BinaryPath: cfg.Containerd.Socktainer.BinaryPath,
+			SocketPath: cfg.Apple.SocketPath,
+			BinaryPath: cfg.Apple.BinaryPath,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("create apple container service: %w", err)

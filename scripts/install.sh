@@ -20,6 +20,20 @@ if [ "${MEMOH_INSTALL_MODE+x}" = x ]; then
 else
   INSTALL_MODE="auto"
 fi
+if [ "${MEMOH_DATABASE_DRIVER+x}" = x ]; then
+  DATABASE_DRIVER="$MEMOH_DATABASE_DRIVER"
+  DATABASE_DRIVER_SET=true
+else
+  DATABASE_DRIVER="postgres"
+  DATABASE_DRIVER_SET=false
+fi
+if [ "${MEMOH_CONTAINER_BACKEND+x}" = x ]; then
+  CONTAINER_BACKEND="$MEMOH_CONTAINER_BACKEND"
+  CONTAINER_BACKEND_SET=true
+else
+  CONTAINER_BACKEND="containerd"
+  CONTAINER_BACKEND_SET=false
+fi
 if [ "${USE_CN_MIRROR+x}" = x ]; then
   USE_CN_MIRROR_SET=true
 else
@@ -67,6 +81,24 @@ while [ $# -gt 0 ]; do
       ;;
     --install-mode=*)
       INSTALL_MODE="${1#--install-mode=}"
+      ;;
+    --database-driver)
+      shift
+      DATABASE_DRIVER="$1"
+      DATABASE_DRIVER_SET=true
+      ;;
+    --database-driver=*)
+      DATABASE_DRIVER="${1#--database-driver=}"
+      DATABASE_DRIVER_SET=true
+      ;;
+    --container-backend|--workspace-backend)
+      shift
+      CONTAINER_BACKEND="$1"
+      CONTAINER_BACKEND_SET=true
+      ;;
+    --container-backend=*|--workspace-backend=*)
+      CONTAINER_BACKEND="${1#*=}"
+      CONTAINER_BACKEND_SET=true
       ;;
   esac
   shift
@@ -145,6 +177,58 @@ browser_core_from_cores() {
     all|chromium,firefox|firefox,chromium) printf '%s' "all" ;;
     *) printf '%s' "chromium" ;;
   esac
+}
+
+normalize_database_driver() {
+  driver=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$driver" in
+    postgres|postgresql) printf '%s' "postgres" ;;
+    sqlite|sqlite3) printf '%s' "sqlite" ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_database_driver_or_exit() {
+  normalized_database_driver=$(normalize_database_driver "$DATABASE_DRIVER" || true)
+  if [ -z "$normalized_database_driver" ]; then
+    echo "${RED}Error: unsupported database driver '${DATABASE_DRIVER}'. Use postgres or sqlite.${NC}"
+    exit 1
+  fi
+  DATABASE_DRIVER="$normalized_database_driver"
+}
+
+normalize_container_backend() {
+  backend=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$backend" in
+    containerd) printf '%s' "containerd" ;;
+    docker) printf '%s' "docker" ;;
+    kubernetes|k8s) printf '%s' "kubernetes" ;;
+    apple) printf '%s' "apple" ;;
+    *) return 1 ;;
+  esac
+}
+
+normalize_container_backend_or_exit() {
+  normalized_container_backend=$(normalize_container_backend "$CONTAINER_BACKEND" || true)
+  if [ -z "$normalized_container_backend" ]; then
+    echo "${RED}Error: unsupported workspace backend '${CONTAINER_BACKEND}'. Use containerd, docker, kubernetes, or apple.${NC}"
+    exit 1
+  fi
+  CONTAINER_BACKEND="$normalized_container_backend"
+}
+
+enforce_compose_container_backend() {
+  if [ "$CONTAINER_BACKEND" = "containerd" ]; then
+    return
+  fi
+  if [ "$INSTALL_MODE" = "upgrade" ] && [ "$CONTAINER_BACKEND_SET" = false ]; then
+    echo "${YELLOW}ℹ Existing config uses workspace backend '${CONTAINER_BACKEND}'. The one-click Docker Compose stack is designed for containerd; reusing your config unchanged.${NC}"
+    return
+  fi
+  echo "${RED}Error: one-click Docker Compose installs support workspace backend 'containerd' only.${NC}"
+  echo "The server image starts an embedded containerd and mounts the required runtime paths."
+  echo "For docker, kubernetes, or apple backends, use a manual deployment and edit [container].backend in config.toml."
+  exit 1
 }
 
 escape_toml_string() {
@@ -270,11 +354,24 @@ load_existing_settings() {
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "auth" "jwt_secret" || true)
     [ -n "$value" ] && JWT_SECRET="$value"
 
+    if [ "$DATABASE_DRIVER_SET" = false ]; then
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "database" "driver" || true)
+      [ -n "$value" ] && DATABASE_DRIVER="$value"
+    fi
+
+    if [ "$CONTAINER_BACKEND_SET" = false ]; then
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "container" "backend" || true)
+      [ -n "$value" ] && CONTAINER_BACKEND="$value"
+    fi
+
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "postgres" "password" || true)
     [ -n "$value" ] && PG_PASS="$value"
 
     if [ "$USE_CN_MIRROR_SET" = false ]; then
-      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "workspace" "registry" || true)
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "container" "registry" || true)
+      if [ -z "$value" ]; then
+        value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "workspace" "registry" || true)
+      fi
       if [ "$value" = "memoh.cn" ]; then
         USE_CN_MIRROR=true
       fi
@@ -297,6 +394,16 @@ load_existing_settings() {
 
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_DATA_DIR" || true)
     [ -n "$value" ] && MEMOH_DATA_DIR="$value"
+
+    if [ "$DATABASE_DRIVER_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_DATABASE_DRIVER" || true)
+      [ -n "$value" ] && DATABASE_DRIVER="$value"
+    fi
+
+    if [ "$CONTAINER_BACKEND_SET" = false ]; then
+      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONTAINER_BACKEND" || true)
+      [ -n "$value" ] && CONTAINER_BACKEND="$value"
+    fi
   fi
 }
 
@@ -400,8 +507,13 @@ cleanup_existing_installation() {
 
 show_failure_logs() {
   echo ""
-  echo "${RED}Startup failed. Recent PostgreSQL and migration logs:${NC}"
-  $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 postgres migrate || true
+  echo "${RED}Startup failed. Recent database, migration, and server logs:${NC}"
+  if [ "$DATABASE_DRIVER" = "sqlite" ]; then
+    log_services="migrate server"
+  else
+    log_services="postgres migrate server"
+  fi
+  $DOCKER compose $COMPOSE_FILES $COMPOSE_PROFILES logs --no-color --tail=200 $log_services || true
 }
 
 # Check Docker and determine if sudo is needed
@@ -489,6 +601,8 @@ WORKSPACE=$(cd "$WORKSPACE" && pwd)
 
 detect_existing_installation
 load_existing_settings
+normalize_database_driver_or_exit
+normalize_container_backend_or_exit
 prompt_install_mode
 
 case "$INSTALL_MODE" in
@@ -513,6 +627,7 @@ if [ "$INSTALL_MODE" = "fresh" ] && [ "$EXISTING_DOCKER_STATE" = true ]; then
   echo "${RED}Error: Existing Memoh Docker state was detected. Use upgrade or reinstall instead of fresh.${NC}"
   exit 1
 fi
+enforce_compose_container_backend
 
 if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   printf "  Data directory (reserved for future bind-mount support) [%s]: " "$MEMOH_DATA_DIR" > /dev/tty
@@ -537,9 +652,34 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   read -r input < /dev/tty || true
   [ -n "$input" ] && JWT_SECRET="$input"
 
-  printf "  Postgres password [%s]: " "$PG_PASS" > /dev/tty
+  echo "" > /dev/tty
+  echo "  Database backend:" > /dev/tty
+  echo "    1) PostgreSQL (recommended for production and multi-user installs)" > /dev/tty
+  echo "    2) SQLite (lightweight single-node install)" > /dev/tty
+  case "$DATABASE_DRIVER" in
+    sqlite) database_default="2" ;;
+    *) database_default="1" ;;
+  esac
+  printf "  Database backend [%s]: " "$database_default" > /dev/tty
   read -r input < /dev/tty || true
-  [ -n "$input" ] && PG_PASS="$input"
+  case "$input" in
+    2|sqlite|SQLite|sqlite3|SQLite3) DATABASE_DRIVER="sqlite" ;;
+    1|postgres|Postgres|postgresql|PostgreSQL) DATABASE_DRIVER="postgres" ;;
+    "") ;;
+    *) DATABASE_DRIVER="postgres" ;;
+  esac
+  normalize_database_driver_or_exit
+
+  if [ "$DATABASE_DRIVER" = "postgres" ]; then
+    printf "  Postgres password [%s]: " "$PG_PASS" > /dev/tty
+    read -r input < /dev/tty || true
+    [ -n "$input" ] && PG_PASS="$input"
+  else
+    echo "  SQLite database: /opt/memoh/data/memoh.db inside the persistent memoh_data volume" > /dev/tty
+  fi
+
+  echo "  Workspace backend: containerd (Docker Compose default; starts an embedded containerd inside memoh-server)" > /dev/tty
+  echo "  Other backends such as docker, kubernetes, and apple are configured manually in config.toml." > /dev/tty
 
   printf "  Enable sparse memory service? [%s]: " "$( [ "$USE_SPARSE" = true ] && printf 'Y/n' || printf 'y/N' )" > /dev/tty
   read -r input < /dev/tty || true
@@ -577,6 +717,9 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
 elif [ "$INSTALL_MODE" = "upgrade" ]; then
   echo "${GREEN}✓ Upgrade mode: reusing existing configuration and database credentials${NC}"
 fi
+normalize_database_driver_or_exit
+normalize_container_backend_or_exit
+enforce_compose_container_backend
 
 # Enter workspace (all operations run here)
 cd "$WORKSPACE"
@@ -605,13 +748,37 @@ else
     CLONED_FRESH=true
 fi
 
-# Pin Docker image versions in docker-compose.yml
+if [ "$DATABASE_DRIVER" = "sqlite" ]; then
+  COMPOSE_FILE_NAME="docker-compose.sqlite.yml"
+  CN_COMPOSE_FILE_NAME="docker/docker-compose.sqlite.cn.yml"
+else
+  COMPOSE_FILE_NAME="docker-compose.yml"
+  CN_COMPOSE_FILE_NAME="docker/docker-compose.cn.yml"
+fi
+if [ ! -f "$COMPOSE_FILE_NAME" ]; then
+  echo "${RED}Error: ${COMPOSE_FILE_NAME} is missing in ${MEMOH_VERSION:-the selected checkout}.${NC}"
+  echo "Use a newer Memoh version or choose MEMOH_DATABASE_DRIVER=postgres."
+  exit 1
+fi
+if [ "$USE_CN_MIRROR" = true ] && [ ! -f "$CN_COMPOSE_FILE_NAME" ]; then
+  echo "${RED}Error: ${CN_COMPOSE_FILE_NAME} is missing in ${MEMOH_VERSION:-the selected checkout}.${NC}"
+  echo "Use a newer Memoh version, disable USE_CN_MIRROR, or choose MEMOH_DATABASE_DRIVER=postgres."
+  exit 1
+fi
+
+# Pin Docker image versions in the selected compose file.
 if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
-    sed -i.bak "s|memohai/server:latest|memohai/server:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
-    sed -i.bak "s|memohai/agent:latest|memohai/agent:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
-    sed -i.bak "s|memohai/web:latest|memohai/web:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
-    sed -i.bak "s|memohai/sparse:latest|memohai/sparse:${MEMOH_DOCKER_VERSION}|g" docker-compose.yml
-    rm -f docker-compose.yml.bak
+    sed -i.bak "s|memohai/server:latest|memohai/server:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
+    sed -i.bak "s|memohai/agent:latest|memohai/agent:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
+    sed -i.bak "s|memohai/web:latest|memohai/web:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
+    sed -i.bak "s|memohai/sparse:latest|memohai/sparse:${MEMOH_DOCKER_VERSION}|g" "$COMPOSE_FILE_NAME"
+    rm -f "${COMPOSE_FILE_NAME}.bak"
+    if [ "$USE_CN_MIRROR" = true ]; then
+      sed -i.bak "s|memoh.cn/memohai/server:latest|memoh.cn/memohai/server:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
+      sed -i.bak "s|memoh.cn/memohai/web:latest|memoh.cn/memohai/web:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
+      sed -i.bak "s|memoh.cn/memohai/sparse:latest|memoh.cn/memohai/sparse:${MEMOH_DOCKER_VERSION}|g" "$CN_COMPOSE_FILE_NAME"
+      rm -f "${CN_COMPOSE_FILE_NAME}.bak"
+    fi
     echo "${GREEN}✓ Docker images pinned to ${MEMOH_DOCKER_VERSION}${NC}"
 fi
 
@@ -624,6 +791,8 @@ else
   set_toml_string_value config.toml "admin" "username" "$ADMIN_USER"
   set_toml_string_value config.toml "admin" "password" "$ADMIN_PASS"
   set_toml_string_value config.toml "auth" "jwt_secret" "$JWT_SECRET"
+  set_toml_string_value config.toml "database" "driver" "$DATABASE_DRIVER"
+  set_toml_string_value config.toml "container" "backend" "$CONTAINER_BACKEND"
   set_toml_string_value config.toml "postgres" "password" "$PG_PASS"
   if [ "$USE_CN_MIRROR" = true ]; then
     sed -i.bak 's|# registry = "memoh.cn"|registry = "memoh.cn"|' config.toml
@@ -664,7 +833,7 @@ else
   BROWSER_TAG="${MEMOH_DOCKER_VERSION}"
 fi
 
-COMPOSE_FILES="-f docker-compose.yml"
+COMPOSE_FILES="-f ${COMPOSE_FILE_NAME}"
 COMPOSE_PROFILES="--profile qdrant --profile browser"
 if [ "$USE_SPARSE" = true ]; then
   COMPOSE_PROFILES="$COMPOSE_PROFILES --profile sparse"
@@ -673,7 +842,7 @@ else
   echo "${YELLOW}ℹ Sparse memory service disabled${NC}"
 fi
 if [ "$USE_CN_MIRROR" = true ]; then
-  COMPOSE_FILES="$COMPOSE_FILES -f docker/docker-compose.cn.yml"
+  COMPOSE_FILES="$COMPOSE_FILES -f ${CN_COMPOSE_FILE_NAME}"
   echo "${GREEN}✓ Using China mainland mirror (memoh.cn)${NC}"
 fi
 
@@ -681,9 +850,13 @@ fi
 write_env_value "POSTGRES_PASSWORD" "$PG_PASS"
 write_env_value "MEMOH_CONFIG" "./config.toml"
 write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
+write_env_value "MEMOH_DATABASE_DRIVER" "$DATABASE_DRIVER"
+write_env_value "MEMOH_CONTAINER_BACKEND" "$CONTAINER_BACKEND"
 write_env_value "USE_SPARSE" "$USE_SPARSE"
 write_env_value "BROWSER_TAG" "$BROWSER_TAG"
 write_env_value "BROWSER_CORES" "$BROWSER_CORES"
+echo "${GREEN}✓ Database backend: ${DATABASE_DRIVER}${NC}"
+echo "${GREEN}✓ Workspace backend: ${CONTAINER_BACKEND}${NC}"
 echo "${GREEN}✓ Browser: ${BROWSER_CORE} (image tag: ${BROWSER_TAG})${NC}"
 
 if [ "$INSTALL_MODE" = "reinstall" ]; then
@@ -705,12 +878,12 @@ fi
 if [ "$CLONED_FRESH" = true ]; then
   echo ""
   echo "${GREEN}Cleaning up clone directory...${NC}"
-  cp docker-compose.yml config.toml .env "$WORKSPACE/"
+  cp "$COMPOSE_FILE_NAME" config.toml .env "$WORKSPACE/"
   mkdir -p "$WORKSPACE/conf"
   cp -r conf/providers "$WORKSPACE/conf/"
   if [ "$USE_CN_MIRROR" = true ]; then
     mkdir -p "$WORKSPACE/docker"
-    cp docker/docker-compose.cn.yml "$WORKSPACE/docker/"
+    cp "$CN_COMPOSE_FILE_NAME" "$WORKSPACE/docker/"
   fi
   cd "$WORKSPACE"
   rm -rf "$WORKSPACE/$DIR"

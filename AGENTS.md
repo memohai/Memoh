@@ -15,7 +15,7 @@ The system consists of three core services:
 | **Browser Gateway** | Bun + Elysia + Playwright | 8083 | Browser automation service: headless browser actions for bots |
 
 Infrastructure dependencies:
-- **PostgreSQL** — Relational data storage
+- **PostgreSQL or SQLite** — Relational data storage
 - **Qdrant** — Vector database for memory semantic search
 - **Container runtime** — Isolated workspace containers per bot (Docker, Kubernetes, containerd, Apple Virtualization)
 
@@ -25,7 +25,7 @@ Infrastructure dependencies:
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
 - **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
-- **Database Driver**: pgx/v5
+- **Database Drivers**: pgx/v5 (PostgreSQL), modernc.org/sqlite (SQLite)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
@@ -195,6 +195,9 @@ Memoh/
 │   ├── docker-compose.minify.yml #  Minified services compose
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
+├── deploy/
+│   ├── kubernetes/             # Kubernetes kustomize starter deployment
+│   └── kubernetes-local/       # Local K8s overlay using k8s-dev image tags
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
 ├── docs/                       # Documentation site (VitePress)
 ├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
@@ -407,10 +410,11 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
-- `[container]` — Explicit container backend selection (`docker`, `kubernetes`, `containerd`, `apple`)
-- `[containerd]` / `[kubernetes]` — Backend-specific runtime configuration
-- `[workspace]` — Workspace container image and data configuration (registry, default_image, snapshotter, data_root, cni, runtime_dir)
+- `[database]` — Database backend selection (`postgres` or `sqlite`)
+- `[container]` — Workspace backend selection (`docker`, `kubernetes`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
+- `[containerd]` / `[docker]` / `[kubernetes]` / `[apple]` — Backend-specific runtime configuration
 - `[postgres]` — PostgreSQL connection
+- `[sqlite]` — SQLite database file and WAL/lock settings
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection
 - `[browser_gateway]` — Browser Gateway address

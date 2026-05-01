@@ -20,25 +20,36 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
+# Supported values: "postgres" or "sqlite".
+# Keep "postgres" for multi-user/production deployments. Use "sqlite" for a
+# lightweight single-node install; the database file is stored in memoh_data.
 driver = "postgres"
 
 [container]
+# Docker Compose deployment uses the server image's embedded containerd. Do not
+# change this to "docker" inside Compose unless you also provide host-valid
+# runtime bind mounts and Docker socket access.
 backend = "containerd"
-
-## Docker configuration
-[containerd]
-socket_path = "/run/containerd/containerd.sock"
-namespace = "default"
-
-[workspace]
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
 default_image = "debian:bookworm-slim"
 image_pull_policy = "if_not_present"
+# containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
 runtime_dir = "/opt/memoh/runtime"
 
-## Postgres configuration
+## Workspace containerd configuration
+[containerd]
+# Embedded containerd socket inside the memoh-server container.
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[docker]
+# Used only when [container].backend = "docker"; the official Compose stack
+# uses containerd above.
+host = ""
+
+## Postgres configuration. Used only when [database].driver = "postgres".
 [postgres]
 host = "postgres"
 port = 5432
@@ -48,8 +59,13 @@ database = "memoh"
 sslmode = "disable"
 
 [sqlite]
+# Used only when [database].driver = "sqlite".
+# This path is inside the server and migrate containers and is backed by the
+# Docker volume named memoh_data.
 path = "/opt/memoh/data/memoh.db"
+# WAL is recommended for SQLite because Memoh can read and write concurrently.
 wal = true
+# Wait up to this many milliseconds when another connection holds a write lock.
 busy_timeout_ms = 5000
 
 ## Qdrant configuration

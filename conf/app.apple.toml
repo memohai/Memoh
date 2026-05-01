@@ -20,26 +20,28 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
+# Supported values: "postgres" or "sqlite".
+# SQLite is often the simplest local option on macOS. Use PostgreSQL when you
+# need an external database or want to match production more closely.
 driver = "postgres"
 
 [container]
+# Apple backend uses socktainer and the Apple Containerization framework.
+# It is local-macOS oriented and does not support provider sidecar overlays.
 backend = "apple"
-
-[containerd]
-# socket_path / namespace are unused on macOS; socktainer takes over.
-
-[containerd.socktainer]
-# NOTE: Apple Container are now experimental feature and only support on macOS 26 and later.
-# socket_path and binary_path use sensible defaults when left empty.
-# socket_path = "/path/to/your/.socktainer/container.sock"
-# binary_path = "/opt/homebrew/bin/socktainer"
-
-[workspace]
 default_image = "debian:bookworm-slim"
 image_pull_policy = "if_not_present"
+# Local workspace state and bridge sockets.
 data_root = "data"
 
+[apple]
+# NOTE: Apple Container are now experimental feature and only support on macOS 26 and later.
+# socket_path and binary_path use sensible defaults when left empty.
+socket_path = ""
+binary_path = ""
+
 [postgres]
+# Used only when [database].driver = "postgres".
 host = "127.0.0.1"
 port = 5432
 user = "memoh"
@@ -48,6 +50,7 @@ database = "memoh"
 sslmode = "disable"
 
 [sqlite]
+# Used only when [database].driver = "sqlite".
 path = "data/memoh.db"
 wal = true
 busy_timeout_ms = 5000

@@ -19,8 +19,8 @@ func TestLoadRejectsLegacyMCPSection(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected load to fail for legacy [mcp] section")
 	}
-	if !strings.Contains(err.Error(), "[mcp]") || !strings.Contains(err.Error(), "[workspace]") {
-		t.Fatalf("expected migration error mentioning [mcp] and [workspace], got %v", err)
+	if !strings.Contains(err.Error(), "[mcp]") || !strings.Contains(err.Error(), "[container]") {
+		t.Fatalf("expected migration error mentioning [mcp] and [container], got %v", err)
 	}
 }
 
@@ -36,7 +36,7 @@ func TestLoadRejectsMixedMCPAndWorkspaceSections(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected load to fail when both [mcp] and [workspace] are present")
 	}
-	if !strings.Contains(err.Error(), "both [mcp] and [workspace]") {
+	if !strings.Contains(err.Error(), "both [mcp] and [workspace]") || !strings.Contains(err.Error(), "[container]") {
 		t.Fatalf("expected mixed-section error, got %v", err)
 	}
 }
@@ -55,6 +55,98 @@ func TestLoadReadsWorkspaceDefaultImage(t *testing.T) {
 	}
 	if cfg.Workspace.DefaultImage != "alpine:3.22" {
 		t.Fatalf("expected default_image to load, got %q", cfg.Workspace.DefaultImage)
+	}
+}
+
+func TestLoadReadsWorkspaceFieldsFromContainerSection(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	data := []byte(`
+[container]
+backend = "docker"
+default_image = "alpine:3.22"
+image_pull_policy = "always"
+runtime_dir = "/opt/memoh/runtime"
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Container.Backend != "docker" {
+		t.Fatalf("container backend = %q", cfg.Container.Backend)
+	}
+	if cfg.Workspace.DefaultImage != "alpine:3.22" {
+		t.Fatalf("workspace default_image = %q", cfg.Workspace.DefaultImage)
+	}
+	if cfg.Container.DefaultImage != "alpine:3.22" {
+		t.Fatalf("container default_image = %q", cfg.Container.DefaultImage)
+	}
+	if cfg.Workspace.ImagePullPolicy != "always" {
+		t.Fatalf("workspace image_pull_policy = %q", cfg.Workspace.ImagePullPolicy)
+	}
+	if cfg.Workspace.RuntimeDir != "/opt/memoh/runtime" {
+		t.Fatalf("workspace runtime_dir = %q", cfg.Workspace.RuntimeDir)
+	}
+}
+
+func TestLoadRejectsMixedWorkspaceFields(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	data := []byte(`
+[container]
+backend = "docker"
+default_image = "alpine:3.22"
+
+[workspace]
+default_image = "debian:bookworm-slim"
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected mixed [container]/[workspace] fields to fail")
+	}
+	if !strings.Contains(err.Error(), "both [container] and [workspace]") {
+		t.Fatalf("expected mixed section error, got %v", err)
+	}
+}
+
+func TestLoadReadsBackendSpecificConfigs(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	data := []byte(`
+[docker]
+host = "unix:///var/run/docker.sock"
+
+[apple]
+socket_path = "/tmp/socktainer.sock"
+binary_path = "/opt/homebrew/bin/socktainer"
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
+		t.Fatalf("docker host = %q", cfg.Docker.Host)
+	}
+	if cfg.Apple.SocketPath != "/tmp/socktainer.sock" {
+		t.Fatalf("apple socket path = %q", cfg.Apple.SocketPath)
+	}
+	if cfg.Apple.BinaryPath != "/opt/homebrew/bin/socktainer" {
+		t.Fatalf("apple binary path = %q", cfg.Apple.BinaryPath)
 	}
 }
 

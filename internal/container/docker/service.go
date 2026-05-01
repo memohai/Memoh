@@ -39,11 +39,15 @@ type Service struct {
 	logger *slog.Logger
 }
 
-func NewService(log *slog.Logger, _ config.Config) (*Service, error) {
+func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+	if host := strings.TrimSpace(cfg.Docker.Host); host != "" {
+		opts = append(opts, client.WithHost(host))
+	}
+	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}

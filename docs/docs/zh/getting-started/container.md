@@ -12,6 +12,8 @@
 
 在 **Container** tab。
 
+底层 runtime 由 `config.toml` 的 `[container].backend` 决定。官方 Docker Compose 栈使用 `containerd`；宿主机 Docker、Kubernetes、Apple 后端也可用于手动部署。改这个值前建议先看 [Workspace backend](/zh/installation/workspace-backends.md)。
+
 ### 生命周期
 
 - **Create**：没有就按镜像建；拉镜像、建实例时会有 SSE 进度。

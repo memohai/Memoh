@@ -48,7 +48,9 @@ type Config struct {
 	Database       DatabaseConfig       `toml:"database"`
 	Container      ContainerConfig      `toml:"container"`
 	Containerd     ContainerdConfig     `toml:"containerd"`
+	Docker         DockerConfig         `toml:"docker"`
 	Kubernetes     KubernetesConfig     `toml:"kubernetes"`
+	Apple          AppleConfig          `toml:"apple"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	SQLite         SQLiteConfig         `toml:"sqlite"`
@@ -93,15 +95,19 @@ func (c DatabaseConfig) DriverOrDefault() string {
 
 type ContainerConfig struct {
 	Backend string `toml:"backend"`
+	WorkspaceConfig
 }
 
 type ContainerdConfig struct {
-	SocketPath string           `toml:"socket_path"`
-	Namespace  string           `toml:"namespace"`
-	Socktainer SocktainerConfig `toml:"socktainer"`
+	SocketPath string `toml:"socket_path"`
+	Namespace  string `toml:"namespace"`
 }
 
-type SocktainerConfig struct {
+type DockerConfig struct {
+	Host string `toml:"host"`
+}
+
+type AppleConfig struct {
 	SocketPath string `toml:"socket_path"`
 	BinaryPath string `toml:"binary_path"`
 }
@@ -268,6 +274,12 @@ func (c SupermarketConfig) GetBaseURL() string {
 }
 
 func Load(path string) (Config, error) {
+	defaultWorkspace := WorkspaceConfig{
+		DefaultImage: DefaultBaseImage,
+		DataRoot:     DefaultDataRoot,
+		CNIBinaryDir: DefaultCNIBinaryDir,
+		CNIConfigDir: DefaultCNIConfigDir,
+	}
 	cfg := Config{
 		Log: LogConfig{
 			Level:  "info",
@@ -289,7 +301,8 @@ func Load(path string) (Config, error) {
 			Driver: DefaultDatabaseDriver,
 		},
 		Container: ContainerConfig{
-			Backend: "",
+			Backend:         "",
+			WorkspaceConfig: defaultWorkspace,
 		},
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
@@ -301,12 +314,7 @@ func Load(path string) (Config, error) {
 			PVCSize:    "10Gi",
 			BridgePort: 9090,
 		},
-		Workspace: WorkspaceConfig{
-			DefaultImage: DefaultBaseImage,
-			DataRoot:     DefaultDataRoot,
-			CNIBinaryDir: DefaultCNIBinaryDir,
-			CNIConfigDir: DefaultCNIConfigDir,
-		},
+		Workspace: defaultWorkspace,
 		Postgres: PostgresConfig{
 			Host:     DefaultPGHost,
 			Port:     DefaultPGPort,
@@ -344,6 +352,7 @@ func Load(path string) (Config, error) {
 	}
 
 	var raw struct {
+		Container map[string]any `toml:"container"`
 		Workspace map[string]any `toml:"workspace"`
 		MCP       map[string]any `toml:"mcp"`
 	}
@@ -352,14 +361,40 @@ func Load(path string) (Config, error) {
 	}
 	if raw.MCP != nil {
 		if raw.Workspace != nil {
-			return cfg, errors.New("config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]")
+			return cfg, errors.New("config uses both [mcp] and [workspace]; remove [mcp] and move workspace fields into [container]")
 		}
-		return cfg, errors.New("config section [mcp] has been renamed to [workspace]; update your config.toml and restart")
+		return cfg, errors.New("config section [mcp] has been replaced by workspace fields in [container]; update your config.toml and restart")
 	}
 
 	if _, err := toml.Decode(string(data), &cfg); err != nil {
 		return cfg, err
 	}
+	if raw.Workspace != nil && containerHasWorkspaceFields(raw.Container) {
+		return cfg, errors.New("config uses workspace fields in both [container] and [workspace]; move workspace fields into [container] and remove [workspace]")
+	}
+	if raw.Workspace != nil {
+		cfg.Container.WorkspaceConfig = cfg.Workspace
+	} else {
+		cfg.Workspace = cfg.Container.WorkspaceConfig
+	}
 
 	return cfg, nil
+}
+
+func containerHasWorkspaceFields(values map[string]any) bool {
+	for _, key := range []string{
+		"registry",
+		"default_image",
+		"image_pull_policy",
+		"snapshotter",
+		"data_root",
+		"cni_bin_dir",
+		"cni_conf_dir",
+		"runtime_dir",
+	} {
+		if _, ok := values[key]; ok {
+			return true
+		}
+	}
+	return false
 }
