@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 // ValidateChannelIdentityID enforces a conservative ID charset for isolation.

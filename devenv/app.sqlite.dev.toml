@@ -20,22 +20,36 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
+# SQLite development profile. Use devenv/app.dev.toml when you want the
+# PostgreSQL-backed dev stack instead.
 driver = "sqlite"
 
-[containerd]
-socket_path = "/run/containerd/containerd.sock"
-namespace = "default"
-
-[workspace]
+[container]
+# SQLite dev still uses nested containerd for bot workspaces; SQLite only
+# changes the relational database backend.
+backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
 default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
+# containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
 runtime_dir = "/opt/memoh/runtime"
 cni_bin_dir = "/opt/cni/bin"
 cni_conf_dir = "/etc/cni/net.d"
 
+[containerd]
+# Embedded containerd socket inside the dev server container.
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[docker]
+# Used only when [container].backend = "docker"; the dev Compose stack uses containerd.
+host = ""
+
 [postgres]
+# Kept so this file can be switched back to driver = "postgres" without adding
+# another section. Ignored while [database].driver = "sqlite".
 host = "postgres"
 port = 5432
 user = "memoh"
@@ -44,6 +58,8 @@ database = "memoh"
 sslmode = "disable"
 
 [sqlite]
+# The SQLite database lives in the memoh_data Docker volume mounted at
+# /opt/memoh/data by devenv/docker-compose.sqlite*.yml.
 path = "/opt/memoh/data/memoh.sqlite.db"
 wal = true
 busy_timeout_ms = 5000

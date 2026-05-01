@@ -884,6 +884,9 @@ definitions:
         type: string
       name:
         type: string
+      path:
+        description: container-local filesystem path
+        type: string
       platform_key:
         type: string
       size:
@@ -895,6 +898,7 @@ definitions:
       type:
         $ref: '#/definitions/channel.AttachmentType'
       url:
+        description: HTTP(S) or data URL
         type: string
       width:
         type: integer
@@ -3040,6 +3044,13 @@ definitions:
         type: string
       memory_provider_id:
         type: string
+      overlay_config:
+        additionalProperties: {}
+        type: object
+      overlay_enabled:
+        type: boolean
+      overlay_provider:
+        type: string
       persist_full_tool_results:
         type: boolean
       reasoning_effort:
@@ -3127,6 +3138,13 @@ definitions:
       language:
         type: string
       memory_provider_id:
+        type: string
+      overlay_config:
+        additionalProperties: {}
+        type: object
+      overlay_enabled:
+        type: boolean
+      overlay_provider:
         type: string
       persist_full_tool_results:
         type: boolean

@@ -6,9 +6,9 @@ export const loadConfig = (path: string = './config.toml'): Config => {
   const config = parse(readFileSync(path, 'utf-8'))
   if ('mcp' in config) {
     if ('workspace' in config) {
-      throw new Error('config uses both [mcp] and [workspace]; remove [mcp] and keep only [workspace]')
+      throw new Error('config uses both [mcp] and [workspace]; remove [mcp] and move workspace fields into [container]')
     }
-    throw new Error('config section [mcp] has been renamed to [workspace]; update your config.toml and restart')
+    throw new Error('config section [mcp] has been replaced by workspace fields in [container]; update your config.toml and restart')
   }
   return config satisfies Config
 }

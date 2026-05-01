@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memoh-server
+  namespace: memoh
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memoh-workspace
+  namespace: memoh
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memoh-server
+  namespace: memoh
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "persistentvolumeclaims", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoh-server
+  namespace: memoh
+subjects:
+  - kind: ServiceAccount
+    name: memoh-server
+    namespace: memoh
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memoh-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memoh-volume-snapshot-reader
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memoh-volume-snapshot-reader
+subjects:
+  - kind: ServiceAccount
+    name: memoh-server
+    namespace: memoh
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: memoh-volume-snapshot-reader

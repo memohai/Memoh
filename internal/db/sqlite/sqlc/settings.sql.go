@@ -34,6 +34,9 @@ SET language = 'auto',
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+    overlay_provider = '',
+    overlay_enabled = false,
+    overlay_config = '{}',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?1
 `
@@ -68,7 +71,10 @@ SELECT
   browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
-  bots.tool_approval_config
+  bots.tool_approval_config,
+  bots.overlay_provider,
+  bots.overlay_enabled,
+  bots.overlay_config
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
@@ -108,6 +114,9 @@ type GetSettingsByBotIDRow struct {
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
+	OverlayProvider        string         `json:"overlay_provider"`
+	OverlayEnabled         int64          `json:"overlay_enabled"`
+	OverlayConfig          string         `json:"overlay_config"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSettingsByBotIDRow, error) {
@@ -138,6 +147,9 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSetting
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.OverlayProvider,
+		&i.OverlayEnabled,
+		&i.OverlayConfig,
 	)
 	return i, err
 }
@@ -167,8 +179,11 @@ SET language = ?1,
     persist_full_tool_results = ?21,
     show_tool_calls_in_im = ?22,
     tool_approval_config = ?23,
+    overlay_provider = ?24,
+    overlay_enabled = ?25,
+    overlay_config = ?26,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?24
+WHERE id = ?27
 RETURNING
   id AS bot_id,
   language,
@@ -193,7 +208,10 @@ RETURNING
   browser_context_id,
   persist_full_tool_results,
   show_tool_calls_in_im,
-  tool_approval_config
+  tool_approval_config,
+  overlay_provider,
+  overlay_enabled,
+  overlay_config
 `
 
 type UpsertBotSettingsParams struct {
@@ -220,6 +238,9 @@ type UpsertBotSettingsParams struct {
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
+	OverlayProvider        string         `json:"overlay_provider"`
+	OverlayEnabled         int64          `json:"overlay_enabled"`
+	OverlayConfig          string         `json:"overlay_config"`
 	ID                     string         `json:"id"`
 }
 
@@ -248,6 +269,9 @@ type UpsertBotSettingsRow struct {
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
+	OverlayProvider        string         `json:"overlay_provider"`
+	OverlayEnabled         int64          `json:"overlay_enabled"`
+	OverlayConfig          string         `json:"overlay_config"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -275,6 +299,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
 		arg.ToolApprovalConfig,
+		arg.OverlayProvider,
+		arg.OverlayEnabled,
+		arg.OverlayConfig,
 		arg.ID,
 	)
 	var i UpsertBotSettingsRow
@@ -303,6 +330,9 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.OverlayProvider,
+		&i.OverlayEnabled,
+		&i.OverlayConfig,
 	)
 	return i, err
 }

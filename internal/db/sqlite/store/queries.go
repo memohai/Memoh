@@ -1485,6 +1485,25 @@ func (q *Queries) GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (p
 	return result, nil
 }
 
+func (q *Queries) GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (pgsqlc.GetBotOverlayConfigRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetBotOverlayConfigRow{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteID string
+	if err := convertValue(id, &sqliteID); err != nil {
+		return pgsqlc.GetBotOverlayConfigRow{}, err
+	}
+	out, err := q.store.queries.GetBotOverlayConfig(ctx, sqliteID)
+	if err != nil {
+		return pgsqlc.GetBotOverlayConfigRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetBotOverlayConfigRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetBotOverlayConfigRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (pgsqlc.BotStorageBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotStorageBinding{}, errSQLiteQueriesNotConfigured

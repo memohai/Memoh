@@ -27,6 +27,9 @@ services:
     entrypoint: ["/app/memoh-server", "migrate", "up"]
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
+      # Required for SQLite: migrations must write to the same persistent
+      # database file later opened by the server container.
+      - memoh_data:/opt/memoh/data
     depends_on:
       postgres:
         condition: service_healthy

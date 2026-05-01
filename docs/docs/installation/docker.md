@@ -1,6 +1,8 @@
 # Docker Installation
 
-Docker is the recommended way to run Memoh. The stack includes PostgreSQL, the main server (with embedded Containerd and in-process AI agent), and the web UI — all orchestrated via Docker Compose. You do not need to install containerd, nerdctl, or buildkit on your host; everything runs inside containers.
+Docker is the recommended way to run Memoh. The default stack includes PostgreSQL, the main server (with an explicit workspace backend and in-process AI agent), and the web UI, all orchestrated via Docker Compose. SQLite is also available for single-node installs; see [SQLite deployment](/installation/sqlite.md).
+
+The official Compose stack uses the `containerd` workspace backend. The server image starts an embedded containerd and mounts the runtime files needed by bot workspaces. For Docker Engine, Kubernetes, and Apple backends, see [Workspace backends](/installation/workspace-backends.md).
 
 ## Service Architecture
 
@@ -8,7 +10,7 @@ The Docker Compose stack consists of multiple services. Some are always started,
 
 | Service | Profile | Description |
 |---------|---------|-------------|
-| **server** | *(core)* | Main Memoh server with embedded Containerd and in-process AI agent |
+| **server** | *(core)* | Main Memoh server with the configured container runtime backend and in-process AI agent |
 | **web** | *(core)* | Web UI (Vue 3) |
 | **postgres** | *(core)* | PostgreSQL database |
 | **qdrant** | `qdrant` | Qdrant vector database for memory search (sparse and dense modes) |
@@ -64,14 +66,15 @@ The script will:
 
 1. Check for Docker and Docker Compose
 2. Detect whether this is a first-time install, an upgrade, or a reinstall
-3. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, Postgres password, sparse service toggle, browser core selection)
+3. Prompt for configuration (workspace, data directory, admin credentials, JWT secret, database backend, Postgres password when needed, workspace backend notice, sparse service toggle, browser core selection)
 4. Reuse the existing `config.toml` automatically during upgrades so database credentials stay aligned with the persisted PostgreSQL volume
 5. Offer a clean reinstall mode that removes Memoh Docker containers, volumes, and network before starting again
 6. Fetch the latest release tag from GitHub and clone the repository
 7. Generate `config.toml` from the Docker template with your settings when needed
-8. Pin Docker image versions to the release
-9. Select and pull the prebuilt browser image for the chosen cores and start all services
-10. Print recent `postgres` and `migrate` logs automatically if startup fails
+8. Select `docker-compose.yml` for PostgreSQL or `docker-compose.sqlite.yml` for SQLite
+9. Pin Docker image versions to the release
+10. Select and pull the prebuilt browser image for the chosen cores and start all services
+11. Print recent database, migration, and server logs automatically if startup fails
 
 **Silent install** (use all defaults, no prompts):
 
@@ -85,6 +88,7 @@ Defaults when running silently:
 - Data directory: `~/memoh/data`
 - Admin: `admin` / `admin123`
 - JWT secret: auto-generated
+- Database: PostgreSQL
 - Postgres password: `memoh123`
 
 If the script detects an existing Memoh installation in silent mode, it defaults to **upgrade** and reuses the previous `config.toml`. If Docker state exists but no reusable `config.toml` can be found, the script exits and asks you to choose an explicit reinstall.
@@ -121,6 +125,18 @@ curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 
 > Environment variables can be combined, e.g. `curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 USE_CN_MIRROR=true sh`
 
+**Use SQLite instead of PostgreSQL** (single-node installs):
+
+```bash
+curl -fsSL https://memoh.sh | MEMOH_DATABASE_DRIVER=sqlite sh
+```
+
+Or:
+
+```bash
+curl -fsSL https://memoh.sh | sh -s -- --database-driver sqlite
+```
+
 ## Manual Install
 
 ```bash
@@ -134,6 +150,8 @@ Edit `config.toml` — at minimum change:
 - `admin.password` — Admin password
 - `auth.jwt_secret` — Generate with `openssl rand -base64 32`
 - `postgres.password` — Database password (also set `POSTGRES_PASSWORD` env var to match)
+
+For SQLite, set `database.driver = "sqlite"` and use `docker-compose.sqlite.yml`. Details are in [SQLite deployment](/installation/sqlite.md).
 
 Then start (recommended — with Qdrant, Browser, and Sparse):
 
@@ -156,8 +174,9 @@ POSTGRES_PASSWORD=your-db-password docker compose up -d
 For users in mainland China who cannot access Docker Hub directly, uncomment the `registry` line in `config.toml`:
 
 ```toml
-[workspace]
+[container]
 registry = "memoh.cn"
+image_pull_policy = "if_not_present" # if_not_present, always, or never
 ```
 
 And add the China mirror compose overlay:
@@ -194,9 +213,14 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `[admin]` | Admin account credentials (username, password, email) |
 | `[auth]` | JWT secret and token expiration |
 | `timezone` | Server timezone (default `UTC`) |
+| `[database]` | Database backend selection (`postgres` or `sqlite`) |
+| `[container]` | Workspace backend selection plus common workspace image, pull policy, data path, runtime path, and CNI settings |
 | `[containerd]` | Containerd socket path and namespace |
-| `[workspace]` | Container image, snapshotter, data paths, CNI config, optional registry mirror |
+| `[docker]` | Docker Engine host override; empty uses Docker environment/default socket |
+| `[kubernetes]` | Kubernetes namespace, kubeconfig/in-cluster mode, PVC, image pull secret, bridge port |
+| `[apple]` | socktainer socket and binary overrides for the Apple backend |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
+| `[sqlite]` | SQLite file path, WAL mode, and busy timeout |
 | `[qdrant]` | Qdrant vector database connection (base_url, api_key, timeout) |
 | `[sparse]` | Sparse encoding service URL |
 | `[registry]` | Provider definitions directory |
@@ -224,6 +248,8 @@ docker compose pull && docker compose up -d  # Update to latest images
 | `MEMOH_CONFIG`     | `./config.toml`    | Path to the configuration file               |
 | `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v0.6.0`). Also pins Docker image versions. |
 | `MEMOH_INSTALL_MODE` | `auto`           | Install mode: `auto`, `fresh`, `upgrade`, or `reinstall` |
+| `MEMOH_DATABASE_DRIVER` | `postgres`    | Database backend for fresh installs: `postgres` or `sqlite` |
+| `MEMOH_CONTAINER_BACKEND` | `containerd` | Workspace backend. One-click Docker Compose installs support `containerd`; use manual deployment for `docker`, `kubernetes`, or `apple`. |
 | `MEMOH_ALLOW_ROOT_INSTALL` | `false` | Allow running the installer shell itself as root. Prefer leaving this unset and running the installer as a normal user. |
 | `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland image mirrors |
 | `BROWSER_CORES`    | `chromium,firefox`  | Browser engines to include in the browser image |

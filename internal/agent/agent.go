@@ -636,12 +636,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		switch evt.Type {
 		case tools.StreamEventAttachment:
 			for _, a := range evt.Attachments {
-				attachments = append(attachments, FileAttachment{
-					Type: a.Type, Path: a.Path, URL: a.URL,
-					Mime: a.Mime, Name: a.Name,
-					ContentHash: a.ContentHash, Size: a.Size,
-					Metadata: a.Metadata,
-				})
+				attachments = append(attachments, fileAttachmentFromToolAttachment(a))
 			}
 		case tools.StreamEventReaction:
 			for _, r := range evt.Reactions {
@@ -834,12 +829,7 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 	case tools.StreamEventAttachment:
 		atts := make([]FileAttachment, 0, len(evt.Attachments))
 		for _, a := range evt.Attachments {
-			atts = append(atts, FileAttachment{
-				Type: a.Type, Path: a.Path, URL: a.URL,
-				Mime: a.Mime, Name: a.Name,
-				ContentHash: a.ContentHash, Size: a.Size,
-				Metadata: a.Metadata,
-			})
+			atts = append(atts, fileAttachmentFromToolAttachment(a))
 		}
 		return StreamEvent{Type: EventAttachment, Attachments: atts}
 	case tools.StreamEventReaction:

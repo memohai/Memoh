@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net/http"
 	neturl "net/url"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -177,7 +176,7 @@ func prepareAttachment(
 		return prepareBase64Attachment(ctx, store, botID, item)
 	case IsHTTPURL(item.URL):
 		return prepareHTTPAttachment(ctx, store, botID, item)
-	case IsDataPath(item.URL):
+	case strings.TrimSpace(item.Path) != "":
 		return prepareContainerAttachment(ctx, store, botID, item)
 	default:
 		return Attachment{}, PreparedAttachment{}, errors.New("attachment reference is required")
@@ -281,7 +280,7 @@ func prepareContainerAttachment(
 	if strings.TrimSpace(botID) == "" {
 		return Attachment{}, PreparedAttachment{}, errors.New("bot id is required for container attachments")
 	}
-	sourcePath := strings.TrimSpace(item.URL)
+	sourcePath := strings.TrimSpace(item.Path)
 	if item.Name == "" {
 		item.Name = preparedAttachmentName(item, sourcePath)
 	}
@@ -448,32 +447,12 @@ func applyPreparedAsset(store OutboundAttachmentStore, asset media.Asset, botID 
 	if item == nil {
 		return
 	}
-	sourceURL := strings.TrimSpace(item.URL)
-	item.ContentHash = asset.ContentHash
-	item.URL = store.AccessPath(asset)
-	item.PlatformKey = ""
+	bundle := BundleFromAttachment(*item)
+	if sourcePath = strings.TrimSpace(sourcePath); sourcePath != "" {
+		bundle.Path = sourcePath
+	}
+	*item = AttachmentFromBundle(bundle.WithAssetAccess(botID, asset, store.AccessPath(asset)))
 	item.SourcePlatform = ""
-	item.Base64 = ""
-	if item.Metadata == nil {
-		item.Metadata = make(map[string]any)
-	}
-	item.Metadata["bot_id"] = botID
-	item.Metadata["storage_key"] = asset.StorageKey
-	if n := strings.TrimSpace(item.Name); n != "" {
-		item.Metadata["name"] = n
-	}
-	if sp := strings.TrimSpace(sourcePath); sp != "" {
-		item.Metadata["source_path"] = sp
-	}
-	if su := strings.TrimSpace(sourceURL); su != "" && !IsDataURL(su) && !IsDataPath(su) {
-		item.Metadata["source_url"] = su
-	}
-	if strings.TrimSpace(item.Mime) == "" {
-		item.Mime = attachmentpkg.NormalizeMime(asset.Mime)
-	}
-	if item.Size == 0 && asset.SizeBytes > 0 {
-		item.Size = asset.SizeBytes
-	}
 	if item.Type == AttachmentFile || item.Type == "" {
 		item.Type = preparedAttachmentTypeFromMime(item.Mime)
 	}
@@ -483,17 +462,7 @@ func preparedAttachmentBotID(defaultBotID string, metadata map[string]any) strin
 	if botID := strings.TrimSpace(defaultBotID); botID != "" {
 		return botID
 	}
-	if metadata == nil {
-		return ""
-	}
-	raw, ok := metadata["bot_id"]
-	if !ok || raw == nil {
-		return ""
-	}
-	if value, ok := raw.(string); ok {
-		return strings.TrimSpace(value)
-	}
-	return ""
+	return attachmentpkg.MetadataString(metadata, attachmentpkg.MetadataKeyBotID)
 }
 
 func preparedAttachmentMime(item Attachment, fallback string) string {
@@ -623,26 +592,19 @@ func contentDispositionFilename(raw string) string {
 
 // IsDataURL reports whether raw is a data: URL (e.g. "data:image/png;base64,...").
 func IsDataURL(raw string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "data:")
+	return attachmentpkg.IsDataURL(raw)
 }
 
 // IsHTTPURL reports whether raw is an http:// or https:// URL.
 func IsHTTPURL(raw string) bool {
-	lower := strings.ToLower(strings.TrimSpace(raw))
-	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+	return attachmentpkg.IsHTTPURL(raw)
 }
 
 // IsDataPath reports whether raw is a container-internal data path (/data/...).
 func IsDataPath(raw string) bool {
-	return strings.HasPrefix(strings.TrimSpace(raw), "/data/")
+	return attachmentpkg.IsDataPath(raw)
 }
 
 func extractPreparedStorageKey(accessPath string) string {
-	// Use path.Join (not filepath.Join) to ensure forward slashes on all platforms.
-	marker := path.Join("/data", "media") + "/"
-	idx := strings.Index(accessPath, marker)
-	if idx < 0 {
-		return ""
-	}
-	return accessPath[idx+len(marker):]
+	return attachmentpkg.ExtractStorageKey(accessPath)
 }

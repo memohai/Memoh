@@ -95,3 +95,41 @@ func TestNormalizeInboundChannelAttachment(t *testing.T) {
 		t.Fatalf("expected trimmed caption, got %q", normalized.Caption)
 	}
 }
+
+func TestNormalizeInboundChannelAttachment_DataURLMovesToBase64(t *testing.T) {
+	normalized := NormalizeInboundChannelAttachment(Attachment{
+		Type: AttachmentFile,
+		URL:  "data:image/png;base64,AAAA",
+	})
+
+	if normalized.URL != "" {
+		t.Fatalf("expected data url moved out of URL, got %q", normalized.URL)
+	}
+	if normalized.Base64 != "data:image/png;base64,AAAA" {
+		t.Fatalf("expected normalized base64 data url, got %q", normalized.Base64)
+	}
+	if normalized.Mime != "image/png" {
+		t.Fatalf("expected inferred mime image/png, got %q", normalized.Mime)
+	}
+	if normalized.Type != AttachmentImage {
+		t.Fatalf("expected inferred image type, got %q", normalized.Type)
+	}
+}
+
+func TestNormalizeInboundChannelAttachment_PreservesExplicitVoiceType(t *testing.T) {
+	normalized := NormalizeInboundChannelAttachment(Attachment{
+		Type: AttachmentVoice,
+		URL:  "https://example.com/audio.ogg",
+		Mime: "audio/ogg",
+	})
+
+	if normalized.Type != AttachmentVoice {
+		t.Fatalf("expected explicit voice type preserved, got %q", normalized.Type)
+	}
+	if normalized.URL != "https://example.com/audio.ogg" {
+		t.Fatalf("expected URL preserved, got %q", normalized.URL)
+	}
+	if normalized.Mime != "audio/ogg" {
+		t.Fatalf("expected normalized mime audio/ogg, got %q", normalized.Mime)
+	}
+}

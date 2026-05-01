@@ -9,9 +9,8 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/v2/core/mount"
-	"github.com/containerd/errdefs"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 const unsupportedReasonBackend = "backend_not_supported"
@@ -34,7 +33,7 @@ func (m *Manager) GetContainerMetrics(ctx context.Context, botID string) (*Conta
 
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return result, nil
 		}
 		return nil, err
@@ -45,7 +44,7 @@ func (m *Manager) GetContainerMetrics(ctx context.Context, botID string) (*Conta
 	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
 	if err == nil {
 		result.Status.TaskRunning = taskInfo.Status == ctr.TaskStatusRunning
-	} else if !errdefs.IsNotFound(err) {
+	} else if !ctr.IsNotFound(err) {
 		return nil, err
 	}
 
@@ -58,8 +57,11 @@ func (m *Manager) GetContainerMetrics(ctx context.Context, botID string) (*Conta
 	case errors.Is(err, ctr.ErrNotSupported):
 		result.Supported = false
 		result.UnsupportedReason = unsupportedReasonBackend
-	case errdefs.IsNotFound(err):
-		// Task is not running, so CPU and memory metrics are unavailable.
+	case ctr.IsNotFound(err):
+		if result.Status.TaskRunning {
+			result.Supported = false
+			result.UnsupportedReason = unsupportedReasonBackend
+		}
 	default:
 		return nil, err
 	}

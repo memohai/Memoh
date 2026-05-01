@@ -3,7 +3,7 @@ package handlers
 import (
 	"testing"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
 func TestSnapshotLineage(t *testing.T) {

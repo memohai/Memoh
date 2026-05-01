@@ -16,6 +16,8 @@ The container acts as the bot's private "computer." Within it, the bot can:
 
 Manage the lifecycle of your bot's environment from the **Container** tab in the Bot Detail page.
 
+The underlying runtime is selected globally with `[container].backend` in `config.toml`. The official Docker Compose stack uses `containerd`; host Docker, Kubernetes, and Apple backends are also available for manual deployments. See [Workspace backends](/installation/workspace-backends.md) before changing this setting.
+
 ### Lifecycle Actions
 
 - **Create**: Initialize the container if it doesn't exist (using the configured image). Progress is shown via real-time SSE feedback during image pull and creation.
@@ -30,7 +32,7 @@ Manage the lifecycle of your bot's environment from the **Container** tab in the
 The **Container** tab displays real-time data about the bot's runtime:
 - **Container ID**: Unique identifier for the instance.
 - **Status**: Whether it's currently running, stopped, or creating.
-- **Image**: The Docker/Containerd image used as the base.
+- **Image**: The container image used as the base.
 - **Paths**: Host and container paths for data persistence.
 - **Tasks**: Number of active background tasks running in the container.
 - **CDI Devices**: The effective GPU CDI devices currently attached to the container, if any.

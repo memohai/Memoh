@@ -20,7 +20,21 @@ jwt_expires_in = "168h"
 timezone = "UTC"
 
 [database]
+# Supported values: "postgres" or "sqlite".
+# SQLite is useful for single-node testing. Use PostgreSQL when you want to
+# match the default Docker deployment.
 driver = "postgres"
+
+[container]
+# Windows template uses containerd by default. Docker and Kubernetes backends are
+# available for custom deployments, but their runtime paths must match the host.
+backend = "containerd"
+# registry = "memoh.cn"  # Uncomment for China mainland mirror
+default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
+# containerd snapshotter used by workspace containers.
+snapshotter = "overlayfs"
+data_root = "data"
 
 [containerd]
 # Windows containerd usually exposes a named pipe endpoint.
@@ -28,13 +42,13 @@ driver = "postgres"
 socket_path = "npipe:////./pipe/containerd-containerd"
 namespace = "default"
 
-[workspace]
-# registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "debian:bookworm-slim"
-snapshotter = "overlayfs"
-data_root = "data"
+[docker]
+# Used when [container].backend = "docker".
+# Leave empty to use Docker's default named pipe or DOCKER_HOST.
+host = ""
 
 [postgres]
+# Used only when [database].driver = "postgres".
 host = "127.0.0.1"
 port = 5432
 user = "memoh"
@@ -43,6 +57,7 @@ database = "memoh"
 sslmode = "disable"
 
 [sqlite]
+# Used only when [database].driver = "sqlite".
 path = "data/memoh.db"
 wal = true
 busy_timeout_ms = 5000

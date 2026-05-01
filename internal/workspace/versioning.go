@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -67,20 +66,20 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
+	defer ref.Close()
+	if err := ref.EnsureDBRecords(ctx); err != nil {
 		return nil, err
 	}
 
+	containerID := ref.containerID
+	info := ref.info
 	displayName := strings.TrimSpace(snapshotName)
 	runtimeSnapshotName := fmt.Sprintf("%s-snapshot-%d", containerID, time.Now().UnixNano())
+	snapshotter := info.StorageRef.Driver
 	normalizedSource := normalizeSnapshotSource(source)
 
 	// The sequence below (stop → commit → replace → start) is atomic from the
@@ -88,17 +87,21 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 	// Use a detached context so a cancelled HTTP request cannot break it.
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
-		return nil, err
-	}
-
-	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, runtimeSnapshotName, info.SnapshotKey); err != nil {
-		return nil, err
-	}
-
-	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, runtimeSnapshotName); err != nil {
-		return nil, err
+	if !m.nativeSnapshotsSupported(dctx) {
+		runtimeSnapshotName = m.archiveSnapshotKey(botID)
+		snapshotter = "archive"
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, runtimeSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
+	} else if err := m.commitSnapshotAndReplaceContainer(dctx, ref, runtimeSnapshotName); err != nil {
+		if !errors.Is(err, ctr.ErrNotSupported) {
+			return nil, err
+		}
+		runtimeSnapshotName = m.archiveSnapshotKey(botID)
+		snapshotter = "archive"
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, runtimeSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
 	}
 
 	_, versionNumber, createdAt, err := m.recordSnapshotVersion(
@@ -106,8 +109,8 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		containerID,
 		runtimeSnapshotName,
 		displayName,
-		info.SnapshotKey,
-		info.Snapshotter,
+		info.StorageRef.Key,
+		snapshotter,
 		normalizedSource,
 	)
 	if err != nil {
@@ -117,7 +120,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		"snapshot_name":         coalesceSnapshotName(displayName, versionNumber),
 		"display_name":          displayName,
 		"runtime_snapshot_name": runtimeSnapshotName,
-		"snapshotter":           info.Snapshotter,
+		"snapshotter":           snapshotter,
 		"source":                normalizedSource,
 		"version":               versionNumber,
 	}); err != nil {
@@ -129,7 +132,7 @@ func (m *Manager) CreateSnapshot(ctx context.Context, botID, snapshotName, sourc
 		SnapshotName:        coalesceSnapshotName(displayName, versionNumber),
 		RuntimeSnapshotName: runtimeSnapshotName,
 		DisplayName:         displayName,
-		Snapshotter:         info.Snapshotter,
+		Snapshotter:         snapshotter,
 		Version:             versionNumber,
 		CreatedAt:           createdAt,
 	}, nil
@@ -143,33 +146,33 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-
-	if _, err := m.ensureDBRecords(ctx, botID, info.ID, info.Runtime.Name, info.Image); err != nil {
+	defer ref.Close()
+	if err := ref.EnsureDBRecords(ctx); err != nil {
 		return nil, err
 	}
 
+	containerID := ref.containerID
+	info := ref.info
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
-		return nil, err
-	}
-
 	versionSnapshotName := fmt.Sprintf("%s-v%d", containerID, time.Now().UnixNano())
-	if err := m.service.CommitSnapshot(dctx, info.Snapshotter, versionSnapshotName, info.SnapshotKey); err != nil {
-		return nil, err
-	}
-
-	activeSnapshotName := fmt.Sprintf("%s-active-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, versionSnapshotName); err != nil {
-		return nil, err
+	if !m.nativeSnapshotsSupported(dctx) {
+		versionSnapshotName = m.archiveSnapshotKey(botID)
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, versionSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
+	} else if err := m.commitSnapshotAndReplaceContainer(dctx, ref, versionSnapshotName); err != nil {
+		if !errors.Is(err, ctr.ErrNotSupported) {
+			return nil, err
+		}
+		versionSnapshotName = m.archiveSnapshotKey(botID)
+		if archiveErr := m.createArchiveSnapshotFromRef(dctx, ref, versionSnapshotName); archiveErr != nil {
+			return nil, archiveErr
+		}
 	}
 
 	versionID, versionNumber, createdAt, err := m.recordSnapshotVersion(
@@ -177,8 +180,8 @@ func (m *Manager) CreateVersion(ctx context.Context, botID string) (*VersionInfo
 		containerID,
 		versionSnapshotName,
 		"",
-		info.SnapshotKey,
-		info.Snapshotter,
+		info.StorageRef.Key,
+		archiveAwareSnapshotter(info.StorageRef.Driver, versionSnapshotName),
 		SnapshotSourcePreExec,
 	)
 	if err != nil {
@@ -211,16 +214,15 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 		return nil, err
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
-
-	info, err := m.service.GetContainer(ctx, containerID)
+	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
+	defer ref.Close()
 
-	snapshotter := strings.TrimSpace(info.Snapshotter)
+	containerID := ref.containerID
+	info := ref.info
+	snapshotter := strings.TrimSpace(info.StorageRef.Driver)
 	if snapshotter == "" {
 		snapshotter = m.cfg.Snapshotter
 	}
@@ -228,8 +230,8 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 		snapshotter = "overlayfs"
 	}
 
-	runtimeSnapshots, err := m.service.ListSnapshots(ctx, snapshotter)
-	if err != nil {
+	runtimeSnapshots, err := m.service.ListSnapshots(ctx, ctr.ListSnapshotsRequest{Driver: snapshotter})
+	if err != nil && !errors.Is(err, ctr.ErrNotSupported) {
 		return nil, err
 	}
 
@@ -308,35 +310,42 @@ func (m *Manager) RollbackVersion(ctx context.Context, botID string, version int
 		return errors.New("version out of range")
 	}
 
-	containerID := m.resolveContainerID(ctx, botID)
-	unlock := m.lockContainer(containerID)
-	defer unlock()
+	ref, err := m.loadLockedContainer(ctx, botID)
+	if err != nil {
+		return err
+	}
+	defer ref.Close()
 
 	snapshotName, err := m.queries.GetVersionSnapshotRuntimeName(ctx, dbsqlc.GetVersionSnapshotRuntimeNameParams{
-		ContainerID: containerID,
+		ContainerID: ref.containerID,
 		Version:     int32(version),
 	})
 	if err != nil {
 		return err
 	}
 
-	info, err := m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		return err
-	}
-
 	dctx := context.WithoutCancel(ctx)
 
-	if err := m.safeStopTask(dctx, containerID); err != nil {
+	if strings.HasPrefix(strings.TrimSpace(snapshotName), archivePrefix) {
+		if err := m.restoreArchiveSnapshotFromRef(dctx, ref, snapshotName); err != nil {
+			return err
+		}
+		return m.insertEvent(dctx, ref.containerID, "version_rollback", map[string]any{
+			"snapshot_name": snapshotName,
+			"version":       version,
+			"source":        SnapshotSourceRollback,
+		})
+	}
+
+	if err := m.safeStopTask(dctx, ref.containerID); err != nil {
 		return err
 	}
 
-	activeSnapshotName := fmt.Sprintf("%s-rollback-%d", containerID, time.Now().UnixNano())
-	if err := m.replaceContainerSnapshot(dctx, botID, containerID, info, activeSnapshotName, snapshotName); err != nil {
+	if err := m.replaceLockedContainerFromSnapshot(dctx, ref, "rollback", snapshotName); err != nil {
 		return err
 	}
 
-	return m.insertEvent(dctx, containerID, "version_rollback", map[string]any{
+	return m.insertEvent(dctx, ref.containerID, "version_rollback", map[string]any{
 		"snapshot_name": snapshotName,
 		"version":       version,
 		"source":        SnapshotSourceRollback,
@@ -365,7 +374,10 @@ func (m *Manager) VersionSnapshotName(ctx context.Context, botID string, version
 // deletes the old container, recreates it on the new snapshot, and restarts the task.
 // Caller must pass a detached context (context.WithoutCancel) to guarantee atomicity.
 func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, containerID string, info ctr.ContainerInfo, activeSnapshotName, parentSnapshot string) error {
-	if err := m.service.PrepareSnapshot(ctx, info.Snapshotter, activeSnapshotName, parentSnapshot); err != nil {
+	if err := m.service.PrepareSnapshot(ctx, ctr.PrepareSnapshotRequest{
+		Target: ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
+		Parent: ctr.SnapshotRef{Driver: info.StorageRef.Driver, Key: parentSnapshot},
+	}); err != nil {
 		return err
 	}
 	if err := m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{CleanupSnapshot: false}); err != nil {
@@ -375,32 +387,55 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	if err != nil {
 		return err
 	}
-	if _, err := m.service.CreateContainerFromSnapshot(ctx, ctr.CreateContainerRequest{
-		ID:          containerID,
-		ImageRef:    info.Image,
-		SnapshotID:  activeSnapshotName,
-		Snapshotter: info.Snapshotter,
-		Labels:      info.Labels,
-		Spec:        spec,
+	if _, err := m.service.RestoreContainer(ctx, ctr.CreateContainerRequest{
+		ID:         containerID,
+		ImageRef:   info.Image,
+		StorageRef: ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
+		Labels:     info.Labels,
+		Spec:       spec,
 	}); err != nil {
-		return err
-	}
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
 		return err
 	}
 	// Container process was recreated — evict the stale gRPC connection
 	// unconditionally so the next call dials fresh to the new process.
 	m.grpcPool.Remove(botID)
 
-	// CNI network setup (for outbound connectivity).
-	if _, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-		ContainerID: containerID,
-		CNIBinDir:   m.cfg.CNIBinaryDir,
-		CNIConfDir:  m.cfg.CNIConfigDir,
-	}); err != nil {
-		return fmt.Errorf("network setup after snapshot replace: %w", err)
+	// Recreate the task and restore the container network before the next
+	// workspace operation.
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		return fmt.Errorf("restart container after snapshot replace: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) commitSnapshotAndReplaceContainer(ctx context.Context, ref *lockedContainerRef, runtimeSnapshotName string) error {
+	if err := m.safeStopTask(ctx, ref.containerID); err != nil {
+		return err
+	}
+	if err := m.service.CommitSnapshot(ctx, ctr.CommitSnapshotRequest{
+		Source: ctr.StorageRef{Driver: ref.info.StorageRef.Driver, Key: ref.info.StorageRef.Key, Kind: "active"},
+		Target: ctr.SnapshotRef{Driver: ref.info.StorageRef.Driver, Key: runtimeSnapshotName, Kind: "committed"},
+	}); err != nil {
+		if errors.Is(err, ctr.ErrNotSupported) {
+			m.grpcPool.Remove(ref.botID)
+			_ = m.startTaskAndEnsureNetwork(ctx, ref.botID, ref.containerID)
+			m.grpcPool.Remove(ref.botID)
+		}
+		return err
+	}
+	return m.replaceLockedContainerFromSnapshot(ctx, ref, "active", runtimeSnapshotName)
+}
+
+func (m *Manager) replaceLockedContainerFromSnapshot(ctx context.Context, ref *lockedContainerRef, activeLabel, parentSnapshot string) error {
+	activeSnapshotName := fmt.Sprintf("%s-%s-%d", ref.containerID, strings.TrimSpace(activeLabel), time.Now().UnixNano())
+	return m.replaceContainerSnapshot(ctx, ref.botID, ref.containerID, ref.info, activeSnapshotName, parentSnapshot)
+}
+
+func (m *Manager) nativeSnapshotsSupported(ctx context.Context) bool {
+	checker, ok := m.service.(interface {
+		SnapshotSupported(context.Context) bool
+	})
+	return !ok || checker.SnapshotSupported(ctx)
 }
 
 func (m *Manager) buildVersionSpec(ctx context.Context, botID string, cdiDevices []string) (ctr.ContainerSpec, error) {
@@ -419,13 +454,13 @@ func (m *Manager) safeStopTask(ctx context.Context, containerID string) error {
 		Timeout: 10 * time.Second,
 		Force:   true,
 	})
-	if err == nil {
-		return nil
+	if err != nil && !ctr.IsNotFound(err) {
+		return err
 	}
-	if errdefs.IsNotFound(err) {
-		return nil
+	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !ctr.IsNotFound(err) {
+		return err
 	}
-	return err
+	return nil
 }
 
 func (m *Manager) ensureDBRecords(ctx context.Context, botID, containerID, _ string, imageRef string) (pgtype.UUID, error) {
@@ -540,6 +575,13 @@ func normalizeSnapshotSource(source string) string {
 		return SnapshotSourceManual
 	}
 	return s
+}
+
+func archiveAwareSnapshotter(snapshotter, runtimeSnapshotName string) string {
+	if strings.HasPrefix(strings.TrimSpace(runtimeSnapshotName), archivePrefix) {
+		return "archive"
+	}
+	return snapshotter
 }
 
 func coalesceSnapshotName(displayName string, version int) string {

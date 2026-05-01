@@ -16,12 +16,14 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	netctl "github.com/memohai/memoh/internal/network"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 type Service struct {
 	queries dbstore.Queries
 	acl     *acl.Service
+	network *netctl.Service
 	logger  *slog.Logger
 }
 
@@ -30,10 +32,11 @@ var (
 	ErrInvalidModelRef  = errors.New("invalid model reference")
 )
 
-func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service, networkService *netctl.Service) *Service {
 	return &Service{
 		queries: queries,
 		acl:     aclService,
+		network: networkService,
 		logger:  log.With(slog.String("service", "settings")),
 	}
 }
@@ -68,6 +71,16 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
+	overlayBindingRow, err := s.queries.GetBotOverlayConfig(ctx, pgID)
+	if err != nil {
+		return Settings{}, err
+	}
+	previousOverlayConfig := settingsOverlayConfigFromRow(overlayBindingRow)
+	if s.network != nil {
+		if resolvedPrevious, resolveErr := s.network.GetBotConfig(ctx, botID); resolveErr == nil {
+			previousOverlayConfig = resolvedPrevious
+		}
+	}
 	aclDefaultEffect, err := s.getDefaultEffect(ctx, botID)
 	if err != nil {
 		return Settings{}, err
@@ -76,6 +89,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 	}
+	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
+	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
+	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
 	if strings.TrimSpace(req.Language) != "" {
 		current.Language = strings.TrimSpace(req.Language)
 	}
@@ -119,6 +135,15 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			return Settings{}, err
 		}
 		timezoneValue = normalized
+	}
+	if req.OverlayEnabled != nil {
+		current.OverlayEnabled = *req.OverlayEnabled
+	}
+	if req.OverlayProvider != nil {
+		current.OverlayProvider = strings.TrimSpace(*req.OverlayProvider)
+	}
+	if req.OverlayConfig != nil {
+		current.OverlayConfig = req.OverlayConfig
 	}
 	chatModelUUID := pgtype.UUID{}
 	if value := strings.TrimSpace(req.ChatModelID); value != "" {
@@ -207,6 +232,33 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, err
 	}
 
+	normalizedNetwork, err := s.normalizeOverlayConfig(current)
+	if err != nil {
+		return Settings{}, err
+	}
+	nextOverlayConfig := settingsOverlayConfigFromSettings(normalizedNetwork)
+	networkChanged := s.network != nil && !overlayConfigsEqual(previousOverlayConfig, nextOverlayConfig)
+	rollbackNetworkChange := func(cause error) error {
+		if !networkChanged {
+			return cause
+		}
+		if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextOverlayConfig, previousOverlayConfig); rollbackErr != nil {
+			return errors.Join(cause, fmt.Errorf("network rollback failed: %w", rollbackErr))
+		}
+		return cause
+	}
+	if networkChanged {
+		if err := s.reconcileBotNetwork(ctx, botID, previousOverlayConfig, nextOverlayConfig); err != nil {
+			if rollbackErr := s.reconcileBotNetwork(ctx, botID, nextOverlayConfig, previousOverlayConfig); rollbackErr != nil {
+				return Settings{}, errors.Join(fmt.Errorf("reconcile bot network: %w", err), fmt.Errorf("network rollback failed: %w", rollbackErr))
+			}
+			return Settings{}, err
+		}
+	}
+	overlayConfigJSON, err := json.Marshal(normalizedNetwork.OverlayConfig)
+	if err != nil {
+		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
+	}
 	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
 		ID:                     pgID,
 		Timezone:               timezoneValue,
@@ -232,9 +284,12 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
+		OverlayProvider:        normalizedNetwork.OverlayProvider,
+		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
+		OverlayConfig:          overlayConfigJSON,
 	})
 	if err != nil {
-		return Settings{}, err
+		return Settings{}, rollbackNetworkChange(err)
 	}
 	createdByUserID := ""
 	if botRow.OwnerUserID.Valid {
@@ -294,6 +349,7 @@ func normalizeBotSetting(language string, aclDefaultEffect string, reasoningEnab
 	if settings.CompactionRatio < 1 || settings.CompactionRatio > 100 {
 		settings.CompactionRatio = 80
 	}
+	settings.OverlayConfig = map[string]any{}
 	return settings
 }
 
@@ -330,6 +386,9 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.OverlayProvider,
+		row.OverlayEnabled,
+		row.OverlayConfig,
 	)
 }
 
@@ -357,6 +416,9 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.OverlayProvider,
+		row.OverlayEnabled,
+		row.OverlayConfig,
 	)
 }
 
@@ -383,6 +445,9 @@ func normalizeBotSettingsFields(
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
+	overlayProvider string,
+	overlayEnabled bool,
+	overlayConfig []byte,
 ) Settings {
 	settings := normalizeBotSetting(language, "", reasoningEnabled, reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionRatio)
 	if timezone.Valid {
@@ -421,6 +486,9 @@ func normalizeBotSettingsFields(
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
+	settings.OverlayProvider = strings.TrimSpace(overlayProvider)
+	settings.OverlayEnabled = overlayEnabled
+	settings.OverlayConfig = normalizeJSONObject(overlayConfig)
 	return settings
 }
 
@@ -433,6 +501,94 @@ func parseToolApprovalConfig(raw []byte) ToolApprovalConfig {
 		return DefaultToolApprovalConfig()
 	}
 	return NormalizeToolApprovalConfig(cfg)
+}
+
+func normalizeJSONObject(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func (s *Service) normalizeOverlayConfig(current Settings) (Settings, error) {
+	current.OverlayProvider = strings.TrimSpace(current.OverlayProvider)
+	current.OverlayConfig = cloneSettingsMap(current.OverlayConfig)
+	if current.OverlayProvider == "" {
+		if current.OverlayEnabled {
+			return Settings{}, errors.New("network provider is required when network is enabled")
+		}
+		current.OverlayConfig = map[string]any{}
+		return current, nil
+	}
+	if s.network == nil {
+		return Settings{}, errors.New("network service not configured")
+	}
+	cfg, err := s.network.PrepareBotConfigForWrite(netctl.BotOverlayConfig{
+		Enabled:  current.OverlayEnabled,
+		Provider: current.OverlayProvider,
+		Config:   current.OverlayConfig,
+	})
+	if err != nil {
+		return Settings{}, err
+	}
+	current.OverlayEnabled = cfg.Enabled
+	current.OverlayProvider = cfg.Provider
+	current.OverlayConfig = cfg.Config
+	return current, nil
+}
+
+func cloneSettingsMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func settingsOverlayConfigFromRow(row sqlc.GetBotOverlayConfigRow) netctl.BotOverlayConfig {
+	return netctl.BotOverlayConfig{
+		Enabled:  row.OverlayEnabled,
+		Provider: strings.TrimSpace(row.OverlayProvider),
+		Config:   normalizeJSONObject(row.OverlayConfig),
+	}
+}
+
+func settingsOverlayConfigFromSettings(current Settings) netctl.BotOverlayConfig {
+	return netctl.BotOverlayConfig{
+		Enabled:  current.OverlayEnabled,
+		Provider: strings.TrimSpace(current.OverlayProvider),
+		Config:   cloneSettingsMap(current.OverlayConfig),
+	}
+}
+
+func overlayConfigsEqual(left, right netctl.BotOverlayConfig) bool {
+	if left.Enabled != right.Enabled || left.Provider != right.Provider {
+		return false
+	}
+	return jsonEqual(left.Config, right.Config)
+}
+
+func (s *Service) reconcileBotNetwork(ctx context.Context, botID string, previous, next netctl.BotOverlayConfig) error {
+	if s.network == nil || overlayConfigsEqual(previous, next) {
+		return nil
+	}
+	return s.network.ReconcileBot(ctx, botID, previous, next)
+}
+
+func jsonEqual(left, right map[string]any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return string(leftJSON) == string(rightJSON)
 }
 
 func (s *Service) getDefaultEffect(ctx context.Context, botID string) (string, error) {

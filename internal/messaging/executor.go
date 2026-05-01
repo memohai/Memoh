@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"strings"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/media"
 )
@@ -252,59 +252,30 @@ func (e *Executor) resolveOutboundAttachments(
 	rawAttachments any,
 	isSameConv bool,
 ) ([]channel.Attachment, error) {
-	if isSameConv || IsSameConversation(session, channelType.String(), target) {
-		return resolveSameConversationAttachments(rawAttachments), nil
-	}
-	items := NormalizeAttachmentInputs(rawAttachments)
-	if items == nil {
+	bundles, ok := attachmentpkg.ParseToolInputBundles(rawAttachments)
+	if !ok {
 		return nil, errors.New("attachments must be a string, object, or array")
 	}
-	if len(items) == 0 {
+	if len(bundles) == 0 {
 		return nil, nil
 	}
-	resolved := e.ResolveAttachments(ctx, botID, items)
+	if isSameConv || IsSameConversation(session, channelType.String(), target) {
+		return resolveSameConversationAttachments(bundles), nil
+	}
+	resolved := e.ResolveAttachments(ctx, botID, bundles)
 	if len(resolved) == 0 {
 		return nil, errors.New("attachments could not be resolved")
 	}
 	return resolved, nil
 }
 
-func resolveSameConversationAttachments(rawAttachments any) []channel.Attachment {
-	items := NormalizeAttachmentInputs(rawAttachments)
-	if items == nil {
+func resolveSameConversationAttachments(bundles []attachmentpkg.Bundle) []channel.Attachment {
+	if len(bundles) == 0 {
 		return nil
 	}
-	result := make([]channel.Attachment, 0, len(items))
-	for _, item := range items {
-		ref := ""
-		name := ""
-		attType := ""
-		switch v := item.(type) {
-		case string:
-			ref = strings.TrimSpace(v)
-		case map[string]any:
-			ref = firstStringArg(v, "path", "url")
-			name = firstStringArg(v, "name")
-			attType = firstStringArg(v, "type")
-		}
-		if ref == "" {
-			continue
-		}
-		lower := strings.ToLower(ref)
-		if !strings.HasPrefix(ref, "/") &&
-			!strings.HasPrefix(lower, "http://") &&
-			!strings.HasPrefix(lower, "https://") &&
-			!strings.HasPrefix(lower, "data:") {
-			ref = "/data/" + ref
-		}
-		if name == "" {
-			name = filepath.Base(ref)
-		}
-		t := channel.AttachmentType(attType)
-		if t == "" {
-			t = InferAttachmentTypeFromExt(ref)
-		}
-		result = append(result, channel.Attachment{Type: t, URL: ref, Name: name})
+	result := make([]channel.Attachment, 0, len(bundles))
+	for _, bundle := range bundles {
+		result = append(result, channel.AttachmentFromBundle(bundle))
 	}
 	return result
 }
@@ -421,109 +392,54 @@ func (e *Executor) resolvePlatform(args map[string]any, session SessionContext) 
 }
 
 // ResolveAttachments converts raw attachment arguments into channel.Attachment values.
-func (e *Executor) ResolveAttachments(ctx context.Context, botID string, items []any) []channel.Attachment {
+func (e *Executor) ResolveAttachments(ctx context.Context, botID string, bundles []attachmentpkg.Bundle) []channel.Attachment {
 	var result []channel.Attachment
-	for _, item := range items {
-		switch v := item.(type) {
-		case string:
-			if att := e.resolveAttachmentRef(ctx, botID, strings.TrimSpace(v), "", ""); att != nil {
-				result = append(result, *att)
-			}
-		case map[string]any:
-			path := firstStringArg(v, "path")
-			urlVal := firstStringArg(v, "url")
-			attType := firstStringArg(v, "type")
-			name := firstStringArg(v, "name")
-			ref := path
-			if ref == "" {
-				ref = urlVal
-			}
-			if ref == "" {
-				continue
-			}
-			if att := e.resolveAttachmentRef(ctx, botID, ref, attType, name); att != nil {
-				result = append(result, *att)
-			}
+	for _, bundle := range bundles {
+		if att := e.resolveAttachmentBundle(ctx, botID, bundle); att != nil {
+			result = append(result, *att)
 		}
 	}
 	return result
 }
 
-func (e *Executor) resolveAttachmentRef(ctx context.Context, botID, ref, attType, name string) *channel.Attachment {
-	ref = strings.TrimSpace(ref)
+func (e *Executor) resolveAttachmentBundle(ctx context.Context, botID string, bundle attachmentpkg.Bundle) *channel.Attachment {
+	att := channel.AttachmentFromBundle(bundle)
+	if att.Type == "" {
+		att.Type = channel.AttachmentFile
+	}
+	if strings.TrimSpace(att.ContentHash) != "" {
+		return &att
+	}
+	if attachmentpkg.IsHTTPURL(bundle.URL) {
+		att.URL = bundle.URL
+		return &att
+	}
+	if bundle.Base64 != "" {
+		att.Base64 = bundle.Base64
+		return &att
+	}
+	ref := strings.TrimSpace(bundle.Path)
 	if ref == "" {
-		return nil
-	}
-	lower := strings.ToLower(ref)
-	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-		t := channel.AttachmentType(attType)
-		if t == "" {
-			t = InferAttachmentTypeFromExt(ref)
+		if strings.TrimSpace(att.PlatformKey) == "" {
+			return nil
 		}
-		return &channel.Attachment{Type: t, URL: ref, Name: name}
+		return &att
 	}
-	if strings.HasPrefix(lower, "data:") {
-		t := channel.AttachmentType(attType)
-		if t == "" {
-			t = channel.AttachmentImage
-		}
-		return &channel.Attachment{Type: t, Base64: ref, Name: name}
-	}
-	// Resolve relative paths against the container's data mount.
-	// LLMs often pass bare filenames like "IDENTITY.md" instead of "/data/IDENTITY.md".
-	if !strings.HasPrefix(ref, "/") {
-		ref = "/data/" + ref
-	}
-	if name == "" {
-		name = filepath.Base(ref)
-	}
-	mediaMarker := filepath.Join("/data", "media")
-	if !strings.HasSuffix(mediaMarker, "/") {
-		mediaMarker += "/"
-	}
-	if idx := strings.Index(ref, mediaMarker); idx >= 0 && e.AssetResolver != nil {
-		storageKey := ref[idx+len(mediaMarker):]
+	if storageKey := attachmentpkg.ExtractStorageKey(ref); storageKey != "" && e.AssetResolver != nil {
 		asset, err := e.AssetResolver.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
-			return AssetMetaToAttachment(asset, botID, attType, name)
+			return AssetMetaToAttachment(asset, botID, string(att.Type), bundle.Name)
 		}
 	}
-	dataPrefix := "/data/"
-	if strings.HasPrefix(ref, dataPrefix) && e.AssetResolver != nil {
+	if attachmentpkg.IsDataPath(ref) && e.AssetResolver != nil {
 		asset, err := e.AssetResolver.IngestContainerFile(ctx, botID, ref)
 		if err == nil {
-			return AssetMetaToAttachment(asset, botID, attType, name)
+			return AssetMetaToAttachment(asset, botID, string(att.Type), bundle.Name)
 		}
 		return nil
 	}
-	t := channel.AttachmentType(attType)
-	if t == "" {
-		t = InferAttachmentTypeFromExt(ref)
-	}
-	return &channel.Attachment{Type: t, URL: ref, Name: name}
-}
-
-// NormalizeAttachmentInputs normalizes raw attachment argument into a slice.
-func NormalizeAttachmentInputs(raw any) []any {
-	switch v := raw.(type) {
-	case nil:
-		return nil
-	case []any:
-		if v == nil {
-			return []any{}
-		}
-		return v
-	case []string:
-		items := make([]any, 0, len(v))
-		for _, item := range v {
-			items = append(items, item)
-		}
-		return items
-	case string, map[string]any:
-		return []any{v}
-	default:
-		return nil
-	}
+	// att.Path is already set correctly by AttachmentFromBundle (bundle.Path = ref).
+	return &att
 }
 
 // ParseOutboundMessage parses a message from tool call arguments.
@@ -556,44 +472,22 @@ func ParseOutboundMessage(arguments map[string]any, fallbackText string) (channe
 
 // AssetMetaToAttachment converts an AssetMeta to a channel.Attachment.
 func AssetMetaToAttachment(asset media.Asset, botID, attType, name string) *channel.Attachment {
-	t := channel.AttachmentType(attType)
-	if t == "" {
-		t = InferAttachmentTypeFromMime(asset.Mime)
-	}
-	return &channel.Attachment{
-		Type: t, ContentHash: asset.ContentHash, Mime: asset.Mime, Size: asset.SizeBytes, Name: name,
-		Metadata: map[string]any{"bot_id": botID, "storage_key": asset.StorageKey},
-	}
+	bundle := attachmentpkg.Bundle{
+		Type: attType,
+		Name: name,
+	}.WithAsset(botID, asset)
+	att := channel.AttachmentFromBundle(bundle)
+	return &att
 }
 
 // InferAttachmentTypeFromMime infers attachment type from MIME type.
 func InferAttachmentTypeFromMime(mime string) channel.AttachmentType {
-	mime = strings.ToLower(strings.TrimSpace(mime))
-	switch {
-	case strings.HasPrefix(mime, "image/"):
-		return channel.AttachmentImage
-	case strings.HasPrefix(mime, "audio/"):
-		return channel.AttachmentAudio
-	case strings.HasPrefix(mime, "video/"):
-		return channel.AttachmentVideo
-	default:
-		return channel.AttachmentFile
-	}
+	return channel.AttachmentType(attachmentpkg.InferTypeFromMime(mime))
 }
 
 // InferAttachmentTypeFromExt infers attachment type from file extension.
 func InferAttachmentTypeFromExt(path string) channel.AttachmentType {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg":
-		return channel.AttachmentImage
-	case ".mp3", ".wav", ".ogg", ".flac", ".aac":
-		return channel.AttachmentAudio
-	case ".mp4", ".webm", ".avi", ".mov":
-		return channel.AttachmentVideo
-	default:
-		return channel.AttachmentFile
-	}
+	return channel.AttachmentType(attachmentpkg.InferTypeFromExt(path))
 }
 
 func firstStringArg(args map[string]any, keys ...string) string {
