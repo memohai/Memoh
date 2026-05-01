@@ -20,6 +20,8 @@ extraResources:
     to: runtime
   - from: resources/config
     to: config
+  - from: resources/providers
+    to: providers
 mac:
   category: public.app-category.productivity
   target:

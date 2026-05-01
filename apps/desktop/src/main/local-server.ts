@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -54,7 +54,21 @@ function serverCommand(): { command: string, args: string[], cwd: string, config
   }
 }
 
+function logPath(): string {
+  return join(app.getPath('userData'), 'local-server.log')
+}
+
+function appendLog(message: string): void {
+  try {
+    appendFileSync(logPath(), `[${new Date().toISOString()}] ${message}\n`)
+  } catch {
+    // Logging must never block startup.
+  }
+}
+
 function prepareRuntime(command: { cwd: string }): void {
+  mkdirSync(join(command.cwd, 'data', 'local'), { recursive: true })
+  prepareProviders(command.cwd)
   const targetRuntime = join(command.cwd, 'data', 'runtime')
   mkdirSync(targetRuntime, { recursive: true })
 
@@ -76,6 +90,20 @@ function prepareRuntime(command: { cwd: string }): void {
   rmSync(targetRuntime, { recursive: true, force: true })
   mkdirSync(targetRuntime, { recursive: true })
   cpSync(bundledRuntime, targetRuntime, { recursive: true })
+}
+
+function prepareProviders(cwd: string): void {
+  if (is.dev) {
+    return
+  }
+  const bundledProviders = resourcePath('providers')
+  if (!existsSync(bundledProviders)) {
+    throw new Error(`Bundled provider templates not found: ${bundledProviders}`)
+  }
+  const targetProviders = join(cwd, 'conf', 'providers')
+  rmSync(targetProviders, { recursive: true, force: true })
+  mkdirSync(targetProviders, { recursive: true })
+  cpSync(bundledProviders, targetProviders, { recursive: true })
 }
 
 async function probeServer(): Promise<boolean> {
@@ -112,7 +140,7 @@ function spawnServer(): ChildProcess {
   const child = spawn(command.command, command.args, {
     cwd: command.cwd,
     detached: true,
-    stdio: 'ignore',
+    stdio: is.dev ? 'ignore' : ['ignore', 'ignore', 'ignore'],
     env: {
       ...process.env,
       CONFIG_PATH: command.configPath,
@@ -123,18 +151,50 @@ function spawnServer(): ChildProcess {
 }
 
 function runMigrations(command: { command: string, cwd: string, configPath: string }): void {
-  const args = is.dev ? ['run', './cmd/agent', 'migrate', 'up'] : ['migrate', 'up']
+  const result = runServerCommand(command, ['migrate', 'up'])
+  if (result.status === 0) {
+    return
+  }
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  if (output.includes('Dirty database version 2')) {
+    appendLog('repairing dirty database version 2')
+    const forceResult = runServerCommand(command, ['migrate', 'force', '2'])
+    if (forceResult.status === 0) {
+      const retryResult = runServerCommand(command, ['migrate', 'up'])
+      if (retryResult.status === 0) {
+        return
+      }
+      throw new Error(`local server migration failed after dirty repair: ${formatCommandFailure(retryResult)}`)
+    }
+    throw new Error(`local server migration dirty repair failed: ${formatCommandFailure(forceResult)}`)
+  }
+  throw new Error(`local server migration failed: ${formatCommandFailure(result)}`)
+}
+
+function runServerCommand(
+  command: { command: string, cwd: string, configPath: string },
+  serverArgs: string[],
+): ReturnType<typeof spawnSync> {
+  const args = is.dev ? ['run', './cmd/agent', ...serverArgs] : serverArgs
   const result = spawnSync(command.command, args, {
     cwd: command.cwd,
-    stdio: is.dev ? 'inherit' : 'ignore',
+    encoding: 'utf8',
     env: {
       ...process.env,
       CONFIG_PATH: command.configPath,
     },
   })
-  if (result.status !== 0) {
-    throw new Error('local server migration failed')
+  appendLog(`$ ${command.command} ${args.join(' ')}\nstatus=${String(result.status)} error=${result.error?.message ?? ''}\nstdout:\n${result.stdout ?? ''}\nstderr:\n${result.stderr ?? ''}`)
+  return result
+}
+
+function formatCommandFailure(result: ReturnType<typeof spawnSync>): string {
+  if (result.error) {
+    return result.error.message
   }
+  const stderr = String(result.stderr ?? '').trim()
+  const stdout = String(result.stdout ?? '').trim()
+  return stderr || stdout || `exit status ${String(result.status)}`
 }
 
 export async function ensureLocalServer(): Promise<LocalServerStatus> {
@@ -154,7 +214,7 @@ export async function ensureLocalServer(): Promise<LocalServerStatus> {
   } catch (error) {
     serverReady = false
     serverError = error instanceof Error ? error.message : String(error)
-    dialog.showErrorBox('Memoh server failed to start', serverError)
+    dialog.showErrorBox('Memoh server failed to start', `${serverError}\n\nLog: ${logPath()}`)
   }
   return getLocalServerStatus()
 }

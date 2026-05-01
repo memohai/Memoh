@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
+import { cpSync, copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -10,14 +10,17 @@ const resourcesRoot = resolve(desktopRoot, 'resources')
 const serverDir = resolve(resourcesRoot, 'server')
 const runtimeDir = resolve(resourcesRoot, 'runtime')
 const configDir = resolve(resourcesRoot, 'config')
+const providersDir = resolve(resourcesRoot, 'providers')
 
 const serverName = process.platform === 'win32' ? 'memoh-server.exe' : 'memoh-server'
 
 rmSync(serverDir, { recursive: true, force: true })
 rmSync(runtimeDir, { recursive: true, force: true })
+rmSync(providersDir, { recursive: true, force: true })
 mkdirSync(serverDir, { recursive: true })
 mkdirSync(runtimeDir, { recursive: true })
 mkdirSync(configDir, { recursive: true })
+mkdirSync(providersDir, { recursive: true })
 
 execFileSync('go', ['build', '-o', resolve(serverDir, serverName), './cmd/agent'], {
   cwd: repoRoot,
@@ -30,5 +33,6 @@ execFileSync('go', ['build', '-o', resolve(runtimeDir, 'bridge'), './cmd/bridge'
 })
 
 copyFileSync(resolve(repoRoot, 'conf', 'app.local.toml'), resolve(configDir, 'app.local.toml'))
+cpSync(resolve(repoRoot, 'conf', 'providers'), providersDir, { recursive: true })
 
 console.log(`Prepared desktop local server resources in ${resourcesRoot}`)
