@@ -403,7 +403,10 @@ func (s *Service) planStartRunTask(ctx context.Context, runRow sqlc.Orchestratio
 	if err != nil || result == nil {
 		return nil, "", err
 	}
-	childPlans := plannedChildTasksFromSpecs(result.ChildTasks)
+	childPlans, err := plannedChildTasksFromSpecs(result.ChildTasks)
+	if err != nil {
+		return nil, "", err
+	}
 	if len(childPlans) == 0 {
 		return nil, strings.TrimSpace(result.Summary), nil
 	}
@@ -800,7 +803,10 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 				return sqlc.OrchestrationEvent{}, err
 			}
 			if requestReplan {
-				childPlans := decodePlannedChildTasks(structuredOutput)
+				childPlans, err := decodePlannedChildTasks(structuredOutput)
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
 				if len(childPlans) == 0 {
 					return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
 				}
@@ -848,15 +854,21 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 				return sqlc.OrchestrationEvent{}, err
 			}
 			if requestReplan {
-				childPlans := decodePlannedChildTasks(structuredOutput)
-				if len(childPlans) > 0 {
-					if err := validatePlannedChildTasks(childPlans); err == nil {
-						lastEvent, err = s.enqueueReplanPlanningIntent(ctx, qtx, runRow, failedTask, attemptRow, childPlans, "attempt_finalize.failed_request_replan")
-						if err == nil {
-							break
-						}
-					}
+				childPlans, err := decodePlannedChildTasks(structuredOutput)
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
 				}
+				if len(childPlans) == 0 {
+					return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
+				}
+				if err := validatePlannedChildTasks(childPlans); err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				lastEvent, err = s.enqueueReplanPlanningIntent(ctx, qtx, runRow, failedTask, attemptRow, childPlans, "attempt_finalize.failed_request_replan")
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				break
 			}
 			if err := s.propagateTaskFailureToDependents(ctx, qtx, failedTask, attemptRow); err != nil {
 				return sqlc.OrchestrationEvent{}, err
@@ -978,7 +990,10 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: source task already superseded", ErrPlanningIntentInvalid)
 	}
 
-	childPlans := decodeReplanChildTasks(payload)
+	childPlans, err := decodeReplanChildTasks(payload)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, err
+	}
 	if len(childPlans) == 0 {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: replan intent requires replacement_plan.child_tasks", ErrPlanningIntentInvalid)
 	}
@@ -3350,14 +3365,22 @@ func encodePlannedChildTasks(childPlans []plannedChildTask) []any {
 	return items
 }
 
-func decodeReplanChildTasks(payload map[string]any) []plannedChildTask {
+func decodeReplanChildTasks(payload map[string]any) ([]plannedChildTask, error) {
 	if len(payload) == 0 {
-		return nil
+		return nil, nil
 	}
-	if replacementPlan, ok := payload["replacement_plan"].(map[string]any); ok {
+	rawReplacementPlan, exists := payload["replacement_plan"]
+	if !exists || rawReplacementPlan == nil {
+		return nil, nil
+	}
+	replacementPlan, ok := rawReplacementPlan.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%w: replacement_plan must be an object", ErrPlanningIntentInvalid)
+	}
+	if len(replacementPlan) > 0 {
 		return decodePlannedChildTasks(replacementPlan)
 	}
-	return nil
+	return nil, nil
 }
 
 func buildTaskSubtreeSet(tasks []sqlc.OrchestrationTask, rootTaskID pgtype.UUID) map[string]struct{} {
@@ -3448,15 +3471,15 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 	return nil
 }
 
-func plannedChildTasksFromSpecs(specs []PlannedTaskSpec) []plannedChildTask {
+func plannedChildTasksFromSpecs(specs []PlannedTaskSpec) ([]plannedChildTask, error) {
 	if len(specs) == 0 {
-		return nil
+		return nil, nil
 	}
 	plans := make([]plannedChildTask, 0, len(specs))
-	for _, spec := range specs {
+	for index, spec := range specs {
 		goal := strings.TrimSpace(spec.Goal)
 		if goal == "" {
-			continue
+			return nil, fmt.Errorf("%w: child task %d goal is required", ErrPlanningIntentInvalid, index)
 		}
 		workerProfile := strings.TrimSpace(spec.WorkerProfile)
 		if workerProfile == "" {
@@ -3479,7 +3502,7 @@ func plannedChildTasksFromSpecs(specs []PlannedTaskSpec) []plannedChildTask {
 			BlackboardScope:    strings.TrimSpace(spec.BlackboardScope),
 		})
 	}
-	return plans
+	return plans, nil
 }
 
 func isActiveExecutionTaskStatus(status string) bool {
@@ -3691,51 +3714,184 @@ func (s *Service) releaseRunBarrierAfterCheckpointClosure(
 	return lastEvent, nil
 }
 
-func decodePlannedChildTasks(structuredOutput map[string]any) []plannedChildTask {
+func decodePlannedChildTasks(structuredOutput map[string]any) ([]plannedChildTask, error) {
 	if len(structuredOutput) == 0 {
-		return nil
+		return nil, nil
 	}
 	rawItems, ok := structuredOutput["child_tasks"].([]any)
-	if !ok || len(rawItems) == 0 {
-		return nil
+	if !ok {
+		if _, exists := structuredOutput["child_tasks"]; exists {
+			return nil, fmt.Errorf("%w: child_tasks must be an array", ErrPlanningIntentInvalid)
+		}
+		return nil, nil
+	}
+	if len(rawItems) == 0 {
+		return nil, nil
 	}
 	plans := make([]plannedChildTask, 0, len(rawItems))
-	for _, rawItem := range rawItems {
+	for index, rawItem := range rawItems {
 		item, ok := rawItem.(map[string]any)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("%w: child_tasks[%d] must be an object", ErrPlanningIntentInvalid, index)
 		}
-		goal := strings.TrimSpace(stringValue(item["goal"]))
-		if goal == "" {
-			continue
+		if err := rejectUnknownPlannedChildTaskKeys(item); err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
 		}
-		alias := strings.TrimSpace(stringValue(item["alias"]))
-		if alias == "" {
-			alias = strings.TrimSpace(stringValue(item["id"]))
+		goal, err := plannedChildTaskString(item, "goal", true)
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
 		}
-		kind := strings.TrimSpace(stringValue(item["kind"]))
+		alias, err := plannedChildTaskString(item, "alias", false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		kind, err := plannedChildTaskString(item, "kind", false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
 		if kind == "" {
 			kind = "child"
 		}
-		workerProfile := strings.TrimSpace(stringValue(item["worker_profile"]))
+		workerProfile, err := plannedChildTaskString(item, "worker_profile", false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
 		if workerProfile == "" {
 			workerProfile = DefaultRootWorkerProfile
+		}
+		blackboardScope, err := plannedChildTaskString(item, "blackboard_scope", false)
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		inputs, err := plannedChildTaskObject(item, "inputs")
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		dependsOn, err := plannedChildTaskStringArray(item, "depends_on")
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		priority, err := plannedChildTaskInt(item, "priority")
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		retryPolicy, err := plannedChildTaskObject(item, "retry_policy")
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
+		}
+		verificationPolicy, err := plannedChildTaskObject(item, "verification_policy")
+		if err != nil {
+			return nil, fmt.Errorf("%w: child_tasks[%d]: %w", ErrPlanningIntentInvalid, index, err)
 		}
 		plan := plannedChildTask{
 			Alias:              alias,
 			Kind:               kind,
 			Goal:               goal,
-			Inputs:             mapValue(item["inputs"]),
-			DependsOnAliases:   stringSliceValue(firstNonNil(item["depends_on"], item["depends_on_aliases"], item["depends_on_task_ids"])),
+			Inputs:             inputs,
+			DependsOnAliases:   dependsOn,
 			WorkerProfile:      workerProfile,
-			Priority:           intValue(item["priority"]),
-			RetryPolicy:        mapValue(item["retry_policy"]),
-			VerificationPolicy: mapValue(item["verification_policy"]),
-			BlackboardScope:    strings.TrimSpace(stringValue(item["blackboard_scope"])),
+			Priority:           priority,
+			RetryPolicy:        retryPolicy,
+			VerificationPolicy: verificationPolicy,
+			BlackboardScope:    blackboardScope,
 		}
 		plans = append(plans, plan)
 	}
-	return plans
+	return plans, nil
+}
+
+func plannedChildTaskString(item map[string]any, key string, required bool) (string, error) {
+	raw, ok := item[key]
+	if !ok || raw == nil {
+		if required {
+			return "", fmt.Errorf("%s is required", key)
+		}
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	trimmed := strings.TrimSpace(value)
+	if required && trimmed == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return trimmed, nil
+}
+
+func plannedChildTaskObject(item map[string]any, key string) (map[string]any, error) {
+	raw, ok := item[key]
+	if !ok || raw == nil {
+		return map[string]any{}, nil
+	}
+	value, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an object", key)
+	}
+	return normalizeObject(value), nil
+}
+
+func plannedChildTaskStringArray(item map[string]any, key string) ([]string, error) {
+	raw, ok := item[key]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an array", key)
+	}
+	values := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for index, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s[%d] must be a string", key, index)
+		}
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil, fmt.Errorf("%s[%d] is required", key, index)
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		values = append(values, trimmed)
+	}
+	return values, nil
+}
+
+func plannedChildTaskInt(item map[string]any, key string) (int, error) {
+	raw, ok := item[key]
+	if !ok || raw == nil {
+		return 0, nil
+	}
+	switch value := raw.(type) {
+	case int:
+		return value, nil
+	case int32:
+		return int(value), nil
+	case int64:
+		return int(value), nil
+	case float64:
+		if value != float64(int(value)) {
+			return 0, fmt.Errorf("%s must be an integer", key)
+		}
+		return int(value), nil
+	default:
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+}
+
+func rejectUnknownPlannedChildTaskKeys(item map[string]any) error {
+	for key := range item {
+		switch key {
+		case "alias", "kind", "goal", "inputs", "depends_on", "worker_profile", "priority", "retry_policy", "verification_policy", "blackboard_scope":
+			continue
+		default:
+			return fmt.Errorf("unknown field %q", key)
+		}
+	}
+	return nil
 }
 
 func findRestorableRunBarrierVerification(verifications []sqlc.OrchestrationTaskVerification, taskID pgtype.UUID) (bool, sqlc.OrchestrationTaskVerification) {
@@ -3755,45 +3911,6 @@ func stringValue(raw any) string {
 func mapValue(raw any) map[string]any {
 	value, _ := raw.(map[string]any)
 	return normalizeObject(value)
-}
-
-func intValue(raw any) int {
-	switch value := raw.(type) {
-	case int:
-		return value
-	case int32:
-		return int(value)
-	case int64:
-		return int(value)
-	case float64:
-		return int(value)
-	default:
-		return 0
-	}
-}
-
-func stringSliceValue(raw any) []string {
-	items, ok := raw.([]any)
-	if !ok || len(items) == 0 {
-		return nil
-	}
-	values := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		value := strings.TrimSpace(stringValue(item))
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		values = append(values, value)
-	}
-	if len(values) == 0 {
-		return nil
-	}
-	return values
 }
 
 func normalizeStringSlice(values []string) []string {
@@ -3820,15 +3937,6 @@ func dependencyPredecessorIDs(deps []sqlc.OrchestrationTaskDependency) []string 
 		values = append(values, dep.PredecessorTaskID.String())
 	}
 	return values
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
 }
 
 func clampInt32(value int) int32 {
