@@ -51,6 +51,7 @@ type Config struct {
 	Docker         DockerConfig         `toml:"docker"`
 	Kubernetes     KubernetesConfig     `toml:"kubernetes"`
 	Apple          AppleConfig          `toml:"apple"`
+	Local          LocalConfig          `toml:"local"`
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	SQLite         SQLiteConfig         `toml:"sqlite"`
@@ -110,6 +111,31 @@ type DockerConfig struct {
 type AppleConfig struct {
 	SocketPath string `toml:"socket_path"`
 	BinaryPath string `toml:"binary_path"`
+}
+
+type LocalConfig struct {
+	Enabled                bool   `toml:"enabled"`
+	DefaultWorkspaceParent string `toml:"default_workspace_parent"`
+	MetadataRoot           string `toml:"metadata_root"`
+	AllowAbsolutePaths     bool   `toml:"allow_absolute_paths"`
+}
+
+func (c LocalConfig) WorkspaceParent() string {
+	if strings.TrimSpace(c.DefaultWorkspaceParent) != "" {
+		return expandHome(strings.TrimSpace(c.DefaultWorkspaceParent))
+	}
+	return filepath.Join(homeDirOrDot(), ".memoh", "workspaces")
+}
+
+func (c LocalConfig) MetadataPath(dataRoot string) string {
+	if strings.TrimSpace(c.MetadataRoot) != "" {
+		return expandHome(strings.TrimSpace(c.MetadataRoot))
+	}
+	root := strings.TrimSpace(dataRoot)
+	if root == "" {
+		root = DefaultDataRoot
+	}
+	return filepath.Join(root, "local", "containers")
 }
 
 type KubernetesConfig struct {
@@ -188,6 +214,23 @@ func (c WorkspaceConfig) EffectiveImagePullPolicy() string {
 	default:
 		return ImagePullPolicyIfNotPresent
 	}
+}
+
+func expandHome(path string) string {
+	if path == "~" {
+		return homeDirOrDot()
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDirOrDot(), path[2:])
+	}
+	return path
+}
+
+func homeDirOrDot() string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return home
+	}
+	return "."
 }
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.

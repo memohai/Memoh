@@ -82,7 +82,14 @@ func (*Provider) AccessPath(key string) string {
 func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
 	subPath, ok := attachmentpkg.DataSubpath(containerPath)
 	if !ok {
-		return nil, fmt.Errorf("path must start with %s/", attachmentpkg.DataMountPath(""))
+		if !filepath.IsAbs(strings.TrimSpace(containerPath)) {
+			return nil, fmt.Errorf("path must start with %s/ or be an absolute local workspace path", attachmentpkg.DataMountPath(""))
+		}
+		client, err := p.clients.MCPClient(ctx, botID)
+		if err != nil {
+			return nil, fmt.Errorf("get client: %w", err)
+		}
+		return client.ReadRaw(ctx, filepath.Clean(containerPath))
 	}
 	if subPath == "" || strings.Contains(subPath, "..") {
 		return nil, errors.New("invalid container path")

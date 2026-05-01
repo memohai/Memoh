@@ -17,6 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/logger"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
 
 const (
@@ -26,7 +27,7 @@ const (
 
 // initDataDir ensures /data exists and seeds template files on first boot.
 func initDataDir() {
-	if err := os.MkdirAll(defaultWorkDir, 0o750); err != nil {
+	if err := os.MkdirAll(bridgesvc.DefaultWorkDir, 0o750); err != nil {
 		logger.Warn("failed to create data dir", slog.Any("error", err))
 		return
 	}
@@ -42,7 +43,7 @@ func initDataDir() {
 		if e.IsDir() {
 			continue
 		}
-		dst := filepath.Join(defaultWorkDir, e.Name())
+		dst := filepath.Join(bridgesvc.DefaultWorkDir, e.Name())
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}
@@ -114,7 +115,11 @@ func main() {
 			PermitWithoutStream: true,
 		}),
 	)
-	pb.RegisterContainerServiceServer(srv, &containerServer{})
+	pb.RegisterContainerServiceServer(srv, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir:    bridgesvc.DefaultWorkDir,
+		DataMount:         bridgesvc.DefaultWorkDir,
+		AllowHostAbsolute: true,
+	}))
 	reflection.Register(srv)
 
 	go func() {

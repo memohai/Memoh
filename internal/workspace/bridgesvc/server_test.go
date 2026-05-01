@@ -1,4 +1,4 @@
-package main
+package bridgesvc
 
 import (
 	"context"
@@ -50,8 +50,9 @@ func (*cancelOnStdoutExecStream) RecvMsg(any) error            { return nil }
 
 func TestExecPipePreservesExitCodeAcrossStreamCancellation(t *testing.T) {
 	stream := newCancelOnStdoutExecStream()
+	srv := New(Options{DefaultWorkDir: "/tmp", AllowHostAbsolute: true})
 
-	err := execPipe(stream, &pb.ExecInput{
+	err := srv.execPipe(stream, &pb.ExecInput{
 		Command:        "printf ok; sleep 0.2",
 		WorkDir:        "/tmp",
 		TimeoutSeconds: 5,

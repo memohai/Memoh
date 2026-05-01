@@ -147,6 +147,31 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml restart $@"
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
 
+[tasks."local:dev"]
+description = "Start the server locally with Docker and local workspaces enabled"
+run = """
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_PATH="${CONFIG_PATH:-conf/app.local.toml}"
+RUNTIME_DIR="${MEMOH_LOCAL_RUNTIME_DIR:-data/runtime}"
+
+mkdir -p data/local "$RUNTIME_DIR"
+go build -o "$RUNTIME_DIR/bridge" ./cmd/bridge
+
+if [ -d ".toolkit" ]; then
+  rm -rf "$RUNTIME_DIR/toolkit"
+  mkdir -p "$RUNTIME_DIR/toolkit"
+  cp -a .toolkit/. "$RUNTIME_DIR/toolkit/"
+else
+  echo "warning: .toolkit not found; Docker workspaces will run without bundled node/uv tools." >&2
+  echo "         Run 'mise run install-workspace-toolkit' to install them." >&2
+fi
+
+CONFIG_PATH="$CONFIG_PATH" go run ./cmd/agent migrate up
+CONFIG_PATH="$CONFIG_PATH" go run ./cmd/agent serve
+"""
+
 [tasks."bridge:build"]
 description = "Manually rebuild bridge binary in dev container (normally auto-triggered by air)"
 run = """

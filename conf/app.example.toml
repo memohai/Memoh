@@ -79,6 +79,22 @@ bridge_port = 9090
 socket_path = ""
 binary_path = ""
 
+[local]
+# Enables local workspaces alongside the configured container backend. This is
+# intended for trusted desktop use only: there is no sandbox, and commands run
+# as the server process user on the host machine.
+enabled = false
+# Default parent used when a local bot does not provide an explicit workspace
+# path. The final default is "$HOME/.memoh/workspaces/<bot-name>".
+default_workspace_parent = "~/.memoh/workspaces"
+# Metadata for local workspace records. Leave empty to store it under
+# [container].data_root/local/containers.
+metadata_root = ""
+# When true, local workspace tools may read/write/execute using host absolute
+# paths outside the bot's default workspace. Desktop can enable this for a
+# trusted local user; server deployments should keep local disabled.
+allow_absolute_paths = true
+
 [postgres]
 # Used only when [database].driver = "postgres".
 host = "127.0.0.1"

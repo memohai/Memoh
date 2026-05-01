@@ -1,4 +1,4 @@
-package main
+package bridgesvc
 
 import (
 	"bufio"
@@ -25,28 +25,62 @@ import (
 
 const (
 	readMaxLines      = 2000
-	readMaxBytes      = 0 // 0 = no byte limit (line count only)
-	readMaxLineLen    = 0 // 0 = no per-line truncation
+	readMaxBytes      = 0
+	readMaxLineLen    = 0
 	listMaxEntries    = 200
 	binaryProbeBytes  = 8 * 1024
 	rawChunkSize      = 64 * 1024
-	defaultWorkDir    = "/data"
+	DefaultWorkDir    = "/data"
 	defaultTimeout    = 30
-	defaultPTYTimeout = 5 * 60 // 5 minutes max for PTY sessions (agent tool calls)
+	defaultPTYTimeout = 5 * 60
 )
 
-type containerServer struct {
-	pb.UnimplementedContainerServiceServer
+type Options struct {
+	DefaultWorkDir    string
+	WorkspaceRoot     string
+	DataMount         string
+	AllowHostAbsolute bool
 }
 
-func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+type Server struct {
+	pb.UnimplementedContainerServiceServer
+	defaultWorkDir    string
+	workspaceRoot     string
+	dataMount         string
+	allowHostAbsolute bool
+}
+
+func New(opts Options) *Server {
+	defaultWorkDir := strings.TrimSpace(opts.DefaultWorkDir)
+	if defaultWorkDir == "" {
+		defaultWorkDir = DefaultWorkDir
+	}
+	dataMount := strings.TrimRight(strings.TrimSpace(opts.DataMount), string(filepath.Separator))
+	if dataMount == "" {
+		dataMount = DefaultWorkDir
+	}
+	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
+	if workspaceRoot != "" {
+		if abs, err := filepath.Abs(workspaceRoot); err == nil {
+			workspaceRoot = abs
+		}
+	}
+	return &Server{
+		defaultWorkDir:    filepath.Clean(defaultWorkDir),
+		workspaceRoot:     filepath.Clean(workspaceRoot),
+		dataMount:         filepath.Clean(dataMount),
+		allowHostAbsolute: opts.AllowHostAbsolute,
+	}
+}
+
+func (s *Server) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
-	f, err := os.Open(path) //nolint:gosec // G304: MCP container filesystem server; paths are resolved within the container's /data, SSRF is by design
+	f, err := os.Open(path) //nolint:gosec // G304: workspace bridge intentionally serves agent-selected paths.
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "open: %v", err)
 	}
@@ -86,7 +120,7 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 			continue
 		}
 		if linesRead >= nLines {
-			continue // keep scanning to count total lines
+			continue
 		}
 
 		line := scanner.Text()
@@ -103,7 +137,6 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 		linesRead++
 	}
 
-	// Drain remaining lines for total count.
 	for scanner.Scan() {
 		totalLines++
 	}
@@ -114,12 +147,12 @@ func (*containerServer) ReadFile(_ context.Context, req *pb.ReadFileRequest) (*p
 	}, nil
 }
 
-func (*containerServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+func (s *Server) WriteFile(_ context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
@@ -130,25 +163,25 @@ func (*containerServer) WriteFile(_ context.Context, req *pb.WriteFileRequest) (
 	return &pb.WriteFileResponse{}, nil
 }
 
-func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
 	dir := req.GetPath()
 	if dir == "" {
 		dir = "."
 	}
-	dir = resolvePath(dir)
+	dir = s.resolvePath(dir)
 
 	var all []*pb.FileEntry
 
 	if req.GetRecursive() {
 		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil // skip errors
+				return nil
 			}
 			rel, _ := filepath.Rel(dir, p)
 			if rel == "." {
 				return nil
 			}
-			entry, _ := buildFileEntry(rel, p, d)
+			entry, _ := buildFileEntry(rel, d)
 			if entry != nil {
 				all = append(all, entry)
 			}
@@ -167,7 +200,7 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 			return nil, status.Errorf(codes.NotFound, "readdir: %v", err)
 		}
 		for _, d := range dirEntries {
-			entry, _ := buildFileEntry(d.Name(), filepath.Join(dir, d.Name()), d)
+			entry, _ := buildFileEntry(d.Name(), d)
 			if entry != nil {
 				all = append(all, entry)
 			}
@@ -187,7 +220,6 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 		limit = listMaxEntries
 	}
 
-	// limit=0 means no limit (return all entries from offset)
 	var entries []*pb.FileEntry
 	if int(offset) < len(all) {
 		entries = all[offset:]
@@ -204,68 +236,7 @@ func (*containerServer) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.
 	}, nil
 }
 
-// collapseHeavySubdirs replaces entries under top-level subdirectories that
-// exceed the threshold with a single summary entry per heavy directory.
-// The top-level directory entry itself (e.g. ".venv") is preserved.
-func collapseHeavySubdirs(entries []*pb.FileEntry, threshold int) []*pb.FileEntry {
-	counts := make(map[string]int)
-	for _, e := range entries {
-		top := listTopDir(e.GetPath())
-		if top != "" {
-			counts[top]++
-		}
-	}
-
-	heavy := make(map[string]bool)
-	for dir, n := range counts {
-		if n > threshold {
-			heavy[dir] = true
-		}
-	}
-	if len(heavy) == 0 {
-		return entries
-	}
-
-	seen := make(map[string]bool)
-	out := make([]*pb.FileEntry, 0, len(entries))
-	for _, e := range entries {
-		path := e.GetPath()
-		top := listTopDir(path)
-
-		if !heavy[top] {
-			// Top-level files (top=="") or entries under non-heavy dirs pass through.
-			out = append(out, e)
-			continue
-		}
-
-		// Keep the top-level directory entry itself (path == top, is_dir).
-		if path == top && e.GetIsDir() {
-			out = append(out, e)
-			continue
-		}
-
-		if seen[top] {
-			continue
-		}
-		seen[top] = true
-		out = append(out, &pb.FileEntry{
-			Path:    top + "/",
-			IsDir:   true,
-			Summary: fmt.Sprintf("%d items (not expanded)", counts[top]),
-		})
-	}
-	return out
-}
-
-// listTopDir extracts the first path component from a relative path.
-func listTopDir(path string) string {
-	if i := strings.IndexByte(path, '/'); i >= 0 {
-		return path[:i]
-	}
-	return ""
-}
-
-func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
+func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
 	firstMsg, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "failed to receive exec config")
@@ -277,17 +248,14 @@ func (*containerServer) Exec(stream pb.ContainerService_ExecServer) error {
 	}
 
 	if firstMsg.GetPty() {
-		return execPTY(stream, firstMsg)
+		return s.execPTY(stream, firstMsg)
 	}
-	return execPipe(stream, firstMsg)
+	return s.execPipe(stream, firstMsg)
 }
 
-func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
+func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
 	command := firstMsg.GetCommand()
-	workDir := firstMsg.GetWorkDir()
-	if workDir == "" {
-		workDir = defaultWorkDir
-	}
+	workDir := s.resolveExecWorkDir(firstMsg.GetWorkDir())
 
 	timeout := int(firstMsg.GetTimeoutSeconds())
 	if timeout <= 0 {
@@ -298,9 +266,9 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 
 	var cmd *exec.Cmd
 	if isBarePath(command) {
-		cmd = exec.CommandContext(ctx, command) //nolint:gosec // G204: intentional
+		cmd = exec.CommandContext(ctx, command) //nolint:gosec // G204: intentional agent command execution.
 	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional agent command execution.
 	}
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
@@ -318,7 +286,6 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 	}
 	defer func() { _ = ptmx.Close() }()
 
-	// stdin + resize from stream
 	go func() {
 		for {
 			msg, recvErr := stream.Recv()
@@ -337,7 +304,6 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 		}
 	}()
 
-	// PTY output -> stream (single fd merges stdout+stderr)
 	streamPipe(stream, ptmx, pb.ExecOutput_STDOUT)
 
 	exitCode := int32(0)
@@ -357,26 +323,19 @@ func execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) erro
 	})
 }
 
-func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
+func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
 	command := firstMsg.GetCommand()
-	workDir := firstMsg.GetWorkDir()
-	if workDir == "" {
-		workDir = defaultWorkDir
-	}
+	workDir := s.resolveExecWorkDir(firstMsg.GetWorkDir())
 
 	timeout := int(firstMsg.GetTimeoutSeconds())
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
 
-	// Process context is independent of the gRPC stream so the process keeps
-	// running even if the stream is cancelled (e.g. background tasks whose client
-	// disconnects or whose stream context dies after the process completes).
-	// Only the process-level timeout kills the process, not stream death.
 	procCtx, procCancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer procCancel()
 
-	cmd := exec.CommandContext(procCtx, "/bin/sh", "-c", command) //nolint:gosec // G204: MCP exec tool intentionally executes agent-issued shell commands inside the container
+	cmd := exec.CommandContext(procCtx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional agent command execution.
 	cmd.Dir = workDir
 	if len(firstMsg.GetEnv()) > 0 {
 		cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
@@ -386,7 +345,6 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 	if err != nil {
 		return status.Errorf(codes.Internal, "stdin pipe: %v", err)
 	}
-
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return status.Errorf(codes.Internal, "stdout pipe: %v", err)
@@ -400,10 +358,6 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
 
-	// Close pipes when EITHER the process finishes (procCtx done) OR the gRPC
-	// stream dies (stream.Context done). Closing unblocks streamPipe's Read so
-	// the goroutines can exit. We do NOT cancel procCtx on stream death — the
-	// process keeps running so background tasks survive client disconnects.
 	go func() {
 		select {
 		case <-procCtx.Done():
@@ -439,16 +393,12 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 		exitErr := &exec.ExitError{}
 		if errors.As(err, &exitErr) {
 			ec := exitErr.ExitCode()
-			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115: value is clamped to int32 range above; Unix exit codes are 0-255
+			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115
 		} else {
 			exitCode = -1
 		}
 	}
 
-	// Send exit code to the client. If the stream is already gone (e.g. the
-	// client is a background task manager that got a stream error when the
-	// process completed), the send will fail but we return nil so the gRPC
-	// handler does not propagate a spurious "context canceled" error status.
 	_ = stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,
 		ExitCode: exitCode,
@@ -456,14 +406,14 @@ func execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) err
 	return nil
 }
 
-func (*containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
+func (s *Server) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
 	path := req.GetPath()
 	if path == "" {
 		return status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
-	f, err := os.Open(path) //nolint:gosec // G304: MCP container filesystem server; path is resolved within the container
+	f, err := os.Open(path) //nolint:gosec // G304: workspace bridge intentionally serves agent-selected paths.
 	if err != nil {
 		return status.Errorf(codes.NotFound, "open: %v", err)
 	}
@@ -487,7 +437,7 @@ func (*containerServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerServi
 	return nil
 }
 
-func (*containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
+func (s *Server) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
 	var f *os.File
 	var written int64
 
@@ -505,11 +455,11 @@ func (*containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) erro
 			if path == "" {
 				return status.Error(codes.InvalidArgument, "first chunk must include path")
 			}
-			path = resolvePath(path)
+			path = s.resolvePath(path)
 			if mkErr := os.MkdirAll(filepath.Dir(path), 0o750); mkErr != nil {
 				return status.Errorf(codes.Internal, "mkdir: %v", mkErr)
 			}
-			f, err = os.Create(path) //nolint:gosec // G304: MCP container filesystem server; path is resolved within the container
+			f, err = os.Create(path) //nolint:gosec // G304: workspace bridge intentionally serves agent-selected paths.
 			if err != nil {
 				return status.Errorf(codes.Internal, "create: %v", err)
 			}
@@ -528,12 +478,12 @@ func (*containerServer) WriteRaw(stream pb.ContainerService_WriteRawServer) erro
 	return stream.SendAndClose(&pb.WriteRawResponse{BytesWritten: written})
 }
 
-func (*containerServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {
+func (s *Server) DeleteFile(_ context.Context, req *pb.DeleteFileRequest) (*pb.DeleteFileResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
 	var err error
 	if req.GetRecursive() {
@@ -547,12 +497,12 @@ func (*containerServer) DeleteFile(_ context.Context, req *pb.DeleteFileRequest)
 	return &pb.DeleteFileResponse{}, nil
 }
 
-func (*containerServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
+func (s *Server) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -572,12 +522,12 @@ func (*containerServer) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatRe
 	}, nil
 }
 
-func (*containerServer) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.MkdirResponse, error) {
+func (s *Server) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.MkdirResponse, error) {
 	path := req.GetPath()
 	if path == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	path = resolvePath(path)
+	path = s.resolvePath(path)
 
 	if err := os.MkdirAll(path, 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir: %v", err)
@@ -585,14 +535,14 @@ func (*containerServer) Mkdir(_ context.Context, req *pb.MkdirRequest) (*pb.Mkdi
 	return &pb.MkdirResponse{}, nil
 }
 
-func (*containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameResponse, error) {
+func (s *Server) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameResponse, error) {
 	oldPath := req.GetOldPath()
 	newPath := req.GetNewPath()
 	if oldPath == "" || newPath == "" {
 		return nil, status.Error(codes.InvalidArgument, "old_path and new_path are required")
 	}
-	oldPath = resolvePath(oldPath)
-	newPath = resolvePath(newPath)
+	oldPath = s.resolvePath(oldPath)
+	newPath = s.resolvePath(newPath)
 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir parent: %v", err)
@@ -603,10 +553,85 @@ func (*containerServer) Rename(_ context.Context, req *pb.RenameRequest) (*pb.Re
 	return &pb.RenameResponse{}, nil
 }
 
-// isBarePath returns true when the command string is a plain executable path
-// (no spaces, shell operators, or arguments) so it can be exec'd directly
-// without wrapping in "/bin/sh -c". This matters for interactive PTY shells
-// where /bin/sh -c wrapping would strip readline support.
+func (s *Server) resolveExecWorkDir(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return s.defaultWorkDir
+	}
+	return s.resolvePath(path)
+}
+
+func (s *Server) resolvePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return s.defaultWorkDir
+	}
+	clean := filepath.Clean(path)
+	if filepath.IsAbs(clean) {
+		if s.workspaceRoot != "." && (clean == s.dataMount || strings.HasPrefix(clean, s.dataMount+string(filepath.Separator))) {
+			rel := strings.TrimPrefix(clean, s.dataMount)
+			return filepath.Join(s.workspaceRoot, strings.TrimPrefix(rel, string(filepath.Separator)))
+		}
+		if s.allowHostAbsolute || s.workspaceRoot == "." || clean == s.defaultWorkDir || strings.HasPrefix(clean, s.defaultWorkDir+string(filepath.Separator)) {
+			return clean
+		}
+		return filepath.Join(s.defaultWorkDir, strings.TrimPrefix(clean, string(filepath.Separator)))
+	}
+	return filepath.Join(s.defaultWorkDir, clean)
+}
+
+func collapseHeavySubdirs(entries []*pb.FileEntry, threshold int) []*pb.FileEntry {
+	counts := make(map[string]int)
+	for _, e := range entries {
+		top := listTopDir(e.GetPath())
+		if top != "" {
+			counts[top]++
+		}
+	}
+
+	heavy := make(map[string]bool)
+	for dir, n := range counts {
+		if n > threshold {
+			heavy[dir] = true
+		}
+	}
+	if len(heavy) == 0 {
+		return entries
+	}
+
+	seen := make(map[string]bool)
+	out := make([]*pb.FileEntry, 0, len(entries))
+	for _, e := range entries {
+		path := e.GetPath()
+		top := listTopDir(path)
+
+		if !heavy[top] {
+			out = append(out, e)
+			continue
+		}
+		if path == top && e.GetIsDir() {
+			out = append(out, e)
+			continue
+		}
+		if seen[top] {
+			continue
+		}
+		seen[top] = true
+		out = append(out, &pb.FileEntry{
+			Path:    top + "/",
+			IsDir:   true,
+			Summary: fmt.Sprintf("%d items (not expanded)", counts[top]),
+		})
+	}
+	return out
+}
+
+func listTopDir(path string) string {
+	if i := strings.IndexByte(path, '/'); i >= 0 {
+		return path[:i]
+	}
+	return ""
+}
+
 func isBarePath(cmd string) bool {
 	if cmd == "" {
 		return false
@@ -635,7 +660,7 @@ func streamPipe(stream pb.ContainerService_ExecServer, r io.Reader, st pb.ExecOu
 	}
 }
 
-func buildFileEntry(name, _ string, d fs.DirEntry) (*pb.FileEntry, error) {
+func buildFileEntry(name string, d fs.DirEntry) (*pb.FileEntry, error) {
 	info, err := d.Info()
 	if err != nil {
 		return nil, err
@@ -647,13 +672,6 @@ func buildFileEntry(name, _ string, d fs.DirEntry) (*pb.FileEntry, error) {
 		Mode:    info.Mode().String(),
 		ModTime: info.ModTime().Format(time.RFC3339),
 	}, nil
-}
-
-func resolvePath(path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-	return filepath.Join(defaultWorkDir, path)
 }
 
 func truncateRunes(s string, maxRunes int) string {

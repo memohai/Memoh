@@ -1,0 +1,99 @@
+# Memoh local desktop/development configuration.
+# Runs the server directly on the host, uses Docker for container workspaces,
+# and also enables trusted local workspaces.
+
+[log]
+level = "info"
+format = "text"
+
+[server]
+addr = ":18080"
+
+[admin]
+username = "admin"
+password = "admin123"
+email = "admin@memoh.local"
+
+[auth]
+jwt_secret = "LOCAL-DEV-CHANGE-ME"
+jwt_expires_in = "168h"
+
+timezone = "UTC"
+
+[database]
+driver = "sqlite"
+
+[container]
+# Keep Docker available for bots that still need isolated workspaces.
+backend = "docker"
+default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
+snapshotter = "docker"
+data_root = "data/local"
+runtime_dir = "data/runtime"
+
+[docker]
+# Leave empty to use Docker's standard environment discovery.
+host = ""
+
+[local]
+# Local workspaces run with the server process permissions and have no sandbox.
+# This is intended for trusted desktop/local development only.
+enabled = true
+default_workspace_parent = "~/.memoh/workspaces"
+metadata_root = "data/local/local/containers"
+allow_absolute_paths = true
+
+[containerd]
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[kubernetes]
+namespace = "default"
+in_cluster = false
+kubeconfig = ""
+service_account_name = ""
+image_pull_secret = ""
+pvc_storage_class = ""
+pvc_size = "10Gi"
+bridge_port = 9090
+
+[apple]
+socket_path = ""
+binary_path = ""
+
+[sqlite]
+path = "data/local/memoh.db"
+wal = true
+busy_timeout_ms = 5000
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+user = "memoh"
+password = "memoh123"
+database = "memoh"
+sslmode = "disable"
+
+[qdrant]
+base_url = "http://127.0.0.1:6334"
+api_key = ""
+timeout_seconds = 10
+
+[sparse]
+base_url = "http://127.0.0.1:8085"
+
+[registry]
+providers_dir = "conf/providers"
+
+[browser_gateway]
+host = "127.0.0.1"
+port = 18083
+server_addr = ":18080"
+
+[supermarket]
+base_url = "https://supermarket.memoh.ai"
+
+[web]
+host = "127.0.0.1"
+port = 8082

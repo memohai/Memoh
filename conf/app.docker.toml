@@ -49,6 +49,15 @@ namespace = "default"
 # uses containerd above.
 host = ""
 
+[local]
+# Local workspaces are intended for trusted desktop builds, not the default
+# Docker Compose deployment. Keep disabled here because local commands run as
+# the server process user without container isolation.
+enabled = false
+default_workspace_parent = "~/.memoh/workspaces"
+metadata_root = ""
+allow_absolute_paths = false
+
 ## Postgres configuration. Used only when [database].driver = "postgres".
 [postgres]
 host = "postgres"

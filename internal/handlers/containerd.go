@@ -45,14 +45,18 @@ type ContainerGPURequest struct {
 }
 
 type CreateContainerRequest struct {
-	Snapshotter string               `json:"snapshotter,omitempty"`
-	RestoreData bool                 `json:"restore_data,omitempty"`
-	Image       string               `json:"image,omitempty"`
-	GPU         *ContainerGPURequest `json:"gpu,omitempty"`
+	Snapshotter        string               `json:"snapshotter,omitempty"`
+	RestoreData        bool                 `json:"restore_data,omitempty"`
+	Image              string               `json:"image,omitempty"`
+	WorkspaceBackend   string               `json:"workspace_backend,omitempty"`
+	LocalWorkspacePath string               `json:"local_workspace_path,omitempty"`
+	GPU                *ContainerGPURequest `json:"gpu,omitempty"`
 }
 
 type CreateContainerResponse struct {
 	ContainerID      string   `json:"container_id"`
+	WorkspaceBackend string   `json:"workspace_backend"`
+	ContainerPath    string   `json:"container_path"`
 	Image            string   `json:"image"`
 	Snapshotter      string   `json:"snapshotter"`
 	CDIDevices       []string `json:"cdi_devices,omitempty"`
@@ -99,6 +103,7 @@ type createContainerErrorEvent struct {
 
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
+	WorkspaceBackend string    `json:"workspace_backend"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -314,32 +319,41 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerErrorEvent{Type: "error", Message: msg})
 	}
 
-	// Phase 1: Pull image with progress
-	send(createContainerPullingEvent{Type: "pulling", Image: image})
-
-	var pullDone atomic.Bool
-	prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
-		Unpack:        true,
-		StorageDriver: snapshotter,
-		OnProgress: func(p ctr.PullProgress) {
-			if pullDone.Load() {
-				return
-			}
-			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
-		},
-	})
-	pullDone.Store(true)
-	if pullErr != nil {
-		h.logger.Error("image preparation failed",
-			slog.String("image", image), slog.Any("error", pullErr))
-		sendError("image preparation failed: " + pullErr.Error())
-		return nil
+	workspaceBackend := strings.ToLower(strings.TrimSpace(req.WorkspaceBackend))
+	if workspaceBackend == "" {
+		workspaceBackend = "container"
 	}
-	switch prepareResult.Mode {
-	case workspace.ImagePrepareSkipped:
-		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
-	case workspace.ImagePrepareDelegated:
-		send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
+	if workspaceBackend == "local" {
+		image = "local"
+		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: "local workspace does not use container images"})
+	} else {
+		// Phase 1: Pull image with progress
+		send(createContainerPullingEvent{Type: "pulling", Image: image})
+
+		var pullDone atomic.Bool
+		prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+			Unpack:        true,
+			StorageDriver: snapshotter,
+			OnProgress: func(p ctr.PullProgress) {
+				if pullDone.Load() {
+					return
+				}
+				send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
+			},
+		})
+		pullDone.Store(true)
+		if pullErr != nil {
+			h.logger.Error("image preparation failed",
+				slog.String("image", image), slog.Any("error", pullErr))
+			sendError("image preparation failed: " + pullErr.Error())
+			return nil
+		}
+		switch prepareResult.Mode {
+		case workspace.ImagePrepareSkipped:
+			send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
+		case workspace.ImagePrepareDelegated:
+			send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
+		}
 	}
 
 	// Phase 2: Create container (image is local, should be fast)
@@ -351,7 +365,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerRestoringEvent{Type: "restoring"})
 	}
 
-	if err := h.manager.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
+	if err := h.manager.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspace.WorkspaceStartConfig{
+		Backend:            workspaceBackend,
+		LocalWorkspacePath: strings.TrimSpace(req.LocalWorkspacePath),
+	}); err != nil {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		sendError("container start failed: " + err.Error())
@@ -395,8 +412,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 			slog.String("bot_id", botID), slog.Any("error", statusErr))
 	}
 	cdiDevices := gpu.Devices
+	containerPath := ""
+	responseBackend := workspaceBackend
 	if status != nil {
 		cdiDevices = status.CDIDevices
+		containerPath = status.ContainerPath
+		responseBackend = status.WorkspaceBackend
 	}
 
 	// Phase 3: Complete
@@ -404,6 +425,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		Type: "complete",
 		Container: CreateContainerResponse{
 			ContainerID:      containerID,
+			WorkspaceBackend: responseBackend,
+			ContainerPath:    containerPath,
 			Image:            image,
 			Snapshotter:      snapshotter,
 			CDIDevices:       cdiDevices,
@@ -438,6 +461,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
 		ContainerID:      status.ContainerID,
+		WorkspaceBackend: status.WorkspaceBackend,
 		Image:            status.Image,
 		Status:           status.Status,
 		Namespace:        status.Namespace,

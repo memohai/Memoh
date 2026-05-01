@@ -15,6 +15,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
+	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -41,6 +42,7 @@ var ErrContainerNotFound = errors.New("container not found for bot")
 // ContainerStatus combines DB records with live containerd state.
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
+	WorkspaceBackend string    `json:"workspace_backend"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -86,6 +88,11 @@ type Manager struct {
 	grpcPool          *bridge.Pool
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
+}
+
+type WorkspaceStartConfig struct {
+	Backend            string
+	LocalWorkspacePath string
 }
 
 func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
@@ -191,7 +198,32 @@ func (m *Manager) clearLegacyRoute(botID string) {
 // MCPClient returns a gRPC client for the given bot's container.
 // Implements bridge.Provider.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	if provider, ok := m.service.(bridge.Provider); ok {
+		client, err := provider.MCPClient(ctx, botID)
+		if err == nil {
+			return client, nil
+		}
+		if !errors.Is(err, ctr.ErrNotSupported) && !ctr.IsNotFound(err) {
+			return nil, err
+		}
+	}
 	return m.grpcPool.Get(ctx, botID)
+}
+
+func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
+	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
+		info, err := provider.WorkspaceInfo(ctx, botID)
+		if err == nil {
+			return info, nil
+		}
+		if !errors.Is(err, ctr.ErrNotSupported) && !ctr.IsNotFound(err) {
+			return bridge.WorkspaceInfo{}, err
+		}
+	}
+	return bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendContainer,
+		DefaultWorkDir: config.DefaultDataMount,
+	}, nil
 }
 
 func (m *Manager) Init(ctx context.Context) error {
@@ -396,6 +428,52 @@ func (m *Manager) StartWithResolvedConfig(ctx context.Context, botID, image stri
 	return m.startWithResolvedConfig(ctx, botID, image, gpu)
 }
 
+func (m *Manager) StartWithWorkspaceConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig, workspaceCfg WorkspaceStartConfig) error {
+	switch strings.ToLower(strings.TrimSpace(workspaceCfg.Backend)) {
+	case "", bridge.WorkspaceBackendContainer:
+		return m.StartWithResolvedConfig(ctx, botID, image, gpu)
+	case bridge.WorkspaceBackendLocal:
+		return m.startWithLocalConfig(ctx, botID, image, workspaceCfg.LocalWorkspacePath)
+	default:
+		return fmt.Errorf("unsupported workspace backend %q", workspaceCfg.Backend)
+	}
+}
+
+func (m *Manager) startWithLocalConfig(ctx context.Context, botID, image, workspacePath string) error {
+	if err := validateBotID(botID); err != nil {
+		return err
+	}
+	if checker, ok := m.service.(interface{ LocalEnabled() bool }); !ok || !checker.LocalEnabled() {
+		return ctr.ErrNotSupported
+	}
+	containerID := LocalContainerPrefix + botID
+	path := strings.TrimSpace(workspacePath)
+	if path == "" {
+		path = m.defaultLocalWorkspacePath(ctx, botID)
+	}
+	labels := map[string]string{
+		BotLabelKey:       botID,
+		WorkspaceLabelKey: WorkspaceLabelValue,
+	}
+	if strings.TrimSpace(image) == "" {
+		image = "local"
+	}
+	if _, err := m.service.CreateContainer(ctx, ctr.CreateContainerRequest{
+		ID:              containerID,
+		ImageRef:        image,
+		ImagePullPolicy: config.ImagePullPolicyNever,
+		StorageRef:      ctr.StorageRef{Driver: localRuntimeName, Key: path, Kind: "directory"},
+		Labels:          labels,
+	}); err != nil && !ctr.IsAlreadyExists(err) {
+		return err
+	}
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		return err
+	}
+	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+	return nil
+}
+
 func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
 	containerID := m.resolveContainerID(ctx, botID)
 
@@ -493,6 +571,25 @@ func (m *Manager) dataRoot() string {
 
 func (m *Manager) imageRef() string {
 	return m.cfg.ImageRef()
+}
+
+func (m *Manager) defaultLocalWorkspacePath(ctx context.Context, botID string) string {
+	displayName := botID
+	if m.queries != nil {
+		if pgBotID, err := db.ParseUUID(botID); err == nil {
+			if row, err := m.queries.GetBotByID(ctx, pgBotID); err == nil && row.DisplayName.Valid && strings.TrimSpace(row.DisplayName.String) != "" {
+				displayName = row.DisplayName.String
+			}
+		}
+	}
+	if resolver, ok := m.service.(interface {
+		DefaultLocalWorkspacePath(string, string) string
+	}); ok {
+		if path := strings.TrimSpace(resolver.DefaultLocalWorkspacePath(botID, displayName)); path != "" {
+			return path
+		}
+	}
+	return filepath.Join(config.LocalConfig{}.WorkspaceParent(), displayName)
 }
 
 // IsLegacyContainer returns true if the container was created before the

@@ -11,10 +11,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,9 @@ func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, container
 }
 
 func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, containerID string) (string, error) {
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return "127.0.0.1", nil
+	}
 	var lastErr error
 	for attempt := range 2 {
 		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
@@ -138,6 +143,9 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 }
 
 func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID string) error {
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return nil
+	}
 	return m.networkController.Detach(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 }
 
@@ -262,6 +270,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				}
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
+					WorkspaceBackend: workspaceBackendFromContainerID(row.ContainerID),
 					Image:            row.Image,
 					Status:           row.Status,
 					Namespace:        row.Namespace,
@@ -290,6 +299,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	}
 	return &ContainerStatus{
 		ContainerID:      info.ID,
+		WorkspaceBackend: workspaceBackendFromContainerID(info.ID),
 		Image:            info.Image,
 		Status:           "unknown",
 		Namespace:        m.namespace,
@@ -487,6 +497,7 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 		Status:        status,
 		Namespace:     ns,
 		AutoStart:     true,
+		ContainerPath: m.containerRecordPath(ctx, containerID),
 	}); dbErr != nil {
 		m.logger.Error("failed to upsert container record",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
@@ -494,6 +505,22 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 	if status == "running" {
 		m.markContainerStarted(ctx, botID)
 	}
+}
+
+func (m *Manager) containerRecordPath(ctx context.Context, containerID string) string {
+	if info, err := m.service.GetContainer(ctx, containerID); err == nil {
+		if strings.TrimSpace(info.StorageRef.Key) != "" && strings.TrimSpace(info.StorageRef.Driver) == localRuntimeName {
+			return info.StorageRef.Key
+		}
+	}
+	return config.DefaultDataMount
+}
+
+func workspaceBackendFromContainerID(containerID string) string {
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return bridge.WorkspaceBackendLocal
+	}
+	return bridge.WorkspaceBackendContainer
 }
 
 func (m *Manager) deleteContainerRecord(ctx context.Context, botID string) {
