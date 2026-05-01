@@ -151,7 +151,16 @@ binary_path = "/opt/homebrew/bin/socktainer"
 }
 
 func TestLoadAppLocalTemplate(t *testing.T) {
-	cfg, err := Load(filepath.Join("..", "..", "conf", "app.local.toml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.local.toml"))
+	if err != nil {
+		t.Fatalf("read app.local.toml: %v", err)
+	}
+	rendered := strings.ReplaceAll(string(raw), "__PROJECT_ROOT__", filepath.ToSlash(filepath.Join("..", "..")))
+	configPath := filepath.Join(t.TempDir(), "app.local.toml")
+	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+		t.Fatalf("write rendered app.local.toml: %v", err)
+	}
+	cfg, err := Load(configPath)
 	if err != nil {
 		t.Fatalf("load app.local.toml: %v", err)
 	}

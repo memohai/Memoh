@@ -166,6 +166,46 @@ func (r *RuntimeRouter) RestoreContainer(ctx context.Context, req ctr.CreateCont
 	return r.routeCreate(req).RestoreContainer(ctx, req)
 }
 
+func (r *RuntimeRouter) PullImage(ctx context.Context, ref string, opts *ctr.PullImageOptions) (ctr.ImageInfo, error) {
+	imageService, ok := r.container.(ctr.ImageService)
+	if !ok {
+		return ctr.ImageInfo{}, ctr.ErrNotSupported
+	}
+	return imageService.PullImage(ctx, ref, opts)
+}
+
+func (r *RuntimeRouter) GetImage(ctx context.Context, ref string) (ctr.ImageInfo, error) {
+	imageService, ok := r.container.(ctr.ImageService)
+	if !ok {
+		return ctr.ImageInfo{}, ctr.ErrNotSupported
+	}
+	return imageService.GetImage(ctx, ref)
+}
+
+func (r *RuntimeRouter) ListImages(ctx context.Context) ([]ctr.ImageInfo, error) {
+	imageService, ok := r.container.(ctr.ImageService)
+	if !ok {
+		return nil, ctr.ErrNotSupported
+	}
+	return imageService.ListImages(ctx)
+}
+
+func (r *RuntimeRouter) DeleteImage(ctx context.Context, ref string, opts *ctr.DeleteImageOptions) error {
+	imageService, ok := r.container.(ctr.ImageService)
+	if !ok {
+		return ctr.ErrNotSupported
+	}
+	return imageService.DeleteImage(ctx, ref, opts)
+}
+
+func (r *RuntimeRouter) ResolveRemoteDigest(ctx context.Context, ref string) (string, error) {
+	imageService, ok := r.container.(ctr.ImageService)
+	if !ok {
+		return "", ctr.ErrNotSupported
+	}
+	return imageService.ResolveRemoteDigest(ctx, ref)
+}
+
 func (r *RuntimeRouter) SnapshotMounts(ctx context.Context, snapshotter, key string) ([]ctr.MountInfo, error) {
 	if strings.TrimSpace(snapshotter) == localRuntimeName {
 		return nil, ctr.ErrNotSupported

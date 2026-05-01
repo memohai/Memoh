@@ -29,8 +29,8 @@ backend = "docker"
 default_image = "debian:bookworm-slim"
 image_pull_policy = "if_not_present"
 snapshotter = "docker"
-data_root = "data/local"
-runtime_dir = "data/runtime"
+data_root = "__PROJECT_ROOT__/data/local"
+runtime_dir = "__PROJECT_ROOT__/data/runtime"
 
 [docker]
 # Leave empty to use Docker's standard environment discovery.
@@ -41,7 +41,7 @@ host = ""
 # This is intended for trusted desktop/local development only.
 enabled = true
 default_workspace_parent = "~/.memoh/workspaces"
-metadata_root = "data/local/local/containers"
+metadata_root = "__PROJECT_ROOT__/data/local/containers"
 allow_absolute_paths = true
 
 [containerd]
@@ -63,7 +63,7 @@ socket_path = ""
 binary_path = ""
 
 [sqlite]
-path = "data/local/memoh.db"
+path = "__PROJECT_ROOT__/data/local/memoh.db"
 wal = true
 busy_timeout_ms = 5000
 

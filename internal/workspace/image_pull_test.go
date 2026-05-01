@@ -92,3 +92,22 @@ func TestPrepareImageForCreateDelegatesWhenImageServiceUnsupported(t *testing.T)
 		t.Fatalf("expected delegated, got %s", result.Mode)
 	}
 }
+
+func TestPrepareImageForCreatePullsThroughRuntimeRouter(t *testing.T) {
+	svc := &legacyRouteTestService{getImageErr: ctr.ErrNotFound}
+	router := NewRuntimeRouter(svc, nil)
+	m := newLegacyRouteTestManager(t, router, config.WorkspaceConfig{
+		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
+	})
+
+	result, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
+	if err != nil {
+		t.Fatalf("PrepareImageForCreate returned error: %v", err)
+	}
+	if result.Mode != ImagePreparePulled {
+		t.Fatalf("expected pulled, got %s", result.Mode)
+	}
+	if svc.getImageCalls != 1 || svc.pullCalls != 1 {
+		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
+	}
+}

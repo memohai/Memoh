@@ -325,6 +325,16 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 			slog.Any("error", err))
 		return err
 	}
+	if _, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		Unpack:        true,
+		StorageDriver: m.cfg.Snapshotter,
+	}); err != nil {
+		m.logger.Error("setup bot container: prepare image failed",
+			slog.String("bot_id", botID),
+			slog.String("image", image),
+			slog.Any("error", err))
+		return err
+	}
 
 	if err := m.StartWithResolvedImage(ctx, botID, image); err != nil {
 		m.logger.Error("setup bot container: start failed",

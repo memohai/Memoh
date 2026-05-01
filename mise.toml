@@ -153,11 +153,14 @@ run = """
 #!/bin/bash
 set -euo pipefail
 
-CONFIG_PATH="${CONFIG_PATH:-conf/app.local.toml}"
+TEMPLATE_CONFIG="${MEMOH_LOCAL_CONFIG_TEMPLATE:-conf/app.local.toml}"
+GENERATED_CONFIG="${CONFIG_PATH:-data/local/config.toml}"
 RUNTIME_DIR="${MEMOH_LOCAL_RUNTIME_DIR:-data/runtime}"
+PROJECT_ROOT="$(pwd)"
 
 mkdir -p data/local "$RUNTIME_DIR"
 go build -o "$RUNTIME_DIR/bridge" ./cmd/bridge
+sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" "$TEMPLATE_CONFIG" > "$GENERATED_CONFIG"
 
 if [ -d ".toolkit" ]; then
   rm -rf "$RUNTIME_DIR/toolkit"
@@ -168,8 +171,8 @@ else
   echo "         Run 'mise run install-workspace-toolkit' to install them." >&2
 fi
 
-CONFIG_PATH="$CONFIG_PATH" go run ./cmd/agent migrate up
-CONFIG_PATH="$CONFIG_PATH" go run ./cmd/agent serve
+CONFIG_PATH="$GENERATED_CONFIG" go run ./cmd/agent migrate up
+CONFIG_PATH="$GENERATED_CONFIG" go run ./cmd/agent serve
 """
 
 [tasks."bridge:build"]
