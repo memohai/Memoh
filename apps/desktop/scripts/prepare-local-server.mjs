@@ -37,6 +37,7 @@ execFileSync('go', ['build', '-o', resolve(runtimeDir, 'bridge'), './cmd/bridge'
     GOARCH: dockerBridgeArch,
   },
 })
+cpSync(resolve(repoRoot, 'cmd', 'bridge', 'template'), resolve(runtimeDir, 'templates'), { recursive: true })
 
 copyFileSync(resolve(repoRoot, 'conf', 'app.local.toml'), resolve(configDir, 'app.local.toml'))
 cpSync(resolve(repoRoot, 'conf', 'providers'), providersDir, { recursive: true })

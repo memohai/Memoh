@@ -189,6 +189,7 @@ function prepareRuntime(command: { cwd: string }): void {
     if (result.status !== 0) {
       throw new Error('failed to build bridge runtime for local desktop server')
     }
+    syncBridgeTemplates(command.cwd, targetRuntime)
     return
   }
 
@@ -199,6 +200,16 @@ function prepareRuntime(command: { cwd: string }): void {
   rmSync(targetRuntime, { recursive: true, force: true })
   mkdirSync(targetRuntime, { recursive: true })
   cpSync(bundledRuntime, targetRuntime, { recursive: true })
+}
+
+function syncBridgeTemplates(cwd: string, targetRuntime: string): void {
+  const templateSource = join(cwd, 'cmd', 'bridge', 'template')
+  const templateTarget = join(targetRuntime, 'templates')
+  if (!existsSync(templateSource)) {
+    throw new Error(`Bridge templates not found: ${templateSource}`)
+  }
+  rmSync(templateTarget, { recursive: true, force: true })
+  cpSync(templateSource, templateTarget, { recursive: true })
 }
 
 function dockerBridgeArch(): string {
