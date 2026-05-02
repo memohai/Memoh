@@ -16,8 +16,8 @@
 | 模式 | 索引 | 要啥 | 适合 |
 |------|------|------|------|
 | **Off** | 仅文件 | 无额外服务 | 最轻，不做向量 |
-| **Sparse** | 神经稀疏向量 | sparse 服务 + Qdrant（`--profile sparse` 等） | 不想交 embedding API 钱、又要比纯词匹配强 |
-| **Dense** | 稠密向量 | embedding 模型 + Qdrant（`--profile qdrant`） | 要稠密语义检索时 |
+| **Sparse** | 神经稀疏向量 | sparse 服务 + 数据库稀疏索引（`--profile sparse`） | 不想交 embedding API 钱、又要比纯词匹配强 |
+| **Dense** | 稠密向量 | embedding 模型 + 数据库向量索引 | 要稠密语义检索时 |
 
 ### Sparse 在干什么
 
@@ -40,7 +40,7 @@
 |------|------|
 | **Memory Mode** | `off`（默认）/ `sparse` / `dense` |
 | **Embedding Model** | 仅 `dense` 要，指向你的 embedding 模型 |
-| **Qdrant Collection** | 集合名，默认常是 `memory_sparse` 等（以界面为准） |
+| **Index** | 当前模式使用的数据库索引 |
 
 **Edit**、**Delete** 如常。
 
@@ -54,34 +54,22 @@
 
 ### Sparse
 
-要 **sparse 服务** + **Qdrant**：
+要 **sparse 服务**：
 
 ```bash
-docker compose --profile qdrant --profile sparse up -d
+docker compose --profile sparse up -d
 ```
 
 `config.toml` 里至少要有类似：
 
 ```toml
-[qdrant]
-base_url = "http://qdrant:6334"
-
 [sparse]
 base_url = "http://sparse:8085"
 ```
 
 ### Dense
 
-要 **embedding 模型**（在提供方里配）+ **Qdrant**：
-
-```bash
-docker compose --profile qdrant up -d
-```
-
-```toml
-[qdrant]
-base_url = "http://qdrant:6334"
-```
+要 **embedding 模型**（在提供方里配）。向量会存到当前数据库后端：PostgreSQL 使用 pgvector，SQLite 使用 sqlite-vec。
 
 （稠密模式细节、embedding 在 UI 里选哪条，以你当前版本为准。）
 

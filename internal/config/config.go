@@ -11,28 +11,26 @@ import (
 )
 
 const (
-	DefaultConfigPath       = "config.toml"
-	DefaultHTTPAddr         = ":8080"
-	DefaultNamespace        = "default"
-	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultDataRoot         = "data"
-	DefaultDataMount        = "/data"
-	DefaultCNIBinaryDir     = "/opt/cni/bin"
-	DefaultCNIConfigDir     = "/etc/cni/net.d"
-	DefaultJWTExpiresIn     = "24h"
-	DefaultDatabaseDriver   = "postgres"
-	DefaultPGHost           = "127.0.0.1"
-	DefaultPGPort           = 5432
-	DefaultPGUser           = "postgres"
-	DefaultPGDatabase       = "memoh"
-	DefaultPGSSLMode        = "disable"
-	DefaultSQLitePath       = "data/memoh.db"
-	DefaultSQLiteBusyMS     = 5000
-	DefaultQdrantURL        = "http://127.0.0.1:6334"
-	DefaultQdrantCollection = "memory"
-	DefaultRuntimeDir       = "/opt/memoh/runtime"
-	DefaultBaseImage        = "debian:bookworm-slim"
-	DefaultTimezone         = "UTC"
+	DefaultConfigPath     = "config.toml"
+	DefaultHTTPAddr       = ":8080"
+	DefaultNamespace      = "default"
+	DefaultSocketPath     = "/run/containerd/containerd.sock"
+	DefaultDataRoot       = "data"
+	DefaultDataMount      = "/data"
+	DefaultCNIBinaryDir   = "/opt/cni/bin"
+	DefaultCNIConfigDir   = "/etc/cni/net.d"
+	DefaultJWTExpiresIn   = "24h"
+	DefaultDatabaseDriver = "postgres"
+	DefaultPGHost         = "127.0.0.1"
+	DefaultPGPort         = 5432
+	DefaultPGUser         = "postgres"
+	DefaultPGDatabase     = "memoh"
+	DefaultPGSSLMode      = "disable"
+	DefaultSQLitePath     = "data/memoh.db"
+	DefaultSQLiteBusyMS   = 5000
+	DefaultRuntimeDir     = "/opt/memoh/runtime"
+	DefaultBaseImage      = "debian:bookworm-slim"
+	DefaultTimezone       = "UTC"
 
 	ImagePullPolicyIfNotPresent = "if_not_present"
 	ImagePullPolicyAlways       = "always"
@@ -55,7 +53,6 @@ type Config struct {
 	Workspace      WorkspaceConfig      `toml:"workspace"`
 	Postgres       PostgresConfig       `toml:"postgres"`
 	SQLite         SQLiteConfig         `toml:"sqlite"`
-	Qdrant         QdrantConfig         `toml:"qdrant"`
 	Sparse         SparseConfig         `toml:"sparse"`
 	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
 	Registry       RegistryConfig       `toml:"registry"`
@@ -260,12 +257,6 @@ type SQLiteConfig struct {
 	DSN           string `toml:"dsn"`
 	WAL           bool   `toml:"wal"`
 	BusyTimeoutMS int    `toml:"busy_timeout_ms"`
-}
-
-type QdrantConfig struct {
-	BaseURL        string `toml:"base_url"`
-	APIKey         string `toml:"api_key" json:"-"`
-	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
 type SparseConfig struct {

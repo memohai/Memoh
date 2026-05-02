@@ -12,7 +12,7 @@ The manifests include:
 - `memoh-web`: web UI
 - `memoh-browser`: browser gateway
 - `memoh-postgres`: PostgreSQL StatefulSet
-- `memoh-qdrant`: Qdrant StatefulSet
+- Memory vector indexes are stored in PostgreSQL through pgvector.
 - `memoh-server` initContainer: runs `migrate up` before the server starts
 - `memoh-runtime-installer`: DaemonSet that copies the workspace bridge/runtime files to `/opt/memoh/runtime` on every node
 - RBAC for the server to create workspace Pods, PVCs, Services, and VolumeSnapshots in the `memoh` namespace

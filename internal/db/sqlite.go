@@ -8,6 +8,8 @@ import (
 
 	// Register the pure-Go SQLite database driver.
 	_ "modernc.org/sqlite"
+	// Register sqlite-vec with the modernc SQLite driver without requiring CGO.
+	_ "modernc.org/sqlite/vec"
 
 	"github.com/memohai/memoh/internal/config"
 )

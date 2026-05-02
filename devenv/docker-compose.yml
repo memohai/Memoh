@@ -1,7 +1,7 @@
 name: "memoh-dev"
 services:
   postgres:
-    image: postgres:18-alpine
+    image: pgvector/pgvector:pg18-trixie
     container_name: memoh-dev-postgres
     environment:
       POSTGRES_DB: memoh
@@ -9,26 +9,10 @@ services:
       POSTGRES_PASSWORD: memoh123
     volumes:
       - postgres_data:/var/lib/postgresql
-      - /etc/localtime:/etc/localtime:ro
     ports:
       - "${MEMOH_DEV_POSTGRES_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U memoh"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-dev-qdrant
-    volumes:
-      - qdrant_data:/qdrant/storage
-    ports:
-      - "${MEMOH_DEV_QDRANT_HTTP_PORT:-16333}:6333"
-      - "${MEMOH_DEV_QDRANT_GRPC_PORT:-16334}:6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -66,8 +50,6 @@ services:
       - go_build_cache:/root/.cache/go-build
     depends_on:
       postgres:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
     restart: "no"
 
@@ -109,8 +91,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      qdrant:
-        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -176,8 +156,6 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
-  qdrant_data:
     driver: local
   go_mod_cache:
     driver: local

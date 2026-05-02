@@ -143,7 +143,7 @@
         </div>
 
         <div class="rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-          {{ $t('memory.denseQdrantHint') }}
+          {{ $t('memory.denseIndexHint') }}
         </div>
       </div>
 
@@ -162,9 +162,9 @@
             </p>
             <span
               class="text-xs"
-              :class="collection.qdrant?.ok ? 'text-foreground' : 'text-destructive'"
+              :class="collection.index?.ok ? 'text-foreground' : 'text-destructive'"
             >
-              {{ collection.qdrant?.ok ? $t('memory.collectionHealthy') : $t('memory.collectionUnavailable') }}
+              {{ collection.index?.ok ? $t('memory.collectionHealthy') : $t('memory.collectionUnavailable') }}
             </span>
           </div>
           <p class="text-2xl font-semibold text-foreground">

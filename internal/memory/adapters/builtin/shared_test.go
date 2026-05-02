@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -95,7 +95,7 @@ func TestPayloadMatches(t *testing.T) {
 
 func TestResultToItem(t *testing.T) {
 	t.Parallel()
-	r := qdrantclient.SearchResult{
+	r := memindex.SearchResult{
 		ID:    "point-1",
 		Score: 0.95,
 		Payload: map[string]string{

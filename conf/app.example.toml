@@ -115,11 +115,6 @@ wal = true
 # How long SQLite waits for a locked database before returning "database is locked".
 busy_timeout_ms = 5000
 
-[qdrant]
-base_url = "http://127.0.0.1:6334"
-api_key = ""
-timeout_seconds = 10
-
 [sparse]
 base_url = "http://127.0.0.1:8085"
 

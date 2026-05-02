@@ -42,7 +42,7 @@ func TestFormationExtractAndAdd(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes oolong tea", "User is based in Berlin"},
 		decideActions: []adapters.DecisionAction{
@@ -81,7 +81,7 @@ func TestFormationUpdate(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	addResp, err := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -128,7 +128,7 @@ func TestFormationDelete(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	addResp, err := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -167,7 +167,7 @@ func TestFormationNOOP(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes tea"},
@@ -199,7 +199,7 @@ func TestFormationNoFacts(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	llm := &fakeLLM{
 		extractFacts: []string{},
@@ -226,7 +226,7 @@ func TestFormationMixedActions(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	addResp, _ := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -270,7 +270,7 @@ func TestFormationInvalidActionsSkipped(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	llm := &fakeLLM{
 		extractFacts: []string{"User likes cats"},
@@ -303,7 +303,7 @@ func TestFormationDuplicateActionsSameID(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	addResp, _ := runtime.Add(context.Background(), adapters.AddRequest{
 		BotID:   "bot-1",
@@ -340,7 +340,7 @@ func TestOnAfterChatWithLLM(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers dark mode"},
 		decideActions: []adapters.DecisionAction{
@@ -376,7 +376,7 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
@@ -399,7 +399,7 @@ func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 	llm := &fakeLLM{
 		extractFacts: []string{"User prefers oolong tea"},
 		decideActions: []adapters.DecisionAction{

@@ -35,7 +35,7 @@ func TestBuiltinProviderOnBeforeChatEmptyQuery(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	result, err := p.OnBeforeChat(context.Background(), adapters.BeforeChatRequest{
@@ -55,7 +55,7 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	encoder := &fakeSparseEncoder{}
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
-	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	runtime := &sparseRuntime{index: index, encoder: encoder, store: store}
 	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 
 	_ = p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
@@ -190,7 +190,7 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 	t.Parallel()
 	sentinel := "file-runtime-sentinel"
-	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, sentinel, nil, nil, defaultTestConfig())
+	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, sentinel, nil, nil, defaultTestConfig(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig())
+	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error for dense mode without embedding_model_id")
 	}
@@ -211,7 +211,7 @@ func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_SparseErrorPropagates(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "sparse"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig())
+	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error for sparse mode without encoder base URL")
 	}

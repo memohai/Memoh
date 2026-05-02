@@ -347,6 +347,24 @@ type McpOauthToken struct {
 	UpdatedAt              string         `json:"updated_at"`
 }
 
+type MemoryDenseRowid struct {
+	ID      int64  `json:"id"`
+	PointID string `json:"point_id"`
+}
+
+type MemoryIndexPoint struct {
+	PointID        string `json:"point_id"`
+	BotID          string `json:"bot_id"`
+	SourceEntryID  string `json:"source_entry_id"`
+	Memory         string `json:"memory"`
+	Hash           string `json:"hash"`
+	Payload        string `json:"payload"`
+	DenseDimension int64  `json:"dense_dimension"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	IndexedAt      string `json:"indexed_at"`
+}
+
 type MemoryProvider struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -355,6 +373,13 @@ type MemoryProvider struct {
 	IsDefault int64  `json:"is_default"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+type MemorySparseTerm struct {
+	PointID string  `json:"point_id"`
+	BotID   string  `json:"bot_id"`
+	Dim     int64   `json:"dim"`
+	Value   float64 `json:"value"`
 }
 
 type Model struct {

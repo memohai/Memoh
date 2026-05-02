@@ -10074,6 +10074,12 @@ const docTemplate = `{
                 "encoder": {
                     "$ref": "#/definitions/adapters.HealthStatus"
                 },
+                "index": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
+                "index_name": {
+                    "type": "string"
+                },
                 "indexed_count": {
                     "type": "integer"
                 },
@@ -10087,12 +10093,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider_type": {
-                    "type": "string"
-                },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
-                },
-                "qdrant_collection": {
                     "type": "string"
                 },
                 "source_count": {
@@ -10120,14 +10120,14 @@ const docTemplate = `{
                 "exists": {
                     "type": "boolean"
                 },
+                "index": {
+                    "$ref": "#/definitions/adapters.HealthStatus"
+                },
                 "name": {
                     "type": "string"
                 },
                 "points": {
                     "type": "integer"
-                },
-                "qdrant": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
                 }
             }
         },

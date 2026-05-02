@@ -62,11 +62,6 @@ path = "data/memoh.db"
 wal = true
 busy_timeout_ms = 5000
 
-[qdrant]
-base_url = "http://127.0.0.1:6334"
-api_key = ""
-timeout_seconds = 10
-
 [sparse]
 base_url = "http://127.0.0.1:8085"
 

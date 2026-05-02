@@ -231,9 +231,9 @@ type MemoryStatusResponse struct {
 	MarkdownFileCount int          `json:"markdown_file_count,omitempty"`
 	SourceCount       int          `json:"source_count,omitempty"`
 	IndexedCount      int          `json:"indexed_count,omitempty"`
-	QdrantCollection  string       `json:"qdrant_collection,omitempty"`
+	IndexName         string       `json:"index_name,omitempty"`
 	Encoder           HealthStatus `json:"encoder"`
-	Qdrant            HealthStatus `json:"qdrant"`
+	Index             HealthStatus `json:"index"`
 }
 
 // Memory provider admin types.
@@ -289,7 +289,7 @@ type ProviderCollectionStatus struct {
 	Name   string       `json:"name"`
 	Exists bool         `json:"exists"`
 	Points int          `json:"points"`
-	Qdrant HealthStatus `json:"qdrant"`
+	Index  HealthStatus `json:"index"`
 }
 
 type ProviderStatusResponse struct {

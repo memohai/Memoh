@@ -11,7 +11,7 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	"github.com/memohai/memoh/internal/memory/sparse"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
@@ -24,15 +24,15 @@ type sparseEncoder interface {
 }
 
 type sparseIndex interface {
-	CollectionName() string
-	CollectionExists(ctx context.Context) (bool, error)
-	EnsureCollection(ctx context.Context) error
-	Upsert(ctx context.Context, id string, vec qdrantclient.SparseVector, payload map[string]string) error
-	Search(ctx context.Context, vec qdrantclient.SparseVector, botID string, limit int) ([]qdrantclient.SearchResult, error)
-	Scroll(ctx context.Context, botID string, limit int) ([]qdrantclient.SearchResult, error)
-	Count(ctx context.Context, botID string) (int, error)
+	Name() string
+	EnsureSparse(ctx context.Context) error
+	UpsertSparse(ctx context.Context, id string, vec memindex.SparseVector, payload map[string]string) error
+	SearchSparse(ctx context.Context, vec memindex.SparseVector, botID string, limit int) ([]memindex.SearchResult, error)
+	ScrollSparse(ctx context.Context, botID string, limit int) ([]memindex.SearchResult, error)
+	CountSparse(ctx context.Context, botID string) (int, error)
 	DeleteByIDs(ctx context.Context, ids []string) error
 	DeleteByBotID(ctx context.Context, botID string) error
+	Health(ctx context.Context) error
 }
 
 type sparseMemoryStore interface {
@@ -46,9 +46,9 @@ type sparseMemoryStore interface {
 }
 
 // sparseRuntime implements memoryRuntime with markdown files as the source of
-// truth and Qdrant as a derived sparse index used for retrieval.
+// truth and SQL as a derived sparse index used for retrieval.
 type sparseRuntime struct {
-	qdrant  sparseIndex
+	index   sparseIndex
 	encoder sparseEncoder
 	store   sparseMemoryStore
 }
@@ -57,9 +57,9 @@ const (
 	sparseExplainTopKLimit = 24
 )
 
-func newSparseRuntime(qdrantHost string, qdrantPort int, qdrantAPIKey, collection, encoderBaseURL string, store *storefs.Service) (*sparseRuntime, error) {
-	if strings.TrimSpace(qdrantHost) == "" {
-		return nil, errors.New("sparse runtime: qdrant host is required")
+func newSparseRuntime(index sparseIndex, encoderBaseURL string, store *storefs.Service) (*sparseRuntime, error) {
+	if index == nil {
+		return nil, errors.New("sparse runtime: memory index is required")
 	}
 	if strings.TrimSpace(encoderBaseURL) == "" {
 		return nil, errors.New("sparse runtime: sparse.base_url is required")
@@ -67,19 +67,15 @@ func newSparseRuntime(qdrantHost string, qdrantPort int, qdrantAPIKey, collectio
 	if store == nil {
 		return nil, errors.New("sparse runtime: memory store is required")
 	}
-	qClient, err := qdrantclient.NewClient(qdrantHost, qdrantPort, qdrantAPIKey, collection)
-	if err != nil {
-		return nil, fmt.Errorf("sparse runtime: %w", err)
-	}
 	return &sparseRuntime{
-		qdrant:  qClient,
+		index:   index,
 		encoder: sparse.NewClient(encoderBaseURL),
 		store:   store,
 	}, nil
 }
 
 func (r *sparseRuntime) ensureCollection(ctx context.Context) error {
-	return r.qdrant.EnsureCollection(ctx)
+	return r.index.EnsureSparse(ctx)
 }
 
 func (*sparseRuntime) Mode() string {
@@ -133,7 +129,7 @@ func (r *sparseRuntime) Search(ctx context.Context, req adapters.SearchRequest) 
 	if err != nil {
 		return adapters.SearchResponse{}, fmt.Errorf("sparse encode query: %w", err)
 	}
-	results, err := r.qdrant.Search(ctx, qdrantclient.SparseVector{
+	results, err := r.index.SearchSparse(ctx, memindex.SparseVector{
 		Indices: vec.Indices,
 		Values:  vec.Values,
 	}, botID, limit)
@@ -239,7 +235,7 @@ func (r *sparseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ad
 	if err := r.ensureCollection(ctx); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
-	if err := r.qdrant.DeleteByIDs(ctx, pointIDs); err != nil {
+	if err := r.index.DeleteByIDs(ctx, pointIDs); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "Memories deleted successfully!"}, nil
@@ -256,7 +252,7 @@ func (r *sparseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllReq
 	if err := r.ensureCollection(ctx); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
-	if err := r.qdrant.DeleteByBotID(ctx, botID); err != nil {
+	if err := r.index.DeleteByBotID(ctx, botID); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
@@ -327,13 +323,18 @@ func (r *sparseRuntime) Usage(ctx context.Context, filters map[string]any) (adap
 }
 
 func (r *sparseRuntime) Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error) {
-	fileCount, err := r.store.CountMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.MemoryStatusResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.MemoryStatusResponse{}, err
+	fileCount := 0
+	items := []storefs.MemoryItem{}
+	if strings.TrimSpace(botID) != "" {
+		var err error
+		fileCount, err = r.store.CountMemoryFiles(ctx, botID)
+		if err != nil {
+			return adapters.MemoryStatusResponse{}, err
+		}
+		items, err = r.store.ReadAllMemoryFiles(ctx, botID)
+		if err != nil {
+			return adapters.MemoryStatusResponse{}, err
+		}
 	}
 	status := adapters.MemoryStatusResponse{
 		ProviderType:      BuiltinType,
@@ -343,28 +344,25 @@ func (r *sparseRuntime) Status(ctx context.Context, botID string) (adapters.Memo
 		OverviewPath:      path.Join(config.DefaultDataMount, "MEMORY.md"),
 		MarkdownFileCount: fileCount,
 		SourceCount:       len(items),
-		QdrantCollection:  r.qdrant.CollectionName(),
+		IndexName:         r.index.Name(),
 	}
 	if err := r.encoder.Health(ctx); err != nil {
 		status.Encoder.Error = err.Error()
 	} else {
 		status.Encoder.OK = true
 	}
-	exists, err := r.qdrant.CollectionExists(ctx)
-	if err != nil {
-		status.Qdrant.Error = err.Error()
+	if err := r.index.Health(ctx); err != nil {
+		status.Index.Error = err.Error()
 		return status, nil
 	}
-	status.Qdrant.OK = true
-	if exists {
-		count, err := r.qdrant.Count(ctx, botID)
-		if err != nil {
-			status.Qdrant.OK = false
-			status.Qdrant.Error = err.Error()
-			return status, nil
-		}
-		status.IndexedCount = count
+	status.Index.OK = true
+	count, err := r.index.CountSparse(ctx, botID)
+	if err != nil {
+		status.Index.OK = false
+		status.Index.Error = err.Error()
+		return status, nil
 	}
+	status.IndexedCount = count
 	return status, nil
 }
 
@@ -385,11 +383,11 @@ func (r *sparseRuntime) syncSourceItems(ctx context.Context, botID string, items
 	if err := r.ensureCollection(ctx); err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	existing, err := r.qdrant.Scroll(ctx, botID, 10000)
+	existing, err := r.index.ScrollSparse(ctx, botID, 10000)
 	if err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	existingBySource := make(map[string]qdrantclient.SearchResult, len(existing))
+	existingBySource := make(map[string]memindex.SearchResult, len(existing))
 	for _, item := range existing {
 		sourceID := strings.TrimSpace(item.Payload["source_entry_id"])
 		if sourceID == "" {
@@ -439,14 +437,14 @@ func (r *sparseRuntime) syncSourceItems(ctx context.Context, botID string, items
 		}
 	}
 	if len(stalePointIDs) > 0 {
-		if err := r.qdrant.DeleteByIDs(ctx, stalePointIDs); err != nil {
+		if err := r.index.DeleteByIDs(ctx, stalePointIDs); err != nil {
 			return adapters.RebuildResult{}, err
 		}
 	}
 	if err := r.upsertSourceItems(ctx, botID, toUpsert); err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	count, err := r.qdrant.Count(ctx, botID)
+	count, err := r.index.CountSparse(ctx, botID)
 	if err != nil {
 		return adapters.RebuildResult{}, err
 	}
@@ -487,7 +485,7 @@ func (r *sparseRuntime) upsertSourceItems(ctx context.Context, botID string, ite
 	}
 	for i, item := range canonical {
 		vec := vectors[i]
-		if err := r.qdrant.Upsert(ctx, runtimePointID(botID, item.ID), qdrantclient.SparseVector{
+		if err := r.index.UpsertSparse(ctx, runtimePointID(botID, item.ID), memindex.SparseVector{
 			Indices: vec.Indices,
 			Values:  vec.Values,
 		}, runtimePayload(botID, item)); err != nil {

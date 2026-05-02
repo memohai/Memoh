@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 )
 
 type Service struct {
@@ -46,7 +44,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 					"memory_mode": {
 						Type:        "select",
 						Title:       "Memory Mode",
-						Description: "off = file-based, sparse = Qdrant sparse vectors, dense = embedding API + Qdrant dense vectors",
+						Description: "off = file-based, sparse = SQL sparse vectors, dense = embedding API + database vector search",
 						Required:    false,
 					},
 					"embedding_model_id": {
@@ -54,13 +52,6 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Title:       "Embedding Model",
 						Description: "Embedding model for dense vector search (dense mode only)",
 						Required:    false,
-					},
-					"qdrant_collection": {
-						Type:        "string",
-						Title:       "Qdrant Collection",
-						Description: "Qdrant collection name for sparse mode. Defaults to memory_sparse.",
-						Required:    false,
-						Example:     "memory_sparse",
 					},
 					"context_target_items": {
 						Type:        "integer",
@@ -182,36 +173,36 @@ func (s *Service) Status(ctx context.Context, id string) (ProviderStatusResponse
 	}
 	status.MemoryMode = StringFromConfig(resp.Config, "memory_mode")
 	status.EmbeddingModelID = StringFromConfig(resp.Config, "embedding_model_id")
-	collections := []string{"memory_sparse", "memory_dense"}
-	status.Collections = make([]ProviderCollectionStatus, 0, len(collections))
-	for _, collection := range collections {
-		collStatus := ProviderCollectionStatus{Name: collection}
-		host, port := parseQdrantHostPort(s.cfg.Qdrant.BaseURL)
-		client, err := qdrantclient.NewClient(host, port, s.cfg.Qdrant.APIKey, collection)
-		if err != nil {
-			collStatus.Qdrant.Error = err.Error()
-			status.Collections = append(status.Collections, collStatus)
-			continue
-		}
-		exists, err := client.CollectionExists(ctx)
-		if err != nil {
-			collStatus.Qdrant.Error = err.Error()
-			status.Collections = append(status.Collections, collStatus)
-			continue
-		}
-		collStatus.Qdrant.OK = true
-		collStatus.Exists = exists
-		if exists {
-			points, err := client.CountAll(ctx)
-			if err != nil {
-				collStatus.Qdrant.OK = false
-				collStatus.Qdrant.Error = err.Error()
-			} else {
-				collStatus.Points = points
-			}
-		}
-		status.Collections = append(status.Collections, collStatus)
+	if s.registry == nil {
+		return status, nil
 	}
+	provider, err := s.registry.Instantiate(resp.ID, resp.Provider, resp.Config)
+	if err != nil {
+		status.Collections = []ProviderCollectionStatus{{
+			Name:  "memory_index",
+			Index: HealthStatus{Error: err.Error()},
+		}}
+		return status, nil
+	}
+	syncProvider, ok := provider.(SourceSyncProvider)
+	if !ok {
+		return status, nil
+	}
+	runtimeStatus, err := syncProvider.Status(ctx, "")
+	collStatus := ProviderCollectionStatus{
+		Name:   runtimeStatus.IndexName,
+		Exists: runtimeStatus.Index.OK,
+		Points: runtimeStatus.IndexedCount,
+		Index:  runtimeStatus.Index,
+	}
+	if strings.TrimSpace(collStatus.Name) == "" {
+		collStatus.Name = "memory_index"
+	}
+	if err != nil {
+		collStatus.Index.OK = false
+		collStatus.Index.Error = err.Error()
+	}
+	status.Collections = []ProviderCollectionStatus{collStatus}
 	return status, nil
 }
 
@@ -337,27 +328,4 @@ func isValidProviderType(t ProviderType) bool {
 	default:
 		return false
 	}
-}
-
-func parseQdrantHostPort(baseURL string) (string, int) {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return "", 0
-	}
-	baseURL = strings.TrimPrefix(baseURL, "http://")
-	baseURL = strings.TrimPrefix(baseURL, "https://")
-	parts := strings.SplitN(baseURL, ":", 2)
-	host := parts[0]
-	if len(parts) == 2 {
-		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
-		if err == nil {
-			switch httpPort {
-			case 6333, 6334:
-				return host, 6334
-			default:
-				return host, httpPort
-			}
-		}
-	}
-	return host, 6334
 }

@@ -65,24 +65,6 @@ services:
     networks:
       - memoh-network
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memoh-qdrant
-    profiles: [qdrant, sparse]
-    volumes:
-      - qdrant_data:/qdrant/storage
-    expose:
-      - "6333"
-      - "6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
   browser:
     image: memohai/browser:${BROWSER_TAG:-local}
     container_name: memoh-browser
@@ -105,8 +87,6 @@ volumes:
   memoh_data:
     driver: local
   server_cni_state:
-    driver: local
-  qdrant_data:
     driver: local
   openviking_data:
     driver: local

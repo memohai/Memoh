@@ -12,6 +12,8 @@ sql:
         overrides:
           - db_type: "user_role"
             go_type: "string"
+          - db_type: "vector"
+            go_type: "string"
   - engine: "sqlite"
     schema: "db/sqlite/migrations"
     queries: "db/sqlite/queries"

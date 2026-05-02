@@ -1,6 +1,4 @@
 services:
-  qdrant:
-    image: memoh.cn/qdrant/qdrant:latest
   migrate:
     image: memoh.cn/memohai/server:latest
   server:

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	"github.com/memohai/memoh/internal/memory/sparse"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
@@ -98,29 +98,29 @@ type fakeSparseIndex struct {
 	encoder    *fakeSparseEncoder
 	collection string
 	exists     bool
-	points     map[string]qdrantclient.SearchResult
+	points     map[string]memindex.SearchResult
 }
 
 func newFakeSparseIndex(encoder *fakeSparseEncoder) *fakeSparseIndex {
 	return &fakeSparseIndex{
 		encoder:    encoder,
 		collection: "memory_sparse_test",
-		points:     map[string]qdrantclient.SearchResult{},
+		points:     map[string]memindex.SearchResult{},
 	}
 }
 
-func (i *fakeSparseIndex) CollectionName() string { return i.collection }
+func (i *fakeSparseIndex) Name() string { return i.collection }
 
 func (i *fakeSparseIndex) CollectionExists(context.Context) (bool, error) { return i.exists, nil }
 
-func (i *fakeSparseIndex) EnsureCollection(context.Context) error {
+func (i *fakeSparseIndex) EnsureSparse(context.Context) error {
 	i.exists = true
 	return nil
 }
 
-func (i *fakeSparseIndex) Upsert(_ context.Context, id string, _ qdrantclient.SparseVector, payload map[string]string) error {
+func (i *fakeSparseIndex) UpsertSparse(_ context.Context, id string, _ memindex.SparseVector, payload map[string]string) error {
 	i.exists = true
-	i.points[id] = qdrantclient.SearchResult{
+	i.points[id] = memindex.SearchResult{
 		ID:      id,
 		Score:   1,
 		Payload: payload,
@@ -128,9 +128,9 @@ func (i *fakeSparseIndex) Upsert(_ context.Context, id string, _ qdrantclient.Sp
 	return nil
 }
 
-func (i *fakeSparseIndex) Search(_ context.Context, _ qdrantclient.SparseVector, botID string, limit int) ([]qdrantclient.SearchResult, error) {
+func (i *fakeSparseIndex) SearchSparse(_ context.Context, _ memindex.SparseVector, botID string, limit int) ([]memindex.SearchResult, error) {
 	query := strings.ToLower(strings.TrimSpace(i.encoder.lastQuery))
-	results := make([]qdrantclient.SearchResult, 0, len(i.points))
+	results := make([]memindex.SearchResult, 0, len(i.points))
 	for _, point := range i.points {
 		if strings.TrimSpace(point.Payload["bot_id"]) != strings.TrimSpace(botID) {
 			continue
@@ -149,8 +149,8 @@ func (i *fakeSparseIndex) Search(_ context.Context, _ qdrantclient.SparseVector,
 	return results, nil
 }
 
-func (i *fakeSparseIndex) Scroll(_ context.Context, botID string, limit int) ([]qdrantclient.SearchResult, error) {
-	results := make([]qdrantclient.SearchResult, 0, len(i.points))
+func (i *fakeSparseIndex) ScrollSparse(_ context.Context, botID string, limit int) ([]memindex.SearchResult, error) {
+	results := make([]memindex.SearchResult, 0, len(i.points))
 	for _, point := range i.points {
 		if strings.TrimSpace(point.Payload["bot_id"]) != strings.TrimSpace(botID) {
 			continue
@@ -164,7 +164,7 @@ func (i *fakeSparseIndex) Scroll(_ context.Context, botID string, limit int) ([]
 	return results, nil
 }
 
-func (i *fakeSparseIndex) Count(_ context.Context, botID string) (int, error) {
+func (i *fakeSparseIndex) CountSparse(_ context.Context, botID string) (int, error) {
 	count := 0
 	for _, point := range i.points {
 		if strings.TrimSpace(point.Payload["bot_id"]) == strings.TrimSpace(botID) {
@@ -173,6 +173,8 @@ func (i *fakeSparseIndex) Count(_ context.Context, botID string) (int, error) {
 	}
 	return count, nil
 }
+
+func (*fakeSparseIndex) Health(context.Context) error { return nil }
 
 func (i *fakeSparseIndex) DeleteByIDs(_ context.Context, ids []string) error {
 	for _, id := range ids {
@@ -197,7 +199,7 @@ func TestSparseRuntimeAddWritesSourceAndSupportsRecall(t *testing.T) {
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
 	runtime := &sparseRuntime{
-		qdrant:  index,
+		index:   index,
 		encoder: encoder,
 		store:   store,
 	}
@@ -222,7 +224,7 @@ func TestSparseRuntimeAddWritesSourceAndSupportsRecall(t *testing.T) {
 	}
 	point, ok := index.points[runtimePointID("bot-1", item.ID)]
 	if !ok {
-		t.Fatalf("expected qdrant point for source memory %q", item.ID)
+		t.Fatalf("expected index point for source memory %q", item.ID)
 	}
 	if point.Payload["source_entry_id"] != item.ID {
 		t.Fatalf("expected source_entry_id payload %q, got %q", item.ID, point.Payload["source_entry_id"])
@@ -271,12 +273,12 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 		},
 	)
 	runtime := &sparseRuntime{
-		qdrant:  index,
+		index:   index,
 		encoder: encoder,
 		store:   store,
 	}
 
-	index.points[runtimePointID("bot-1", "bot-1:mem_1")] = qdrantclient.SearchResult{
+	index.points[runtimePointID("bot-1", "bot-1:mem_1")] = memindex.SearchResult{
 		ID: runtimePointID("bot-1", "bot-1:mem_1"),
 		Payload: map[string]string{
 			"bot_id":          "bot-1",
@@ -287,7 +289,7 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 			"updated_at":      "2026-03-13T09:00:00Z",
 		},
 	}
-	index.points[runtimePointID("bot-1", "bot-1:stale")] = qdrantclient.SearchResult{
+	index.points[runtimePointID("bot-1", "bot-1:stale")] = memindex.SearchResult{
 		ID: runtimePointID("bot-1", "bot-1:stale"),
 		Payload: map[string]string{
 			"bot_id":          "bot-1",
@@ -313,7 +315,7 @@ func TestSparseRuntimeRebuildSyncsSourceAndRemovesStalePoints(t *testing.T) {
 		t.Fatalf("expected restored_count=2, got %d", result.RestoredCount)
 	}
 	if _, ok := index.points[runtimePointID("bot-1", "bot-1:stale")]; ok {
-		t.Fatal("expected stale qdrant point to be removed")
+		t.Fatal("expected stale index point to be removed")
 	}
 }
 
@@ -332,7 +334,7 @@ func TestSparseRuntimeGetAllIncludesExplainStats(t *testing.T) {
 		},
 	)
 	runtime := &sparseRuntime{
-		qdrant:  index,
+		index:   index,
 		encoder: encoder,
 		store:   store,
 	}
@@ -362,7 +364,7 @@ func TestBuiltinProviderMultiTurnRecallUsesSparseSourceRuntime(t *testing.T) {
 	index := newFakeSparseIndex(encoder)
 	store := newFakeSparseStore()
 	runtime := &sparseRuntime{
-		qdrant:  index,
+		index:   index,
 		encoder: encoder,
 		store:   store,
 	}

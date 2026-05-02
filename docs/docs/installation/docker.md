@@ -12,8 +12,7 @@ The Docker Compose stack consists of multiple services. Some are always started,
 |---------|---------|-------------|
 | **server** | *(core)* | Main Memoh server with the configured container runtime backend and in-process AI agent |
 | **web** | *(core)* | Web UI (Vue 3) |
-| **postgres** | *(core)* | PostgreSQL database |
-| **qdrant** | `qdrant` | Qdrant vector database for memory search (sparse and dense modes) |
+| **postgres** | *(core)* | PostgreSQL database with pgvector for memory vector indexes |
 | **browser** | `browser` | Playwright-based browser gateway for bot web automation |
 | **sparse** | `sparse` | Neural sparse encoding service for memory retrieval (see below) |
 
@@ -25,7 +24,7 @@ The **sparse** container provides neural sparse vector encoding for memory retri
 
 - Converts document text into sparse vectors (a compact list of token indices + importance weights) using a masked language model
 - Encodes queries using IDF-weighted term lookup for fast, efficient retrieval
-- Works with Qdrant to enable semantic memory search without requiring an external embedding API
+- Writes sparse vectors into the configured database backend for semantic memory search without requiring an external embedding API
 
 **Why use it:**
 
@@ -38,7 +37,7 @@ The **sparse** container provides neural sparse vector encoding for memory retri
 Enable the sparse profile (`--profile sparse`) if you plan to use the built-in memory provider in **sparse mode**. The model is pre-downloaded during the Docker image build, so the container starts quickly without needing to fetch weights at runtime.
 
 ```bash
-docker compose --profile qdrant --profile sparse --profile browser up -d
+docker compose --profile sparse --profile browser up -d
 ```
 
 For more details on memory modes, see [Built-in Memory Provider](/memory-providers/builtin.md).
@@ -153,13 +152,13 @@ Edit `config.toml` — at minimum change:
 
 For SQLite, set `database.driver = "sqlite"` and use `docker-compose.sqlite.yml`. Details are in [SQLite deployment](/installation/sqlite.md).
 
-Then start (recommended — with Qdrant, Browser, and Sparse):
+Then start (recommended — with Browser and Sparse):
 
 ```bash
-POSTGRES_PASSWORD=your-db-password docker compose --profile qdrant --profile browser --profile sparse up -d
+POSTGRES_PASSWORD=your-db-password docker compose --profile browser --profile sparse up -d
 ```
 
-Or start core services only (no vector DB or browser automation):
+Or start core services only (no sparse encoder or browser automation):
 
 ```bash
 POSTGRES_PASSWORD=your-db-password docker compose up -d
@@ -183,7 +182,7 @@ And add the China mirror compose overlay:
 
 ```bash
 docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
-  --profile qdrant --profile browser up -d
+  --profile browser up -d
 ```
 
 The install script handles this automatically when you set `USE_CN_MIRROR=true`.
@@ -221,7 +220,6 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `[apple]` | socktainer socket and binary overrides for the Apple backend |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
 | `[sqlite]` | SQLite file path, WAL mode, and busy timeout |
-| `[qdrant]` | Qdrant vector database connection (base_url, api_key, timeout) |
 | `[sparse]` | Sparse encoding service URL |
 | `[registry]` | Provider definitions directory |
 | `[browser_gateway]` | Browser Gateway host, port, and server address |

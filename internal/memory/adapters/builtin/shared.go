@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -87,7 +87,7 @@ func memoryItemFromStore(item storefs.MemoryItem) adapters.MemoryItem {
 	}
 }
 
-func resultToItem(r qdrantclient.SearchResult) adapters.MemoryItem {
+func resultToItem(r memindex.SearchResult) adapters.MemoryItem {
 	item := adapters.MemoryItem{
 		ID:    r.ID,
 		Score: r.Score,

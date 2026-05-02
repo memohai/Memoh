@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:18-alpine
+          image: pgvector/pgvector:pg18-trixie
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:

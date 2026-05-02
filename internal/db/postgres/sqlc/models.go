@@ -363,6 +363,27 @@ type MediaAsset struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type MemoryDenseVector struct {
+	PointID   string             `json:"point_id"`
+	BotID     string             `json:"bot_id"`
+	Dimension int32              `json:"dimension"`
+	Embedding string             `json:"embedding"`
+	IndexedAt pgtype.Timestamptz `json:"indexed_at"`
+}
+
+type MemoryIndexPoint struct {
+	PointID        string             `json:"point_id"`
+	BotID          string             `json:"bot_id"`
+	SourceEntryID  string             `json:"source_entry_id"`
+	Memory         string             `json:"memory"`
+	Hash           string             `json:"hash"`
+	Payload        []byte             `json:"payload"`
+	DenseDimension int32              `json:"dense_dimension"`
+	CreatedAt      string             `json:"created_at"`
+	UpdatedAt      string             `json:"updated_at"`
+	IndexedAt      pgtype.Timestamptz `json:"indexed_at"`
+}
+
 type MemoryProvider struct {
 	ID        pgtype.UUID        `json:"id"`
 	Name      string             `json:"name"`
@@ -371,6 +392,13 @@ type MemoryProvider struct {
 	IsDefault bool               `json:"is_default"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemorySparseTerm struct {
+	PointID string  `json:"point_id"`
+	BotID   string  `json:"bot_id"`
+	Dim     int64   `json:"dim"`
+	Value   float32 `json:"value"`
 }
 
 type Model struct {

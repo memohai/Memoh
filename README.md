@@ -131,7 +131,7 @@ Three modes, switchable per bot from the web UI:
 |------|---------|-------------|
 | **Off** | Plain file storage, no vector search | Small bots, debugging, or when you want minimal moving parts |
 | **Sparse** | Neural sparse vectors via a local model + BM25 | Zero API cost, runs entirely on your machine, strong recall for short factual memories |
-| **Dense** | Embedding model + Qdrant vector DB | Best semantic recall — finds memories by meaning, not just keywords |
+| **Dense** | Embedding model + database vector index | Best semantic recall — finds memories by meaning, not just keywords |
 
 Under the hood:
 

@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18-alpine
+        image: pgvector/pgvector:pg18-trixie
         env:
           POSTGRES_DB: memoh_test
           POSTGRES_USER: memoh

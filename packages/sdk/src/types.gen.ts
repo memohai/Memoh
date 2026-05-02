@@ -200,13 +200,13 @@ export type AdaptersMemoryItem = {
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
     encoder?: AdaptersHealthStatus;
+    index?: AdaptersHealthStatus;
+    index_name?: string;
     indexed_count?: number;
     markdown_file_count?: number;
     memory_mode?: string;
     overview_path?: string;
     provider_type?: string;
-    qdrant?: AdaptersHealthStatus;
-    qdrant_collection?: string;
     source_count?: number;
     source_dir?: string;
 };
@@ -218,9 +218,9 @@ export type AdaptersMessage = {
 
 export type AdaptersProviderCollectionStatus = {
     exists?: boolean;
+    index?: AdaptersHealthStatus;
     name?: string;
     points?: number;
-    qdrant?: AdaptersHealthStatus;
 };
 
 export type AdaptersProviderConfigSchema = {

@@ -124,14 +124,14 @@
             </p>
           </div>
           <div
-            v-if="showQdrantDetails"
+            v-if="showIndexDetails"
             class="rounded-md border border-border bg-background/60 px-3 py-2"
           >
             <p class="text-xs text-muted-foreground">
-              {{ $t('bots.settings.memoryQdrantCollection') }}
+              {{ $t('bots.settings.memoryIndexName') }}
             </p>
             <p class="mt-1 text-xs font-medium text-foreground break-all">
-              {{ statusCardData.qdrant_collection || '-' }}
+              {{ statusCardData.index_name || '-' }}
             </p>
           </div>
           <div
@@ -149,17 +149,17 @@
             </p>
           </div>
           <div
-            v-if="showQdrantHealth"
+            v-if="showIndexHealth"
             class="rounded-md border border-border bg-background/60 px-3 py-2"
           >
             <p class="text-xs text-muted-foreground">
-              {{ $t('bots.settings.memoryQdrantHealth') }}
+              {{ $t('bots.settings.memoryIndexHealth') }}
             </p>
             <p
               class="mt-1 text-xs font-medium"
-              :class="healthTextClass(statusCardData.qdrant?.ok)"
+              :class="healthTextClass(statusCardData.index?.ok)"
             >
-              {{ healthLabel(statusCardData.qdrant?.ok, statusCardData.qdrant?.error) }}
+              {{ healthLabel(statusCardData.index?.ok, statusCardData.index?.error) }}
             </p>
           </div>
         </div>
@@ -667,13 +667,13 @@ const { mutateAsync: rebuildMemory, isLoading: isRebuilding } = useMutation({
 
 const memoryStatus = computed(() => memoryStatusData.value ?? null)
 const statusCardData = computed(() => memoryStatus.value)
-const showQdrantDetails = computed(() =>
+const showIndexDetails = computed(() =>
   selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
 )
 const showEncoderHealth = computed(() =>
   selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
 )
-const showQdrantHealth = computed(() =>
+const showIndexHealth = computed(() =>
   selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
 )
 const encoderHealthLabel = computed(() =>

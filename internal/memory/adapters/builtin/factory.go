@@ -1,13 +1,18 @@
 package builtin
 
 import (
+	stdsql "database/sql"
+	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
@@ -20,68 +25,46 @@ const (
 	ModeDense  BuiltinMemoryMode = "dense"
 )
 
+type memorySQLIndex interface {
+	memindex.DenseIndex
+	memindex.SparseIndex
+}
+
 // NewBuiltinRuntimeFromConfig returns the appropriate memoryRuntime based on
 // the provider's persisted config (memory_mode field). Returns the file
 // runtime for "off" or unknown modes. Returns an error if a sparse or dense
 // runtime was explicitly requested but failed to initialise, so that callers
 // can surface configuration problems rather than silently degrading.
-func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries dbstore.Queries, cfg config.Config) (any, error) {
+func NewBuiltinRuntimeFromConfig(_ *slog.Logger, providerConfig map[string]any, fileRuntime any, store *storefs.Service, queries dbstore.Queries, cfg config.Config, pgPool *pgxpool.Pool, sqliteDB *stdsql.DB) (any, error) {
 	mode := BuiltinMemoryMode(strings.TrimSpace(adapters.StringFromConfig(providerConfig, "memory_mode")))
 
 	switch mode {
 	case ModeSparse:
-		host, port := parseQdrantHostPort(cfg.Qdrant.BaseURL)
-		if host == "" {
-			host = "localhost"
+		index, err := newMemoryIndex(cfg, pgPool, sqliteDB)
+		if err != nil {
+			return nil, err
 		}
-		if port == 0 {
-			port = 6334
-		}
-		collection := adapters.StringFromConfig(providerConfig, "qdrant_collection")
-		if collection == "" {
-			collection = "memory_sparse"
-		}
-		return newSparseRuntime(
-			host,
-			port,
-			cfg.Qdrant.APIKey,
-			collection,
-			strings.TrimSpace(cfg.Sparse.BaseURL),
-			store,
-		)
+		return newSparseRuntime(index, strings.TrimSpace(cfg.Sparse.BaseURL), store)
 
 	case ModeDense:
-		return newDenseRuntime(providerConfig, queries, cfg, store)
+		index, err := newMemoryIndex(cfg, pgPool, sqliteDB)
+		if err != nil {
+			return nil, err
+		}
+		return newDenseRuntime(providerConfig, queries, store, index)
 
 	default:
 		return fileRuntime, nil
 	}
 }
 
-// parseQdrantHostPort extracts host and gRPC port from a Qdrant base URL.
-// Qdrant base URLs are typically HTTP (port 6333), but the gRPC port is 6334.
-func parseQdrantHostPort(baseURL string) (string, int) {
-	baseURL = strings.TrimSpace(baseURL)
-	if baseURL == "" {
-		return "", 0
+func newMemoryIndex(cfg config.Config, pgPool *pgxpool.Pool, sqliteDB *stdsql.DB) (memorySQLIndex, error) {
+	switch db.DriverFromConfig(cfg) {
+	case db.DriverPostgres:
+		return memindex.NewPostgres(pgPool)
+	case db.DriverSQLite:
+		return memindex.NewSQLite(sqliteDB)
+	default:
+		return nil, fmt.Errorf("unsupported database driver %q", db.DriverFromConfig(cfg))
 	}
-	baseURL = strings.TrimPrefix(baseURL, "http://")
-	baseURL = strings.TrimPrefix(baseURL, "https://")
-	parts := strings.SplitN(baseURL, ":", 2)
-	host := parts[0]
-	if len(parts) == 2 {
-		httpPort, err := strconv.Atoi(strings.TrimRight(parts[1], "/"))
-		if err == nil {
-			switch httpPort {
-			case 6333:
-				return host, 6334
-			case 6334:
-				return host, 6334
-			default:
-				// Common case: operator already configured the intended gRPC port.
-				return host, httpPort
-			}
-		}
-	}
-	return host, 6334
 }

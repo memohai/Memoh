@@ -19,7 +19,7 @@ import (
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
+	memindex "github.com/memohai/memoh/internal/memory/index"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -27,11 +27,10 @@ import (
 const denseEmbedTimeout = models.DefaultProviderRequestTimeout
 
 type denseRuntime struct {
-	qdrant     *qdrantclient.Client
+	index      memindex.DenseIndex
 	store      *storefs.Service
 	embedModel *sdk.EmbeddingModel
 	dimensions int
-	collection string
 }
 
 type denseModelSpec struct {
@@ -42,12 +41,15 @@ type denseModelSpec struct {
 	dimensions int
 }
 
-func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, cfg config.Config, store *storefs.Service) (*denseRuntime, error) {
+func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, store *storefs.Service, index memindex.DenseIndex) (*denseRuntime, error) {
 	if queries == nil {
 		return nil, errors.New("dense runtime: queries are required")
 	}
 	if store == nil {
 		return nil, errors.New("dense runtime: memory store is required")
+	}
+	if index == nil {
+		return nil, errors.New("dense runtime: memory index is required")
 	}
 
 	modelRef := strings.TrimSpace(adapters.StringFromConfig(providerConfig, "embedding_model_id"))
@@ -60,30 +62,13 @@ func newDenseRuntime(providerConfig map[string]any, queries dbstore.Queries, cfg
 		return nil, err
 	}
 
-	host, port := parseQdrantHostPort(cfg.Qdrant.BaseURL)
-	if host == "" {
-		host = "localhost"
-	}
-	if port == 0 {
-		port = 6334
-	}
-	collection := adapters.StringFromConfig(providerConfig, "qdrant_collection")
-	if strings.TrimSpace(collection) == "" {
-		collection = "memory_dense"
-	}
-	qClient, err := qdrantclient.NewClient(host, port, cfg.Qdrant.APIKey, collection)
-	if err != nil {
-		return nil, fmt.Errorf("dense runtime: %w", err)
-	}
-
 	embedModel := models.NewSDKEmbeddingModel(spec.clientType, spec.baseURL, spec.apiKey, spec.modelID, denseEmbedTimeout, nil)
 
 	return &denseRuntime{
-		qdrant:     qClient,
+		index:      index,
 		store:      store,
 		embedModel: embedModel,
 		dimensions: spec.dimensions,
-		collection: collection,
 	}, nil
 }
 
@@ -165,7 +150,7 @@ func (r *denseRuntime) Search(ctx context.Context, req adapters.SearchRequest) (
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
+	if err := r.index.EnsureDense(ctx, r.dimensions); err != nil {
 		return adapters.SearchResponse{}, err
 	}
 	limit := req.Limit
@@ -176,7 +161,7 @@ func (r *denseRuntime) Search(ctx context.Context, req adapters.SearchRequest) (
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
-	results, err := r.qdrant.SearchDense(ctx, qdrantclient.DenseVector{Values: vec}, botID, limit)
+	results, err := r.index.SearchDense(ctx, memindex.DenseVector{Values: vec}, botID, limit)
 	if err != nil {
 		return adapters.SearchResponse{}, err
 	}
@@ -275,7 +260,7 @@ func (r *denseRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 			return adapters.DeleteResponse{}, err
 		}
 	}
-	if err := r.qdrant.DeleteByIDs(ctx, pointIDs); err != nil {
+	if err := r.index.DeleteByIDs(ctx, pointIDs); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "Memories deleted successfully!"}, nil
@@ -289,7 +274,7 @@ func (r *denseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 	if err := r.store.RemoveAllMemories(ctx, botID); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
-	if err := r.qdrant.DeleteByBotID(ctx, botID); err != nil {
+	if err := r.index.DeleteByBotID(ctx, botID); err != nil {
 		return adapters.DeleteResponse{}, err
 	}
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
@@ -364,13 +349,18 @@ func (*denseRuntime) Mode() string {
 }
 
 func (r *denseRuntime) Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error) {
-	fileCount, err := r.store.CountMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.MemoryStatusResponse{}, err
-	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.MemoryStatusResponse{}, err
+	fileCount := 0
+	items := []storefs.MemoryItem{}
+	if strings.TrimSpace(botID) != "" {
+		var err error
+		fileCount, err = r.store.CountMemoryFiles(ctx, botID)
+		if err != nil {
+			return adapters.MemoryStatusResponse{}, err
+		}
+		items, err = r.store.ReadAllMemoryFiles(ctx, botID)
+		if err != nil {
+			return adapters.MemoryStatusResponse{}, err
+		}
 	}
 	status := adapters.MemoryStatusResponse{
 		ProviderType:      BuiltinType,
@@ -380,28 +370,25 @@ func (r *denseRuntime) Status(ctx context.Context, botID string) (adapters.Memor
 		OverviewPath:      path.Join(config.DefaultDataMount, "MEMORY.md"),
 		MarkdownFileCount: fileCount,
 		SourceCount:       len(items),
-		QdrantCollection:  r.collection,
+		IndexName:         r.index.Name(),
 	}
 	if err := r.embedHealth(ctx); err != nil {
 		status.Encoder.Error = err.Error()
 	} else {
 		status.Encoder.OK = true
 	}
-	exists, err := r.qdrant.CollectionExists(ctx)
-	if err != nil {
-		status.Qdrant.Error = err.Error()
+	if err := r.index.Health(ctx); err != nil {
+		status.Index.Error = err.Error()
 		return status, nil
 	}
-	status.Qdrant.OK = true
-	if exists {
-		count, err := r.qdrant.Count(ctx, botID)
-		if err != nil {
-			status.Qdrant.OK = false
-			status.Qdrant.Error = err.Error()
-			return status, nil
-		}
-		status.IndexedCount = count
+	status.Index.OK = true
+	count, err := r.index.CountDense(ctx, botID)
+	if err != nil {
+		status.Index.OK = false
+		status.Index.Error = err.Error()
+		return status, nil
 	}
+	status.IndexedCount = count
 	return status, nil
 }
 
@@ -417,14 +404,14 @@ func (r *denseRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 }
 
 func (r *denseRuntime) syncSourceItems(ctx context.Context, botID string, items []storefs.MemoryItem) (adapters.RebuildResult, error) {
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
+	if err := r.index.EnsureDense(ctx, r.dimensions); err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	existing, err := r.qdrant.Scroll(ctx, botID, 10000)
+	existing, err := r.index.ScrollDense(ctx, botID, 10000)
 	if err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	existingBySource := make(map[string]qdrantclient.SearchResult, len(existing))
+	existingBySource := make(map[string]memindex.SearchResult, len(existing))
 	for _, item := range existing {
 		sourceID := strings.TrimSpace(item.Payload["source_entry_id"])
 		if sourceID == "" {
@@ -471,14 +458,14 @@ func (r *denseRuntime) syncSourceItems(ctx context.Context, botID string, items 
 		}
 	}
 	if len(stale) > 0 {
-		if err := r.qdrant.DeleteByIDs(ctx, stale); err != nil {
+		if err := r.index.DeleteByIDs(ctx, stale); err != nil {
 			return adapters.RebuildResult{}, err
 		}
 	}
 	if err := r.upsertSourceItems(ctx, botID, toUpsert); err != nil {
 		return adapters.RebuildResult{}, err
 	}
-	count, err := r.qdrant.Count(ctx, botID)
+	count, err := r.index.CountDense(ctx, botID)
 	if err != nil {
 		return adapters.RebuildResult{}, err
 	}
@@ -494,7 +481,7 @@ func (r *denseRuntime) upsertSourceItems(ctx context.Context, botID string, item
 	if len(items) == 0 {
 		return nil
 	}
-	if err := r.qdrant.EnsureDenseCollection(ctx, r.dimensions); err != nil {
+	if err := r.index.EnsureDense(ctx, r.dimensions); err != nil {
 		return err
 	}
 	canonical := make([]storefs.MemoryItem, 0, len(items))
@@ -518,7 +505,7 @@ func (r *denseRuntime) upsertSourceItems(ctx context.Context, botID string, item
 		return fmt.Errorf("dense embed documents: expected %d vectors, got %d", len(canonical), len(vectors))
 	}
 	for i, item := range canonical {
-		if err := r.qdrant.UpsertDense(ctx, runtimePointID(botID, item.ID), qdrantclient.DenseVector{
+		if err := r.index.UpsertDense(ctx, runtimePointID(botID, item.ID), memindex.DenseVector{
 			Values: vectors[i],
 		}, runtimePayload(botID, item)); err != nil {
 			return err

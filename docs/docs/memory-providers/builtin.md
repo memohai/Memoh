@@ -16,8 +16,8 @@ The built-in provider operates in one of three **memory modes**, each with diffe
 | Mode | Index | Requirements | Use Case |
 |------|-------|-------------|----------|
 | **Off** | File-based only | None | Lightweight setup, no vector search |
-| **Sparse** | Neural sparse vectors | Sparse service + Qdrant (`--profile sparse`) | Good retrieval quality without embedding API costs |
-| **Dense** | Dense embeddings | Embedding model + Qdrant (`--profile qdrant`) | Highest-quality semantic search |
+| **Sparse** | Neural sparse vectors | Sparse service + database sparse index (`--profile sparse`) | Good retrieval quality without embedding API costs |
+| **Dense** | Dense embeddings | Embedding model + database vector index | Highest-quality semantic search |
 
 ### How Sparse Mode Works
 
@@ -44,7 +44,7 @@ After creating a provider, select it from the list and configure its settings.
 |-------|-------------|
 | **Memory Mode** | `off` (default), `sparse`, or `dense`. Controls how memories are indexed and retrieved. |
 | **Embedding Model** | Embedding model for dense vector search. Only used in `dense` mode. |
-| **Qdrant Collection** | Qdrant collection name. Defaults to `memory_sparse`. |
+| **Index** | Database-backed index used by the selected memory mode. |
 
 ### Managing Providers
 
@@ -61,36 +61,22 @@ No additional infrastructure required. Memories are stored and retrieved using f
 
 ### Sparse Mode
 
-Requires the **sparse service** (runs the [`opensearch-neural-sparse-encoding-multilingual-v1`](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1) model locally) and **Qdrant** vector database. Enable both with Docker Compose profiles:
+Requires the **sparse service** (runs the [`opensearch-neural-sparse-encoding-multilingual-v1`](https://huggingface.co/opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1) model locally). Enable it with Docker Compose profiles:
 
 ```bash
-docker compose --profile qdrant --profile sparse up -d
+docker compose --profile sparse up -d
 ```
 
-The following sections must be present in `config.toml`:
+The sparse encoder section must be present in `config.toml`:
 
 ```toml
-[qdrant]
-base_url = "http://qdrant:6334"
-
 [sparse]
 base_url = "http://sparse:8085"
 ```
 
 ### Dense Mode
 
-Requires an **embedding model** (configured in the provider settings) and **Qdrant**:
-
-```bash
-docker compose --profile qdrant up -d
-```
-
-The Qdrant section must be present in `config.toml`:
-
-```toml
-[qdrant]
-base_url = "http://qdrant:6334"
-```
+Requires an **embedding model** configured in the provider settings. Vectors are stored in the configured database backend: PostgreSQL uses pgvector, and SQLite uses sqlite-vec.
 
 ---
 

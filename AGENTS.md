@@ -16,7 +16,7 @@ The system consists of three core services:
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
-- **Qdrant** — Vector database for memory semantic search
+- **PostgreSQL pgvector or SQLite sqlite-vec** — Database-backed vector indexes for memory semantic search
 - **Container runtime** — Isolated workspace containers per bot (Docker, Kubernetes, containerd, Apple Virtualization)
 
 ## Tech Stack
@@ -25,7 +25,7 @@ Infrastructure dependencies:
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
 - **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
-- **Database Drivers**: pgx/v5 (PostgreSQL), modernc.org/sqlite (SQLite)
+- **Database Drivers**: pgx/v5 (PostgreSQL + pgvector), modernc.org/sqlite (SQLite + sqlite-vec)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
@@ -133,7 +133,7 @@ Memoh/
 │   ├── logger/                 #   Structured logging (slog)
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
 │   ├── media/                  #   Content-addressed media asset service
-│   ├── memory/                 #   Long-term memory system (multi-provider: Qdrant, BM25, LLM extraction)
+│   ├── memory/                 #   Long-term memory system (multi-provider: SQL vector indexes, BM25, LLM extraction)
 │   ├── message/                #   Message persistence and event publishing
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
@@ -263,7 +263,7 @@ docker compose up -d        # Start all services
 ```
 
 Production services: `postgres`, `migrate`, `server`, `web`.
-Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search), `browser` (browser automation).
+Optional profiles: `sparse` (neural sparse encoder), `browser` (browser automation).
 
 ## Key Development Rules
 
@@ -415,7 +415,7 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[containerd]` / `[docker]` / `[kubernetes]` / `[apple]` — Backend-specific runtime configuration
 - `[postgres]` — PostgreSQL connection
 - `[sqlite]` — SQLite database file and WAL/lock settings
-- `[qdrant]` — Qdrant vector database connection
+- Memory vector indexes are stored in the configured database backend (`pgvector` for PostgreSQL, `sqlite-vec` for SQLite)
 - `[sparse]` — Sparse (BM25) search service connection
 - `[browser_gateway]` — Browser Gateway address
 - `[web]` — Web frontend address
