@@ -13,6 +13,7 @@ const configDir = resolve(resourcesRoot, 'config')
 const providersDir = resolve(resourcesRoot, 'providers')
 
 const serverName = process.platform === 'win32' ? 'memoh-server.exe' : 'memoh-server'
+const dockerBridgeArch = process.arch === 'x64' ? 'amd64' : process.arch
 
 rmSync(serverDir, { recursive: true, force: true })
 rmSync(runtimeDir, { recursive: true, force: true })
@@ -30,6 +31,11 @@ execFileSync('go', ['build', '-o', resolve(serverDir, serverName), './cmd/agent'
 execFileSync('go', ['build', '-o', resolve(runtimeDir, 'bridge'), './cmd/bridge'], {
   cwd: repoRoot,
   stdio: 'inherit',
+  env: {
+    ...process.env,
+    GOOS: 'linux',
+    GOARCH: dockerBridgeArch,
+  },
 })
 
 copyFileSync(resolve(repoRoot, 'conf', 'app.local.toml'), resolve(configDir, 'app.local.toml'))

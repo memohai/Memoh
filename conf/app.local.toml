@@ -33,7 +33,7 @@ data_root = "data/local"
 runtime_dir = "data/runtime"
 
 [docker]
-# Leave empty to use Docker's standard environment discovery.
+# Leave empty to let desktop startup detect Docker Desktop / Docker Engine sockets.
 host = ""
 
 [local]

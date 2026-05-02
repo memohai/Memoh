@@ -243,3 +243,11 @@ func (r *RuntimeRouter) WorkspaceInfo(ctx context.Context, botID string) (bridge
 		DefaultWorkDir: "/data",
 	}, nil
 }
+
+func (r *RuntimeRouter) BridgeTarget(botID string) string {
+	targeter, ok := r.container.(interface{ BridgeTarget(string) string })
+	if !ok {
+		return ""
+	}
+	return targeter.BridgeTarget(botID)
+}

@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -41,7 +41,7 @@ function serverCommand(): { command: string, args: string[], cwd: string, config
       command: 'go',
       args: ['run', './cmd/agent', 'serve'],
       cwd: root,
-      configPath: join(root, 'conf', 'app.local.toml'),
+      configPath: prepareConfig(root, join(root, 'conf', 'app.local.toml')),
     }
   }
 
@@ -51,7 +51,7 @@ function serverCommand(): { command: string, args: string[], cwd: string, config
     command: binary,
     args: ['serve'],
     cwd,
-    configPath: resourcePath('config', 'app.local.toml'),
+    configPath: prepareConfig(cwd, resourcePath('config', 'app.local.toml')),
   }
 }
 
@@ -71,6 +71,105 @@ function appendLog(message: string): void {
   }
 }
 
+function prepareConfig(cwd: string, sourcePath: string): string {
+  mkdirSync(cwd, { recursive: true })
+  const targetPath = join(cwd, 'config.toml')
+  copyFileSync(sourcePath, targetPath)
+  const home = app.getPath('home')
+  const contents = applyLocalConfigDefaults(readFileSync(targetPath, 'utf8'), cwd, home)
+  writeFileSync(targetPath, contents, { mode: 0o600 })
+  return targetPath
+}
+
+function applyLocalConfigDefaults(contents: string, cwd: string, home: string): string {
+  let next = contents.replaceAll('__HOME__', home)
+  next = setTomlString(next, 'container', 'data_root', toAbsoluteConfigPath(cwd, 'data/local'))
+  next = setTomlString(next, 'container', 'runtime_dir', toAbsoluteConfigPath(cwd, 'data/runtime'))
+  next = setTomlString(next, 'local', 'metadata_root', toAbsoluteConfigPath(cwd, 'data/local/containers'))
+  next = setTomlString(next, 'sqlite', 'path', toAbsoluteConfigPath(cwd, 'data/local/memoh.db'))
+  next = setTomlString(next, 'registry', 'providers_dir', toAbsoluteConfigPath(cwd, 'conf/providers'))
+  return setDockerHostIfEmpty(next, detectDockerHost(home))
+}
+
+function toAbsoluteConfigPath(cwd: string, value: string): string {
+  if (value.startsWith('/')) {
+    return value
+  }
+  return join(cwd, value)
+}
+
+function detectDockerHost(home: string): string {
+  const envHost = process.env.DOCKER_HOST?.trim()
+  if (envHost) {
+    return envHost
+  }
+  const candidates = [
+    join(home, '.docker', 'run', 'docker.sock'),
+    '/var/run/docker.sock',
+  ]
+  for (const socketPath of candidates) {
+    if (existsSync(socketPath)) {
+      return `unix://${socketPath}`
+    }
+  }
+  return ''
+}
+
+function setDockerHostIfEmpty(contents: string, dockerHost: string): string {
+  if (!dockerHost) {
+    return contents
+  }
+  const lines = contents.split(/\r?\n/)
+  let inDocker = false
+  let updated = false
+  const next = lines.map((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inDocker = trimmed === '[docker]'
+      return line
+    }
+    if (!inDocker) {
+      return line
+    }
+    const match = line.match(/^(\s*host\s*=\s*)"([^"]*)"(.*)$/)
+    if (!match || match[2].trim() !== '') {
+      return line
+    }
+    updated = true
+    return `${match[1]}"${dockerHost}"${match[3]}`
+  })
+  if (updated) {
+    appendLog(`detected Docker host: ${dockerHost}`)
+  }
+  return next.join('\n')
+}
+
+function setTomlString(contents: string, sectionName: string, key: string, value: string): string {
+  const lines = contents.split(/\r?\n/)
+  let inSection = false
+  let updated = false
+  const next = lines.map((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inSection = trimmed === `[${sectionName}]`
+      return line
+    }
+    if (!inSection) {
+      return line
+    }
+    const match = line.match(new RegExp(`^(\\s*${key}\\s*=\\s*)"([^"]*)"(.*)$`))
+    if (!match) {
+      return line
+    }
+    updated = true
+    return `${match[1]}"${value}"${match[3]}`
+  })
+  if (!updated) {
+    appendLog(`config key not found: [${sectionName}].${key}`)
+  }
+  return next.join('\n')
+}
+
 function prepareRuntime(command: { cwd: string }): void {
   mkdirSync(join(command.cwd, 'data', 'local'), { recursive: true })
   prepareProviders(command.cwd)
@@ -81,6 +180,11 @@ function prepareRuntime(command: { cwd: string }): void {
     const result = spawnSync('go', ['build', '-o', join(targetRuntime, 'bridge'), './cmd/bridge'], {
       cwd: command.cwd,
       stdio: 'inherit',
+      env: {
+        ...process.env,
+        GOOS: 'linux',
+        GOARCH: dockerBridgeArch(),
+      },
     })
     if (result.status !== 0) {
       throw new Error('failed to build bridge runtime for local desktop server')
@@ -95,6 +199,17 @@ function prepareRuntime(command: { cwd: string }): void {
   rmSync(targetRuntime, { recursive: true, force: true })
   mkdirSync(targetRuntime, { recursive: true })
   cpSync(bundledRuntime, targetRuntime, { recursive: true })
+}
+
+function dockerBridgeArch(): string {
+  switch (process.arch) {
+    case 'arm64':
+      return 'arm64'
+    case 'x64':
+      return 'amd64'
+    default:
+      return process.arch
+  }
 }
 
 function prepareProviders(cwd: string): void {

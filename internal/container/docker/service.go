@@ -20,6 +20,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	dockermount "github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 
 	"github.com/memohai/memoh/internal/config"
 	containerapi "github.com/memohai/memoh/internal/container"
@@ -135,6 +136,9 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 		Mounts: toDockerMounts(req.Spec.Mounts),
 		DNS:    req.Spec.DNS,
 		Init:   boolPtr(true),
+		PortBindings: nat.PortMap{
+			nat.Port(bridgeTCPPort + "/tcp"): []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}},
+		},
 	}
 	if req.Spec.NetworkJoinTarget.Value != "" {
 		hostCfg.NetworkMode = container.NetworkMode("none")
@@ -147,6 +151,9 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 		User:       req.Spec.User,
 		Tty:        req.Spec.TTY,
 		Labels:     labels,
+		ExposedPorts: nat.PortSet{
+			nat.Port(bridgeTCPPort + "/tcp"): struct{}{},
+		},
 	}
 	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, req.ID)
 	if err != nil {
@@ -165,11 +172,32 @@ func (s *Service) BridgeTarget(botID string) string {
 	if err != nil {
 		return ""
 	}
+	if host := firstHostPort(info, bridgeTCPPort); host != "" {
+		return host
+	}
 	ip := firstContainerIP(info)
 	if ip == "" {
 		return ""
 	}
 	return net.JoinHostPort(ip, bridgeTCPPort)
+}
+
+func firstHostPort(info container.InspectResponse, port string) string {
+	if info.NetworkSettings == nil {
+		return ""
+	}
+	for _, binding := range info.NetworkSettings.Ports[nat.Port(port+"/tcp")] {
+		hostIP := strings.TrimSpace(binding.HostIP)
+		hostPort := strings.TrimSpace(binding.HostPort)
+		if hostPort == "" {
+			continue
+		}
+		if hostIP == "" || hostIP == "0.0.0.0" || hostIP == "::" {
+			hostIP = "127.0.0.1"
+		}
+		return net.JoinHostPort(hostIP, hostPort)
+	}
+	return ""
 }
 
 func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.ContainerInfo, error) {

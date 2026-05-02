@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -80,5 +81,18 @@ func TestDockerDoesNotExposeHostSnapshotCapabilities(t *testing.T) {
 	var svc any = &Service{}
 	if _, ok := svc.(snapshotMountProvider); ok {
 		t.Fatal("docker service should not expose host-side snapshot mounts")
+	}
+}
+
+func TestBridgeTargetPrefersPublishedHostPort(t *testing.T) {
+	var settings dockercontainer.NetworkSettings
+	if err := json.Unmarshal([]byte(`{"Ports":{"9090/tcp":[{"HostIp":"127.0.0.1","HostPort":"49153"}]}}`), &settings); err != nil {
+		t.Fatalf("unmarshal network settings: %v", err)
+	}
+	info := dockercontainer.InspectResponse{
+		NetworkSettings: &settings,
+	}
+	if got, want := firstHostPort(info, bridgeTCPPort), "127.0.0.1:49153"; got != want {
+		t.Fatalf("firstHostPort = %q, want %q", got, want)
 	}
 }
