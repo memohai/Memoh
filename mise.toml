@@ -274,10 +274,35 @@ dir = "{{config_root}}/apps/desktop"
 env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18731", CONFIG_PATH = "../../conf/app.local.toml" }
 run = "pnpm dev"
 
+[tasks."desktop:qdrant:prepare"]
+description = "Download the Qdrant binary used by the Electron desktop app"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant"
+
+[tasks."desktop:qdrant:prepare:all"]
+description = "Download all supported Qdrant binaries for desktop packaging"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant:all"
+
+[tasks."desktop:qdrant:prepare:release-platform"]
+description = "Download Qdrant binaries for the current release platform"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant:release-platform"
+
 [tasks."desktop:build"]
 description = "Build Electron desktop app for release (electron-builder)"
 dir = "{{config_root}}/apps/desktop"
 run = "pnpm build"
+
+[tasks."desktop:build:mac:arm64"]
+description = "Build signed-capable macOS arm64 desktop artifacts"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:mac:arm64"
+
+[tasks."desktop:build:mac:x64"]
+description = "Build signed-capable macOS x64 desktop artifacts"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:mac:x64"
 
 [tasks."desktop:build:dir"]
 description = "Build unpacked Electron desktop app with bundled local server"

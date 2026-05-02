@@ -42,6 +42,5 @@ func SQLiteFileDSN(cfg config.SQLiteConfig) string {
 		query.Add("_pragma", "journal_mode(WAL)")
 		query.Del("_journal_mode")
 	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
+	return parsed.Path + "?" + query.Encode()
 }

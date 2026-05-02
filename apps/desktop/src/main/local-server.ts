@@ -1,8 +1,17 @@
 import { app, dialog } from 'electron'
-import { is } from '@electron-toolkit/utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { ensureEmbeddedQdrant, getEmbeddedQdrantStatus } from './qdrant'
+import {
+  appendLineLog,
+  isProcessAlive,
+  readManagedPid,
+  stopManagedPid,
+  writeManagedPid,
+  type ManagedPid,
+} from './daemon'
+import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
 export const LOCAL_SERVER_PORT = 18731
 export const LOCAL_SERVER_BASE_URL = `http://127.0.0.1:${LOCAL_SERVER_PORT}`
@@ -11,12 +20,26 @@ let startedProcess: ChildProcess | null = null
 let serverReady = false
 let serverError: string | null = null
 let desktopAuthToken: string | null = null
+let preparedServerCommand: ServerCommand | null = null
 
 export interface LocalServerStatus {
   baseUrl: string
   ready: boolean
   managed: boolean
   error?: string
+  qdrant?: {
+    grpcBaseUrl: string
+    httpBaseUrl: string
+    ready: boolean
+  }
+}
+
+interface ServerCommand {
+  command: string
+  args: string[]
+  cwd: string
+  configPath: string
+  sourceRoot?: string
 }
 
 interface ServerIdentity {
@@ -28,50 +51,64 @@ interface PingPayload extends ServerIdentity {
   status?: string
 }
 
-interface ManagedServerPid {
-  pid: number
-  command: string
-  startedAt: string
-}
-
-function repoRoot(): string {
-  if (is.dev) {
-    return resolve(process.cwd(), '..', '..')
-  }
-  return resolve(app.getAppPath(), '..', '..')
-}
-
 function serverBinaryName(): string {
   return process.platform === 'win32' ? 'memoh-server.exe' : 'memoh-server'
 }
 
-function resourcePath(...segments: string[]): string {
-  return join(process.resourcesPath, ...segments)
+function devServerBinaryPath(cwd: string): string {
+  return join(cwd, 'bin', serverBinaryName())
 }
 
-function serverCommand(): { command: string, args: string[], cwd: string, configPath: string } {
-  if (is.dev) {
+function buildDevServerBinary(root: string, cwd: string): string {
+  const binary = devServerBinaryPath(cwd)
+  mkdirSync(join(cwd, 'bin'), { recursive: true })
+  const result = spawnSync('go', ['build', '-o', binary, './cmd/agent'], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+  if (result.status !== 0) {
+    throw new Error('failed to build local desktop server binary')
+  }
+  return binary
+}
+
+function serverCommand(qdrantGrpcBaseUrl?: string): ServerCommand {
+  if (!app.isPackaged) {
     const root = repoRoot()
+    const cwd = desktopServerWorkDir()
     return {
-      command: 'go',
-      args: ['run', './cmd/agent', 'serve'],
-      cwd: root,
-      configPath: prepareConfig(root, join(root, 'conf', 'app.local.toml')),
+      command: buildDevServerBinary(root, cwd),
+      args: ['serve'],
+      cwd,
+      configPath: prepareConfig(
+        cwd,
+        join(root, 'conf', 'app.local.toml'),
+        qdrantGrpcBaseUrl,
+        join(root, 'conf', 'providers'),
+      ),
+      sourceRoot: root,
     }
   }
 
   const cwd = app.getPath('userData')
-  const binary = resourcePath('server', serverBinaryName())
   return {
-    command: binary,
+    command: desktopResourcePath('server', serverBinaryName()),
     args: ['serve'],
     cwd,
-    configPath: prepareConfig(cwd, resourcePath('config', 'app.local.toml')),
+    configPath: prepareConfig(
+      cwd,
+      desktopResourcePath('config', 'app.local.toml'),
+      qdrantGrpcBaseUrl,
+      toAbsoluteConfigPath(cwd, 'conf/providers'),
+    ),
   }
 }
 
-function currentServerCommand(): { command: string, args: string[], cwd: string, configPath: string } {
-  return serverCommand()
+function currentServerCommand(): ServerCommand {
+  if (preparedServerCommand) {
+    return preparedServerCommand
+  }
+  return serverCommand(getEmbeddedQdrantStatus()?.grpcBaseUrl)
 }
 
 function logPath(): string {
@@ -83,30 +120,35 @@ function pidPath(): string {
 }
 
 function appendLog(message: string): void {
-  try {
-    appendFileSync(logPath(), `[${new Date().toISOString()}] ${message}\n`)
-  } catch {
-    // Logging must never block startup.
-  }
+  appendLineLog(logPath(), message)
 }
 
-function prepareConfig(cwd: string, sourcePath: string): string {
+function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: string | undefined, providersDir: string): string {
   mkdirSync(cwd, { recursive: true })
-  const targetPath = join(cwd, 'config.toml')
-  copyFileSync(sourcePath, targetPath)
   const home = app.getPath('home')
-  const contents = applyLocalConfigDefaults(readFileSync(targetPath, 'utf8'), cwd, home)
+  const source = readFileSync(sourcePath, 'utf8')
+  const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl)
+  const targetPath = join(cwd, 'config.toml')
   writeFileSync(targetPath, contents, { mode: 0o600 })
   return targetPath
 }
 
-function applyLocalConfigDefaults(contents: string, cwd: string, home: string): string {
+function applyLocalConfigDefaults(
+  contents: string,
+  cwd: string,
+  home: string,
+  providersDir: string,
+  qdrantGrpcBaseUrl?: string,
+): string {
   let next = contents.replaceAll('__HOME__', home)
   next = setTomlString(next, 'container', 'data_root', toAbsoluteConfigPath(cwd, 'data/local'))
   next = setTomlString(next, 'container', 'runtime_dir', toAbsoluteConfigPath(cwd, 'data/runtime'))
   next = setTomlString(next, 'local', 'metadata_root', toAbsoluteConfigPath(cwd, 'data/local/containers'))
   next = setTomlString(next, 'sqlite', 'path', toAbsoluteConfigPath(cwd, 'data/local/memoh.db'))
-  next = setTomlString(next, 'registry', 'providers_dir', toAbsoluteConfigPath(cwd, 'conf/providers'))
+  next = setTomlString(next, 'registry', 'providers_dir', providersDir)
+  if (qdrantGrpcBaseUrl) {
+    next = setTomlString(next, 'qdrant', 'base_url', qdrantGrpcBaseUrl)
+  }
   return setDockerHostIfEmpty(next, detectDockerHost(home))
 }
 
@@ -184,20 +226,21 @@ function setTomlString(contents: string, sectionName: string, key: string, value
     return `${match[1]}"${value}"${match[3]}`
   })
   if (!updated) {
-    appendLog(`config key not found: [${sectionName}].${key}`)
+    throw new Error(`config key not found: [${sectionName}].${key}`)
   }
   return next.join('\n')
 }
 
-function prepareRuntime(command: { cwd: string }): void {
+function prepareRuntime(command: ServerCommand): void {
   mkdirSync(join(command.cwd, 'data', 'local'), { recursive: true })
   prepareProviders(command.cwd)
   const targetRuntime = join(command.cwd, 'data', 'runtime')
   mkdirSync(targetRuntime, { recursive: true })
 
-  if (is.dev) {
+  if (!app.isPackaged) {
+    const root = command.sourceRoot ?? repoRoot()
     const result = spawnSync('go', ['build', '-o', join(targetRuntime, 'bridge'), './cmd/bridge'], {
-      cwd: command.cwd,
+      cwd: root,
       stdio: 'inherit',
       env: {
         ...process.env,
@@ -208,11 +251,11 @@ function prepareRuntime(command: { cwd: string }): void {
     if (result.status !== 0) {
       throw new Error('failed to build bridge runtime for local desktop server')
     }
-    syncBridgeTemplates(command.cwd, targetRuntime)
+    syncBridgeTemplates(root, targetRuntime)
     return
   }
 
-  const bundledRuntime = resourcePath('runtime')
+  const bundledRuntime = desktopResourcePath('runtime')
   if (!existsSync(bundledRuntime)) {
     throw new Error(`Bundled runtime not found: ${bundledRuntime}`)
   }
@@ -221,8 +264,8 @@ function prepareRuntime(command: { cwd: string }): void {
   cpSync(bundledRuntime, targetRuntime, { recursive: true })
 }
 
-function syncBridgeTemplates(cwd: string, targetRuntime: string): void {
-  const templateSource = join(cwd, 'cmd', 'bridge', 'template')
+function syncBridgeTemplates(root: string, targetRuntime: string): void {
+  const templateSource = join(root, 'cmd', 'bridge', 'template')
   const templateTarget = join(targetRuntime, 'templates')
   if (!existsSync(templateSource)) {
     throw new Error(`Bridge templates not found: ${templateSource}`)
@@ -243,10 +286,10 @@ function dockerBridgeArch(): string {
 }
 
 function prepareProviders(cwd: string): void {
-  if (is.dev) {
+  if (!app.isPackaged) {
     return
   }
-  const bundledProviders = resourcePath('providers')
+  const bundledProviders = desktopResourcePath('providers')
   if (!existsSync(bundledProviders)) {
     throw new Error(`Bundled provider templates not found: ${bundledProviders}`)
   }
@@ -285,22 +328,33 @@ async function waitForServer(timeoutMs = 30_000): Promise<boolean> {
   return false
 }
 
-function spawnServer(command = serverCommand()): ChildProcess {
+function spawnServer(command: ServerCommand): ChildProcess {
   prepareRuntime(command)
-  if (!is.dev && !existsSync(command.command)) {
+  if (!existsSync(command.command)) {
     throw new Error(`Bundled server binary not found: ${command.command}`)
   }
   runMigrations(command)
   const child = spawn(command.command, command.args, {
     cwd: command.cwd,
     detached: true,
-    stdio: is.dev ? 'ignore' : ['ignore', 'ignore', 'ignore'],
+    stdio: 'ignore',
     env: {
       ...process.env,
       CONFIG_PATH: command.configPath,
     },
   })
   child.unref()
+  child.once('error', (error) => {
+    appendLog(`managed local server process error: ${error.message}`)
+  })
+  child.once('exit', (code, signal) => {
+    appendLog(`managed local server exited code=${String(code)} signal=${String(signal)}`)
+    if (startedProcess === child) {
+      startedProcess = null
+      serverReady = false
+      desktopAuthToken = null
+    }
+  })
   if (typeof child.pid === 'number') {
     writeManagedServerPid({
       pid: child.pid,
@@ -336,8 +390,7 @@ function runServerCommand(
   command: { command: string, cwd: string, configPath: string },
   serverArgs: string[],
 ): ReturnType<typeof spawnSync> {
-  const args = is.dev ? ['run', './cmd/agent', ...serverArgs] : serverArgs
-  const result = spawnSync(command.command, args, {
+  const result = spawnSync(command.command, serverArgs, {
     cwd: command.cwd,
     encoding: 'utf8',
     env: {
@@ -345,7 +398,7 @@ function runServerCommand(
       CONFIG_PATH: command.configPath,
     },
   })
-  appendLog(`$ ${command.command} ${args.join(' ')}\nstatus=${String(result.status)} error=${result.error?.message ?? ''}\nstdout:\n${result.stdout ?? ''}\nstderr:\n${result.stderr ?? ''}`)
+  appendLog(`$ ${command.command} ${serverArgs.join(' ')}\nstatus=${String(result.status)} error=${result.error?.message ?? ''}\nstdout:\n${result.stdout ?? ''}\nstderr:\n${result.stderr ?? ''}`)
   return result
 }
 
@@ -389,94 +442,52 @@ function identityLabel(identity: ServerIdentity): string {
   return identity.commitHash ? `${identity.version} (${identity.commitHash})` : identity.version || 'unknown'
 }
 
-function writeManagedServerPid(info: ManagedServerPid): void {
-  try {
-    writeFileSync(pidPath(), JSON.stringify(info, null, 2), { mode: 0o600 })
-  } catch (error) {
-    appendLog(`failed to write pid file: ${error instanceof Error ? error.message : String(error)}`)
-  }
+function writeManagedServerPid(info: ManagedPid): void {
+  writeManagedPid(pidPath(), logPath(), info)
 }
 
-function readManagedServerPid(): ManagedServerPid | null {
-  try {
-    const payload = JSON.parse(readFileSync(pidPath(), 'utf8')) as Partial<ManagedServerPid>
-    if (typeof payload.pid !== 'number' || payload.pid <= 0) return null
-    return {
-      pid: payload.pid,
-      command: typeof payload.command === 'string' ? payload.command : '',
-      startedAt: typeof payload.startedAt === 'string' ? payload.startedAt : '',
-    }
-  } catch {
-    return null
-  }
+function readManagedServerPid(): ManagedPid | null {
+  return readManagedPid(pidPath())
 }
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
+export async function stopManagedServer(): Promise<boolean> {
+  const stopped = await stopManagedPid({
+    pidPath: pidPath(),
+    logPath: logPath(),
+    label: 'managed local server',
+  })
+  if (stopped || !hasLiveManagedServer()) {
+    startedProcess = null
+    serverReady = false
+    desktopAuthToken = null
   }
+  return stopped
 }
 
-async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (!isProcessAlive(pid)) return true
-    await new Promise(resolve => setTimeout(resolve, 200))
-  }
-  return false
-}
-
-async function stopManagedServer(): Promise<boolean> {
+function hasLiveManagedServer(): boolean {
   const info = readManagedServerPid()
-  if (!info || !isProcessAlive(info.pid)) {
-    return false
-  }
-  appendLog(`stopping managed local server pid=${info.pid}`)
-  try {
-    process.kill(info.pid, 'SIGTERM')
-  } catch (error) {
-    appendLog(`failed to terminate managed local server: ${error instanceof Error ? error.message : String(error)}`)
-    return false
-  }
-  if (!(await waitForProcessExit(info.pid))) {
-    appendLog(`managed local server did not exit after SIGTERM, killing pid=${info.pid}`)
-    try {
-      process.kill(info.pid, 'SIGKILL')
-    } catch (error) {
-      appendLog(`failed to kill managed local server: ${error instanceof Error ? error.message : String(error)}`)
-      return false
-    }
-    await waitForProcessExit(info.pid)
-  }
-  try {
-    unlinkSync(pidPath())
-  } catch {
-    // Stale pid files are harmless.
-  }
-  return true
+  return !!info && isProcessAlive(info.pid)
 }
 
 export async function ensureLocalServer(): Promise<LocalServerStatus> {
   try {
-    const command = serverCommand()
-    const bundledIdentity = bundledServerIdentity(command)
+    const identityCommand = serverCommand()
+    preparedServerCommand = identityCommand
+    const bundledIdentity = bundledServerIdentity(identityCommand)
     const existing = await probeServer()
     if (existing) {
-      if (sameServerIdentity(existing, bundledIdentity)) {
-        serverReady = true
-        serverError = null
-        await ensureDesktopAuthToken()
-        return getLocalServerStatus()
-      }
-      appendLog(`local server version mismatch: running=${identityLabel(existing)} bundled=${identityLabel(bundledIdentity)}`)
-      if (!(await stopManagedServer())) {
-        throw new Error(`Local server on ${LOCAL_SERVER_BASE_URL} is ${identityLabel(existing)}, but this desktop bundles ${identityLabel(bundledIdentity)}. Stop the old local server and reopen Memoh.`)
+      if (hasLiveManagedServer()) {
+        appendLog('restarting managed local server to attach embedded Qdrant')
+        await stopManagedServer()
+      } else {
+        const sameIdentity = sameServerIdentity(existing, bundledIdentity)
+        throw new Error(`Local server on ${LOCAL_SERVER_BASE_URL} is already running${sameIdentity ? '' : ` (${identityLabel(existing)})`}, but it is not managed by this desktop. Stop it and reopen Memoh so desktop memory uses the embedded Qdrant.`)
       }
     }
 
+    const qdrant = await ensureEmbeddedQdrant()
+    const command = serverCommand(qdrant.grpcBaseUrl)
+    preparedServerCommand = command
     startedProcess = spawnServer(command)
     if (!(await waitForServer())) {
       throw new Error(`Local server did not become ready on ${LOCAL_SERVER_BASE_URL}`)
@@ -503,11 +514,19 @@ export async function getDesktopAuthToken(): Promise<string> {
 }
 
 export function getLocalServerStatus(): LocalServerStatus {
+  const qdrant = getEmbeddedQdrantStatus()
   return {
     baseUrl: LOCAL_SERVER_BASE_URL,
     ready: serverReady,
-    managed: startedProcess != null,
+    managed: startedProcess != null || hasLiveManagedServer(),
     error: serverError ?? undefined,
+    qdrant: qdrant
+      ? {
+          grpcBaseUrl: qdrant.grpcBaseUrl,
+          httpBaseUrl: qdrant.httpBaseUrl,
+          ready: qdrant.ready,
+        }
+      : undefined,
   }
 }
 

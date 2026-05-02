@@ -39,6 +39,9 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 45
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +66,39 @@ jobs:
       - name: Typecheck desktop
         run: pnpm --filter @memohai/desktop typecheck
 
+      - name: Prepare macOS code signing
+        id: mac-signing
+        if: ${{ matrix.platform == 'macos-latest' && github.event_name != 'pull_request' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CSC_PATH="$RUNNER_TEMP/certificate.p12"
+          python3 - <<'EOF'
+          import base64
+          import os
+          from pathlib import Path
+
+          target = Path(os.environ["RUNNER_TEMP"]) / "certificate.p12"
+          target.write_bytes(base64.b64decode(os.environ["APPLE_CERTIFICATE"]))
+          EOF
+          echo "CSC_LINK=$CSC_PATH" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
+          echo "has_cert=true" >> "$GITHUB_OUTPUT"
+
       - name: Build desktop (unpacked smoke)
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
         run: pnpm --filter @memohai/desktop build:dir
+
+      - name: Verify macOS signature
+        if: ${{ matrix.platform == 'macos-latest' && steps.mac-signing.outputs.has_cert == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find apps/desktop/dist -name 'Memoh.app' -type d | head -n 1)"
+          if [[ -z "$app_path" ]]; then
+            echo "Memoh.app not found in apps/desktop/dist" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F "Developer ID Application"

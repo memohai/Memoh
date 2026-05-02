@@ -2,7 +2,8 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
-import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus } from './local-server'
+import { stopEmbeddedQdrant } from './qdrant'
+import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus, stopManagedServer } from './local-server'
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
@@ -19,6 +20,31 @@ let settingsWindow: BrowserWindow | null = null
 // rather than a closure variable lets us stay correct if a future change
 // ever introduces multiple settings windows.
 const pendingSettingsNavigate = new Map<number, string>()
+let stoppingLocalProcesses = false
+
+async function stopLocalProcesses(): Promise<void> {
+  await stopManagedServer()
+  await stopEmbeddedQdrant()
+}
+
+app.on('before-quit', (event) => {
+  if (stoppingLocalProcesses) return
+  stoppingLocalProcesses = true
+  event.preventDefault()
+  void stopLocalProcesses()
+    .catch((error) => {
+      console.error('failed to stop local desktop processes', error)
+    })
+    .finally(() => app.quit())
+})
+
+app.on('will-quit', () => {
+  if (stoppingLocalProcesses) return
+  stoppingLocalProcesses = true
+  void stopLocalProcesses().catch((error) => {
+    console.error('failed to stop local desktop processes', error)
+  })
+})
 
 function applyExternalLinkHandler(window: BrowserWindow): void {
   window.webContents.setWindowOpenHandler(({ url }) => {

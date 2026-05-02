@@ -128,8 +128,18 @@ jobs:
         with:
           node-version: lts/*
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+      - name: Require macOS code signing secrets
+        if: ${{ matrix.platform == 'macos-latest' && (env.APPLE_CERTIFICATE == '' || env.APPLE_CERTIFICATE_PASSWORD == '') }}
+        shell: bash
+        run: |
+          echo "APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD are required for signed macOS desktop releases." >&2
+          exit 1
       - name: Prepare macOS code signing
         id: mac-signing
         if: ${{ matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
@@ -154,6 +164,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
         run: pnpm --filter @memohai/desktop ${{ matrix.build_cmd }}
+      - name: Verify macOS signature
+        if: ${{ matrix.platform == 'macos-latest' && steps.mac-signing.outputs.has_cert == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find apps/desktop/dist -name 'Memoh.app' -type d | head -n 1)"
+          if [[ -z "$app_path" ]]; then
+            echo "Memoh.app not found in apps/desktop/dist" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F "Developer ID Application"
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:

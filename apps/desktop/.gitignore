@@ -11,6 +11,8 @@ dist
 !build/
 !build/**
 resources/config/
+resources/providers/
+resources/qdrant/
 resources/runtime/
 resources/server/
 

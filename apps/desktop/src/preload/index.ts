@@ -19,7 +19,17 @@ export interface CrossWindowInvalidatePayload {
 // node-privileged main process.
 const api = {
   desktop: {
-    getServerStatus: (): Promise<{ baseUrl: string, ready: boolean, managed: boolean, error?: string }> =>
+    getServerStatus: (): Promise<{
+      baseUrl: string
+      ready: boolean
+      managed: boolean
+      error?: string
+      qdrant?: {
+        grpcBaseUrl: string
+        httpBaseUrl: string
+        ready: boolean
+      }
+    }> =>
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
