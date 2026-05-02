@@ -1,6 +1,10 @@
 package providers
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -202,5 +206,53 @@ func TestOAuthConfigForGitHubCopilotUsesFixedDeviceFlowSettings(t *testing.T) {
 	}
 	if cfg.Scopes != "read:user user:email" {
 		t.Fatalf("expected fixed scope, got %q", cfg.Scopes)
+	}
+}
+
+func TestFetchRemoteModelsFromAnthropicUsesAnthropicHeaders(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models path, got %q", r.URL.Path)
+		}
+		if got := r.Header.Get("x-api-key"); got != "sk-ant-test" {
+			t.Fatalf("expected x-api-key header, got %q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got != anthropicAPIVersion {
+			t.Fatalf("expected anthropic-version %q, got %q", anthropicAPIVersion, got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected no Authorization header, got %q", got)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":           "claude-sonnet-4-20250514",
+					"display_name": "Claude Sonnet 4",
+					"type":         "model",
+				},
+			},
+			"has_more": false,
+		})
+	}))
+	defer server.Close()
+
+	remoteModels, err := fetchRemoteModelsFromProvider(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeAnthropicMessages),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"sk-ant-test"}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(remoteModels))
+	}
+	if remoteModels[0].Name != "Claude Sonnet 4" {
+		t.Fatalf("expected display name to be mapped, got %q", remoteModels[0].Name)
+	}
+	if remoteModels[0].Type != string(models.ModelTypeChat) {
+		t.Fatalf("expected Anthropic model type to import as chat, got %q", remoteModels[0].Type)
 	}
 }

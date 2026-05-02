@@ -94,6 +94,7 @@ type RemoteModel struct {
 	Created          int64    `json:"created"`
 	OwnedBy          string   `json:"owned_by"`
 	Name             string   `json:"name,omitempty"`
+	DisplayName      string   `json:"display_name,omitempty"`
 	Type             string   `json:"type,omitempty"`
 	Compatibilities  []string `json:"compatibilities,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`

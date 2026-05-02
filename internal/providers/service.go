@@ -210,7 +210,10 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-const probeTimeout = models.DefaultProviderProbeTimeout
+const (
+	probeTimeout        = models.DefaultProviderProbeTimeout
+	anthropicAPIVersion = "2023-06-01"
+)
 
 // Test probes the provider using the Twilight AI SDK to check
 // reachability and authentication.
@@ -310,10 +313,14 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return remoteModels, nil
 	}
 
+	return fetchRemoteModelsFromProvider(ctx, provider)
+}
+
+func fetchRemoteModelsFromProvider(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
 	cfg := providerConfig(provider.Config)
 	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
 	apiKey := configString(cfg, "api_key")
-	modelsURL := fmt.Sprintf("%s/models", baseURL)
+	modelsURL := fetchModelsURL(models.ClientType(provider.ClientType), baseURL)
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -323,9 +330,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	if apiKey != "" && !supportsOAuth(provider) {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
-	}
+	setFetchModelsAuthHeaders(req, models.ClientType(provider.ClientType), apiKey)
 
 	resp, err := models.NewProviderHTTPClient(probeTimeout).Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
 	if err != nil {
@@ -343,7 +348,44 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
+	normalizeFetchedModels(models.ClientType(provider.ClientType), fetchResp.Data)
 	return fetchResp.Data, nil
+}
+
+func fetchModelsURL(clientType models.ClientType, baseURL string) string {
+	if clientType == models.ClientTypeAnthropicMessages && !strings.HasSuffix(baseURL, "/v1") {
+		baseURL += "/v1"
+	}
+	return fmt.Sprintf("%s/models", baseURL)
+}
+
+func setFetchModelsAuthHeaders(req *http.Request, clientType models.ClientType, apiKey string) {
+	if apiKey == "" {
+		return
+	}
+	if clientType == models.ClientTypeAnthropicMessages {
+		req.Header.Set("x-api-key", apiKey)
+		req.Header.Set("anthropic-version", anthropicAPIVersion)
+		return
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+}
+
+func normalizeFetchedModels(clientType models.ClientType, remoteModels []RemoteModel) {
+	if clientType != models.ClientTypeAnthropicMessages {
+		return
+	}
+	for i := range remoteModels {
+		if strings.TrimSpace(remoteModels[i].Name) == "" {
+			remoteModels[i].Name = strings.TrimSpace(remoteModels[i].DisplayName)
+		}
+		if strings.TrimSpace(remoteModels[i].Object) == "" {
+			remoteModels[i].Object = remoteModels[i].Type
+		}
+		if strings.TrimSpace(remoteModels[i].Type) == "model" {
+			remoteModels[i].Type = string(models.ModelTypeChat)
+		}
+	}
 }
 
 // toGetResponse converts a database provider to a response.
