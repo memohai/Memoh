@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,12 +19,15 @@ import (
 // --- fake services ---
 
 type fakePermissionResolver struct {
+	mu      sync.Mutex
 	allowed bool
 	err     error
 	checks  []rbac.PermissionKey
 }
 
 func (f *fakePermissionResolver) HasBotPermission(_ context.Context, _, _ string, permission rbac.PermissionKey) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.checks = append(f.checks, permission)
 	return f.allowed, f.err
 }
