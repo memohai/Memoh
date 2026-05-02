@@ -52,6 +52,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -65,6 +66,8 @@ import (
 	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
 	modelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/model"
 	"github.com/memohai/memoh/internal/heartbeat"
+	"github.com/memohai/memoh/internal/iam/rbac"
+	"github.com/memohai/memoh/internal/iam/sso"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/mcp"
 	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
@@ -263,7 +266,7 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 	}
 }
 
-func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
+func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, rbacService *rbac.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileRuntime := handlers.NewBuiltinMemoryRuntime(provider)
 	fileStore := storefs.New(log, provider)
@@ -272,7 +275,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 		if err != nil {
 			return nil, err
 		}
-		p := membuiltin.NewBuiltinProvider(log, runtime, chatService, accountService)
+		p := membuiltin.NewBuiltinProvider(log, runtime, chatService, rbacService)
 		p.SetLLM(llm)
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
@@ -283,7 +286,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
-	defaultProvider := membuiltin.NewBuiltinProvider(log, fileRuntime, chatService, accountService)
+	defaultProvider := membuiltin.NewBuiltinProvider(log, fileRuntime, chatService, rbacService)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry
@@ -598,14 +601,22 @@ func provideMemoryHandler(log *slog.Logger, botService *bots.Service, accountSer
 	return h
 }
 
-func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *boot.RuntimeConfig) *handlers.AuthHandler {
-	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
+func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, queries dbstore.Queries, rc *boot.RuntimeConfig) *handlers.AuthHandler {
+	h := handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
+	h.SetSessionStore(handlers.NewDBAuthSessionStore(queries))
+	h.SetSSOService(sso.NewAuthService(queries, rc.JwtExpiresIn, "/login/sso/callback"))
+	return h
 }
 
-func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service) *handlers.MessageHandler {
+func provideRBACService(queries dbstore.Queries) *rbac.Service {
+	return rbac.NewService(rbac.NewSQLStore(queries))
+}
+
+func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, rbacService *rbac.Service) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, chatService, msgService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
+	h.SetRBACService(rbacService)
 	return h
 }
 
@@ -624,8 +635,8 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	return media.NewService(log, storageProvider)
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *handlers.UsersHandler {
-	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry)
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, identityService *identities.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, rbacService *rbac.Service) *handlers.UsersHandler {
+	return handlers.NewUsersHandler(log, accountService, identityService, botService, routeService, channelStore, channelLifecycle, channelManager, registry, rbacService)
 }
 
 func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
@@ -932,14 +943,15 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 	})
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, rbacService *rbac.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelManager *channel.Manager, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := ensureAdminUser(ctx, logger, accountStore, cfg); err != nil {
+			if err := ensureAdminUser(ctx, logger, queries, accountStore, cfg); err != nil {
 				return err
 			}
+			botService.SetRBACService(rbacService)
 			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
 				_, err := manager.MCPClient(ctx, botID)
@@ -972,7 +984,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 	})
 }
 
-func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, cfg config.Config) error {
+func ensureAdminUser(ctx context.Context, log *slog.Logger, queries dbstore.Queries, accountStore dbstore.AccountStore, cfg config.Config) error {
 	if accountStore == nil {
 		return errors.New("account store not configured")
 	}
@@ -1012,13 +1024,31 @@ func ensureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 		Username:     username,
 		Email:        email,
 		PasswordHash: string(hashed),
-		Role:         "admin",
 		DisplayName:  username,
 		IsActive:     true,
 		DataRoot:     cfg.Workspace.DataRoot,
 	})
 	if err != nil {
 		return err
+	}
+	if queries != nil {
+		role, err := queries.GetRoleByKey(ctx, string(rbac.RoleAdmin))
+		if err != nil {
+			return fmt.Errorf("get admin role: %w", err)
+		}
+		userID, err := db.ParseUUID(user.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := queries.AssignPrincipalRole(ctx, sqlc.AssignPrincipalRoleParams{
+			PrincipalType: string(rbac.PrincipalUser),
+			PrincipalID:   userID,
+			RoleID:        role.ID,
+			ResourceType:  string(rbac.ResourceSystem),
+			Source:        string(rbac.SourceSystem),
+		}); err != nil {
+			return fmt.Errorf("assign admin role: %w", err)
+		}
 	}
 	log.Info("Admin user created", slog.String("username", username))
 	return nil

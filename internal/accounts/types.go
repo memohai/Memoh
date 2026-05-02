@@ -7,7 +7,6 @@ type Account struct {
 	ID          string    `json:"id"`
 	Username    string    `json:"username"`
 	Email       string    `json:"email,omitempty"`
-	Role        string    `json:"role"`
 	DisplayName string    `json:"display_name"`
 	AvatarURL   string    `json:"avatar_url,omitempty"`
 	Timezone    string    `json:"timezone,omitempty"`
@@ -22,7 +21,6 @@ type CreateAccountRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"` //nolint:gosec // intentional: JSON request field carrying a user-supplied credential
 	Email       string `json:"email,omitempty"`
-	Role        string `json:"role,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	AvatarURL   string `json:"avatar_url,omitempty"`
 	IsActive    *bool  `json:"is_active,omitempty"`
@@ -30,7 +28,6 @@ type CreateAccountRequest struct {
 
 // UpdateAccountRequest is the input for admin-level account updates.
 type UpdateAccountRequest struct {
-	Role        *string `json:"role,omitempty"`
 	DisplayName *string `json:"display_name,omitempty"`
 	AvatarURL   *string `json:"avatar_url,omitempty"`
 	IsActive    *bool   `json:"is_active,omitempty"`

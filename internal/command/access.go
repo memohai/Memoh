@@ -15,14 +15,14 @@ func (h *Handler) buildAccessGroup() *CommandGroup {
 		Usage: "show - Show current identity, write access, and chat ACL context",
 		Handler: func(cc CommandContext) (string, error) {
 			writeAccess := "no"
-			if cc.Role == "owner" {
+			if cc.BotUpdateAllowed {
 				writeAccess = "yes"
 			}
 
 			pairs := []kv{
 				{"Channel Identity", fallbackValue(cc.ChannelIdentityID)},
 				{"Linked User", fallbackValue(cc.UserID)},
-				{"Bot Role", fallbackValue(cc.Role)},
+				{"Bot Permission", "bot.update=" + writeAccess},
 				{"Write Commands", writeAccess},
 				{"Channel", fallbackValue(cc.ChannelType)},
 				{"Conversation Type", fallbackValue(cc.ConversationType)},

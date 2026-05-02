@@ -24,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -51,6 +52,10 @@ type channelReactor interface {
 
 type chatACL interface {
 	Evaluate(ctx context.Context, req acl.EvaluateRequest) (bool, error)
+}
+
+type botPermissionChecker interface {
+	HasPermission(ctx context.Context, check rbac.Check) (bool, error)
 }
 
 type mediaIngestor interface {
@@ -128,6 +133,7 @@ type ChannelInboundProcessor struct {
 	policy              PolicyService
 	dispatcher          *RouteDispatcher
 	acl                 chatACL
+	rbac                botPermissionChecker
 	observer            channel.StreamObserver
 	speechService       speechSynthesizer
 	speechModelResolver speechModelResolver
@@ -183,6 +189,13 @@ func (p *ChannelInboundProcessor) SetACLService(service chatACL) {
 		return
 	}
 	p.acl = service
+}
+
+func (p *ChannelInboundProcessor) SetRBACService(service botPermissionChecker) {
+	if p == nil {
+		return
+	}
+	p.rbac = service
 }
 
 // IdentityMiddleware returns the identity resolution middleware.
@@ -485,7 +498,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 		if p.logger != nil {
 			p.logger.Info(
-				"inbound denied by acl — event not ingested",
+				"inbound denied by acl; event not ingested",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
@@ -493,6 +506,32 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			)
 		}
 		return nil
+	}
+
+	if strings.TrimSpace(identity.UserID) != "" && p.rbac != nil {
+		allowed, permissionErr := p.rbac.HasPermission(ctx, rbac.Check{
+			UserID:        strings.TrimSpace(identity.UserID),
+			PermissionKey: rbac.PermissionBotChat,
+			ResourceType:  rbac.ResourceBot,
+			ResourceID:    strings.TrimSpace(identity.BotID),
+		})
+		if permissionErr != nil {
+			return fmt.Errorf("evaluate bot chat permission: %w", permissionErr)
+		}
+		if !allowed {
+			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
+			if p.logger != nil {
+				p.logger.Info(
+					"inbound denied by rbac; event not ingested",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+					slog.String("user_id", strings.TrimSpace(identity.UserID)),
+					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+					slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
+				)
+			}
+			return nil
+		}
 	}
 
 	if isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {

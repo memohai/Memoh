@@ -68,12 +68,12 @@ ORDER BY created_at DESC;
 
 -- name: GetUserChannelBinding :one
 SELECT id, user_id, channel_type, config, created_at, updated_at
-FROM user_channel_bindings
+FROM iam_user_channel_bindings
 WHERE user_id = sqlc.arg(user_id) AND channel_type = sqlc.arg(channel_type)
 LIMIT 1;
 
 -- name: UpsertUserChannelBinding :one
-INSERT INTO user_channel_bindings (id, user_id, channel_type, config)
+INSERT INTO iam_user_channel_bindings (id, user_id, channel_type, config)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -92,6 +92,6 @@ RETURNING id, user_id, channel_type, config, created_at, updated_at;
 
 -- name: ListUserChannelBindingsByPlatform :many
 SELECT id, user_id, channel_type, config, created_at, updated_at
-FROM user_channel_bindings
+FROM iam_user_channel_bindings
 WHERE channel_type = sqlc.arg(channel_type)
 ORDER BY created_at DESC;

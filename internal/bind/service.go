@@ -216,7 +216,7 @@ func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound)
 }
 
-func toCode(row sqlc.ChannelIdentityBindCode) Code {
+func toCode(row sqlc.IamChannelIdentityBindCode) Code {
 	c := Code{
 		ID:             row.ID.String(),
 		Token:          row.Token,

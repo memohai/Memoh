@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/mcp"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 )
@@ -50,9 +51,9 @@ type memoryRuntime interface {
 	Rebuild(ctx context.Context, botID string) (adapters.RebuildResult, error)
 }
 
-// AdminChecker checks whether a channel identity has admin privileges.
+// AdminChecker checks system-level permissions.
 type AdminChecker interface {
-	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
+	HasPermission(ctx context.Context, check rbac.Check) (bool, error)
 }
 
 func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
@@ -376,7 +377,11 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 
 func (p *BuiltinProvider) canAccessChat(ctx context.Context, chatID, channelIdentityID string) (bool, error) {
 	if p.adminChecker != nil {
-		isAdmin, err := p.adminChecker.IsAdmin(ctx, channelIdentityID)
+		isAdmin, err := p.adminChecker.HasPermission(ctx, rbac.Check{
+			UserID:        channelIdentityID,
+			PermissionKey: rbac.PermissionSystemAdmin,
+			ResourceType:  rbac.ResourceSystem,
+		})
 		if err != nil {
 			return false, err
 		}

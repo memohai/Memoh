@@ -346,40 +346,40 @@ func (q *Queries) CountTokenUsageRecords(ctx context.Context, arg pgsqlc.CountTo
 	return result, nil
 }
 
-func (q *Queries) CreateAccount(ctx context.Context, arg pgsqlc.CreateAccountParams) (pgsqlc.User, error) {
+func (q *Queries) CreateAccount(ctx context.Context, arg pgsqlc.CreateAccountParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateAccountParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.CreateAccount(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) CreateBindCode(ctx context.Context, arg pgsqlc.CreateBindCodeParams) (pgsqlc.ChannelIdentityBindCode, error) {
+func (q *Queries) CreateBindCode(ctx context.Context, arg pgsqlc.CreateBindCodeParams) (pgsqlc.IamChannelIdentityBindCode, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateBindCodeParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	out, err := q.store.queries.CreateBindCode(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentityBindCode{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentityBindCode
+	var result pgsqlc.IamChannelIdentityBindCode
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	return result, nil
 }
@@ -460,21 +460,21 @@ func (q *Queries) CreateBrowserContext(ctx context.Context, arg pgsqlc.CreateBro
 	return result, nil
 }
 
-func (q *Queries) CreateChannelIdentity(ctx context.Context, arg pgsqlc.CreateChannelIdentityParams) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) CreateChannelIdentity(ctx context.Context, arg pgsqlc.CreateChannelIdentityParams) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateChannelIdentityParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.CreateChannelIdentity(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
@@ -859,21 +859,21 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg pgsqlc.Crea
 	return result, nil
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg pgsqlc.CreateUserParams) (pgsqlc.User, error) {
+func (q *Queries) CreateUser(ctx context.Context, arg pgsqlc.CreateUserParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateUserParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.CreateUser(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
@@ -1276,40 +1276,36 @@ func (q *Queries) FindChatRoute(ctx context.Context, arg pgsqlc.FindChatRoutePar
 	return result, nil
 }
 
-func (q *Queries) GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (pgsqlc.User, error) {
+func (q *Queries) GetAccountByIdentity(ctx context.Context, identity string) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
-	var sqliteIdentity sql.NullString
-	if err := convertValue(identity, &sqliteIdentity); err != nil {
-		return pgsqlc.User{}, err
-	}
-	out, err := q.store.queries.GetAccountByIdentity(ctx, sqliteIdentity)
+	out, err := q.store.queries.GetAccountByIdentity(ctx, identity)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (pgsqlc.User, error) {
+func (q *Queries) GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteUserID string
 	if err := convertValue(userID, &sqliteUserID); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.GetAccountByUserID(ctx, sqliteUserID)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
@@ -1333,40 +1329,40 @@ func (q *Queries) GetActiveSessionForRoute(ctx context.Context, routeID pgtype.U
 	return result, nil
 }
 
-func (q *Queries) GetBindCode(ctx context.Context, token string) (pgsqlc.ChannelIdentityBindCode, error) {
+func (q *Queries) GetBindCode(ctx context.Context, token string) (pgsqlc.IamChannelIdentityBindCode, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteToken string
 	if err := convertValue(token, &sqliteToken); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	out, err := q.store.queries.GetBindCode(ctx, sqliteToken)
 	if err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentityBindCode{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentityBindCode
+	var result pgsqlc.IamChannelIdentityBindCode
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetBindCodeForUpdate(ctx context.Context, token string) (pgsqlc.ChannelIdentityBindCode, error) {
+func (q *Queries) GetBindCodeForUpdate(ctx context.Context, token string) (pgsqlc.IamChannelIdentityBindCode, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteToken string
 	if err := convertValue(token, &sqliteToken); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	out, err := q.store.queries.GetBindCodeForUpdate(ctx, sqliteToken)
 	if err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentityBindCode{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentityBindCode
+	var result pgsqlc.IamChannelIdentityBindCode
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	return result, nil
 }
@@ -1542,59 +1538,59 @@ func (q *Queries) GetBrowserContextByID(ctx context.Context, id pgtype.UUID) (pg
 	return result, nil
 }
 
-func (q *Queries) GetChannelIdentityByChannelSubject(ctx context.Context, arg pgsqlc.GetChannelIdentityByChannelSubjectParams) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) GetChannelIdentityByChannelSubject(ctx context.Context, arg pgsqlc.GetChannelIdentityByChannelSubjectParams) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.GetChannelIdentityByChannelSubjectParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.GetChannelIdentityByChannelSubject(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) GetChannelIdentityByID(ctx context.Context, id pgtype.UUID) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteId string
 	if err := convertValue(id, &sqliteId); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.GetChannelIdentityByID(ctx, sqliteId)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetChannelIdentityByIDForUpdate(ctx context.Context, id pgtype.UUID) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) GetChannelIdentityByIDForUpdate(ctx context.Context, id pgtype.UUID) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteId string
 	if err := convertValue(id, &sqliteId); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.GetChannelIdentityByIDForUpdate(ctx, sqliteId)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
@@ -2450,78 +2446,78 @@ func (q *Queries) GetTranscriptionModelWithProvider(ctx context.Context, id pgty
 	return result, nil
 }
 
-func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (pgsqlc.User, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteId string
 	if err := convertValue(id, &sqliteId); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.GetUserByID(ctx, sqliteId)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetUserChannelBinding(ctx context.Context, arg pgsqlc.GetUserChannelBindingParams) (pgsqlc.UserChannelBinding, error) {
+func (q *Queries) GetUserChannelBinding(ctx context.Context, arg pgsqlc.GetUserChannelBindingParams) (pgsqlc.IamUserChannelBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UserChannelBinding{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUserChannelBinding{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.GetUserChannelBindingParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.UserChannelBinding{}, err
+		return pgsqlc.IamUserChannelBinding{}, err
 	}
 	out, err := q.store.queries.GetUserChannelBinding(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.UserChannelBinding{}, mapQueryErr(err)
+		return pgsqlc.IamUserChannelBinding{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UserChannelBinding
+	var result pgsqlc.IamUserChannelBinding
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UserChannelBinding{}, err
+		return pgsqlc.IamUserChannelBinding{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetUserProviderOAuthToken(ctx context.Context, arg pgsqlc.GetUserProviderOAuthTokenParams) (pgsqlc.UserProviderOauthToken, error) {
+func (q *Queries) GetUserProviderOAuthToken(ctx context.Context, arg pgsqlc.GetUserProviderOAuthTokenParams) (pgsqlc.IamUserProviderOauthToken, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UserProviderOauthToken{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUserProviderOauthToken{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.GetUserProviderOAuthTokenParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	out, err := q.store.queries.GetUserProviderOAuthToken(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.UserProviderOauthToken{}, mapQueryErr(err)
+		return pgsqlc.IamUserProviderOauthToken{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UserProviderOauthToken
+	var result pgsqlc.IamUserProviderOauthToken
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) GetUserProviderOAuthTokenByState(ctx context.Context, state string) (pgsqlc.UserProviderOauthToken, error) {
+func (q *Queries) GetUserProviderOAuthTokenByState(ctx context.Context, state string) (pgsqlc.IamUserProviderOauthToken, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UserProviderOauthToken{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUserProviderOauthToken{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteState string
 	if err := convertValue(state, &sqliteState); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	out, err := q.store.queries.GetUserProviderOAuthTokenByState(ctx, sqliteState)
 	if err != nil {
-		return pgsqlc.UserProviderOauthToken{}, mapQueryErr(err)
+		return pgsqlc.IamUserProviderOauthToken{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UserProviderOauthToken
+	var result pgsqlc.IamUserProviderOauthToken
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	return result, nil
 }
@@ -2595,7 +2591,7 @@ func (q *Queries) InsertVersion(ctx context.Context, arg pgsqlc.InsertVersionPar
 	return result, nil
 }
 
-func (q *Queries) ListAccounts(ctx context.Context) ([]pgsqlc.User, error) {
+func (q *Queries) ListAccounts(ctx context.Context) ([]pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
@@ -2603,7 +2599,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]pgsqlc.User, error) {
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.User
+	var result []pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -2773,7 +2769,7 @@ func (q *Queries) ListBrowserContexts(ctx context.Context) ([]pgsqlc.BrowserCont
 	return result, nil
 }
 
-func (q *Queries) ListChannelIdentitiesByUserID(ctx context.Context, userID pgtype.UUID) ([]pgsqlc.ChannelIdentity, error) {
+func (q *Queries) ListChannelIdentitiesByUserID(ctx context.Context, userID pgtype.UUID) ([]pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
@@ -2785,7 +2781,7 @@ func (q *Queries) ListChannelIdentitiesByUserID(ctx context.Context, userID pgty
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.ChannelIdentity
+	var result []pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -3899,7 +3895,7 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 	return result, nil
 }
 
-func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channelType string) ([]pgsqlc.UserChannelBinding, error) {
+func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channelType string) ([]pgsqlc.IamUserChannelBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
@@ -3911,7 +3907,7 @@ func (q *Queries) ListUserChannelBindingsByPlatform(ctx context.Context, channel
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.UserChannelBinding
+	var result []pgsqlc.IamUserChannelBinding
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -3956,21 +3952,21 @@ func (q *Queries) ListVisibleChatsByBotAndUser(ctx context.Context, arg pgsqlc.L
 	return result, nil
 }
 
-func (q *Queries) MarkBindCodeUsed(ctx context.Context, arg pgsqlc.MarkBindCodeUsedParams) (pgsqlc.ChannelIdentityBindCode, error) {
+func (q *Queries) MarkBindCodeUsed(ctx context.Context, arg pgsqlc.MarkBindCodeUsedParams) (pgsqlc.IamChannelIdentityBindCode, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentityBindCode{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.MarkBindCodeUsedParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	out, err := q.store.queries.MarkBindCodeUsed(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentityBindCode{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentityBindCode
+	var result pgsqlc.IamChannelIdentityBindCode
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentityBindCode{}, err
+		return pgsqlc.IamChannelIdentityBindCode{}, err
 	}
 	return result, nil
 }
@@ -4056,7 +4052,7 @@ func (q *Queries) SaveMatrixSyncSinceToken(ctx context.Context, arg pgsqlc.SaveM
 	return result, nil
 }
 
-func (q *Queries) SearchAccounts(ctx context.Context, arg pgsqlc.SearchAccountsParams) ([]pgsqlc.User, error) {
+func (q *Queries) SearchAccounts(ctx context.Context, arg pgsqlc.SearchAccountsParams) ([]pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured
 	}
@@ -4068,7 +4064,7 @@ func (q *Queries) SearchAccounts(ctx context.Context, arg pgsqlc.SearchAccountsP
 	if err != nil {
 		return nil, mapQueryErr(err)
 	}
-	var result []pgsqlc.User
+	var result []pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -4125,21 +4121,21 @@ func (q *Queries) SetBotACLDefaultEffect(ctx context.Context, arg pgsqlc.SetBotA
 	return mapQueryErr(err)
 }
 
-func (q *Queries) SetChannelIdentityLinkedUser(ctx context.Context, arg pgsqlc.SetChannelIdentityLinkedUserParams) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) SetChannelIdentityLinkedUser(ctx context.Context, arg pgsqlc.SetChannelIdentityLinkedUserParams) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.SetChannelIdentityLinkedUserParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.SetChannelIdentityLinkedUser(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
@@ -4204,78 +4200,78 @@ func (q *Queries) TouchSession(ctx context.Context, id pgtype.UUID) error {
 	return mapQueryErr(err)
 }
 
-func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg pgsqlc.UpdateAccountAdminParams) (pgsqlc.User, error) {
+func (q *Queries) UpdateAccountAdmin(ctx context.Context, arg pgsqlc.UpdateAccountAdminParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpdateAccountAdminParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.UpdateAccountAdmin(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (pgsqlc.User, error) {
+func (q *Queries) UpdateAccountLastLogin(ctx context.Context, id pgtype.UUID) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteId string
 	if err := convertValue(id, &sqliteId); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.UpdateAccountLastLogin(ctx, sqliteId)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) UpdateAccountPassword(ctx context.Context, arg pgsqlc.UpdateAccountPasswordParams) (pgsqlc.User, error) {
+func (q *Queries) UpdateAccountPassword(ctx context.Context, arg pgsqlc.UpdateAccountPasswordParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpdateAccountPasswordParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.UpdateAccountPassword(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) UpdateAccountProfile(ctx context.Context, arg pgsqlc.UpdateAccountProfileParams) (pgsqlc.User, error) {
+func (q *Queries) UpdateAccountProfile(ctx context.Context, arg pgsqlc.UpdateAccountProfileParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpdateAccountProfileParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.UpdateAccountProfile(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
@@ -4807,21 +4803,21 @@ func (q *Queries) UpdateUserProviderOAuthState(ctx context.Context, arg pgsqlc.U
 	return mapQueryErr(err)
 }
 
-func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg pgsqlc.UpsertAccountByUsernameParams) (pgsqlc.User, error) {
+func (q *Queries) UpsertAccountByUsername(ctx context.Context, arg pgsqlc.UpsertAccountByUsernameParams) (pgsqlc.IamUser, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.User{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUser{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpsertAccountByUsernameParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	out, err := q.store.queries.UpsertAccountByUsername(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.User{}, mapQueryErr(err)
+		return pgsqlc.IamUser{}, mapQueryErr(err)
 	}
-	var result pgsqlc.User
+	var result pgsqlc.IamUser
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.User{}, err
+		return pgsqlc.IamUser{}, err
 	}
 	return result, nil
 }
@@ -4883,21 +4879,21 @@ func (q *Queries) UpsertBotStorageBinding(ctx context.Context, arg pgsqlc.Upsert
 	return result, nil
 }
 
-func (q *Queries) UpsertChannelIdentityByChannelSubject(ctx context.Context, arg pgsqlc.UpsertChannelIdentityByChannelSubjectParams) (pgsqlc.ChannelIdentity, error) {
+func (q *Queries) UpsertChannelIdentityByChannelSubject(ctx context.Context, arg pgsqlc.UpsertChannelIdentityByChannelSubjectParams) (pgsqlc.IamChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamChannelIdentity{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpsertChannelIdentityByChannelSubjectParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	out, err := q.store.queries.UpsertChannelIdentityByChannelSubject(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.ChannelIdentity{}, mapQueryErr(err)
+		return pgsqlc.IamChannelIdentity{}, mapQueryErr(err)
 	}
-	var result pgsqlc.ChannelIdentity
+	var result pgsqlc.IamChannelIdentity
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.ChannelIdentity{}, err
+		return pgsqlc.IamChannelIdentity{}, err
 	}
 	return result, nil
 }
@@ -5066,40 +5062,40 @@ func (q *Queries) UpsertSnapshot(ctx context.Context, arg pgsqlc.UpsertSnapshotP
 	return result, nil
 }
 
-func (q *Queries) UpsertUserChannelBinding(ctx context.Context, arg pgsqlc.UpsertUserChannelBindingParams) (pgsqlc.UserChannelBinding, error) {
+func (q *Queries) UpsertUserChannelBinding(ctx context.Context, arg pgsqlc.UpsertUserChannelBindingParams) (pgsqlc.IamUserChannelBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UserChannelBinding{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUserChannelBinding{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpsertUserChannelBindingParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.UserChannelBinding{}, err
+		return pgsqlc.IamUserChannelBinding{}, err
 	}
 	out, err := q.store.queries.UpsertUserChannelBinding(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.UserChannelBinding{}, mapQueryErr(err)
+		return pgsqlc.IamUserChannelBinding{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UserChannelBinding
+	var result pgsqlc.IamUserChannelBinding
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UserChannelBinding{}, err
+		return pgsqlc.IamUserChannelBinding{}, err
 	}
 	return result, nil
 }
 
-func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg pgsqlc.UpsertUserProviderOAuthTokenParams) (pgsqlc.UserProviderOauthToken, error) {
+func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg pgsqlc.UpsertUserProviderOAuthTokenParams) (pgsqlc.IamUserProviderOauthToken, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UserProviderOauthToken{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.IamUserProviderOauthToken{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpsertUserProviderOAuthTokenParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	out, err := q.store.queries.UpsertUserProviderOAuthToken(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.UserProviderOauthToken{}, mapQueryErr(err)
+		return pgsqlc.IamUserProviderOauthToken{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UserProviderOauthToken
+	var result pgsqlc.IamUserProviderOauthToken
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UserProviderOauthToken{}, err
+		return pgsqlc.IamUserProviderOauthToken{}, err
 	}
 	return result, nil
 }

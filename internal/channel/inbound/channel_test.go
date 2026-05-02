@@ -22,6 +22,7 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -188,6 +189,22 @@ type fakeChatACL struct {
 	err     error
 	calls   int
 	lastReq acl.EvaluateRequest
+}
+
+type fakeRBACService struct {
+	allowed bool
+	err     error
+	calls   int
+	last    rbac.Check
+}
+
+func (f *fakeRBACService) HasPermission(_ context.Context, check rbac.Check) (bool, error) {
+	f.calls++
+	f.last = check
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.allowed, nil
 }
 
 type fakeSessionEnsurer struct {
@@ -505,6 +522,95 @@ func TestChannelInboundProcessorDeniedByACL(t *testing.T) {
 	}
 	if gateway.gotReq.Query != "" {
 		t.Error("denied user should not trigger chat call")
+	}
+}
+
+func TestChannelInboundProcessorLinkedUserDeniedByRBACAfterACLAllow(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-rbac-deny"},
+		linked:          map[string]string{"channelIdentity-rbac-deny": "user-rbac-deny"},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-rbac-denied", RouteID: "route-rbac-denied"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	rbacSvc := &fakeRBACService{allowed: false}
+	processor.SetRBACService(rbacSvc)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-rbac-1",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-rbac-1", Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "linked-user-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-rbac-1"}, msg, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rbacSvc.calls != 1 {
+		t.Fatalf("expected rbac to be checked once, got %d", rbacSvc.calls)
+	}
+	if rbacSvc.last.UserID != "user-rbac-deny" || rbacSvc.last.PermissionKey != rbac.PermissionBotChat ||
+		rbacSvc.last.ResourceType != rbac.ResourceBot || rbacSvc.last.ResourceID != "bot-rbac-1" {
+		t.Fatalf("unexpected rbac check: %+v", rbacSvc.last)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatal("rbac denied linked user should not trigger chat call")
+	}
+	if len(chatSvc.persistedIn) != 1 {
+		t.Fatalf("rbac denied linked user should persist 1 passive message, got %d", len(chatSvc.persistedIn))
+	}
+}
+
+func TestChannelInboundProcessorUnlinkedIdentitySkipsRBACAfterACLAllow(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-unlinked"},
+		linked:          map[string]string{},
+	}
+	policySvc := &fakePolicyService{}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{ChatID: "chat-unlinked-rbac", RouteID: "route-unlinked-rbac"}}
+	gateway := &fakeChatGateway{
+		resp: conversation.ChatResponse{
+			Messages: []conversation.ModelMessage{
+				{Role: "assistant", Content: conversation.NewTextContent("AI reply")},
+			},
+		},
+	}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, nil, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	rbacSvc := &fakeRBACService{allowed: false}
+	processor.SetRBACService(rbacSvc)
+	sender := &fakeReplySender{}
+
+	msg := channel.InboundMessage{
+		BotID:       "bot-rbac-2",
+		Channel:     channel.ChannelType("feishu"),
+		Message:     channel.Message{ID: "msg-rbac-2", Text: "hello"},
+		ReplyTarget: "target-id",
+		Sender:      channel.Identity{SubjectID: "guest-rbac-1"},
+		Conversation: channel.Conversation{
+			ID:   "chat-1",
+			Type: channel.ConversationTypePrivate,
+		},
+	}
+
+	err := processor.HandleInbound(context.Background(), channel.ChannelConfig{ID: "cfg-1", BotID: "bot-rbac-2"}, msg, sender)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rbacSvc.calls != 0 {
+		t.Fatalf("unlinked identity should skip rbac, got %d checks", rbacSvc.calls)
+	}
+	if gateway.gotReq.Query != "hello" {
+		t.Fatalf("unlinked identity allowed by ACL should trigger chat, got %q", gateway.gotReq.Query)
 	}
 }
 

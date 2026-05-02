@@ -210,7 +210,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]Search
 	items := make([]SearchResult, 0, len(rows))
 	for _, row := range rows {
 		item := SearchResult{
-			ChannelIdentity: toChannelIdentity(sqlc.ChannelIdentity{
+			ChannelIdentity: toChannelIdentity(sqlc.IamChannelIdentity{
 				ID:               row.ID,
 				UserID:           row.UserID,
 				ChannelType:      row.ChannelType,
@@ -298,7 +298,7 @@ func (s *Service) LinkChannelIdentityToUser(ctx context.Context, channelIdentity
 	return nil
 }
 
-func toChannelIdentity(row sqlc.ChannelIdentity) ChannelIdentity {
+func toChannelIdentity(row sqlc.IamChannelIdentity) ChannelIdentity {
 	var metadata map[string]any
 	if len(row.Metadata) > 0 {
 		_ = json.Unmarshal(row.Metadata, &metadata)

@@ -12,6 +12,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
@@ -21,31 +22,27 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
-// MemberRoleResolver resolves a user's role within a bot.
-type MemberRoleResolver interface {
-	GetMemberRole(ctx context.Context, botID, channelIdentityID string) (string, error)
+// MemberPermissionResolver resolves a user's permission within a bot.
+type MemberPermissionResolver interface {
+	HasBotPermission(ctx context.Context, userID, botID string, permission rbac.PermissionKey) (bool, error)
 }
 
-// BotMemberRoleAdapter adapts bots.Service to MemberRoleResolver.
+// BotMemberRoleAdapter adapts bots.Service to MemberPermissionResolver.
 type BotMemberRoleAdapter struct {
 	BotService *bots.Service
 }
 
-func (a *BotMemberRoleAdapter) GetMemberRole(ctx context.Context, botID, channelIdentityID string) (string, error) {
-	bot, err := a.BotService.Get(ctx, botID)
-	if err != nil {
-		return "", err
+func (a *BotMemberRoleAdapter) HasBotPermission(ctx context.Context, userID, botID string, permission rbac.PermissionKey) (bool, error) {
+	if a == nil || a.BotService == nil {
+		return false, nil
 	}
-	if bot.OwnerUserID == channelIdentityID {
-		return "owner", nil
-	}
-	return "", nil
+	return a.BotService.HasBotPermission(ctx, userID, botID, permission)
 }
 
 // Handler processes slash commands intercepted before they reach the LLM.
 type Handler struct {
 	registry        *Registry
-	roleResolver    MemberRoleResolver
+	permission      MemberPermissionResolver
 	scheduleService *schedule.Service
 	settingsService *settings.Service
 	mcpConnService  *mcp.ConnectionService
@@ -85,7 +82,7 @@ type ExecuteInput struct {
 // NewHandler creates a Handler with all required services.
 func NewHandler(
 	log *slog.Logger,
-	roleResolver MemberRoleResolver,
+	permission MemberPermissionResolver,
 	scheduleService *schedule.Service,
 	settingsService *settings.Service,
 	mcpConnService *mcp.ConnectionService,
@@ -106,7 +103,7 @@ func NewHandler(
 		log = slog.Default()
 	}
 	h := &Handler{
-		roleResolver:       roleResolver,
+		permission:         permission,
 		scheduleService:    scheduleService,
 		settingsService:    settingsService,
 		mcpConnService:     mcpConnService,
@@ -172,6 +169,7 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 	return h.ExecuteWithInput(ctx, ExecuteInput{
 		BotID:             botID,
 		ChannelIdentityID: channelIdentityID,
+		UserID:            channelIdentityID,
 		Text:              text,
 	})
 }
@@ -187,29 +185,24 @@ func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (str
 		return h.registry.GlobalHelp(), nil
 	}
 
-	// Resolve the user's role in this bot.
-	role := ""
-	roleIdentityID := input.ChannelIdentityID
-	if strings.TrimSpace(input.UserID) != "" {
-		roleIdentityID = strings.TrimSpace(input.UserID)
-	}
-	if h.roleResolver != nil && roleIdentityID != "" {
-		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
+	botUpdateAllowed := false
+	if h.permission != nil && strings.TrimSpace(input.UserID) != "" {
+		allowed, err := h.permission.HasBotPermission(ctx, strings.TrimSpace(input.UserID), input.BotID, rbac.PermissionBotUpdate)
 		if err != nil {
-			h.logger.Warn("failed to resolve member role",
+			h.logger.Warn("failed to resolve bot update permission",
 				slog.String("bot_id", input.BotID),
-				slog.String("role_identity_id", roleIdentityID),
+				slog.String("user_id", strings.TrimSpace(input.UserID)),
 				slog.Any("error", err),
 			)
 		} else {
-			role = r
+			botUpdateAllowed = allowed
 		}
 	}
 
 	cc := CommandContext{
 		Ctx:               ctx,
 		BotID:             input.BotID,
-		Role:              role,
+		BotUpdateAllowed:  botUpdateAllowed,
 		Args:              parsed.Args,
 		ChannelIdentityID: strings.TrimSpace(input.ChannelIdentityID),
 		UserID:            strings.TrimSpace(input.UserID),
@@ -257,8 +250,8 @@ func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (str
 		return fmt.Sprintf("Unknown action \"%s\" for /%s.\n\n%s", parsed.Action, parsed.Resource, group.Usage()), nil
 	}
 
-	if sub.IsWrite && role != "owner" {
-		return "Permission denied: only the bot owner can execute this command.", nil
+	if sub.IsWrite && !botUpdateAllowed {
+		return "Permission denied: bot.update permission is required to execute this command.", nil
 	}
 
 	result, handlerErr := safeExecute(sub.Handler, cc)

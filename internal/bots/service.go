@@ -17,13 +17,19 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
+
+type PermissionService interface {
+	HasPermission(ctx context.Context, check rbac.Check) (bool, error)
+}
 
 // Service provides bot CRUD and membership management.
 type Service struct {
 	queries               dbstore.Queries
 	logger                *slog.Logger
+	rbac                  PermissionService
 	containerLifecycle    ContainerLifecycle
 	checkers              []RuntimeChecker
 	containerReachability func(ctx context.Context, botID string) error
@@ -55,6 +61,10 @@ func (s *Service) SetContainerLifecycle(lc ContainerLifecycle) {
 	s.containerLifecycle = lc
 }
 
+func (s *Service) SetRBACService(service PermissionService) {
+	s.rbac = service
+}
+
 // SetContainerReachability registers a function that checks whether a bot's
 // container is reachable via gRPC. Returns nil on success, error otherwise.
 func (s *Service) SetContainerReachability(fn func(ctx context.Context, botID string) error) {
@@ -68,11 +78,12 @@ func (s *Service) AddRuntimeChecker(c RuntimeChecker) {
 	}
 }
 
-// AuthorizeAccess checks whether userID may access the given bot (owner or admin only).
+// AuthorizeAccess checks whether userID may read the given bot.
 func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isAdmin bool) (Bot, error) {
 	if s.queries == nil {
 		return Bot{}, errors.New("bot queries not configured")
 	}
+	_ = isAdmin
 	bot, err := s.Get(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -80,7 +91,11 @@ func (s *Service) AuthorizeAccess(ctx context.Context, userID, botID string, isA
 		}
 		return Bot{}, err
 	}
-	if isAdmin || bot.OwnerUserID == userID {
+	allowed, err := s.hasBotPermission(ctx, userID, bot.ID, rbac.PermissionBotRead)
+	if err != nil {
+		return Bot{}, err
+	}
+	if allowed {
 		return bot, nil
 	}
 	return Bot{}, ErrBotAccessDenied
@@ -151,6 +166,15 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 			)
 		}
 		return Bot{}, fmt.Errorf("apply acl preset: %w", err)
+	}
+	if err := s.assignBotOwnerRole(ctx, ownerUUID, row.ID); err != nil {
+		if cleanupErr := s.queries.DeleteBotByID(ctx, row.ID); cleanupErr != nil {
+			return Bot{}, errors.Join(
+				fmt.Errorf("assign bot owner role: %w", err),
+				fmt.Errorf("cleanup bot after owner role failure: %w", cleanupErr),
+			)
+		}
+		return Bot{}, fmt.Errorf("assign bot owner role: %w", err)
 	}
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
@@ -297,6 +321,11 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 	if err := s.ensureUserExists(ctx, ownerUUID); err != nil {
 		return Bot{}, err
 	}
+	current, err := s.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return Bot{}, err
+	}
+	oldOwnerID := current.OwnerUserID
 	row, err := s.queries.UpdateBotOwner(ctx, sqlc.UpdateBotOwnerParams{
 		ID:          botUUID,
 		OwnerUserID: ownerUUID,
@@ -311,7 +340,65 @@ func (s *Service) TransferOwner(ctx context.Context, botID string, ownerUserID s
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
+	if err := s.assignBotOwnerRole(ctx, ownerUUID, botUUID); err != nil {
+		return Bot{}, fmt.Errorf("assign bot owner role: %w", err)
+	}
+	if oldOwnerID.Valid && oldOwnerID != ownerUUID {
+		if err := s.deleteBotOwnerRole(ctx, oldOwnerID, botUUID); err != nil {
+			return Bot{}, fmt.Errorf("delete previous bot owner role: %w", err)
+		}
+	}
 	return bot, nil
+}
+
+func (s *Service) HasBotPermission(ctx context.Context, userID, botID string, permission rbac.PermissionKey) (bool, error) {
+	return s.hasBotPermission(ctx, userID, botID, permission)
+}
+
+func (s *Service) hasBotPermission(ctx context.Context, userID, botID string, permission rbac.PermissionKey) (bool, error) {
+	if s.rbac == nil {
+		return false, errors.New("bot rbac service not configured")
+	}
+	userID = strings.TrimSpace(userID)
+	botID = strings.TrimSpace(botID)
+	if userID == "" || botID == "" {
+		return false, nil
+	}
+	return s.rbac.HasPermission(ctx, rbac.Check{
+		UserID:        userID,
+		PermissionKey: permission,
+		ResourceType:  rbac.ResourceBot,
+		ResourceID:    botID,
+	})
+}
+
+func (s *Service) assignBotOwnerRole(ctx context.Context, ownerID pgtype.UUID, botID pgtype.UUID) error {
+	role, err := s.queries.GetRoleByKey(ctx, string(rbac.RoleBotOwner))
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.AssignPrincipalRole(ctx, sqlc.AssignPrincipalRoleParams{
+		PrincipalType: string(rbac.PrincipalUser),
+		PrincipalID:   ownerID,
+		RoleID:        role.ID,
+		ResourceType:  string(rbac.ResourceBot),
+		ResourceID:    botID,
+		Source:        string(rbac.SourceSystem),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
+func (s *Service) deleteBotOwnerRole(ctx context.Context, ownerID pgtype.UUID, botID pgtype.UUID) error {
+	return s.queries.DeletePrincipalRoleAssignment(ctx, sqlc.DeletePrincipalRoleAssignmentParams{
+		PrincipalType: string(rbac.PrincipalUser),
+		PrincipalID:   ownerID,
+		ResourceType:  string(rbac.ResourceBot),
+		ResourceID:    botID,
+		RoleKey:       string(rbac.RoleBotOwner),
+	})
 }
 
 // Delete removes a bot and its associated resources.

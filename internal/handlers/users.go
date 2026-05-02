@@ -17,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/identity"
 )
 
@@ -30,7 +31,12 @@ type UsersHandler struct {
 	channelLifecycle       *channel.Lifecycle
 	channelManager         *channel.Manager
 	registry               *channel.Registry
+	rbacService            SystemPermissionService
 	logger                 *slog.Logger
+}
+
+type SystemPermissionService interface {
+	HasPermission(ctx context.Context, check rbac.Check) (bool, error)
 }
 
 type listMyIdentitiesResponse struct {
@@ -39,7 +45,7 @@ type listMyIdentitiesResponse struct {
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentityService *identities.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentityService *identities.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, rbacService SystemPermissionService) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -52,6 +58,7 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentit
 		channelLifecycle:       channelLifecycle,
 		channelManager:         channelManager,
 		registry:               registry,
+		rbacService:            rbacService,
 		logger:                 log.With(slog.String("handler", "users")),
 	}
 }
@@ -197,12 +204,12 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+		return echo.NewHTTPError(http.StatusForbidden, "system admin required")
 	}
 	if strings.TrimSpace(c.QueryParam("user_type")) != "" || strings.TrimSpace(c.QueryParam("owner_id")) != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "user_type and owner_id are not supported")
@@ -235,7 +242,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
 	}
 	if targetID != channelIdentityID {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -270,12 +277,12 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+		return echo.NewHTTPError(http.StatusForbidden, "system admin required")
 	}
 	targetID := strings.TrimSpace(c.Param("id"))
 	if targetID == "" {
@@ -316,12 +323,12 @@ func (h *UsersHandler) ResetUserPassword(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+		return echo.NewHTTPError(http.StatusForbidden, "system admin required")
 	}
 	targetID := strings.TrimSpace(c.Param("id"))
 	if targetID == "" {
@@ -358,12 +365,12 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+		return echo.NewHTTPError(http.StatusForbidden, "system admin required")
 	}
 	var req accounts.CreateAccountRequest
 	if err := c.Bind(&req); err != nil {
@@ -399,12 +406,12 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	ownerID := channelIdentityID
 	ownerFromToken := true
 	if raw := strings.TrimSpace(c.QueryParam("owner_id")); raw != "" {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		if !isAdmin {
-			return echo.NewHTTPError(http.StatusForbidden, "admin role required for owner override")
+			return echo.NewHTTPError(http.StatusForbidden, "system admin required for owner override")
 		}
 		if err := identity.ValidateChannelIdentityID(raw); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -415,21 +422,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if ownerFromToken {
 		if _, err := h.service.Get(c.Request().Context(), ownerID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				// Backward-compatible token path: token user_id might be a channel identity ID.
-				// Try to resolve to linked user first; if still missing, force re-login.
-				linkedUserID := ""
-				if h.channelIdentityService != nil {
-					linkedUserID, err = h.channelIdentityService.GetLinkedUserID(c.Request().Context(), ownerID)
-					if err != nil {
-						return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-					}
-				}
-				linkedUserID = strings.TrimSpace(linkedUserID)
-				if linkedUserID != "" {
-					ownerID = linkedUserID
-				} else {
-					return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
-				}
+				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			} else {
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 			}
@@ -468,12 +461,12 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 	}
 	ownerID := strings.TrimSpace(c.QueryParam("owner_id"))
 	if ownerID != "" {
-		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+		isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 		if !isAdmin {
-			return echo.NewHTTPError(http.StatusForbidden, "admin role required for owner filter")
+			return echo.NewHTTPError(http.StatusForbidden, "system admin required for owner filter")
 		}
 		items, err := h.botService.ListByOwner(c.Request().Context(), ownerID)
 		if err != nil {
@@ -490,7 +483,7 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 
 // GetBot godoc
 // @Summary Get bot details
-// @Description Get a bot by ID (owner/admin only)
+// @Description Get a bot by ID when the current user has bot.read
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 200 {object} bots.Bot
@@ -550,7 +543,7 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 
 // UpdateBot godoc
 // @Summary Update bot details
-// @Description Update bot profile (owner/admin only)
+// @Description Update bot profile when the current user has bot.update
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Param payload body bots.UpdateBotRequest true "Bot update payload"
@@ -584,7 +577,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 }
 
 // TransferBotOwner godoc
-// @Summary Transfer bot owner (admin only)
+// @Summary Transfer bot owner (system admin only)
 // @Description Transfer bot ownership to another human user
 // @Tags bots
 // @Param id path string true "Bot ID"
@@ -600,12 +593,12 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	isAdmin, err := h.hasSystemAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if !isAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+		return echo.NewHTTPError(http.StatusForbidden, "system admin required")
 	}
 	botID := strings.TrimSpace(c.Param("id"))
 	if botID == "" {
@@ -630,7 +623,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 
 // DeleteBot godoc
 // @Summary Delete bot
-// @Description Delete a bot user (owner/admin only)
+// @Description Delete a bot user when the current user has bot.delete
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 202 {object} map[string]string
@@ -943,6 +936,17 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID)
+}
+
+func (h *UsersHandler) hasSystemAdmin(ctx context.Context, userID string) (bool, error) {
+	if h.rbacService == nil {
+		return false, errors.New("rbac service not configured")
+	}
+	return h.rbacService.HasPermission(ctx, rbac.Check{
+		UserID:        userID,
+		PermissionKey: rbac.PermissionSystemAdmin,
+		ResourceType:  rbac.ResourceSystem,
+	})
 }
 
 func (*UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {

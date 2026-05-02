@@ -1,5 +1,5 @@
 -- name: CreateBindCode :one
-INSERT INTO channel_identity_bind_codes (id, token, issued_by_user_id, channel_type, expires_at)
+INSERT INTO iam_channel_identity_bind_codes (id, token, issued_by_user_id, channel_type, expires_at)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -15,16 +15,16 @@ RETURNING id, token, issued_by_user_id, channel_type, expires_at, used_at, used_
 
 -- name: GetBindCode :one
 SELECT id, token, issued_by_user_id, channel_type, expires_at, used_at, used_by_channel_identity_id, created_at
-FROM channel_identity_bind_codes
+FROM iam_channel_identity_bind_codes
 WHERE token = sqlc.arg(token);
 
 -- name: GetBindCodeForUpdate :one
 SELECT id, token, issued_by_user_id, channel_type, expires_at, used_at, used_by_channel_identity_id, created_at
-FROM channel_identity_bind_codes
+FROM iam_channel_identity_bind_codes
 WHERE token = sqlc.arg(token);
 
 -- name: MarkBindCodeUsed :one
-UPDATE channel_identity_bind_codes
+UPDATE iam_channel_identity_bind_codes
 SET used_at = CURRENT_TIMESTAMP, used_by_channel_identity_id = sqlc.arg(used_by_channel_identity_id)
 WHERE id = sqlc.arg(id)
   AND used_at IS NULL

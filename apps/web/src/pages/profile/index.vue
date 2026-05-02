@@ -249,7 +249,6 @@ async function loadMyAccount() {
   patchUserInfo({
     id: data.id,
     username: data.username,
-    role: data.role,
     displayName: data.display_name || '',
     avatarUrl: data.avatar_url || '',
     timezone: data.timezone || 'UTC',

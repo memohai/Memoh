@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
@@ -16,13 +17,15 @@ import (
 
 // --- fake services ---
 
-type fakeRoleResolver struct {
-	role string
-	err  error
+type fakePermissionResolver struct {
+	allowed bool
+	err     error
+	checks  []rbac.PermissionKey
 }
 
-func (f *fakeRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string, error) {
-	return f.role, f.err
+func (f *fakePermissionResolver) HasBotPermission(_ context.Context, _, _ string, permission rbac.PermissionKey) (bool, error) {
+	f.checks = append(f.checks, permission)
+	return f.allowed, f.err
 }
 
 type fakeScheduleService struct {
@@ -75,12 +78,12 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ dbsqlc.GetT
 }
 
 // newTestHandler creates a Handler with nil services for use in tests.
-func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+func newTestHandler(permission MemberPermissionResolver) *Handler {
+	return NewHandler(nil, permission, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+func newTestHandlerWithQueries(permission MemberPermissionResolver, queries CommandQueries) *Handler {
+	return NewHandler(nil, permission, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 // --- tests ---
@@ -118,7 +121,7 @@ func TestIsCommand(t *testing.T) {
 
 func TestExecute_Help(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -136,7 +139,7 @@ func TestExecute_Help(t *testing.T) {
 
 func TestExecute_HelpGroup(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help model")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -144,14 +147,14 @@ func TestExecute_HelpGroup(t *testing.T) {
 	if !strings.Contains(result, "/model - Manage bot models") {
 		t.Errorf("expected group help, got: %s", result)
 	}
-	if !strings.Contains(result, "- set - Set the chat model [owner]") {
+	if !strings.Contains(result, "- set - Set the chat model [bot.update]") {
 		t.Errorf("expected compact action summary, got: %s", result)
 	}
 }
 
 func TestExecute_HelpAction(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help model set")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -159,14 +162,14 @@ func TestExecute_HelpAction(t *testing.T) {
 	if !strings.Contains(result, "Usage: /model set <model_id> | <provider_name> <model_name>") {
 		t.Errorf("expected action usage, got: %s", result)
 	}
-	if !strings.Contains(result, "Access: owner only") {
-		t.Errorf("expected owner hint, got: %s", result)
+	if !strings.Contains(result, "Access: bot.update") {
+		t.Errorf("expected bot.update hint, got: %s", result)
 	}
 }
 
 func TestExecute_UnknownCommand(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/foobar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -178,7 +181,7 @@ func TestExecute_UnknownCommand(t *testing.T) {
 
 func TestExecute_WithMentionPrefix(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "@BotName /help")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -190,7 +193,7 @@ func TestExecute_WithMentionPrefix(t *testing.T) {
 
 func TestExecute_TelegramBotSuffix(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/help@MemohBot")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -202,7 +205,7 @@ func TestExecute_TelegramBotSuffix(t *testing.T) {
 
 func TestExecute_UnknownAction(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule foobar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -217,7 +220,7 @@ func TestExecute_UnknownAction(t *testing.T) {
 
 func TestExecute_WritePermissionDenied(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: ""})
+	h := newTestHandler(&fakePermissionResolver{allowed: false})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule create test desc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -229,13 +232,13 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 
 func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/schedule create")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(result, "Permission denied") {
-		t.Errorf("owner should not get permission denied, got: %s", result)
+		t.Errorf("user with bot.update should not get permission denied, got: %s", result)
 	}
 	if !strings.Contains(result, "Usage:") {
 		t.Errorf("expected usage hint for missing args, got: %s", result)
@@ -244,7 +247,7 @@ func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 
 func TestExecute_SettingsDefaultAction(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: ""})
+	h := newTestHandler(&fakePermissionResolver{allowed: false})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/settings")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -256,7 +259,7 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 
 func TestExecute_MissingArgs(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	tests := []struct {
 		cmd      string
 		contains string
@@ -354,7 +357,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 
 func TestExecuteWithInput_Access(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
 		BotID:             "bot-1",
 		ChannelIdentityID: "channel-id-1",
@@ -383,7 +386,7 @@ func TestExecute_StatusLatest(t *testing.T) {
 	sessionUUID := pgtype.UUID{}
 	copy(sessionUUID.Bytes[:], []byte{1, 2, 3, 4, 5, 6, 7, 8, 9})
 	sessionUUID.Valid = true
-	h := newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, &fakeCommandQueries{
+	h := newTestHandlerWithQueries(&fakePermissionResolver{allowed: true}, &fakeCommandQueries{
 		latestSessionID: sessionUUID,
 		messageCount:    42,
 		latestUsage:     1200,
@@ -408,7 +411,7 @@ func TestExecute_StatusLatest(t *testing.T) {
 
 func TestExecute_StatusLatestNoRows(t *testing.T) {
 	t.Parallel()
-	h := newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, &fakeCommandQueries{
+	h := newTestHandlerWithQueries(&fakePermissionResolver{allowed: true}, &fakeCommandQueries{
 		latestSessionErr: pgx.ErrNoRows,
 	})
 	result, err := h.Execute(context.Background(), "11111111-1111-1111-1111-111111111111", "user-1", "/status latest")
@@ -422,7 +425,7 @@ func TestExecute_StatusLatestNoRows(t *testing.T) {
 
 func TestExecute_StatusShowWithoutSession(t *testing.T) {
 	t.Parallel()
-	h := newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, &fakeCommandQueries{})
+	h := newTestHandlerWithQueries(&fakePermissionResolver{allowed: true}, &fakeCommandQueries{})
 	result, err := h.Execute(context.Background(), "bot-1", "user-1", "/status")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -432,7 +435,7 @@ func TestExecute_StatusShowWithoutSession(t *testing.T) {
 	}
 }
 
-// Verify write commands are tagged with [owner] in usage.
+// Verify write commands are tagged with [bot.update] in usage.
 func TestUsage_OwnerTag(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
@@ -441,8 +444,8 @@ func TestUsage_OwnerTag(t *testing.T) {
 		usage := group.Usage()
 		for _, subName := range group.order {
 			sub := group.commands[subName]
-			if sub.IsWrite && !strings.Contains(usage, "[owner]") {
-				t.Errorf("/%s %s is a write command but usage missing [owner] tag", name, subName)
+			if sub.IsWrite && !strings.Contains(usage, "[bot.update]") {
+				t.Errorf("/%s %s is a write command but usage missing [bot.update] tag", name, subName)
 			}
 		}
 	}
@@ -451,7 +454,7 @@ func TestUsage_OwnerTag(t *testing.T) {
 // Verify new commands with nil services return graceful errors, not panics.
 func TestNewCommands_NilServices(t *testing.T) {
 	t.Parallel()
-	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	h := newTestHandler(&fakePermissionResolver{allowed: true})
 	cmds := []string{
 		"/skill list",
 		"/fs list",

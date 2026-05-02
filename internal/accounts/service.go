@@ -3,7 +3,6 @@ package accounts
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -117,21 +116,6 @@ func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) (
 	return items, nil
 }
 
-// IsAdmin checks if the user has admin role.
-func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
-	if s.store == nil {
-		return false, errors.New("account store not configured")
-	}
-	row, err := s.store.GetByUserID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return isAdminRole(row.Role), nil
-}
-
 // Create creates a new account for an existing user.
 func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
 	if s.store == nil {
@@ -145,11 +129,6 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 	if password == "" {
 		return Account{}, errors.New("password is required")
 	}
-	role, err := normalizeRole(req.Role)
-	if err != nil {
-		return Account{}, err
-	}
-
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return Account{}, err
@@ -171,7 +150,6 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 		Username:     username,
 		Email:        email,
 		PasswordHash: string(hashed),
-		Role:         role,
 		DisplayName:  displayName,
 		AvatarURL:    avatarURL,
 		IsActive:     isActive,
@@ -215,13 +193,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 	if err != nil {
 		return Account{}, err
 	}
-	role := existing.Role
-	if req.Role != nil {
-		role, err = normalizeRole(*req.Role)
-		if err != nil {
-			return Account{}, err
-		}
-	}
 	displayName := strings.TrimSpace(existing.DisplayName)
 	if req.DisplayName != nil {
 		displayName = strings.TrimSpace(*req.DisplayName)
@@ -240,7 +211,6 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 
 	row, err := s.store.UpdateAdmin(ctx, dbstore.UpdateAccountAdminInput{
 		UserID:      userID,
-		Role:        role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		IsActive:    isActive,
@@ -344,31 +314,6 @@ func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string)
 	})
 }
 
-func normalizeRole(raw string) (string, error) {
-	role := strings.ToLower(strings.TrimSpace(raw))
-	if role == "" {
-		return "member", nil
-	}
-	if role != "member" && role != "admin" {
-		return "", fmt.Errorf("invalid role: %s", raw)
-	}
-	return role, nil
-}
-
-func isAdminRole(role any) bool {
-	if role == nil {
-		return false
-	}
-	switch v := role.(type) {
-	case string:
-		return strings.EqualFold(v, "admin")
-	case fmt.Stringer:
-		return strings.EqualFold(v.String(), "admin")
-	default:
-		return strings.EqualFold(fmt.Sprint(v), "admin")
-	}
-}
-
 func toAccount(row dbstore.AccountRecord) Account {
 	username := strings.TrimSpace(row.Username)
 	email := strings.TrimSpace(row.Email)
@@ -382,7 +327,6 @@ func toAccount(row dbstore.AccountRecord) Account {
 		ID:          row.ID,
 		Username:    username,
 		Email:       email,
-		Role:        row.Role,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		Timezone:    timezone,
