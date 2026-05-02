@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -17,6 +17,21 @@ export interface LocalServerStatus {
   ready: boolean
   managed: boolean
   error?: string
+}
+
+interface ServerIdentity {
+  version: string
+  commitHash: string
+}
+
+interface PingPayload extends ServerIdentity {
+  status?: string
+}
+
+interface ManagedServerPid {
+  pid: number
+  command: string
+  startedAt: string
 }
 
 function repoRoot(): string {
@@ -61,6 +76,10 @@ function currentServerCommand(): { command: string, args: string[], cwd: string,
 
 function logPath(): string {
   return join(app.getPath('userData'), 'local-server.log')
+}
+
+function pidPath(): string {
+  return join(app.getPath('userData'), 'local-server.pid.json')
 }
 
 function appendLog(message: string): void {
@@ -237,16 +256,21 @@ function prepareProviders(cwd: string): void {
   cpSync(bundledProviders, targetProviders, { recursive: true })
 }
 
-async function probeServer(): Promise<boolean> {
+async function probeServer(): Promise<PingPayload | null> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 1000)
   try {
     const response = await fetch(`${LOCAL_SERVER_BASE_URL}/ping`, { signal: controller.signal })
-    if (!response.ok) return false
-    const payload = await response.json() as { status?: string, version?: string }
-    return payload.status === 'ok' && typeof payload.version === 'string'
+    if (!response.ok) return null
+    const payload = await response.json() as { status?: string, version?: string, commit_hash?: string }
+    if (payload.status !== 'ok' || typeof payload.version !== 'string') return null
+    return {
+      status: payload.status,
+      version: payload.version,
+      commitHash: payload.commit_hash ?? '',
+    }
   } catch {
-    return false
+    return null
   } finally {
     clearTimeout(timeout)
   }
@@ -261,8 +285,7 @@ async function waitForServer(timeoutMs = 30_000): Promise<boolean> {
   return false
 }
 
-function spawnServer(): ChildProcess {
-  const command = serverCommand()
+function spawnServer(command = serverCommand()): ChildProcess {
   prepareRuntime(command)
   if (!is.dev && !existsSync(command.command)) {
     throw new Error(`Bundled server binary not found: ${command.command}`)
@@ -278,6 +301,13 @@ function spawnServer(): ChildProcess {
     },
   })
   child.unref()
+  if (typeof child.pid === 'number') {
+    writeManagedServerPid({
+      pid: child.pid,
+      command: `${command.command} ${command.args.join(' ')}`,
+      startedAt: new Date().toISOString(),
+    })
+  }
   return child
 }
 
@@ -328,15 +358,126 @@ function formatCommandFailure(result: ReturnType<typeof spawnSync>): string {
   return stderr || stdout || `exit status ${String(result.status)}`
 }
 
-export async function ensureLocalServer(): Promise<LocalServerStatus> {
-  if (await probeServer()) {
-    serverReady = true
-    serverError = null
-    return getLocalServerStatus()
+function bundledServerIdentity(command: { command: string, cwd: string, configPath: string }): ServerIdentity {
+  const result = runServerCommand(command, ['version'])
+  if (result.status !== 0) {
+    throw new Error(`failed to inspect bundled server version: ${formatCommandFailure(result)}`)
   }
+  return parseVersionOutput(String(result.stdout ?? ''))
+}
 
+function parseVersionOutput(output: string): ServerIdentity {
+  const line = output.trim().split(/\r?\n/).find(Boolean) ?? ''
+  const match = line.match(/^memoh-server\s+([^\s(]+)(?:\s+\(([^)]+)\))?/)
+  if (!match) {
+    return { version: '', commitHash: '' }
+  }
+  return { version: match[1] ?? '', commitHash: match[2] ?? '' }
+}
+
+function sameServerIdentity(existing: ServerIdentity, bundled: ServerIdentity): boolean {
+  if (bundled.commitHash) {
+    return existing.commitHash === bundled.commitHash
+  }
+  if (bundled.version) {
+    return existing.version === bundled.version
+  }
+  return true
+}
+
+function identityLabel(identity: ServerIdentity): string {
+  return identity.commitHash ? `${identity.version} (${identity.commitHash})` : identity.version || 'unknown'
+}
+
+function writeManagedServerPid(info: ManagedServerPid): void {
   try {
-    startedProcess = spawnServer()
+    writeFileSync(pidPath(), JSON.stringify(info, null, 2), { mode: 0o600 })
+  } catch (error) {
+    appendLog(`failed to write pid file: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function readManagedServerPid(): ManagedServerPid | null {
+  try {
+    const payload = JSON.parse(readFileSync(pidPath(), 'utf8')) as Partial<ManagedServerPid>
+    if (typeof payload.pid !== 'number' || payload.pid <= 0) return null
+    return {
+      pid: payload.pid,
+      command: typeof payload.command === 'string' ? payload.command : '',
+      startedAt: typeof payload.startedAt === 'string' ? payload.startedAt : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isProcessAlive(pid)) return true
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  return false
+}
+
+async function stopManagedServer(): Promise<boolean> {
+  const info = readManagedServerPid()
+  if (!info || !isProcessAlive(info.pid)) {
+    return false
+  }
+  appendLog(`stopping managed local server pid=${info.pid}`)
+  try {
+    process.kill(info.pid, 'SIGTERM')
+  } catch (error) {
+    appendLog(`failed to terminate managed local server: ${error instanceof Error ? error.message : String(error)}`)
+    return false
+  }
+  if (!(await waitForProcessExit(info.pid))) {
+    appendLog(`managed local server did not exit after SIGTERM, killing pid=${info.pid}`)
+    try {
+      process.kill(info.pid, 'SIGKILL')
+    } catch (error) {
+      appendLog(`failed to kill managed local server: ${error instanceof Error ? error.message : String(error)}`)
+      return false
+    }
+    await waitForProcessExit(info.pid)
+  }
+  try {
+    unlinkSync(pidPath())
+  } catch {
+    // Stale pid files are harmless.
+  }
+  return true
+}
+
+export async function ensureLocalServer(): Promise<LocalServerStatus> {
+  try {
+    const command = serverCommand()
+    const bundledIdentity = bundledServerIdentity(command)
+    const existing = await probeServer()
+    if (existing) {
+      if (sameServerIdentity(existing, bundledIdentity)) {
+        serverReady = true
+        serverError = null
+        await ensureDesktopAuthToken()
+        return getLocalServerStatus()
+      }
+      appendLog(`local server version mismatch: running=${identityLabel(existing)} bundled=${identityLabel(bundledIdentity)}`)
+      if (!(await stopManagedServer())) {
+        throw new Error(`Local server on ${LOCAL_SERVER_BASE_URL} is ${identityLabel(existing)}, but this desktop bundles ${identityLabel(bundledIdentity)}. Stop the old local server and reopen Memoh.`)
+      }
+    }
+
+    startedProcess = spawnServer(command)
     if (!(await waitForServer())) {
       throw new Error(`Local server did not become ready on ${LOCAL_SERVER_BASE_URL}`)
     }
