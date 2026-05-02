@@ -21,6 +21,10 @@ import router from './settings/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
+  const token = await window.api.desktop.authToken()
+  if (token) {
+    localStorage.setItem('token', token)
+  }
   setupApiClient({
     baseUrl: await window.api.desktop.apiBaseUrl(),
     // Settings is a satellite window — it doesn't host the login screen.

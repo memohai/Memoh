@@ -107,6 +107,9 @@ func (s *LocalService) CreateContainer(ctx context.Context, req ctr.CreateContai
 	if err := os.MkdirAll(absPath, 0o750); err != nil {
 		return ctr.ContainerInfo{}, err
 	}
+	if err := seedBridgeTemplates(absPath); err != nil {
+		return ctr.ContainerInfo{}, err
+	}
 	if err := os.MkdirAll(s.metadataRoot(), 0o750); err != nil {
 		return ctr.ContainerInfo{}, err
 	}

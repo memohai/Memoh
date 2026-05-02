@@ -21,6 +21,10 @@ import router from './chat/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
+  const token = await window.api.desktop.authToken()
+  if (token) {
+    localStorage.setItem('token', token)
+  }
   setupApiClient({
     baseUrl: await window.api.desktop.apiBaseUrl(),
     onUnauthorized: () => router.replace({ name: 'Login' }),

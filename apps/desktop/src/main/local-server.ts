@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -10,6 +10,7 @@ export const LOCAL_SERVER_BASE_URL = `http://127.0.0.1:${LOCAL_SERVER_PORT}`
 let startedProcess: ChildProcess | null = null
 let serverReady = false
 let serverError: string | null = null
+let desktopAuthToken: string | null = null
 
 export interface LocalServerStatus {
   baseUrl: string
@@ -52,6 +53,10 @@ function serverCommand(): { command: string, args: string[], cwd: string, config
     cwd,
     configPath: resourcePath('config', 'app.local.toml'),
   }
+}
+
+function currentServerCommand(): { command: string, args: string[], cwd: string, configPath: string } {
+  return serverCommand()
 }
 
 function logPath(): string {
@@ -211,12 +216,23 @@ export async function ensureLocalServer(): Promise<LocalServerStatus> {
     }
     serverReady = true
     serverError = null
+    await ensureDesktopAuthToken()
   } catch (error) {
     serverReady = false
     serverError = error instanceof Error ? error.message : String(error)
     dialog.showErrorBox('Memoh server failed to start', `${serverError}\n\nLog: ${logPath()}`)
   }
   return getLocalServerStatus()
+}
+
+export async function getDesktopAuthToken(): Promise<string> {
+  if (!serverReady) {
+    await ensureLocalServer()
+  }
+  if (!desktopAuthToken) {
+    await ensureDesktopAuthToken()
+  }
+  return desktopAuthToken ?? ''
 }
 
 export function getLocalServerStatus(): LocalServerStatus {
@@ -232,4 +248,57 @@ export function defaultWorkspacePath(displayName: string): string {
   const raw = displayName.trim() || 'bot'
   const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'bot'
   return join(app.getPath('home'), '.memoh', 'workspaces', safe)
+}
+
+async function ensureDesktopAuthToken(): Promise<void> {
+  if (desktopAuthToken) {
+    return
+  }
+  const command = currentServerCommand()
+  const admin = readAdminCredentials(command.configPath)
+  const response = await fetch(`${LOCAL_SERVER_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(admin),
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(`desktop auto login failed: HTTP ${response.status} ${text}`)
+  }
+  const payload = await response.json() as { access_token?: string }
+  if (!payload.access_token) {
+    throw new Error('desktop auto login failed: response did not include access_token')
+  }
+  desktopAuthToken = payload.access_token
+}
+
+function readAdminCredentials(configPath: string): { username: string, password: string } {
+  const raw = readFileSync(configPath, 'utf8')
+  let inAdmin = false
+  let username = ''
+  let password = ''
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      inAdmin = trimmed === '[admin]'
+      continue
+    }
+    if (!inAdmin || trimmed === '' || trimmed.startsWith('#')) {
+      continue
+    }
+    const match = trimmed.match(/^([A-Za-z0-9_]+)\s*=\s*"(.*)"\s*$/)
+    if (!match) {
+      continue
+    }
+    if (match[1] === 'username') {
+      username = match[2]
+    }
+    if (match[1] === 'password') {
+      password = match[2]
+    }
+  }
+  if (!username || !password) {
+    throw new Error(`desktop auto login failed: missing [admin] username/password in ${configPath}`)
+  }
+  return { username, password }
 }

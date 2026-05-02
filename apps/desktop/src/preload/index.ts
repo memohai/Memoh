@@ -22,6 +22,7 @@ const api = {
     getServerStatus: (): Promise<{ baseUrl: string, ready: boolean, managed: boolean, error?: string }> =>
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
+    authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
     // Tell the main process to fan a query-cache invalidation out to every

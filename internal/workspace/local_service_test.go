@@ -39,6 +39,9 @@ func TestLocalServiceCRUDAndInProcessBridge(t *testing.T) {
 	if info.StorageRef.Key != workspaceRoot {
 		t.Fatalf("workspace path = %q, want %q", info.StorageRef.Key, workspaceRoot)
 	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "IDENTITY.md")); err != nil {
+		t.Fatalf("expected seeded bridge template: %v", err)
+	}
 
 	if err := svc.StartContainer(ctx, info.ID, nil); err != nil {
 		t.Fatalf("StartContainer failed: %v", err)

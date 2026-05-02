@@ -2,7 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
-import { defaultWorkspacePath, ensureLocalServer, getLocalServerStatus } from './local-server'
+import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus } from './local-server'
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
@@ -100,13 +100,15 @@ function createSettingsWindow(): BrowserWindow {
     },
   })
   window.setParentWindow(null)
+  const webContentsId = window.webContents.id
 
   window.on('ready-to-show', () => {
+    if (window.isDestroyed()) return
     window.setParentWindow(null)
     window.show()
   })
   window.on('closed', () => {
-    pendingSettingsNavigate.delete(window.webContents.id)
+    pendingSettingsNavigate.delete(webContentsId)
     settingsWindow = null
   })
 
@@ -114,9 +116,10 @@ function createSettingsWindow(): BrowserWindow {
   // receive IPC messages. Reusing `did-finish-load` keeps both fresh
   // cold-starts and in-place refreshes working without extra coordination.
   window.webContents.on('did-finish-load', () => {
-    const target = pendingSettingsNavigate.get(window.webContents.id)
+    const target = pendingSettingsNavigate.get(webContentsId)
     if (!target) return
-    pendingSettingsNavigate.delete(window.webContents.id)
+    if (window.isDestroyed()) return
+    pendingSettingsNavigate.delete(webContentsId)
     window.webContents.send('settings:navigate', target)
   })
 
@@ -180,6 +183,7 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('desktop:server-status', () => getLocalServerStatus())
   ipcMain.handle('desktop:api-base-url', () => getLocalServerStatus().baseUrl)
+  ipcMain.handle('desktop:auth-token', () => getDesktopAuthToken())
   ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
