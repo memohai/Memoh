@@ -1380,6 +1380,68 @@ func TestIntegrationStartRunPlannerDecomposesRootTaskIntoInitialDAG(t *testing.T
 	}
 }
 
+func TestIntegrationStartRunPlannerRejectsRuntimeLimitOverflow(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	svc.SetStartRunPlanner(fixedStartRunPlanner{
+		result: &StartRunPlanningResult{
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "one", Goal: "first child", WorkerProfile: DefaultRootWorkerProfile},
+				{Alias: "two", Goal: "second child", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-plan-limit-" + uuid.NewString(),
+		Subject:  "subject-plan-limit-" + uuid.NewString(),
+	}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "planner output should exceed child limit",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-plan-limit-" + uuid.NewString(),
+		RequestedControlPolicy: map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan": 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 {
+		t.Fatalf("ListRunTasks() len = %d, want root task only", len(taskPage.Items))
+	}
+	if taskPage.Items[0].Status != TaskStatusCreated {
+		t.Fatalf("root task status = %q, want %q", taskPage.Items[0].Status, TaskStatusCreated)
+	}
+
+	var failedIntentCount int
+	if err := pool.QueryRow(ctx, `
+SELECT count(*)
+FROM orchestration_planning_intents
+WHERE run_id = $1
+  AND status = $2
+  AND failure_reason LIKE '%planned child task count%'
+`, mustParsePGUUID(t, handle.RunID), PlanningIntentStatusFailed).Scan(&failedIntentCount); err != nil {
+		t.Fatalf("count failed planning intents: %v", err)
+	}
+	if failedIntentCount != 1 {
+		t.Fatalf("failed planning intent count = %d, want 1", failedIntentCount)
+	}
+}
+
 func TestIntegrationSchedulerAndAttemptLifecycleCompletesRootTask(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -4041,6 +4103,101 @@ func TestIntegrationReplanUsesReplannerWhenReplacementPlanMissing(t *testing.T) 
 	}
 	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
 		t.Fatal("root task was not superseded after replanner-created replacement")
+	}
+}
+
+func TestIntegrationReplanRejectsRuntimeLimitOverflowWithoutAdvancingEpoch(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-replan-limit-" + uuid.NewString(),
+		Subject:  "subject-replan-limit-" + uuid.NewString(),
+	}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "root should reject oversized replan",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-replan-limit-" + uuid.NewString(),
+		RequestedControlPolicy: map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan": 1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	pgRunID := mustParsePGUUID(t, handle.RunID)
+	pgRootTaskID := mustParsePGUUID(t, handle.RootTaskID)
+	runBefore, err := svc.queries.GetOrchestrationRunByID(ctx, pgRunID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID(before) error = %v", err)
+	}
+	_, replanIntentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(replan intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               replanIntentUUID,
+		RunID:            pgRunID,
+		TaskID:           pgRootTaskID,
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runBefore.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":         handle.RunID,
+			"source_task_id": handle.RootTaskID,
+			"reason":         "integration_test.replan_limit",
+			"replacement_plan": map[string]any{
+				"child_tasks": []any{
+					map[string]any{"alias": "one", "goal": "first replacement"},
+					map[string]any{"alias": "two", "goal": "second replacement"},
+				},
+			},
+		}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent(replan) error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	runAfter, err := svc.queries.GetOrchestrationRunByID(ctx, pgRunID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID(after) error = %v", err)
+	}
+	if runAfter.PlannerEpoch != runBefore.PlannerEpoch {
+		t.Fatalf("planner_epoch = %d, want unchanged %d", runAfter.PlannerEpoch, runBefore.PlannerEpoch)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 {
+		t.Fatalf("ListRunTasks() len = %d, want root task only", len(taskPage.Items))
+	}
+	if taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("root task status = %q, want %q", taskPage.Items[0].Status, TaskStatusReady)
+	}
+
+	var failedIntentCount int
+	if err := pool.QueryRow(ctx, `
+SELECT count(*)
+FROM orchestration_planning_intents
+WHERE run_id = $1
+  AND status = $2
+  AND failure_reason LIKE '%planned child task count%'
+`, pgRunID, PlanningIntentStatusFailed).Scan(&failedIntentCount); err != nil {
+		t.Fatalf("count failed planning intents: %v", err)
+	}
+	if failedIntentCount != 1 {
+		t.Fatalf("failed planning intent count = %d, want 1", failedIntentCount)
 	}
 }
 

@@ -2,11 +2,15 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -299,6 +303,9 @@ func (s *Service) processStartRunPlanningIntent(ctx context.Context, qtx *sqlc.Q
 	initiallyDecomposed := false
 	if taskRow.Status == TaskStatusCreated {
 		if childPlans, planSummary, planErr := s.planStartRunTask(ctx, runRow, taskRow); planErr != nil {
+			if shouldFailPlanningIntent(planErr) {
+				return sqlc.OrchestrationEvent{}, planErr
+			}
 			s.logger.Warn("start run planner failed; falling back to direct execution",
 				slog.String("run_id", runRow.ID.String()),
 				slog.String("task_id", taskRow.ID.String()),
@@ -409,6 +416,9 @@ func (s *Service) planStartRunTask(ctx context.Context, runRow sqlc.Orchestratio
 	}
 	if len(childPlans) == 0 {
 		return nil, strings.TrimSpace(result.Summary), nil
+	}
+	if err := validateStartRunPlanRuntimeLimits(runRow, childPlans); err != nil {
+		return nil, "", err
 	}
 	if err := validatePlannedChildTasks(childPlans); err != nil {
 		return nil, "", err
@@ -1093,6 +1103,9 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 	}
 	if len(childPlans) == 0 {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: replan intent requires replacement_plan.child_tasks", ErrPlanningIntentInvalid)
+	}
+	if err := validateReplanRuntimeLimits(runRow, sourceTask, allTasks, childPlans); err != nil {
+		return sqlc.OrchestrationEvent{}, err
 	}
 	if err := validatePlannedChildTasks(childPlans); err != nil {
 		return sqlc.OrchestrationEvent{}, err
@@ -3288,6 +3301,177 @@ type plannedChildTask struct {
 	BlackboardScope    string
 }
 
+type runtimeLimits struct {
+	MaxChildTasksPerPlan      int
+	MaxDependencyEdgesPerPlan int
+	MaxTotalTasksPerRun       int
+	MaxReplansPerRun          int
+	MaxReplanDepth            int
+	MaxTaskGoalChars          int
+}
+
+func defaultRuntimeLimits() runtimeLimits {
+	return runtimeLimits{
+		MaxChildTasksPerPlan:      defaultMaxChildTasksPerPlan,
+		MaxDependencyEdgesPerPlan: defaultMaxDependencyEdgesPerPlan,
+		MaxTotalTasksPerRun:       defaultMaxTotalTasksPerRun,
+		MaxReplansPerRun:          defaultMaxReplansPerRun,
+		MaxReplanDepth:            defaultMaxReplanDepth,
+		MaxTaskGoalChars:          defaultMaxTaskGoalChars,
+	}
+}
+
+func (limits runtimeLimits) Map() map[string]any {
+	return map[string]any{
+		"max_child_tasks_per_plan":      limits.MaxChildTasksPerPlan,
+		"max_dependency_edges_per_plan": limits.MaxDependencyEdgesPerPlan,
+		"max_total_tasks_per_run":       limits.MaxTotalTasksPerRun,
+		"max_replans_per_run":           limits.MaxReplansPerRun,
+		"max_replan_depth":              limits.MaxReplanDepth,
+		"max_task_goal_chars":           limits.MaxTaskGoalChars,
+	}
+}
+
+func runtimeLimitsFromRun(runRow sqlc.OrchestrationRun) (runtimeLimits, error) {
+	policy := decodeJSONObject(runRow.ControlPolicy)
+	limits := defaultRuntimeLimits()
+	rawRuntimeLimits, ok := policy["runtime_limits"].(map[string]any)
+	if !ok {
+		if rawRuntimeLimits := policy["runtime_limits"]; rawRuntimeLimits != nil {
+			return runtimeLimits{}, fmt.Errorf("%w: control_policy.runtime_limits must be an object", ErrPlanningIntentInvalid)
+		}
+		return limits, nil
+	}
+	if err := applyRuntimeLimit(&limits.MaxChildTasksPerPlan, rawRuntimeLimits, "max_child_tasks_per_plan", absoluteMaxChildTasksPerPlan, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxDependencyEdgesPerPlan, rawRuntimeLimits, "max_dependency_edges_per_plan", absoluteMaxDependencyEdgesPerPlan, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxTotalTasksPerRun, rawRuntimeLimits, "max_total_tasks_per_run", absoluteMaxTotalTasksPerRun, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxReplansPerRun, rawRuntimeLimits, "max_replans_per_run", absoluteMaxReplansPerRun, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxReplanDepth, rawRuntimeLimits, "max_replan_depth", absoluteMaxReplanDepth, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxTaskGoalChars, rawRuntimeLimits, "max_task_goal_chars", absoluteMaxTaskGoalChars, ErrPlanningIntentInvalid); err != nil {
+		return runtimeLimits{}, err
+	}
+	return limits, nil
+}
+
+func runtimeLimitsFromRequestedPolicy(requested map[string]any) (runtimeLimits, error) {
+	limits := defaultRuntimeLimits()
+	normalized := normalizeObject(requested)
+	if len(normalized) == 0 {
+		return limits, nil
+	}
+	rawRuntimeLimits, ok := normalized["runtime_limits"]
+	if !ok || rawRuntimeLimits == nil {
+		return limits, nil
+	}
+	runtimeLimitMap, ok := rawRuntimeLimits.(map[string]any)
+	if !ok {
+		return runtimeLimits{}, fmt.Errorf("%w: requested_control_policy.runtime_limits must be an object", ErrInvalidArgument)
+	}
+	if err := applyRuntimeLimit(&limits.MaxChildTasksPerPlan, runtimeLimitMap, "max_child_tasks_per_plan", absoluteMaxChildTasksPerPlan, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxDependencyEdgesPerPlan, runtimeLimitMap, "max_dependency_edges_per_plan", absoluteMaxDependencyEdgesPerPlan, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxTotalTasksPerRun, runtimeLimitMap, "max_total_tasks_per_run", absoluteMaxTotalTasksPerRun, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxReplansPerRun, runtimeLimitMap, "max_replans_per_run", absoluteMaxReplansPerRun, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxReplanDepth, runtimeLimitMap, "max_replan_depth", absoluteMaxReplanDepth, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	if err := applyRuntimeLimit(&limits.MaxTaskGoalChars, runtimeLimitMap, "max_task_goal_chars", absoluteMaxTaskGoalChars, ErrInvalidArgument); err != nil {
+		return runtimeLimits{}, err
+	}
+	return limits, nil
+}
+
+func applyRuntimeLimit(target *int, values map[string]any, key string, absoluteMax int, invalidErr error) error {
+	raw, ok := values[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	value, err := runtimeLimitInt(raw, key, absoluteMax, invalidErr)
+	if err != nil {
+		return err
+	}
+	if value <= 0 {
+		return fmt.Errorf("%w: %s must be positive", invalidErr, key)
+	}
+	*target = value
+	return nil
+}
+
+func runtimeLimitInt(raw any, key string, absoluteMax int, invalidErr error) (int, error) {
+	switch value := raw.(type) {
+	case int:
+		if value > absoluteMax {
+			return absoluteMax, nil
+		}
+		return value, nil
+	case int32:
+		if int64(value) > int64(absoluteMax) {
+			return absoluteMax, nil
+		}
+		return int(value), nil
+	case int64:
+		if value > int64(absoluteMax) {
+			return absoluteMax, nil
+		}
+		if value <= 0 {
+			return -1, nil
+		}
+		return int(value), nil
+	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) {
+			return 0, fmt.Errorf("%w: %s must be an integer", invalidErr, key)
+		}
+		if value > float64(absoluteMax) {
+			return absoluteMax, nil
+		}
+		if value <= 0 {
+			return -1, nil
+		}
+		return int(value), nil
+	case json.Number:
+		parsed, err := strconv.ParseInt(value.String(), 10, 64)
+		if err == nil {
+			if parsed > int64(absoluteMax) {
+				return absoluteMax, nil
+			}
+			if parsed <= 0 {
+				return -1, nil
+			}
+			return int(parsed), nil
+		}
+		asFloat, floatErr := strconv.ParseFloat(value.String(), 64)
+		if floatErr != nil || math.IsNaN(asFloat) || math.IsInf(asFloat, 0) || asFloat != math.Trunc(asFloat) {
+			return 0, fmt.Errorf("%w: %s must be an integer", invalidErr, key)
+		}
+		if asFloat > float64(absoluteMax) {
+			return absoluteMax, nil
+		}
+		if asFloat <= 0 {
+			return -1, nil
+		}
+		return int(asFloat), nil
+	default:
+		return 0, fmt.Errorf("%w: %s must be an integer", invalidErr, key)
+	}
+}
+
 func (s *Service) expandChildTasksFromPlans(
 	ctx context.Context,
 	qtx *sqlc.Queries,
@@ -3604,6 +3788,82 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 		return fmt.Errorf("%w: child task dependencies must form an acyclic graph", ErrPlanningIntentInvalid)
 	}
 	return nil
+}
+
+func validateStartRunPlanRuntimeLimits(runRow sqlc.OrchestrationRun, childPlans []plannedChildTask) error {
+	limits, err := runtimeLimitsFromRun(runRow)
+	if err != nil {
+		return err
+	}
+	if err := validatePlannedChildTaskRuntimeLimits(childPlans, limits); err != nil {
+		return err
+	}
+	if 1+len(childPlans) > limits.MaxTotalTasksPerRun {
+		return fmt.Errorf("%w: planned run would create %d tasks, limit is %d", ErrPlanningIntentInvalid, 1+len(childPlans), limits.MaxTotalTasksPerRun)
+	}
+	return nil
+}
+
+func validateReplanRuntimeLimits(runRow sqlc.OrchestrationRun, sourceTask sqlc.OrchestrationTask, allTasks []sqlc.OrchestrationTask, childPlans []plannedChildTask) error {
+	limits, err := runtimeLimitsFromRun(runRow)
+	if err != nil {
+		return err
+	}
+	if err := validatePlannedChildTaskRuntimeLimits(childPlans, limits); err != nil {
+		return err
+	}
+	if len(allTasks)+len(childPlans) > limits.MaxTotalTasksPerRun {
+		return fmt.Errorf("%w: replan would create %d total task rows, limit is %d", ErrPlanningIntentInvalid, len(allTasks)+len(childPlans), limits.MaxTotalTasksPerRun)
+	}
+	if successfulReplans := int(runRow.PlannerEpoch - 1); successfulReplans >= limits.MaxReplansPerRun {
+		return fmt.Errorf("%w: run replan count %d reached limit %d", ErrPlanningIntentInvalid, successfulReplans, limits.MaxReplansPerRun)
+	}
+	if depth := taskDecompositionDepth(allTasks, sourceTask.ID); depth+1 > limits.MaxReplanDepth {
+		return fmt.Errorf("%w: replan depth %d would exceed limit %d", ErrPlanningIntentInvalid, depth+1, limits.MaxReplanDepth)
+	}
+	return nil
+}
+
+func validatePlannedChildTaskRuntimeLimits(childPlans []plannedChildTask, limits runtimeLimits) error {
+	if len(childPlans) > limits.MaxChildTasksPerPlan {
+		return fmt.Errorf("%w: planned child task count %d exceeds limit %d", ErrPlanningIntentInvalid, len(childPlans), limits.MaxChildTasksPerPlan)
+	}
+	dependencyEdges := 0
+	for index, plan := range childPlans {
+		if utf8.RuneCountInString(plan.Goal) > limits.MaxTaskGoalChars {
+			return fmt.Errorf("%w: child task %d goal length exceeds limit %d", ErrPlanningIntentInvalid, index, limits.MaxTaskGoalChars)
+		}
+		dependencyEdges += len(plan.DependsOnAliases)
+	}
+	if dependencyEdges > limits.MaxDependencyEdgesPerPlan {
+		return fmt.Errorf("%w: planned dependency edge count %d exceeds limit %d", ErrPlanningIntentInvalid, dependencyEdges, limits.MaxDependencyEdgesPerPlan)
+	}
+	return nil
+}
+
+func taskDecompositionDepth(tasks []sqlc.OrchestrationTask, taskID pgtype.UUID) int {
+	byID := make(map[string]sqlc.OrchestrationTask, len(tasks))
+	for _, task := range tasks {
+		byID[task.ID.String()] = task
+	}
+	depth := 0
+	seen := map[string]struct{}{taskID.String(): {}}
+	current, ok := byID[taskID.String()]
+	for ok && current.DecomposedFromTaskID.Valid {
+		parentID := current.DecomposedFromTaskID.String()
+		if _, exists := seen[parentID]; exists {
+			return depth
+		}
+		seen[parentID] = struct{}{}
+		parent, parentOK := byID[parentID]
+		if !parentOK {
+			return depth
+		}
+		depth++
+		current = parent
+		ok = true
+	}
+	return depth
 }
 
 func validateOptionalReplanChildPlans(childPlans []plannedChildTask) error {

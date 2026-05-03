@@ -694,6 +694,9 @@ func TestBuildPhase1ControlPolicyAndAuthorizeRun(t *testing.T) {
 	if got := policy["owner_subject"]; got != caller.Subject {
 		t.Fatalf("control policy owner_subject = %v, want %q", got, caller.Subject)
 	}
+	if _, ok := policy["runtime_limits"].(map[string]any); !ok {
+		t.Fatalf("control policy runtime_limits = %T, want object", policy["runtime_limits"])
+	}
 
 	run := sqlc.OrchestrationRun{
 		TenantID:     caller.TenantID,
@@ -711,6 +714,171 @@ func TestBuildPhase1ControlPolicyAndAuthorizeRun(t *testing.T) {
 	}
 	if err := authorizeRun(ControlIdentity{TenantID: "user-2", Subject: "user-2"}, run); !errors.Is(err, ErrAccessDenied) {
 		t.Fatalf("authorizeRun(non-owner) error = %v, want %v", err, ErrAccessDenied)
+	}
+}
+
+func TestBuildControlPolicyRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	caller := ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}
+	policy, err := buildControlPolicy(caller, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan":      float64(3),
+			"max_dependency_edges_per_plan": float64(5),
+			"max_total_tasks_per_run":       float64(9),
+			"max_replans_per_run":           float64(2),
+			"max_replan_depth":              float64(2),
+			"max_task_goal_chars":           float64(120),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildControlPolicy() error = %v", err)
+	}
+	limits := policy["runtime_limits"].(map[string]any)
+	if limits["max_child_tasks_per_plan"] != 3 {
+		t.Fatalf("max_child_tasks_per_plan = %v, want 3", limits["max_child_tasks_per_plan"])
+	}
+	if limits["max_dependency_edges_per_plan"] != 5 {
+		t.Fatalf("max_dependency_edges_per_plan = %v, want 5", limits["max_dependency_edges_per_plan"])
+	}
+	if limits["max_total_tasks_per_run"] != 9 {
+		t.Fatalf("max_total_tasks_per_run = %v, want 9", limits["max_total_tasks_per_run"])
+	}
+	if limits["max_replans_per_run"] != 2 {
+		t.Fatalf("max_replans_per_run = %v, want 2", limits["max_replans_per_run"])
+	}
+	if limits["max_replan_depth"] != 2 {
+		t.Fatalf("max_replan_depth = %v, want 2", limits["max_replan_depth"])
+	}
+	if limits["max_task_goal_chars"] != 120 {
+		t.Fatalf("max_task_goal_chars = %v, want 120", limits["max_task_goal_chars"])
+	}
+}
+
+func TestBuildControlPolicyRejectsInvalidRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildControlPolicy(ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan": float64(1.5),
+		},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("buildControlPolicy(invalid limit) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestBuildControlPolicyClampsRuntimeLimitsToAbsoluteMax(t *testing.T) {
+	t.Parallel()
+
+	policy, err := buildControlPolicy(ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan": float64(absoluteMaxChildTasksPerPlan * 10),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildControlPolicy(oversized limit) error = %v", err)
+	}
+	limits := policy["runtime_limits"].(map[string]any)
+	if limits["max_child_tasks_per_plan"] != absoluteMaxChildTasksPerPlan {
+		t.Fatalf("max_child_tasks_per_plan = %v, want absolute max %d", limits["max_child_tasks_per_plan"], absoluteMaxChildTasksPerPlan)
+	}
+}
+
+func TestValidateRuntimeLimitsRejectInvalidPersistedPolicy(t *testing.T) {
+	t.Parallel()
+
+	run := sqlc.OrchestrationRun{
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan": "not-an-integer",
+			},
+		}),
+	}
+	err := validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(invalid persisted policy) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	run.ControlPolicy = marshalJSON(map[string]any{
+		"runtime_limits": []any{"not", "an", "object"},
+	})
+	err = validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(invalid persisted runtime_limits) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestValidateStartRunPlanRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	run := sqlc.OrchestrationRun{
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan":      2,
+				"max_dependency_edges_per_plan": 1,
+				"max_total_tasks_per_run":       3,
+				"max_task_goal_chars":           20,
+			},
+		}),
+	}
+	err := validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+		{Alias: "b", Goal: "second", DependsOnAliases: []string{"a"}},
+		{Alias: "c", Goal: "third"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(too many children) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	err = validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+		{Alias: "b", Goal: "this goal is intentionally too long"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(long goal) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestValidateReplanRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	rootID := mustUUID(t, "550e8400-e29b-41d4-a716-446655440020")
+	childID := mustUUID(t, "550e8400-e29b-41d4-a716-446655440021")
+	run := sqlc.OrchestrationRun{
+		PlannerEpoch: 3,
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan":      2,
+				"max_dependency_edges_per_plan": 4,
+				"max_total_tasks_per_run":       4,
+				"max_replans_per_run":           2,
+				"max_replan_depth":              1,
+				"max_task_goal_chars":           100,
+			},
+		}),
+	}
+	allTasks := []sqlc.OrchestrationTask{
+		{ID: rootID},
+		{ID: childID, DecomposedFromTaskID: rootID},
+	}
+	err := validateReplanRuntimeLimits(run, allTasks[0], allTasks, []plannedChildTask{
+		{Alias: "replacement", Goal: "replacement"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateReplanRuntimeLimits(replan count) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	run.PlannerEpoch = 1
+	err = validateReplanRuntimeLimits(run, allTasks[1], allTasks, []plannedChildTask{
+		{Alias: "replacement", Goal: "replacement"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateReplanRuntimeLimits(depth) error = %v, want %v", err, ErrPlanningIntentInvalid)
 	}
 }
 

@@ -76,6 +76,10 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 	if normalizedIdempotencyKey == "" {
 		return RunHandle{}, fmt.Errorf("%w: idempotency_key is required", ErrInvalidArgument)
 	}
+	controlPolicy, err := buildControlPolicy(caller, req.RequestedControlPolicy)
+	if err != nil {
+		return RunHandle{}, err
+	}
 	sourceMetadata, err := normalizeStartRunSourceMetadata(req)
 	if err != nil {
 		return RunHandle{}, err
@@ -132,7 +136,7 @@ func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req Star
 		Input:                  marshalObject(req.Input),
 		OutputSchema:           marshalObject(req.OutputSchema),
 		RequestedControlPolicy: marshalObject(req.RequestedControlPolicy),
-		ControlPolicy:          marshalJSON(buildPhase1ControlPolicy(caller)),
+		ControlPolicy:          marshalJSON(controlPolicy),
 		SourceMetadata:         marshalObject(sourceMetadata),
 		Policies:               marshalObject(req.Policies),
 		CreatedBy:              caller.Subject,
@@ -3275,10 +3279,27 @@ func normalizeStartRunSourceMetadata(req StartRunRequest) (map[string]any, error
 }
 
 func buildPhase1ControlPolicy(caller ControlIdentity) map[string]any {
-	return map[string]any{
-		"mode":          ControlPolicyModeOwnerOnly,
-		"owner_subject": caller.Subject,
+	policy, err := buildControlPolicy(caller, nil)
+	if err != nil {
+		return map[string]any{
+			"mode":           ControlPolicyModeOwnerOnly,
+			"owner_subject":  strings.TrimSpace(caller.Subject),
+			"runtime_limits": defaultRuntimeLimits().Map(),
+		}
 	}
+	return policy
+}
+
+func buildControlPolicy(caller ControlIdentity, requested map[string]any) (map[string]any, error) {
+	limits, err := runtimeLimitsFromRequestedPolicy(requested)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"mode":           ControlPolicyModeOwnerOnly,
+		"owner_subject":  strings.TrimSpace(caller.Subject),
+		"runtime_limits": limits.Map(),
+	}, nil
 }
 
 func rootWorkerProfile(input, sourceMetadata map[string]any) string {

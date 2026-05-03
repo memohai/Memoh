@@ -93,6 +93,19 @@ const (
 	defaultEventLimit = 100
 	maxEventLimit     = 500
 
+	defaultMaxChildTasksPerPlan       = 8
+	absoluteMaxChildTasksPerPlan      = 32
+	defaultMaxDependencyEdgesPerPlan  = 16
+	absoluteMaxDependencyEdgesPerPlan = 128
+	defaultMaxTotalTasksPerRun        = 64
+	absoluteMaxTotalTasksPerRun       = 512
+	defaultMaxReplansPerRun           = 8
+	absoluteMaxReplansPerRun          = 64
+	defaultMaxReplanDepth             = 4
+	absoluteMaxReplanDepth            = 16
+	defaultMaxTaskGoalChars           = 4000
+	absoluteMaxTaskGoalChars          = 20000
+
 	methodStartRun              = "StartRun"
 	methodCreateHumanCheckpoint = "CreateHumanCheckpoint"
 	methodCancelRun             = "CancelRun"
