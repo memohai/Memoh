@@ -87,6 +87,8 @@ func evaluateBuiltinVerification(verification TaskVerification, policy map[strin
 	if requestReplan {
 		status = TaskVerificationStatusCompleted
 		failureClass = "verification_requested_replan"
+	} else if normalized.OnReject == VerificationRejectActionRetry {
+		failureClass = "verifier_retryable"
 	}
 	summary := strings.Join(failures, "; ")
 	return VerificationCompletion{
@@ -122,7 +124,7 @@ func normalizeVerificationPolicy(raw map[string]any) (builtinVerificationPolicy,
 	policy.RequiredArtifactKinds = normalizeStringArray(raw["required_artifact_kinds"])
 	if onReject := strings.TrimSpace(stringValue(raw["on_reject"])); onReject != "" {
 		switch onReject {
-		case VerificationRejectActionFailTask, VerificationRejectActionReplan:
+		case VerificationRejectActionFailTask, VerificationRejectActionReplan, VerificationRejectActionRetry:
 			policy.OnReject = onReject
 		default:
 			return builtinVerificationPolicy{}, fmt.Errorf("unsupported verification on_reject %q", onReject)

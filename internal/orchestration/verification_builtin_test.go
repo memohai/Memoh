@@ -35,6 +35,31 @@ func TestEvaluateBuiltinVerificationFailsClosedWithoutReplacementPlan(t *testing
 	}
 }
 
+func TestEvaluateBuiltinVerificationRequestsRetryWhenPolicyAllowsIt(t *testing.T) {
+	t.Parallel()
+
+	completion := evaluateBuiltinVerification(TaskVerification{
+		ID:         "verification-1",
+		ClaimToken: "claim-1",
+	}, map[string]any{
+		"on_reject":                 VerificationRejectActionRetry,
+		"require_structured_output": true,
+	}, map[string]any{}, nil)
+
+	if completion.Status != TaskVerificationStatusFailed {
+		t.Fatalf("completion status = %q, want %q", completion.Status, TaskVerificationStatusFailed)
+	}
+	if completion.Verdict != VerificationVerdictRejected {
+		t.Fatalf("completion verdict = %q, want %q", completion.Verdict, VerificationVerdictRejected)
+	}
+	if completion.FailureClass != "verifier_retryable" {
+		t.Fatalf("completion failure_class = %q, want verifier_retryable", completion.FailureClass)
+	}
+	if completion.RequestReplan {
+		t.Fatal("completion request_replan = true, want false")
+	}
+}
+
 func TestEvaluateBuiltinVerificationPassesWithRequiredArtifactsAndOutput(t *testing.T) {
 	t.Parallel()
 

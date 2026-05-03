@@ -2307,6 +2307,40 @@ func (q *Queries) GetOrchestrationWorkerByIDForUpdate(ctx context.Context, id st
 	return i, err
 }
 
+const getTerminalOrchestrationVerificationEventByAggregateID = `-- name: GetTerminalOrchestrationVerificationEventByAggregateID :one
+SELECT id, run_id, task_id, attempt_id, checkpoint_id, seq, aggregate_type, aggregate_id, aggregate_version, type, causation_event_id, correlation_id, idempotency_key, payload, created_at, published_at
+FROM orchestration_events
+WHERE aggregate_type = 'verification'
+  AND aggregate_id = $1
+  AND type IN ('run.event.verification.passed', 'run.event.verification.rejected')
+ORDER BY seq DESC
+LIMIT 1
+`
+
+func (q *Queries) GetTerminalOrchestrationVerificationEventByAggregateID(ctx context.Context, verificationID pgtype.UUID) (OrchestrationEvent, error) {
+	row := q.db.QueryRow(ctx, getTerminalOrchestrationVerificationEventByAggregateID, verificationID)
+	var i OrchestrationEvent
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.CheckpointID,
+		&i.Seq,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.AggregateVersion,
+		&i.Type,
+		&i.CausationEventID,
+		&i.CorrelationID,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
 const getTerminalOrchestrationVerificationEventByID = `-- name: GetTerminalOrchestrationVerificationEventByID :one
 SELECT id, run_id, task_id, attempt_id, checkpoint_id, seq, aggregate_type, aggregate_id, aggregate_version, type, causation_event_id, correlation_id, idempotency_key, payload, created_at, published_at
 FROM orchestration_events
@@ -4322,6 +4356,7 @@ SET status = 'ready',
     status_version = status_version + 1,
     waiting_checkpoint_id = NULL,
     waiting_scope = '',
+    latest_result_id = NULL,
     blocked_reason = '',
     terminal_reason = '',
     ready_at = now(),

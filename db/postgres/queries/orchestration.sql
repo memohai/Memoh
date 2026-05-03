@@ -336,6 +336,7 @@ SET status = 'ready',
     status_version = status_version + 1,
     waiting_checkpoint_id = NULL,
     waiting_scope = '',
+    latest_result_id = NULL,
     blocked_reason = '',
     terminal_reason = '',
     ready_at = now(),
@@ -1317,6 +1318,15 @@ SELECT *
 FROM orchestration_events
 WHERE run_id = sqlc.arg(run_id)
   AND aggregate_type = 'verification'
+  AND aggregate_id = sqlc.arg(verification_id)
+  AND type IN ('run.event.verification.passed', 'run.event.verification.rejected')
+ORDER BY seq DESC
+LIMIT 1;
+
+-- name: GetTerminalOrchestrationVerificationEventByAggregateID :one
+SELECT *
+FROM orchestration_events
+WHERE aggregate_type = 'verification'
   AND aggregate_id = sqlc.arg(verification_id)
   AND type IN ('run.event.verification.passed', 'run.event.verification.rejected')
 ORDER BY seq DESC

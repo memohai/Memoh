@@ -43,6 +43,7 @@ const (
 	VerificationModeBuiltinBasic       = "builtin_basic"
 	VerificationRejectActionFailTask   = "fail_task"
 	VerificationRejectActionReplan     = "request_replan"
+	VerificationRejectActionRetry      = "retry"
 	WorkerStatusActive                 = "active"
 	WorkerStatusUnavailable            = "unavailable"
 	DefaultWorkerExecutorID            = "builtin.workerd"

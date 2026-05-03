@@ -896,6 +896,7 @@ Return exactly one JSON object and no markdown. The JSON shape must be:
 
 Use status="completed", verdict="accepted" when the result is valid.
 Use verdict="rejected" when validation fails.
+When verification_policy.on_reject is "retry", use status="failed", verdict="rejected", failure_class="verifier_retryable", and request_replan=false for retryable invalid results.
 Set request_replan=true when the result is rejected and the task should be replaced by a replanned subtree instead of retried or failed. Existing structured_output.child_tasks may be used as a static replacement plan, but it is not required.`
 
 func buildWorkerPrompt(execCtx attemptExecutionContext) string {

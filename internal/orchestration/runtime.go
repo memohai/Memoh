@@ -901,7 +901,7 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 	case TaskAttemptStatusFailed, TaskAttemptStatusLost:
 		if taskRow.Status == TaskStatusRunning {
 			if shouldAutoRetryAttemptFailure(taskRow, attemptRow, completionStatus, requestReplan) {
-				lastEvent, err = s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, attemptRow, resultUUID, "attempt_finalize", failureClass, normalizeAttemptTerminalReason(terminalReason))
+				lastEvent, err = s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, attemptRow, resultUUID, "attempt_retry", "attempt_finalize", failureClass, normalizeAttemptTerminalReason(terminalReason))
 				if err != nil {
 					return sqlc.OrchestrationEvent{}, err
 				}
@@ -2455,7 +2455,7 @@ func positiveInt32FromJSON(value any) (int32, bool) {
 	return 0, false
 }
 
-func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.Queries, taskRow sqlc.OrchestrationTask, attemptRow sqlc.OrchestrationTaskAttempt, resultID pgtype.UUID, reason, failureClass, terminalReason string) (sqlc.OrchestrationEvent, error) {
+func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.Queries, taskRow sqlc.OrchestrationTask, attemptRow sqlc.OrchestrationTaskAttempt, resultID pgtype.UUID, readyReason, reason, failureClass, terminalReason string) (sqlc.OrchestrationEvent, error) {
 	if resultID.Valid {
 		if err := qtx.DeleteOrchestrationTaskResultByID(ctx, resultID); err != nil {
 			return sqlc.OrchestrationEvent{}, fmt.Errorf("delete retried attempt result: %w", err)
@@ -2478,7 +2478,7 @@ func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.
 			"attempt_id":      attemptRow.ID.String(),
 			"previous_status": taskRow.Status,
 			"new_status":      readyTask.Status,
-			"ready_reason":    "attempt_retry",
+			"ready_reason":    strings.TrimSpace(readyReason),
 			"retry_reason":    strings.TrimSpace(reason),
 			"attempt_no":      attemptRow.AttemptNo,
 			"next_attempt_no": attemptRow.AttemptNo + 1,
@@ -2713,7 +2713,7 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			continue
 		}
 		if !taskRow.SupersededByPlannerEpoch.Valid && shouldAutoRetryAttemptFailure(taskRow, lostAttempt, TaskAttemptStatusLost, false) {
-			if _, err := s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, lostAttempt, pgtype.UUID{}, "attempt_lease_expired", "lease_expired", "attempt lease expired"); err != nil {
+			if _, err := s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, lostAttempt, pgtype.UUID{}, "attempt_retry", "attempt_lease_expired", "lease_expired", "attempt lease expired"); err != nil {
 				_ = tx.Rollback(ctx)
 				return recovered, err
 			}

@@ -497,7 +497,17 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 	row, err := qtx.GetOrchestrationTaskVerificationByIDForUpdate(ctx, pgVerificationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrVerificationNotFound
+			verification, replayErr := validateDeletedTerminalVerificationCompletionReplay(ctx, qtx, pgVerificationID, normalizedClaimToken, input, completionStatus, verdict)
+			if replayErr == nil {
+				if err := tx.Commit(ctx); err != nil {
+					return nil, fmt.Errorf("commit deleted terminal verification replay tx: %w", err)
+				}
+				return verification, nil
+			}
+			if errors.Is(replayErr, ErrVerificationNotFound) {
+				return nil, ErrVerificationNotFound
+			}
+			return nil, replayErr
 		}
 		return nil, fmt.Errorf("lock task verification for completion: %w", err)
 	}
@@ -603,6 +613,18 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		}
 		return nil, fmt.Errorf("load verification result: %w", err)
 	}
+	var retryAttemptRow sqlc.OrchestrationTaskAttempt
+	shouldRetryRejectedVerification := false
+	if !runAlreadyFailed && resultRow.AttemptID.Valid && isRetryableVerificationRejection(completionStatus, verdict, input.RequestReplan, rejectAction) {
+		retryAttemptRow, err = qtx.GetOrchestrationTaskAttemptByID(ctx, resultRow.AttemptID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("load attempt for verification retry: %w", err)
+			}
+		} else {
+			shouldRetryRejectedVerification = shouldAutoRetryVerificationRejection(taskRow, retryAttemptRow, completionStatus, verdict, input.RequestReplan, rejectAction)
+		}
+	}
 
 	var finalRow sqlc.OrchestrationTaskVerification
 	switch completionStatus {
@@ -645,8 +667,10 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			"verification_id": finalRow.ID.String(),
 			"task_id":         finalRow.TaskID.String(),
 			"result_id":       finalRow.ResultID.String(),
+			"attempt_no":      finalRow.AttemptNo,
 			"previous_status": row.Status,
 			"new_status":      finalRow.Status,
+			"claim_token":     normalizedClaimToken,
 			"verdict":         finalRow.Verdict,
 			"summary":         finalRow.Summary,
 			"failure_class":   finalRow.FailureClass,
@@ -712,6 +736,10 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			return nil, err
 		}
 		if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, taskRow.ID, resultRow.AttemptID); err != nil {
+			return nil, err
+		}
+	case shouldRetryRejectedVerification:
+		if _, err := s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, retryAttemptRow, row.ResultID, "verification_retry", "verification_rejected", finalRow.FailureClass, normalizeVerificationTerminalReason(finalRow.TerminalReason, finalRow.Verdict)); err != nil {
 			return nil, err
 		}
 	case input.RequestReplan:
@@ -846,6 +874,83 @@ func validateTerminalVerificationRequestReplanReplay(ctx context.Context, qtx *s
 		return fmt.Errorf("%w: terminal verification request_replan mismatch", ErrCompletionReplayConflict)
 	}
 	return nil
+}
+
+func validateDeletedTerminalVerificationCompletionReplay(ctx context.Context, qtx *sqlc.Queries, verificationID pgtype.UUID, claimToken string, input VerificationCompletion, completionStatus, verdict string) (*TaskVerification, error) {
+	event, err := qtx.GetTerminalOrchestrationVerificationEventByAggregateID(ctx, verificationID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrVerificationNotFound
+		}
+		return nil, fmt.Errorf("load deleted terminal verification event: %w", err)
+	}
+	payload := decodeJSONObject(event.Payload)
+	if strings.TrimSpace(stringValue(payload["claim_token"])) != strings.TrimSpace(claimToken) {
+		return nil, ErrVerificationLeaseConflict
+	}
+	if strings.TrimSpace(stringValue(payload["new_status"])) != completionStatus {
+		return nil, fmt.Errorf("%w: terminal verification status mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(stringValue(payload["verdict"])) != verdict {
+		return nil, fmt.Errorf("%w: terminal verification verdict mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(stringValue(payload["summary"])) != strings.TrimSpace(input.Summary) {
+		return nil, fmt.Errorf("%w: terminal verification summary mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(stringValue(payload["failure_class"])) != strings.TrimSpace(input.FailureClass) {
+		return nil, fmt.Errorf("%w: terminal verification failure_class mismatch", ErrCompletionReplayConflict)
+	}
+	expectedTerminalReason := strings.TrimSpace(input.TerminalReason)
+	if completionStatus == TaskVerificationStatusFailed {
+		expectedTerminalReason = normalizeVerificationTerminalReason(input.TerminalReason, verdict)
+	}
+	if strings.TrimSpace(stringValue(payload["terminal_reason"])) != expectedTerminalReason {
+		return nil, fmt.Errorf("%w: terminal verification terminal_reason mismatch", ErrCompletionReplayConflict)
+	}
+	originalRequestReplan, _ := payload["request_replan"].(bool)
+	if originalRequestReplan != input.RequestReplan {
+		return nil, fmt.Errorf("%w: terminal verification request_replan mismatch", ErrCompletionReplayConflict)
+	}
+	claimEpoch, _ := uint64FromInt64(event.AggregateVersion, "verification.claim_epoch")
+	attemptNo, _ := positiveInt32FromJSON(payload["attempt_no"])
+	observedAt := db.TimeFromPg(event.CreatedAt)
+	return &TaskVerification{
+		ID:             verificationID.String(),
+		RunID:          event.RunID.String(),
+		TaskID:         strings.TrimSpace(stringValue(payload["task_id"])),
+		ResultID:       strings.TrimSpace(stringValue(payload["result_id"])),
+		AttemptNo:      int(attemptNo),
+		Status:         completionStatus,
+		ClaimEpoch:     claimEpoch,
+		ClaimToken:     strings.TrimSpace(claimToken),
+		Verdict:        verdict,
+		Summary:        strings.TrimSpace(stringValue(payload["summary"])),
+		FailureClass:   strings.TrimSpace(stringValue(payload["failure_class"])),
+		TerminalReason: strings.TrimSpace(stringValue(payload["terminal_reason"])),
+		FinishedAt:     &observedAt,
+		CreatedAt:      observedAt,
+		UpdatedAt:      observedAt,
+	}, nil
+}
+
+func isRetryableVerificationRejection(completionStatus, verdict string, requestReplan bool, rejectAction string) bool {
+	if requestReplan || verdict != VerificationVerdictRejected || rejectAction != VerificationRejectActionRetry {
+		return false
+	}
+	switch completionStatus {
+	case TaskVerificationStatusCompleted, TaskVerificationStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldAutoRetryVerificationRejection(taskRow sqlc.OrchestrationTask, attemptRow sqlc.OrchestrationTaskAttempt, completionStatus, verdict string, requestReplan bool, rejectAction string) bool {
+	if !isRetryableVerificationRejection(completionStatus, verdict, requestReplan, rejectAction) {
+		return false
+	}
+	maxAttempts := attemptRetryMaxAttempts(decodeJSONObject(taskRow.RetryPolicy))
+	return maxAttempts > 1 && attemptRow.AttemptNo > 0 && attemptRow.AttemptNo < maxAttempts
 }
 
 func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) {

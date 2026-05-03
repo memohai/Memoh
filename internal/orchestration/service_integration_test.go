@@ -7784,6 +7784,165 @@ func TestIntegrationFailedAttemptRetriesWhenPolicyAllows(t *testing.T) {
 	}
 }
 
+func TestIntegrationVerifierRejectRetriesWhenPolicyAllows(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "verifier rejection should retry when policy allows",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskRetryPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{"max_attempts": 2})
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+		"on_reject":                 VerificationRejectActionRetry,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "missing structured output",
+		StructuredOutput: map[string]any{},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	retryCompletion := VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusFailed,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "structured_output is required",
+		FailureClass:   "verifier_retryable",
+		TerminalReason: "structured_output is required",
+		RequestReplan:  false,
+	}
+	completedVerification, err := svc.CompleteVerification(ctx, retryCompletion)
+	if err != nil {
+		t.Fatalf("CompleteVerification(retryable reject) error = %v", err)
+	}
+	if completedVerification.Status != TaskVerificationStatusFailed {
+		t.Fatalf("verification status = %q, want %q", completedVerification.Status, TaskVerificationStatusFailed)
+	}
+	if _, err := svc.CompleteVerification(ctx, retryCompletion); err != nil {
+		t.Fatalf("CompleteVerification(retryable reject replay) error = %v", err)
+	}
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status after verifier retry = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10, AsOfSeq: snapshot.SnapshotSeq})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusReady || taskPage.Items[0].LatestResultID != "" {
+		t.Fatalf("task page after verifier retry = %+v, want single ready task without latest result", taskPage.Items)
+	}
+	var resultCount int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_task_results WHERE run_id = $1", mustParsePGUUID(t, handle.RunID)).Scan(&resultCount); err != nil {
+		t.Fatalf("count task results after verifier retry: %v", err)
+	}
+	if resultCount != 0 {
+		t.Fatalf("task result count after verifier retry = %d, want 0", resultCount)
+	}
+
+	retryAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	if retryAttempt.AttemptNo != 2 {
+		t.Fatalf("retry attempt_no = %d, want 2", retryAttempt.AttemptNo)
+	}
+	runningRetryAttempt, err := svc.StartAttempt(ctx, retryAttempt.ID, retryAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(retry) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningRetryAttempt.ID,
+		ClaimToken:       runningRetryAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "retry result is valid",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(retry) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	retryVerification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification(retry) error = %v", err)
+	}
+	runningRetryVerification, err := svc.StartVerification(ctx, retryVerification.ID, retryVerification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification(retry) error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningRetryVerification.ID,
+		ClaimToken:     runningRetryVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "retry verification passed",
+	}); err != nil {
+		t.Fatalf("CompleteVerification(retry accepted) error = %v", err)
+	}
+
+	finalSnapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(final) error = %v", err)
+	}
+	if finalSnapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status after verifier retry completion = %q, want %q", finalSnapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+}
+
 func TestIntegrationAttemptLeaseExpiryIsStrictlyFenced(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
