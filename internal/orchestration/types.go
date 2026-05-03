@@ -154,6 +154,22 @@ type StartRunPlanningResult struct {
 	ChildTasks []PlannedTaskSpec `json:"child_tasks"`
 }
 
+type ReplanPlanningInput struct {
+	Run           Run              `json:"run"`
+	SourceTask    Task             `json:"source_task"`
+	SourceAttempt *TaskAttempt     `json:"source_attempt,omitempty"`
+	SourceResult  *TaskResult      `json:"source_result,omitempty"`
+	SubtreeTasks  []Task           `json:"subtree_tasks"`
+	Dependencies  []TaskDependency `json:"dependencies"`
+	Reason        string           `json:"reason,omitempty"`
+	InjectedHint  map[string]any   `json:"injected_hint,omitempty"`
+}
+
+type ReplanPlanningResult struct {
+	Summary    string            `json:"summary,omitempty"`
+	ChildTasks []PlannedTaskSpec `json:"child_tasks"`
+}
+
 type Run struct {
 	ID                     string         `json:"id"`
 	TenantID               string         `json:"tenant_id"`

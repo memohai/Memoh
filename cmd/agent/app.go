@@ -389,14 +389,16 @@ func configureOrchestrationStartRunPlanner(
 	rc *boot.RuntimeConfig,
 	orchestrationService *orchestration.Service,
 ) {
-	orchestrationService.SetStartRunPlanner(orchestrationexec.NewRuntime(
+	runtime := orchestrationexec.NewRuntime(
 		log,
 		queries,
 		settingsService,
 		modelsService,
 		agent,
 		rc.TimezoneLocation,
-	))
+	)
+	orchestrationService.SetStartRunPlanner(runtime)
+	orchestrationService.SetReplanner(runtime)
 }
 
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, channelStore *channel.Store, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service) *flow.Resolver {

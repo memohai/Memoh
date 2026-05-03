@@ -43,6 +43,38 @@ func (r *Runtime) PlanStartRun(ctx context.Context, input orchestration.StartRun
 	return plan, nil
 }
 
+func (r *Runtime) PlanReplan(ctx context.Context, input orchestration.ReplanPlanningInput) (*orchestration.ReplanPlanningResult, error) {
+	if r == nil {
+		return nil, errors.New("replanner runtime is not configured")
+	}
+	botID := strings.TrimSpace(stringValue(input.Run.SourceMetadata["bot_id"]))
+	if botID == "" {
+		return &orchestration.ReplanPlanningResult{}, nil
+	}
+	cfg, _, _, err := r.buildBotRunConfig(ctx, botID, input.Run.OwnerSubject)
+	if err != nil {
+		return nil, err
+	}
+	cfg.System = replanPlannerSystemPrompt
+	cfg.Messages = []sdk.Message{sdk.UserMessage(buildReplanPlannerPrompt(input))}
+	cfg.ResponseFormat = &sdk.ResponseFormat{Type: sdk.ResponseFormatJSONObject}
+	cfg.SupportsToolCall = false
+
+	result, err := r.generateWithThinkingTrace(ctx, cfg, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := decodeJSONObjectText(result.Text)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode replanner response: %w", orchestration.ErrPlanningIntentInvalid, err)
+	}
+	plan, err := decodeReplanPlannerPayload(payload)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode replanner schema: %w", orchestration.ErrPlanningIntentInvalid, err)
+	}
+	return plan, nil
+}
+
 func buildStartRunPlannerPrompt(input orchestration.StartRunPlanningInput) string {
 	payload := map[string]any{
 		"run": map[string]any{
@@ -65,7 +97,67 @@ func buildStartRunPlannerPrompt(input orchestration.StartRunPlanningInput) strin
 	return string(raw)
 }
 
+func buildReplanPlannerPrompt(input orchestration.ReplanPlanningInput) string {
+	payload := map[string]any{
+		"run": map[string]any{
+			"goal":          input.Run.Goal,
+			"input":         input.Run.Input,
+			"output_schema": input.Run.OutputSchema,
+			"planner_epoch": input.Run.PlannerEpoch,
+		},
+		"source_task":    input.SourceTask,
+		"source_attempt": replanPromptAttempt(input.SourceAttempt),
+		"source_result":  input.SourceResult,
+		"subtree_tasks":  input.SubtreeTasks,
+		"dependencies":   input.Dependencies,
+		"reason":         input.Reason,
+		"injected_hint":  input.InjectedHint,
+	}
+	raw, err := marshalJSONValue(payload)
+	if err != nil {
+		return `{}`
+	}
+	return string(raw)
+}
+
 func decodeStartRunPlannerPayload(payload map[string]any) (*orchestration.StartRunPlanningResult, error) {
+	return decodePlannerPayload(payload)
+}
+
+func decodeReplanPlannerPayload(payload map[string]any) (*orchestration.ReplanPlanningResult, error) {
+	if payload == nil {
+		return nil, errors.New("replanner response must be a JSON object")
+	}
+	plan, err := decodePlannerPayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.ChildTasks) == 0 {
+		return nil, errors.New("child_tasks must contain at least one replacement task")
+	}
+	return &orchestration.ReplanPlanningResult{
+		Summary:    plan.Summary,
+		ChildTasks: plan.ChildTasks,
+	}, nil
+}
+
+func replanPromptAttempt(attempt *orchestration.TaskAttempt) any {
+	if attempt == nil {
+		return nil
+	}
+	return map[string]any{
+		"id":              attempt.ID,
+		"task_id":         attempt.TaskID,
+		"attempt_no":      attempt.AttemptNo,
+		"status":          attempt.Status,
+		"failure_class":   attempt.FailureClass,
+		"terminal_reason": attempt.TerminalReason,
+		"started_at":      attempt.StartedAt,
+		"finished_at":     attempt.FinishedAt,
+	}
+}
+
+func decodePlannerPayload(payload map[string]any) (*orchestration.StartRunPlanningResult, error) {
 	if payload == nil {
 		return nil, errors.New("planner response must be a JSON object")
 	}
@@ -280,6 +372,41 @@ Rules:
 - Do not call tools.
 - Use exactly the JSON field names shown below. Do not invent aliases or extra fields.
 - Return child_tasks as an array. Use [] when no decomposition is needed.
+
+Return JSON:
+{
+  "summary": string,
+  "child_tasks": [
+    {
+      "alias": string,
+      "kind": string,
+      "goal": string,
+      "inputs": object,
+      "depends_on": [string],
+      "worker_profile": string,
+      "priority": integer,
+      "retry_policy": object,
+      "verification_policy": object,
+      "blackboard_scope": string
+    }
+  ]
+}`
+
+const replanPlannerSystemPrompt = `You are the replanner for a Memoh orchestration run.
+
+Replace the provided source task subtree with a small executable DAG that can recover from the reported failure, verification rejection, or explicit replan reason.
+
+Rules:
+- Output only replacement child tasks for the source task. Do not include the superseded source task itself.
+- Use the source result, failed attempt, subtree tasks, and dependencies to preserve useful completed work only when it is represented as input context.
+- Only output executable leaf tasks. Do not output abstract manager/planner/meta tasks.
+- Keep the replacement graph small and useful. Prefer 1-5 child tasks unless the failure clearly requires more.
+- Use depends_on aliases to form an acyclic DAG.
+- Default worker_profile should usually be "llm.default".
+- Use verification_policy only when a replacement child clearly needs an explicit verifier gate.
+- Do not call tools.
+- Use exactly the JSON field names shown below. Do not invent aliases or extra fields.
+- Return child_tasks as a non-empty array. If no safe replacement can be produced, explain the blocker in summary and return the smallest safe diagnostic task.
 
 Return JSON:
 {

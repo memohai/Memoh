@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"reflect"
@@ -15,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	dbembed "github.com/memohai/memoh/db"
+	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
@@ -28,69 +32,118 @@ func (p fixedStartRunPlanner) PlanStartRun(context.Context, StartRunPlanningInpu
 	return p.result, p.err
 }
 
+type fixedReplanner struct {
+	result *ReplanPlanningResult
+	err    error
+	input  *ReplanPlanningInput
+}
+
+func (p *fixedReplanner) PlanReplan(_ context.Context, input ReplanPlanningInput) (*ReplanPlanningResult, error) {
+	if p.input != nil {
+		*p.input = input
+	}
+	return p.result, p.err
+}
+
 func setupOrchestrationIntegrationTest(t *testing.T) (*Service, *pgxpool.Pool, func()) {
 	t.Helper()
 
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("skip integration test: TEST_POSTGRES_DSN is not set")
+	dbCfg, err := orchestrationIntegrationPostgresConfigFromTestDSN()
+	if err != nil {
+		t.Skipf("skip integration test: %v", err)
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	dbName := "memoh_orch_integration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	adminCfg := dbCfg
+	adminCfg.Database = "postgres"
+	adminPool, err := db.Open(ctx, adminCfg)
 	if err != nil {
-		t.Skipf("skip integration test: cannot connect to database: %v", err)
+		t.Skipf("skip integration test: open admin database: %v", err)
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skip integration test: database ping failed: %v", err)
+	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+quoteIntegrationIdentifier(dbName)); err != nil {
+		adminPool.Close()
+		t.Skipf("skip integration test: create database: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-ALTER TABLE IF EXISTS orchestration_task_attempts
-  ADD COLUMN IF NOT EXISTS worker_lease_token TEXT NOT NULL DEFAULT '';
-ALTER TABLE IF EXISTS orchestration_task_verifications
-  ADD COLUMN IF NOT EXISTS worker_lease_token TEXT NOT NULL DEFAULT '';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_human_checkpoints_open_run_barrier_unique
-  ON orchestration_human_checkpoints (run_id)
-  WHERE blocks_run = TRUE AND status = 'open';
-CREATE TABLE IF NOT EXISTS orchestration_action_ledger (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  run_id UUID NOT NULL REFERENCES orchestration_runs(id) ON DELETE CASCADE,
-  task_id UUID NOT NULL REFERENCES orchestration_tasks(id) ON DELETE CASCADE,
-  attempt_id UUID,
-  verification_id UUID,
-  action_kind TEXT NOT NULL DEFAULT 'tool_call',
-  status TEXT NOT NULL,
-  tool_name TEXT NOT NULL DEFAULT '',
-  tool_call_id TEXT NOT NULL DEFAULT '',
-  input_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
-  output_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
-  error_payload JSONB NOT NULL DEFAULT 'null'::jsonb,
-  summary TEXT NOT NULL DEFAULT '',
-  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  finished_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT orchestration_action_ledger_exactly_one_subject CHECK (
-    (attempt_id IS NOT NULL AND verification_id IS NULL)
-    OR (attempt_id IS NULL AND verification_id IS NOT NULL)
-  )
-);
-CREATE INDEX IF NOT EXISTS idx_orchestration_action_ledger_run_started_at
-  ON orchestration_action_ledger(run_id, started_at, id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_action_ledger_attempt_tool_call_unique
-  ON orchestration_action_ledger(attempt_id, tool_call_id)
-  WHERE attempt_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_action_ledger_verification_tool_call_unique
-  ON orchestration_action_ledger(verification_id, tool_call_id)
-  WHERE verification_id IS NOT NULL;
-`); err != nil {
+	adminPool.Close()
+
+	dbCfg.Database = dbName
+	if err := migrateOrchestrationIntegrationDatabase(dbCfg); err != nil {
+		dropOrchestrationIntegrationDatabase(t, adminCfg, dbName)
+		t.Fatalf("migrate orchestration integration database: %v", err)
+	}
+
+	pool, err := db.Open(ctx, dbCfg)
+	if err != nil {
+		dropOrchestrationIntegrationDatabase(t, adminCfg, dbName)
+		t.Fatalf("open orchestration integration database: %v", err)
+	}
+	cleanup := func() {
 		pool.Close()
-		t.Skipf("skip integration test: database schema bootstrap failed: %v", err)
+		dropOrchestrationIntegrationDatabase(t, adminCfg, dbName)
 	}
 
 	logger := slog.New(slog.DiscardHandler)
-	return NewService(logger, pool, sqlc.New(pool)), pool, func() { pool.Close() }
+	return NewService(logger, pool, sqlc.New(pool)), pool, cleanup
+}
+
+func orchestrationIntegrationPostgresConfigFromTestDSN() (config.PostgresConfig, error) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		return config.PostgresConfig{}, errors.New("TEST_POSTGRES_DSN is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return config.PostgresConfig{}, fmt.Errorf("parse TEST_POSTGRES_DSN: %w", err)
+	}
+	return config.PostgresConfig{
+		Host:     cfg.ConnConfig.Host,
+		Port:     int(cfg.ConnConfig.Port),
+		User:     cfg.ConnConfig.User,
+		Password: cfg.ConnConfig.Password,
+		Database: cfg.ConnConfig.Database,
+		SSLMode:  chooseIntegrationString(cfg.ConnConfig.RuntimeParams["sslmode"], "disable"),
+	}, nil
+}
+
+func migrateOrchestrationIntegrationDatabase(dbCfg config.PostgresConfig) error {
+	sub, err := fs.Sub(dbembed.MigrationsFS, "migrations")
+	if err != nil {
+		return err
+	}
+	return db.RunMigrate(slog.New(slog.DiscardHandler), dbCfg, sub, "up", nil)
+}
+
+func dropOrchestrationIntegrationDatabase(t *testing.T, adminCfg config.PostgresConfig, dbName string) {
+	t.Helper()
+
+	pool, err := db.Open(context.Background(), adminCfg)
+	if err != nil {
+		t.Fatalf("open admin database for cleanup: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(), `
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = $1
+  AND pid <> pg_backend_pid()
+`, dbName); err != nil {
+		t.Fatalf("terminate orchestration integration database sessions: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+quoteIntegrationIdentifier(dbName)); err != nil {
+		t.Fatalf("drop orchestration integration database: %v", err)
+	}
+}
+
+func quoteIntegrationIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func chooseIntegrationString(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func cleanupOrchestrationIntegrationRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, runID string) {
@@ -243,6 +296,47 @@ func dispatchAndClaimAttemptForProfiles(t *testing.T, ctx context.Context, svc *
 	attempt, err := svc.ClaimNextAttempt(ctx, claim)
 	if err != nil {
 		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	return attempt
+}
+
+func dispatchAndClaimTaskForTest(t *testing.T, ctx context.Context, svc *Service, taskID string, claim AttemptClaim, maxDispatches int) *TaskAttempt {
+	t.Helper()
+
+	normalizedTaskID := strings.TrimSpace(taskID)
+	if normalizedTaskID == "" {
+		t.Fatal("target task id is required")
+	}
+	if strings.TrimSpace(claim.LeaseToken) == "" {
+		claim.LeaseToken = "lease-" + uuid.NewString()
+	}
+
+	for i := 0; i < maxDispatches; i++ {
+		attempt, err := svc.ClaimNextAttempt(ctx, claim)
+		if err == nil {
+			if attempt.TaskID != normalizedTaskID {
+				t.Fatalf("ClaimNextAttempt() claimed task_id = %q, want %q; test database is not isolated", attempt.TaskID, normalizedTaskID)
+			}
+			return attempt
+		}
+		if !errors.Is(err, ErrNoRunnableAttempt) {
+			t.Fatalf("ClaimNextAttempt() error = %v", err)
+		}
+		dispatched, dispatchErr := dispatchNextReadyTaskForTest(ctx, svc)
+		if dispatchErr != nil {
+			t.Fatalf("DispatchNextReadyTask() error = %v", dispatchErr)
+		}
+		if !dispatched {
+			break
+		}
+	}
+
+	attempt, err := svc.ClaimNextAttempt(ctx, claim)
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	if attempt.TaskID != normalizedTaskID {
+		t.Fatalf("ClaimNextAttempt() claimed task_id = %q, want %q; test database is not isolated", attempt.TaskID, normalizedTaskID)
 	}
 	return attempt
 }
@@ -1714,6 +1808,176 @@ func TestIntegrationFailedAttemptRequestReplanKeepsRunAliveAndExpandsReplacement
 	}
 }
 
+func TestIntegrationCompletedAttemptRequestReplanUsesReplannerWhenReplacementPlanMissing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	var replannerInput ReplanPlanningInput
+	svc.SetReplanner(&fixedReplanner{
+		input: &replannerInput,
+		result: &ReplanPlanningResult{
+			Summary: "replace completed handoff",
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "replacement", Goal: "replacement from completed handoff", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "completed request_replan should use replanner",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimTaskForTest(t, ctx, svc, handle.RootTaskID, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:     runningAttempt.ID,
+		ClaimToken:    runningAttempt.ClaimToken,
+		Status:        TaskAttemptStatusCompleted,
+		Summary:       "needs replanner decomposition",
+		RequestReplan: true,
+		StructuredOutput: map[string]any{
+			"reason": "worker could not safely choose child tasks",
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(request_replan without child tasks) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	if replannerInput.SourceTask.ID != handle.RootTaskID {
+		t.Fatalf("replanner source task id = %q, want %q", replannerInput.SourceTask.ID, handle.RootTaskID)
+	}
+	if replannerInput.SourceAttempt == nil || replannerInput.SourceAttempt.ID != runningAttempt.ID {
+		t.Fatalf("replanner source attempt = %+v, want %q", replannerInput.SourceAttempt, runningAttempt.ID)
+	}
+	if replannerInput.SourceResult == nil || replannerInput.SourceResult.Status != TaskAttemptStatusCompleted {
+		t.Fatalf("replanner source result = %+v, want completed", replannerInput.SourceResult)
+	}
+	if replannerInput.Reason != "attempt_finalize.request_replan" {
+		t.Fatalf("replanner reason = %q, want attempt finalize reason", replannerInput.Reason)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replanner) error = %v", err)
+	}
+	foundReplacement := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "replacement from completed handoff" && task.Status == TaskStatusReady {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatalf("replanner replacement task not found: %+v", taskPage.Items)
+	}
+}
+
+func TestIntegrationFailedAttemptRequestReplanUsesReplannerWhenReplacementPlanMissing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	var replannerInput ReplanPlanningInput
+	svc.SetReplanner(&fixedReplanner{
+		input: &replannerInput,
+		result: &ReplanPlanningResult{
+			Summary: "replace failed attempt",
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "replacement", Goal: "replacement from failed attempt", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "failed request_replan should use replanner",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimTaskForTest(t, ctx, svc, handle.RootTaskID, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		Summary:        "failed but recoverable by replanning",
+		FailureClass:   "needs_replan",
+		TerminalReason: "current task shape is wrong",
+		RequestReplan:  true,
+		StructuredOutput: map[string]any{
+			"failure_context": "worker needs a replacement DAG",
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(failed request_replan without child tasks) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	if replannerInput.SourceTask.ID != handle.RootTaskID {
+		t.Fatalf("replanner source task id = %q, want %q", replannerInput.SourceTask.ID, handle.RootTaskID)
+	}
+	if replannerInput.SourceAttempt == nil || replannerInput.SourceAttempt.ID != runningAttempt.ID {
+		t.Fatalf("replanner source attempt = %+v, want %q", replannerInput.SourceAttempt, runningAttempt.ID)
+	}
+	if replannerInput.SourceResult == nil || replannerInput.SourceResult.Status != TaskAttemptStatusFailed {
+		t.Fatalf("replanner source result = %+v, want failed", replannerInput.SourceResult)
+	}
+	if replannerInput.Reason != "attempt_finalize.failed_request_replan" {
+		t.Fatalf("replanner reason = %q, want failed attempt finalize reason", replannerInput.Reason)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replanner) error = %v", err)
+	}
+	foundReplacement := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "replacement from failed attempt" && task.Status == TaskStatusReady {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatalf("replanner replacement task not found: %+v", taskPage.Items)
+	}
+}
+
 func TestIntegrationAttemptCompletionWithVerificationPassesRun(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -2060,13 +2324,13 @@ func TestIntegrationKernelRunBarrierResumeAndCompletionManualStateMachine(t *tes
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
 				map[string]any{
-					"id":             "verify-child",
+					"alias":          "verify-child",
 					"goal":           "verify child",
 					"worker_profile": "kernel-e2e.verify",
 					"priority":       100,
 				},
 				map[string]any{
-					"id":             "checkpoint-child",
+					"alias":          "checkpoint-child",
 					"goal":           "checkpoint child",
 					"worker_profile": "kernel-e2e.checkpoint",
 					"priority":       10,
@@ -2418,12 +2682,12 @@ func TestIntegrationAttemptFinalizeStillTransitionsTaskAfterRunFailure(t *testin
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
 				map[string]any{
-					"id":             "task-a",
+					"alias":          "task-a",
 					"goal":           "task a",
 					"worker_profile": "parallel.task-a",
 				},
 				map[string]any{
-					"id":             "task-b",
+					"alias":          "task-b",
 					"goal":           "task b",
 					"worker_profile": "parallel.task-b",
 				},
@@ -2714,6 +2978,119 @@ func TestIntegrationVerificationRejectRequestReplanEnqueuesReplan(t *testing.T) 
 	}
 	if snapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
 		t.Fatalf("run lifecycle_status after replacement = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+}
+
+func TestIntegrationVerificationRejectRequestReplanUsesReplannerWhenReplacementPlanMissing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	var replannerInput ReplanPlanningInput
+	svc.SetReplanner(&fixedReplanner{
+		input: &replannerInput,
+		result: &ReplanPlanningResult{
+			Summary: "replace rejected verification",
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "replacement", Goal: "replacement from rejected verification", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "verification rejection should use replanner",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+		"on_reject":                 VerificationRejectActionReplan,
+	})
+
+	attempt := dispatchAndClaimTaskForTest(t, ctx, svc, handle.RootTaskID, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "root result needs verifier decision",
+		StructuredOutput: map[string]any{"summary": "done without replacement plan"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+	if _, err := svc.CompleteVerification(ctx, VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "result should be replanned",
+		FailureClass:   "verification_requested_replan",
+		TerminalReason: "result should be replanned",
+		RequestReplan:  true,
+	}); err != nil {
+		t.Fatalf("CompleteVerification(request_replan without child tasks) error = %v", err)
+	}
+	drainRunPlanningIntents(t, ctx, svc)
+
+	if replannerInput.SourceTask.ID != handle.RootTaskID {
+		t.Fatalf("replanner source task id = %q, want %q", replannerInput.SourceTask.ID, handle.RootTaskID)
+	}
+	if replannerInput.SourceAttempt == nil || replannerInput.SourceAttempt.ID != runningAttempt.ID {
+		t.Fatalf("replanner source attempt = %+v, want %q", replannerInput.SourceAttempt, runningAttempt.ID)
+	}
+	if replannerInput.SourceResult == nil || replannerInput.SourceResult.Status != TaskAttemptStatusCompleted {
+		t.Fatalf("replanner source result = %+v, want completed result", replannerInput.SourceResult)
+	}
+	if replannerInput.Reason != "verification.request_replan" {
+		t.Fatalf("replanner reason = %q, want verification request reason", replannerInput.Reason)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replanner) error = %v", err)
+	}
+	foundReplacement := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "replacement from rejected verification" && task.Status == TaskStatusReady {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatalf("replanner replacement task not found: %+v", taskPage.Items)
 	}
 }
 
@@ -3298,7 +3675,7 @@ func TestIntegrationInvalidRequestReplanFailsIntentWithoutStrandingRun(t *testin
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "a", "goal": "child a", "depends_on": []any{"missing"}},
+				map[string]any{"alias": "a", "goal": "child a", "depends_on": []any{"missing"}},
 			},
 		},
 	}); err != nil {
@@ -3365,22 +3742,12 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
-	if err != nil {
-		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
-	}
-	if !dispatched {
-		t.Fatal("DispatchNextReadyTask(root) = false, want true")
-	}
-	rootAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	rootAttempt := dispatchAndClaimTaskForTest(t, ctx, svc, handle.RootTaskID, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt(root) error = %v", err)
-	}
+	}, 4)
 	runningRootAttempt, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
 	if err != nil {
 		t.Fatalf("StartAttempt(root) error = %v", err)
@@ -3393,7 +3760,7 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "old", "goal": "old child"},
+				map[string]any{"alias": "old", "goal": "old child"},
 			},
 		},
 	}); err != nil {
@@ -3459,7 +3826,7 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 			"reason":         "integration_test.manual_replan",
 			"replacement_plan": map[string]any{
 				"child_tasks": []any{
-					map[string]any{"id": "replacement", "goal": "replacement child"},
+					map[string]any{"alias": "replacement", "goal": "replacement child"},
 				},
 			},
 		}),
@@ -3567,22 +3934,12 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	}
 	processRunPlanningIntent(t, ctx, svc)
 
-	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
-	if err != nil {
-		t.Fatalf("DispatchNextReadyTask(replacement) error = %v", err)
-	}
-	if !dispatched {
-		t.Fatal("DispatchNextReadyTask(replacement) = false, want true")
-	}
-	replacementAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	replacementAttempt := dispatchAndClaimTaskForTest(t, ctx, svc, replacementChild.ID, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt(replacement) error = %v", err)
-	}
+	}, 4)
 	if replacementAttempt.TaskID != replacementChild.ID {
 		t.Fatalf("claimed task_id = %q, want replacement child %q", replacementAttempt.TaskID, replacementChild.ID)
 	}
@@ -3593,6 +3950,246 @@ func TestIntegrationReplanSupersedesOldSubtreeAndOpenCheckpoint(t *testing.T) {
 	}
 	if snapshot.Run.PlanningStatus != PlanningStatusIdle {
 		t.Fatalf("run planning_status = %q, want %q", snapshot.Run.PlanningStatus, PlanningStatusIdle)
+	}
+}
+
+func TestIntegrationReplanUsesReplannerWhenReplacementPlanMissing(t *testing.T) {
+	svc, _, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	var replannerInput ReplanPlanningInput
+	svc.SetReplanner(&fixedReplanner{
+		input: &replannerInput,
+		result: &ReplanPlanningResult{
+			Summary: "replace root task",
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "replacement", Goal: "replacement child", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "root needs replanning",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	pgRunID := mustParsePGUUID(t, handle.RunID)
+	pgRootTaskID := mustParsePGUUID(t, handle.RootTaskID)
+	runRow, err := svc.queries.GetOrchestrationRunByID(ctx, pgRunID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID() error = %v", err)
+	}
+	_, replanIntentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(replan intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               replanIntentUUID,
+		RunID:            pgRunID,
+		TaskID:           pgRootTaskID,
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runRow.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":         handle.RunID,
+			"source_task_id": handle.RootTaskID,
+			"reason":         "integration_test.llm_replan",
+		}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent(replan) error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	if replannerInput.Run.ID != handle.RunID {
+		t.Fatalf("replanner run id = %q, want %q", replannerInput.Run.ID, handle.RunID)
+	}
+	if replannerInput.SourceTask.ID != handle.RootTaskID {
+		t.Fatalf("replanner source task id = %q, want %q", replannerInput.SourceTask.ID, handle.RootTaskID)
+	}
+	if len(replannerInput.SubtreeTasks) != 1 || replannerInput.SubtreeTasks[0].ID != handle.RootTaskID {
+		t.Fatalf("replanner subtree tasks = %#v, want root only", replannerInput.SubtreeTasks)
+	}
+
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRunTasks(after replanner) error = %v", err)
+	}
+	foundReplacement := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "replacement child" && task.Status == TaskStatusReady {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatalf("ready replacement child not found: %+v", taskPage.Items)
+	}
+	rootTaskRow, err := svc.queries.GetOrchestrationTaskByID(ctx, pgRootTaskID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationTaskByID(root) error = %v", err)
+	}
+	if !rootTaskRow.SupersededByPlannerEpoch.Valid {
+		t.Fatal("root task was not superseded after replanner-created replacement")
+	}
+}
+
+func TestIntegrationReplanRejectsAttemptFromDifferentSourceTask(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	svc.SetReplanner(&fixedReplanner{
+		result: &ReplanPlanningResult{
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "replacement", Goal: "replacement child", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject mismatched replan attempt",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	processRunPlanningIntent(t, ctx, svc)
+
+	siblingTaskID := createIntegrationChildTask(t, ctx, svc, handle.RunID, "unrelated sibling task", "run.sibling")
+	_, siblingAttemptUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(sibling attempt) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationTaskAttempt(ctx, sqlc.CreateOrchestrationTaskAttemptParams{
+		ID:               siblingAttemptUUID,
+		RunID:            mustParsePGUUID(t, handle.RunID),
+		TaskID:           mustParsePGUUID(t, siblingTaskID),
+		AttemptNo:        1,
+		Status:           TaskAttemptStatusCompleted,
+		InputManifestID:  pgtype.UUID{},
+		ParkCheckpointID: pgtype.UUID{},
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationTaskAttempt(sibling) error = %v", err)
+	}
+	_, replanIntentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(replan intent) error = %v", err)
+	}
+	runRow, err := svc.queries.GetOrchestrationRunByID(ctx, mustParsePGUUID(t, handle.RunID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID() error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               replanIntentUUID,
+		RunID:            mustParsePGUUID(t, handle.RunID),
+		TaskID:           mustParsePGUUID(t, handle.RootTaskID),
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runRow.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":         handle.RunID,
+			"source_task_id": handle.RootTaskID,
+			"attempt_id":     siblingAttemptUUID.String(),
+			"reason":         "integration_test.mismatched_attempt",
+		}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent(replan) error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	var failedReplanCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE id = $1
+		  AND status = $2
+	`, replanIntentUUID, PlanningIntentStatusFailed).Scan(&failedReplanCount); err != nil {
+		t.Fatalf("query failed replan intent: %v", err)
+	}
+	if failedReplanCount != 1 {
+		t.Fatalf("failed replan intent count = %d, want 1", failedReplanCount)
+	}
+}
+
+func TestIntegrationReplanInvalidAttemptIDFailsIntentWithoutRetryLoop(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "reject malformed replan attempt id",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	processRunPlanningIntent(t, ctx, svc)
+
+	runRow, err := svc.queries.GetOrchestrationRunByID(ctx, mustParsePGUUID(t, handle.RunID))
+	if err != nil {
+		t.Fatalf("GetOrchestrationRunByID() error = %v", err)
+	}
+	_, replanIntentUUID, err := newPGUUID()
+	if err != nil {
+		t.Fatalf("newPGUUID(replan intent) error = %v", err)
+	}
+	if _, err := svc.queries.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
+		ID:               replanIntentUUID,
+		RunID:            mustParsePGUUID(t, handle.RunID),
+		TaskID:           mustParsePGUUID(t, handle.RootTaskID),
+		CheckpointID:     pgtype.UUID{},
+		Kind:             PlanningIntentKindReplan,
+		Status:           PlanningIntentStatusPending,
+		BasePlannerEpoch: runRow.PlannerEpoch,
+		Payload: marshalJSON(map[string]any{
+			"run_id":         handle.RunID,
+			"source_task_id": handle.RootTaskID,
+			"attempt_id":     "not-a-uuid",
+			"reason":         "integration_test.invalid_attempt_id",
+		}),
+	}); err != nil {
+		t.Fatalf("CreateOrchestrationPlanningIntent(replan) error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	var failedReplanCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE id = $1
+		  AND status = $2
+	`, replanIntentUUID, PlanningIntentStatusFailed).Scan(&failedReplanCount); err != nil {
+		t.Fatalf("query failed malformed replan intent: %v", err)
+	}
+	if failedReplanCount != 1 {
+		t.Fatalf("failed malformed replan intent count = %d, want 1", failedReplanCount)
 	}
 }
 
@@ -3617,22 +4214,12 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
 	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
 
-	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
-	if err != nil {
-		t.Fatalf("DispatchNextReadyTask(root) error = %v", err)
-	}
-	if !dispatched {
-		t.Fatal("DispatchNextReadyTask(root) = false, want true")
-	}
-	rootAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	rootAttempt := dispatchAndClaimTaskForTest(t, ctx, svc, handle.RootTaskID, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt(root) error = %v", err)
-	}
+	}, 4)
 	runningRootAttempt, err := svc.StartAttempt(ctx, rootAttempt.ID, rootAttempt.ClaimToken)
 	if err != nil {
 		t.Fatalf("StartAttempt(root) error = %v", err)
@@ -3645,7 +4232,7 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "active", "goal": "active child"},
+				map[string]any{"alias": "active", "goal": "active child"},
 			},
 		},
 	}); err != nil {
@@ -3665,25 +4252,15 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 		}
 	}
 	if activeChild.ID == "" {
-		t.Fatal("active child task not found")
+		t.Fatalf("active child task not found: %+v", taskPage.Items)
 	}
 
-	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
-	if err != nil {
-		t.Fatalf("DispatchNextReadyTask(active child) error = %v", err)
-	}
-	if !dispatched {
-		t.Fatal("DispatchNextReadyTask(active child) = false, want true")
-	}
-	activeAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	activeAttempt := dispatchAndClaimTaskForTest(t, ctx, svc, activeChild.ID, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt(active child) error = %v", err)
-	}
+	}, 4)
 	runningActiveAttempt, err := svc.StartAttempt(ctx, activeAttempt.ID, activeAttempt.ClaimToken)
 	if err != nil {
 		t.Fatalf("StartAttempt(active child) error = %v", err)
@@ -3720,7 +4297,7 @@ func TestIntegrationReplanRejectsActiveSubtree(t *testing.T) {
 			"reason":         "integration_test.active_subtree_replan",
 			"replacement_plan": map[string]any{
 				"child_tasks": []any{
-					map[string]any{"id": "replacement", "goal": "replacement"},
+					map[string]any{"alias": "replacement", "goal": "replacement"},
 				},
 			},
 		}),
@@ -3904,11 +4481,11 @@ func TestIntegrationDependentChildTaskWaitsForCompletedPredecessor(t *testing.T)
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
 				map[string]any{
-					"id":   "first",
-					"goal": "child task one",
+					"alias": "first",
+					"goal":  "child task one",
 				},
 				map[string]any{
-					"id":         "second",
+					"alias":      "second",
 					"goal":       "child task two",
 					"depends_on": []any{"first"},
 				},
@@ -4048,8 +4625,8 @@ func TestIntegrationFailedDependencyBlocksSuccessorTask(t *testing.T) {
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "first", "goal": "child task one"},
-				map[string]any{"id": "second", "goal": "child task two", "depends_on": []any{"first"}},
+				map[string]any{"alias": "first", "goal": "child task one"},
+				map[string]any{"alias": "second", "goal": "child task two", "depends_on": []any{"first"}},
 			},
 		},
 	}); err != nil {
@@ -4160,9 +4737,9 @@ func TestIntegrationJoinTaskAutoCompletesAfterPredecessors(t *testing.T) {
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "a", "goal": "branch a"},
-				map[string]any{"id": "b", "goal": "branch b"},
-				map[string]any{"id": "j", "kind": "join", "goal": "join branches", "depends_on": []any{"a", "b"}},
+				map[string]any{"alias": "a", "goal": "branch a"},
+				map[string]any{"alias": "b", "goal": "branch b"},
+				map[string]any{"alias": "j", "kind": "join", "goal": "join branches", "depends_on": []any{"a", "b"}},
 			},
 		},
 	}); err != nil {
@@ -5221,7 +5798,7 @@ func TestIntegrationCancelRunCancelsWaitingHumanVerificationCreatedByRunBarrier(
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
 				map[string]any{
-					"id":             "verify-child",
+					"alias":          "verify-child",
 					"goal":           "verifying sibling",
 					"worker_profile": "kernel-cancel.verify",
 					"priority":       100,
@@ -5230,7 +5807,7 @@ func TestIntegrationCancelRunCancelsWaitingHumanVerificationCreatedByRunBarrier(
 					},
 				},
 				map[string]any{
-					"id":             "checkpoint-child",
+					"alias":          "checkpoint-child",
 					"goal":           "checkpoint sibling",
 					"worker_profile": "kernel-cancel.checkpoint",
 					"priority":       10,
@@ -9505,6 +10082,163 @@ func TestIntegrationInjectRunHintEnqueuesReplan(t *testing.T) {
 	}
 }
 
+func TestIntegrationInjectRunHintUsesReplannerWhenReplacementPlanMissing(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-replanner", Subject: "user-hint-replanner"}
+	var replannerInput ReplanPlanningInput
+	svc.SetReplanner(&fixedReplanner{
+		input: &replannerInput,
+		result: &ReplanPlanningResult{
+			Summary: "replace from hint",
+			ChildTasks: []PlannedTaskSpec{
+				{Alias: "hint-replacement", Goal: "execute replanner replacement", WorkerProfile: DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject replanner request",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "inject-run-hint-replanner-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	if _, err := svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root via replanner",
+			TargetTaskID: handle.RootTaskID,
+			Details:      map[string]any{"constraint": "preserve existing context"},
+		},
+		IdempotencyKey: "inject-run-hint-replanner",
+	}); err != nil {
+		t.Fatalf("InjectRunHint() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	if replannerInput.Reason != "replace root via replanner" {
+		t.Fatalf("replanner reason = %q, want hint summary", replannerInput.Reason)
+	}
+	injectedHintDetails, _ := replannerInput.InjectedHint["details"].(map[string]any)
+	if injectedHintDetails["constraint"] != "preserve existing context" {
+		t.Fatalf("replanner injected hint = %#v, want constraint detail", replannerInput.InjectedHint)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 100})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	foundReplacement := false
+	for _, task := range taskPage.Items {
+		if task.Goal == "execute replanner replacement" && task.Status == TaskStatusReady {
+			foundReplacement = true
+		}
+	}
+	if !foundReplacement {
+		t.Fatalf("replanner replacement task not found: %+v", taskPage.Items)
+	}
+}
+
+func TestIntegrationInjectRunHintRejectsReplannerOnlyRequestWithoutRuntime(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-no-runtime", Subject: "user-hint-no-runtime"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject replanner request without runtime",
+		BotID:          "bot-" + uuid.NewString(),
+		IdempotencyKey: "inject-run-hint-no-runtime-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	_, err = svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root via missing replanner",
+			TargetTaskID: handle.RootTaskID,
+		},
+		IdempotencyKey: "inject-run-hint-no-runtime",
+	})
+	if !errors.Is(err, ErrRunHintUnsupported) {
+		t.Fatalf("InjectRunHint(no replanner) error = %v, want %v", err, ErrRunHintUnsupported)
+	}
+	var replanIntentCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE run_id = $1
+		  AND kind = $2
+	`, mustParsePGUUID(t, handle.RunID), PlanningIntentKindReplan).Scan(&replanIntentCount); err != nil {
+		t.Fatalf("count replan intents after no-runtime rejection: %v", err)
+	}
+	if replanIntentCount != 0 {
+		t.Fatalf("replan intents after no-runtime rejection = %d, want 0", replanIntentCount)
+	}
+}
+
+func TestIntegrationInjectRunHintRejectsReplannerOnlyRequestWithoutBotID(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{TenantID: "tenant-hint-no-bot", Subject: "user-hint-no-bot"}
+	svc.SetReplanner(&fixedReplanner{
+		result: &ReplanPlanningResult{
+			ChildTasks: []PlannedTaskSpec{{Alias: "replacement", Goal: "replacement child"}},
+		},
+	})
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "inject replanner request without bot id",
+		IdempotencyKey: "inject-run-hint-no-bot-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	_, err = svc.InjectRunHint(ctx, caller, handle.RunID, InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root without bot id",
+			TargetTaskID: handle.RootTaskID,
+		},
+		IdempotencyKey: "inject-run-hint-no-bot",
+	})
+	if !errors.Is(err, ErrRunHintUnsupported) {
+		t.Fatalf("InjectRunHint(no bot_id) error = %v, want %v", err, ErrRunHintUnsupported)
+	}
+	var replanIntentCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE run_id = $1
+		  AND kind = $2
+	`, mustParsePGUUID(t, handle.RunID), PlanningIntentKindReplan).Scan(&replanIntentCount); err != nil {
+		t.Fatalf("count replan intents after no-bot rejection: %v", err)
+	}
+	if replanIntentCount != 0 {
+		t.Fatalf("replan intents after no-bot rejection = %d, want 0", replanIntentCount)
+	}
+}
+
 func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -9554,7 +10288,7 @@ func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
 		RequestReplan: true,
 		StructuredOutput: map[string]any{
 			"child_tasks": []any{
-				map[string]any{"id": "active", "goal": "active child"},
+				map[string]any{"alias": "active", "goal": "active child"},
 			},
 		},
 	}); err != nil {
@@ -9574,25 +10308,15 @@ func TestIntegrationInjectRunHintRejectsActiveSubtreeReplan(t *testing.T) {
 		}
 	}
 	if activeChild.ID == "" {
-		t.Fatal("active child task not found")
+		t.Fatalf("active child task not found: %+v", taskPage.Items)
 	}
 
-	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
-	if err != nil {
-		t.Fatalf("DispatchNextReadyTask(active child) error = %v", err)
-	}
-	if !dispatched {
-		t.Fatal("DispatchNextReadyTask(active child) = false, want true")
-	}
-	activeAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+	activeAttempt := dispatchAndClaimTaskForTest(t, ctx, svc, activeChild.ID, AttemptClaim{
 		WorkerID:        "worker-" + uuid.NewString(),
 		ExecutorID:      DefaultWorkerExecutorID,
 		WorkerProfiles:  []string{DefaultRootWorkerProfile},
 		LeaseTTLSeconds: 30,
-	})
-	if err != nil {
-		t.Fatalf("ClaimNextAttempt(active child) error = %v", err)
-	}
+	}, 4)
 	if _, err := svc.StartAttempt(ctx, activeAttempt.ID, activeAttempt.ClaimToken); err != nil {
 		t.Fatalf("StartAttempt(active child) error = %v", err)
 	}

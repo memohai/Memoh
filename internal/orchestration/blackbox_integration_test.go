@@ -101,14 +101,16 @@ const (
 	fakeLLMChildTaskGoal     = "compute Fibonacci and return verified result"
 	fakeLLMToolActionGoal    = "blackbox llm tool action trace"
 	fakeLLMFailureReplanGoal = "blackbox llm failure-triggered replan path"
+	fakeLLMReplannerGoal     = "blackbox llm replanner should replace root"
 	fakeLLMInitialPlanGoal   = "blackbox initial planner should decompose before execution"
 )
 
 type fakeOpenAICompletionsServer struct {
-	server        *httptest.Server
-	plannerCalls  atomic.Int32
-	workerCalls   atomic.Int32
-	verifierCalls atomic.Int32
+	server         *httptest.Server
+	plannerCalls   atomic.Int32
+	replannerCalls atomic.Int32
+	workerCalls    atomic.Int32
+	verifierCalls  atomic.Int32
 }
 
 type fakeOpenAIMessage struct {
@@ -483,6 +485,53 @@ func TestBlackboxRuntimeLLMFailureTriggeredReplanAndComplete(t *testing.T) {
 	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 15*time.Second)
 	h.waitForTaskGoalStatus(t, handle.RunID, fakeLLMChildTaskGoal, orch.TaskStatusCompleted, 15*time.Second)
 	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+	if got := fakeLLM.replannerCalls.Load(); got != 1 {
+		t.Fatalf("replanner calls = %d, want 1", got)
+	}
+}
+
+func TestBlackboxRuntimeLLMReplannerHintCreatesReplacementTask(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		startScheduler: true,
+	})
+	defer h.Close()
+
+	fakeLLM := newFakeOpenAICompletionsServer(t)
+	defer fakeLLM.Close()
+
+	botID := h.createLLMBot(t, fakeLLM.URL())
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           fakeLLMReplannerGoal,
+		IdempotencyKey: "start-" + uuid.NewString(),
+		SourceMetadata: map[string]any{
+			"bot_id": botID,
+			"source": "blackbox-llm-replanner-hint",
+		},
+	})
+	defer func() {
+		if t.Failed() {
+			h.dumpRunDiagnostics(t, handle.RunID)
+		}
+	}()
+
+	h.waitForTaskGoalStatus(t, handle.RunID, fakeLLMReplannerGoal, orch.TaskStatusReady, 10*time.Second)
+	h.injectRunHint(t, handle.RunID, orch.InjectRunHintRequest{
+		Hint: orch.RunHint{
+			Kind:         orch.RunHintKindReplanRequest,
+			Summary:      "replace root through llm replanner",
+			TargetTaskID: handle.RootTaskID,
+			Details: map[string]any{
+				"constraint": "produce blackbox replanner replacement",
+			},
+		},
+		IdempotencyKey: "hint-" + uuid.NewString(),
+	})
+
+	h.waitForEventType(t, handle.RunID, "run.event.planner_epoch.advanced", 15*time.Second)
+	h.waitForTaskGoalStatus(t, handle.RunID, "blackbox replanner replacement task", orch.TaskStatusReady, 15*time.Second)
+	if got := fakeLLM.replannerCalls.Load(); got != 1 {
+		t.Fatalf("replanner calls = %d, want 1", got)
+	}
 }
 
 func TestBlackboxRuntimeWorkerCompletionReplayAfterAckLossConverges(t *testing.T) {
@@ -1431,14 +1480,16 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 	logger := slog.New(slog.DiscardHandler)
 	service := orch.NewService(logger, appPool, queries)
 	botService := bots.NewService(logger, queries)
-	service.SetStartRunPlanner(orchestrationexec.NewRuntime(
+	plannerRuntime := orchestrationexec.NewRuntime(
 		logger,
 		queries,
 		settings.NewService(logger, queries, nil),
 		models.NewService(logger, queries),
 		agentpkg.New(agentpkg.Deps{Logger: logger}),
 		time.UTC,
-	))
+	)
+	service.SetStartRunPlanner(plannerRuntime)
+	service.SetReplanner(plannerRuntime)
 
 	listenCfg := net.ListenConfig{}
 	listener, err := listenCfg.Listen(ctx, "tcp", "127.0.0.1:0")
@@ -1737,6 +1788,13 @@ func (h *blackboxHarness) cancelRun(t *testing.T, runID string, req orch.CancelR
 	t.Helper()
 	var result orch.CancelRunResult
 	h.mustJSON(t, http.MethodPost, "/orchestration/runs/"+runID+"/cancel", req, h.token, &result, http.StatusOK)
+	return result
+}
+
+func (h *blackboxHarness) injectRunHint(t *testing.T, runID string, req orch.InjectRunHintRequest) orch.InjectRunHintResult {
+	t.Helper()
+	var result orch.InjectRunHintResult
+	h.mustJSON(t, http.MethodPost, "/orchestration/runs/"+runID+"/hints", req, h.token, &result, http.StatusOK)
 	return result
 }
 
@@ -2105,7 +2163,7 @@ func buildBlackboxBinaries(t *testing.T) blackboxBinarySet {
 	t.Helper()
 	blackboxBinariesOnce.Do(func() {
 		repoRoot := findRepoRoot(t)
-		dir, err := os.MkdirTemp(repoRoot, ".memoh-orchestration-blackbox-bin-*")
+		dir, err := os.MkdirTemp("", "memoh-orchestration-blackbox-bin-*")
 		if err != nil {
 			blackboxBinariesErr = err
 			return
@@ -2328,6 +2386,7 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 
 		prompt := flattenOpenAIMessageContent(body.Messages)
 		isStartRunPlannerPrompt := strings.Contains(prompt, "You are the initial planner for a Memoh orchestration run.")
+		isReplannerPrompt := strings.Contains(prompt, "You are the replanner for a Memoh orchestration run.")
 		payload := `{"status":"failed","summary":"unexpected fake llm prompt","failure_class":"unexpected_prompt","terminal_reason":"unexpected fake llm prompt","request_replan":false,"structured_output":{}}`
 		switch {
 		case isStartRunPlannerPrompt && strings.Contains(prompt, fakeLLMInitialPlanGoal):
@@ -2336,6 +2395,12 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 		case isStartRunPlannerPrompt:
 			fake.plannerCalls.Add(1)
 			payload = `{"summary":"execute root task directly","child_tasks":[]}`
+		case isReplannerPrompt && strings.Contains(prompt, fakeLLMReplannerGoal):
+			fake.replannerCalls.Add(1)
+			payload = `{"summary":"replace root from hint","child_tasks":[{"alias":"blackbox-replanner-replacement","kind":"step","goal":"blackbox replanner replacement task","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""}]}`
+		case isReplannerPrompt && strings.Contains(prompt, fakeLLMFailureReplanGoal):
+			fake.replannerCalls.Add(1)
+			payload = `{"summary":"replace failed root from replanner","child_tasks":[{"alias":"fib-recovery","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""}]}`
 		case strings.Contains(prompt, "Verify the following orchestration task result."):
 			fake.verifierCalls.Add(1)
 			payload = `{"status":"completed","verdict":"accepted","summary":"verification accepted","failure_class":"","terminal_reason":"","request_replan":false}`
@@ -2385,7 +2450,7 @@ func newFakeOpenAICompletionsServer(t *testing.T) *fakeOpenAICompletionsServer {
 			payload = `{"status":"completed","summary":"computed fib(31)=1346269","failure_class":"","terminal_reason":"","request_replan":false,"artifact_intents":[],"structured_output":{"value":1346269,"algorithm":"python","verified":true}}`
 		case strings.Contains(prompt, fakeLLMFailureReplanGoal):
 			fake.workerCalls.Add(1)
-			payload = `{"status":"failed","summary":"decomposition required before execution","failure_class":"needs_decomposition","terminal_reason":"task must be decomposed before execution","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-recovery","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{},"blackboard_scope":""}],"structured_output":{}}`
+			payload = `{"status":"failed","summary":"decomposition required before execution","failure_class":"needs_decomposition","terminal_reason":"task must be decomposed before execution","request_replan":true,"artifact_intents":[],"structured_output":{"failure_context":"task must be replaced by the replanner"}}`
 		case strings.Contains(prompt, "blackbox llm worker verifier path"):
 			fake.workerCalls.Add(1)
 			payload = `{"status":"completed","summary":"planned verification child task","failure_class":"","terminal_reason":"","request_replan":true,"artifact_intents":[],"child_tasks":[{"alias":"fib-verify","kind":"step","goal":"compute Fibonacci and return verified result","inputs":{},"depends_on":[],"worker_profile":"llm.default","priority":0,"retry_policy":{},"verification_policy":{"require_structured_output":true},"blackboard_scope":""}],"structured_output":{}}`

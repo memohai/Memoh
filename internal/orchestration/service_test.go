@@ -246,6 +246,26 @@ func TestPlannedChildTasksFromSpecsNormalizesDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeInjectRunHintRequestRejectsEmptyReplacementPlan(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := normalizeInjectRunHintRequest(InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root",
+			TargetTaskID: "task-1",
+			Details: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{},
+				},
+			},
+		},
+	}, "idem-1")
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeInjectRunHintRequest(empty replacement) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
 func TestValidatePlannedChildTasksRejectsCycles(t *testing.T) {
 	t.Parallel()
 

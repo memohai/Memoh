@@ -31,10 +31,15 @@ type Service struct {
 	logger             *slog.Logger
 	attemptAssignments AttemptAssignmentPublisher
 	startRunPlanner    StartRunPlanner
+	replanner          Replanner
 }
 
 type StartRunPlanner interface {
 	PlanStartRun(context.Context, StartRunPlanningInput) (*StartRunPlanningResult, error)
+}
+
+type Replanner interface {
+	PlanReplan(context.Context, ReplanPlanningInput) (*ReplanPlanningResult, error)
 }
 
 func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Service {
@@ -51,6 +56,10 @@ func NewService(log *slog.Logger, pool *pgxpool.Pool, queries *sqlc.Queries) *Se
 
 func (s *Service) SetStartRunPlanner(planner StartRunPlanner) {
 	s.startRunPlanner = planner
+}
+
+func (s *Service) SetReplanner(planner Replanner) {
+	s.replanner = planner
 }
 
 func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req StartRunRequest) (RunHandle, error) {
@@ -878,6 +887,15 @@ func (s *Service) InjectRunHint(ctx context.Context, caller ControlIdentity, run
 			return nil, ErrRunHintUnsupported
 		}
 	}
+	if normalizedHint.Kind == RunHintKindReplanRequest && !runHintHasReplacementPlan(normalizedHint) {
+		if s.replanner == nil {
+			return nil, fmt.Errorf("%w: replanner is not configured", ErrRunHintUnsupported)
+		}
+		sourceMetadata := decodeJSONObject(lockedRun.SourceMetadata)
+		if strings.TrimSpace(stringValue(sourceMetadata["bot_id"])) == "" {
+			return nil, fmt.Errorf("%w: replanner requires bot_id for replan_request without replacement_plan", ErrRunHintUnsupported)
+		}
+	}
 
 	record, replay, err := ensureIdempotencyRecord(ctx, qtx, caller, methodInjectRunHint, normalizedRunID, normalizedIdempotencyKey, requestHash)
 	if err != nil {
@@ -1256,6 +1274,21 @@ func (s *Service) injectReplanHint(
 	if err != nil {
 		return "", sqlc.OrchestrationEvent{}, err
 	}
+	payload := map[string]any{
+		"run_id":             lockedRun.ID.String(),
+		"source_task_id":     lockedTask.ID.String(),
+		"reason":             strings.TrimSpace(normalizedHint.Summary),
+		"base_planner_epoch": lockedRun.PlannerEpoch,
+		"injected_hint": map[string]any{
+			"kind":           normalizedHint.Kind,
+			"summary":        normalizedHint.Summary,
+			"details":        normalizedHint.Details,
+			"target_task_id": normalizedHint.TargetTaskID,
+		},
+	}
+	if replacementPlan, ok := normalizedHint.Details["replacement_plan"].(map[string]any); ok {
+		payload["replacement_plan"] = normalizeObject(replacementPlan)
+	}
 	planningIntent, err := qtx.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
 		ID:               planningIntentUUID,
 		RunID:            lockedRun.ID,
@@ -1264,19 +1297,7 @@ func (s *Service) injectReplanHint(
 		Kind:             PlanningIntentKindReplan,
 		Status:           PlanningIntentStatusPending,
 		BasePlannerEpoch: lockedRun.PlannerEpoch,
-		Payload: marshalJSON(map[string]any{
-			"run_id":             lockedRun.ID.String(),
-			"source_task_id":     lockedTask.ID.String(),
-			"reason":             strings.TrimSpace(normalizedHint.Summary),
-			"base_planner_epoch": lockedRun.PlannerEpoch,
-			"replacement_plan":   normalizeObject(mapValue(normalizedHint.Details["replacement_plan"])),
-			"injected_hint": map[string]any{
-				"kind":           normalizedHint.Kind,
-				"summary":        normalizedHint.Summary,
-				"details":        normalizedHint.Details,
-				"target_task_id": normalizedHint.TargetTaskID,
-			},
-		}),
+		Payload:          marshalJSON(payload),
 	})
 	if err != nil {
 		return "", sqlc.OrchestrationEvent{}, fmt.Errorf("create injected run hint planning intent: %w", err)
@@ -3039,8 +3060,14 @@ func normalizeInjectRunHintRequest(req InjectRunHintRequest, idempotencyKey stri
 		if normalized.TargetTaskID == "" {
 			return RunHint{}, "", "", fmt.Errorf("%w: target_task_id is required for replan_request", ErrInvalidArgument)
 		}
-		if _, ok := normalized.Details["replacement_plan"].(map[string]any); !ok {
-			return RunHint{}, "", "", fmt.Errorf("%w: replacement_plan is required for replan_request", ErrRunHintUnsupported)
+		if rawReplacementPlan, ok := normalized.Details["replacement_plan"]; ok && rawReplacementPlan != nil {
+			replacementPlan, ok := rawReplacementPlan.(map[string]any)
+			if !ok {
+				return RunHint{}, "", "", fmt.Errorf("%w: replacement_plan must be an object for replan_request", ErrInvalidArgument)
+			}
+			if err := validateRunHintReplacementPlan(replacementPlan); err != nil {
+				return RunHint{}, "", "", err
+			}
 		}
 	case RunHintKindContextUpdate:
 		if normalized.TargetTaskID != "" {
@@ -3068,6 +3095,33 @@ func normalizeInjectRunHintRequest(req InjectRunHintRequest, idempotencyKey stri
 		return RunHint{}, "", "", err
 	}
 	return normalized, normalized.TargetTaskID, hash, nil
+}
+
+func runHintHasReplacementPlan(hint RunHint) bool {
+	if len(hint.Details) == 0 {
+		return false
+	}
+	rawReplacementPlan, ok := hint.Details["replacement_plan"]
+	if !ok || rawReplacementPlan == nil {
+		return false
+	}
+	_, ok = rawReplacementPlan.(map[string]any)
+	return ok
+}
+
+func validateRunHintReplacementPlan(replacementPlan map[string]any) error {
+	rawChildTasks, ok := replacementPlan["child_tasks"]
+	if !ok {
+		return fmt.Errorf("%w: replacement_plan.child_tasks is required for replan_request", ErrInvalidArgument)
+	}
+	childTasks, ok := rawChildTasks.([]any)
+	if !ok {
+		return fmt.Errorf("%w: replacement_plan.child_tasks must be an array for replan_request", ErrInvalidArgument)
+	}
+	if len(childTasks) == 0 {
+		return fmt.Errorf("%w: replacement_plan.child_tasks must not be empty for replan_request", ErrInvalidArgument)
+	}
+	return nil
 }
 
 func createHumanCheckpointRequestHash(

@@ -416,6 +416,72 @@ func (s *Service) planStartRunTask(ctx context.Context, runRow sqlc.Orchestratio
 	return childPlans, strings.TrimSpace(result.Summary), nil
 }
 
+func (s *Service) planReplacementSubtree(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runRow sqlc.OrchestrationRun,
+	sourceTask sqlc.OrchestrationTask,
+	attemptID pgtype.UUID,
+	allTasks []sqlc.OrchestrationTask,
+	allDependencies []sqlc.OrchestrationTaskDependency,
+	subtreeTaskIDs map[string]struct{},
+	reason string,
+	injectedHint map[string]any,
+) ([]plannedChildTask, error) {
+	if s == nil || s.replanner == nil {
+		return nil, fmt.Errorf("%w: replanner is not configured", ErrPlanningIntentInvalid)
+	}
+	sourceMetadata := decodeJSONObject(runRow.SourceMetadata)
+	if strings.TrimSpace(stringValue(sourceMetadata["bot_id"])) == "" {
+		return nil, fmt.Errorf("%w: replanner requires run source_metadata.bot_id", ErrPlanningIntentInvalid)
+	}
+	input := ReplanPlanningInput{
+		Run:          toRun(runRow),
+		SourceTask:   toTask(sourceTask),
+		SubtreeTasks: replanSubtreeTasks(allTasks, subtreeTaskIDs),
+		Dependencies: replanSubtreeDependencies(allDependencies, subtreeTaskIDs),
+		Reason:       reason,
+		InjectedHint: normalizeObject(injectedHint),
+	}
+	if attemptID.Valid {
+		attemptRow, err := qtx.GetOrchestrationTaskAttemptByID(ctx, attemptID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrAttemptNotFound
+			}
+			return nil, fmt.Errorf("load replan source attempt: %w", err)
+		}
+		if attemptRow.RunID != runRow.ID || attemptRow.TaskID != sourceTask.ID {
+			return nil, fmt.Errorf("%w: replan attempt does not belong to source task", ErrPlanningIntentInvalid)
+		}
+		sourceAttempt := toTaskAttempt(attemptRow)
+		input.SourceAttempt = &sourceAttempt
+	}
+	if sourceTask.LatestResultID.Valid {
+		resultRow, err := qtx.GetOrchestrationTaskResultByID(ctx, sourceTask.LatestResultID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrPlanningIntentNotFound
+			}
+			return nil, fmt.Errorf("load replan source result: %w", err)
+		}
+		sourceResult := toTaskResult(resultRow)
+		input.SourceResult = &sourceResult
+	}
+	result, err := s.replanner.PlanReplan(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("%w: replanner returned no result", ErrPlanningIntentInvalid)
+	}
+	childPlans, err := plannedChildTasksFromSpecs(result.ChildTasks)
+	if err != nil {
+		return nil, err
+	}
+	return childPlans, nil
+}
+
 func (s *Service) processCheckpointResumePlanningIntent(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, intent sqlc.OrchestrationPlanningIntent) (sqlc.OrchestrationEvent, error) {
 	if !intent.TaskID.Valid {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: checkpoint_resume intent missing task", ErrPlanningIntentNotFound)
@@ -807,10 +873,7 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 				if err != nil {
 					return sqlc.OrchestrationEvent{}, err
 				}
-				if len(childPlans) == 0 {
-					return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
-				}
-				if err := validatePlannedChildTasks(childPlans); err != nil {
+				if err := validateOptionalReplanChildPlans(childPlans); err != nil {
 					return sqlc.OrchestrationEvent{}, err
 				}
 				lastEvent, err = s.enqueueReplanPlanningIntent(ctx, qtx, runRow, completedTask, attemptRow, childPlans, "attempt_finalize.request_replan")
@@ -858,10 +921,7 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 				if err != nil {
 					return sqlc.OrchestrationEvent{}, err
 				}
-				if len(childPlans) == 0 {
-					return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
-				}
-				if err := validatePlannedChildTasks(childPlans); err != nil {
+				if err := validateOptionalReplanChildPlans(childPlans); err != nil {
 					return sqlc.OrchestrationEvent{}, err
 				}
 				lastEvent, err = s.enqueueReplanPlanningIntent(ctx, qtx, runRow, failedTask, attemptRow, childPlans, "attempt_finalize.failed_request_replan")
@@ -917,8 +977,17 @@ func (s *Service) enqueueReplanPlanningIntent(
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, err
 	}
-	replacementPlan := map[string]any{
-		"child_tasks": encodePlannedChildTasks(childPlans),
+	payload := map[string]any{
+		"run_id":             runRow.ID.String(),
+		"source_task_id":     sourceTask.ID.String(),
+		"attempt_id":         uuidString(attemptRow.ID),
+		"reason":             strings.TrimSpace(reason),
+		"base_planner_epoch": runRow.PlannerEpoch,
+	}
+	if len(childPlans) > 0 {
+		payload["replacement_plan"] = map[string]any{
+			"child_tasks": encodePlannedChildTasks(childPlans),
+		}
 	}
 	planningIntent, err := qtx.CreateOrchestrationPlanningIntent(ctx, sqlc.CreateOrchestrationPlanningIntentParams{
 		ID:               planningIntentUUID,
@@ -928,14 +997,7 @@ func (s *Service) enqueueReplanPlanningIntent(
 		Kind:             PlanningIntentKindReplan,
 		Status:           PlanningIntentStatusPending,
 		BasePlannerEpoch: runRow.PlannerEpoch,
-		Payload: marshalJSON(map[string]any{
-			"run_id":             runRow.ID.String(),
-			"source_task_id":     sourceTask.ID.String(),
-			"attempt_id":         uuidString(attemptRow.ID),
-			"reason":             strings.TrimSpace(reason),
-			"base_planner_epoch": runRow.PlannerEpoch,
-			"replacement_plan":   replacementPlan,
-		}),
+		Payload:          marshalJSON(payload),
 	})
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("create replan planning intent: %w", err)
@@ -990,22 +1052,16 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: source task already superseded", ErrPlanningIntentInvalid)
 	}
 
-	childPlans, err := decodeReplanChildTasks(payload)
-	if err != nil {
-		return sqlc.OrchestrationEvent{}, err
-	}
-	if len(childPlans) == 0 {
-		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: replan intent requires replacement_plan.child_tasks", ErrPlanningIntentInvalid)
-	}
-	if err := validatePlannedChildTasks(childPlans); err != nil {
-		return sqlc.OrchestrationEvent{}, err
-	}
-
 	attemptID := pgtype.UUID{}
 	if rawAttemptID, _ := payload["attempt_id"].(string); strings.TrimSpace(rawAttemptID) != "" {
 		attemptID, err = db.ParseUUID(rawAttemptID)
 		if err != nil {
 			return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: invalid replan attempt id", ErrPlanningIntentNotFound)
+		}
+	}
+	if attemptID.Valid {
+		if err := validateReplanAttemptBelongsToSource(ctx, qtx, runRow, sourceTask, attemptID); err != nil {
+			return sqlc.OrchestrationEvent{}, err
 		}
 	}
 
@@ -1021,6 +1077,27 @@ func (s *Service) processReplanPlanningIntent(ctx context.Context, qtx *sqlc.Que
 	if err := validateReplanSubtreeIsQuiescent(ctx, qtx, runRow.ID, subtreeTaskIDs, allTasks, allDependencies); err != nil {
 		return sqlc.OrchestrationEvent{}, err
 	}
+
+	childPlans, err := decodeReplanChildTasks(payload)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, err
+	}
+	if len(childPlans) == 0 {
+		if hasReplanReplacementPlan(payload) {
+			return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: replan intent requires replacement_plan.child_tasks", ErrPlanningIntentInvalid)
+		}
+		childPlans, err = s.planReplacementSubtree(ctx, qtx, runRow, sourceTask, attemptID, allTasks, allDependencies, subtreeTaskIDs, strings.TrimSpace(stringValue(payload["reason"])), mapValue(payload["injected_hint"]))
+		if err != nil {
+			return sqlc.OrchestrationEvent{}, err
+		}
+	}
+	if len(childPlans) == 0 {
+		return sqlc.OrchestrationEvent{}, fmt.Errorf("%w: replan intent requires replacement_plan.child_tasks", ErrPlanningIntentInvalid)
+	}
+	if err := validatePlannedChildTasks(childPlans); err != nil {
+		return sqlc.OrchestrationEvent{}, err
+	}
+
 	allCheckpoints, err := qtx.ListCurrentOrchestrationCheckpointsByRun(ctx, runRow.ID)
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("list current checkpoints for replan: %w", err)
@@ -2456,6 +2533,9 @@ func (s *Service) maybeMarkRunCompletedAfterPlanningIntent(ctx context.Context, 
 	if strings.TrimSpace(attemptID) != "" {
 		attemptUUID, err = db.ParseUUID(attemptID)
 		if err != nil {
+			if intent.Status == PlanningIntentStatusFailed {
+				return s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, intent.TaskID, pgtype.UUID{})
+			}
 			return sqlc.OrchestrationEvent{}, false, fmt.Errorf("%w: invalid completed planning intent attempt id", ErrPlanningIntentNotFound)
 		}
 	}
@@ -3383,6 +3463,28 @@ func decodeReplanChildTasks(payload map[string]any) ([]plannedChildTask, error) 
 	return nil, nil
 }
 
+func hasReplanReplacementPlan(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	_, ok := payload["replacement_plan"]
+	return ok
+}
+
+func validateReplanAttemptBelongsToSource(ctx context.Context, qtx *sqlc.Queries, runRow sqlc.OrchestrationRun, sourceTask sqlc.OrchestrationTask, attemptID pgtype.UUID) error {
+	attemptRow, err := qtx.GetOrchestrationTaskAttemptByID(ctx, attemptID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAttemptNotFound
+		}
+		return fmt.Errorf("load replan source attempt: %w", err)
+	}
+	if attemptRow.RunID != runRow.ID || attemptRow.TaskID != sourceTask.ID {
+		return fmt.Errorf("%w: replan attempt does not belong to source task", ErrPlanningIntentInvalid)
+	}
+	return nil
+}
+
 func buildTaskSubtreeSet(tasks []sqlc.OrchestrationTask, rootTaskID pgtype.UUID) map[string]struct{} {
 	childrenByParent := make(map[string][]pgtype.UUID)
 	for _, task := range tasks {
@@ -3407,6 +3509,39 @@ func buildTaskSubtreeSet(tasks []sqlc.OrchestrationTask, rootTaskID pgtype.UUID)
 		}
 	}
 	return subtree
+}
+
+func replanSubtreeTasks(tasks []sqlc.OrchestrationTask, subtreeTaskIDs map[string]struct{}) []Task {
+	if len(tasks) == 0 || len(subtreeTaskIDs) == 0 {
+		return nil
+	}
+	items := make([]Task, 0, len(subtreeTaskIDs))
+	for _, task := range tasks {
+		if _, ok := subtreeTaskIDs[task.ID.String()]; !ok {
+			continue
+		}
+		items = append(items, toTask(task))
+	}
+	return items
+}
+
+func replanSubtreeDependencies(dependencies []sqlc.OrchestrationTaskDependency, subtreeTaskIDs map[string]struct{}) []TaskDependency {
+	if len(dependencies) == 0 || len(subtreeTaskIDs) == 0 {
+		return nil
+	}
+	items := make([]TaskDependency, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		if dependency.SupersededByPlannerEpoch.Valid {
+			continue
+		}
+		_, predecessorInSubtree := subtreeTaskIDs[dependency.PredecessorTaskID.String()]
+		_, successorInSubtree := subtreeTaskIDs[dependency.SuccessorTaskID.String()]
+		if !predecessorInSubtree && !successorInSubtree {
+			continue
+		}
+		items = append(items, toTaskDependency(dependency))
+	}
+	return items
 }
 
 func validatePlannedChildTasks(childPlans []plannedChildTask) error {
@@ -3469,6 +3604,13 @@ func validatePlannedChildTasks(childPlans []plannedChildTask) error {
 		return fmt.Errorf("%w: child task dependencies must form an acyclic graph", ErrPlanningIntentInvalid)
 	}
 	return nil
+}
+
+func validateOptionalReplanChildPlans(childPlans []plannedChildTask) error {
+	if len(childPlans) == 0 {
+		return nil
+	}
+	return validatePlannedChildTasks(childPlans)
 }
 
 func plannedChildTasksFromSpecs(specs []PlannedTaskSpec) ([]plannedChildTask, error) {

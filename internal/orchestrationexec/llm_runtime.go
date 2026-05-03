@@ -860,8 +860,8 @@ Return exactly one JSON object and no markdown. The JSON shape must be:
   "structured_output": object
 }
 
-When requesting replan, use status="completed", set "request_replan": true, and put replacement tasks in structured_output.child_tasks.
-Do not use status="failed" for a replan-only handoff, or the runtime will treat the task as terminal failure instead of expanding the DAG.
+When the task needs a different decomposition or recovery path, set "request_replan": true. You may include replacement tasks in structured_output.child_tasks only when the replacement DAG is obvious; otherwise leave structured_output as context for the replanner.
+Use status="completed" for a replan-only handoff. Use status="failed" with request_replan=true only when this attempt genuinely failed and the replanner should replace the failed subtree.
 Each child task must be an object with:
 {
   "alias": string,
@@ -896,7 +896,7 @@ Return exactly one JSON object and no markdown. The JSON shape must be:
 
 Use status="completed", verdict="accepted" when the result is valid.
 Use verdict="rejected" when validation fails.
-Only set request_replan=true when the existing task result already contains structured_output.child_tasks that should replace the current subtree.`
+Set request_replan=true when the result is rejected and the task should be replaced by a replanned subtree instead of retried or failed. Existing structured_output.child_tasks may be used as a static replacement plan, but it is not required.`
 
 func buildWorkerPrompt(execCtx attemptExecutionContext) string {
 	payload := map[string]any{

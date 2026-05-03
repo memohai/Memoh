@@ -687,10 +687,7 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 			if err != nil {
 				return nil, err
 			}
-			if len(childPlans) == 0 {
-				return nil, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
-			}
-			if err := validatePlannedChildTasks(childPlans); err != nil {
+			if err := validateOptionalReplanChildPlans(childPlans); err != nil {
 				return nil, err
 			}
 			if !resultRow.AttemptID.Valid {
@@ -731,10 +728,7 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		if err != nil {
 			return nil, err
 		}
-		if len(childPlans) == 0 {
-			return nil, fmt.Errorf("%w: request_replan requires structured_output.child_tasks", ErrPlanningIntentInvalid)
-		}
-		if err := validatePlannedChildTasks(childPlans); err != nil {
+		if err := validateOptionalReplanChildPlans(childPlans); err != nil {
 			return nil, err
 		}
 		if !resultRow.AttemptID.Valid {
