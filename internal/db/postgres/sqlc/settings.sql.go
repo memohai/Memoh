@@ -35,6 +35,7 @@ SET language = 'auto',
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
+    display_enabled = false,
     overlay_provider = '',
     overlay_enabled = false,
     overlay_config = '{}'::jsonb,
@@ -73,6 +74,7 @@ SELECT
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
   bots.tool_approval_config,
+  bots.display_enabled,
   bots.overlay_provider,
   bots.overlay_enabled,
   bots.overlay_config
@@ -115,6 +117,7 @@ type GetSettingsByBotIDRow struct {
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -148,6 +151,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.DisplayEnabled,
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,
@@ -181,12 +185,13 @@ WITH updated AS (
       persist_full_tool_results = $21,
       show_tool_calls_in_im = $22,
       tool_approval_config = $23,
-      overlay_provider = $24,
-      overlay_enabled = $25,
-      overlay_config = $26,
+      display_enabled = $24,
+      overlay_provider = $25,
+      overlay_enabled = $26,
+      overlay_config = $27,
       updated_at = now()
-  WHERE bots.id = $27
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.browser_context_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config
+  WHERE bots.id = $28
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.browser_context_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config
 )
 SELECT
   updated.id AS bot_id,
@@ -213,6 +218,7 @@ SELECT
   updated.persist_full_tool_results,
   updated.show_tool_calls_in_im,
   updated.tool_approval_config,
+  updated.display_enabled,
   updated.overlay_provider,
   updated.overlay_enabled,
   updated.overlay_config
@@ -253,6 +259,7 @@ type UpsertBotSettingsParams struct {
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -284,6 +291,7 @@ type UpsertBotSettingsRow struct {
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -314,6 +322,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
 		arg.ToolApprovalConfig,
+		arg.DisplayEnabled,
 		arg.OverlayProvider,
 		arg.OverlayEnabled,
 		arg.OverlayConfig,
@@ -345,6 +354,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.DisplayEnabled,
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,

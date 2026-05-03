@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -321,6 +322,147 @@ func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) er
 	})
 	return mapError(err)
 }
+
+func (c *Client) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if network != "tcp" {
+		return nil, fmt.Errorf("unsupported tunnel network %q", network)
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.svc.Tunnel(streamCtx)
+	if err != nil {
+		cancel()
+		return nil, mapError(err)
+	}
+	if err := stream.Send(&pb.TunnelFrame{
+		Frame: &pb.TunnelFrame_Open{Open: &pb.TunnelOpen{Address: address}},
+	}); err != nil {
+		cancel()
+		return nil, mapError(err)
+	}
+	conn := &tunnelConn{
+		stream: stream,
+		cancel: cancel,
+		local:  tunnelAddr("memoh-bridge"),
+		remote: tunnelAddr(address),
+	}
+	if err := conn.waitOpen(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+type tunnelConn struct {
+	stream pb.ContainerService_TunnelClient
+	cancel context.CancelFunc
+	local  net.Addr
+	remote net.Addr
+
+	readMu  sync.Mutex
+	writeMu sync.Mutex
+	closeMu sync.Once
+	buf     []byte
+	off     int
+}
+
+type tunnelAddr string
+
+func (tunnelAddr) Network() string  { return "bridge-tunnel" }
+func (a tunnelAddr) String() string { return string(a) }
+
+func (c *tunnelConn) waitOpen() error {
+	frame, err := c.stream.Recv()
+	if err != nil {
+		return mapError(err)
+	}
+	switch payload := frame.GetFrame().(type) {
+	case *pb.TunnelFrame_Data:
+		if data := payload.Data.GetData(); len(data) > 0 {
+			c.buf = data
+		}
+		return nil
+	case *pb.TunnelFrame_Close:
+		if msg := payload.Close.GetError(); msg != "" {
+			return errors.New(msg)
+		}
+		return io.EOF
+	default:
+		return errors.New("unexpected tunnel open response")
+	}
+}
+
+func (c *tunnelConn) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+
+	for c.off >= len(c.buf) {
+		frame, err := c.stream.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return 0, io.EOF
+			}
+			return 0, mapError(err)
+		}
+		switch payload := frame.GetFrame().(type) {
+		case *pb.TunnelFrame_Data:
+			c.buf = payload.Data.GetData()
+			c.off = 0
+			if len(c.buf) == 0 {
+				continue
+			}
+		case *pb.TunnelFrame_Close:
+			if msg := payload.Close.GetError(); msg != "" {
+				return 0, errors.New(msg)
+			}
+			return 0, io.EOF
+		default:
+			continue
+		}
+	}
+
+	n := copy(p, c.buf[c.off:])
+	c.off += n
+	return n, nil
+}
+
+func (c *tunnelConn) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	data := append([]byte(nil), p...)
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if err := c.stream.Send(&pb.TunnelFrame{
+		Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{Data: data}},
+	}); err != nil {
+		return 0, mapError(err)
+	}
+	return len(p), nil
+}
+
+func (c *tunnelConn) Close() error {
+	var err error
+	c.closeMu.Do(func() {
+		c.writeMu.Lock()
+		defer c.writeMu.Unlock()
+		err = c.stream.Send(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Close{Close: &pb.TunnelClose{}}})
+		if closeErr := c.stream.CloseSend(); err == nil {
+			err = closeErr
+		}
+		c.cancel()
+	})
+	return err
+}
+
+func (c *tunnelConn) LocalAddr() net.Addr  { return c.local }
+func (c *tunnelConn) RemoteAddr() net.Addr { return c.remote }
+
+func (*tunnelConn) SetDeadline(_ time.Time) error      { return nil }
+func (*tunnelConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (*tunnelConn) SetWriteDeadline(_ time.Time) error { return nil }
 
 // streamReader adapts a gRPC server stream into an io.ReadCloser.
 type streamReader struct {

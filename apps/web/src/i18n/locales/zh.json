@@ -309,9 +309,28 @@
     "sessionActions": "会话操作",
     "tabBarToolkit": {
       "newTerminal": "新建终端",
+      "openDisplay": "打开显示器",
       "menu": "标签页操作",
       "closeAll": "关闭全部",
       "closeFinished": "关闭已保存和结束的"
+    },
+    "display": {
+      "title": "显示器",
+      "reconnect": "重新连接",
+      "status": {
+        "idle": "显示器待连接",
+        "connecting": "正在连接显示器...",
+        "connected": "显示器已连接",
+        "disconnected": "显示器连接已断开",
+        "unavailable": "显示器不可用"
+      },
+      "unavailable": {
+        "disabled": "工作区显示器未启用",
+        "container": "工作区容器不可达",
+        "bundle": "显示器运行时不可用，请先安装 toolkit",
+        "server": "显示器服务未运行，请重新创建工作区容器后再试",
+        "manager": "工作区管理器未配置"
+      }
     }
   },
   "models": {
@@ -1140,6 +1159,8 @@
       "compactionModelPlaceholder": "使用聊天模型（默认）",
       "showToolCallsInIM": "在 IM 中显示工具调用",
       "showToolCallsInIMDescription": "在 IM 频道中以单条消息持续展示工具执行的状态（进行中 / 已完成 / 失败）。默认关闭。",
+      "displayEnabled": "启用工作区显示器",
+      "displayEnabledDescription": "在容器启动时启动 Xvnc，保存后需重启工作区容器才会生效。",
       "toolApproval": "工具调用审核",
       "toolApprovalDescription": "对 write、edit、exec 等敏感工具启用人工审核，可配置可跳过审核的路径或命令。",
       "toolApprovalBypass": "跳过审核",

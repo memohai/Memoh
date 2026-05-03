@@ -13,9 +13,11 @@ export type WorkspaceTab =
   | { id: string; type: 'chat'; sessionId: string; title: string }
   | { id: string; type: 'file'; filePath: string; title: string }
   | { id: string; type: 'terminal'; title: string }
+  | { id: string; type: 'vnc'; title: string }
   | { id: string; type: 'draft'; title: string }
 
 const DRAFT_TAB_ID = 'draft'
+const DISPLAY_TAB_ID = 'display'
 
 interface BotTabState {
   tabs: WorkspaceTab[]
@@ -240,6 +242,22 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  function openDisplay() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const existing = state.tabs.find((t) => t.id === DISPLAY_TAB_ID)
+    if (existing) {
+      commit({ ...state, activeId: DISPLAY_TAB_ID })
+      return
+    }
+    const tab: WorkspaceTab = {
+      id: DISPLAY_TAB_ID,
+      type: 'vnc',
+      title: 'Display',
+    }
+    commit({ ...state, tabs: [...state.tabs, tab], activeId: DISPLAY_TAB_ID })
+  }
+
   function closeTab(id: string) {
     const state = ensureBot(currentBotId.value)
     if (!state) return
@@ -293,6 +311,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'file':
         return dirty[tab.id] === true
       case 'terminal':
+      case 'vnc':
       case 'draft':
         return false
     }
@@ -407,6 +426,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openChat,
     openFile,
     openTerminal,
+    openDisplay,
     openDraft,
     promoteDraftToChat,
     closeTab,

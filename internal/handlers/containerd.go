@@ -229,6 +229,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	// Terminal routes
 	group.GET("/terminal", h.GetTerminalInfo)
 	group.GET("/terminal/ws", h.HandleTerminalWS)
+	// Display routes
+	group.GET("/display", h.GetDisplayInfo)
+	group.GET("/display/ws", h.HandleDisplayWS)
 	// File manager routes
 	group.GET("/fs", h.FSStat)
 	group.GET("/fs/list", h.FSList)

@@ -313,9 +313,28 @@
     "sessionActions": "Session actions",
     "tabBarToolkit": {
       "newTerminal": "Open new terminal",
+      "openDisplay": "Open display",
       "menu": "Tab actions",
       "closeAll": "Close all",
       "closeFinished": "Close saved and finished"
+    },
+    "display": {
+      "title": "Display",
+      "reconnect": "Reconnect",
+      "status": {
+        "idle": "Display is idle",
+        "connecting": "Connecting display...",
+        "connected": "Display connected",
+        "disconnected": "Display disconnected",
+        "unavailable": "Display unavailable"
+      },
+      "unavailable": {
+        "disabled": "Workspace display is not enabled",
+        "container": "Workspace container is not reachable",
+        "bundle": "Display runtime is unavailable. Install the toolkit first.",
+        "server": "Display server is not running. Recreate the workspace container and try again.",
+        "manager": "Workspace manager is not configured"
+      }
     }
   },
   "models": {
@@ -1144,6 +1163,8 @@
       "compactionModelPlaceholder": "Use chat model (default)",
       "showToolCallsInIM": "Show Tool Calls in IM",
       "showToolCallsInIMDescription": "Surface tool execution status (running / completed / failed) as a single message in IM channels. Off by default.",
+      "displayEnabled": "Enable Workspace Display",
+      "displayEnabledDescription": "Start Xvnc when the container starts. Save and restart the workspace container for this to take effect.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
       "toolApprovalBypass": "Bypass",

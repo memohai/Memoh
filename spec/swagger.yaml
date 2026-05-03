@@ -2167,6 +2167,17 @@ definitions:
       title:
         type: string
     type: object
+  handlers.displayInfoResponse:
+    properties:
+      available:
+        type: boolean
+      enabled:
+        type: boolean
+      running:
+        type: boolean
+      unavailable_reason:
+        type: string
+    type: object
   handlers.emailOAuthStatusResponse:
     properties:
       configured:
@@ -3040,6 +3051,8 @@ definitions:
         type: integer
       discuss_probe_model_id:
         type: string
+      display_enabled:
+        type: boolean
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3135,6 +3148,8 @@ definitions:
         type: integer
       discuss_probe_model_id:
         type: string
+      display_enabled:
+        type: boolean
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3833,6 +3848,52 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Restore previously preserved data into container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.displayInfoResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check workspace display availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/ws:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Auth token
+        in: query
+        name: token
+        type: string
+      responses:
+        "101":
+          description: WebSocket upgrade
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: WebSocket VNC relay for bot workspace display
       tags:
       - containerd
   /bots/{bot_id}/container/fs:

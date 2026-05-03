@@ -1293,6 +1293,13 @@ export type HandlersCreateSessionRequest = {
     title?: string;
 };
 
+export type HandlersDisplayInfoResponse = {
+    available?: boolean;
+    enabled?: boolean;
+    running?: boolean;
+    unavailable_reason?: string;
+};
+
 export type HandlersEmailOAuthStatusResponse = {
     configured?: boolean;
     email_address?: string;
@@ -1817,6 +1824,7 @@ export type SettingsSettings = {
     compaction_ratio?: number;
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
+    display_enabled?: boolean;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1868,6 +1876,7 @@ export type SettingsUpsertRequest = {
     compaction_ratio?: number;
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
+    display_enabled?: boolean;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -2728,6 +2737,66 @@ export type PostBotsByBotIdContainerDataRestoreResponses = {
 };
 
 export type PostBotsByBotIdContainerDataRestoreResponse = PostBotsByBotIdContainerDataRestoreResponses[keyof PostBotsByBotIdContainerDataRestoreResponses];
+
+export type GetBotsByBotIdContainerDisplayData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display';
+};
+
+export type GetBotsByBotIdContainerDisplayErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerDisplayError = GetBotsByBotIdContainerDisplayErrors[keyof GetBotsByBotIdContainerDisplayErrors];
+
+export type GetBotsByBotIdContainerDisplayResponses = {
+    /**
+     * OK
+     */
+    200: HandlersDisplayInfoResponse;
+};
+
+export type GetBotsByBotIdContainerDisplayResponse = GetBotsByBotIdContainerDisplayResponses[keyof GetBotsByBotIdContainerDisplayResponses];
+
+export type GetBotsByBotIdContainerDisplayWsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Auth token
+         */
+        token?: string;
+    };
+    url: '/bots/{bot_id}/container/display/ws';
+};
+
+export type GetBotsByBotIdContainerDisplayWsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerDisplayWsError = GetBotsByBotIdContainerDisplayWsErrors[keyof GetBotsByBotIdContainerDisplayWsErrors];
 
 export type GetBotsByBotIdContainerFsData = {
     body?: never;

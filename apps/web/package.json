@@ -22,6 +22,7 @@
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
     "@memohai/ui": "workspace:*",
+    "@novnc/novnc": "^1.7.0",
     "@pinia/colada": "^0.21.1",
     "@shikijs/transformers": "^4.0.1",
     "@tailwindcss/vite": "^4.2.2",

@@ -14,6 +14,7 @@ import (
 // depending on the full concrete workspace manager surface.
 type containerWorkspace interface {
 	bridge.Provider
+	BotDisplayEnabled(ctx context.Context, botID string) bool
 	EnsureRunning(ctx context.Context, botID string) error
 	ContainerID(ctx context.Context, botID string) (string, error)
 	ResolveWorkspaceImage(ctx context.Context, botID string) (string, error)

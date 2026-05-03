@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS bots (
   persist_full_tool_results INTEGER NOT NULL DEFAULT 0,
   show_tool_calls_in_im INTEGER NOT NULL DEFAULT 0,
   tool_approval_config TEXT NOT NULL DEFAULT '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+  display_enabled INTEGER NOT NULL DEFAULT 0,
   overlay_provider TEXT NOT NULL DEFAULT '',
   overlay_enabled INTEGER NOT NULL DEFAULT 0,
   overlay_config TEXT NOT NULL DEFAULT '{}',

@@ -317,6 +317,9 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	if m.botDisplayEnabled(ctx, botID) {
+		env = append(env, "MEMOH_DISPLAY_ENABLED=true", "DISPLAY=:99")
+	}
 	env = append(env, skillEnv...)
 
 	return ctr.ContainerSpec{
@@ -325,6 +328,25 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 		Env:        env,
 		CDIDevices: normalizeWorkspaceGPUDevices(gpu.Devices),
 	}, nil
+}
+
+func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) bool {
+	if m.queries == nil {
+		return false
+	}
+	id, err := db.ParseUUID(botID)
+	if err != nil {
+		return false
+	}
+	row, err := m.queries.GetSettingsByBotID(ctx, id)
+	if err != nil {
+		return false
+	}
+	return row.DisplayEnabled
+}
+
+func (m *Manager) BotDisplayEnabled(ctx context.Context, botID string) bool {
+	return m.botDisplayEnabled(ctx, botID)
 }
 
 func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {

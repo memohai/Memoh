@@ -1005,6 +1005,77 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/container/display": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Check workspace display availability for bot container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.displayInfoResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/display/ws": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "WebSocket VNC relay for bot workspace display",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Auth token",
+                        "name": "token",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "WebSocket upgrade"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/container/fs": {
             "get": {
                 "description": "Returns metadata about a file or directory at the given container path",
@@ -12854,6 +12925,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.displayInfoResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "running": {
+                    "type": "boolean"
+                },
+                "unavailable_reason": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.emailOAuthStatusResponse": {
             "type": "object",
             "properties": {
@@ -14165,6 +14253,9 @@ const docTemplate = `{
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
+                "display_enabled": {
+                    "type": "boolean"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -14308,6 +14399,9 @@ const docTemplate = `{
                 },
                 "discuss_probe_model_id": {
                     "type": "string"
+                },
+                "display_enabled": {
+                    "type": "boolean"
                 },
                 "heartbeat_enabled": {
                     "type": "boolean"

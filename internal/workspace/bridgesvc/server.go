@@ -9,10 +9,12 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -251,6 +253,98 @@ func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
 		return s.execPTY(stream, firstMsg)
 	}
 	return s.execPipe(stream, firstMsg)
+}
+
+func (*Server) Tunnel(stream pb.ContainerService_TunnelServer) error {
+	firstMsg, err := stream.Recv()
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "failed to receive tunnel open")
+	}
+	open := firstMsg.GetOpen()
+	if open == nil {
+		return status.Error(codes.InvalidArgument, "first tunnel frame must be open")
+	}
+	address, err := validateTunnelAddress(stream.Context(), open.GetAddress())
+	if err != nil {
+		return err
+	}
+
+	conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(stream.Context(), "tcp", address)
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "dial tunnel target: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	var sendMu sync.Mutex
+	sendFrame := func(frame *pb.TunnelFrame) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.Send(frame)
+	}
+	if err := sendFrame(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{}}}); err != nil {
+		return err
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := conn.Read(buf)
+			if n > 0 {
+				data := append([]byte(nil), buf[:n]...)
+				if sendErr := sendFrame(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{Data: data}}}); sendErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				closeErr := ""
+				if !errors.Is(readErr, io.EOF) {
+					closeErr = readErr.Error()
+				}
+				_ = sendFrame(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Close{Close: &pb.TunnelClose{Error: closeErr}}})
+				return
+			}
+		}
+	}()
+
+	for {
+		frame, recvErr := stream.Recv()
+		if recvErr != nil {
+			_ = conn.Close()
+			<-done
+			if errors.Is(recvErr, io.EOF) || stream.Context().Err() != nil {
+				return nil
+			}
+			return recvErr
+		}
+		switch payload := frame.GetFrame().(type) {
+		case *pb.TunnelFrame_Data:
+			if len(payload.Data.GetData()) == 0 {
+				continue
+			}
+			if _, err := conn.Write(payload.Data.GetData()); err != nil {
+				_ = conn.Close()
+				<-done
+				return status.Errorf(codes.Unavailable, "write tunnel target: %v", err)
+			}
+		case *pb.TunnelFrame_Close:
+			_ = conn.Close()
+			<-done
+			if msg := strings.TrimSpace(payload.Close.GetError()); msg != "" {
+				return status.Error(codes.Canceled, msg)
+			}
+			return nil
+		case *pb.TunnelFrame_Open:
+			_ = conn.Close()
+			<-done
+			return status.Error(codes.InvalidArgument, "tunnel already open")
+		default:
+			_ = conn.Close()
+			<-done
+			return status.Error(codes.InvalidArgument, "empty tunnel frame")
+		}
+	}
 }
 
 func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.ExecInput) error {
@@ -642,6 +736,33 @@ func isBarePath(cmd string) bool {
 		}
 	}
 	return strings.HasPrefix(cmd, "/") || !strings.Contains(cmd, "/")
+}
+
+func validateTunnelAddress(ctx context.Context, address string) (string, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return "", status.Error(codes.InvalidArgument, "tunnel address is required")
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", status.Errorf(codes.InvalidArgument, "invalid tunnel address: %v", err)
+	}
+	if _, err := net.DefaultResolver.LookupPort(ctx, "tcp", port); err != nil {
+		return "", status.Errorf(codes.InvalidArgument, "invalid tunnel port: %v", err)
+	}
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if err != nil {
+		return "", status.Errorf(codes.InvalidArgument, "resolve tunnel host: %v", err)
+	}
+	if len(ips) == 0 {
+		return "", status.Error(codes.InvalidArgument, "tunnel host did not resolve")
+	}
+	for _, ip := range ips {
+		if !ip.IsLoopback() {
+			return "", status.Error(codes.PermissionDenied, "tunnel target must resolve to loopback")
+		}
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 func streamPipe(stream pb.ContainerService_ExecServer, r io.Reader, st pb.ExecOutput_Stream) {

@@ -88,6 +88,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current := normalizeBotSetting(botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
 	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
+		current.DisplayEnabled = settingsRow.DisplayEnabled
 	}
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
@@ -127,6 +128,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.ToolApprovalConfig != nil {
 		current.ToolApprovalConfig = NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
+	}
+	if req.DisplayEnabled != nil {
+		current.DisplayEnabled = *req.DisplayEnabled
 	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
@@ -284,6 +288,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
+		DisplayEnabled:         current.DisplayEnabled,
 		OverlayProvider:        normalizedNetwork.OverlayProvider,
 		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
 		OverlayConfig:          overlayConfigJSON,
@@ -386,6 +391,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.DisplayEnabled,
 		row.OverlayProvider,
 		row.OverlayEnabled,
 		row.OverlayConfig,
@@ -416,6 +422,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.DisplayEnabled,
 		row.OverlayProvider,
 		row.OverlayEnabled,
 		row.OverlayConfig,
@@ -445,6 +452,7 @@ func normalizeBotSettingsFields(
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
+	displayEnabled bool,
 	overlayProvider string,
 	overlayEnabled bool,
 	overlayConfig []byte,
@@ -486,6 +494,7 @@ func normalizeBotSettingsFields(
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
+	settings.DisplayEnabled = displayEnabled
 	settings.OverlayProvider = strings.TrimSpace(overlayProvider)
 	settings.OverlayEnabled = overlayEnabled
 	settings.OverlayConfig = normalizeJSONObject(overlayConfig)

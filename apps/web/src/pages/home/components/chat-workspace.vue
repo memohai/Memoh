@@ -24,6 +24,11 @@
             :active="activeTab.id === tab.id"
           />
         </template>
+        <VncPane
+          v-if="activeTab.type === 'vnc' && currentBotId"
+          :key="`vnc-pane:${activeTab.id}`"
+          :bot-id="currentBotId"
+        />
       </template>
       <div
         v-else
@@ -52,6 +57,7 @@ import WorkspaceTabBar from './workspace-tab-bar.vue'
 import ChatPane from './chat-pane.vue'
 import FilePane from './file-pane.vue'
 import TerminalPane from './terminal-pane.vue'
+import VncPane from './vnc-pane.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()

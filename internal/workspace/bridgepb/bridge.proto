@@ -12,6 +12,7 @@ service ContainerService {
   rpc Mkdir(MkdirRequest) returns (MkdirResponse);
   rpc Rename(RenameRequest) returns (RenameResponse);
   rpc Exec(stream ExecInput) returns (stream ExecOutput);
+  rpc Tunnel(stream TunnelFrame) returns (stream TunnelFrame);
   rpc ReadRaw(ReadRawRequest) returns (stream DataChunk);
   rpc WriteRaw(stream WriteRawChunk) returns (WriteRawResponse);
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
@@ -83,6 +84,26 @@ message ExecOutput {
   Stream stream = 1;
   bytes data = 2;
   int32 exit_code = 3;
+}
+
+message TunnelOpen {
+  string address = 1;
+}
+
+message TunnelData {
+  bytes data = 1;
+}
+
+message TunnelClose {
+  string error = 1;
+}
+
+message TunnelFrame {
+  oneof frame {
+    TunnelOpen open = 1;
+    TunnelData data = 2;
+    TunnelClose close = 3;
+  }
 }
 
 message ReadRawRequest {

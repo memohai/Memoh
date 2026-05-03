@@ -308,6 +308,20 @@
       />
     </div>
 
+    <!-- Workspace Display -->
+    <div class="flex items-center justify-between">
+      <div class="space-y-1">
+        <Label>{{ $t('bots.settings.displayEnabled') }}</Label>
+        <p class="text-xs text-muted-foreground">
+          {{ $t('bots.settings.displayEnabledDescription') }}
+        </p>
+      </div>
+      <Switch
+        :model-value="form.display_enabled"
+        @update:model-value="(val) => form.display_enabled = !!val"
+      />
+    </div>
+
     <!-- Save -->
     <div class="flex justify-end">
       <Button
@@ -556,6 +570,7 @@ const form = reactive({
   reasoning_enabled: false,
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
+  display_enabled: false,
 })
 
 const selectedMemoryProvider = computed(() =>
@@ -697,6 +712,7 @@ watch(settings, (val) => {
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
+    form.display_enabled = val.display_enabled ?? false
   }
 }, { immediate: true })
 
@@ -721,6 +737,7 @@ const hasSettingsChanges = computed(() => {
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
+    || form.display_enabled !== (s.display_enabled ?? false)
   )
 })
 
