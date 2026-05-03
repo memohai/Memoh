@@ -111,11 +111,17 @@ function extractZipArchive(archivePath, extractDir) {
   if (process.platform === 'win32') {
     execFileSync('powershell.exe', [
       '-NoProfile',
+      '-NonInteractive',
       '-Command',
-      'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
-      archivePath,
-      extractDir,
-    ], { stdio: 'inherit' })
+      '$ErrorActionPreference = "Stop"; Expand-Archive -LiteralPath $env:MEMOH_QDRANT_ARCHIVE -DestinationPath $env:MEMOH_QDRANT_EXTRACT_DIR -Force',
+    ], {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        MEMOH_QDRANT_ARCHIVE: archivePath,
+        MEMOH_QDRANT_EXTRACT_DIR: extractDir,
+      },
+    })
     return
   }
   execFileSync('unzip', ['-q', archivePath, '-d', extractDir], { stdio: 'inherit' })
