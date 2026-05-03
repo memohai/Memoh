@@ -110,3 +110,4 @@ _main-ref/
 .toolkit/
 /scripts/vendor
 design-env/
+.gemini/settings.json

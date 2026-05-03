@@ -152,7 +152,7 @@
         <div
           v-for="i in 5"
           :key="i"
-          class="h-10 rounded-md border bg-muted/10 animate-pulse"
+          class="h-12 rounded-md border bg-muted/10 animate-pulse"
         />
       </div>
 
