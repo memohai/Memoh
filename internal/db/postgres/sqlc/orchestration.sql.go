@@ -1665,6 +1665,16 @@ func (q *Queries) CreateOrchestrationVerificationActionRecord(ctx context.Contex
 	return i, err
 }
 
+const deleteOrchestrationTaskResultByID = `-- name: DeleteOrchestrationTaskResultByID :exec
+DELETE FROM orchestration_task_results
+WHERE id = $1
+`
+
+func (q *Queries) DeleteOrchestrationTaskResultByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteOrchestrationTaskResultByID, id)
+	return err
+}
+
 const failOrchestrationPlanningIntent = `-- name: FailOrchestrationPlanningIntent :one
 UPDATE orchestration_planning_intents
 SET status = 'failed',
@@ -2147,6 +2157,32 @@ func (q *Queries) GetOrchestrationTaskByIDForUpdate(ctx context.Context, id pgty
 	return i, err
 }
 
+const getOrchestrationTaskResultByAttemptID = `-- name: GetOrchestrationTaskResultByAttemptID :one
+SELECT id, run_id, task_id, attempt_id, status, summary, failure_class, request_replan, artifact_intents, structured_output, created_at, updated_at
+FROM orchestration_task_results
+WHERE attempt_id = $1
+`
+
+func (q *Queries) GetOrchestrationTaskResultByAttemptID(ctx context.Context, attemptID pgtype.UUID) (OrchestrationTaskResult, error) {
+	row := q.db.QueryRow(ctx, getOrchestrationTaskResultByAttemptID, attemptID)
+	var i OrchestrationTaskResult
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.Status,
+		&i.Summary,
+		&i.FailureClass,
+		&i.RequestReplan,
+		&i.ArtifactIntents,
+		&i.StructuredOutput,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getOrchestrationTaskResultByID = `-- name: GetOrchestrationTaskResultByID :one
 SELECT id, run_id, task_id, attempt_id, status, summary, failure_class, request_replan, artifact_intents, structured_output, created_at, updated_at
 FROM orchestration_task_results
@@ -2267,6 +2303,46 @@ func (q *Queries) GetOrchestrationWorkerByIDForUpdate(ctx context.Context, id st
 		&i.LeaseExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTerminalOrchestrationVerificationEventByID = `-- name: GetTerminalOrchestrationVerificationEventByID :one
+SELECT id, run_id, task_id, attempt_id, checkpoint_id, seq, aggregate_type, aggregate_id, aggregate_version, type, causation_event_id, correlation_id, idempotency_key, payload, created_at, published_at
+FROM orchestration_events
+WHERE run_id = $1
+  AND aggregate_type = 'verification'
+  AND aggregate_id = $2
+  AND type IN ('run.event.verification.passed', 'run.event.verification.rejected')
+ORDER BY seq DESC
+LIMIT 1
+`
+
+type GetTerminalOrchestrationVerificationEventByIDParams struct {
+	RunID          pgtype.UUID `json:"run_id"`
+	VerificationID pgtype.UUID `json:"verification_id"`
+}
+
+func (q *Queries) GetTerminalOrchestrationVerificationEventByID(ctx context.Context, arg GetTerminalOrchestrationVerificationEventByIDParams) (OrchestrationEvent, error) {
+	row := q.db.QueryRow(ctx, getTerminalOrchestrationVerificationEventByID, arg.RunID, arg.VerificationID)
+	var i OrchestrationEvent
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.AttemptID,
+		&i.CheckpointID,
+		&i.Seq,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.AggregateVersion,
+		&i.Type,
+		&i.CausationEventID,
+		&i.CorrelationID,
+		&i.IdempotencyKey,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.PublishedAt,
 	)
 	return i, err
 }

@@ -822,6 +822,7 @@ CREATE TABLE IF NOT EXISTS orchestration_task_results (
 );
 
 CREATE INDEX IF NOT EXISTS idx_orchestration_task_results_run_created_at ON orchestration_task_results(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orchestration_task_results_attempt ON orchestration_task_results(attempt_id) WHERE attempt_id IS NOT NULL;
 
 -- orchestration_artifacts: authoritative committed artifact metadata
 CREATE TABLE IF NOT EXISTS orchestration_artifacts (
@@ -1231,6 +1232,7 @@ CREATE TABLE IF NOT EXISTS orchestration_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_run_seq ON orchestration_events(run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_orchestration_events_aggregate_seq ON orchestration_events(run_id, aggregate_type, aggregate_id, seq DESC);
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_task_seq ON orchestration_events(task_id, seq) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_checkpoint_seq ON orchestration_events(checkpoint_id, seq) WHERE checkpoint_id IS NOT NULL;
 

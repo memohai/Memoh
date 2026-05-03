@@ -1,10 +1,12 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"strconv"
@@ -898,6 +900,13 @@ func (s *Service) processAttemptFinalizePlanningIntent(ctx context.Context, qtx 
 		}
 	case TaskAttemptStatusFailed, TaskAttemptStatusLost:
 		if taskRow.Status == TaskStatusRunning {
+			if shouldAutoRetryAttemptFailure(taskRow, attemptRow, completionStatus, requestReplan) {
+				lastEvent, err = s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, attemptRow, resultUUID, "attempt_finalize", failureClass, normalizeAttemptTerminalReason(terminalReason))
+				if err != nil {
+					return sqlc.OrchestrationEvent{}, err
+				}
+				break
+			}
 			failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
 				ID:             taskRow.ID,
 				LatestResultID: resultUUID,
@@ -1984,6 +1993,9 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		return nil, ErrAttemptLeaseConflict
 	}
 	if isTerminalAttemptStatus(attemptRow.Status) {
+		if err := validateTerminalAttemptCompletionReplay(ctx, qtx, attemptRow, input, completionStatus); err != nil {
+			return nil, err
+		}
 		attempt := toTaskAttempt(attemptRow)
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit replayed complete attempt tx: %w", err)
@@ -2051,6 +2063,7 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		return nil, ErrAttemptImmutable
 	}
 
+	artifactIntents := normalizeAttemptArtifactIntents(input.ArtifactIntents)
 	resultRow, err := qtx.CreateOrchestrationTaskResult(ctx, sqlc.CreateOrchestrationTaskResultParams{
 		RunID:            attemptRow.RunID,
 		TaskID:           attemptRow.TaskID,
@@ -2059,17 +2072,14 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		Summary:          strings.TrimSpace(input.Summary),
 		FailureClass:     strings.TrimSpace(input.FailureClass),
 		RequestReplan:    input.RequestReplan,
-		ArtifactIntents:  marshalJSON(input.ArtifactIntents),
+		ArtifactIntents:  marshalJSON(artifactIntents),
 		StructuredOutput: marshalObject(input.StructuredOutput),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create task result from attempt completion: %w", err)
 	}
 
-	for _, artifact := range input.ArtifactIntents {
-		if strings.TrimSpace(artifact.Kind) == "" || strings.TrimSpace(artifact.URI) == "" || strings.TrimSpace(artifact.Version) == "" || strings.TrimSpace(artifact.Digest) == "" {
-			continue
-		}
+	for _, artifact := range artifactIntents {
 		artifactID, artifactUUID, err := newPGUUID()
 		if err != nil {
 			return nil, err
@@ -2079,12 +2089,12 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 			RunID:       attemptRow.RunID,
 			TaskID:      attemptRow.TaskID,
 			AttemptID:   attemptRow.ID,
-			Kind:        strings.TrimSpace(artifact.Kind),
-			Uri:         strings.TrimSpace(artifact.URI),
-			Version:     strings.TrimSpace(artifact.Version),
-			Digest:      strings.TrimSpace(artifact.Digest),
-			ContentType: strings.TrimSpace(artifact.ContentType),
-			Summary:     strings.TrimSpace(artifact.Summary),
+			Kind:        artifact.Kind,
+			Uri:         artifact.URI,
+			Version:     artifact.Version,
+			Digest:      artifact.Digest,
+			ContentType: artifact.ContentType,
+			Summary:     artifact.Summary,
 			Metadata:    marshalObject(artifact.Metadata),
 		})
 		if err != nil {
@@ -2229,6 +2239,254 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 	}
 	attempt := toTaskAttempt(finalAttempt)
 	return &attempt, nil
+}
+
+func validateTerminalAttemptCompletionReplay(ctx context.Context, qtx *sqlc.Queries, attemptRow sqlc.OrchestrationTaskAttempt, input AttemptCompletion, completionStatus string) error {
+	if attemptRow.Status != completionStatus {
+		return fmt.Errorf("%w: terminal attempt status is %q, replay status is %q", ErrCompletionReplayConflict, attemptRow.Status, completionStatus)
+	}
+	if completionStatus == TaskAttemptStatusFailed {
+		if strings.TrimSpace(attemptRow.FailureClass) != strings.TrimSpace(input.FailureClass) {
+			return fmt.Errorf("%w: terminal attempt failure_class mismatch", ErrCompletionReplayConflict)
+		}
+		if strings.TrimSpace(attemptRow.TerminalReason) != normalizeAttemptTerminalReason(input.TerminalReason) {
+			return fmt.Errorf("%w: terminal attempt terminal_reason mismatch", ErrCompletionReplayConflict)
+		}
+	}
+	resultRow, err := qtx.GetOrchestrationTaskResultByAttemptID(ctx, attemptRow.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: terminal attempt result is no longer current", ErrCompletionReplayConflict)
+		}
+		return fmt.Errorf("load attempt replay result: %w", err)
+	}
+	if resultRow.Status != completionStatus {
+		return fmt.Errorf("%w: terminal attempt result status mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(resultRow.Summary) != strings.TrimSpace(input.Summary) {
+		return fmt.Errorf("%w: terminal attempt summary mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(resultRow.FailureClass) != strings.TrimSpace(input.FailureClass) {
+		return fmt.Errorf("%w: terminal attempt result failure_class mismatch", ErrCompletionReplayConflict)
+	}
+	if resultRow.RequestReplan != input.RequestReplan {
+		return fmt.Errorf("%w: terminal attempt request_replan mismatch", ErrCompletionReplayConflict)
+	}
+	if !artifactIntentsMatch(resultRow.ArtifactIntents, input.ArtifactIntents) {
+		return fmt.Errorf("%w: terminal attempt artifact_intents mismatch", ErrCompletionReplayConflict)
+	}
+	if !jsonValueMatches(resultRow.StructuredOutput, normalizeObject(input.StructuredOutput)) {
+		return fmt.Errorf("%w: terminal attempt structured_output mismatch", ErrCompletionReplayConflict)
+	}
+	return nil
+}
+
+func jsonValueMatches(raw []byte, value any) bool {
+	leftValue, err := decodeJSONValuePreservingNumbers(raw)
+	if err != nil {
+		return false
+	}
+	rightValue, err := decodeJSONValuePreservingNumbers(marshalJSON(value))
+	if err != nil {
+		return false
+	}
+	return normalizedJSONValuesMatch(leftValue, rightValue)
+}
+
+func normalizedJSONValuesMatch(leftValue, rightValue any) bool {
+	left, err := hashJSON(leftValue)
+	if err != nil {
+		return false
+	}
+	right, err := hashJSON(rightValue)
+	if err != nil {
+		return false
+	}
+	return left == right
+}
+
+func artifactIntentsMatch(raw []byte, intents []AttemptArtifactIntent) bool {
+	leftValue, err := decodeJSONValuePreservingNumbers(raw)
+	if err != nil {
+		return false
+	}
+	rightValue, err := decodeJSONValuePreservingNumbers(marshalJSON(normalizeAttemptArtifactIntents(intents)))
+	if err != nil {
+		return false
+	}
+	return normalizedJSONValuesMatch(normalizeAttemptArtifactIntentsValue(leftValue), normalizeAttemptArtifactIntentsValue(rightValue))
+}
+
+func decodeJSONValuePreservingNumbers(raw []byte) (any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("multiple json values")
+	}
+	return normalizeJSONValue(value), nil
+}
+
+func normalizeAttemptArtifactIntentsValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return []any{}
+	case []any:
+		normalized := make([]any, 0, len(typed))
+		for _, item := range typed {
+			normalized = append(normalized, normalizeAttemptArtifactIntentValue(item))
+		}
+		return normalized
+	default:
+		return normalizeJSONValue(value)
+	}
+}
+
+func normalizeAttemptArtifactIntentValue(value any) any {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return normalizeJSONValue(value)
+	}
+	normalized := make(map[string]any, len(object)+1)
+	for key, item := range object {
+		if key == "metadata" {
+			continue
+		}
+		normalized[key] = normalizeJSONValue(item)
+	}
+	metadata, ok := object["metadata"]
+	if !ok || metadata == nil {
+		normalized["metadata"] = map[string]any{}
+		return normalized
+	}
+	metadataObject, ok := metadata.(map[string]any)
+	if !ok {
+		normalized["metadata"] = normalizeJSONValue(metadata)
+		return normalized
+	}
+	normalized["metadata"] = normalizeObject(metadataObject)
+	return normalized
+}
+
+func normalizeAttemptArtifactIntents(intents []AttemptArtifactIntent) []AttemptArtifactIntent {
+	if len(intents) == 0 {
+		return []AttemptArtifactIntent{}
+	}
+	normalized := make([]AttemptArtifactIntent, 0, len(intents))
+	for _, intent := range intents {
+		item := AttemptArtifactIntent{
+			Kind:        strings.TrimSpace(intent.Kind),
+			URI:         strings.TrimSpace(intent.URI),
+			Version:     strings.TrimSpace(intent.Version),
+			Digest:      strings.TrimSpace(intent.Digest),
+			ContentType: strings.TrimSpace(intent.ContentType),
+			Summary:     strings.TrimSpace(intent.Summary),
+			Metadata:    normalizeObject(intent.Metadata),
+		}
+		if item.Kind == "" || item.URI == "" || item.Version == "" || item.Digest == "" {
+			continue
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func shouldAutoRetryAttemptFailure(taskRow sqlc.OrchestrationTask, attemptRow sqlc.OrchestrationTaskAttempt, completionStatus string, requestReplan bool) bool {
+	if requestReplan {
+		return false
+	}
+	switch completionStatus {
+	case TaskAttemptStatusFailed, TaskAttemptStatusLost:
+	default:
+		return false
+	}
+	maxAttempts := attemptRetryMaxAttempts(decodeJSONObject(taskRow.RetryPolicy))
+	return maxAttempts > 1 && attemptRow.AttemptNo > 0 && attemptRow.AttemptNo < maxAttempts
+}
+
+func attemptRetryMaxAttempts(policy map[string]any) int32 {
+	value, ok := policy["max_attempts"]
+	if !ok {
+		return 1
+	}
+	maxAttempts, ok := positiveInt32FromJSON(value)
+	if !ok || maxAttempts < 1 {
+		return 1
+	}
+	return maxAttempts
+}
+
+func positiveInt32FromJSON(value any) (int32, bool) {
+	switch typed := value.(type) {
+	case int:
+		if typed > 0 && typed <= math.MaxInt32 {
+			return int32(typed), true
+		}
+	case int32:
+		if typed > 0 {
+			return typed, true
+		}
+	case int64:
+		if typed > 0 && typed <= math.MaxInt32 {
+			return int32(typed), true
+		}
+	case float64:
+		if typed > 0 && typed <= math.MaxInt32 && math.Trunc(typed) == typed {
+			return int32(typed), true
+		}
+	case json.Number:
+		parsed, err := strconv.ParseInt(typed.String(), 10, 32)
+		if err == nil && parsed > 0 {
+			return int32(parsed), true
+		}
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 32)
+		if err == nil && parsed > 0 {
+			return int32(parsed), true
+		}
+	}
+	return 0, false
+}
+
+func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.Queries, taskRow sqlc.OrchestrationTask, attemptRow sqlc.OrchestrationTaskAttempt, resultID pgtype.UUID, reason, failureClass, terminalReason string) (sqlc.OrchestrationEvent, error) {
+	if resultID.Valid {
+		if err := qtx.DeleteOrchestrationTaskResultByID(ctx, resultID); err != nil {
+			return sqlc.OrchestrationEvent{}, fmt.Errorf("delete retried attempt result: %w", err)
+		}
+	}
+	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, taskRow.ID)
+	if err != nil {
+		return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task ready for automatic retry: %w", err)
+	}
+	maxAttempts := attemptRetryMaxAttempts(decodeJSONObject(taskRow.RetryPolicy))
+	return s.appendEvent(ctx, qtx, taskRow.RunID, eventSpec{
+		TaskID:           readyTask.ID,
+		AttemptID:        attemptRow.ID,
+		AggregateType:    "task",
+		AggregateID:      readyTask.ID,
+		AggregateVersion: readyTask.StatusVersion,
+		Type:             "run.event.task.ready",
+		Payload: map[string]any{
+			"task_id":         readyTask.ID.String(),
+			"attempt_id":      attemptRow.ID.String(),
+			"previous_status": taskRow.Status,
+			"new_status":      readyTask.Status,
+			"ready_reason":    "attempt_retry",
+			"retry_reason":    strings.TrimSpace(reason),
+			"attempt_no":      attemptRow.AttemptNo,
+			"next_attempt_no": attemptRow.AttemptNo + 1,
+			"max_attempts":    maxAttempts,
+			"failure_class":   strings.TrimSpace(failureClass),
+			"terminal_reason": strings.TrimSpace(terminalReason),
+		},
+	})
 }
 
 func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
@@ -2406,21 +2664,6 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			_ = tx.Rollback(ctx)
 			return recovered, fmt.Errorf("retire expired attempt: %w", err)
 		}
-		resultRow, err := qtx.CreateOrchestrationTaskResult(ctx, sqlc.CreateOrchestrationTaskResultParams{
-			RunID:            attemptRow.RunID,
-			TaskID:           attemptRow.TaskID,
-			AttemptID:        attemptRow.ID,
-			Status:           TaskAttemptStatusFailed,
-			Summary:          "attempt lease expired",
-			FailureClass:     "lease_expired",
-			RequestReplan:    false,
-			ArtifactIntents:  marshalJSON([]AttemptArtifactIntent{}),
-			StructuredOutput: marshalObject(nil),
-		})
-		if err != nil {
-			_ = tx.Rollback(ctx)
-			return recovered, fmt.Errorf("create result for lost attempt: %w", err)
-		}
 		if taskRow.SupersededByPlannerEpoch.Valid {
 			if _, _, err := s.maybeMarkRunCompletedAfterTaskTransition(ctx, qtx, runRow, taskRow.ID, lostAttempt.ID); err != nil {
 				_ = tx.Rollback(ctx)
@@ -2468,6 +2711,32 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 			}
 			recovered++
 			continue
+		}
+		if !taskRow.SupersededByPlannerEpoch.Valid && shouldAutoRetryAttemptFailure(taskRow, lostAttempt, TaskAttemptStatusLost, false) {
+			if _, err := s.markTaskReadyForAutomaticRetry(ctx, qtx, taskRow, lostAttempt, pgtype.UUID{}, "attempt_lease_expired", "lease_expired", "attempt lease expired"); err != nil {
+				_ = tx.Rollback(ctx)
+				return recovered, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return recovered, fmt.Errorf("commit attempt retry recovery tx: %w", err)
+			}
+			recovered++
+			continue
+		}
+		resultRow, err := qtx.CreateOrchestrationTaskResult(ctx, sqlc.CreateOrchestrationTaskResultParams{
+			RunID:            attemptRow.RunID,
+			TaskID:           attemptRow.TaskID,
+			AttemptID:        attemptRow.ID,
+			Status:           TaskAttemptStatusFailed,
+			Summary:          "attempt lease expired",
+			FailureClass:     "lease_expired",
+			RequestReplan:    false,
+			ArtifactIntents:  marshalJSON([]AttemptArtifactIntent{}),
+			StructuredOutput: marshalObject(nil),
+		})
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return recovered, fmt.Errorf("create result for lost attempt: %w", err)
 		}
 		failedTask, err := qtx.MarkOrchestrationTaskFailed(ctx, sqlc.MarkOrchestrationTaskFailedParams{
 			ID:             taskRow.ID,

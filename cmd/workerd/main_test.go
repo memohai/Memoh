@@ -95,6 +95,67 @@ func TestRunAttemptHeartbeatLoopCancelsAfterRepeatedFailures(t *testing.T) {
 	}
 }
 
+func TestRunAttemptHeartbeatLoopTreatsImmutableAsLocalStop(t *testing.T) {
+	runtime := &fakeAttemptRuntime{
+		heartbeatErrs: []error{orchestration.ErrAttemptImmutable},
+	}
+	log := slog.New(slog.DiscardHandler)
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	defer cancelCtx()
+	execCtx, cancelExec := context.WithCancel(context.Background())
+	defer cancelExec()
+	done := make(chan bool, 1)
+
+	go runAttemptHeartbeatLoopWithInterval(ctx, cancelExec, runtime, log, orchestration.AttemptFence{
+		AttemptID:  "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Millisecond, done)
+
+	select {
+	case leaseLost := <-done:
+		if leaseLost {
+			t.Fatal("runAttemptHeartbeatLoopWithInterval() leaseLost = true, want false")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("runAttemptHeartbeatLoopWithInterval() timed out")
+	}
+
+	select {
+	case <-execCtx.Done():
+	default:
+		t.Fatal("execution context was not cancelled after immutable heartbeat")
+	}
+}
+
+func TestRunAttemptDropsStaleCompletionAfterImmutableHeartbeat(t *testing.T) {
+	runtime := &fakeAttemptRuntime{
+		heartbeatErrs: []error{orchestration.ErrAttemptImmutable},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runAttemptWithInterval(context.Background(), runtime, log, orchestration.TaskAttempt{
+		ID:         "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Millisecond, []string{"root"}, func(ctx context.Context, attempt orchestration.TaskAttempt, _ []string) orchestration.AttemptCompletion {
+		<-ctx.Done()
+		return orchestration.AttemptCompletion{
+			AttemptID:  attempt.ID,
+			ClaimToken: attempt.ClaimToken,
+			Status:     orchestration.TaskAttemptStatusCompleted,
+			Summary:    "done",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runAttemptWithInterval() leaseLost = true, want false")
+	}
+	if runtime.heartbeatCalls != 1 {
+		t.Fatalf("heartbeat call count = %d, want 1", runtime.heartbeatCalls)
+	}
+	if len(runtime.completions) != 0 {
+		t.Fatalf("completion count = %d, want 0", len(runtime.completions))
+	}
+}
+
 func TestRunAttemptRewritesSuccessfulCompletionOnShutdown(t *testing.T) {
 	runtime := &fakeAttemptRuntime{}
 	log := slog.New(slog.DiscardHandler)
@@ -286,5 +347,91 @@ func TestRunAttemptRetriesAfterCompletionAckLossAndConverges(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runtime.completions[0], runtime.completions[1]) {
 		t.Fatalf("replayed completion mismatch: first=%+v second=%+v", runtime.completions[0], runtime.completions[1])
+	}
+}
+
+func TestRunAttemptRetriesAckLossWithSamePayloadAfterShutdown(t *testing.T) {
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	runtime := &fakeAttemptRuntime{
+		completeCallback: func(_ orchestration.AttemptCompletion, call int) error {
+			if call == 1 {
+				cancelParent()
+				return errors.New("completion ack lost after commit")
+			}
+			return nil
+		},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runAttemptWithInterval(parentCtx, runtime, log, orchestration.TaskAttempt{
+		ID:         "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{"root"}, func(_ context.Context, attempt orchestration.TaskAttempt, _ []string) orchestration.AttemptCompletion {
+		return orchestration.AttemptCompletion{
+			AttemptID:  attempt.ID,
+			ClaimToken: attempt.ClaimToken,
+			Status:     orchestration.TaskAttemptStatusCompleted,
+			Summary:    "done",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runAttemptWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(runtime.completions))
+	}
+	if !reflect.DeepEqual(runtime.completions[0], runtime.completions[1]) {
+		t.Fatalf("replayed completion mismatch after shutdown: first=%+v second=%+v", runtime.completions[0], runtime.completions[1])
+	}
+}
+
+func TestRunAttemptStopsOnCompletionReplayConflict(t *testing.T) {
+	runtime := &fakeAttemptRuntime{
+		completeErrs: []error{orchestration.ErrCompletionReplayConflict},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runAttemptWithInterval(context.Background(), runtime, log, orchestration.TaskAttempt{
+		ID:         "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{"root"}, func(_ context.Context, attempt orchestration.TaskAttempt, _ []string) orchestration.AttemptCompletion {
+		return orchestration.AttemptCompletion{
+			AttemptID:  attempt.ID,
+			ClaimToken: attempt.ClaimToken,
+			Status:     orchestration.TaskAttemptStatusCompleted,
+			Summary:    "done",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runAttemptWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 1 {
+		t.Fatalf("completion count = %d, want 1", len(runtime.completions))
+	}
+}
+
+func TestRunAttemptTreatsCompletionImmutableAsNonLeaseLoss(t *testing.T) {
+	runtime := &fakeAttemptRuntime{
+		completeErrs: []error{orchestration.ErrAttemptImmutable},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runAttemptWithInterval(context.Background(), runtime, log, orchestration.TaskAttempt{
+		ID:         "attempt-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{"root"}, func(_ context.Context, attempt orchestration.TaskAttempt, _ []string) orchestration.AttemptCompletion {
+		return orchestration.AttemptCompletion{
+			AttemptID:  attempt.ID,
+			ClaimToken: attempt.ClaimToken,
+			Status:     orchestration.TaskAttemptStatusCompleted,
+			Summary:    "done",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runAttemptWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 1 {
+		t.Fatalf("completion count = %d, want 1", len(runtime.completions))
 	}
 }

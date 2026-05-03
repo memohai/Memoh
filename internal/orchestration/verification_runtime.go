@@ -486,20 +486,6 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 	if verdict == "" {
 		return nil, fmt.Errorf("%w: unsupported verification verdict %q", ErrInvalidArgument, input.Verdict)
 	}
-	if input.RequestReplan && (verdict != VerificationVerdictRejected || completionStatus != TaskVerificationStatusCompleted) {
-		return nil, fmt.Errorf("%w: request_replan requires completed rejected verification", ErrInvalidArgument)
-	}
-	if verdict == VerificationVerdictAccepted {
-		if completionStatus != TaskVerificationStatusCompleted {
-			return nil, fmt.Errorf("%w: accepted verification must complete successfully", ErrInvalidArgument)
-		}
-		if input.RequestReplan {
-			return nil, fmt.Errorf("%w: accepted verification cannot request_replan", ErrInvalidArgument)
-		}
-	}
-	if completionStatus == TaskVerificationStatusFailed && verdict != VerificationVerdictRejected {
-		return nil, fmt.Errorf("%w: failed verification must be rejected", ErrInvalidArgument)
-	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -522,11 +508,28 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 		return nil, ErrVerificationLeaseConflict
 	}
 	if isTerminalVerificationStatus(row.Status) {
+		if err := validateTerminalVerificationCompletionReplay(ctx, qtx, row, input, completionStatus, verdict); err != nil {
+			return nil, err
+		}
 		verification := toTaskVerification(row)
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit replayed complete verification tx: %w", err)
 		}
 		return &verification, nil
+	}
+	if input.RequestReplan && (verdict != VerificationVerdictRejected || completionStatus != TaskVerificationStatusCompleted) {
+		return nil, fmt.Errorf("%w: request_replan requires completed rejected verification", ErrInvalidArgument)
+	}
+	if verdict == VerificationVerdictAccepted {
+		if completionStatus != TaskVerificationStatusCompleted {
+			return nil, fmt.Errorf("%w: accepted verification must complete successfully", ErrInvalidArgument)
+		}
+		if input.RequestReplan {
+			return nil, fmt.Errorf("%w: accepted verification cannot request_replan", ErrInvalidArgument)
+		}
+	}
+	if completionStatus == TaskVerificationStatusFailed && verdict != VerificationVerdictRejected {
+		return nil, fmt.Errorf("%w: failed verification must be rejected", ErrInvalidArgument)
 	}
 	observedAt, err := databaseNow(ctx, tx)
 	if err != nil {
@@ -798,6 +801,51 @@ func (s *Service) CompleteVerification(ctx context.Context, input VerificationCo
 	}
 	verification := toTaskVerification(finalRow)
 	return &verification, nil
+}
+
+func validateTerminalVerificationCompletionReplay(ctx context.Context, qtx *sqlc.Queries, row sqlc.OrchestrationTaskVerification, input VerificationCompletion, completionStatus, verdict string) error {
+	if row.Status != completionStatus {
+		return fmt.Errorf("%w: terminal verification status is %q, replay status is %q", ErrCompletionReplayConflict, row.Status, completionStatus)
+	}
+	if row.Verdict != verdict {
+		return fmt.Errorf("%w: terminal verification verdict mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(row.Summary) != strings.TrimSpace(input.Summary) {
+		return fmt.Errorf("%w: terminal verification summary mismatch", ErrCompletionReplayConflict)
+	}
+	if strings.TrimSpace(row.FailureClass) != strings.TrimSpace(input.FailureClass) {
+		return fmt.Errorf("%w: terminal verification failure_class mismatch", ErrCompletionReplayConflict)
+	}
+	expectedTerminalReason := strings.TrimSpace(input.TerminalReason)
+	if completionStatus == TaskVerificationStatusFailed {
+		expectedTerminalReason = normalizeVerificationTerminalReason(input.TerminalReason, verdict)
+	}
+	if strings.TrimSpace(row.TerminalReason) != expectedTerminalReason {
+		return fmt.Errorf("%w: terminal verification terminal_reason mismatch", ErrCompletionReplayConflict)
+	}
+	if err := validateTerminalVerificationRequestReplanReplay(ctx, qtx, row, input.RequestReplan); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateTerminalVerificationRequestReplanReplay(ctx context.Context, qtx *sqlc.Queries, row sqlc.OrchestrationTaskVerification, requestReplan bool) error {
+	event, err := qtx.GetTerminalOrchestrationVerificationEventByID(ctx, sqlc.GetTerminalOrchestrationVerificationEventByIDParams{
+		RunID:          row.RunID,
+		VerificationID: row.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: terminal verification event missing", ErrCompletionReplayConflict)
+		}
+		return fmt.Errorf("load terminal verification event: %w", err)
+	}
+	payload := decodeJSONObject(event.Payload)
+	original, _ := payload["request_replan"].(bool)
+	if original != requestReplan {
+		return fmt.Errorf("%w: terminal verification request_replan mismatch", ErrCompletionReplayConflict)
+	}
+	return nil
 }
 
 func (s *Service) RecoverExpiredVerifications(ctx context.Context) (int, error) {
@@ -1189,16 +1237,23 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime ClaimedVeri
 		}
 	}
 
+	completionSubmitted := false
 	for {
-		if done, leaseLost := checkHeartbeat(false); done && leaseLost {
-			return true
+		if done, leaseLost := checkHeartbeat(false); done {
+			if leaseLost {
+				return true
+			}
+			if ctx.Err() == nil {
+				return false
+			}
 		}
 
-		if ctx.Err() != nil && completion.Status == TaskVerificationStatusCompleted {
+		if !completionSubmitted && ctx.Err() != nil && completion.Status == TaskVerificationStatusCompleted {
 			completion = fence.Completion(workerShutdownVerificationCompletion(verification))
 		}
 
 		completeCtx, cancelComplete := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		completionSubmitted = true
 		_, completeErr := runtime.CompleteVerification(completeCtx, completion)
 		cancelComplete()
 		if completeErr == nil {
@@ -1213,7 +1268,9 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime ClaimedVeri
 		}
 
 		log.Error("complete verification failed", slog.String("verification_id", verification.ID), slog.Any("error", completeErr))
-		if errors.Is(completeErr, ErrVerificationLeaseConflict) || errors.Is(completeErr, ErrVerificationImmutable) {
+		if errors.Is(completeErr, ErrVerificationLeaseConflict) ||
+			errors.Is(completeErr, ErrVerificationImmutable) ||
+			errors.Is(completeErr, ErrCompletionReplayConflict) {
 			cancelHeartbeat()
 			if done, leaseLost := checkHeartbeat(true); done {
 				return leaseLost || errors.Is(completeErr, ErrVerificationLeaseConflict)
@@ -1227,8 +1284,10 @@ func RunClaimedVerificationWithInterval(ctx context.Context, runtime ClaimedVeri
 			if leaseLost {
 				return true
 			}
-			cancelHeartbeat()
-			return false
+			if ctx.Err() == nil {
+				cancelHeartbeat()
+				return false
+			}
 		case <-ctx.Done():
 		case <-time.After(verificationCompletionRetryInterval):
 		}

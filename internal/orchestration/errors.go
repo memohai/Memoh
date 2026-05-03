@@ -29,6 +29,7 @@ var (
 	ErrAttemptAlreadyClaimed       = errors.New("orchestration task attempt already claimed")
 	ErrAttemptLeaseConflict        = errors.New("orchestration task attempt lease conflict")
 	ErrAttemptImmutable            = errors.New("orchestration task attempt is immutable")
+	ErrCompletionReplayConflict    = errors.New("orchestration completion replay conflict")
 	ErrNoRunnableAttempt           = errors.New("no runnable orchestration task attempt")
 	ErrVerificationNotFound        = errors.New("orchestration task verification not found")
 	ErrVerificationLeaseConflict   = errors.New("orchestration task verification lease conflict")

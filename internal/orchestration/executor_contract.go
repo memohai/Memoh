@@ -67,6 +67,14 @@ type WorkerLeaseRuntime interface {
 
 // ClaimedAttemptRuntime is the narrow contract a worker uses after an attempt
 // has been claimed. All calls must carry the current claim token.
+// CompleteAttempt is terminal-idempotent for durable completed/failed
+// completion identity while the attempt's result is still current: replaying
+// the same status/result/request-replan/failure fields after an ack loss
+// returns the terminal attempt, while a different durable terminal replay
+// returns ErrCompletionReplayConflict and must be treated as non-retryable and
+// not as lease loss. CompletionMetadata, IdempotencyKey, and successful
+// TerminalReason are executor telemetry/reserved inputs; they are not durable
+// replay identity.
 type ClaimedAttemptRuntime interface {
 	HeartbeatAttempt(context.Context, AttemptHeartbeat) (*TaskAttempt, error)
 	CompleteAttempt(context.Context, AttemptCompletion) (*TaskAttempt, error)
@@ -82,7 +90,10 @@ type AttemptExecutor interface {
 }
 
 // ClaimedVerificationRuntime is the verifier equivalent of
-// ClaimedAttemptRuntime.
+// ClaimedAttemptRuntime. CompleteVerification follows the same terminal replay
+// contract for its durable status/verdict/summary/failure/request-replan
+// identity: identical replay succeeds, conflicting replay returns
+// ErrCompletionReplayConflict without implying lease loss.
 type ClaimedVerificationRuntime interface {
 	HeartbeatVerification(context.Context, VerificationHeartbeat) (*TaskVerification, error)
 	CompleteVerification(context.Context, VerificationCompletion) (*TaskVerification, error)

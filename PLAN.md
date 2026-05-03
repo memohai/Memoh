@@ -2204,7 +2204,7 @@ type OrchestrationClient interface {
 - `InjectRunHint` 重试时不得创建第二条语义重复的 `PlanningIntent`
 - `ResolveCheckpoint` 重试时不得重复推进 checkpoint 状态机
 - `RetryTask` 重试时不得为同一 task 重复创建 retry path 或 duplicate attempt
-- `CancelRun` 不要求额外 `idempotency_key`；它自身按 run 状态天然幂等
+- `CancelRun` 通过 `idempotency_key` 记录调用结果；同一调用重试必须返回首次 recorded result
 
 事件读取 contract：
 
@@ -2960,7 +2960,7 @@ preemption / reclaim 规则：
 
 ## Runtime Plane Completion Checklist
 
-当前代码已经具备 `runtime plane` 的最小可运行内核，但还不能视为“完成”。完成标准必须以“无需人工 SQL 干预即可自动推进 run，并在失败/重启/人工介入场景下保持状态机正确”为准。
+当前代码已经具备 `runtime plane` 的最小可运行内核，并已经打通 LLM planner / replanner、HTTP 黑盒 runtime harness、HITL resume、failure-triggered replan、stale intent cleanup、worker / verifier lease fencing 的主要路径。但还不能视为“完成”。完成标准必须以“无需人工 SQL 干预即可自动推进 run，并在失败/重启/人工介入场景下保持状态机正确”为准。
 
 ### P0: 必须完成
 
@@ -2971,6 +2971,14 @@ preemption / reclaim 规则：
 - resume-after-HITL
 - failure-triggered replan
 - stale intent cleanup 必须是终态语义，不只是 lease timeout 后重试
+
+当前状态：
+
+- `start_run` 已接入 LLM planner，能够从 root goal 生成初始 DAG。
+- `InjectRunHint(replan_request)`、worker `request_replan`、verifier `request_replan` 已接入 LLM replanner；当没有静态 `replacement_plan.child_tasks` 时，由 replanner 生成替换 DAG。
+- `checkpoint_resume` / HITL resume 已有 planner intent 路径，并覆盖 planner epoch drift 场景。
+- stale / orphaned / expired processing planning intent 已能进入终态语义，不依赖 lease timeout 无限重试。
+- 剩余工作不再是补 happy path，而是验证 planner / replanner 失败时的 run 级 terminal policy 是否与最终产品策略一致。
 
 #### 2. Executor Contract Complete
 
@@ -3034,8 +3042,11 @@ preemption / reclaim 规则：
   - checkpoint pause / resolve / resume / terminal
   - root replan -> child execute -> verification -> terminal
   - claimed attempt crash / lease expiry / recovery requeue
+  - LLM worker failure -> replanner -> replacement child -> terminal
+  - LLM replan hint -> replanner -> replacement DAG
+  - completion replay after ack loss for worker / verifier
 
-这些覆盖现在已经外推到纯公开入口契约，不再只停留在“进程级 runtime loop 能跑通”。
+这些覆盖现在已经主要外推到公开入口契约，不再只停留在“进程级 runtime loop 能跑通”；少量 service / SQL 仍保留为 harness 初始化和最终一致性校验。
 
 #### 6.1 Completed: HTTP Blackbox Closure
 
@@ -3055,13 +3066,32 @@ preemption / reclaim 规则：
 
 在这一步完成后，下一轮不再继续补纯 service-only correctness 用例来替代公开入口验证。
 
-#### 6.2 Next Step: Planner / Executor Closure
+#### 6.2 Completed: Planner / Replanner Closure
+
+当前 planner / replanner 已经从“只能处理 start_run 或静态 child_tasks”推进到完整的 intent-driven runtime path：
+
+1. `StartRun` 使用 LLM planner 创建初始 DAG。
+2. `InjectRunHint(replan_request)` 可以不携带静态 replacement plan，由 LLM replanner 读取当前 run / source task / subtree / hint 后生成替换 DAG。
+3. worker completion 可以通过 `request_replan` 触发 replanner，不再要求 worker 自己产出 replacement child tasks。
+4. verifier rejection 可以通过 `request_replan` 触发 replanner，不再要求 verifier 依赖旧 result 中已有 child tasks。
+5. replan 仍然保持 append + supersede 语义，不原地重开旧 task。
+6. planner / replanner 输出经过统一 DAG schema 校验，旧字段别名和空 replacement 会被拒绝。
+
+#### 6.3 Next Step: Executor / Recovery Closure
 
 下一步优先级转到 runtime plane 的剩余 P0 缺口：
 
-1. 补齐 `checkpoint_resume`、HITL resume、failure-triggered replan、stale intent terminalization 的 planner path。
-2. 收紧 executor contract，明确 `claim/start/heartbeat/complete/fail/cancel` 的权威语义，并让 `worker_profile / capability routing` 成为真实调度输入。
-3. 继续扩大 crash / lease-loss / recovery 下的 completion fencing 覆盖，证明 worker / verifier 在“已执行但未成功提交”场景不会错误收敛。
+1. 收紧 executor contract，明确 `claim/start/heartbeat/complete/fail/cancel` 的权威语义，并让 `worker_profile / capability routing` 成为真实调度输入。
+2. 继续扩大 crash / lease-loss / recovery 下的 completion fencing 覆盖，证明 worker / verifier 在“已执行但未成功提交”场景不会错误收敛。
+3. 明确 `completion commit failed`、`ack lost`、`worker restarted`、`lease expired` 四类场景的恢复策略，区分可安全补交、必须 requeue、必须 fail、必须 fence 的边界。
+4. 把 executor/recovery 语义整理成可审查的 contract 文档或代码注释，使外部 executor / remote worker 后续接入时不依赖阅读状态机实现细节。
+
+当前增量：
+
+- terminal completion replay 已收紧为“只允许同一持久化完成身份的 ack-loss 重放”。同一 attempt / verification 进入终态后，如果 executor 用相同 claim token 提交不同 status / summary / result / request_replan / failure payload，服务端返回 replay conflict，不再静默吞掉；attempt 的 `CompletionMetadata`、`IdempotencyKey` 和成功态 `TerminalReason` 不属于持久化 replay identity。
+- `workerd` / `verifyd` 对 replay conflict 视为不可重试的本地终止信号，不会无限 retry，也不会把它误判成 lease loss。
+- `retry_policy.max_attempts` 已接入 attempt finalize 与 lease-expiry recovery。executor 明确上报 failed 或 running attempt 过期时，如果仍有 retry 预算，task 会回到 `ready` 并由 scheduler 创建下一次 attempt；默认空策略仍保持 fail-fast。
+- `control_policy.runtime_limits` 已开始承载 hard quota：`max_child_tasks_per_plan`、`max_dependency_edges_per_plan`、`max_total_tasks_per_run`、`max_replans_per_run`、`max_replan_depth`、`max_task_goal_chars`。planner / replanner 输出在扩展 task 前必须通过这些限制；超限输出不能进入 DAG。
 
 ### P1: 强烈建议完成
 
@@ -3154,4 +3184,3 @@ preemption / reclaim 规则：
 - worker 与 User Bot 运行时边界清晰
 - 编排状态完全独立于聊天会话
 - 系统在重启、失败、超时、人工介入场景下仍可恢复和推进
-

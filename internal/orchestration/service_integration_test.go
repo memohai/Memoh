@@ -178,6 +178,18 @@ func setIntegrationTaskVerificationPolicy(t *testing.T, ctx context.Context, poo
 	}
 }
 
+func setIntegrationTaskRetryPolicy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, taskID string, policy map[string]any) {
+	t.Helper()
+
+	pgTaskID, err := db.ParseUUID(taskID)
+	if err != nil {
+		t.Fatalf("parse task uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_tasks SET retry_policy = $2::jsonb, updated_at = now() WHERE id = $1", pgTaskID, marshalJSON(policy)); err != nil {
+		t.Fatalf("update task retry policy: %v", err)
+	}
+}
+
 func mustParsePGUUID(t *testing.T, raw string) pgtype.UUID {
 	t.Helper()
 
@@ -186,6 +198,68 @@ func mustParsePGUUID(t *testing.T, raw string) pgtype.UUID {
 		t.Fatalf("parse uuid %q: %v", raw, err)
 	}
 	return parsed
+}
+
+type completionReplaySnapshot struct {
+	EventCount          int
+	PlanningIntentCount int
+	TaskResultCount     int
+	ArtifactCount       int
+	VerificationCount   int
+	RunLifecycleStatus  string
+	RunPlanningStatus   string
+	TaskStatus          string
+	AttemptStatus       string
+	VerificationStatus  string
+}
+
+func captureCompletionReplaySnapshot(t *testing.T, ctx context.Context, pool *pgxpool.Pool, runID, taskID, attemptID, verificationID string) completionReplaySnapshot {
+	t.Helper()
+
+	pgRunID := mustParsePGUUID(t, runID)
+	snapshot := completionReplaySnapshot{}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_events WHERE run_id = $1", pgRunID).Scan(&snapshot.EventCount); err != nil {
+		t.Fatalf("count orchestration events: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_planning_intents WHERE run_id = $1", pgRunID).Scan(&snapshot.PlanningIntentCount); err != nil {
+		t.Fatalf("count orchestration planning intents: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_task_results WHERE run_id = $1", pgRunID).Scan(&snapshot.TaskResultCount); err != nil {
+		t.Fatalf("count orchestration task results: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_artifacts WHERE run_id = $1", pgRunID).Scan(&snapshot.ArtifactCount); err != nil {
+		t.Fatalf("count orchestration artifacts: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_task_verifications WHERE run_id = $1", pgRunID).Scan(&snapshot.VerificationCount); err != nil {
+		t.Fatalf("count orchestration task verifications: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT lifecycle_status, planning_status FROM orchestration_runs WHERE id = $1", pgRunID).Scan(&snapshot.RunLifecycleStatus, &snapshot.RunPlanningStatus); err != nil {
+		t.Fatalf("load orchestration run status: %v", err)
+	}
+	if strings.TrimSpace(taskID) != "" {
+		if err := pool.QueryRow(ctx, "SELECT status FROM orchestration_tasks WHERE id = $1", mustParsePGUUID(t, taskID)).Scan(&snapshot.TaskStatus); err != nil {
+			t.Fatalf("load orchestration task status: %v", err)
+		}
+	}
+	if strings.TrimSpace(attemptID) != "" {
+		if err := pool.QueryRow(ctx, "SELECT status FROM orchestration_task_attempts WHERE id = $1", mustParsePGUUID(t, attemptID)).Scan(&snapshot.AttemptStatus); err != nil {
+			t.Fatalf("load orchestration attempt status: %v", err)
+		}
+	}
+	if strings.TrimSpace(verificationID) != "" {
+		if err := pool.QueryRow(ctx, "SELECT status FROM orchestration_task_verifications WHERE id = $1", mustParsePGUUID(t, verificationID)).Scan(&snapshot.VerificationStatus); err != nil {
+			t.Fatalf("load orchestration verification status: %v", err)
+		}
+	}
+	return snapshot
+}
+
+func assertCompletionReplaySnapshotUnchanged(t *testing.T, before, after completionReplaySnapshot) {
+	t.Helper()
+
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("completion replay side effects changed state:\nbefore=%+v\nafter=%+v", before, after)
+	}
 }
 
 func processRunPlanningIntent(t *testing.T, ctx context.Context, svc *Service) {
@@ -1715,25 +1789,237 @@ func TestIntegrationCompleteAttemptReplayReturnsTerminalAttempt(t *testing.T) {
 	}
 
 	input := AttemptCompletion{
-		AttemptID:  runningAttempt.ID,
-		ClaimToken: runningAttempt.ClaimToken,
-		Status:     TaskAttemptStatusCompleted,
-		Summary:    "done",
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusCompleted,
+		Summary:        "done",
+		FailureClass:   "completion-note",
+		TerminalReason: "executor kept an informational terminal note",
 		StructuredOutput: map[string]any{
 			"ok": true,
+		},
+		ArtifactIntents: []AttemptArtifactIntent{
+			{
+				Kind:    "report",
+				URI:     "memoh://artifact/replay-report",
+				Version: "v1",
+				Digest:  "sha256:replay-report",
+			},
 		},
 	}
 	completedAttempt, err := svc.CompleteAttempt(ctx, input)
 	if err != nil {
 		t.Fatalf("CompleteAttempt() error = %v", err)
 	}
-	replayedAttempt, err := svc.CompleteAttempt(ctx, input)
+	beforeReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	replayInput := input
+	replayInput.ArtifactIntents = append([]AttemptArtifactIntent(nil), input.ArtifactIntents...)
+	replayInput.ArtifactIntents[0].Metadata = map[string]any{}
+	replayedAttempt, err := svc.CompleteAttempt(ctx, replayInput)
 	if err != nil {
 		t.Fatalf("CompleteAttempt(replay) error = %v", err)
 	}
+	afterReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	assertCompletionReplaySnapshotUnchanged(t, beforeReplay, afterReplay)
 	if replayedAttempt.ID != completedAttempt.ID || replayedAttempt.Status != completedAttempt.Status {
 		t.Fatalf("replayed attempt = %+v, want %+v", replayedAttempt, completedAttempt)
 	}
+}
+
+func TestIntegrationCompleteFailedAttemptReplayValidatesTerminalIdentity(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "failed complete attempt replay should validate durable identity",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	input := AttemptCompletion{
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		Summary:        "executor failed before producing a usable result",
+		FailureClass:   "executor_error",
+		TerminalReason: "",
+	}
+	failedAttempt, err := svc.CompleteAttempt(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	if failedAttempt.Status != TaskAttemptStatusFailed {
+		t.Fatalf("failed attempt status = %q, want %q", failedAttempt.Status, TaskAttemptStatusFailed)
+	}
+	if failedAttempt.TerminalReason != "attempt failed" {
+		t.Fatalf("failed attempt terminal_reason = %q, want normalized default", failedAttempt.TerminalReason)
+	}
+
+	beforeReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	replayedAttempt, err := svc.CompleteAttempt(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteAttempt(failed replay) error = %v", err)
+	}
+	if replayedAttempt.ID != failedAttempt.ID || replayedAttempt.Status != failedAttempt.Status {
+		t.Fatalf("replayed failed attempt = %+v, want %+v", replayedAttempt, failedAttempt)
+	}
+	afterReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	assertCompletionReplaySnapshotUnchanged(t, beforeReplay, afterReplay)
+
+	beforeConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	conflicting := input
+	conflicting.TerminalReason = "different failed terminal reason"
+	if _, err := svc.CompleteAttempt(ctx, conflicting); !errors.Is(err, ErrCompletionReplayConflict) {
+		t.Fatalf("CompleteAttempt(conflicting failed replay) error = %v, want %v", err, ErrCompletionReplayConflict)
+	}
+	afterConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	assertCompletionReplaySnapshotUnchanged(t, beforeConflict, afterConflict)
+}
+
+func TestIntegrationCompleteAttemptRejectsConflictingTerminalReplay(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "conflicting complete attempt replay should be rejected",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	input := AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "done",
+		StructuredOutput: map[string]any{"ok": true},
+	}
+	if _, err := svc.CompleteAttempt(ctx, input); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	beforeConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	conflicting := input
+	conflicting.Summary = "different result after terminal commit"
+	if _, err := svc.CompleteAttempt(ctx, conflicting); !errors.Is(err, ErrCompletionReplayConflict) {
+		t.Fatalf("CompleteAttempt(conflicting replay) error = %v, want %v", err, ErrCompletionReplayConflict)
+	}
+	afterConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	assertCompletionReplaySnapshotUnchanged(t, beforeConflict, afterConflict)
+
+	var attemptFinalizeCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM orchestration_planning_intents
+		WHERE run_id = $1
+		  AND task_id = $2
+		  AND kind = $3
+	`, mustParsePGUUID(t, handle.RunID), mustParsePGUUID(t, handle.RootTaskID), PlanningIntentKindAttemptFinalize).Scan(&attemptFinalizeCount); err != nil {
+		t.Fatalf("count attempt finalize intents: %v", err)
+	}
+	if attemptFinalizeCount != 1 {
+		t.Fatalf("attempt finalize intent count = %d, want 1", attemptFinalizeCount)
+	}
+}
+
+func TestIntegrationCompleteAttemptRejectsLargeIntegerStructuredOutputReplayConflict(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "large integer structured output replay should preserve numeric identity",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	input := AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "done",
+		StructuredOutput: map[string]any{
+			"large": int64(9007199254740992),
+		},
+	}
+	if _, err := svc.CompleteAttempt(ctx, input); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+
+	beforeConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+
+	conflicting := input
+	conflicting.StructuredOutput = map[string]any{
+		"large": int64(9007199254740993),
+	}
+	if _, err := svc.CompleteAttempt(ctx, conflicting); !errors.Is(err, ErrCompletionReplayConflict) {
+		t.Fatalf("CompleteAttempt(conflicting large integer replay) error = %v, want %v", err, ErrCompletionReplayConflict)
+	}
+	afterConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, "")
+	assertCompletionReplaySnapshotUnchanged(t, beforeConflict, afterConflict)
 }
 
 func TestIntegrationFailedAttemptRequestReplanKeepsRunAliveAndExpandsReplacementTasks(t *testing.T) {
@@ -2228,13 +2514,197 @@ func TestIntegrationCompleteVerificationReplayReturnsTerminalVerification(t *tes
 	if err != nil {
 		t.Fatalf("CompleteVerification() error = %v", err)
 	}
+	beforeReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
 	replayedVerification, err := svc.CompleteVerification(ctx, input)
 	if err != nil {
 		t.Fatalf("CompleteVerification(replay) error = %v", err)
 	}
+	afterReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	assertCompletionReplaySnapshotUnchanged(t, beforeReplay, afterReplay)
 	if replayedVerification.ID != completedVerification.ID || replayedVerification.Status != completedVerification.Status || replayedVerification.Verdict != completedVerification.Verdict {
 		t.Fatalf("replayed verification = %+v, want %+v", replayedVerification, completedVerification)
 	}
+}
+
+func TestIntegrationCompleteVerificationRejectsConflictingTerminalReplay(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "conflicting verification replay should be rejected",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "ready for verification",
+		StructuredOutput: map[string]any{"summary": "done"},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	input := VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictAccepted,
+		Summary:        "accepted",
+	}
+	if _, err := svc.CompleteVerification(ctx, input); err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+	beforeConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	conflicting := input
+	conflicting.Summary = "different verification after terminal commit"
+	if _, err := svc.CompleteVerification(ctx, conflicting); !errors.Is(err, ErrCompletionReplayConflict) {
+		t.Fatalf("CompleteVerification(conflicting replay) error = %v, want %v", err, ErrCompletionReplayConflict)
+	}
+	afterConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	assertCompletionReplaySnapshotUnchanged(t, beforeConflict, afterConflict)
+}
+
+func TestIntegrationCompleteVerificationRejectsRequestReplanReplayConflict(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "request_replan replay should be part of terminal verification identity",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskVerificationPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"require_structured_output": true,
+		"on_reject":                 VerificationRejectActionReplan,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:  runningAttempt.ID,
+		ClaimToken: runningAttempt.ClaimToken,
+		Status:     TaskAttemptStatusCompleted,
+		Summary:    "root task needs verification replan",
+		StructuredOutput: map[string]any{
+			"child_tasks": []any{
+				map[string]any{
+					"goal":           "replacement after request_replan",
+					"worker_profile": DefaultRootWorkerProfile,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	verification, err := svc.ClaimNextVerification(ctx, VerificationClaim{
+		WorkerID:         "verifier-" + uuid.NewString(),
+		ExecutorID:       DefaultVerifierExecutorID,
+		VerifierProfiles: []string{DefaultVerifierProfile},
+		LeaseTTLSeconds:  30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextVerification() error = %v", err)
+	}
+	runningVerification, err := svc.StartVerification(ctx, verification.ID, verification.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartVerification() error = %v", err)
+	}
+
+	input := VerificationCompletion{
+		VerificationID: runningVerification.ID,
+		ClaimToken:     runningVerification.ClaimToken,
+		Status:         TaskVerificationStatusCompleted,
+		Verdict:        VerificationVerdictRejected,
+		Summary:        "needs replanning",
+		FailureClass:   "verification_requested_replan",
+		TerminalReason: "needs replanning",
+		RequestReplan:  true,
+	}
+	if _, err := svc.CompleteVerification(ctx, input); err != nil {
+		t.Fatalf("CompleteVerification() error = %v", err)
+	}
+
+	beforeReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	replayedVerification, err := svc.CompleteVerification(ctx, input)
+	if err != nil {
+		t.Fatalf("CompleteVerification(request_replan replay) error = %v", err)
+	}
+	if replayedVerification.Status != TaskVerificationStatusCompleted || replayedVerification.Verdict != VerificationVerdictRejected {
+		t.Fatalf("replayed verification = %+v, want completed rejected", replayedVerification)
+	}
+	afterReplay := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	assertCompletionReplaySnapshotUnchanged(t, beforeReplay, afterReplay)
+
+	beforeConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	conflicting := input
+	conflicting.RequestReplan = false
+	if _, err := svc.CompleteVerification(ctx, conflicting); !errors.Is(err, ErrCompletionReplayConflict) {
+		t.Fatalf("CompleteVerification(conflicting request_replan replay) error = %v, want %v", err, ErrCompletionReplayConflict)
+	}
+	afterConflict := captureCompletionReplaySnapshot(t, ctx, pool, handle.RunID, handle.RootTaskID, runningAttempt.ID, runningVerification.ID)
+	assertCompletionReplaySnapshotUnchanged(t, beforeConflict, afterConflict)
 }
 
 func TestIntegrationVerificationRejectFailsTaskAndRun(t *testing.T) {
@@ -7202,6 +7672,118 @@ func TestIntegrationChildTaskFailureFailsRun(t *testing.T) {
 	}
 }
 
+func TestIntegrationFailedAttemptRetriesWhenPolicyAllows(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "failed attempt should retry when policy allows",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskRetryPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{"max_attempts": 2})
+
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		FailureClass:   "transient_executor_failure",
+		TerminalReason: "transient executor failure",
+		Summary:        "transient executor failure",
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(failed) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status after failed retry = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10, AsOfSeq: snapshot.SnapshotSeq})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("task page status after failed retry = %+v, want single ready task", taskPage.Items)
+	}
+	var resultCount int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_task_results WHERE run_id = $1", mustParsePGUUID(t, handle.RunID)).Scan(&resultCount); err != nil {
+		t.Fatalf("count task results after failed retry: %v", err)
+	}
+	if resultCount != 0 {
+		t.Fatalf("task result count after failed retry = %d, want 0", resultCount)
+	}
+
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask(retry) error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask(retry) = false, want true")
+	}
+	retryAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	if retryAttempt.AttemptNo != 2 {
+		t.Fatalf("retry attempt_no = %d, want 2", retryAttempt.AttemptNo)
+	}
+	runningRetryAttempt, err := svc.StartAttempt(ctx, retryAttempt.ID, retryAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(retry) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningRetryAttempt.ID,
+		ClaimToken:       runningRetryAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "retry succeeded",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(retry) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	finalSnapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(final) error = %v", err)
+	}
+	if finalSnapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status after retry completion = %q, want %q", finalSnapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
+	}
+}
+
 func TestIntegrationAttemptLeaseExpiryIsStrictlyFenced(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()
@@ -7357,6 +7939,137 @@ func TestIntegrationCompleteAttemptRejectsExpiredLeaseAndRecoveryFailsRunOnce(t 
 	}
 	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusFailed {
 		t.Fatalf("task page status = %+v, want single failed task", taskPage.Items)
+	}
+}
+
+func TestIntegrationExpiredRunningAttemptRetriesWhenPolicyAllows(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "expired running attempt should retry when policy allows",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskRetryPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{"max_attempts": 2})
+
+	dispatched, err := dispatchNextReadyTaskForTest(ctx, svc)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask() error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask() = false, want true")
+	}
+	attempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt() error = %v", err)
+	}
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+
+	pgAttemptID, err := db.ParseUUID(runningAttempt.ID)
+	if err != nil {
+		t.Fatalf("parse attempt uuid: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_task_attempts SET lease_expires_at = now() - interval '1 second' WHERE id = $1", pgAttemptID); err != nil {
+		t.Fatalf("expire running attempt lease: %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningAttempt.ID,
+		ClaimToken:       runningAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "stale completion must be fenced before retry",
+		StructuredOutput: map[string]any{"ok": true},
+	}); !errors.Is(err, ErrAttemptLeaseConflict) {
+		t.Fatalf("CompleteAttempt(expired lease) error = %v, want %v", err, ErrAttemptLeaseConflict)
+	}
+
+	recovered, err := svc.RecoverExpiredAttempts(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredAttempts() error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredAttempts() = %d, want 1", recovered)
+	}
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	if snapshot.Run.LifecycleStatus != LifecycleStatusRunning {
+		t.Fatalf("run lifecycle_status after retry recovery = %q, want %q", snapshot.Run.LifecycleStatus, LifecycleStatusRunning)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10, AsOfSeq: snapshot.SnapshotSeq})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("task page status after retry recovery = %+v, want single ready task", taskPage.Items)
+	}
+	var resultCount int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM orchestration_task_results WHERE run_id = $1", mustParsePGUUID(t, handle.RunID)).Scan(&resultCount); err != nil {
+		t.Fatalf("count task results after retry recovery: %v", err)
+	}
+	if resultCount != 0 {
+		t.Fatalf("task result count after retry recovery = %d, want 0", resultCount)
+	}
+
+	dispatched, err = dispatchNextReadyTaskForTest(ctx, svc)
+	if err != nil {
+		t.Fatalf("DispatchNextReadyTask(retry) error = %v", err)
+	}
+	if !dispatched {
+		t.Fatal("DispatchNextReadyTask(retry) = false, want true")
+	}
+	retryAttempt, err := svc.ClaimNextAttempt(ctx, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("ClaimNextAttempt(retry) error = %v", err)
+	}
+	if retryAttempt.AttemptNo != 2 {
+		t.Fatalf("retry attempt_no = %d, want 2", retryAttempt.AttemptNo)
+	}
+	runningRetryAttempt, err := svc.StartAttempt(ctx, retryAttempt.ID, retryAttempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt(retry) error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:        runningRetryAttempt.ID,
+		ClaimToken:       runningRetryAttempt.ClaimToken,
+		Status:           TaskAttemptStatusCompleted,
+		Summary:          "retry succeeded",
+		StructuredOutput: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(retry) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	finalSnapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot(final) error = %v", err)
+	}
+	if finalSnapshot.Run.LifecycleStatus != LifecycleStatusCompleted {
+		t.Fatalf("run lifecycle_status after retry completion = %q, want %q", finalSnapshot.Run.LifecycleStatus, LifecycleStatusCompleted)
 	}
 }
 

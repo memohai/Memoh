@@ -1131,6 +1131,15 @@ SELECT *
 FROM orchestration_task_results
 WHERE id = sqlc.arg(id);
 
+-- name: GetOrchestrationTaskResultByAttemptID :one
+SELECT *
+FROM orchestration_task_results
+WHERE attempt_id = sqlc.arg(attempt_id);
+
+-- name: DeleteOrchestrationTaskResultByID :exec
+DELETE FROM orchestration_task_results
+WHERE id = sqlc.arg(id);
+
 -- name: ListCurrentOrchestrationTaskResultsByRun :many
 SELECT *
 FROM orchestration_task_results
@@ -1302,6 +1311,16 @@ WHERE run_id = sqlc.arg(run_id)
   AND seq <= sqlc.arg(until_seq)
 ORDER BY seq ASC
 LIMIT sqlc.arg(limit_count);
+
+-- name: GetTerminalOrchestrationVerificationEventByID :one
+SELECT *
+FROM orchestration_events
+WHERE run_id = sqlc.arg(run_id)
+  AND aggregate_type = 'verification'
+  AND aggregate_id = sqlc.arg(verification_id)
+  AND type IN ('run.event.verification.passed', 'run.event.verification.rejected')
+ORDER BY seq DESC
+LIMIT 1;
 
 -- name: CreateOrchestrationProjectionSnapshot :one
 INSERT INTO orchestration_projection_snapshots (

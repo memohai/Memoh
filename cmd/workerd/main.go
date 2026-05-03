@@ -206,15 +206,23 @@ func runAttemptWithInterval(ctx context.Context, svc orchestration.ClaimedAttemp
 		}
 		if ctx.Err() != nil {
 			completion = fence.Completion(workerShutdownCompletion(attempt))
+		} else {
+			return false
 		}
 	}
 
+	completionSubmitted := false
 	for {
-		if done, leaseLost := checkHeartbeat(false); done && leaseLost {
-			return true
+		if done, leaseLost := checkHeartbeat(false); done {
+			if leaseLost {
+				return true
+			}
+			if ctx.Err() == nil {
+				return false
+			}
 		}
 
-		if ctx.Err() != nil && completion.Status == orchestration.TaskAttemptStatusCompleted {
+		if !completionSubmitted && ctx.Err() != nil && completion.Status == orchestration.TaskAttemptStatusCompleted {
 			completion.Status = orchestration.TaskAttemptStatusFailed
 			completion.FailureClass = "worker_shutdown"
 			completion.TerminalReason = "worker shutdown interrupted attempt"
@@ -222,6 +230,7 @@ func runAttemptWithInterval(ctx context.Context, svc orchestration.ClaimedAttemp
 		}
 
 		completeCtx, cancelComplete := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		completionSubmitted = true
 		_, completeErr := svc.CompleteAttempt(completeCtx, completion)
 		cancelComplete()
 		if completeErr == nil {
@@ -236,7 +245,9 @@ func runAttemptWithInterval(ctx context.Context, svc orchestration.ClaimedAttemp
 		}
 
 		log.Error("complete attempt failed", slog.String("attempt_id", attempt.ID), slog.Any("error", completeErr))
-		if errors.Is(completeErr, orchestration.ErrAttemptLeaseConflict) || errors.Is(completeErr, orchestration.ErrAttemptImmutable) {
+		if errors.Is(completeErr, orchestration.ErrAttemptLeaseConflict) ||
+			errors.Is(completeErr, orchestration.ErrAttemptImmutable) ||
+			errors.Is(completeErr, orchestration.ErrCompletionReplayConflict) {
 			cancelHeartbeat()
 			if done, leaseLost := checkHeartbeat(true); done {
 				return leaseLost || errors.Is(completeErr, orchestration.ErrAttemptLeaseConflict)
@@ -250,8 +261,10 @@ func runAttemptWithInterval(ctx context.Context, svc orchestration.ClaimedAttemp
 			if leaseLost {
 				return true
 			}
-			cancelHeartbeat()
-			return false
+			if ctx.Err() == nil {
+				cancelHeartbeat()
+				return false
+			}
 		case <-ctx.Done():
 		case <-time.After(completionRetryInterval):
 		}
@@ -321,9 +334,14 @@ func runAttemptHeartbeatLoopWithInterval(ctx context.Context, cancel context.Can
 		case <-ticker.C:
 			if _, err := svc.HeartbeatAttempt(ctx, fence.Heartbeat(leaseTTLSeconds)); err != nil {
 				log.Warn("attempt heartbeat failed", slog.String("attempt_id", fence.AttemptID), slog.Any("error", err))
-				if errors.Is(err, orchestration.ErrAttemptLeaseConflict) || errors.Is(err, orchestration.ErrAttemptImmutable) {
+				if errors.Is(err, orchestration.ErrAttemptLeaseConflict) {
 					cancel()
 					done <- true
+					return
+				}
+				if errors.Is(err, orchestration.ErrAttemptImmutable) {
+					cancel()
+					done <- false
 					return
 				}
 				consecutiveFailures++

@@ -182,6 +182,69 @@ func TestRunVerificationRetriesAfterCompletionAckLossAndConverges(t *testing.T) 
 	}
 }
 
+func TestRunVerificationRetriesAckLossWithSamePayloadAfterShutdown(t *testing.T) {
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	runtime := &fakeVerificationRuntime{
+		completeCallback: func(_ orchestration.VerificationCompletion, call int) error {
+			if call == 1 {
+				cancelParent()
+				return errors.New("completion ack lost after commit")
+			}
+			return nil
+		},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runVerificationWithInterval(parentCtx, runtime, log, orchestration.TaskVerification{
+		ID:         "verification-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{orchestration.DefaultVerifierProfile}, func(_ context.Context, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
+		return orchestration.VerificationCompletion{
+			VerificationID: verification.ID,
+			ClaimToken:     verification.ClaimToken,
+			Status:         orchestration.TaskVerificationStatusCompleted,
+			Verdict:        orchestration.VerificationVerdictAccepted,
+			Summary:        "passed",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runVerificationWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(runtime.completions))
+	}
+	if !reflect.DeepEqual(runtime.completions[0], runtime.completions[1]) {
+		t.Fatalf("replayed completion mismatch after shutdown: first=%+v second=%+v", runtime.completions[0], runtime.completions[1])
+	}
+}
+
+func TestRunVerificationStopsOnCompletionReplayConflict(t *testing.T) {
+	runtime := &fakeVerificationRuntime{
+		completeErrs: []error{orchestration.ErrCompletionReplayConflict},
+	}
+	log := slog.New(slog.DiscardHandler)
+
+	leaseLost := runVerificationWithInterval(context.Background(), runtime, log, orchestration.TaskVerification{
+		ID:         "verification-1",
+		ClaimToken: "claim-1",
+	}, 30, time.Hour, []string{orchestration.DefaultVerifierProfile}, func(_ context.Context, verification orchestration.TaskVerification, _ []string) orchestration.VerificationCompletion {
+		return orchestration.VerificationCompletion{
+			VerificationID: verification.ID,
+			ClaimToken:     verification.ClaimToken,
+			Status:         orchestration.TaskVerificationStatusCompleted,
+			Verdict:        orchestration.VerificationVerdictAccepted,
+			Summary:        "passed",
+		}
+	})
+	if leaseLost {
+		t.Fatal("runVerificationWithInterval() leaseLost = true, want false")
+	}
+	if len(runtime.completions) != 1 {
+		t.Fatalf("completion count = %d, want 1", len(runtime.completions))
+	}
+}
+
 func TestRunVerificationTreatsCompletionLeaseConflictAsLeaseLoss(t *testing.T) {
 	runtime := &fakeVerificationRuntime{
 		completeErrs: []error{orchestration.ErrVerificationLeaseConflict},

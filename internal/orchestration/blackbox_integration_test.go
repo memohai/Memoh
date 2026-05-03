@@ -873,6 +873,63 @@ func TestBlackboxRuntimeClaimedAttemptLeaseExpiryRequeuesAfterWorkerCrash(t *tes
 	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
 }
 
+func TestBlackboxRuntimeRunningAttemptLeaseExpiryRetriesWhenPolicyAllows(t *testing.T) {
+	h := setupBlackboxHarness(t, blackboxHarnessOptions{
+		disablePlanner: true,
+		startRecovery:  true,
+	})
+	defer h.Close()
+
+	slowWorker := h.startWorkerd(t, workerdProcessOptions{
+		workerID:       "blackbox-workerd-running-retry-slow-" + uuid.NewString(),
+		profiles:       []string{orch.DefaultRootWorkerProfile},
+		pollMS:         50,
+		leaseTTL:       2,
+		executionDelay: 4000,
+	})
+
+	handle := h.startRun(t, orch.StartRunRequest{
+		Goal:           "running attempt should retry after worker crash when policy allows",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	taskUUID, err := db.ParseUUID(handle.RootTaskID)
+	if err != nil {
+		t.Fatalf("parse root task uuid: %v", err)
+	}
+	if _, err := h.appPool.Exec(h.ctx, "UPDATE orchestration_tasks SET retry_policy = $2::jsonb, updated_at = now() WHERE id = $1", taskUUID, mustMarshalJSON(t, map[string]any{"max_attempts": 2})); err != nil {
+		t.Fatalf("update root retry policy: %v", err)
+	}
+
+	h.startPlannerLoop()
+	h.startSchedulerLoop()
+	runningEvent := h.waitForEventTypeForTask(t, handle.RunID, handle.RootTaskID, "run.event.attempt.running", 10*time.Second)
+	if runningEvent.AttemptID == "" {
+		t.Fatalf("running event attempt_id = empty")
+	}
+	slowWorker.stop(t)
+	h.waitForEventTypeForTask(t, handle.RunID, handle.RootTaskID, "run.event.attempt.lost", 10*time.Second)
+	h.waitForTaskStatus(t, handle.RunID, handle.RootTaskID, orch.TaskStatusReady, 10*time.Second)
+
+	h.startWorkerd(t, workerdProcessOptions{
+		workerID: "blackbox-workerd-running-retry-fast-" + uuid.NewString(),
+		profiles: []string{orch.DefaultRootWorkerProfile},
+		pollMS:   50,
+		leaseTTL: 2,
+	})
+
+	h.waitForRunStatus(t, handle.RunID, orch.LifecycleStatusCompleted, 20*time.Second)
+	eventPage := h.listEvents(t, handle.RunID)
+	if countEventsByType(eventPage.Items, "run.event.attempt.lost") != 1 {
+		t.Fatalf("run.event.attempt.lost count = %d, want 1", countEventsByType(eventPage.Items, "run.event.attempt.lost"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.task.failed") != 0 {
+		t.Fatalf("run.event.task.failed count = %d, want 0", countEventsByType(eventPage.Items, "run.event.task.failed"))
+	}
+	if countEventsByType(eventPage.Items, "run.event.completed") != 1 {
+		t.Fatalf("run.event.completed count = %d, want 1", countEventsByType(eventPage.Items, "run.event.completed"))
+	}
+}
+
 func TestBlackboxRuntimeHTTPSnapshotCutsAcrossReadModelsConsistently(t *testing.T) {
 	h := setupBlackboxHarness(t, blackboxHarnessOptions{
 		startScheduler: true,
