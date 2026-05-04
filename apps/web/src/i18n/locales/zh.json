@@ -366,6 +366,14 @@
     "iconPlaceholder": "图标 URL 或标识（可选）",
     "enable": "启用",
     "enableHint": "只有启用的供应商的模型才会出现在可用模型列表中",
+    "promptCache": {
+      "label": "Prompt 缓存",
+      "option5m": "5 分钟（默认）",
+      "option1h": "1 小时（费用更高）",
+      "optionOff": "关闭（不推荐）",
+      "description": "对系统提示词与工具列表启用 Prompt Caching，可显著降低重复请求的输入费用。当前仅 Anthropic 系列模型生效。",
+      "descriptionOff": "关闭后每次请求都会重新计费完整的系统提示词与工具列表，仅在需要严格隔离上下文时使用。"
+    },
     "oauth": {
       "openaiTitle": "OpenAI OAuth",
       "openaiDescription": "使用你的 ChatGPT 账号为该提供商授权，以启用 Codex 兼容的 OpenAI 访问。",

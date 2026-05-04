@@ -157,6 +157,7 @@ func TestLoadAppLocalTemplate(t *testing.T) {
 	}
 	rendered := strings.ReplaceAll(string(raw), "__PROJECT_ROOT__", filepath.ToSlash(filepath.Join("..", "..")))
 	configPath := filepath.Join(t.TempDir(), "app.local.toml")
+	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
 	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
 		t.Fatalf("write rendered app.local.toml: %v", err)
 	}

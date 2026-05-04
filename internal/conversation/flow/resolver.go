@@ -582,6 +582,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	cfg := agentpkg.RunConfig{
 		Model:              sdkModel,
 		ReasoningEffort:    reasoningEffort,
+		PromptCacheTTL:     providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:        p.SessionType,
 		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
 		SupportsToolCall:   chatModel.HasCompatibility(models.CompatToolCall),

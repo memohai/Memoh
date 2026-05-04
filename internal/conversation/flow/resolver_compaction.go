@@ -133,6 +133,7 @@ func (r *Resolver) buildCompactionConfig(ctx context.Context, req conversation.C
 		Ratio:            ratio,
 		TotalInputTokens: inputTokens,
 		HTTPClient:       r.streamHTTPClient,
+		PromptCacheTTL:   providers.ProviderConfigString(compactProvider, "prompt_cache_ttl"),
 	}
 
 	// Cap compaction input to 90% of the compaction model's context window.

@@ -22,11 +22,12 @@ const (
 
 // Config holds model resolution details for the memory LLM.
 type Config struct {
-	ModelID    string
-	BaseURL    string
-	APIKey     string `json:"-"`
-	ClientType string
-	Timeout    time.Duration
+	ModelID        string
+	BaseURL        string
+	APIKey         string `json:"-"`
+	ClientType     string
+	Timeout        time.Duration
+	PromptCacheTTL string
 }
 
 // Client implements adapters.LLM using the Twilight AI SDK.
@@ -85,10 +86,15 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 	}
 	systemPrompt := strings.ReplaceAll(agent.MemoryExtractPrompt, "{{today}}", now.Format("2006-01-02"))
 
+	model := c.model()
+	system, messages, _ := models.ApplyPromptCache(
+		model, c.cfg.PromptCacheTTL,
+		systemPrompt, []sdk.Message{sdk.UserMessage(transcript)}, nil,
+	)
 	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(c.model()),
-		sdk.WithSystem(systemPrompt),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage(transcript)}),
+		sdk.WithModel(model),
+		sdk.WithSystem(system),
+		sdk.WithMessages(messages),
 	)
 	if err != nil {
 		return adapters.ExtractResponse{}, fmt.Errorf("extract: %w", err)
@@ -111,10 +117,15 @@ func (c *Client) Decide(ctx context.Context, req adapters.DecideRequest) (adapte
 
 	userMessage := buildUpdateUserMessage(req.Candidates, req.Facts)
 
+	model := c.model()
+	system, messages, _ := models.ApplyPromptCache(
+		model, c.cfg.PromptCacheTTL,
+		agent.MemoryUpdatePrompt, []sdk.Message{sdk.UserMessage(userMessage)}, nil,
+	)
 	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(c.model()),
-		sdk.WithSystem(agent.MemoryUpdatePrompt),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage(userMessage)}),
+		sdk.WithModel(model),
+		sdk.WithSystem(system),
+		sdk.WithMessages(messages),
 	)
 	if err != nil {
 		return adapters.DecideResponse{}, fmt.Errorf("decide: %w", err)
@@ -142,10 +153,15 @@ func (c *Client) Compact(ctx context.Context, req adapters.CompactRequest) (adap
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: marshal input: %w", err)
 	}
+	model := c.model()
+	system, messages, _ := models.ApplyPromptCache(
+		model, c.cfg.PromptCacheTTL,
+		compactSystemPrompt, []sdk.Message{sdk.UserMessage(string(payload))}, nil,
+	)
 	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(c.model()),
-		sdk.WithSystem(compactSystemPrompt),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage(string(payload))}),
+		sdk.WithModel(model),
+		sdk.WithSystem(system),
+		sdk.WithMessages(messages),
 	)
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: %w", err)

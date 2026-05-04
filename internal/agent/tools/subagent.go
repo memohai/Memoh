@@ -41,6 +41,7 @@ type SpawnRunConfig struct {
 	LoopDetection   SpawnLoopConfig
 	Messages        []sdk.Message
 	ReasoningEffort string
+	PromptCacheTTL  string
 }
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by spawn.
@@ -329,7 +330,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	// prevent the spawn from completing and returning its results.
 	sessionCtx := context.WithoutCancel(ctx)
 
-	sdkModel, modelID, err := p.resolveModel(sessionCtx, botID)
+	sdkModel, modelID, promptCacheTTL, err := p.resolveModel(sessionCtx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
@@ -353,7 +354,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	for i, task := range tasks {
 		go func(idx int, query string) {
 			defer wg.Done()
-			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, systemPrompt, query)
+			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, query)
 		}(i, task)
 	}
 	wg.Wait()
@@ -394,6 +395,7 @@ func (p *SpawnProvider) runSubagentTask(
 	parentSession SessionContext,
 	model *sdk.Model,
 	modelID string,
+	promptCacheTTL string,
 	systemPrompt string,
 	query string,
 ) spawnResult {
@@ -416,10 +418,11 @@ func (p *SpawnProvider) runSubagentTask(
 	}
 
 	cfg := SpawnRunConfig{
-		Model:       model,
-		System:      systemPrompt,
-		Query:       query,
-		SessionType: sessionpkg.TypeSubagent,
+		Model:          model,
+		System:         systemPrompt,
+		Query:          query,
+		SessionType:    sessionpkg.TypeSubagent,
+		PromptCacheTTL: promptCacheTTL,
 		Identity: SpawnIdentity{
 			BotID:             parentSession.BotID,
 			ChatID:            parentSession.ChatID,
@@ -596,33 +599,33 @@ func (p *SpawnProvider) SetModelCreator(fn ModelCreator) {
 	p.modelCreator = fn
 }
 
-func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Model, string, error) {
+func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Model, string, string, error) {
 	if p.settings == nil || p.models == nil || p.queries == nil {
-		return nil, "", errors.New("model resolution services not configured")
+		return nil, "", "", errors.New("model resolution services not configured")
 	}
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	chatModelID := strings.TrimSpace(botSettings.ChatModelID)
 	if chatModelID == "" {
-		return nil, "", errors.New("no chat model configured for bot")
+		return nil, "", "", errors.New("no chat model configured for bot")
 	}
 	modelInfo, err := p.models.GetByID(ctx, chatModelID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	provider, err := models.FetchProviderByID(ctx, p.queries, modelInfo.ProviderID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if p.modelCreator == nil {
-		return nil, "", errors.New("model creator not configured")
+		return nil, "", "", errors.New("model creator not configured")
 	}
 	authResolver := providers.NewService(nil, p.queries, "")
 	creds, err := authResolver.ResolveModelCredentials(ctx, provider)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	sdkModel := p.modelCreator(
 		modelInfo.ModelID,
@@ -632,7 +635,8 @@ func (p *SpawnProvider) resolveModel(ctx context.Context, botID string) (*sdk.Mo
 		providers.ProviderConfigString(provider, "base_url"),
 		nil,
 	)
-	return sdkModel, modelInfo.ID, nil
+	cacheTTL := providers.ProviderConfigString(provider, "prompt_cache_ttl")
+	return sdkModel, modelInfo.ID, cacheTTL, nil
 }
 
 func toStringSlice(v any) ([]string, error) {

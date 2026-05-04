@@ -39,6 +39,7 @@ func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (
 		SessionType:      cfg.SessionType,
 		Messages:         messages,
 		ReasoningEffort:  cfg.ReasoningEffort,
+		PromptCacheTTL:   cfg.PromptCacheTTL,
 		SupportsToolCall: true,
 		Identity: SessionContext{
 			BotID:             cfg.Identity.BotID,
@@ -86,6 +87,7 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		SessionType:      cfg.SessionType,
 		Messages:         messages,
 		ReasoningEffort:  cfg.ReasoningEffort,
+		PromptCacheTTL:   cfg.PromptCacheTTL,
 		SupportsToolCall: true,
 		Identity: SessionContext{
 			BotID:             cfg.Identity.BotID,

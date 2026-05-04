@@ -135,11 +135,17 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 	})
 
 	userMsg := fmt.Sprintf("Generate an image with the following description. Size: %s\n\n%s", size, prompt)
+	system, messages, _ := models.ApplyPromptCache(
+		sdkModel,
+		providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		"",
+		[]sdk.Message{{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: userMsg}}}},
+		nil,
+	)
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(sdkModel),
-		sdk.WithMessages([]sdk.Message{
-			{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: userMsg}}},
-		}),
+		sdk.WithSystem(system),
+		sdk.WithMessages(messages),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("image generation failed: %w", err)

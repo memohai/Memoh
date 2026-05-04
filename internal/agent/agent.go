@@ -664,10 +664,13 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 }
 
 func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
+	system, messages, tools := models.ApplyPromptCache(
+		cfg.Model, cfg.PromptCacheTTL, cfg.System, cfg.Messages, tools,
+	)
 	opts := []sdk.GenerateOption{
 		sdk.WithModel(cfg.Model),
-		sdk.WithMessages(cfg.Messages),
-		sdk.WithSystem(cfg.System),
+		sdk.WithMessages(messages),
+		sdk.WithSystem(system),
 		sdk.WithMaxSteps(-1),
 	}
 	if len(tools) > 0 && cfg.SupportsToolCall {

@@ -76,6 +76,13 @@ type RunConfig struct {
 	LoopDetection      LoopDetectionConfig
 	Retry              RetryConfig
 
+	// PromptCacheTTL controls prompt caching for this run. Empty or
+	// unrecognized values default to 5m. Use "1h" for the long-cache tier
+	// or "off" to disable caching entirely. The TTL is honored only when
+	// the resolved model's vendor implements prompt caching (currently
+	// Anthropic Messages); for other vendors the value is ignored.
+	PromptCacheTTL string
+
 	// MidTaskPruneThreshold is the minimum number of messages before mid-task
 	// pruning kicks in. When the accumulated message count reaches this
 	// threshold, older tool-result pairs are pruned to keep the context

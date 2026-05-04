@@ -126,10 +126,16 @@ func (r *Resolver) generateTitle(ctx context.Context, userID string, model model
 	genCtx, cancel := context.WithTimeout(ctx, titleGenerateTimeout)
 	defer cancel()
 
+	cacheTTL := providers.ProviderConfigString(provider, "prompt_cache_ttl")
+	system, messages, _ := models.ApplyPromptCache(
+		sdkModel, cacheTTL, "", []sdk.Message{sdk.UserMessage(prompt)}, nil,
+	)
+
 	client := sdk.NewClient()
 	text, err := client.GenerateText(genCtx,
 		sdk.WithModel(sdkModel),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage(prompt)}),
+		sdk.WithSystem(system),
+		sdk.WithMessages(messages),
 	)
 	if err != nil {
 		r.logger.Warn("title gen: LLM call failed", slog.Any("error", err))

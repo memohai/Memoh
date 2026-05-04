@@ -370,6 +370,14 @@
     "iconPlaceholder": "Icon URL or identifier (optional)",
     "enable": "Enable",
     "enableHint": "Only models from enabled providers appear in the available model list",
+    "promptCache": {
+      "label": "Prompt Cache",
+      "option5m": "5 minutes (default)",
+      "option1h": "1 hour (higher cost)",
+      "optionOff": "Off (not recommended)",
+      "description": "Enable prompt caching for the system prompt and tool list to cut input cost on repeat requests. Currently honored only by Anthropic models.",
+      "descriptionOff": "Disabling caching rebills the full system prompt and tool list on every request. Only use this for strict context isolation."
+    },
     "oauth": {
       "openaiTitle": "OpenAI OAuth",
       "openaiDescription": "Authorize this provider with your ChatGPT account for Codex-compatible OpenAI access.",

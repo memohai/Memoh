@@ -147,10 +147,15 @@ func (s *Service) doCompaction(ctx context.Context, logID pgtype.UUID, sessionUU
 		HTTPClient:     cfg.HTTPClient,
 	})
 
+	systemPromptDecorated, sdkMessages, _ := models.ApplyPromptCache(
+		model, cfg.PromptCacheTTL,
+		systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
+	)
+
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
-		sdk.WithSystem(systemPrompt),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage(userPrompt)}),
+		sdk.WithSystem(systemPromptDecorated),
+		sdk.WithMessages(sdkMessages),
 	)
 	if err != nil {
 		return err

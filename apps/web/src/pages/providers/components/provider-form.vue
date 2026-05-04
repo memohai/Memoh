@@ -71,6 +71,42 @@
         </FormItem>
       </FormField>
 
+      <FormField
+        v-if="supportsPromptCache(form.values.client_type)"
+        v-slot="{ value, handleChange }"
+        name="prompt_cache_ttl"
+      >
+        <FormItem class="md:col-span-2">
+          <FormLabel>{{ $t('provider.promptCache.label') }}</FormLabel>
+          <FormControl>
+            <Select
+              :model-value="value || '5m'"
+              @update:model-value="handleChange"
+            >
+              <SelectTrigger>
+                <SelectValue :placeholder="$t('provider.promptCache.label')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5m">
+                  {{ $t('provider.promptCache.option5m') }}
+                </SelectItem>
+                <SelectItem value="1h">
+                  {{ $t('provider.promptCache.option1h') }}
+                </SelectItem>
+                <SelectItem value="off">
+                  {{ $t('provider.promptCache.optionOff') }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormControl>
+          <FormDescription>
+            {{ form.values.prompt_cache_ttl === 'off'
+              ? $t('provider.promptCache.descriptionOff')
+              : $t('provider.promptCache.description') }}
+          </FormDescription>
+        </FormItem>
+      </FormField>
+
       <section
         v-if="['openai-codex', 'github-copilot'].includes(form.values.client_type)"
         class="md:col-span-2 rounded-lg border p-4 space-y-3 text-xs"
@@ -288,9 +324,15 @@ import {
   Input,
   Button,
   FormControl,
+  FormDescription,
   FormField,
   FormLabel,
   FormItem,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
 } from '@memohai/ui'
 import { Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
@@ -348,6 +390,20 @@ function getStoredSecret(config: Record<string, unknown> | undefined) {
   if (!config) return ''
   const apiKey = config.api_key
   return typeof apiKey === 'string' ? apiKey : ''
+}
+
+type PromptCacheTtl = '5m' | '1h' | 'off'
+
+function normalizeCacheTtl(value: string | undefined): PromptCacheTtl {
+  return value === '1h' || value === 'off' ? value : '5m'
+}
+
+// Vendors that expose configurable prompt cache TTL. Currently only
+// Anthropic Messages; expand this list as other providers gain support.
+const PROMPT_CACHE_CLIENT_TYPES = new Set(['anthropic-messages'])
+
+function supportsPromptCache(clientType: string | undefined): boolean {
+  return !!clientType && PROMPT_CACHE_CLIENT_TYPES.has(clientType)
 }
 
 const props = defineProps<{
@@ -409,6 +465,7 @@ const providerSchema = toTypedSchema(z.object({
   base_url: z.string().optional(),
   api_key: z.string().optional(),
   client_type: z.string().min(1),
+  prompt_cache_ttl: z.enum(['5m', '1h', 'off']).optional(),
 }).superRefine((value, ctx) => {
   const existingSecret = getStoredSecret(
     props.provider?.config as Record<string, unknown> | undefined,
@@ -442,6 +499,7 @@ watch(() => props.provider, (newVal) => {
       base_url: (cfg?.base_url as string) ?? '',
       api_key: '',
       client_type: newVal.client_type || 'openai-completions',
+      prompt_cache_ttl: normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined),
     })
   }
 }, { immediate: true })
@@ -482,7 +540,10 @@ const hasChanges = computed(() => {
   })
 
   const apiKeyChanged = Boolean(form.values.api_key && form.values.api_key.trim() !== '')
-  return baseChanged || apiKeyChanged
+  const cacheChanged = supportsPromptCache(form.values.client_type)
+    && normalizeCacheTtl(form.values.prompt_cache_ttl)
+      !== normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined)
+  return baseChanged || apiKeyChanged || cacheChanged
 })
 
 const editProvider = form.handleSubmit(async (value) => {
@@ -494,6 +555,9 @@ const editProvider = form.handleSubmit(async (value) => {
     if (value.client_type !== 'github-copilot') {
       config.api_key = value.api_key.trim()
     }
+  }
+  if (supportsPromptCache(value.client_type)) {
+    config.prompt_cache_ttl = normalizeCacheTtl(value.prompt_cache_ttl)
   }
   const metadata = {
     ...((props.provider?.metadata as Record<string, unknown> | undefined) ?? {}),
