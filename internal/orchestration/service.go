@@ -1197,7 +1197,10 @@ func (s *Service) RetryTask(ctx context.Context, caller ControlIdentity, taskID 
 		return &result, nil
 	}
 
-	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, lockedTask.ID)
+	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, sqlc.MarkOrchestrationTaskReadyForRetryParams{
+		ID:             lockedTask.ID,
+		BackoffSeconds: 0,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("mark task ready for retry: %w", err)
 	}

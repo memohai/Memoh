@@ -106,6 +106,7 @@ const (
 	absoluteMaxReplanDepth            = 16
 	defaultMaxTaskGoalChars           = 4000
 	absoluteMaxTaskGoalChars          = 20000
+	absoluteMaxRetryBackoffSeconds    = 3600
 
 	methodStartRun              = "StartRun"
 	methodCreateHumanCheckpoint = "CreateHumanCheckpoint"

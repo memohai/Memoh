@@ -214,6 +214,7 @@ FROM orchestration_tasks t
 JOIN orchestration_runs r ON r.id = t.run_id
 WHERE t.status = 'ready'
   AND t.superseded_by_planner_epoch IS NULL
+  AND (t.ready_at IS NULL OR t.ready_at <= clock_timestamp())
   AND r.lifecycle_status = 'running'
 ORDER BY t.priority DESC, t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC;
 
@@ -339,7 +340,7 @@ SET status = 'ready',
     latest_result_id = NULL,
     blocked_reason = '',
     terminal_reason = '',
-    ready_at = now(),
+    ready_at = clock_timestamp() + (sqlc.arg(backoff_seconds)::integer * interval '1 second'),
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;

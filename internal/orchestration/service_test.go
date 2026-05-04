@@ -844,6 +844,23 @@ func TestValidateStartRunPlanRuntimeLimits(t *testing.T) {
 	}
 }
 
+func TestAttemptRetryBackoffSeconds(t *testing.T) {
+	t.Parallel()
+
+	if got := attemptRetryBackoffSeconds(map[string]any{}); got != 0 {
+		t.Fatalf("attemptRetryBackoffSeconds(empty) = %d, want 0", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(3)}); got != 3 {
+		t.Fatalf("attemptRetryBackoffSeconds(valid) = %d, want 3", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(1.5)}); got != 0 {
+		t.Fatalf("attemptRetryBackoffSeconds(fractional) = %d, want 0", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(absoluteMaxRetryBackoffSeconds + 10)}); got != absoluteMaxRetryBackoffSeconds {
+		t.Fatalf("attemptRetryBackoffSeconds(clamped) = %d, want %d", got, absoluteMaxRetryBackoffSeconds)
+	}
+}
+
 func TestValidateReplanRuntimeLimits(t *testing.T) {
 	t.Parallel()
 
