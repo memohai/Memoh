@@ -19,6 +19,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/tui/local"
 )
 
 type Client struct {
@@ -60,6 +61,26 @@ func NewClient(baseURL, token string) *Client {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// NewLocalClient builds a Client targeting the desktop-managed local
+// server. It performs (or reuses) a self-login against the [admin]
+// credentials in the desktop userData/config.toml so callers don't
+// need to handle authentication manually.
+//
+// Returns an error if the desktop userData layout is unavailable
+// (e.g. desktop has never been launched on this machine, so config.toml
+// is missing). Callers should surface a "open Memoh.app once" message.
+func NewLocalClient(ctx context.Context) (*Client, error) {
+	configPath, err := local.ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	token, err := local.EnsureToken(ctx, local.LocalServerBaseURL, configPath)
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(local.LocalServerBaseURL, token), nil
 }
 
 func (c *Client) Login(ctx context.Context, username, password string) (LoginResponse, error) {

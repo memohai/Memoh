@@ -65,7 +65,7 @@ Memoh/
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Unified CLI (Cobra: serve, migrate, chat, bots, compose, docker, login, install, support)
+│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh.app, talks to the local 18731 server
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -332,6 +332,8 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - `@memohai/web`'s `package.json` exposes an `exports` map (`./main`, `./App.vue`, `./style.css`, `./*`) so downstream consumers can reuse web modules.
 - `electron.vite.config.ts` mirrors `apps/web/vite.config.ts`: same `@` / `#` path aliases, same `/api` proxy (driven by `MEMOH_WEB_PROXY_TARGET` / `config.toml` via `@memohai/config`).
 - Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`.
+- The Memoh CLI (`cmd/memoh/`) is bundled into the app at `Resources/cli/memoh` next to `Resources/server/memoh-server`. On first launch (and via the `Install Command Line Tool…` menu item) the main process offers to add `memoh` to PATH (`/usr/local/bin/memoh` symlink on macOS, `~/.local/bin/memoh` on Linux, HKCU PATH on Windows). The CLI talks to the local server at `127.0.0.1:18731`, self-logs in with the `[admin]` credentials in `userData/config.toml`, and shares the same pid file (`local-server.pid.json`) so either side can `start`/`stop` the server. See `apps/desktop/AGENTS.md` § Bundled CLI.
+- `productName` is pinned to `Memoh` so userData lives at `~/Library/Application Support/Memoh/` (macOS), `%APPDATA%\Memoh\` (Windows), `~/.config/Memoh/` (Linux). The Go CLI hard-codes the same product name in `internal/tui/local/paths.go`; if you ever rename, both sides must change together.
 - When desktop needs to diverge from the web experience, replace the re-export in `renderer/src/main.ts` with an inline copy of web's `main.ts` and customize from there — do **not** fork `apps/web` itself.
 
 ### Container / Workspace Management

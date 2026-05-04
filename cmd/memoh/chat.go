@@ -18,10 +18,14 @@ func newChatCommand(ctx *cliContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Send one chat message and stream the reply",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			client := tui.NewClient(ctx.state.ServerURL, ctx.state.Token)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := localClient(cmd.Context(), ctx)
+			if err != nil {
+				return err
+			}
+
 			if sessionID == "" {
-				requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				requestCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 				defer cancel()
 				sess, err := client.CreateSession(requestCtx, botID, message)
 				if err != nil {
@@ -31,7 +35,7 @@ func newChatCommand(ctx *cliContext) *cobra.Command {
 				fmt.Printf("session: %s\n", sessionID)
 			}
 
-			streamCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			streamCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 			defer cancel()
 			return client.StreamChat(streamCtx, tui.ChatRequest{
 				BotID:     botID,

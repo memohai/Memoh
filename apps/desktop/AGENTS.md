@@ -400,6 +400,121 @@ Ports / hosts during dev come from the same `config.toml` the rest of the
 stack reads (via `@memohai/config`). The repo-level `mise run desktop:dev`
 task is the recommended entrypoint when contributing.
 
+## Bundled CLI
+
+The Memoh CLI (Go, source at `cmd/memoh/`) ships inside the desktop
+app bundle alongside the server. It is the **desktop edition** of the
+CLI — there are no docker-compose / login subcommands; everything
+operates on the local server the desktop already manages.
+
+### Layout in the packaged app
+
+```
+Memoh.app/Contents/Resources/
+├── server/memoh-server     # backend binary spawned by main process or `memoh start`
+├── cli/memoh               # CLI binary; PATH symlink resolves here
+├── runtime/                # bridge binary + templates
+└── …
+```
+
+### Build pipeline
+
+`scripts/prepare-local-server.mjs` runs three `go build` invocations:
+`./cmd/agent` → `resources/server/memoh-server`, `./cmd/memoh` →
+`resources/cli/memoh`, and `./cmd/bridge` → `resources/runtime/bridge`
+(linux/$arch). `electron-builder.yml`'s `extraResources` block then
+maps each directory into `Contents/Resources/` of the app bundle.
+
+### Shared filesystem contract
+
+CLI and main process cooperate purely through files under
+`app.getPath('userData')` (= `~/Library/Application Support/Memoh` on
+macOS — see `productName` pinning below):
+
+| File | Owner | Used by |
+|------|-------|---------|
+| `config.toml` | desktop main (renders from `resources/config/app.local.toml` on first launch) | both — server's `CONFIG_PATH`, CLI's `[admin]` source |
+| `local-server.pid.json` | whoever spawned the server (desktop or CLI) | both — graceful stop / liveness probe |
+| `local-server.log` | server itself (stdout/stderr append) | both — `memoh logs`, desktop log dump |
+| `qdrant/qdrant.pid.json` | desktop main (CLI never spawns qdrant on its own) | desktop main only |
+| `cli-token.json` | CLI (after self-login against `[admin]`) | CLI only |
+| `cli-prefs.json` | desktop main (records `dontAskAgain` for the install prompt) | desktop main only |
+
+The pid JSON shape is deliberately identical between
+`apps/desktop/src/main/daemon.ts` and
+`internal/tui/local/service.go`, so `memoh stop` can kill a server
+that desktop spawned and vice versa.
+
+### productName pinning
+
+`apps/desktop/package.json` sets `"productName": "Memoh"`, and
+`src/main/index.ts` calls `app.setName('Memoh')` *and* runs a
+one-shot `migrateLegacyUserDataDirectory()` before any path is
+resolved (older builds defaulted to `@memohai/desktop`). The Go CLI
+hard-codes the same product name in
+`internal/tui/local/paths.go::productName`. **If you ever rename the
+app, both sides must change in lockstep** — otherwise CLI and
+desktop will read/write different userData directories and silently
+diverge.
+
+### PATH integration (`src/main/cli-integration.ts`)
+
+`detectCliState()` runs `which memoh` (`where` on Windows) plus
+`fs.realpathSync` to bucket the install into one of:
+`installed-current` (symlink resolves to this app's `Resources/cli`),
+`installed-stale` (resolves to a different `Memoh.app`), `installed-foreign`
+(resolves to some other `memoh` — homebrew, manual go build, etc.),
+or `not-installed`.
+
+`installCli()` is platform-specific:
+
+- **macOS**: `osascript … with administrator privileges` to create
+  `/usr/local/bin/memoh` symlink. Triggers the system password prompt.
+- **Linux**: writes `~/.local/bin/memoh` symlink (no admin); if that
+  dir is not on PATH the renderer / first-launch prompt surfaces a
+  hint via `linuxPathHint()`.
+- **Windows**: `setx Path …` updates `HKCU\Environment\Path` (no
+  admin required) — Windows broadcasts `WM_SETTINGCHANGE`
+  automatically so newly opened shells pick it up. Existing terminals
+  must be restarted.
+
+`runCliInstallCheck()` runs once after `app.whenReady()`:
+`installed-current` → no-op; `installed-stale` → silent reinstall;
+otherwise (and not `dontAskAgain`) → three-button dialog `Install /
+Skip / Don't ask again`. The Tools / app menu item
+`Install Command Line Tool…` (label flips to `Reinstall…` once
+installed) always provides a manual path; an `Uninstall Command Line
+Tool` sibling is enabled when the symlink is current.
+
+### IPC surface
+
+```
+window.api.desktop.getCliStatus(): Promise<CliStatusPayload>
+window.api.desktop.installCli(): Promise<CliStatusPayload>
+window.api.desktop.uninstallCli(): Promise<CliStatusPayload>
+```
+
+Reserved for a future settings-page "CLI integration" card; not yet
+consumed by the renderer.
+
+### CLI command surface
+
+| Command | Channel | Notes |
+|---------|---------|-------|
+| `memoh` (default) / `memoh tui` | HTTP + WebSocket | Bubble Tea TUI; auto self-login |
+| `memoh chat --bot --message [--session]` | HTTP + WebSocket | One-shot streaming chat |
+| `memoh bots create / delete` | HTTP REST | |
+| `memoh start [--wait]` | spawn binary | Resolves bundled `memoh-server`, fails with a hint if `userData/config.toml` is missing |
+| `memoh stop` | SIGTERM via pid file | |
+| `memoh restart` | stop + start | |
+| `memoh status` | HTTP `GET /ping` + pid liveness | |
+| `memoh logs [-f] [-n N]` | tail `local-server.log` | |
+| `memoh version` | local | |
+
+`--server URL` overrides the default `http://127.0.0.1:18731` and
+disables auto self-login (advanced; the user is expected to manage
+auth out-of-band).
+
 ## Native Dependencies
 
 `electron`, `electron-winstaller`, `esbuild`, and `sharp` all require

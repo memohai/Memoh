@@ -16,6 +16,8 @@ asarUnpack:
 extraResources:
   - from: resources/server
     to: server
+  - from: resources/cli
+    to: cli
   - from: resources/runtime
     to: runtime
   - from: resources/config

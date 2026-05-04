@@ -110,7 +110,10 @@ type chatEventMsg struct {
 
 type chatDoneMsg struct{}
 
-func NewTUIModel(state State) *TUIModel {
+// NewTUIModel constructs the Bubble Tea model. The caller is
+// responsible for building an authenticated *Client — typically via
+// NewLocalClient for the desktop edition.
+func NewTUIModel(state State, client *Client) *TUIModel {
 	input := textinput.New()
 	input.Placeholder = "Type a message and press Enter"
 	input.Focus()
@@ -119,7 +122,7 @@ func NewTUIModel(state State) *TUIModel {
 	sessList := newSelectorList()
 
 	return &TUIModel{
-		client:             NewClient(state.ServerURL, state.Token),
+		client:             client,
 		state:              state,
 		focus:              focusBots,
 		input:              input,
@@ -176,11 +179,7 @@ func (m *TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Use Tab to switch focus. Enter on bots/sessions. Enter in input sends."
 			return m, loadSessionsCmd(m.client, m.currentBotID())
 		}
-		if strings.TrimSpace(m.state.Token) == "" {
-			m.status = "Login first with `memoh login`, then reopen the TUI."
-		} else {
-			m.status = "No accessible bots found."
-		}
+		m.status = "No accessible bots found. Create one with `memoh bots create --name ...`."
 		return m, nil
 
 	case sessionsLoadedMsg:

@@ -1,5 +1,6 @@
 {
   "name": "@memohai/desktop",
+  "productName": "Memoh",
   "version": "0.8.0",
   "type": "module",
   "description": "Memoh Electron desktop application (self-managed bootstrap reusing @memohai/web components)",

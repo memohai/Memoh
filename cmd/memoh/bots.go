@@ -16,12 +16,11 @@ import (
 func newBotsCommand(ctx *cliContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bots",
-		Short: "Manage bots and their workspace containers",
+		Short: "Manage bots",
 	}
 
 	cmd.AddCommand(newBotsCreateCommand(ctx))
 	cmd.AddCommand(newBotsDeleteCommand(ctx))
-	cmd.AddCommand(newBotsContainerCommand())
 
 	return cmd
 }
@@ -36,13 +35,13 @@ func newBotsCreateCommand(ctx *cliContext) *cobra.Command {
 		Use:   "create",
 		Short: "Create a bot",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			client, err := authenticatedClient(ctx)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := localClient(cmd.Context(), ctx)
 			if err != nil {
 				return err
 			}
 
-			requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			requestCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 
 			req := buildCreateBotRequest(displayName, avatarURL, timezone, inactive)
@@ -73,7 +72,7 @@ func newBotsDeleteCommand(ctx *cliContext) *cobra.Command {
 		Use:   "delete <bot-id>",
 		Short: "Delete a bot",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			botID := strings.TrimSpace(args[0])
 			if botID == "" {
 				return errors.New("bot id is required")
@@ -82,12 +81,12 @@ func newBotsDeleteCommand(ctx *cliContext) *cobra.Command {
 				return fmt.Errorf("refusing to delete bot %s without --yes", botID)
 			}
 
-			client, err := authenticatedClient(ctx)
+			client, err := localClient(cmd.Context(), ctx)
 			if err != nil {
 				return err
 			}
 
-			requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			requestCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
 
 			if err := client.DeleteBot(requestCtx, botID); err != nil {
@@ -104,48 +103,17 @@ func newBotsDeleteCommand(ctx *cliContext) *cobra.Command {
 	return cmd
 }
 
-func newBotsContainerCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:                "ctr [ctr args]",
-		Aliases:            []string{"container"},
-		Short:              "Manage the nested containerd inside the server container",
-		DisableFlagParsing: true,
-		SilenceUsage:       true,
-		Long: `Run ctr inside the Docker Compose server service so you can inspect and
-manage the nested containerd that Memoh uses for workspace containers.
-
-By default this command injects the containerd namespace from config.toml.
-Pass --no-namespace or provide your own ctr -n/--namespace flag to override it.`,
-		Example: `  memoh bots ctr images ls
-  memoh bots ctr containers ls
-  memoh bots ctr --namespace default tasks ls
-  memoh bots ctr --server-service server -- snapshots ls`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 || isHelpArg(args[0]) {
-				return cmd.Help()
-			}
-
-			opts, ctrArgs, err := parseContainerdOptions(args)
-			if err != nil {
-				return err
-			}
-			if len(ctrArgs) == 0 {
-				return errors.New("missing ctr arguments")
-			}
-
-			return runServerContainerd(cmd.Context(), opts, ctrArgs)
-		},
+// localClient returns a tui.Client targeting the desktop-managed local
+// server. When --server is supplied it falls back to a token-less
+// remote client (advanced override; assumes the caller knows the
+// remote auth flow).
+func localClient(ctx context.Context, cli *cliContext) (*tui.Client, error) {
+	if cli.server != "" {
+		return tui.NewClient(cli.state.ServerURL, ""), nil
 	}
-
-	return cmd
-}
-
-func authenticatedClient(ctx *cliContext) (*tui.Client, error) {
-	token := strings.TrimSpace(ctx.state.Token)
-	if token == "" {
-		return nil, errors.New("missing access token, please run `memoh login` first")
-	}
-	return tui.NewClient(ctx.state.ServerURL, token), nil
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return tui.NewLocalClient(requestCtx)
 }
 
 func buildCreateBotRequest(displayName, avatarURL, timezone string, inactive bool) bots.CreateBotRequest {

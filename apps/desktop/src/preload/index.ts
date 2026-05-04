@@ -14,6 +14,16 @@ export interface CrossWindowInvalidatePayload {
   refetchActive?: boolean | 'all'
 }
 
+// Bundled CLI status — mirrors CliStatus in main/cli-integration.ts.
+// Kept inline rather than imported to avoid pulling main-process modules
+// into the preload bundle.
+export interface CliStatusPayload {
+  state: 'not-installed' | 'installed-current' | 'installed-stale' | 'installed-foreign'
+  source: string
+  target: string | null
+  error?: string
+}
+
 // Renderer-facing API surface. Keep this intentionally small — it is the
 // full security boundary between chromium renderer processes and the
 // node-privileged main process.
@@ -35,6 +45,9 @@ const api = {
     authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
+    getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),
+    installCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-install'),
+    uninstallCli: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-uninstall'),
     // Tell the main process to fan a query-cache invalidation out to every
     // other BrowserWindow. Used by `setupCrossWindowCacheSync` to mirror
     // mutations performed in one renderer onto siblings.

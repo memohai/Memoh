@@ -1,9 +1,62 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, dialog, Menu, shell, BrowserWindow, ipcMain, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
+import { existsSync, renameSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import { stopEmbeddedQdrant } from './qdrant'
 import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus, stopManagedServer } from './local-server'
+import {
+  detectCliState,
+  installCli,
+  linuxPathHint,
+  readCliPrefs,
+  uninstallCli,
+  writeCliPrefs,
+  type CliStatus,
+} from './cli-integration'
+
+// Migration: prior to v0.8.x productName was implicitly the package `name`
+// (`@memohai/desktop`), so userData lived at `~/Library/Application
+// Support/@memohai/desktop/` on macOS (and analogous paths on other OSes).
+// Pinning productName to `Memoh` switches the userData root to `…/Memoh/`.
+// We rename the old directory in place once, before Electron caches the path.
+// CLI shipped alongside desktop relies on this stable layout.
+function migrateLegacyUserDataDirectory(): void {
+  const home = app.getPath('home')
+  let legacy: string | null = null
+  let modern: string | null = null
+  switch (process.platform) {
+    case 'darwin': {
+      const base = join(home, 'Library', 'Application Support')
+      legacy = join(base, '@memohai', 'desktop')
+      modern = join(base, 'Memoh')
+      break
+    }
+    case 'win32': {
+      const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming')
+      legacy = join(appData, '@memohai', 'desktop')
+      modern = join(appData, 'Memoh')
+      break
+    }
+    default: {
+      const xdg = process.env.XDG_CONFIG_HOME || join(home, '.config')
+      legacy = join(xdg, '@memohai', 'desktop')
+      modern = join(xdg, 'Memoh')
+      break
+    }
+  }
+  if (!legacy || !modern) return
+  if (existsSync(modern) || !existsSync(legacy)) return
+  try {
+    renameSync(legacy, modern)
+  } catch (error) {
+    console.error('failed to migrate userData directory', { from: legacy, to: modern, error })
+  }
+}
+
+// Must run before anything resolves `app.getPath('userData')`.
+app.setName('Memoh')
+migrateLegacyUserDataDirectory()
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
@@ -183,6 +236,185 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
   window.webContents.send('settings:navigate', target)
 }
 
+// CLI install / menu helpers — kept above the whenReady block so the
+// Promise chain can call them without forward-declaration noise.
+
+async function runCliInstallCheck(): Promise<void> {
+  // In dev (mise run desktop:dev / electron-vite dev) we skip the
+  // auto-prompt entirely. The CLI binary is built lazily by
+  // `installCli()` via `go build ./cmd/memoh`, so it works if the
+  // developer explicitly clicks the menu, but we don't nag on every
+  // hot-reload.
+  if (!app.isPackaged) return
+
+  let status: CliStatus
+  try {
+    status = await detectCliState()
+  } catch (error) {
+    console.error('failed to detect cli state', error)
+    return
+  }
+  if (status.state === 'installed-current') return
+  if (status.state === 'installed-stale') {
+    try {
+      await installCli()
+      await rebuildAppMenu()
+    } catch (error) {
+      console.error('silent cli reinstall failed', error)
+    }
+    return
+  }
+  const prefs = readCliPrefs()
+  if (prefs.dontAskAgain) return
+  if (status.state === 'installed-foreign') return // never overwrite a non-Memoh memoh
+
+  const detail = process.platform === 'win32'
+    ? 'A `memoh` directory will be added to your user PATH (no admin required). Open a new terminal afterwards.'
+    : process.platform === 'darwin'
+      ? 'macOS will prompt for your administrator password to create /usr/local/bin/memoh.'
+      : `A symlink will be created at ${join(app.getPath('home'), '.local', 'bin', 'memoh')}.${linuxPathHint() ? ' ' + linuxPathHint() : ''}`
+
+  const result = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Install', 'Skip', 'Don\u2019t ask again'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Install Memoh CLI?',
+    message: 'Install the `memoh` command-line tool?',
+    detail,
+    noLink: true,
+  })
+  if (result.response === 0) {
+    try {
+      await installCli()
+      await rebuildAppMenu()
+      await dialog.showMessageBox({
+        type: 'info',
+        message: 'Memoh CLI installed.',
+        detail: 'Run `memoh --help` in a new terminal to get started.',
+      })
+    } catch (error) {
+      await dialog.showMessageBox({
+        type: 'error',
+        message: 'Failed to install Memoh CLI',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+  } else if (result.response === 2) {
+    writeCliPrefs({ ...prefs, dontAskAgain: true })
+  }
+}
+
+async function rebuildAppMenu(): Promise<void> {
+  let cliStatus: CliStatus | null = null
+  try {
+    cliStatus = await detectCliState()
+  } catch {
+    cliStatus = null
+  }
+  const isInstalled = cliStatus?.state === 'installed-current'
+  const cliMenuItem: MenuItemConstructorOptions = {
+    label: isInstalled ? 'Reinstall Command Line Tool…' : 'Install Command Line Tool…',
+    click: async () => {
+      try {
+        await installCli()
+        await rebuildAppMenu()
+        await dialog.showMessageBox({
+          type: 'info',
+          message: 'Memoh CLI installed.',
+          detail: 'Run `memoh --help` in a new terminal to get started.',
+        })
+      } catch (error) {
+        await dialog.showMessageBox({
+          type: 'error',
+          message: 'Failed to install Memoh CLI',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+  }
+  const uninstallItem: MenuItemConstructorOptions = {
+    label: 'Uninstall Command Line Tool',
+    enabled: isInstalled,
+    click: async () => {
+      try {
+        await uninstallCli()
+        await rebuildAppMenu()
+      } catch (error) {
+        await dialog.showMessageBox({
+          type: 'error',
+          message: 'Failed to uninstall Memoh CLI',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+  }
+
+  const template: MenuItemConstructorOptions[] = []
+  if (process.platform === 'darwin') {
+    template.push({
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        cliMenuItem,
+        uninstallItem,
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    })
+  }
+  template.push(
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+      ],
+    },
+  )
+  if (process.platform !== 'darwin') {
+    template.push({
+      label: 'Tools',
+      submenu: [cliMenuItem, uninstallItem],
+    })
+  }
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('ai.memoh.desktop')
   await ensureLocalServer()
@@ -213,6 +445,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
+  ipcMain.handle('desktop:cli-status', () => detectCliState())
+  ipcMain.handle('desktop:cli-install', async () => {
+    await installCli()
+    return detectCliState()
+  })
+  ipcMain.handle('desktop:cli-uninstall', async () => {
+    await uninstallCli()
+    return detectCliState()
+  })
 
   // Cross-window Pinia Colada query-cache invalidation. Each renderer owns
   // an independent in-memory cache (separate Vue/Pinia instances per
@@ -239,6 +480,9 @@ app.whenReady().then(async () => {
       chatWindow = createChatWindow()
     }
   })
+
+  await rebuildAppMenu()
+  void runCliInstallCheck()
 })
 
 app.on('window-all-closed', () => {
