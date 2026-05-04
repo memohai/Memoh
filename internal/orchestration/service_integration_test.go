@@ -7943,6 +7943,87 @@ func TestIntegrationVerifierRejectRetriesWhenPolicyAllows(t *testing.T) {
 	}
 }
 
+func TestIntegrationRetryBackoffDelaysRedispatch(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	caller := ControlIdentity{
+		TenantID: "tenant-" + uuid.NewString(),
+		Subject:  "subject-" + uuid.NewString(),
+	}
+
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "failed attempt should retry after backoff",
+		IdempotencyKey: "start-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+	defer cleanupOrchestrationIntegrationRun(t, ctx, pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, ctx, pool, caller.TenantID, caller.Subject)
+	setIntegrationTaskRetryPolicy(t, ctx, pool, handle.RootTaskID, map[string]any{
+		"max_attempts":    2,
+		"backoff_seconds": 60,
+	})
+
+	attempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	runningAttempt, err := svc.StartAttempt(ctx, attempt.ID, attempt.ClaimToken)
+	if err != nil {
+		t.Fatalf("StartAttempt() error = %v", err)
+	}
+	if _, err := svc.CompleteAttempt(ctx, AttemptCompletion{
+		AttemptID:      runningAttempt.ID,
+		ClaimToken:     runningAttempt.ClaimToken,
+		Status:         TaskAttemptStatusFailed,
+		FailureClass:   "transient_executor_failure",
+		TerminalReason: "transient executor failure",
+		Summary:        "transient executor failure",
+	}); err != nil {
+		t.Fatalf("CompleteAttempt(failed) error = %v", err)
+	}
+	processRunPlanningIntent(t, ctx, svc)
+
+	snapshot, err := svc.GetRunSnapshot(ctx, caller, handle.RunID)
+	if err != nil {
+		t.Fatalf("GetRunSnapshot() error = %v", err)
+	}
+	taskPage, err := svc.ListRunTasks(ctx, caller, handle.RunID, ListRunTasksRequest{Limit: 10, AsOfSeq: snapshot.SnapshotSeq})
+	if err != nil {
+		t.Fatalf("ListRunTasks() error = %v", err)
+	}
+	if len(taskPage.Items) != 1 || taskPage.Items[0].Status != TaskStatusReady {
+		t.Fatalf("task page after backoff retry = %+v, want single ready task", taskPage.Items)
+	}
+	if taskPage.Items[0].ReadyAt == nil || !taskPage.Items[0].ReadyAt.After(time.Now().Add(30*time.Second)) {
+		t.Fatalf("retry ready_at = %v, want delayed by backoff", taskPage.Items[0].ReadyAt)
+	}
+	if dispatched, err := dispatchNextReadyTaskForTest(ctx, svc); err != nil {
+		t.Fatalf("DispatchNextReadyTask(backoff pending) error = %v", err)
+	} else if dispatched {
+		t.Fatal("DispatchNextReadyTask(backoff pending) = true, want false")
+	}
+
+	if _, err := pool.Exec(ctx, "UPDATE orchestration_tasks SET ready_at = clock_timestamp() - interval '1 second', updated_at = now() WHERE id = $1", mustParsePGUUID(t, handle.RootTaskID)); err != nil {
+		t.Fatalf("expire retry backoff: %v", err)
+	}
+	retryAttempt := dispatchAndClaimAttemptForProfiles(t, ctx, svc, AttemptClaim{
+		WorkerID:        "worker-" + uuid.NewString(),
+		ExecutorID:      DefaultWorkerExecutorID,
+		WorkerProfiles:  []string{DefaultRootWorkerProfile},
+		LeaseTTLSeconds: 30,
+	}, 4)
+	if retryAttempt.AttemptNo != 2 {
+		t.Fatalf("retry attempt_no = %d, want 2", retryAttempt.AttemptNo)
+	}
+}
+
 func TestIntegrationAttemptLeaseExpiryIsStrictlyFenced(t *testing.T) {
 	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
 	defer cleanup()

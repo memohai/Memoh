@@ -2423,6 +2423,21 @@ func attemptRetryMaxAttempts(policy map[string]any) int32 {
 	return maxAttempts
 }
 
+func attemptRetryBackoffSeconds(policy map[string]any) int32 {
+	value, ok := policy["backoff_seconds"]
+	if !ok {
+		return 0
+	}
+	backoffSeconds, ok := positiveInt32FromJSON(value)
+	if !ok {
+		return 0
+	}
+	if backoffSeconds > absoluteMaxRetryBackoffSeconds {
+		return absoluteMaxRetryBackoffSeconds
+	}
+	return backoffSeconds
+}
+
 func positiveInt32FromJSON(value any) (int32, bool) {
 	switch typed := value.(type) {
 	case int:
@@ -2461,11 +2476,16 @@ func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.
 			return sqlc.OrchestrationEvent{}, fmt.Errorf("delete retried attempt result: %w", err)
 		}
 	}
-	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, taskRow.ID)
+	retryPolicy := decodeJSONObject(taskRow.RetryPolicy)
+	backoffSeconds := attemptRetryBackoffSeconds(retryPolicy)
+	readyTask, err := qtx.MarkOrchestrationTaskReadyForRetry(ctx, sqlc.MarkOrchestrationTaskReadyForRetryParams{
+		ID:             taskRow.ID,
+		BackoffSeconds: backoffSeconds,
+	})
 	if err != nil {
 		return sqlc.OrchestrationEvent{}, fmt.Errorf("mark task ready for automatic retry: %w", err)
 	}
-	maxAttempts := attemptRetryMaxAttempts(decodeJSONObject(taskRow.RetryPolicy))
+	maxAttempts := attemptRetryMaxAttempts(retryPolicy)
 	return s.appendEvent(ctx, qtx, taskRow.RunID, eventSpec{
 		TaskID:           readyTask.ID,
 		AttemptID:        attemptRow.ID,
@@ -2483,6 +2503,8 @@ func (s *Service) markTaskReadyForAutomaticRetry(ctx context.Context, qtx *sqlc.
 			"attempt_no":      attemptRow.AttemptNo,
 			"next_attempt_no": attemptRow.AttemptNo + 1,
 			"max_attempts":    maxAttempts,
+			"backoff_seconds": backoffSeconds,
+			"ready_at":        timeForJSON(db.TimeFromPg(readyTask.ReadyAt)),
 			"failure_class":   strings.TrimSpace(failureClass),
 			"terminal_reason": strings.TrimSpace(terminalReason),
 		},

@@ -3397,6 +3397,7 @@ FROM orchestration_tasks t
 JOIN orchestration_runs r ON r.id = t.run_id
 WHERE t.status = 'ready'
   AND t.superseded_by_planner_epoch IS NULL
+  AND (t.ready_at IS NULL OR t.ready_at <= clock_timestamp())
   AND r.lifecycle_status = 'running'
 ORDER BY t.priority DESC, t.ready_at ASC NULLS FIRST, t.created_at ASC, t.id ASC
 `
@@ -4359,14 +4360,19 @@ SET status = 'ready',
     latest_result_id = NULL,
     blocked_reason = '',
     terminal_reason = '',
-    ready_at = now(),
+    ready_at = clock_timestamp() + ($1::integer * interval '1 second'),
     updated_at = now()
-WHERE id = $1
+WHERE id = $2
 RETURNING id, run_id, decomposed_from_task_id, kind, goal, inputs, planner_epoch, superseded_by_planner_epoch, worker_profile, priority, retry_policy, verification_policy, status, status_version, waiting_checkpoint_id, waiting_scope, latest_result_id, ready_at, blocked_reason, terminal_reason, blackboard_scope, created_at, updated_at
 `
 
-func (q *Queries) MarkOrchestrationTaskReadyForRetry(ctx context.Context, id pgtype.UUID) (OrchestrationTask, error) {
-	row := q.db.QueryRow(ctx, markOrchestrationTaskReadyForRetry, id)
+type MarkOrchestrationTaskReadyForRetryParams struct {
+	BackoffSeconds int32       `json:"backoff_seconds"`
+	ID             pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) MarkOrchestrationTaskReadyForRetry(ctx context.Context, arg MarkOrchestrationTaskReadyForRetryParams) (OrchestrationTask, error) {
+	row := q.db.QueryRow(ctx, markOrchestrationTaskReadyForRetry, arg.BackoffSeconds, arg.ID)
 	var i OrchestrationTask
 	err := row.Scan(
 		&i.ID,
