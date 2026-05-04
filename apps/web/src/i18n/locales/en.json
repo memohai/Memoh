@@ -9,6 +9,7 @@
     "edit": "Edit",
     "delete": "Delete",
     "search": "Search",
+    "noData": "No data",
     "loading": "Loading...",
     "operation": "Actions",
     "enable": "Enable",
@@ -332,7 +333,7 @@
     "compatibility": {
       "vision": "Vision",
       "tool-call": "Tool Call",
-      "image-output": "Image Output",
+      "image-output": "Image",
       "reasoning": "Reasoning"
     },
     "contextWindow": "Context Window",
@@ -833,11 +834,11 @@
     },
     "checks": {
       "title": "Runtime Checks",
-      "subtitle": "View current health status and issue details.",
+      "subtitle": "Monitor system services and troubleshoot runtime errors.",
       "ok": "No issues",
       "hasIssue": "Has issues",
       "issueCount": "{count} issues",
-      "empty": "No check items",
+      "empty": "No active checks registered for this environment.",
       "loadFailed": "Failed to load runtime checks",
       "actions": {},
       "titles": {
@@ -860,8 +861,19 @@
         "ok": "OK",
         "warn": "WARN",
         "error": "ERROR",
-        "unknown": "UNKNOWN"
-      }
+        "unknown": "UNKNOWN",
+        "issue": "Issue Detected",
+        "stable": "Operational"
+      },
+      "statusTitle": "Status",
+      "vitalityTitle": "Health Score",
+      "vitalityUnit": "checks",
+      "actionsTitle": "Actions",
+      "lastSync": "Last updated: {time}",
+      "diagnosticTitle": "Diagnostic Log",
+      "diagnosticSubtitle": "Detailed system traces and runtime logs.",
+      "expandAll": "Expand All",
+      "collapse": "Collapse"
     },
     "tabs": {
       "overview": "Overview",
@@ -1194,7 +1206,21 @@
       "save": "Save Settings",
       "dangerZone": "Danger Zone",
       "deleteBotDescription": "Deleting this bot cannot be undone. Proceed with caution.",
-      "deleteBot": "Delete Bot"
+      "deleteBot": "Delete Bot",
+      "blocks": {
+        "global": "Global Settings",
+        "interaction": "Models & Behavior",
+        "context": "Knowledge & Context",
+        "multimedia": "Multimedia Interaction",
+        "globalDescription": "Base environment and language preferences.",
+        "interactionDescription": "Configure AI models and core response behaviors.",
+        "contextDescription": "Set up web search, browser environments, and long-term memory.",
+        "multimediaDescription": "Configure specialized models for voice and image processing."
+      },
+      "showMemoryDetails": "Show Detailed Index Status",
+      "hideMemoryDetails": "Hide Detailed Index Status",
+      "chatLanguage": "Chat Language",
+      "chatLanguagePlaceholder": "Auto Detect"
     },
     "access": {
       "title": "Access Control",
@@ -1636,5 +1662,17 @@
     "skillInstallTitle": "Install Skill",
     "loadError": "Failed to load from Supermarket",
     "submit": "Submit"
+  },
+  "languages": {
+    "auto": "Auto Detect",
+    "zh-CN": "Chinese (Simplified)",
+    "en-US": "English (United States)",
+    "ja-JP": "Japanese",
+    "ko-KR": "Korean",
+    "fr-FR": "French",
+    "de-DE": "German",
+    "es-ES": "Spanish",
+    "ru-RU": "Russian",
+    "it-IT": "Italian"
   }
 }

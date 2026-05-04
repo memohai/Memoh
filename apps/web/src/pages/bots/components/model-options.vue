@@ -102,6 +102,8 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
   modelType: 'chat' | 'embedding'
   open?: boolean
+  showTags?: boolean
+  showIcons?: boolean
 }>()
 
 defineEmits<{
