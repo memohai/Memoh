@@ -8452,6 +8452,14 @@ export type PostOrchestrationRunsErrors = {
      */
     401: HandlersErrorResponse;
     /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
      * Conflict
      */
     409: HandlersErrorResponse;

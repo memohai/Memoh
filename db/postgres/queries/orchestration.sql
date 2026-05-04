@@ -527,6 +527,31 @@ FROM orchestration_planning_intents
 WHERE run_id = sqlc.arg(run_id)
   AND status IN ('pending', 'processing');
 
+-- name: ListExpiredOrchestrationPlanningIntents :many
+SELECT *
+FROM orchestration_planning_intents
+WHERE status = 'processing'
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= clock_timestamp()
+ORDER BY updated_at ASC, id ASC
+LIMIT sqlc.arg(limit_count);
+
+-- name: RequeueOrchestrationPlanningIntent :one
+UPDATE orchestration_planning_intents
+SET status = 'pending',
+    claim_epoch = claim_epoch + 1,
+    claim_token = '',
+    claimed_by = '',
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'processing'
+  AND claim_epoch = sqlc.arg(claim_epoch)
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= clock_timestamp()
+RETURNING *;
+
 -- name: CreateOrchestrationInputManifest :one
 INSERT INTO orchestration_input_manifests (
   id,

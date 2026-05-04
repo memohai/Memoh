@@ -2801,6 +2801,59 @@ func (s *Service) RecoverExpiredAttempts(ctx context.Context) (int, error) {
 	return recovered, nil
 }
 
+func (s *Service) RecoverExpiredPlanningIntents(ctx context.Context) (int, error) {
+	expiredIntents, err := s.queries.ListExpiredOrchestrationPlanningIntents(ctx, 100)
+	if err != nil {
+		return 0, fmt.Errorf("list expired planning intents: %w", err)
+	}
+	recovered := 0
+	for _, candidate := range expiredIntents {
+		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return recovered, fmt.Errorf("begin planning intent recovery tx: %w", err)
+		}
+		qtx := s.queries.WithTx(tx)
+		requeuedIntent, err := qtx.RequeueOrchestrationPlanningIntent(ctx, sqlc.RequeueOrchestrationPlanningIntentParams{
+			ID:         candidate.ID,
+			ClaimEpoch: candidate.ClaimEpoch,
+		})
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return recovered, fmt.Errorf("requeue expired planning intent: %w", err)
+		}
+		if _, err := s.appendEvent(ctx, qtx, requeuedIntent.RunID, eventSpec{
+			TaskID:           requeuedIntent.TaskID,
+			CheckpointID:     requeuedIntent.CheckpointID,
+			AggregateType:    "planning_intent",
+			AggregateID:      requeuedIntent.ID,
+			AggregateVersion: requeuedIntent.ClaimEpoch,
+			Type:             "run.event.planning_intent.requeued",
+			Payload: map[string]any{
+				"planning_intent_id":   requeuedIntent.ID.String(),
+				"run_id":               requeuedIntent.RunID.String(),
+				"task_id":              requeuedIntent.TaskID.String(),
+				"kind":                 requeuedIntent.Kind,
+				"previous_status":      candidate.Status,
+				"new_status":           requeuedIntent.Status,
+				"previous_claim_epoch": candidate.ClaimEpoch,
+				"claim_epoch":          requeuedIntent.ClaimEpoch,
+				"requeue_reason":       "planning intent lease expired",
+			},
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return recovered, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return recovered, fmt.Errorf("commit planning intent recovery tx: %w", err)
+		}
+		recovered++
+	}
+	return recovered, nil
+}
+
 func (s *Service) RunPlannerLoop(ctx context.Context) {
 	runBoolLoop(ctx, s.logger, "planner", 200*time.Millisecond, s.ProcessNextPlanningIntent)
 }
@@ -2817,6 +2870,12 @@ func (s *Service) RunRecoveryLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			planningCount, err := s.RecoverExpiredPlanningIntents(ctx)
+			if err != nil {
+				s.logger.Error("planning intent recovery loop failed", slog.Any("error", err))
+			} else if planningCount > 0 {
+				s.logger.Info("recovered expired orchestration planning intents", slog.Int("count", planningCount))
+			}
 			count, err := s.RecoverExpiredAttempts(ctx)
 			if err != nil {
 				s.logger.Error("attempt recovery loop failed", slog.Any("error", err))

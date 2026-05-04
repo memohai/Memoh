@@ -21,9 +21,10 @@ import (
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	containerprovider "github.com/memohai/memoh/internal/container/provider"
 	"github.com/memohai/memoh/internal/db"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	"github.com/memohai/memoh/internal/logger"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/orchestration"
@@ -59,7 +60,7 @@ func run() error {
 	logger.Init(cfg.Log.Level, cfg.Log.Format)
 	log := logger.L.With(slog.String("component", "workerd"))
 
-	pool, err := db.Open(ctx, cfg.Postgres)
+	pool, err := db.Open(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("db connect: %w", err)
 	}
@@ -597,11 +598,13 @@ func buildLLMRuntime(
 	if err != nil {
 		return nil, nil, err
 	}
-	containerSvc, cleanup, err := ctr.ProvideService(ctx, log, cfg, rc.ContainerBackend)
+	containerSvc, cleanupContainer, err := containerprovider.ProvideService(ctx, log, cfg, rc.ContainerBackend)
 	if err != nil {
 		return nil, nil, err
 	}
-	manager := workspace.NewManager(log, containerSvc, cfg.Workspace, cfg.Containerd.Namespace, pool)
+	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
+	runtimeSvc := workspace.NewRuntimeRouter(containerSvc, localSvc)
+	manager := workspace.NewManager(log, runtimeSvc, nil, cfg.Workspace, cfg.Containerd.Namespace, pool)
 	a := agentpkg.New(agentpkg.Deps{
 		BridgeProvider: manager,
 		Logger:         log,
@@ -609,14 +612,22 @@ func buildLLMRuntime(
 	a.SetToolProviders([]agenttools.ToolProvider{
 		agenttools.NewContainerProvider(log, manager, nil, config.DefaultDataMount),
 	})
-	return orchestrationexec.NewRuntime(
+	storeQueries := postgresstore.NewQueries(queries)
+	runtime := orchestrationexec.NewRuntime(
 		log,
 		queries,
-		settings.NewService(log, queries, nil),
-		models.NewService(log, queries),
+		settings.NewService(log, storeQueries, nil, nil),
+		models.NewService(log, storeQueries),
 		a,
 		rc.TimezoneLocation,
-	), cleanup, nil
+	)
+	cleanup := func() {
+		localSvc.Close()
+		if cleanupContainer != nil {
+			cleanupContainer()
+		}
+	}
+	return runtime, cleanup, nil
 }
 
 func heartbeatInterval(leaseTTLSeconds int) time.Duration {

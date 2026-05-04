@@ -18,6 +18,8 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/oauthctx"
 	"github.com/memohai/memoh/internal/orchestration"
@@ -34,6 +36,7 @@ const (
 type Runtime struct {
 	logger          *slog.Logger
 	queries         *sqlc.Queries
+	storeQueries    dbstore.Queries
 	settingsService *settings.Service
 	modelsService   *models.Service
 	agent           *agentpkg.Agent
@@ -70,6 +73,7 @@ func NewRuntime(
 	return &Runtime{
 		logger:          log.With(slog.String("component", "orchestration_llm_runtime")),
 		queries:         queries,
+		storeQueries:    postgresstore.NewQueries(queries),
 		settingsService: settingsService,
 		modelsService:   modelsService,
 		agent:           agent,
@@ -760,7 +764,7 @@ func (r *Runtime) buildBotRunConfig(ctx context.Context, botID, ownerSubject str
 		reasoningConfig = &models.ReasoningConfig{Enabled: true, Effort: reasoningEffort}
 	}
 
-	credentialsResolver := providers.NewService(nil, r.queries, "")
+	credentialsResolver := providers.NewService(nil, r.storeQueries, "")
 	authCtx := oauthctx.WithUserID(ctx, ownerSubject)
 	creds, err := credentialsResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
@@ -810,7 +814,7 @@ resolved:
 	if model.Type != models.ModelTypeChat {
 		return models.GetResponse{}, sqlc.Provider{}, errors.New("configured bot chat model is not a chat model")
 	}
-	provider, err := models.FetchProviderByID(ctx, r.queries, model.ProviderID)
+	provider, err := models.FetchProviderByID(ctx, r.storeQueries, model.ProviderID)
 	if err != nil {
 		return models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("load provider: %w", err)
 	}

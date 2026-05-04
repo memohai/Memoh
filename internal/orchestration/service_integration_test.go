@@ -57,7 +57,7 @@ func setupOrchestrationIntegrationTest(t *testing.T) (*Service, *pgxpool.Pool, f
 	dbName := "memoh_orch_integration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	adminCfg := dbCfg
 	adminCfg.Database = "postgres"
-	adminPool, err := db.Open(ctx, adminCfg)
+	adminPool, err := db.OpenPostgres(ctx, adminCfg)
 	if err != nil {
 		t.Skipf("skip integration test: open admin database: %v", err)
 	}
@@ -73,7 +73,7 @@ func setupOrchestrationIntegrationTest(t *testing.T) (*Service, *pgxpool.Pool, f
 		t.Fatalf("migrate orchestration integration database: %v", err)
 	}
 
-	pool, err := db.Open(ctx, dbCfg)
+	pool, err := db.OpenPostgres(ctx, dbCfg)
 	if err != nil {
 		dropOrchestrationIntegrationDatabase(t, adminCfg, dbName)
 		t.Fatalf("open orchestration integration database: %v", err)
@@ -107,7 +107,7 @@ func orchestrationIntegrationPostgresConfigFromTestDSN() (config.PostgresConfig,
 }
 
 func migrateOrchestrationIntegrationDatabase(dbCfg config.PostgresConfig) error {
-	sub, err := fs.Sub(dbembed.MigrationsFS, "migrations")
+	sub, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func migrateOrchestrationIntegrationDatabase(dbCfg config.PostgresConfig) error 
 func dropOrchestrationIntegrationDatabase(t *testing.T, adminCfg config.PostgresConfig, dbName string) {
 	t.Helper()
 
-	pool, err := db.Open(context.Background(), adminCfg)
+	pool, err := db.OpenPostgres(context.Background(), adminCfg)
 	if err != nil {
 		t.Fatalf("open admin database for cleanup: %v", err)
 	}
@@ -9100,6 +9100,44 @@ WHERE id = $1
 		t.Fatalf("mark planning intent processing+expired: %v", err)
 	}
 
+	recovered, err := svc.RecoverExpiredPlanningIntents(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredPlanningIntents(first) error = %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("RecoverExpiredPlanningIntents(first) = %d, want 1", recovered)
+	}
+	recovered, err = svc.RecoverExpiredPlanningIntents(ctx)
+	if err != nil {
+		t.Fatalf("RecoverExpiredPlanningIntents(second) error = %v", err)
+	}
+	if recovered != 0 {
+		t.Fatalf("RecoverExpiredPlanningIntents(second) = %d, want 0", recovered)
+	}
+
+	intentRow, err := svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentUUID)
+	if err != nil {
+		t.Fatalf("GetOrchestrationPlanningIntentByID(after recovery) error = %v", err)
+	}
+	if intentRow.Status != PlanningIntentStatusPending {
+		t.Fatalf("planning intent status after recovery = %q, want %q", intentRow.Status, PlanningIntentStatusPending)
+	}
+	if intentRow.ClaimEpoch != 2 {
+		t.Fatalf("planning intent claim_epoch after recovery = %d, want 2", intentRow.ClaimEpoch)
+	}
+	if strings.TrimSpace(intentRow.ClaimToken) != "" {
+		t.Fatalf("planning intent claim_token after recovery = %q, want empty", intentRow.ClaimToken)
+	}
+	if strings.TrimSpace(intentRow.ClaimedBy) != "" {
+		t.Fatalf("planning intent claimed_by after recovery = %q, want empty", intentRow.ClaimedBy)
+	}
+	if intentRow.LeaseExpiresAt.Valid {
+		t.Fatalf("planning intent lease_expires_at after recovery = %v, want null", intentRow.LeaseExpiresAt)
+	}
+	if intentRow.LastHeartbeatAt.Valid {
+		t.Fatalf("planning intent last_heartbeat_at after recovery = %v, want null", intentRow.LastHeartbeatAt)
+	}
+
 	processed, err := svc.ProcessNextPlanningIntent(ctx)
 	if err != nil {
 		t.Fatalf("ProcessNextPlanningIntent() error = %v", err)
@@ -9108,7 +9146,7 @@ WHERE id = $1
 		t.Fatal("ProcessNextPlanningIntent() = false, want true")
 	}
 
-	intentRow, err := svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentUUID)
+	intentRow, err = svc.queries.GetOrchestrationPlanningIntentByID(ctx, intentUUID)
 	if err != nil {
 		t.Fatalf("GetOrchestrationPlanningIntentByID() error = %v", err)
 	}
@@ -9142,8 +9180,25 @@ WHERE id = $1
 	if err != nil {
 		t.Fatalf("ListRunEvents() error = %v", err)
 	}
+	var foundRequeuedEvent bool
 	var foundCompletedEvent bool
 	for _, event := range eventPage.Items {
+		if event.Type == "run.event.planning_intent.requeued" {
+			if planningIntentID, _ := event.Payload["planning_intent_id"].(string); planningIntentID != intentUUID.String() {
+				continue
+			}
+			if kind, _ := event.Payload["kind"].(string); kind != PlanningIntentKindStartRun {
+				continue
+			}
+			if previousStatus, _ := event.Payload["previous_status"].(string); previousStatus != PlanningIntentStatusProcessing {
+				continue
+			}
+			if newStatus, _ := event.Payload["new_status"].(string); newStatus != PlanningIntentStatusPending {
+				continue
+			}
+			foundRequeuedEvent = true
+			continue
+		}
 		if event.Type != "run.event.planning_intent.completed" {
 			continue
 		}
@@ -9157,6 +9212,9 @@ WHERE id = $1
 	}
 	if !foundCompletedEvent {
 		t.Fatal("ListRunEvents() missing reclaimed planning_intent.completed event")
+	}
+	if !foundRequeuedEvent {
+		t.Fatal("ListRunEvents() missing planning_intent.requeued event")
 	}
 }
 

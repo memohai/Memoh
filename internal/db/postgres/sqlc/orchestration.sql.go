@@ -3088,6 +3088,53 @@ func (q *Queries) ListDependencyBlockedOrchestrationTasks(ctx context.Context) (
 	return items, nil
 }
 
+const listExpiredOrchestrationPlanningIntents = `-- name: ListExpiredOrchestrationPlanningIntents :many
+SELECT id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, claim_epoch, claim_token, claimed_by, lease_expires_at, last_heartbeat_at, failure_reason, payload, created_at, updated_at
+FROM orchestration_planning_intents
+WHERE status = 'processing'
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= clock_timestamp()
+ORDER BY updated_at ASC, id ASC
+LIMIT $1
+`
+
+func (q *Queries) ListExpiredOrchestrationPlanningIntents(ctx context.Context, limitCount int32) ([]OrchestrationPlanningIntent, error) {
+	rows, err := q.db.Query(ctx, listExpiredOrchestrationPlanningIntents, limitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationPlanningIntent
+	for rows.Next() {
+		var i OrchestrationPlanningIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.CheckpointID,
+			&i.Kind,
+			&i.Status,
+			&i.BasePlannerEpoch,
+			&i.ClaimEpoch,
+			&i.ClaimToken,
+			&i.ClaimedBy,
+			&i.LeaseExpiresAt,
+			&i.LastHeartbeatAt,
+			&i.FailureReason,
+			&i.Payload,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredOrchestrationTaskAttempts = `-- name: ListExpiredOrchestrationTaskAttempts :many
 SELECT id, run_id, task_id, attempt_no, worker_id, executor_id, worker_lease_token, status, claim_epoch, claim_token, lease_expires_at, last_heartbeat_at, input_manifest_id, park_checkpoint_id, failure_class, terminal_reason, started_at, finished_at, created_at, updated_at
 FROM orchestration_task_attempts
@@ -5018,6 +5065,52 @@ func (q *Queries) ReleaseOrchestrationTaskVerificationClaim(ctx context.Context,
 		&i.TerminalReason,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const requeueOrchestrationPlanningIntent = `-- name: RequeueOrchestrationPlanningIntent :one
+UPDATE orchestration_planning_intents
+SET status = 'pending',
+    claim_epoch = claim_epoch + 1,
+    claim_token = '',
+    claimed_by = '',
+    lease_expires_at = NULL,
+    last_heartbeat_at = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'processing'
+  AND claim_epoch = $2
+  AND lease_expires_at IS NOT NULL
+  AND lease_expires_at <= clock_timestamp()
+RETURNING id, run_id, task_id, checkpoint_id, kind, status, base_planner_epoch, claim_epoch, claim_token, claimed_by, lease_expires_at, last_heartbeat_at, failure_reason, payload, created_at, updated_at
+`
+
+type RequeueOrchestrationPlanningIntentParams struct {
+	ID         pgtype.UUID `json:"id"`
+	ClaimEpoch int64       `json:"claim_epoch"`
+}
+
+func (q *Queries) RequeueOrchestrationPlanningIntent(ctx context.Context, arg RequeueOrchestrationPlanningIntentParams) (OrchestrationPlanningIntent, error) {
+	row := q.db.QueryRow(ctx, requeueOrchestrationPlanningIntent, arg.ID, arg.ClaimEpoch)
+	var i OrchestrationPlanningIntent
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.TaskID,
+		&i.CheckpointID,
+		&i.Kind,
+		&i.Status,
+		&i.BasePlannerEpoch,
+		&i.ClaimEpoch,
+		&i.ClaimToken,
+		&i.ClaimedBy,
+		&i.LeaseExpiresAt,
+		&i.LastHeartbeatAt,
+		&i.FailureReason,
+		&i.Payload,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

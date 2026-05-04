@@ -38,6 +38,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/models"
 	orch "github.com/memohai/memoh/internal/orchestration"
@@ -1508,7 +1509,7 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 	dbName := "memoh_orch_blackbox_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	adminCfg := dbCfg
 	adminCfg.Database = "postgres"
-	adminPool, err := db.Open(context.Background(), adminCfg)
+	adminPool, err := db.OpenPostgres(context.Background(), adminCfg)
 	if err != nil {
 		t.Skipf("skip blackbox test: open admin db: %v", err)
 	}
@@ -1525,23 +1526,25 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	appPool, err := db.Open(ctx, dbCfg)
+	appPool, err := db.OpenPostgres(ctx, dbCfg)
 	if err != nil {
 		cancel()
 		dropBlackboxDatabase(t, adminCfg, dbName)
 		t.Fatalf("open app db: %v", err)
 	}
 	queries := sqlc.New(appPool)
+	storeQueries := postgresstore.NewQueries(queries)
+	accountStore := postgresstore.NewWithPool(appPool, queries)
 	createBlackboxAdminUser(t, queries, "admin", "admin123", "test@memoh.local")
 
 	logger := slog.New(slog.DiscardHandler)
 	service := orch.NewService(logger, appPool, queries)
-	botService := bots.NewService(logger, queries)
+	botService := bots.NewService(logger, storeQueries)
 	plannerRuntime := orchestrationexec.NewRuntime(
 		logger,
 		queries,
-		settings.NewService(logger, queries, nil),
-		models.NewService(logger, queries),
+		settings.NewService(logger, storeQueries, nil, nil),
+		models.NewService(logger, storeQueries),
 		agentpkg.New(agentpkg.Deps{Logger: logger}),
 		time.UTC,
 	)
@@ -1565,7 +1568,7 @@ func setupBlackboxHarness(t *testing.T, opts blackboxHarnessOptions) *blackboxHa
 		return path == "/auth/login" || path == "/ping"
 	}))
 	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "ok") })
-	handlers.NewAuthHandler(logger, accounts.NewService(logger, queries), blackboxJWTSecret, 24*time.Hour).Register(e)
+	handlers.NewAuthHandler(logger, accounts.NewService(logger, accountStore), blackboxJWTSecret, 24*time.Hour).Register(e)
 	handlers.NewOrchestrationHandler(logger, service, botService).Register(e)
 
 	serverErrCh := make(chan error, 1)
@@ -2208,6 +2211,10 @@ func (h *blackboxHarness) createLLMBot(t *testing.T, providerBaseURL string) str
 		BrowserContextID:       pgtype.UUID{},
 		PersistFullToolResults: false,
 		ShowToolCallsInIm:      false,
+		ToolApprovalConfig:     mustMarshalJSON(t, settings.DefaultToolApprovalConfig()),
+		OverlayProvider:        "",
+		OverlayEnabled:         false,
+		OverlayConfig:          []byte("{}"),
 		ID:                     bot.ID,
 	}); err != nil {
 		t.Fatalf("UpsertBotSettings() error = %v", err)
@@ -2278,7 +2285,7 @@ func postgresConfigFromTestDSN() (config.PostgresConfig, error) {
 }
 
 func migrateBlackboxDatabase(dbCfg config.PostgresConfig) error {
-	sub, err := fs.Sub(dbembed.MigrationsFS, "migrations")
+	sub, err := fs.Sub(dbembed.MigrationsFS, "postgres/migrations")
 	if err != nil {
 		return err
 	}
@@ -2324,7 +2331,7 @@ func createBlackboxAdminUser(t *testing.T, queries *sqlc.Queries, username, pass
 
 func dropBlackboxDatabase(t *testing.T, adminCfg config.PostgresConfig, dbName string) {
 	t.Helper()
-	pool, err := db.Open(context.Background(), adminCfg)
+	pool, err := db.OpenPostgres(context.Background(), adminCfg)
 	if err != nil {
 		t.Fatalf("open admin db for cleanup: %v", err)
 	}
@@ -2359,6 +2366,9 @@ jwt_secret = %q
 jwt_expires_in = "24h"
 
 timezone = "Asia/Shanghai"
+
+[container]
+backend = "docker"
 
 [postgres]
 host = %q
