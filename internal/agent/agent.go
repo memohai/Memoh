@@ -529,7 +529,15 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			)
 		}
 	}
-	sendEvent(ctx, ch, termEvent)
+	// Deliver the terminal event using a context that is NOT cancelled when
+	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
+	// Otherwise sendEvent would short-circuit on <-ctx.Done() and the consumer
+	// would never receive the partial messages accumulated so far, forcing it
+	// to fall back to a synthetic placeholder. A 5s deadline guards against
+	// a fully-disconnected consumer hanging this goroutine forever.
+	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer deliveryCancel()
+	sendEvent(deliveryCtx, ch, termEvent)
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
@@ -628,12 +636,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (*GenerateResult
 		switch evt.Type {
 		case tools.StreamEventAttachment:
 			for _, a := range evt.Attachments {
-				attachments = append(attachments, FileAttachment{
-					Type: a.Type, Path: a.Path, URL: a.URL,
-					Mime: a.Mime, Name: a.Name,
-					ContentHash: a.ContentHash, Size: a.Size,
-					Metadata: a.Metadata,
-				})
+				attachments = append(attachments, fileAttachmentFromToolAttachment(a))
 			}
 		case tools.StreamEventReaction:
 			for _, r := range evt.Reactions {
@@ -826,12 +829,7 @@ func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 	case tools.StreamEventAttachment:
 		atts := make([]FileAttachment, 0, len(evt.Attachments))
 		for _, a := range evt.Attachments {
-			atts = append(atts, FileAttachment{
-				Type: a.Type, Path: a.Path, URL: a.URL,
-				Mime: a.Mime, Name: a.Name,
-				ContentHash: a.ContentHash, Size: a.Size,
-				Metadata: a.Metadata,
-			})
+			atts = append(atts, fileAttachmentFromToolAttachment(a))
 		}
 		return StreamEvent{Type: EventAttachment, Attachments: atts}
 	case tools.StreamEventReaction:
@@ -1188,9 +1186,23 @@ func (a *Agent) runMidStreamRetry(
 			for range retryResult.Stream {
 			}
 		}
+		// Merge prev messages into retryResult so the caller sees the full
+		// accumulated history (initial run + retry continuation). The SDK's
+		// StreamResult.Messages only contains messages produced within that
+		// StreamText call, so without this merge the original steps before
+		// the mid-stream error would be lost when the retry result becomes
+		// the new streamResult.
+		if len(prevResult.Messages) > 0 {
+			merged := make([]sdk.Message, 0, len(prevResult.Messages)+len(retryResult.Messages))
+			merged = append(merged, prevResult.Messages...)
+			merged = append(merged, retryResult.Messages...)
+			retryResult.Messages = merged
+		}
 		return retryResult, aborted || detectGenerateLoopAbort(streamCtx, streamCtx.Err()) != nil
 	}
-	// All retry attempts failed
+	// All retry attempts failed to even start a new stream — return the
+	// previous (already drained) result so its accumulated messages are
+	// preserved as the final partial state.
 	return prevResult, true
 }
 

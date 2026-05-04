@@ -13,7 +13,8 @@ import (
 
 	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/session"
 )
 
@@ -27,11 +28,11 @@ type SessionLister interface {
 // HistoryProvider exposes list_sessions and search_messages tools.
 type HistoryProvider struct {
 	sessions SessionLister
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	logger   *slog.Logger
 }
 
-func NewHistoryProvider(log *slog.Logger, sessions SessionLister, queries *sqlc.Queries) *HistoryProvider {
+func NewHistoryProvider(log *slog.Logger, sessions SessionLister, queries dbstore.Queries) *HistoryProvider {
 	if log == nil {
 		log = slog.Default()
 	}

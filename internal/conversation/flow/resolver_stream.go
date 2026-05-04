@@ -16,6 +16,43 @@ import (
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
 type WSStreamEvent = json.RawMessage
 
+// terminalSnapshot captures the partial state extracted from a terminal
+// agent event. It is used both for the success-path persistence and for the
+// interrupted-path fallback so that real partial messages get saved instead
+// of a synthetic placeholder.
+type terminalSnapshot struct {
+	sdkMessages []sdk.Message
+	usage       json.RawMessage
+	approvalID  string
+}
+
+// extractTerminalSnapshot decodes a terminal stream event payload into the
+// raw SDK messages plus auxiliary metadata. Returns ok=false when the event
+// has no usable messages.
+func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
+	var envelope struct {
+		Type       string          `json:"type"`
+		Messages   json.RawMessage `json:"messages"`
+		Usage      json.RawMessage `json:"usage,omitempty"`
+		ApprovalID string          `json:"approvalId,omitempty"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return terminalSnapshot{}, false
+	}
+	if len(envelope.Messages) == 0 {
+		return terminalSnapshot{}, false
+	}
+	var sdkMsgs []sdk.Message
+	if err := json.Unmarshal(envelope.Messages, &sdkMsgs); err != nil || len(sdkMsgs) == 0 {
+		return terminalSnapshot{}, false
+	}
+	return terminalSnapshot{
+		sdkMessages: sdkMsgs,
+		usage:       envelope.Usage,
+		approvalID:  strings.TrimSpace(envelope.ApprovalID),
+	}, true
+}
+
 // StreamChat runs a streaming chat via the internal agent.
 func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest) (<-chan conversation.StreamChunk, <-chan error) {
 	chunkCh := make(chan conversation.StreamChunk)
@@ -53,6 +90,9 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 
 		eventCh := r.agent.Stream(idleCtx, cfg)
 		stored := false
+		clientGone := false
+		var lastSnapshot terminalSnapshot
+		var hasSnapshot bool
 		var toolCallCount int
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
@@ -76,25 +116,47 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 			if err != nil {
 				continue
 			}
-			if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-				if _, storeErr := r.tryStoreStream(ctx, streamReq, data, rc.model.ID, rc); storeErr != nil {
-					r.logger.Error("stream persist failed", slog.Any("error", storeErr))
-				} else {
-					stored = true
+			if event.IsTerminal() && len(event.Messages) > 0 {
+				if snap, ok := extractTerminalSnapshot(data); ok {
+					lastSnapshot = snap
+					hasSnapshot = true
+					if !stored {
+						// Use WithoutCancel so persistence still succeeds even
+						// when the parent ctx has already been cancelled by a
+						// client disconnect or idle timeout.
+						if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), streamReq, rc, snap); storeErr != nil {
+							r.logger.Error("stream persist failed", slog.Any("error", storeErr))
+						} else {
+							stored = true
+						}
+					}
 				}
 			}
-			select {
-			case chunkCh <- conversation.StreamChunk(data):
-			case <-ctx.Done():
-				return
+
+			// Forward to the client unless the client is already gone. Once
+			// the client disconnects we keep draining eventCh so the agent
+			// goroutine can finish and the terminal event (with partial
+			// messages) is captured for persistence above.
+			if !clientGone {
+				select {
+				case chunkCh <- conversation.StreamChunk(data):
+				case <-ctx.Done():
+					clientGone = true
+				}
 			}
 		}
 
 		// Intermediate persistence on abort/error: if stream ended without
-		// storing results, persist a synthetic message so the user can see
-		// what happened and ask the bot to continue.
+		// storing results, persist whatever partial messages we managed to
+		// capture so the user can see what was accomplished and ask the bot
+		// to continue. Falls back to a synthetic placeholder only when no
+		// partial messages are available at all.
 		if !stored {
-			r.persistPartialResult(ctx, streamReq, rc, toolCallCount, idleCancel.DidFire())
+			var partial []sdk.Message
+			if hasSnapshot {
+				partial = lastSnapshot.sdkMessages
+			}
+			r.persistPartialResult(ctx, streamReq, rc, partial, toolCallCount, idleCancel.DidFire())
 		}
 
 		if idleCancel.DidFire() {
@@ -105,14 +167,16 @@ func (r *Resolver) StreamChat(ctx context.Context, req conversation.ChatRequest)
 				slog.Int("tool_calls", toolCallCount),
 			)
 			// Notify the client that the stream was terminated due to idle timeout.
-			timeoutEvent := agentpkg.StreamEvent{
-				Type:  agentpkg.EventError,
-				Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
-			}
-			if data, err := json.Marshal(timeoutEvent); err == nil {
-				select {
-				case chunkCh <- conversation.StreamChunk(data):
-				case <-ctx.Done():
+			if !clientGone {
+				timeoutEvent := agentpkg.StreamEvent{
+					Type:  agentpkg.EventError,
+					Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
+				}
+				if data, err := json.Marshal(timeoutEvent); err == nil {
+					select {
+					case chunkCh <- conversation.StreamChunk(data):
+					case <-ctx.Done():
+					}
 				}
 			}
 		}
@@ -167,6 +231,9 @@ func (r *Resolver) StreamChatWS(
 	agentEventCh := r.agent.Stream(idleCtx, cfg)
 	modelID := rc.model.ID
 	stored := false
+	clientGone := false
+	var lastSnapshot terminalSnapshot
+	var hasSnapshot bool
 	var toolCallCount int
 	for event := range agentEventCh {
 		idleCancel.Reset() // each event resets the idle timer
@@ -191,24 +258,36 @@ func (r *Resolver) StreamChatWS(
 			continue
 		}
 
-		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if _, storeErr := r.tryStoreStream(ctx, req, data, modelID, rc); storeErr != nil {
-				r.logger.Error("ws persist failed", slog.Any("error", storeErr))
-			} else {
-				stored = true
+		if event.IsTerminal() && len(event.Messages) > 0 {
+			if snap, ok := extractTerminalSnapshot(data); ok {
+				lastSnapshot = snap
+				hasSnapshot = true
+				if !stored {
+					if storeErr := r.persistTerminalSnapshot(context.WithoutCancel(ctx), req, rc, snap); storeErr != nil {
+						r.logger.Error("ws persist failed", slog.Any("error", storeErr))
+					} else {
+						stored = true
+					}
+				}
 			}
 		}
 
-		select {
-		case eventCh <- json.RawMessage(data):
-		case <-ctx.Done():
-			return ctx.Err()
+		if !clientGone {
+			select {
+			case eventCh <- json.RawMessage(data):
+			case <-ctx.Done():
+				clientGone = true
+			}
 		}
 	}
 
 	// Intermediate persistence on abort/error
 	if !stored {
-		r.persistPartialResult(ctx, req, rc, toolCallCount, idleCancel.DidFire())
+		var partial []sdk.Message
+		if hasSnapshot {
+			partial = lastSnapshot.sdkMessages
+		}
+		r.persistPartialResult(ctx, req, rc, partial, toolCallCount, idleCancel.DidFire())
 	}
 
 	if idleCancel.DidFire() {
@@ -219,14 +298,16 @@ func (r *Resolver) StreamChatWS(
 			slog.Int("tool_calls", toolCallCount),
 		)
 		// Notify the client that the stream was terminated due to idle timeout.
-		timeoutEvent := agentpkg.StreamEvent{
-			Type:  agentpkg.EventError,
-			Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
-		}
-		if data, err := json.Marshal(timeoutEvent); err == nil {
-			select {
-			case eventCh <- json.RawMessage(data):
-			case <-ctx.Done():
+		if !clientGone {
+			timeoutEvent := agentpkg.StreamEvent{
+				Type:  agentpkg.EventError,
+				Error: fmt.Sprintf("stream timeout: no response from model provider (after %d tool calls)", toolCallCount),
+			}
+			if data, err := json.Marshal(timeoutEvent); err == nil {
+				select {
+				case eventCh <- json.RawMessage(data):
+				case <-ctx.Done():
+				}
 			}
 		}
 	}
@@ -234,49 +315,77 @@ func (r *Resolver) StreamChatWS(
 	return nil
 }
 
-func (r *Resolver) tryStoreStream(ctx context.Context, req conversation.ChatRequest, data []byte, modelID string, rc resolvedContext) (bool, error) {
-	var envelope struct {
-		Type       string          `json:"type"`
-		Messages   json.RawMessage `json:"messages"`
-		Usage      json.RawMessage `json:"usage,omitempty"`
-		ApprovalID string          `json:"approvalId,omitempty"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return false, nil
-	}
-	if len(envelope.Messages) == 0 {
-		return false, nil
-	}
-
-	var sdkMsgs []sdk.Message
-	if err := json.Unmarshal(envelope.Messages, &sdkMsgs); err != nil || len(sdkMsgs) == 0 {
-		return false, nil
-	}
-	outputMessages := sdkMessagesToModelMessages(sdkMsgs)
+// persistTerminalSnapshot stores the SDK messages produced by an agent run
+// (or partial run) into bot history. Triggers compaction when usage data
+// indicates the context is large.
+func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, snap terminalSnapshot) error {
+	outputMessages := sdkMessagesToModelMessages(snap.sdkMessages)
 	roundMessages := prependUserMessage(req.Query, outputMessages)
 
 	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
 		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
-	if err := r.storeRoundWithOptions(ctx, req, roundMessages, modelID, storeRoundOptions{
-		AllowPendingToolCalls: strings.TrimSpace(envelope.ApprovalID) != "",
+	if err := r.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
+		AllowPendingToolCalls: snap.approvalID != "",
 	}); err != nil {
-		return false, err
+		return err
 	}
 
-	if inputTokens := extractInputTokensFromUsage(envelope.Usage); inputTokens > 0 {
+	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
 		go r.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
 	}
 
-	return true, nil
+	return nil
 }
 
-// persistPartialResult stores a synthetic assistant message when the agent
-// stream was interrupted (error, abort, idle timeout) after completing tool
-// calls but before producing a final response. This preserves intermediate
-// progress so the user can see what was accomplished and ask the bot to continue.
-func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.ChatRequest, rc resolvedContext, toolCallCount int, wasIdleTimeout bool) {
+// persistPartialResult is the interrupt-path fallback. When the agent stream
+// was interrupted (provider error, user abort, idle timeout) and partial SDK
+// messages are available, those are persisted via the normal pipeline so
+// orphaned tool_calls get repaired with synthetic error tool_results, keeping
+// the conversation coherent for "ask the bot to continue".
+//
+// Only when no partial messages are available at all does it write a synthetic
+// placeholder so the user can see something happened.
+func (r *Resolver) persistPartialResult(
+	ctx context.Context,
+	req conversation.ChatRequest,
+	rc resolvedContext,
+	partialMessages []sdk.Message,
+	toolCallCount int,
+	wasIdleTimeout bool,
+) {
+	persistCtx := context.WithoutCancel(ctx)
+
+	if len(partialMessages) > 0 {
+		// AllowPendingToolCalls=false → repairToolCallClosures will inject
+		// synthetic error tool_results for any tool_calls that never received
+		// a real result, preserving the assistant ↔ tool pairing required by
+		// downstream provider serializers (especially Anthropic).
+		err := r.persistTerminalSnapshot(persistCtx, req, rc, terminalSnapshot{
+			sdkMessages: partialMessages,
+		})
+		if err == nil {
+			r.logger.Info("persisted partial agent result",
+				slog.String("bot_id", req.BotID),
+				slog.Int("tool_calls", toolCallCount),
+				slog.Int("partial_messages", len(partialMessages)),
+				slog.Bool("idle_timeout", wasIdleTimeout),
+			)
+			// Trigger compaction on the failure path so that oversized
+			// contexts don't deadlock (where the LLM can never succeed and
+			// therefore compaction never fires).
+			if rc.estimatedTokens > 0 {
+				r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+			}
+			return
+		}
+		r.logger.Error("failed to persist partial agent messages, falling back to placeholder",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", err),
+		)
+	}
+
 	reason := "provider error"
 	if wasIdleTimeout {
 		reason = "provider idle timeout"
@@ -287,18 +396,15 @@ func (r *Resolver) persistPartialResult(ctx context.Context, req conversation.Ch
 		{Role: "assistant", Content: conversation.NewTextContent(syntheticMsg)},
 	})
 
-	if err := r.storeRound(context.WithoutCancel(ctx), req, roundMessages, rc.model.ID); err != nil {
-		r.logger.Error("failed to persist partial result",
+	if err := r.storeRound(persistCtx, req, roundMessages, rc.model.ID); err != nil {
+		r.logger.Error("failed to persist partial result placeholder",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
 	}
 
-	// Trigger compaction on failure path so that oversized contexts don't
-	// create a deadlock where the LLM can never succeed (and therefore
-	// compaction never fires). Use the estimated token count from resolve.
 	if rc.estimatedTokens > 0 {
-		r.maybeCompact(context.WithoutCancel(ctx), req, rc, rc.estimatedTokens)
+		r.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
 }
 

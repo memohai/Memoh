@@ -74,6 +74,7 @@
           </p>
         </div>
         <Button
+          v-if="!formVisible"
           size="sm"
           @click="openAddDialog"
         >
@@ -190,321 +191,332 @@
       </div>
     </section>
 
-    <!-- Add/Edit Rule Dialog -->
-    <Dialog v-model:open="dialogOpen">
-      <DialogContent class="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {{ editingRule ? $t('bots.access.editRule') : $t('bots.access.addRule') }}
-          </DialogTitle>
-        </DialogHeader>
-
-        <form
-          class="space-y-4"
-          @submit.prevent="handleSaveRule"
+    <!-- Inline Add/Edit Rule Form -->
+    <section
+      v-if="formVisible"
+      class="rounded-lg border border-border bg-card p-4 space-y-4"
+    >
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-foreground">
+          {{ editingRule ? $t('bots.access.editRule') : $t('bots.access.addRule') }}
+        </h3>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="size-7"
+          @click="formVisible = false"
         >
-          <div class="space-y-1.5">
-            <Label>{{ $t('bots.access.enabled') }}</Label>
-            <div class="flex items-center gap-2 h-9">
-              <Switch v-model="ruleForm.enabled" />
-              <span class="text-xs text-muted-foreground">{{ ruleForm.enabled ? $t('common.yes') : $t('common.no') }}</span>
-            </div>
-          </div>
+          <X class="size-4" />
+        </Button>
+      </div>
 
-          <!-- Effect -->
-          <div class="space-y-1.5">
-            <Label>{{ $t('bots.access.effect') }}</Label>
-            <div class="flex gap-2">
-              <button
-                type="button"
-                class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
-                :class="ruleForm.effect === 'deny'
-                  ? 'border-destructive bg-destructive/10 text-destructive'
-                  : 'border-border text-muted-foreground hover:bg-accent'"
-                @click="ruleForm.effect = 'deny'"
-              >
-                {{ $t('bots.access.effectDeny') }}
-              </button>
-              <button
-                type="button"
-                class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
-                :class="ruleForm.effect === 'allow'
-                  ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  : 'border-border text-muted-foreground hover:bg-accent'"
-                @click="ruleForm.effect = 'allow'"
-              >
-                {{ $t('bots.access.effectAllow') }}
-              </button>
-            </div>
+      <form
+        class="space-y-4"
+        @submit.prevent="handleSaveRule"
+      >
+        <div class="space-y-1.5">
+          <Label>{{ $t('bots.access.enabled') }}</Label>
+          <div class="flex items-center gap-2 h-9">
+            <Switch v-model="ruleForm.enabled" />
+            <span class="text-xs text-muted-foreground">{{ ruleForm.enabled ? $t('common.yes') : $t('common.no') }}</span>
           </div>
+        </div>
 
-          <!-- Subject Kind -->
-          <div class="space-y-1.5">
-            <Label>{{ $t('bots.access.subjectKind') }}</Label>
-            <div class="grid grid-cols-3 gap-2">
-              <button
-                v-for="kind in subjectKinds"
-                :key="kind.value"
-                type="button"
-                class="rounded-md border px-2 py-1.5 text-xs font-medium transition-colors text-center"
-                :class="ruleForm.subjectKind === kind.value
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:bg-accent'"
-                @click="handleSubjectKindChange(kind.value)"
-              >
-                {{ kind.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Channel Type (when subjectKind === 'channel_type') -->
-          <div
-            v-if="ruleForm.subjectKind === 'channel_type'"
-            class="space-y-1.5"
-          >
-            <Label>{{ $t('bots.access.channelType') }}</Label>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="ch in commonChannels"
-                :key="ch"
-                type="button"
-                class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
-                :class="ruleForm.subjectChannelType === ch
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:bg-accent'"
-                @click="ruleForm.subjectChannelType = ch"
-              >
-                {{ ch }}
-              </button>
-            </div>
-            <Input
-              v-model="ruleForm.subjectChannelType"
-              :placeholder="$t('bots.access.channelTypePlaceholder')"
-              class="mt-1.5"
-            />
-          </div>
-
-          <!-- Channel Identity (when subjectKind === 'channel_identity') -->
-          <div
-            v-if="ruleForm.subjectKind === 'channel_identity'"
-            class="space-y-1.5"
-          >
-            <Label>{{ $t('bots.access.identitySelector') }}</Label>
-            <SearchableSelectPopover
-              v-model="ruleForm.channelIdentityId"
-              :options="identityOptions"
-              :placeholder="$t('bots.access.selectIdentity')"
-              :aria-label="$t('bots.access.selectIdentity')"
-              :search-placeholder="$t('bots.access.searchIdentity')"
-              :search-aria-label="$t('bots.access.searchIdentity')"
-              :empty-text="$t('bots.access.noIdentityCandidates')"
+        <!-- Effect -->
+        <div class="space-y-1.5">
+          <Label>{{ $t('bots.access.effect') }}</Label>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
+              :class="ruleForm.effect === 'deny'
+                ? 'border-destructive bg-destructive/10 text-destructive'
+                : 'border-border text-muted-foreground hover:bg-accent'"
+              @click="ruleForm.effect = 'deny'"
             >
-              <template #option-label="{ option }">
-                <div class="flex min-w-0 items-center gap-2 text-left">
-                  <Avatar class="size-6 shrink-0">
-                    <AvatarImage
-                      :src="option.meta?.avatarUrl"
-                      :alt="option.label"
-                    />
-                    <AvatarFallback>{{ option.label.slice(0, 2).toUpperCase() }}</AvatarFallback>
-                  </Avatar>
-                  <div class="min-w-0">
+              {{ $t('bots.access.effectDeny') }}
+            </button>
+            <button
+              type="button"
+              class="flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
+              :class="ruleForm.effect === 'allow'
+                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'border-border text-muted-foreground hover:bg-accent'"
+              @click="ruleForm.effect = 'allow'"
+            >
+              {{ $t('bots.access.effectAllow') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Subject Kind -->
+        <div class="space-y-1.5">
+          <Label>{{ $t('bots.access.subjectKind') }}</Label>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              v-for="kind in subjectKinds"
+              :key="kind.value"
+              type="button"
+              class="rounded-md border px-2 py-1.5 text-xs font-medium transition-colors text-center"
+              :class="ruleForm.subjectKind === kind.value
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border text-muted-foreground hover:bg-accent'"
+              @click="handleSubjectKindChange(kind.value)"
+            >
+              {{ kind.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Channel Type (when subjectKind === 'channel_type') -->
+        <div
+          v-if="ruleForm.subjectKind === 'channel_type'"
+          class="space-y-1.5"
+        >
+          <Label>{{ $t('bots.access.channelType') }}</Label>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="ch in commonChannels"
+              :key="ch"
+              type="button"
+              class="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
+              :class="ruleForm.subjectChannelType === ch
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border text-muted-foreground hover:bg-accent'"
+              @click="ruleForm.subjectChannelType = ch"
+            >
+              {{ ch }}
+            </button>
+          </div>
+          <Input
+            v-model="ruleForm.subjectChannelType"
+            :placeholder="$t('bots.access.channelTypePlaceholder')"
+            class="mt-1.5"
+          />
+        </div>
+
+        <!-- Channel Identity (when subjectKind === 'channel_identity') -->
+        <div
+          v-if="ruleForm.subjectKind === 'channel_identity'"
+          class="space-y-1.5"
+        >
+          <Label>{{ $t('bots.access.identitySelector') }}</Label>
+          <SearchableSelectPopover
+            v-model="ruleForm.channelIdentityId"
+            :options="identityOptions"
+            :placeholder="$t('bots.access.selectIdentity')"
+            :aria-label="$t('bots.access.selectIdentity')"
+            :search-placeholder="$t('bots.access.searchIdentity')"
+            :search-aria-label="$t('bots.access.searchIdentity')"
+            :empty-text="$t('bots.access.noIdentityCandidates')"
+          >
+            <template #option-label="{ option }">
+              <div class="flex min-w-0 items-center gap-2 text-left">
+                <Avatar class="size-6 shrink-0">
+                  <AvatarImage
+                    :src="option.meta?.avatarUrl"
+                    :alt="option.label"
+                  />
+                  <AvatarFallback>{{ option.label.slice(0, 2).toUpperCase() }}</AvatarFallback>
+                </Avatar>
+                <div class="min-w-0">
+                  <div class="truncate text-xs">
+                    {{ option.label }}
+                  </div>
+                  <div
+                    v-if="option.meta?.linkedUsername"
+                    class="truncate text-xs text-muted-foreground"
+                  >
+                    @{{ option.meta.linkedUsername }}
+                  </div>
+                </div>
+              </div>
+            </template>
+          </SearchableSelectPopover>
+        </div>
+
+        <!-- Source Scope -->
+        <details
+          class="group"
+          :open="scopeOpen"
+          @toggle="scopeOpen = ($event.target as HTMLDetailsElement).open"
+        >
+          <summary class="flex cursor-pointer items-center gap-1 text-xs font-medium text-foreground select-none list-none">
+            <ChevronRight
+              class="size-3 transition-transform group-open:rotate-90"
+            />
+            {{ $t('bots.access.sourceScopeTitle') }}
+          </summary>
+          <div class="mt-3 space-y-3 pl-4 border-l border-border">
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.access.sourceScopeDescription') }}
+            </p>
+
+            <!-- Conversation Type -->
+            <div class="space-y-1.5">
+              <Label>{{ $t('bots.access.conversationType') }}</Label>
+              <div class="flex gap-2">
+                <button
+                  v-for="ct in conversationTypes"
+                  :key="ct.value"
+                  type="button"
+                  class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                  :class="ruleForm.sourceConversationType === ct.value
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:bg-accent'"
+                  @click="ruleForm.sourceConversationType = ruleForm.sourceConversationType === ct.value ? '' : ct.value"
+                >
+                  {{ ct.label }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Searchable conversation (identity or platform type) -->
+            <div
+              v-if="showConversationSearch"
+              class="space-y-1.5"
+            >
+              <Label>{{ $t('bots.access.conversationSource') }}</Label>
+              <p class="text-xs text-muted-foreground">
+                {{ $t('bots.access.conversationSourceDescription') }}
+              </p>
+              <SearchableSelectPopover
+                v-model="ruleForm.observedConversationRouteId"
+                :options="observedConversationOptions"
+                :show-group-headers="false"
+                :placeholder="$t('bots.access.selectConversationSource')"
+                :aria-label="$t('bots.access.selectConversationSource')"
+                :search-placeholder="$t('bots.access.searchConversationSource')"
+                :search-aria-label="$t('bots.access.searchConversationSource')"
+                :empty-text="observedConversationEmptyText"
+                @update:model-value="onConversationSourceChange"
+              >
+                <template #option-label="{ option }">
+                  <div class="min-w-0 flex-1 text-left">
                     <div class="truncate text-xs">
                       {{ option.label }}
                     </div>
-                    <div
-                      v-if="option.meta?.linkedUsername"
-                      class="truncate text-xs text-muted-foreground"
-                    >
-                      @{{ option.meta.linkedUsername }}
+                    <div class="truncate text-xs text-muted-foreground">
+                      {{ buildConversationStableId(option.meta as AclObservedConversationCandidate | undefined) }}
                     </div>
                   </div>
-                </div>
-              </template>
-            </SearchableSelectPopover>
-          </div>
+                </template>
+              </SearchableSelectPopover>
 
-          <!-- Source Scope -->
-          <details
-            class="group"
-            :open="scopeOpen"
-            @toggle="scopeOpen = ($event.target as HTMLDetailsElement).open"
-          >
-            <summary class="flex cursor-pointer items-center gap-1 text-xs font-medium text-foreground select-none list-none">
-              <ChevronRight
-                class="size-3 transition-transform group-open:rotate-90"
-              />
-              {{ $t('bots.access.sourceScopeTitle') }}
-            </summary>
-            <div class="mt-3 space-y-3 pl-4 border-l border-border">
-              <p class="text-xs text-muted-foreground">
-                {{ $t('bots.access.sourceScopeDescription') }}
-              </p>
-
-              <!-- Conversation Type -->
-              <div class="space-y-1.5">
-                <Label>{{ $t('bots.access.conversationType') }}</Label>
-                <div class="flex gap-2">
-                  <button
-                    v-for="ct in conversationTypes"
-                    :key="ct.value"
-                    type="button"
-                    class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
-                    :class="ruleForm.sourceConversationType === ct.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:bg-accent'"
-                    @click="ruleForm.sourceConversationType = ruleForm.sourceConversationType === ct.value ? '' : ct.value"
-                  >
-                    {{ ct.label }}
-                  </button>
-                </div>
-              </div>
-
-              <!-- Searchable conversation (identity or platform type) -->
-              <div
-                v-if="showConversationSearch"
-                class="space-y-1.5"
-              >
-                <Label>{{ $t('bots.access.conversationSource') }}</Label>
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('bots.access.conversationSourceDescription') }}
-                </p>
-                <SearchableSelectPopover
-                  v-model="ruleForm.observedConversationRouteId"
-                  :options="observedConversationOptions"
-                  :show-group-headers="false"
-                  :placeholder="$t('bots.access.selectConversationSource')"
-                  :aria-label="$t('bots.access.selectConversationSource')"
-                  :search-placeholder="$t('bots.access.searchConversationSource')"
-                  :search-aria-label="$t('bots.access.searchConversationSource')"
-                  :empty-text="observedConversationEmptyText"
-                  @update:model-value="onConversationSourceChange"
+              <details class="group/conversation-manual">
+                <summary
+                  class="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground select-none"
                 >
-                  <template #option-label="{ option }">
-                    <div class="min-w-0 flex-1 text-left">
-                      <div class="truncate text-xs">
-                        {{ option.label }}
-                      </div>
-                      <div class="truncate text-xs text-muted-foreground">
-                        {{ buildConversationStableId(option.meta as AclObservedConversationCandidate | undefined) }}
-                      </div>
-                    </div>
-                  </template>
-                </SearchableSelectPopover>
-
-                <details class="group/conversation-manual">
-                  <summary
-                    class="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground select-none"
-                  >
-                    <ChevronRight
-                      class="mr-0.5 inline size-3 transition-transform group-open/conversation-manual:rotate-90"
+                  <ChevronRight
+                    class="mr-0.5 inline size-3 transition-transform group-open/conversation-manual:rotate-90"
+                  />
+                  {{ $t('bots.access.manualConversationIds') }}
+                </summary>
+                <p class="mt-2 text-xs text-muted-foreground">
+                  {{ $t('bots.access.manualConversationIdsHint') }}
+                </p>
+                <div class="mt-2 space-y-3 pl-1">
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('bots.access.conversationId') }}</Label>
+                    <Input
+                      v-model="ruleForm.sourceConversationId"
+                      :placeholder="$t('bots.access.conversationIdPlaceholder')"
                     />
-                    {{ $t('bots.access.manualConversationIds') }}
-                  </summary>
-                  <p class="mt-2 text-xs text-muted-foreground">
-                    {{ $t('bots.access.manualConversationIdsHint') }}
-                  </p>
-                  <div class="mt-2 space-y-3 pl-1">
-                    <div class="space-y-1.5">
-                      <Label>{{ $t('bots.access.conversationId') }}</Label>
-                      <Input
-                        v-model="ruleForm.sourceConversationId"
-                        :placeholder="$t('bots.access.conversationIdPlaceholder')"
-                      />
-                    </div>
-                    <div class="space-y-1.5">
-                      <Label>{{ $t('bots.access.threadId') }}</Label>
-                      <Input
-                        v-model="ruleForm.sourceThreadId"
-                        :placeholder="$t('bots.access.threadIdPlaceholder')"
-                      />
-                    </div>
                   </div>
-                </details>
-              </div>
-
-              <!-- No identity: manual IDs only (no search API) -->
-              <template v-else>
-                <p
-                  v-if="ruleForm.subjectKind === 'channel_identity'"
-                  class="text-xs text-muted-foreground"
-                >
-                  {{ $t('bots.access.pickIdentityForConversationSearch') }}
-                </p>
-                <p
-                  v-else-if="ruleForm.subjectKind === 'channel_type'"
-                  class="text-xs text-muted-foreground"
-                >
-                  {{ $t('bots.access.pickChannelTypeForConversationSearch') }}
-                </p>
-                <div class="space-y-1.5">
-                  <Label>{{ $t('bots.access.conversationId') }}</Label>
-                  <Input
-                    v-model="ruleForm.sourceConversationId"
-                    :placeholder="$t('bots.access.conversationIdPlaceholder')"
-                  />
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.access.conversationIdManualHint') }}
-                  </p>
+                  <div class="space-y-1.5">
+                    <Label>{{ $t('bots.access.threadId') }}</Label>
+                    <Input
+                      v-model="ruleForm.sourceThreadId"
+                      :placeholder="$t('bots.access.threadIdPlaceholder')"
+                    />
+                  </div>
                 </div>
-                <div class="space-y-1.5">
-                  <Label>{{ $t('bots.access.threadId') }}</Label>
-                  <Input
-                    v-model="ruleForm.sourceThreadId"
-                    :placeholder="$t('bots.access.threadIdPlaceholder')"
-                  />
-                </div>
-              </template>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                @click="clearScopeFields"
-              >
-                {{ $t('bots.access.clearScope') }}
-              </Button>
+              </details>
             </div>
-          </details>
 
-          <!-- Description -->
-          <div class="space-y-1.5">
-            <Label>{{ $t('bots.access.description') }}</Label>
-            <Input
-              v-model="ruleForm.description"
-              :placeholder="$t('bots.access.descriptionPlaceholder')"
-            />
-          </div>
+            <!-- No identity: manual IDs only (no search API) -->
+            <template v-else>
+              <p
+                v-if="ruleForm.subjectKind === 'channel_identity'"
+                class="text-xs text-muted-foreground"
+              >
+                {{ $t('bots.access.pickIdentityForConversationSearch') }}
+              </p>
+              <p
+                v-else-if="ruleForm.subjectKind === 'channel_type'"
+                class="text-xs text-muted-foreground"
+              >
+                {{ $t('bots.access.pickChannelTypeForConversationSearch') }}
+              </p>
+              <div class="space-y-1.5">
+                <Label>{{ $t('bots.access.conversationId') }}</Label>
+                <Input
+                  v-model="ruleForm.sourceConversationId"
+                  :placeholder="$t('bots.access.conversationIdPlaceholder')"
+                />
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.access.conversationIdManualHint') }}
+                </p>
+              </div>
+              <div class="space-y-1.5">
+                <Label>{{ $t('bots.access.threadId') }}</Label>
+                <Input
+                  v-model="ruleForm.sourceThreadId"
+                  :placeholder="$t('bots.access.threadIdPlaceholder')"
+                />
+              </div>
+            </template>
 
-          <p
-            v-if="formError"
-            class="text-xs text-destructive"
-          >
-            {{ formError }}
-          </p>
-
-          <DialogFooter>
             <Button
               type="button"
-              variant="outline"
-              @click="dialogOpen = false"
+              variant="ghost"
+              size="sm"
+              @click="clearScopeFields"
             >
-              {{ $t('common.cancel') }}
+              {{ $t('bots.access.clearScope') }}
             </Button>
-            <Button
-              type="submit"
-              :disabled="isSavingRule"
-            >
-              <Spinner
-                v-if="isSavingRule"
-                class="mr-1.5"
-              />
-              {{ $t('common.save') }}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </div>
+        </details>
+
+        <!-- Description -->
+        <div class="space-y-1.5">
+          <Label>{{ $t('bots.access.description') }}</Label>
+          <Input
+            v-model="ruleForm.description"
+            :placeholder="$t('bots.access.descriptionPlaceholder')"
+          />
+        </div>
+
+        <p
+          v-if="formError"
+          class="text-xs text-destructive"
+        >
+          {{ formError }}
+        </p>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            @click="formVisible = false"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            :disabled="isSavingRule"
+          >
+            <Spinner
+              v-if="isSavingRule"
+              class="mr-1.5"
+            />
+            {{ $t('common.save') }}
+          </Button>
+        </div>
+      </form>
+    </section>
   </div>
 </template>
 
@@ -514,7 +526,7 @@ import { useSortable } from '@vueuse/integrations/useSortable'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { Plus, GripVertical, SquarePen, Trash2, ChevronRight } from 'lucide-vue-next'
+import { Plus, GripVertical, SquarePen, Trash2, ChevronRight, X } from 'lucide-vue-next'
 import {
   Button,
   Input,
@@ -523,11 +535,6 @@ import {
   Avatar,
   AvatarImage,
   AvatarFallback,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
   Spinner,
   Empty,
 } from '@memohai/ui'
@@ -867,14 +874,14 @@ async function handleSaveDefaultEffect() {
 
 // ---- rule form ----
 
-const dialogOpen = ref(false)
+const formVisible = ref(false)
 const editingRule = ref<AclRule | null>(null)
 const formError = ref('')
 const isSavingRule = ref(false)
 
 watch(
   () => [
-    dialogOpen.value,
+    formVisible.value,
     ruleForm.subjectKind,
     dialogIdentityId.value,
     dialogChannelTypeTrimmed.value,
@@ -885,7 +892,7 @@ watch(
     observedByChannelTypeData.value,
   ] as const,
   () => {
-    if (!dialogOpen.value) return
+    if (!formVisible.value) return
     const hasIdentity = ruleForm.subjectKind === 'channel_identity' && !!dialogIdentityId.value
     const hasChannelType = ruleForm.subjectKind === 'channel_type' && !!dialogChannelTypeTrimmed.value
     if (!hasIdentity && !hasChannelType) return
@@ -908,7 +915,7 @@ watch(
 watch(
   () => ruleForm.channelIdentityId,
   (id, prev) => {
-    if (!dialogOpen.value) return
+    if (!formVisible.value) return
     if (prev !== undefined && prev !== '' && id !== prev) {
       ruleForm.observedConversationRouteId = ''
       ruleForm.sourceConversationType = ''
@@ -921,7 +928,7 @@ watch(
 watch(
   () => ruleForm.subjectChannelType,
   (id, prev) => {
-    if (!dialogOpen.value) return
+    if (!formVisible.value) return
     if (ruleForm.subjectKind !== 'channel_type') return
     if (prev !== undefined && prev.trim() !== '' && id !== prev) {
       ruleForm.observedConversationRouteId = ''
@@ -949,7 +956,7 @@ function openAddDialog() {
   Object.assign(ruleForm, createRuleForm())
   scopeOpen.value = false
   formError.value = ''
-  dialogOpen.value = true
+  formVisible.value = true
 }
 
 function openEditDialog(rule: AclRule) {
@@ -966,7 +973,7 @@ function openEditDialog(rule: AclRule) {
   ruleForm.description = rule.description ?? ''
   scopeOpen.value = hasScopeValues.value
   formError.value = ''
-  dialogOpen.value = true
+  formVisible.value = true
 }
 
 function handleSubjectKindChange(kind: string) {
@@ -1037,7 +1044,7 @@ async function handleSaveRule() {
     }
     queryCache.invalidateQueries({ key: ['bot-acl-rules', props.botId] })
     toast.success(t('bots.access.ruleSaved'))
-    dialogOpen.value = false
+    formVisible.value = false
   }
   catch (e) {
     formError.value = resolveApiErrorMessage(e, t('bots.access.saveFailed'))

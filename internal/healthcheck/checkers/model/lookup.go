@@ -7,16 +7,16 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // QueriesLookup adapts sqlc.Queries to the BotModelLookup interface.
 type QueriesLookup struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 }
 
 // NewQueriesLookup creates a BotModelLookup backed by sqlc.Queries.
-func NewQueriesLookup(queries *sqlc.Queries) *QueriesLookup {
+func NewQueriesLookup(queries dbstore.Queries) *QueriesLookup {
 	return &QueriesLookup{queries: queries}
 }
 

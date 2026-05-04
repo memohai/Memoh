@@ -15,9 +15,9 @@ The system consists of three core services:
 | **Browser Gateway** | Bun + Elysia + Playwright | 8083 | Browser automation service: headless browser actions for bots |
 
 Infrastructure dependencies:
-- **PostgreSQL** — Relational data storage
+- **PostgreSQL or SQLite** — Relational data storage
 - **Qdrant** — Vector database for memory semantic search
-- **Containerd** — Container runtime providing isolated environments per bot (Linux); Apple Virtualization on macOS
+- **Container runtime** — Isolated workspace containers per bot (Docker, Kubernetes, containerd, Apple Virtualization)
 
 ## Tech Stack
 
@@ -25,11 +25,11 @@ Infrastructure dependencies:
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
 - **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
-- **Database Driver**: pgx/v5
+- **Database Drivers**: pgx/v5 (PostgreSQL), modernc.org/sqlite (SQLite)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
-- **Containers**: containerd v2 (Linux), Apple Virtualization (macOS)
+- **Containers**: Docker / Kubernetes / containerd v2 / Apple Virtualization adapters
 - **TUI**: Charm libraries (bubbletea, glamour, lipgloss) for CLI interactive mode
 
 ### Frontend (TypeScript)
@@ -117,7 +117,7 @@ Memoh/
 │   ├── command/                #   Slash command system (extensible command handlers)
 │   ├── compaction/             #   Message history compaction service (LLM summarization)
 │   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
-│   ├── containerd/             #   Container runtime abstraction (containerd / Apple Virtualization)
+│   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker, Kubernetes)
 │   ├── conversation/           #   Conversation management and flow resolver
 │   │   ├── service.go          #     Conversation CRUD and routing
 │   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
@@ -178,8 +178,12 @@ Memoh/
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
-│   ├── migrations/             #   SQL migration files (0001–0067+)
-│   └── queries/                #   SQL query files (sqlc input)
+│   ├── postgres/               #   PostgreSQL SQL resources
+│   │   ├── migrations/         #   SQL migration files (0001–0067+)
+│   │   └── queries/            #   SQL query files (sqlc input)
+│   └── sqlite/                 #   SQLite SQL resources (parallel backend track)
+│       ├── migrations/         #   SQLite migration files
+│       └── queries/            #   SQLite query files (sqlc input)
 ├── conf/                       # Configuration
 │   ├── providers/              #   Provider YAML templates (openai, anthropic, codex, github-copilot, etc.)
 │   ├── app.example.toml        #   Default config template
@@ -191,6 +195,9 @@ Memoh/
 │   ├── docker-compose.minify.yml #  Minified services compose
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
+├── deploy/
+│   ├── kubernetes/             # Kubernetes kustomize starter deployment
+│   └── kubernetes-local/       # Local K8s overlay using k8s-dev image tags
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
 ├── docs/                       # Documentation site (VitePress)
 ├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
@@ -220,10 +227,15 @@ Memoh/
 |---------|-------------|
 | `mise run dev` | Start the containerized dev environment (all services) |
 | `mise run dev:minify` | Start dev environment with minified services |
+| `mise run dev:sqlite` | Start SQLite-backed development environment |
+| `mise run dev:sqlite:minify` | Start SQLite-backed development environment with minified services |
 | `mise run dev:selinux` | Start dev environment on SELinux systems |
 | `mise run dev:down` | Stop the dev environment |
+| `mise run dev:down:sqlite` | Stop SQLite development environment |
 | `mise run dev:logs` | View dev environment logs |
+| `mise run dev:logs:sqlite` | View SQLite development logs |
 | `mise run dev:restart` | Restart a service (e.g. `-- server`) |
+| `mise run dev:restart:sqlite` | Restart a SQLite dev service (e.g. `-- server`) |
 | `mise run setup` | Install dependencies + workspace toolkit |
 | `mise run sqlc-generate` | Regenerate Go code after modifying SQL files |
 | `mise run swagger-generate` | Generate Swagger documentation |
@@ -257,17 +269,20 @@ Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search), `browser` (brow
 
 ### Database, sqlc & Migrations
 
-1. **SQL queries** are defined in `db/queries/*.sql`.
-2. All Go files under `internal/db/sqlc/` are auto-generated by sqlc. **DO NOT modify them manually.**
-3. After modifying any SQL files (migrations or queries), run `mise run sqlc-generate` to update the generated Go code.
+1. **PostgreSQL SQL queries** are defined in `db/postgres/queries/*.sql`; **SQLite SQL queries** live in `db/sqlite/queries/*.sql`.
+2. All Go files under `internal/db/postgres/sqlc/` and `internal/db/sqlite/sqlc/` are auto-generated by sqlc. **DO NOT modify them manually.**
+3. **Always update both database backends together.** Any schema or query change must update the PostgreSQL and SQLite equivalents in the same change unless the code path is explicitly backend-specific and documented.
+4. After modifying any SQL files (migrations or queries), run `mise run sqlc-generate` to update both generated Go packages.
 
 #### Migration Rules
 
-Migrations live in `db/migrations/` and follow a dual-update convention:
+PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update convention:
 
-- **`0001_init.up.sql` is the canonical full schema.** It always contains the complete, up-to-date database definition (all tables, indexes, constraints, etc.). When adding schema changes, you must **also update `0001_init.up.sql`** to reflect the final state.
-- **Incremental migration files** (`0002_`, `0003_`, ...) contain only the diff needed to upgrade an existing database. They exist for environments that already have the schema and need to apply only the delta.
-- **Both must be kept in sync**: every schema change requires updating `0001_init.up.sql` AND creating a new incremental migration file.
+- **PostgreSQL `0001_init.up.sql` is the canonical full PostgreSQL schema.** It always contains the complete, up-to-date PostgreSQL database definition (all tables, indexes, constraints, etc.). When adding PostgreSQL schema changes, you must **also update `db/postgres/migrations/0001_init.up.sql`** to reflect the final state.
+- **SQLite `0001_init.up.sql` is the canonical full SQLite schema.** SQLite currently uses a single baseline migration at `db/sqlite/migrations/0001_init.up.sql`; when adding schema changes, update this file and its paired down migration.
+- **Incremental PostgreSQL migration files** (`0002_`, `0003_`, ...) contain only the diff needed to upgrade an existing PostgreSQL database. They exist for environments that already have the schema and need to apply only the delta.
+- **Both PostgreSQL and SQLite must be kept in sync**: every schema change requires updating PostgreSQL `0001_init.up.sql`, adding the next PostgreSQL incremental migration pair, and updating SQLite `0001_init.up.sql` / `0001_init.down.sql` to the equivalent final schema.
+- **Both query sets must be kept in sync**: every query change in `db/postgres/queries/*.sql` must have an equivalent SQLite query change in `db/sqlite/queries/*.sql`, with dialect differences handled deliberately (`jsonb` vs JSON1, casts, `ILIKE`, `FOR UPDATE`, date/time functions, arrays).
 - **Naming**: `{NNNN}_{description}.up.sql` and `{NNNN}_{description}.down.sql`, where `{NNNN}` is a zero-padded sequential number (e.g., `0005`). Always use the next available number.
 - **Paired files**: Every incremental migration **must** have both an `.up.sql` (apply) and a `.down.sql` (rollback) file.
 - **Header comment**: Each file should start with a comment indicating the migration name and a brief description:
@@ -277,7 +292,7 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
   ```
 - **Idempotent DDL**: Use `IF NOT EXISTS` / `IF EXISTS` guards (e.g., `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP TABLE IF EXISTS`) so migrations are safe to re-run.
 - **Down migration must fully reverse up**: The `.down.sql` must cleanly undo everything its `.up.sql` does, in reverse order.
-- **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate the Go code, then `mise run db-up` to apply.
+- **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate both Go SQLC packages, then validate both migration tracks (`mise run db-up` for PostgreSQL and SQLite migration/dev tasks where relevant).
 
 ### API Development Workflow
 
@@ -326,12 +341,12 @@ Migrations live in `db/migrations/` and follow a dual-update convention:
 - The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. Bridge prompt templates live in `cmd/bridge/template/`.
 - Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
 - `internal/workspace/` manages container lifecycle (create, start, stop, reconcile) and maintains a gRPC connection pool.
-- `internal/containerd/` provides the container runtime abstraction layer (containerd on Linux, Apple Virtualization on macOS, socktainer for socket-based management).
+- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`containerd`, `apple`, `docker`, `k8s`).
 - SSE-based progress feedback is provided during container image pull and creation.
 
 ## Database Tables
 
-The canonical source of truth for the full schema is `db/migrations/0001_init.up.sql`. Key tables grouped by domain:
+The canonical source of truth for the full PostgreSQL schema is `db/postgres/migrations/0001_init.up.sql`. Key tables grouped by domain:
 
 **Auth & Users**
 - `users` — User accounts (username, email, role, display_name, avatar)
@@ -395,9 +410,11 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[server]` — HTTP listen address
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
-- `[containerd]` — Container runtime configuration (socket path, namespace, socktainer)
-- `[workspace]` — Workspace container image and data configuration (registry, default_image, snapshotter, data_root, cni, runtime_dir)
+- `[database]` — Database backend selection (`postgres` or `sqlite`)
+- `[container]` — Workspace backend selection (`docker`, `kubernetes`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
+- `[containerd]` / `[docker]` / `[kubernetes]` / `[apple]` — Backend-specific runtime configuration
 - `[postgres]` — PostgreSQL connection
+- `[sqlite]` — SQLite database file and WAL/lock settings
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection
 - `[browser_gateway]` — Browser Gateway address

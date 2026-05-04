@@ -154,7 +154,7 @@ const { info, usedTokens, contextWindow, contextPercent, currentBotId, sessionId
 })
 
 const { data: skillCatalog } = useQuery({
-  key: () => ['bot-skill-catalog', currentBotId.value ?? ''],
+  key: () => ['bot-skills-catalog', currentBotId.value ?? ''],
   query: async () => {
     const { data } = await getBotsByBotIdContainerSkills({
       path: {

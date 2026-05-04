@@ -11,17 +11,18 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 )
 
 type Service struct {
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	logger   *slog.Logger
 	registry *Registry
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, registry *Registry) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, registry *Registry) *Service {
 	return &Service{
 		queries:  queries,
 		logger:   log.With(slog.String("service", "audio")),

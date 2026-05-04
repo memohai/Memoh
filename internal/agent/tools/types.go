@@ -43,6 +43,8 @@ type Attachment struct {
 	Type        string         `json:"type"`
 	Path        string         `json:"path,omitempty"`
 	URL         string         `json:"url,omitempty"`
+	Base64      string         `json:"base64,omitempty"`
+	PlatformKey string         `json:"platform_key,omitempty"`
 	Mime        string         `json:"mime,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	ContentHash string         `json:"content_hash,omitempty"`

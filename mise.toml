@@ -75,6 +75,22 @@ set -e
 docker compose -f devenv/docker-compose.minify.yml up --build
 """
 
+[tasks."dev:sqlite"]
+description = "Start SQLite development environment"
+run = """
+#!/bin/bash
+set -e
+docker compose -f devenv/docker-compose.sqlite.yml up --build
+"""
+
+[tasks."dev:sqlite:minify"]
+description = "Start SQLite development environment with minified services"
+run = """
+#!/bin/bash
+set -e
+docker compose -f devenv/docker-compose.sqlite.minify.yml up --build
+"""
+
 [tasks."dev:selinux"]
 description = "Start development environment on SELinux systems"
 run = """
@@ -87,6 +103,14 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 description = "Stop development environment"
 run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
 
+[tasks."dev:down:sqlite"]
+description = "Stop SQLite development environment"
+run = "docker compose -f devenv/docker-compose.sqlite.yml down --remove-orphans"
+
+[tasks."dev:down:sqlite:minify"]
+description = "Stop SQLite minified development environment"
+run = "docker compose -f devenv/docker-compose.sqlite.minify.yml down --remove-orphans"
+
 [tasks."dev:down:selinux"]
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
@@ -94,6 +118,14 @@ run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.seli
 [tasks."dev:logs"]
 description = "View development logs"
 run = "docker compose -f devenv/docker-compose.yml logs -f"
+
+[tasks."dev:logs:sqlite"]
+description = "View SQLite development logs"
+run = "docker compose -f devenv/docker-compose.sqlite.yml logs -f"
+
+[tasks."dev:logs:sqlite:minify"]
+description = "View SQLite minified development logs"
+run = "docker compose -f devenv/docker-compose.sqlite.minify.yml logs -f"
 
 [tasks."dev:logs:selinux"]
 description = "View development logs on SELinux systems"
@@ -103,9 +135,45 @@ run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.seli
 description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
 
+[tasks."dev:restart:sqlite"]
+description = "Restart a SQLite dev service (usage: mise run dev:restart:sqlite -- server)"
+run = "docker compose -f devenv/docker-compose.sqlite.yml restart $@"
+
+[tasks."dev:restart:sqlite:minify"]
+description = "Restart a SQLite minified dev service (usage: mise run dev:restart:sqlite:minify -- server)"
+run = "docker compose -f devenv/docker-compose.sqlite.minify.yml restart $@"
+
 [tasks."dev:restart:selinux"]
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
+
+[tasks."local:dev"]
+description = "Start the server locally with Docker and local workspaces enabled"
+run = """
+#!/bin/bash
+set -euo pipefail
+
+TEMPLATE_CONFIG="${MEMOH_LOCAL_CONFIG_TEMPLATE:-conf/app.local.toml}"
+GENERATED_CONFIG="${CONFIG_PATH:-data/local/config.toml}"
+RUNTIME_DIR="${MEMOH_LOCAL_RUNTIME_DIR:-data/runtime}"
+PROJECT_ROOT="$(pwd)"
+
+mkdir -p data/local "$RUNTIME_DIR"
+go build -o "$RUNTIME_DIR/bridge" ./cmd/bridge
+sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" "$TEMPLATE_CONFIG" > "$GENERATED_CONFIG"
+
+if [ -d ".toolkit" ]; then
+  rm -rf "$RUNTIME_DIR/toolkit"
+  mkdir -p "$RUNTIME_DIR/toolkit"
+  cp -a .toolkit/. "$RUNTIME_DIR/toolkit/"
+else
+  echo "warning: .toolkit not found; Docker workspaces will run without bundled node/uv tools." >&2
+  echo "         Run 'mise run install-workspace-toolkit' to install them." >&2
+fi
+
+CONFIG_PATH="$GENERATED_CONFIG" go run ./cmd/agent migrate up
+CONFIG_PATH="$GENERATED_CONFIG" go run ./cmd/agent serve
+"""
 
 [tasks."bridge:build"]
 description = "Manually rebuild bridge binary in dev container (normally auto-triggered by air)"
@@ -203,10 +271,40 @@ echo '  Dev web UI will be available at http://localhost:18082'
 [tasks."desktop:dev"]
 description = "Start Electron desktop app in dev mode (renderer reuses @memohai/web)"
 dir = "{{config_root}}/apps/desktop"
-env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18080" }
+env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18731", CONFIG_PATH = "../../conf/app.local.toml" }
 run = "pnpm dev"
+
+[tasks."desktop:qdrant:prepare"]
+description = "Download the Qdrant binary used by the Electron desktop app"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant"
+
+[tasks."desktop:qdrant:prepare:all"]
+description = "Download all supported Qdrant binaries for desktop packaging"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant:all"
+
+[tasks."desktop:qdrant:prepare:release-platform"]
+description = "Download Qdrant binaries for the current release platform"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:qdrant:release-platform"
 
 [tasks."desktop:build"]
 description = "Build Electron desktop app for release (electron-builder)"
 dir = "{{config_root}}/apps/desktop"
 run = "pnpm build"
+
+[tasks."desktop:build:mac:arm64"]
+description = "Build signed-capable macOS arm64 desktop artifacts"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:mac:arm64"
+
+[tasks."desktop:build:mac:x64"]
+description = "Build signed-capable macOS x64 desktop artifacts"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:mac:x64"
+
+[tasks."desktop:build:dir"]
+description = "Build unpacked Electron desktop app with bundled local server"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm build:dir"

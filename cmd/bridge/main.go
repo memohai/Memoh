@@ -17,6 +17,7 @@ import (
 
 	"github.com/memohai/memoh/internal/logger"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
 
 const (
@@ -26,7 +27,7 @@ const (
 
 // initDataDir ensures /data exists and seeds template files on first boot.
 func initDataDir() {
-	if err := os.MkdirAll(defaultWorkDir, 0o750); err != nil {
+	if err := os.MkdirAll(bridgesvc.DefaultWorkDir, 0o750); err != nil {
 		logger.Warn("failed to create data dir", slog.Any("error", err))
 		return
 	}
@@ -42,7 +43,7 @@ func initDataDir() {
 		if e.IsDir() {
 			continue
 		}
-		dst := filepath.Join(defaultWorkDir, e.Name())
+		dst := filepath.Join(bridgesvc.DefaultWorkDir, e.Name())
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}
@@ -79,16 +80,23 @@ func main() {
 		}
 	}()
 
-	socketPath := os.Getenv("BRIDGE_SOCKET_PATH")
-	if socketPath == "" {
-		socketPath = defaultSocketPath
+	network := "unix"
+	address := os.Getenv("BRIDGE_SOCKET_PATH")
+	if tcpAddr := os.Getenv("BRIDGE_TCP_ADDR"); tcpAddr != "" {
+		network = "tcp"
+		address = tcpAddr
 	}
-	// Clean up residual socket from a previous run.
-	_ = os.Remove(filepath.Clean(socketPath)) //nolint:gosec // G703: socketPath is from BRIDGE_SOCKET_PATH env or a compiled-in default, not end-user input
+	if address == "" {
+		address = defaultSocketPath
+	}
+	if network == "unix" {
+		// Clean up residual socket from a previous run.
+		_ = os.Remove(filepath.Clean(address)) //nolint:gosec // G703: address is from BRIDGE_SOCKET_PATH env or a compiled-in default, not end-user input
+	}
 
-	lis, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
+	lis, err := (&net.ListenConfig{}).Listen(ctx, network, address)
 	if err != nil {
-		logger.Error("failed to listen", slog.String("socket", socketPath), slog.Any("error", err))
+		logger.Error("failed to listen", slog.String("network", network), slog.String("address", address), slog.Any("error", err))
 		return
 	}
 
@@ -107,7 +115,11 @@ func main() {
 			PermitWithoutStream: true,
 		}),
 	)
-	pb.RegisterContainerServiceServer(srv, &containerServer{})
+	pb.RegisterContainerServiceServer(srv, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir:    bridgesvc.DefaultWorkDir,
+		DataMount:         bridgesvc.DefaultWorkDir,
+		AllowHostAbsolute: true,
+	}))
 	reflection.Register(srv)
 
 	go func() {
@@ -116,7 +128,7 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	logger.Info("bridge gRPC server listening", slog.String("socket", socketPath))
+	logger.Info("bridge gRPC server listening", slog.String("network", network), slog.String("address", address))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server failed", slog.Any("error", err))
 		return

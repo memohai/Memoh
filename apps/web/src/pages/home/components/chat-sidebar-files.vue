@@ -70,17 +70,19 @@
     >
 
     <div class="flex-1 min-h-0 relative">
-      <ScrollArea class="absolute inset-0">
-        <FileList
-          :entries="entries"
-          :loading="loading"
-          @navigate="navigateTo"
-          @open="handleOpenFile"
-          @download="handleDownload"
-          @rename="openRenameDialog"
-          @delete="openDeleteDialog"
-        />
-      </ScrollArea>
+      <div class="absolute inset-0">
+        <ScrollArea class="h-full">
+          <FileList
+            :entries="entries"
+            :loading="loading"
+            @navigate="navigateTo"
+            @open="handleOpenFile"
+            @download="handleDownload"
+            @rename="openRenameDialog"
+            @delete="openDeleteDialog"
+          />
+        </ScrollArea>
+      </div>
     </div>
 
     <Dialog v-model:open="mkdirDialogOpen">
@@ -210,6 +212,8 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { pathSegments, joinPath } from '@/components/file-manager/utils'
 import FileList from '@/components/file-manager/file-list.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatStore } from '@/store/chat-list'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps<{
   botId: string
@@ -387,6 +391,14 @@ function handleDownload(entry: HandlersFsFileInfo) {
 watch(() => props.botId, () => {
   void loadDirectory(currentPath.value)
 }, { immediate: true })
+
+// Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/exec).
+const chatStore = useChatStore()
+const { fsChangedAt } = storeToRefs(chatStore)
+watch(fsChangedAt, () => {
+  if (!props.botId) return
+  void loadDirectory(currentPath.value)
+})
 
 defineExpose({
   navigateTo,

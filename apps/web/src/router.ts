@@ -48,6 +48,14 @@ const routes = [
             component: () => import('@/pages/bots/index.vue'),
           },
           {
+            name: 'bot-new',
+            path: 'new',
+            component: () => import('@/pages/bots/new.vue'),
+            meta: {
+              breadcrumb: i18nRef('bots.createBot'),
+            },
+          },
+          {
             name: 'bot-detail',
             path: ':botId',
             component: () => import('@/pages/bots/detail.vue'),

@@ -1,6 +1,7 @@
 import { client } from '@memohai/sdk/client'
 
 export interface SetupApiClientOptions {
+  baseUrl?: string
   // Called after the access token is cleared on a 401. Hosts (web / desktop
   // chat window / desktop settings window) decide what to do — usually a
   // router redirect to the login screen, but desktop satellite windows may
@@ -13,7 +14,7 @@ export interface SetupApiClientOptions {
  * Call this once at app startup (main.ts).
  */
 export function setupApiClient(options: SetupApiClientOptions = {}) {
-  const apiBaseUrl = import.meta.env.VITE_API_URL?.trim() || '/api'
+  const apiBaseUrl = options.baseUrl?.trim() || import.meta.env.VITE_API_URL?.trim() || '/api'
   const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'
   void agentBaseUrl
 

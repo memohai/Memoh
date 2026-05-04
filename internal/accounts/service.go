@@ -6,21 +6,18 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 // Service provides account (credential) management for users.
 type Service struct {
-	queries *sqlc.Queries
-	logger  *slog.Logger
+	store  dbstore.AccountStore
+	logger *slog.Logger
 }
 
 var (
@@ -30,26 +27,22 @@ var (
 )
 
 // NewService creates a new accounts service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, store dbstore.AccountStore) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Service{
-		queries: queries,
-		logger:  log.With(slog.String("service", "accounts")),
+		store:  store,
+		logger: log.With(slog.String("service", "accounts")),
 	}
 }
 
 // Get returns an account by user id.
 func (s *Service) Get(ctx context.Context, userID string) (Account, error) {
-	if s.queries == nil {
-		return Account{}, errors.New("account queries not configured")
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
 	}
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return Account{}, err
-	}
-	row, err := s.queries.GetAccountByUserID(ctx, pgID)
+	row, err := s.store.GetByUserID(ctx, userID)
 	if err != nil {
 		return Account{}, err
 	}
@@ -58,16 +51,16 @@ func (s *Service) Get(ctx context.Context, userID string) (Account, error) {
 
 // Login authenticates by identity (username or email) and password.
 func (s *Service) Login(ctx context.Context, identity, password string) (Account, error) {
-	if s.queries == nil {
-		return Account{}, errors.New("account queries not configured")
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
 	}
 	identity = strings.TrimSpace(identity)
 	if identity == "" || strings.TrimSpace(password) == "" {
 		return Account{}, ErrInvalidCredentials
 	}
-	row, err := s.queries.GetAccountByIdentity(ctx, pgtype.Text{String: identity, Valid: true})
+	row, err := s.store.GetByIdentity(ctx, identity)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return Account{}, ErrInvalidCredentials
 		}
 		return Account{}, err
@@ -75,13 +68,13 @@ func (s *Service) Login(ctx context.Context, identity, password string) (Account
 	if !row.IsActive {
 		return Account{}, ErrInactiveAccount
 	}
-	if !row.PasswordHash.Valid {
+	if !row.HasPasswordHash {
 		return Account{}, ErrInvalidCredentials
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(row.PasswordHash.String), []byte(password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(password)); err != nil {
 		return Account{}, ErrInvalidCredentials
 	}
-	if _, err := s.queries.UpdateAccountLastLogin(ctx, row.ID); err != nil {
+	if err := s.store.UpdateLastLogin(ctx, row.ID); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("touch last login failed", slog.Any("error", err))
 		}
@@ -91,10 +84,10 @@ func (s *Service) Login(ctx context.Context, identity, password string) (Account
 
 // ListAccounts returns all accounts.
 func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
-	if s.queries == nil {
-		return nil, errors.New("account queries not configured")
+	if s.store == nil {
+		return nil, errors.New("account store not configured")
 	}
-	rows, err := s.queries.ListAccounts(ctx)
+	rows, err := s.store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -107,16 +100,13 @@ func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
 
 // SearchAccounts returns account candidates for UI search.
 func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) ([]Account, error) {
-	if s.queries == nil {
-		return nil, errors.New("account queries not configured")
+	if s.store == nil {
+		return nil, errors.New("account store not configured")
 	}
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.queries.SearchAccounts(ctx, sqlc.SearchAccountsParams{
-		Query:      strings.TrimSpace(query),
-		LimitCount: int32(limit), //nolint:gosec // limit is capped above
-	})
+	rows, err := s.store.Search(ctx, strings.TrimSpace(query), int32(limit)) //nolint:gosec // limit is capped above
 	if err != nil {
 		return nil, err
 	}
@@ -129,16 +119,12 @@ func (s *Service) SearchAccounts(ctx context.Context, query string, limit int) (
 
 // IsAdmin checks if the user has admin role.
 func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
-	if s.queries == nil {
-		return false, errors.New("account queries not configured")
+	if s.store == nil {
+		return false, errors.New("account store not configured")
 	}
-	pgID, err := db.ParseUUID(userID)
+	row, err := s.store.GetByUserID(ctx, userID)
 	if err != nil {
-		return false, err
-	}
-	row, err := s.queries.GetAccountByUserID(ctx, pgID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -148,8 +134,8 @@ func (s *Service) IsAdmin(ctx context.Context, userID string) (bool, error) {
 
 // Create creates a new account for an existing user.
 func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
-	if s.queries == nil {
-		return Account{}, errors.New("account queries not configured")
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
 	}
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
@@ -180,30 +166,15 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 		isActive = *req.IsActive
 	}
 
-	pgUserID, err := db.ParseUUID(userID)
-	if err != nil {
-		return Account{}, err
-	}
-	emailValue := pgtype.Text{Valid: false}
-	if email != "" {
-		emailValue = pgtype.Text{String: email, Valid: true}
-	}
-	displayValue := pgtype.Text{String: displayName, Valid: displayName != ""}
-	avatarValue := pgtype.Text{Valid: false}
-	if avatarURL != "" {
-		avatarValue = pgtype.Text{String: avatarURL, Valid: true}
-	}
-
-	row, err := s.queries.CreateAccount(ctx, sqlc.CreateAccountParams{
-		UserID:       pgUserID,
-		Username:     pgtype.Text{String: username, Valid: true},
-		Email:        emailValue,
-		PasswordHash: pgtype.Text{String: string(hashed), Valid: true},
+	row, err := s.store.CreateAccount(ctx, dbstore.CreateAccountInput{
+		UserID:       userID,
+		Username:     username,
+		Email:        email,
+		PasswordHash: string(hashed),
 		Role:         role,
-		DisplayName:  displayValue,
-		AvatarUrl:    avatarValue,
+		DisplayName:  displayName,
+		AvatarURL:    avatarURL,
 		IsActive:     isActive,
-		DataRoot:     pgtype.Text{Valid: false},
 	})
 	if err != nil {
 		return Account{}, err
@@ -217,34 +188,30 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateAccountRe
 func (s *Service) CreateHuman(ctx context.Context, userID string, req CreateAccountRequest) (Account, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		if s.queries == nil {
-			return Account{}, errors.New("account queries not configured")
+		if s.store == nil {
+			return Account{}, errors.New("account store not configured")
 		}
-		userRow, err := s.queries.CreateUser(ctx, sqlc.CreateUserParams{
+		userRow, err := s.store.CreateUser(ctx, dbstore.CreateUserInput{
 			IsActive: true,
 			Metadata: []byte("{}"),
 		})
 		if err != nil {
 			return Account{}, err
 		}
-		if !userRow.ID.Valid {
+		if strings.TrimSpace(userRow.ID) == "" {
 			return Account{}, errors.New("create user: invalid id")
 		}
-		userID = userRow.ID.String()
+		userID = userRow.ID
 	}
 	return s.Create(ctx, userID, req)
 }
 
 // UpdateAdmin updates account fields as admin.
 func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAccountRequest) (Account, error) {
-	if s.queries == nil {
-		return Account{}, errors.New("account queries not configured")
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
 	}
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return Account{}, err
-	}
-	existing, err := s.queries.GetAccountByUserID(ctx, pgID)
+	existing, err := s.store.GetByUserID(ctx, userID)
 	if err != nil {
 		return Account{}, err
 	}
@@ -255,14 +222,14 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 			return Account{}, err
 		}
 	}
-	displayName := strings.TrimSpace(existing.DisplayName.String)
+	displayName := strings.TrimSpace(existing.DisplayName)
 	if req.DisplayName != nil {
 		displayName = strings.TrimSpace(*req.DisplayName)
 	}
 	if displayName == "" {
-		displayName = strings.TrimSpace(existing.Username.String)
+		displayName = strings.TrimSpace(existing.Username)
 	}
-	avatarURL := strings.TrimSpace(existing.AvatarUrl.String)
+	avatarURL := strings.TrimSpace(existing.AvatarURL)
 	if req.AvatarURL != nil {
 		avatarURL = strings.TrimSpace(*req.AvatarURL)
 	}
@@ -271,11 +238,11 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 		isActive = *req.IsActive
 	}
 
-	row, err := s.queries.UpdateAccountAdmin(ctx, sqlc.UpdateAccountAdminParams{
-		UserID:      pgID,
+	row, err := s.store.UpdateAdmin(ctx, dbstore.UpdateAccountAdminInput{
+		UserID:      userID,
 		Role:        role,
-		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
-		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+		DisplayName: displayName,
+		AvatarURL:   avatarURL,
 		IsActive:    isActive,
 	})
 	if err != nil {
@@ -286,25 +253,21 @@ func (s *Service) UpdateAdmin(ctx context.Context, userID string, req UpdateAcco
 
 // UpdateProfile updates the user's profile.
 func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdateProfileRequest) (Account, error) {
-	if s.queries == nil {
-		return Account{}, errors.New("account queries not configured")
+	if s.store == nil {
+		return Account{}, errors.New("account store not configured")
 	}
-	pgID, err := db.ParseUUID(userID)
+	existing, err := s.store.GetByUserID(ctx, userID)
 	if err != nil {
 		return Account{}, err
 	}
-	existing, err := s.queries.GetAccountByUserID(ctx, pgID)
-	if err != nil {
-		return Account{}, err
-	}
-	displayName := strings.TrimSpace(existing.DisplayName.String)
+	displayName := strings.TrimSpace(existing.DisplayName)
 	if req.DisplayName != nil {
 		displayName = strings.TrimSpace(*req.DisplayName)
 	}
 	if displayName == "" {
-		displayName = strings.TrimSpace(existing.Username.String)
+		displayName = strings.TrimSpace(existing.Username)
 	}
-	avatarURL := strings.TrimSpace(existing.AvatarUrl.String)
+	avatarURL := strings.TrimSpace(existing.AvatarURL)
 	if req.AvatarURL != nil {
 		avatarURL = strings.TrimSpace(*req.AvatarURL)
 	}
@@ -319,10 +282,10 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 	if tzName == "" {
 		tzName = "UTC"
 	}
-	row, err := s.queries.UpdateAccountProfile(ctx, sqlc.UpdateAccountProfileParams{
-		ID:          pgID,
-		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
-		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+	row, err := s.store.UpdateProfile(ctx, dbstore.UpdateAccountProfileInput{
+		UserID:      userID,
+		DisplayName: displayName,
+		AvatarURL:   avatarURL,
 		Timezone:    tzName,
 		IsActive:    existing.IsActive,
 	})
@@ -334,61 +297,51 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 
 // UpdatePassword changes the password after verifying the current one.
 func (s *Service) UpdatePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
-	if s.queries == nil {
-		return errors.New("account queries not configured")
+	if s.store == nil {
+		return errors.New("account store not configured")
 	}
 	if strings.TrimSpace(newPassword) == "" {
 		return errors.New("new password is required")
 	}
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return err
-	}
-	existing, err := s.queries.GetAccountByUserID(ctx, pgID)
+	existing, err := s.store.GetByUserID(ctx, userID)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(currentPassword) == "" {
 		return ErrInvalidPassword
 	}
-	if !existing.PasswordHash.Valid {
+	if !existing.HasPasswordHash {
 		return ErrInvalidPassword
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash.String), []byte(currentPassword)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(currentPassword)); err != nil {
 		return ErrInvalidPassword
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.UpdateAccountPassword(ctx, sqlc.UpdateAccountPasswordParams{
-		ID:           pgID,
-		PasswordHash: pgtype.Text{String: string(hashed), Valid: true},
+	return s.store.UpdatePassword(ctx, dbstore.UpdateAccountPasswordInput{
+		UserID:       userID,
+		PasswordHash: string(hashed),
 	})
-	return err
 }
 
 // ResetPassword sets a new password without requiring the current one.
 func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string) error {
-	if s.queries == nil {
-		return errors.New("account queries not configured")
+	if s.store == nil {
+		return errors.New("account store not configured")
 	}
 	if strings.TrimSpace(newPassword) == "" {
 		return errors.New("new password is required")
-	}
-	pgID, err := db.ParseUUID(userID)
-	if err != nil {
-		return err
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.UpdateAccountPassword(ctx, sqlc.UpdateAccountPasswordParams{
-		ID:           pgID,
-		PasswordHash: pgtype.Text{String: string(hashed), Valid: true},
+	return s.store.UpdatePassword(ctx, dbstore.UpdateAccountPasswordInput{
+		UserID:       userID,
+		PasswordHash: string(hashed),
 	})
-	return err
 }
 
 func normalizeRole(raw string) (string, error) {
@@ -416,38 +369,17 @@ func isAdminRole(role any) bool {
 	}
 }
 
-func toAccount(row sqlc.User) Account {
-	username := strings.TrimSpace(row.Username.String)
-	email := ""
-	if row.Email.Valid {
-		email = row.Email.String
-	}
-	displayName := ""
-	if row.DisplayName.Valid {
-		displayName = row.DisplayName.String
-	}
+func toAccount(row dbstore.AccountRecord) Account {
+	username := strings.TrimSpace(row.Username)
+	email := strings.TrimSpace(row.Email)
+	displayName := strings.TrimSpace(row.DisplayName)
 	if displayName == "" {
 		displayName = username
 	}
-	avatarURL := ""
-	if row.AvatarUrl.Valid {
-		avatarURL = row.AvatarUrl.String
-	}
+	avatarURL := strings.TrimSpace(row.AvatarURL)
 	timezone := strings.TrimSpace(row.Timezone)
-	createdAt := time.Time{}
-	if row.CreatedAt.Valid {
-		createdAt = row.CreatedAt.Time
-	}
-	updatedAt := time.Time{}
-	if row.UpdatedAt.Valid {
-		updatedAt = row.UpdatedAt.Time
-	}
-	lastLogin := time.Time{}
-	if row.LastLoginAt.Valid {
-		lastLogin = row.LastLoginAt.Time
-	}
 	return Account{
-		ID:          row.ID.String(),
+		ID:          row.ID,
 		Username:    username,
 		Email:       email,
 		Role:        row.Role,
@@ -455,8 +387,8 @@ func toAccount(row sqlc.User) Account {
 		AvatarURL:   avatarURL,
 		Timezone:    timezone,
 		IsActive:    row.IsActive,
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
-		LastLoginAt: lastLogin,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+		LastLoginAt: row.LastLoginAt,
 	}
 }

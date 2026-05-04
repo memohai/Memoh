@@ -98,12 +98,22 @@ const { t } = useI18n()
 // ---- API Hooks ----
 const queryCache = useQueryCache()
 
+function invalidateProviderQueries() {
+  queryCache.invalidateQueries({ key: ['providers'] })
+  queryCache.invalidateQueries({ key: ['models'] })
+}
+
+function invalidateModelQueries() {
+  queryCache.invalidateQueries({ key: ['provider-models'] })
+  queryCache.invalidateQueries({ key: ['models'] })
+}
+
 const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
     if (!curProviderId.value) return
     await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
+  onSettled: invalidateProviderQueries,
 })
 
 const { mutate: changeProvider, isLoading: editLoading } = useMutation({
@@ -116,7 +126,7 @@ const { mutate: changeProvider, isLoading: editLoading } = useMutation({
     })
     return result
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
+  onSettled: invalidateProviderQueries,
 })
 
 async function handleToggleEnable(value: boolean) {
@@ -135,7 +145,7 @@ async function handleToggleEnable(value: boolean) {
       body: { enable: value },
       throwOnError: true,
     })
-    queryCache.invalidateQueries({ key: ['providers'] })
+    invalidateProviderQueries()
   } catch {
     curProvider.value = {
       ...curProvider.value,
@@ -152,7 +162,7 @@ const { mutate: deleteModel, isLoading: deleteModelLoading } = useMutation({
     if (!modelID) return
     await deleteModelsById({ path: { id: modelID }, throwOnError: true })
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['provider-models'] }),
+  onSettled: invalidateModelQueries,
 })
 
 const { data: modelDataList } = useQuery({

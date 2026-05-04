@@ -11,12 +11,15 @@ import (
 
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
 	workspaceMetadataKey                    = "workspace"
 	workspaceImageMetadataKey               = "image"
+	workspaceBackendMetadataKey             = "backend"
+	workspaceLocalPathMetadataKey           = "local_workspace_path"
 	workspaceGPUMetadataKey                 = "gpu"
 	workspaceGPUDevicesKey                  = "devices"
 	workspaceSkillDiscoveryRootsMetadataKey = "skill_discovery_roots"
@@ -67,6 +70,25 @@ func workspaceImageFromMetadata(metadata map[string]any) string {
 	section := workspaceSection(metadata)
 	image, _ := section[workspaceImageMetadataKey].(string)
 	return strings.TrimSpace(image)
+}
+
+func workspaceBackendFromMetadata(metadata map[string]any) string {
+	section := workspaceSection(metadata)
+	backend, _ := section[workspaceBackendMetadataKey].(string)
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case bridge.WorkspaceBackendLocal:
+		return bridge.WorkspaceBackendLocal
+	case bridge.WorkspaceBackendContainer, "":
+		return bridge.WorkspaceBackendContainer
+	default:
+		return bridge.WorkspaceBackendContainer
+	}
+}
+
+func localWorkspacePathFromMetadata(metadata map[string]any) string {
+	section := workspaceSection(metadata)
+	path, _ := section[workspaceLocalPathMetadataKey].(string)
+	return strings.TrimSpace(path)
 }
 
 func normalizeWorkspaceGPUDevices(devices []string) []string {
@@ -165,6 +187,19 @@ func withoutWorkspaceImagePreference(metadata map[string]any) map[string]any {
 	return next
 }
 
+func withWorkspaceBackendPreference(metadata map[string]any, backend, localPath string) map[string]any {
+	next := cloneAnyMap(metadata)
+	section := workspaceSection(next)
+	section[workspaceBackendMetadataKey] = strings.TrimSpace(backend)
+	if strings.TrimSpace(localPath) != "" {
+		section[workspaceLocalPathMetadataKey] = strings.TrimSpace(localPath)
+	} else {
+		delete(section, workspaceLocalPathMetadataKey)
+	}
+	next[workspaceMetadataKey] = section
+	return next
+}
+
 func withWorkspaceGPUPreference(metadata map[string]any, gpu WorkspaceGPUConfig) map[string]any {
 	next := cloneAnyMap(metadata)
 	section := workspaceSection(next)
@@ -214,7 +249,7 @@ func withoutWorkspaceSkillDiscoveryRoots(metadata map[string]any) map[string]any
 }
 
 func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string) (string, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return "", nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -235,8 +270,33 @@ func (m *Manager) botWorkspaceImagePreference(ctx context.Context, botID string)
 	return workspaceImageFromMetadata(metadata), nil
 }
 
+func (m *Manager) botWorkspaceStartPreference(ctx context.Context, botID string) (WorkspaceStartConfig, error) {
+	if m.queries == nil {
+		return WorkspaceStartConfig{Backend: bridge.WorkspaceBackendContainer}, nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return WorkspaceStartConfig{}, err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WorkspaceStartConfig{Backend: bridge.WorkspaceBackendContainer}, nil
+		}
+		return WorkspaceStartConfig{}, err
+	}
+	metadata, err := decodeBotMetadata(row.Metadata)
+	if err != nil {
+		return WorkspaceStartConfig{}, err
+	}
+	return WorkspaceStartConfig{
+		Backend:            workspaceBackendFromMetadata(metadata),
+		LocalWorkspacePath: localWorkspacePathFromMetadata(metadata),
+	}, nil
+}
+
 func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, image string, clearPreference bool) error {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -271,6 +331,38 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 	return err
 }
 
+func (m *Manager) rememberWorkspaceBackend(ctx context.Context, botID, backend, localPath string) error {
+	if m.queries == nil {
+		return nil
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	row, err := m.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return err
+	}
+	metadata, err := decodeBotMetadata(row.Metadata)
+	if err != nil {
+		return err
+	}
+	metadata = withWorkspaceBackendPreference(metadata, backend, localPath)
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
+		ID:          botUUID,
+		DisplayName: row.DisplayName,
+		AvatarUrl:   row.AvatarUrl,
+		Timezone:    row.Timezone,
+		IsActive:    row.IsActive,
+		Metadata:    payload,
+	})
+	return err
+}
+
 func (m *Manager) RememberWorkspaceImage(ctx context.Context, botID, image string) error {
 	return m.updateBotWorkspaceImagePreference(ctx, botID, config.NormalizeImageRef(image), false)
 }
@@ -280,7 +372,7 @@ func (m *Manager) ClearWorkspaceImagePreference(ctx context.Context, botID strin
 }
 
 func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (WorkspaceGPUConfig, bool, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return WorkspaceGPUConfig{}, false, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -303,7 +395,7 @@ func (m *Manager) botWorkspaceGPUPreference(ctx context.Context, botID string) (
 }
 
 func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context, botID string) ([]string, bool, error) {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil, false, nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -326,7 +418,7 @@ func (m *Manager) botWorkspaceSkillDiscoveryRootsPreference(ctx context.Context,
 }
 
 func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID string, gpu WorkspaceGPUConfig, clearPreference bool) error {
-	if m.db == nil || m.queries == nil {
+	if m.queries == nil {
 		return nil
 	}
 	botUUID, err := db.ParseUUID(botID)
@@ -391,7 +483,7 @@ func SkillDiscoveryRootsFromMetadata(metadata map[string]any) []string {
 }
 
 func (m *Manager) resolveWorkspaceImage(ctx context.Context, botID string) (string, error) {
-	if m.db != nil && m.queries != nil {
+	if m.queries != nil {
 		pgBotID, err := db.ParseUUID(botID)
 		if err == nil {
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)

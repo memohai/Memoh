@@ -13,7 +13,8 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/conversation"
 	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // ConversationService contains the minimal conversation behavior required by route resolution.
@@ -23,13 +24,13 @@ type ConversationService interface {
 
 // DBService manages channel routes and route-to-conversation resolution.
 type DBService struct {
-	queries      *sqlc.Queries
+	queries      dbstore.Queries
 	conversation ConversationService
 	logger       *slog.Logger
 }
 
 // NewService creates a channel route service.
-func NewService(log *slog.Logger, queries *sqlc.Queries, conversationService ConversationService) *DBService {
+func NewService(log *slog.Logger, queries dbstore.Queries, conversationService ConversationService) *DBService {
 	if log == nil {
 		log = slog.Default()
 	}

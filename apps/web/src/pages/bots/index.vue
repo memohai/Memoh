@@ -1,11 +1,11 @@
 <template>
-  <section class="p-4  mx-auto">
+  <section class="p-4 mx-auto">
     <!-- Header: search + create -->
     <div class="flex items-center justify-between mb-6 flex-wrap">
       <h2 class="text-xs font-medium max-md:hidden">
         {{ $t('bots.title') }}
       </h2>
-      <div class="flex items-center gap-3 ">
+      <div class="flex items-center gap-3">
         <div class="relative">
           <Search
             class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground size-3.5"
@@ -16,7 +16,13 @@
             class="pl-9 w-64"
           />
         </div>
-        <CreateBot v-model:open="dialogOpen" />
+        <Button
+          variant="default"
+          @click="router.push({ name: 'bot-new' })"
+        >
+          <Plus class="mr-1.5" />
+          {{ $t('bots.createBot') }}
+        </Button>
       </div>
     </div>
 
@@ -51,6 +57,7 @@
 
 <script setup lang="ts">
 import {
+  Button,
   Input,
   Empty,
   EmptyContent,
@@ -59,15 +66,15 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memohai/ui'
-import { Search, Bot } from 'lucide-vue-next'
+import { Search, Bot, Plus } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import BotCard from './components/bot-card.vue'
-import CreateBot from './components/create-bot.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsQuery, getBotsQueryKey } from '@memohai/sdk/colada'
 
+const router = useRouter()
 const searchText = ref('')
-const dialogOpen = ref(false)
 const queryCache = useQueryCache()
 
 const { data: botData, status } = useQuery(getBotsQuery())
@@ -79,31 +86,31 @@ const allBots = computed(() => botData.value?.items ?? [])
 const filteredBots = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
   if (!keyword) return allBots.value
-  return allBots.value.filter((bot) =>
+  return allBots.value.filter(bot =>
     bot.display_name?.toLowerCase().includes(keyword)
     || bot.id?.toLowerCase().includes(keyword),
   )
 })
 
 const hasPendingBots = computed(() =>
-  allBots.value.some((bot) => bot.status === 'creating' || bot.status === 'deleting'),
+  allBots.value.some(bot => bot.status === 'creating' || bot.status === 'deleting'),
 )
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 watch(hasPendingBots, (pending) => {
-    if (pending) {
-      if (pollTimer == null) {
-        pollTimer = setInterval(() => {
-          queryCache.invalidateQueries({ key: getBotsQueryKey() })
-        }, 2000)
-      }
-      return
+  if (pending) {
+    if (pollTimer == null) {
+      pollTimer = setInterval(() => {
+        queryCache.invalidateQueries({ key: getBotsQueryKey() })
+      }, 2000)
     }
-    if (pollTimer != null) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
+    return
+  }
+  if (pollTimer != null) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 }, { immediate: true })
 
 onUnmounted(() => {

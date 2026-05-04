@@ -58,14 +58,16 @@ apps/desktop/
 │       ├── settings.html           # Settings window root
 │       ├── src/
 │       │   ├── main.ts             # Chat renderer bootstrap (createApp, plugins, router, i18n)
-│       │   ├── settings.ts         # Settings renderer bootstrap (parallel chain)
+│       │   ├── settings.ts         # Settings renderer bootstrap (parallel chain) + onSettingsNavigate listener
 │       │   ├── env.d.ts            # vite/client + *.vue ambient module
 │       │   ├── chat/
 │       │   │   ├── App.vue         # Chat root (provides DesktopShellKey, Toaster)
-│       │   │   └── router.ts       # Chat routes + /settings/* IPC interception + auth guard
-│       │   └── settings/
-│       │       ├── App.vue         # Settings root (provides DesktopShellKey, MainLayout)
-│       │       └── router.ts       # Settings routes (mirrors web's /settings/* paths)
+│       │   │   └── router.ts       # Chat routes + settings name stubs + /settings/* IPC interception + auth guard
+│       │   ├── settings/
+│       │   │   ├── App.vue         # Settings root (provides DesktopShellKey, MainLayout)
+│       │   │   └── router.ts       # Settings routes (built from shared spec; mirrors web's /settings/* paths)
+│       │   └── shared/
+│       │       └── settings-routes.ts  # Single source of truth for settings name+path+loader, consumed by both routers
 │       └── types/
 │           ├── web-stubs.d.ts      # Path-mapped stub for @memohai/web/* — see "Type Stubbing"
 │           └── ui-stubs.d.ts       # Path-mapped stub for @memohai/ui (Toaster, SidebarInset)
@@ -157,8 +159,9 @@ The preload bridge exposes a small, fixed surface to renderers via
 ```ts
 window.api = {
   window: {
-    openSettings(): Promise<void>   // ipc → main:'window:open-settings'
-    closeSelf(): Promise<void>      // ipc → main:'window:close-self'
+    openSettings(target?: string): Promise<void>          // ipc → main:'window:open-settings'
+    closeSelf(): Promise<void>                            // ipc → main:'window:close-self'
+    onSettingsNavigate(cb: (target: string) => void): void // settings-window subscription for IPC 'settings:navigate'
   },
 }
 ```
@@ -169,20 +172,42 @@ part of the security boundary.
 
 ### Cross-window navigation
 
-Settings actions invoked from the chat window's reused
-`@memohai/web/components/sidebar/...` (e.g. the gear footer link, the `+`
-button) are intercepted in the chat router's `beforeEach`:
+Settings actions invoked from the chat window's reused @memohai/web
+components — the gear footer link, the sidebar `+` button, the bot-item
+"Details" menu, the chat sidebar MCP/Schedule panels' `+` icons, the
+schedule/heartbeat trigger blocks, etc. — all eventually call either
+`router.push('/settings/...')` or `router.push({ name: 'bot-detail', ... })`.
+
+Both shapes are handled in the chat router. Name-based navigation works
+because the chat router registers no-op stub routes for every settings
+`name` from `shared/settings-routes.ts`. That lets vue-router resolve
+`{ name: 'bot-detail', params, query }` into a concrete `/settings/...`
+fullPath without warnings before the guard fires:
 
 ```ts
 if (to.path === '/settings' || to.path.startsWith('/settings/')) {
-  void window.api?.window?.openSettings()
+  void window.api?.window?.openSettings(to.fullPath)
   return false   // abort in-place navigation
 }
 ```
 
-This is why shared chat-sidebar components must navigate by **path** (e.g.
-`router.push('/settings/bots')`), never by `name` — `name: 'bots'` only
-exists in the settings router.
+The main process handler then:
+
+1. Creates the settings `BrowserWindow` if it doesn't exist, otherwise
+   restores/focuses the existing one (`focusWindow`).
+2. Sends `settings:navigate` with the requested path. If the renderer
+   isn't ready yet (cold start or in-flight reload), the target is
+   buffered in a Map keyed by webContents id and drained from the
+   per-window `did-finish-load` listener attached at creation time.
+
+The settings renderer subscribes via `onSettingsNavigate` before mount
+(in `src/renderer/src/settings.ts`) and pushes the path through its own
+router. A guard skips the push when the requested path equals the
+current `fullPath` so no spurious navigation is generated.
+
+When you add a new settings page in `@memohai/web`, also add an entry to
+`src/renderer/src/shared/settings-routes.ts`. Both routers consume it,
+so cross-window jumps stay correct without manual sync.
 
 ### Settings 401 handling
 
@@ -218,20 +243,48 @@ update both Web/CI and desktop typecheck.
 On `process.platform === 'darwin'` only, both `BrowserWindow`s opt in to:
 
 ```ts
-{ titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 12 } }
+{ titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 12 } }
 ```
 
 The native titlebar is hidden but the traffic lights remain at a fixed
-position. The reusable web sidebars reserve a 36px-tall (h-9) header above
-the sidebar content, marked `[-webkit-app-region:drag]` so the window can
-be dragged from there. Inside that strip, interactive elements (e.g. the
-chat sidebar `+` button) need an explicit
-`[-webkit-app-region:no-drag]` wrapper to stay clickable.
+position. To let the user grab the **entire** top of each window —
+not just the sidebar corner — the two windows take different paths,
+chosen so the chrome looks intentional rather than introducing an
+empty grey gap above the page content:
 
-The chat content also gets a floating "Title - BotName" header overlaid
-with a bottom-fade gradient. It's `pointer-events:none` so scroll/clicks
-fall through to messages, and the message list reserves the equivalent
-top padding so the first message isn't obscured at rest.
+- **Both sidebars** (`components/sidebar/index.vue`,
+  `components/settings-sidebar/index.vue`) render their existing
+  36px-tall (`h-9`) `position:fixed` drag header above the sidebar
+  body when `topInset` is true, marked `[-webkit-app-region:drag]`
+  with `pl-[78px]` to clear the traffic lights. Interactive elements
+  inside (e.g. the chat sidebar `+` button) opt out with explicit
+  `[-webkit-app-region:no-drag]` wrappers.
+
+- **Chat right side** reuses the existing 48px tab bars instead of
+  reserving a separate strip. The two chat-window tab-bar rows —
+  `pages/home/components/chat-sidebar.vue` (activity tabs) and
+  `pages/home/components/workspace-tab-bar.vue` (workspace tabs +
+  toolkit) — both carry `[-webkit-app-region:drag]` on the row root,
+  while every interactive child (tab button, close `×`, terminal
+  button, dropdown trigger) carries `[-webkit-app-region:no-drag]`.
+  Empty space within the bars is therefore draggable; clicks on
+  buttons still work. No extra height is added to the chat window.
+
+- **Settings right side** can't reuse the chat trick — settings
+  pages vary too much (master/detail layouts, full-page tables,
+  forms) and a 36px chrome strip above the page looks out of place.
+  Instead, `apps/desktop/src/renderer/src/settings/App.vue` paints
+  an invisible 16px-tall (`h-4`) `position:fixed` drag strip across
+  the very top edge of the window at `z-10`, sized to match the
+  routed sections' `p-4` top padding so it lives in the page's
+  existing dead space. The SettingsSidebar's own drag header sits
+  at `z-20` and covers the strip on the left half; on the right
+  half the strip is the topmost layer and becomes a thin
+  transparent grab zone. On `MasterDetailSidebarLayout` pages the
+  inner sidebar's `SidebarMenu` only has `p-2` (8px), so the
+  strip's lower 8px clips the very top of the first sidebar item —
+  acceptable because those rows are `py-5` and the bulk of each
+  hit area remains clickable. No visible chrome is added.
 
 ## electron-vite Configuration
 
@@ -277,10 +330,16 @@ Both windows use `createMemoryHistory()` — the `file://` runtime makes
 | `/chat/:botId?/:sessionId?` | `chat` | `@memohai/web/pages/home/index.vue` |
 | `/login` | `Login` | `@memohai/web/pages/login/index.vue` |
 | `/oauth/mcp/callback` | `oauth-mcp-callback` | `@memohai/web/pages/oauth/mcp-callback.vue` |
+| `/settings/...` (every entry from `shared/settings-routes.ts`) | mirror of settings name | no-op stub component |
+
+The settings rows above are placeholders — the guard intercepts them
+before they ever render. They exist so that `router.push({ name: 'bots' })`
+and friends from reused @memohai/web components resolve to a concrete
+`/settings/...` fullPath that gets forwarded to the settings window.
 
 Three guards in `beforeEach`:
 
-1. `/settings*` → IPC `openSettings()` → return `false`.
+1. `/settings*` → IPC `openSettings(to.fullPath)` → return `false`.
 2. `/login` while already logged in → redirect to `/`.
 3. Any other route without `localStorage.token` → redirect to `Login`.
 
@@ -289,12 +348,14 @@ load failures (covers the case where the dev server restarts mid-session).
 
 ### Settings router (`src/renderer/src/settings/router.ts`)
 
-Mirrors the path layout under `/settings/*` from `@memohai/web/router` so
-the reused `SettingsSidebar`'s `route.path.startsWith('/settings/...')`
-active-state checks keep working. Route names mirror web exactly:
-`bots`, `bot-detail`, `providers`, `web-search`, `memory`, `speech`,
-`transcription`, `email`, `browser`, `usage`, `profile`, `platform`,
-`supermarket`, `about`. Default redirect: `/` → `/settings/bots`.
+Built from `shared/settings-routes.ts` (the same spec the chat router
+uses for its stubs). Path layout mirrors `@memohai/web/router`'s
+`/settings/*` children so the reused `SettingsSidebar`'s
+`route.path.startsWith('/settings/...')` active-state checks keep
+working. Route names mirror web exactly: `bots`, `bot-detail`,
+`providers`, `web-search`, `memory`, `speech`, `transcription`, `email`,
+`browser`, `usage`, `profile`, `platform`, `supermarket`, `about`.
+Default redirect: `/` → `/settings/bots`.
 
 The settings window has **no auth guard** — by design. If the chat window
 isn't authenticated yet, it owns login. Any 401 returned to a settings

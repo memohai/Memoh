@@ -28,6 +28,7 @@
           {{ $t('common.refresh') }}
         </Button>
         <Button
+          v-if="!formVisible"
           size="sm"
           @click="handleNew"
         >
@@ -35,6 +36,149 @@
           {{ $t('bots.schedule.create') }}
         </Button>
       </div>
+    </div>
+
+    <!-- Inline form -->
+    <div
+      v-if="formVisible"
+      class="rounded-md border p-4 space-y-4"
+    >
+      <div class="flex items-center justify-between">
+        <h4 class="text-sm font-medium">
+          {{ formMode === 'create' ? $t('bots.schedule.create') : $t('bots.schedule.edit') }}
+        </h4>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="size-7"
+          @click="handleFormCancel"
+        >
+          <X class="size-4" />
+        </Button>
+      </div>
+
+      <form @submit.prevent="handleFormSubmit">
+        <div class="flex flex-col gap-4">
+          <div class="flex items-end gap-3">
+            <div class="space-y-1.5 flex-1 min-w-0">
+              <Label for="schedule-name">
+                {{ $t('bots.schedule.form.name') }}
+              </Label>
+              <Input
+                id="schedule-name"
+                v-model="form.name"
+                :placeholder="$t('bots.schedule.form.namePlaceholder')"
+              />
+            </div>
+            <div class="flex items-center gap-2 h-9 shrink-0">
+              <Label
+                class="cursor-pointer text-xs"
+                @click="form.enabled = !form.enabled"
+              >
+                {{ $t('bots.schedule.form.enabled') }}
+              </Label>
+              <Switch
+                :model-value="form.enabled"
+                @update:model-value="(v: boolean) => form.enabled = !!v"
+              />
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <Label
+              for="schedule-description"
+              class="flex items-center gap-1.5"
+            >
+              {{ $t('bots.schedule.form.description') }}
+              <span class="text-[11px] text-muted-foreground font-normal">
+                ({{ $t('common.optional') }})
+              </span>
+            </Label>
+            <Input
+              id="schedule-description"
+              v-model="form.description"
+              :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <Label for="schedule-command">
+              {{ $t('bots.schedule.form.command') }}
+            </Label>
+            <Textarea
+              id="schedule-command"
+              v-model="form.command"
+              class="text-xs"
+              :placeholder="$t('bots.schedule.form.commandPlaceholder')"
+              rows="3"
+            />
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.schedule.form.commandHint') }}
+            </p>
+          </div>
+
+          <div class="space-y-1.5">
+            <Label>{{ $t('bots.schedule.form.pattern') }}</Label>
+            <SchedulePatternBuilder
+              :state="patternState"
+              :timezone="botTimezone"
+              @update:state="(next) => patternState = next"
+            />
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <Label>{{ $t('bots.schedule.form.maxCalls') }}</Label>
+              <div class="flex items-center gap-2">
+                <Switch
+                  :model-value="maxCallsUnlimited"
+                  @update:model-value="(v: boolean) => handleMaxCallsUnlimited(!!v)"
+                />
+                <span class="text-xs text-muted-foreground">
+                  {{ $t('bots.schedule.form.maxCallsUnlimited') }}
+                </span>
+              </div>
+            </div>
+            <Input
+              v-if="!maxCallsUnlimited"
+              :model-value="form.maxCalls ?? 1"
+              type="number"
+              :min="1"
+              :placeholder="'1'"
+              @update:model-value="(v) => form.maxCalls = Math.max(1, Math.floor(Number(v) || 1))"
+            />
+          </div>
+
+          <p
+            v-if="submitError"
+            class="text-xs text-destructive"
+          >
+            {{ submitError }}
+          </p>
+
+          <div class="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              @click="handleFormCancel"
+            >
+              {{ $t('common.cancel') }}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              :disabled="!canSubmit || isSaving"
+            >
+              <Spinner
+                v-if="isSaving"
+                class="mr-1"
+              />
+              {{ formMode === 'create' ? $t('common.create') : $t('common.save') }}
+            </Button>
+          </div>
+        </div>
+      </form>
     </div>
 
     <!-- Loading -->
@@ -48,7 +192,7 @@
 
     <!-- Empty -->
     <div
-      v-else-if="!isLoading && schedules.length === 0"
+      v-else-if="!isLoading && schedules.length === 0 && !formVisible"
       class="flex flex-col items-center justify-center py-12 text-center"
     >
       <div class="rounded-full bg-muted p-3 mb-4">
@@ -70,7 +214,7 @@
     </div>
 
     <!-- Table -->
-    <template v-else>
+    <template v-else-if="schedules.length > 0">
       <div class="rounded-md border overflow-hidden">
         <table class="w-full text-xs">
           <thead>
@@ -210,25 +354,17 @@
         </Pagination>
       </div>
     </template>
-
-    <ScheduleFormDialog
-      v-model:open="dialogOpen"
-      :bot-id="botId"
-      :mode="dialogMode"
-      :schedule="dialogSchedule"
-      :timezone="botTimezone"
-      @saved="handleSaved"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { Calendar, Pencil, Plus, Trash2 } from 'lucide-vue-next'
-import { ref, computed, onMounted, reactive } from 'vue'
+import { Calendar, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { useQueryCache } from '@pinia/colada'
 import {
-  Button, Badge, Spinner, Switch,
+  Button, Badge, Input, Label, Spinner, Switch, Textarea,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
@@ -237,14 +373,26 @@ import {
   deleteBotsByBotIdScheduleById,
   getBotsByBotIdSchedule,
   getBotsByBotIdSettings,
+  postBotsByBotIdSchedule,
   putBotsByBotIdScheduleById,
 } from '@memohai/sdk'
-import type { ScheduleSchedule } from '@memohai/sdk'
+import type {
+  ScheduleSchedule,
+  ScheduleCreateRequest,
+  ScheduleUpdateRequest,
+} from '@memohai/sdk'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
-import { describeCron } from '@/utils/cron-pattern'
-import ScheduleFormDialog from './schedule-form-dialog.vue'
+import {
+  describeCron,
+  defaultScheduleFormState,
+  fromCron,
+  isValidCron,
+  toCron,
+  type ScheduleFormState,
+} from '@/utils/cron-pattern'
+import SchedulePatternBuilder from './schedule-pattern-builder.vue'
 
 const props = defineProps<{
   botId: string
@@ -259,10 +407,77 @@ const PAGE_SIZE = 10
 const botTimezone = ref<string | undefined>(undefined)
 const busyIds = reactive(new Set<string>())
 
-const dialogOpen = ref(false)
-const dialogMode = ref<'create' | 'edit'>('create')
-const dialogSchedule = ref<ScheduleSchedule | null>(null)
+// Inline form state
+const formVisible = ref(false)
+const formMode = ref<'create' | 'edit'>('create')
+const editingSchedule = ref<ScheduleSchedule | null>(null)
+const isSaving = ref(false)
+const submitError = ref<string | null>(null)
 
+interface SchedulePlainForm {
+  name: string
+  description: string
+  command: string
+  maxCalls: number | null
+  enabled: boolean
+}
+
+const form = reactive<SchedulePlainForm>({
+  name: '',
+  description: '',
+  command: '',
+  maxCalls: null,
+  enabled: true,
+})
+
+const patternState = ref<ScheduleFormState>(defaultScheduleFormState())
+
+const maxCallsUnlimited = computed(() => form.maxCalls === null)
+
+function handleMaxCallsUnlimited(v: boolean) {
+  form.maxCalls = v ? null : 1
+}
+
+const derivedPattern = computed(() => {
+  try {
+    return toCron(patternState.value).trim()
+  } catch {
+    return ''
+  }
+})
+
+const canSubmit = computed(() => {
+  if (isSaving.value) return false
+  if (!form.name.trim()) return false
+  if (!form.command.trim()) return false
+  if (!derivedPattern.value) return false
+  if (patternState.value.mode === 'advanced' && !isValidCron(derivedPattern.value)) return false
+  if (!maxCallsUnlimited.value && (form.maxCalls === null || form.maxCalls < 1)) return false
+  return true
+})
+
+function resetForm() {
+  form.name = ''
+  form.description = ''
+  form.command = ''
+  form.maxCalls = null
+  form.enabled = true
+  patternState.value = defaultScheduleFormState()
+  submitError.value = null
+}
+
+function hydrateForm(s: ScheduleSchedule) {
+  form.name = s.name ?? ''
+  form.description = s.description ?? ''
+  form.command = s.command ?? ''
+  const maxCallsRaw = s.max_calls as unknown
+  form.maxCalls = (typeof maxCallsRaw === 'number' && maxCallsRaw > 0) ? maxCallsRaw : null
+  form.enabled = s.enabled ?? true
+  patternState.value = fromCron(s.pattern ?? '')
+  submitError.value = null
+}
+
+// List computeds
 const totalPages = computed(() => Math.ceil(schedules.value.length / PAGE_SIZE))
 
 const pagedSchedules = computed(() => {
@@ -286,11 +501,15 @@ function describeItem(pattern: string | undefined): string | undefined {
 }
 
 function formatMaxCalls(item: ScheduleSchedule): string {
-  // Backend emits max_calls as a plain number or omits it (typing in the SDK
-  // is a known mismatch). Treat any non-positive/absent value as unlimited.
   const raw = item.max_calls as unknown
   if (typeof raw === 'number' && raw > 0) return String(raw)
   return t('bots.schedule.unlimited')
+}
+
+const queryCache = useQueryCache()
+
+function invalidateSidebarSchedule() {
+  queryCache.invalidateQueries({ key: ['bot-schedule', props.botId] })
 }
 
 async function fetchSchedules() {
@@ -319,7 +538,6 @@ async function fetchBotSettings() {
     const tz = (data as { timezone?: string } | undefined)?.timezone
     botTimezone.value = tz && tz.trim() !== '' ? tz : undefined
   } catch {
-    // Fallback to browser timezone — non-fatal.
     botTimezone.value = undefined
   }
 }
@@ -330,19 +548,74 @@ async function handleRefresh() {
 }
 
 function handleNew() {
-  dialogMode.value = 'create'
-  dialogSchedule.value = null
-  dialogOpen.value = true
+  formMode.value = 'create'
+  editingSchedule.value = null
+  resetForm()
+  formVisible.value = true
 }
 
 function handleEdit(item: ScheduleSchedule) {
-  dialogMode.value = 'edit'
-  dialogSchedule.value = item
-  dialogOpen.value = true
+  formMode.value = 'edit'
+  editingSchedule.value = item
+  hydrateForm(item)
+  formVisible.value = true
 }
 
-async function handleSaved() {
-  await fetchSchedules()
+function handleFormCancel() {
+  formVisible.value = false
+  editingSchedule.value = null
+  submitError.value = null
+}
+
+async function handleFormSubmit() {
+  if (!canSubmit.value) return
+  submitError.value = null
+  isSaving.value = true
+  try {
+    const pattern = derivedPattern.value
+    const maxCallsWire = form.maxCalls ?? null
+    if (formMode.value === 'create') {
+      const body = {
+        name: form.name.trim(),
+        description: form.description.trim(),
+        command: form.command.trim(),
+        pattern,
+        enabled: form.enabled,
+        max_calls: maxCallsWire,
+      } as unknown as ScheduleCreateRequest
+      await postBotsByBotIdSchedule({
+        path: { bot_id: props.botId },
+        body,
+        throwOnError: true,
+      })
+      toast.success(t('bots.schedule.saveSuccess'))
+    } else {
+      const id = editingSchedule.value?.id
+      if (!id) throw new Error('schedule id missing')
+      const body = {
+        name: form.name.trim(),
+        description: form.description.trim(),
+        command: form.command.trim(),
+        pattern,
+        enabled: form.enabled,
+        max_calls: maxCallsWire,
+      } as unknown as ScheduleUpdateRequest
+      await putBotsByBotIdScheduleById({
+        path: { bot_id: props.botId, id },
+        body,
+        throwOnError: true,
+      })
+      toast.success(t('bots.schedule.saveSuccess'))
+    }
+    formVisible.value = false
+    editingSchedule.value = null
+    await fetchSchedules()
+    invalidateSidebarSchedule()
+  } catch (err) {
+    submitError.value = resolveApiErrorMessage(err, t('bots.schedule.saveFailed'))
+  } finally {
+    isSaving.value = false
+  }
 }
 
 async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
@@ -356,6 +629,7 @@ async function handleToggleEnabled(item: ScheduleSchedule, enabled: boolean) {
       throwOnError: true,
     })
     await fetchSchedules()
+    invalidateSidebarSchedule()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.saveFailed')))
   } finally {
@@ -374,6 +648,7 @@ async function handleDelete(item: ScheduleSchedule) {
     })
     toast.success(t('bots.schedule.deleteSuccess'))
     await fetchSchedules()
+    invalidateSidebarSchedule()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.schedule.deleteFailed')))
   } finally {
@@ -385,4 +660,16 @@ onMounted(() => {
   fetchSchedules()
   fetchBotSettings()
 })
+
+watch(
+  () => {
+    const entries = queryCache.getEntries({ key: ['bot-schedule', props.botId] })
+    return entries[0]?.state.value.data
+  },
+  (next, prev) => {
+    if (!props.botId) return
+    if (next === prev) return
+    void fetchSchedules()
+  },
+)
 </script>

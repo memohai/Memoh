@@ -23,6 +23,11 @@
           >
             <div class="w-full max-w-4xl mx-auto px-10 pt-6 pb-6 space-y-6">
               <div
+                ref="loadMoreSentinel"
+                aria-hidden="true"
+                class="h-px w-full"
+              />
+              <div
                 v-if="loadingOlder"
                 class="flex justify-center py-2"
               >
@@ -240,12 +245,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, useTemplateRef, watchEffect, watch } from 'vue'
+import { ref, computed, onMounted, useTemplateRef, watchEffect, watch, nextTick } from 'vue'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, Lightbulb } from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import { useScroll, useElementBounding } from '@vueuse/core'
+import { useScroll, useElementBounding, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
@@ -281,7 +286,7 @@ const {
 
 
 const { data: modelData } = useQuery({
-  key: ['all-models'],
+  key: ['models'],
   query: async () => {
     const { data } = await getModels({ throwOnError: true })
     return data
@@ -289,7 +294,7 @@ const { data: modelData } = useQuery({
 })
 
 const { data: providerData } = useQuery({
-  key: ['all-providers'],
+  key: ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
     return data
@@ -398,29 +403,38 @@ onMounted(async () => {
 })
 
 const elNode = useTemplateRef('scrollContainer')
-const descEl = computed(() => elNode.value?.$el?.children[0]?.children[0])
-const scrollEl = computed(() => descEl.value?.parentNode)
+// Resolve the real scrollable viewport via data-slot to avoid coupling to the
+// child-index DOM shape of @memohai/ui's ScrollArea (which wraps reka-ui).
+const scrollEl = computed<HTMLElement | null>(() => {
+  const root = elNode.value?.$el as HTMLElement | undefined
+  if (!root) return null
+  return root.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement | null
+})
+const descEl = computed<HTMLElement | null>(() => {
+  return (scrollEl.value?.firstElementChild as HTMLElement | null) ?? null
+})
+const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
 const isAutoScroll = ref(true)
 const isInstant = ref(false)
 const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
-const { height, bottom } = useElementBounding(descEl)
+const { height } = useElementBounding(descEl)
 
 watch(activeSession, async () => {
   isInstant.value = false
-  y.value=height.value  
-},{immediate:true,deep:true})
+  y.value = height.value
+}, { immediate: true, deep: true })
 
 
 watchEffect(() => {
   if (directions.top) {
     isAutoScroll.value = false
-     isInstant.value=true
+    isInstant.value = true
   }
   if (arrivedState.bottom) {
     isAutoScroll.value = true
-    isInstant.value=true
+    isInstant.value = true
   }
-},{flush:'post'})
+}, { flush: 'post' })
 
 
 watchEffect(() => {
@@ -429,22 +443,86 @@ watchEffect(() => {
   }
 })
 
-let Throttle = true
+// Sentinel-based infinite scroll for older history. The IntersectionObserver
+// fires reliably even when the user is pinned at scrollTop=0 (where scroll
+// events stop), and we restore the visual position via scrollHeight diff —
+// the only anchoring scheme that survives nested scroll containers and
+// arbitrary page offsets. After each load we re-check whether the sentinel
+// is still inside the rootMargin band and chain another load if so; this
+// avoids the "must scroll down then up to load again" symptom that arises
+// when IntersectionObserver's isIntersecting state stays sticky-true.
+let isLoadingOlderInFlight = false
 
-watchEffect(() => {
-  if (directions.top && arrivedState.top && Throttle && hasMoreOlder.value && !loadingOlder.value) {
-    const prev = bottom.value
-    Throttle = false
-    chatStore.loadOlderMessages().then((count) => {
-      setTimeout(() => {
-        if (count > 0) {
-          y.value = height.value - prev
-          Throttle = true
-        }
-      })
-    })
+function isSentinelStillInRange(scrollElement: HTMLElement): boolean {
+  const sentinel = loadMoreSentinel.value
+  if (!sentinel) return false
+  const rootRect = scrollElement.getBoundingClientRect()
+  const sentinelRect = sentinel.getBoundingClientRect()
+  return sentinelRect.bottom >= rootRect.top - 200
+    && sentinelRect.top <= rootRect.bottom
+}
+
+async function ensureOlderLoaded() {
+  if (isLoadingOlderInFlight) return
+  if (loadingOlder.value || !hasMoreOlder.value) return
+  if (!messages.value.length) return
+  const scrollElement = scrollEl.value
+  if (!scrollElement) return
+
+  isLoadingOlderInFlight = true
+  // The `if (isAutoScroll) y = height` watchEffect above will otherwise stomp
+  // our restored scrollTop the moment new content lands (height grows, effect
+  // fires, viewport jumps to bottom, sentinel flies off-screen — and IO never
+  // fires again because the user can't scroll back up far enough). The user
+  // is at the top by definition (sentinel just intersected), so disabling
+  // stick-to-bottom here is correct; arrivedState.bottom will re-enable it
+  // when the user scrolls back down to the latest messages.
+  isAutoScroll.value = false
+  try {
+    while (hasMoreOlder.value) {
+      const prevScrollHeight = scrollElement.scrollHeight
+      const prevScrollTop = scrollElement.scrollTop
+
+      let count = 0
+      try {
+        count = await chatStore.loadOlderMessages()
+      } catch (error) {
+        console.error('Failed to load older messages:', error)
+        return
+      }
+      if (count <= 0) return
+
+      await nextTick()
+      const newScrollHeight = scrollElement.scrollHeight
+      const delta = newScrollHeight - prevScrollHeight
+      if (delta > 0) {
+        scrollElement.scrollTop = prevScrollTop + delta
+      }
+
+      // Yield one frame so the browser can re-evaluate layout and IO entries,
+      // then bail out unless the sentinel is still inside the trigger band —
+      // meaning the newly prepended page wasn't tall enough to push us out of
+      // range and we should keep paginating.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      if (!isSentinelStillInRange(scrollElement)) return
+    }
+  } finally {
+    isLoadingOlderInFlight = false
   }
-})
+}
+
+useIntersectionObserver(
+  loadMoreSentinel,
+  ([entry]) => {
+    if (!entry?.isIntersecting) return
+    void ensureOlderLoaded()
+  },
+  {
+    root: scrollEl,
+    rootMargin: '200px 0px 0px 0px',
+    threshold: 0,
+  },
+)
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return

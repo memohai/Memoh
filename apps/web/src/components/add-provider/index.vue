@@ -218,7 +218,10 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     }
     return result
   },
-  onSettled: () => queryCache.invalidateQueries({ key: ['providers'] }),
+  onSettled: () => {
+    queryCache.invalidateQueries({ key: ['providers'] })
+    queryCache.invalidateQueries({ key: ['models'] })
+  },
 })
 
 const providerSchema = toTypedSchema(z.object({

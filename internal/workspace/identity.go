@@ -3,10 +3,10 @@ package workspace
 import (
 	"strings"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 )
 
-var knownContainerPrefixes = []string{ContainerPrefix, LegacyContainerPrefix}
+var knownContainerPrefixes = []string{ContainerPrefix, LegacyContainerPrefix, LocalContainerPrefix}
 
 // BotIDFromContainerID infers a bot ID from a known container naming scheme.
 // This is only used as a fallback for legacy containers when labels are missing.

@@ -884,6 +884,9 @@ definitions:
         type: string
       name:
         type: string
+      path:
+        description: container-local filesystem path
+        type: string
       platform_key:
         type: string
       size:
@@ -895,6 +898,7 @@ definitions:
       type:
         $ref: '#/definitions/channel.AttachmentType'
       url:
+        description: HTTP(S) or data URL
         type: string
       width:
         type: integer
@@ -1490,6 +1494,8 @@ definitions:
     properties:
       kernel_nanoseconds:
         type: integer
+      usage_nanocores:
+        type: integer
       usage_nanoseconds:
         type: integer
       usage_percent:
@@ -1549,9 +1555,13 @@ definitions:
         $ref: '#/definitions/handlers.ContainerGPURequest'
       image:
         type: string
+      local_workspace_path:
+        type: string
       restore_data:
         type: boolean
       snapshotter:
+        type: string
+      workspace_backend:
         type: string
     type: object
   handlers.CreateContainerResponse:
@@ -1561,6 +1571,8 @@ definitions:
           type: string
         type: array
       container_id:
+        type: string
+      container_path:
         type: string
       data_restored:
         type: boolean
@@ -1572,6 +1584,8 @@ definitions:
         type: string
       started:
         type: boolean
+      workspace_backend:
+        type: string
     type: object
   handlers.CreateSnapshotRequest:
     properties:
@@ -1722,6 +1736,8 @@ definitions:
         type: boolean
       updated_at:
         type: string
+      workspace_backend:
+        type: string
     type: object
   handlers.InstallMcpRequest:
     properties:
@@ -1830,6 +1846,8 @@ definitions:
         type: string
       container_backend:
         type: string
+      local_workspace_enabled:
+        type: boolean
       snapshot_supported:
         type: boolean
       status:
@@ -3040,6 +3058,13 @@ definitions:
         type: string
       memory_provider_id:
         type: string
+      overlay_config:
+        additionalProperties: {}
+        type: object
+      overlay_enabled:
+        type: boolean
+      overlay_provider:
+        type: string
       persist_full_tool_results:
         type: boolean
       reasoning_effort:
@@ -3127,6 +3152,13 @@ definitions:
       language:
         type: string
       memory_provider_id:
+        type: string
+      overlay_config:
+        additionalProperties: {}
+        type: object
+      overlay_enabled:
+        type: boolean
+      overlay_provider:
         type: string
       persist_full_tool_results:
         type: boolean

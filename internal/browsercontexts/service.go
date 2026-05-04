@@ -10,15 +10,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 type Service struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
 		queries: queries,
 		logger:  log.With(slog.String("service", "browser_contexts")),

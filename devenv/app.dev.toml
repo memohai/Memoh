@@ -19,26 +19,49 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
-[containerd]
-socket_path = "/run/containerd/containerd.sock"
-namespace = "default"
+[database]
+# Supported values: "postgres" or "sqlite".
+# This dev profile uses PostgreSQL from devenv/docker-compose.yml.
+driver = "postgres"
 
-[workspace]
+[container]
+# Development runs nested containerd inside the server container, matching the
+# production Docker Compose image.
+backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
 default_image = "debian:bookworm-slim"
+image_pull_policy = "if_not_present"
+# containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"
 data_root = "/opt/memoh/data"
 runtime_dir = "/opt/memoh/runtime"
 cni_bin_dir = "/opt/cni/bin"
 cni_conf_dir = "/etc/cni/net.d"
 
+[containerd]
+# Embedded containerd socket inside the dev server container.
+socket_path = "/run/containerd/containerd.sock"
+namespace = "default"
+
+[docker]
+# Used only when [container].backend = "docker"; the dev Compose stack uses containerd.
+host = ""
+
 [postgres]
+# Used only when [database].driver = "postgres".
 host = "postgres"
 port = 5432
 user = "memoh"
 password = "memoh123"
 database = "memoh"
 sslmode = "disable"
+
+[sqlite]
+# Used only when [database].driver = "sqlite". The SQLite dev profile mounts
+# /opt/memoh/data to a persistent Docker volume.
+path = "/opt/memoh/data/memoh.db"
+wal = true
+busy_timeout_ms = 5000
 
 [qdrant]
 base_url = "http://qdrant:6334"

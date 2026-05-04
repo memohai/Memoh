@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/conversation"
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
@@ -152,15 +153,39 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		if msg.Role == "user" {
 			messageSenderChannelIdentityID = senderChannelIdentityID
 			messageSenderUserID = senderUserID
-			externalMessageID = req.ExternalMessageID
-			messageEventID = req.EventID
-			if req.RawQuery != "" {
-				displayText = req.RawQuery
-			} else {
-				displayText = strings.TrimSpace(req.Query)
-			}
-			if strings.TrimSpace(msg.TextContent()) == strings.TrimSpace(req.Query) {
+
+			// Only the user message whose text matches req.Query is the
+			// "real" turn-leading query from the user. Other user-role
+			// messages in this round are synthetic — typically:
+			//   1. Mid-turn IM platform injects (the user typed again
+			//      while the bot was working).
+			//   2. The image-only user message that the read-media tool
+			//      decoration appends after a successful image read so
+			//      that the next LLM step can see the image.
+			// For (2) the message has no text content; for both (1) and
+			// (2), splatting req.RawQuery / req.ExternalMessageID /
+			// req.EventID across them was wrong: it forced the UI to
+			// display the original query text on a synthetic image-only
+			// turn (the read-tool case), and falsely linked unrelated
+			// messages to the same inbound IM event.
+			ownText := strings.TrimSpace(msg.TextContent())
+			isOriginalQuery := ownText != "" && ownText == strings.TrimSpace(req.Query)
+
+			if isOriginalQuery {
+				externalMessageID = req.ExternalMessageID
+				messageEventID = req.EventID
+				if req.RawQuery != "" {
+					displayText = req.RawQuery
+				} else {
+					displayText = strings.TrimSpace(req.Query)
+				}
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
+			} else {
+				// Use the message's own text as display text. For the
+				// read-media image-only injection this is empty, so
+				// DisplayContent stays empty and ConvertMessagesToUITurns
+				// drops the turn entirely (no text + no assets).
+				displayText = ownText
 			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
 			sourceReplyToMessageID = req.ExternalMessageID
@@ -240,11 +265,7 @@ func chatAttachmentsToAssetRefs(attachments []conversation.ChatAttachment) []mes
 			Name:        strings.TrimSpace(att.Name),
 			Metadata:    att.Metadata,
 		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
+		ref.StorageKey = attachmentpkg.MetadataString(att.Metadata, attachmentpkg.MetadataKeyStorageKey)
 		refs = append(refs, ref)
 	}
 	return refs

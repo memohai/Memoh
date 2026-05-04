@@ -94,6 +94,19 @@ export const useChatStore = defineStore('chat', () => {
   const overrideModelId = ref<string>('')
   const overrideReasoningEffort = ref<string>('')
 
+  // Bumps every time a fs-mutating tool call (write/edit/exec) finishes for the
+  // current bot. File-manager components watch this to refresh their listings
+  // and any open file viewers without polling.
+  const fsChangedAt = ref(0)
+  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'exec'])
+
+  function bumpFsChangedAtIfFsMutation(message: UIMessage) {
+    if (message.type !== 'tool') return
+    if (message.running) return
+    if (!FS_MUTATING_TOOLS.has(message.name)) return
+    fsChangedAt.value = Date.now()
+  }
+
   let abortFn: (() => void) | null = null
   let messageEventsSince = ''
   let pendingAssistantStream: PendingAssistantStream | null = null
@@ -262,7 +275,6 @@ export const useChatStore = defineStore('chat', () => {
       text,
       attachments: (attachments ?? []).map((attachment) => ({
         type: attachment.type,
-        url: attachment.base64,
         base64: attachment.base64,
         name: attachment.name ?? '',
         mime: attachment.mime ?? '',
@@ -304,6 +316,7 @@ export const useChatStore = defineStore('chat', () => {
   function upsertAssistantUIMessage(turn: ChatAssistantTurn, message: UIMessage) {
     const normalized = normalizeUIMessage(message)
     turn.messages = upsertById(turn.messages, normalized)
+    bumpFsChangedAtIfFsMutation(message)
   }
 
   function nextAssistantMessageId(turn: ChatAssistantTurn): number {
@@ -532,20 +545,61 @@ export const useChatStore = defineStore('chat', () => {
 
     loadingOlder.value = true
     try {
-      const turns = await fetchMessagesUI(bid, sid, {
-        limit: PAGE_SIZE,
-        before: first.timestamp,
-      })
-      const existingIds = new Set(messages.map(message => message.id))
-      const older = turns
-        .map(normalizeTurn)
-        .filter(turn => !existingIds.has(turn.id))
-      if (older.length === 0) {
-        hasMoreOlder.value = false
-        return 0
+      // Page through history with cursor advancement. When merged-turn de-dup
+      // collapses an entire page to zero net-new entries, we must keep
+      // advancing the `before` cursor (using the earliest timestamp from the
+      // raw server response, not from our local list, otherwise the cursor
+      // never moves and we'd terminate prematurely).
+      const MAX_DEDUP_HOPS = 4
+      let cursor = first.timestamp
+      for (let hop = 0; hop < MAX_DEDUP_HOPS; hop++) {
+        const turns = await fetchMessagesUI(bid, sid, {
+          limit: PAGE_SIZE,
+          before: cursor,
+        })
+
+        if (turns.length === 0) {
+          hasMoreOlder.value = false
+          return 0
+        }
+
+        const existingIds = new Set(messages.map(message => message.id))
+        const normalized = turns.map(normalizeTurn)
+        const older = normalized.filter(turn => !existingIds.has(turn.id))
+
+        if (older.length > 0) {
+          messages.unshift(...older)
+          // Don't infer end-of-history from `turns.length < PAGE_SIZE`: the
+          // server pages by raw DB rows (bot_history_messages.created_at) but
+          // we receive merged UI turns (multi-row user/assistant groups
+          // collapsed into one), so a "short" UI page is the common case, not
+          // a terminal signal. Only an empty server response (handled at the
+          // top of the loop) is authoritative.
+          return older.length
+        }
+
+        // All returned turns were already present locally. Advance the cursor
+        // past the earliest one we just saw and try again on the next hop.
+        const earliest = normalized.reduce<string | null>((acc, turn) => {
+          const ts = turn.timestamp?.trim()
+          if (!ts) return acc
+          if (!acc || ts < acc) return ts
+          return acc
+        }, null)
+        if (!earliest || earliest === cursor) {
+          // Cursor cannot advance — bail out to avoid a request loop.
+          hasMoreOlder.value = false
+          return 0
+        }
+        cursor = earliest
       }
-      messages.unshift(...older)
-      return older.length
+      // Exhausted hop budget without finding net-new turns; treat as end of
+      // history rather than spinning indefinitely.
+      hasMoreOlder.value = false
+      return 0
+    } catch (error) {
+      console.error('Failed to load older messages:', error)
+      return 0
     } finally {
       loadingOlder.value = false
     }
@@ -809,6 +863,7 @@ export const useChatStore = defineStore('chat', () => {
     initializing,
     overrideModelId,
     overrideReasoningEffort,
+    fsChangedAt,
     initialize,
     selectBot,
     selectSession,

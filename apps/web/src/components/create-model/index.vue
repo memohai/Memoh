@@ -213,7 +213,7 @@ const props = withDefaults(defineProps<{
   ],
   defaultType: 'chat',
   hideType: false,
-  invalidateKeys: () => ['provider-models'],
+  invalidateKeys: () => ['provider-models', 'models'],
 })
 
 const form = useForm({

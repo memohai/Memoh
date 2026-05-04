@@ -49,3 +49,98 @@
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
+
+/* MarkdownRender (markstream-vue) — soft styling aligned with the design system.
+ * Loaded after markstream-vue/index.css so equal-specificity selectors win. */
+.markstream-vue {
+  --link-color: var(--color-foreground);
+  --hr-border-color: var(--color-border);
+  --blockquote-border-color: var(--color-border);
+  --list-item-counter-marker: var(--color-muted-foreground);
+  --list-item-marker: var(--color-muted-foreground);
+  --table-border: var(--color-border);
+  color: var(--color-foreground);
+}
+
+/* Tables — rounded corners with a distinctly tinted header row */
+.markstream-vue .table-node-wrapper {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  scrollbar-gutter: auto !important;
+}
+
+.markstream-vue .table-node-wrapper .table-node {
+  margin: 0;
+}
+
+.markstream-vue .table-node thead {
+  background-color: var(--color-muted);
+}
+
+.markstream-vue .table-node th {
+  padding: 0.5rem 0.875rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-foreground);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.markstream-vue .table-node td {
+  padding: 0.5rem 0.875rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.markstream-vue .table-node tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.markstream-vue .table-node tbody tr:hover td {
+  background-color: color-mix(in oklch, var(--color-accent) 60%, transparent);
+}
+
+/* Inline code — pill-shaped chip on accent fill */
+.markstream-vue :not(pre) > code {
+  background-color: var(--color-accent);
+  color: var(--color-foreground);
+  border-radius: 0.3125rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.875em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Code block container — soft rounded frame */
+.markstream-vue .code-block-container {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* Blockquote — subtle accent tint, drop the default italic for readability */
+.markstream-vue .blockquote {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--color-muted-foreground);
+  background-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 0.5rem 1rem;
+  margin: 1rem 0;
+}
+
+/* HR — tighter spacing, theme border color via CSS var above */
+.markstream-vue .hr-node {
+  margin: 1.5rem 0;
+}
+
+/* Links — soft underline, foreground color comes from the --link-color var above */
+.markstream-vue .link-node {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in oklch, var(--color-foreground) 35%, transparent);
+}
+
+.markstream-vue .link-node:hover {
+  text-decoration-color: var(--color-foreground);
+}

@@ -220,68 +220,46 @@
       </MasterDetailSidebarLayout>
     </div>
 
-    <!-- Edit avatar dialog -->
-    <Dialog v-model:open="avatarDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ $t('bots.editAvatar') }}</DialogTitle>
-          <DialogDescription>
-            {{ $t('bots.editAvatarDescription') }}
-          </DialogDescription>
-        </DialogHeader>
-        <div class="mt-4 flex flex-col items-center gap-4">
-          <Avatar class="size-20 shrink-0 rounded-full">
-            <AvatarImage
-              v-if="avatarUrlDraft.trim()"
-              :src="avatarUrlDraft.trim()"
-              :alt="bot?.display_name"
-            />
-            <AvatarFallback class="text-xl">
-              {{ avatarFallback }}
-            </AvatarFallback>
-          </Avatar>
-          <Input
-            v-model="avatarUrlDraft"
-            type="url"
-            class="w-full"
-            :placeholder="$t('bots.avatarUrlPlaceholder')"
-            :disabled="avatarSaving"
-          />
-        </div>
-        <DialogFooter class="mt-6">
-          <DialogClose as-child>
-            <Button
-              variant="outline"
-              :disabled="avatarSaving"
-            >
-              {{ $t('common.cancel') }}
-            </Button>
-          </DialogClose>
-          <Button
-            :disabled="avatarSaving || !canConfirmAvatar"
-            @click="handleConfirmAvatar"
-          >
-            <Spinner
-              v-if="avatarSaving"
-              class="mr-1.5"
-            />
-            {{ $t('common.confirm') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <AvatarEditDialog
+      v-model:open="avatarDialogOpen"
+      v-model:avatar-url="avatarUrlModel"
+      :fallback-text="avatarFallback"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import {
-  Avatar, AvatarImage, AvatarFallback, Badge, Button, Dialog, DialogClose, DialogContent,
-  DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Spinner,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, Toggle
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+  Badge,
+  Input,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  Toggle,
 } from '@memohai/ui'
 import {
-  SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
-  BrainCircuit, ShieldAlert, Cpu, Database, Mail, Link, Clock, Server, FileBox, Zap
+  SquarePen,
+  LoaderCircle,
+  Check,
+  Search,
+  X,
+  LayoutDashboard,
+  Settings,
+  MessageSquare,
+  BrainCircuit,
+  ShieldAlert,
+  Cpu,
+  Database,
+  Mail,
+  Link,
+  Clock,
+  Server,
+  FileBox,
+  Zap,
+  Network,
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
@@ -294,6 +272,7 @@ import {
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
 } from '@memohai/sdk'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type {
   BotsBotCheck, HandlersGetContainerResponse,
   HandlersListSnapshotsResponse,
@@ -302,6 +281,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 
 import BotSettings from './components/bot-settings.vue'
 import BotToolApproval from './components/bot-tool-approval.vue'
+import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
@@ -313,6 +293,7 @@ import BotOverview from './components/bot-overview.vue'
 import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotAccess from './components/bot-access.vue'
+import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
@@ -336,12 +317,28 @@ const { data: bot } = useQuery({
   enabled: () => !!botId.value,
 })
 
+function workspaceBackendFromMetadata(metadata: unknown): string {
+  if (!metadata || typeof metadata !== 'object') return ''
+  const workspace = (metadata as Record<string, unknown>).workspace
+  if (!workspace || typeof workspace !== 'object') return ''
+  const backend = (workspace as Record<string, unknown>).backend
+  return typeof backend === 'string' ? backend.trim().toLowerCase() : ''
+}
+
+const containerInfo = ref<BotContainerInfo | null>(null)
+
+const isLocalWorkspace = computed(() =>
+  workspaceBackendFromMetadata(bot.value?.metadata) === 'local'
+  || containerInfo.value?.workspace_backend === 'local',
+)
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
-  return [
+  const tabs = [
     { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
     { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {} },
+    { value: 'network', label: 'bots.tabs.network', icon: Network, component: BotNetwork, params: { 'bot-id': bot_id } },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
@@ -353,6 +350,10 @@ const tabList = computed(() => {
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
   ]
+  if (isLocalWorkspace.value) {
+    return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network')
+  }
+  return tabs
 })
 
 const searchQuery = ref('')
@@ -366,6 +367,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
+    { tab: 'network', key: 'bots.tabs.network', keywords: ['network', 'proxy', 'routing', 'egress'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'qdrant', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
@@ -397,7 +399,7 @@ const searchResults = computed(() => {
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
   const capabilityKeys = ['skills', 'tool-approval', 'mcp', 'memory']
-  const runtimeKeys = ['container', 'schedule', 'compaction', 'heartbeat']
+  const runtimeKeys = ['container', 'network', 'schedule', 'compaction', 'heartbeat']
   const securityKeys = ['access', 'email']
 
   return [
@@ -428,7 +430,7 @@ const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
     return data
   },
   onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bots'] })
+    queryCache.invalidateQueries({ key: getBotsQueryKey() })
     queryCache.invalidateQueries({ key: ['bot'] })
   },
 })
@@ -455,16 +457,33 @@ watch(bot, (val) => {
 }, { immediate: true })
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
+watch([tabList, activeTab], ([tabs, tab]) => {
+  if (!tabs.some(item => item.value === tab)) {
+    activeTab.value = 'overview'
+  }
+}, { immediate: true })
 const avatarDialogOpen = ref(false)
-const avatarUrlDraft = ref('')
+const avatarUrlModel = ref('')
 const avatarFallback = useAvatarInitials(() => bot.value?.display_name || botId.value || '')
 const isSavingBotName = computed(() => updateBotLoading.value)
-const avatarSaving = computed(() => updateBotLoading.value)
-const canConfirmAvatar = computed(() => {
-  if (!bot.value) return false
-  const next = avatarUrlDraft.value.trim()
+
+watch(() => bot.value?.avatar_url, (url) => {
+  avatarUrlModel.value = url || ''
+}, { immediate: true })
+
+watch(avatarUrlModel, async (nextUrl) => {
+  if (!bot.value) return
   const current = (bot.value.avatar_url || '').trim()
-  return next !== current
+  if (nextUrl.trim() === current) return
+  try {
+    await updateBot({
+      id: bot.value.id as string,
+      avatar_url: nextUrl || undefined,
+    })
+    toast.success(t('bots.avatarUpdateSuccess'))
+  } catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.avatarUpdateFailed')))
+  }
 })
 const canConfirmBotName = computed(() => {
   if (!bot.value) return false
@@ -489,7 +508,6 @@ const botTypeLabel = computed(() => {
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)
 
-const containerInfo = ref<BotContainerInfo | null>(null)
 const containerMissing = ref(false)
 const containerLoading = ref(false)
 const snapshotsLoading = ref(false)
@@ -519,23 +537,7 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
 
 function handleEditAvatar() {
   if (!bot.value || botLifecyclePending.value) return
-  avatarUrlDraft.value = bot.value.avatar_url || ''
   avatarDialogOpen.value = true
-}
-
-async function handleConfirmAvatar() {
-  if (!bot.value || !canConfirmAvatar.value || avatarSaving.value) return
-  const nextUrl = avatarUrlDraft.value.trim()
-  try {
-    await updateBot({
-      id: bot.value.id as string,
-      avatar_url: nextUrl || undefined,
-    })
-    avatarDialogOpen.value = false
-    toast.success(t('bots.avatarUpdateSuccess'))
-  } catch (error) {
-    toast.error(resolveErrorMessage(error, t('bots.avatarUpdateFailed')))
-  }
 }
 
 function handleStartEditBotName() {

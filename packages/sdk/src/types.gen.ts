@@ -552,11 +552,18 @@ export type ChannelAttachment = {
     };
     mime?: string;
     name?: string;
+    /**
+     * container-local filesystem path
+     */
+    path?: string;
     platform_key?: string;
     size?: number;
     source_platform?: string;
     thumbnail_url?: string;
     type?: ChannelAttachmentType;
+    /**
+     * HTTP(S) or data URL
+     */
     url?: string;
     width?: number;
 };
@@ -884,6 +891,7 @@ export type HandlersChannelMeta = {
 
 export type HandlersContainerCpuMetricsResponse = {
     kernel_nanoseconds?: number;
+    usage_nanocores?: number;
     usage_nanoseconds?: number;
     usage_percent?: number;
     user_nanoseconds?: number;
@@ -923,18 +931,22 @@ export type HandlersContextUsage = {
 export type HandlersCreateContainerRequest = {
     gpu?: HandlersContainerGpuRequest;
     image?: string;
+    local_workspace_path?: string;
     restore_data?: boolean;
     snapshotter?: string;
+    workspace_backend?: string;
 };
 
 export type HandlersCreateContainerResponse = {
     cdi_devices?: Array<string>;
     container_id?: string;
+    container_path?: string;
     data_restored?: boolean;
     has_preserved_data?: boolean;
     image?: string;
     snapshotter?: string;
     started?: boolean;
+    workspace_backend?: string;
 };
 
 export type HandlersCreateSnapshotRequest = {
@@ -1029,6 +1041,7 @@ export type HandlersGetContainerResponse = {
     status?: string;
     task_running?: boolean;
     updated_at?: string;
+    workspace_backend?: string;
 };
 
 export type HandlersInstallMcpRequest = {
@@ -1097,6 +1110,7 @@ export type HandlersModelTokenUsage = {
 export type HandlersPingResponse = {
     commit_hash?: string;
     container_backend?: string;
+    local_workspace_enabled?: boolean;
     snapshot_supported?: boolean;
     status?: string;
     version?: string;
@@ -1812,6 +1826,11 @@ export type SettingsSettings = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    overlay_config?: {
+        [key: string]: unknown;
+    };
+    overlay_enabled?: boolean;
+    overlay_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;
@@ -1858,6 +1877,11 @@ export type SettingsUpsertRequest = {
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
+    overlay_config?: {
+        [key: string]: unknown;
+    };
+    overlay_enabled?: boolean;
+    overlay_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
     reasoning_enabled?: boolean;

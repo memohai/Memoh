@@ -351,6 +351,7 @@ import {
   putBotsById,
   type HandlersSkillItem,
 } from '@memohai/sdk'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type SkillItem = HandlersSkillItem & {
@@ -368,6 +369,10 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+
+function invalidateSidebarSkills() {
+  queryCache.invalidateQueries({ key: ['bot-skills-catalog', props.botId] })
+}
 
 const MANAGED_SKILL_PATH = '/data/skills'
 const DEFAULT_DISCOVERY_ROOTS = ['/data/.agents/skills', '/root/.agents/skills']
@@ -638,6 +643,7 @@ async function handleSkillAction(action: 'adopt' | 'disable' | 'enable', skill: 
           : t('bots.skills.enableSuccess'),
     )
     await fetchSkills()
+    invalidateSidebarSkills()
   } catch (error) {
     toast.error(resolveApiErrorMessage(
       error,
@@ -668,6 +674,7 @@ async function handleSave() {
     toast.success(t('bots.skills.saveSuccess'))
     isDialogOpen.value = false
     await fetchSkills()
+    invalidateSidebarSkills()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.skills.saveFailed')))
   } finally {
@@ -693,7 +700,7 @@ async function handleSaveDiscoveryRoots() {
 
     void queryCache.invalidateQueries({ key: ['bot', props.botId] })
     void queryCache.invalidateQueries({ key: ['bot'] })
-    void queryCache.invalidateQueries({ key: ['bots'] })
+    void queryCache.invalidateQueries({ key: getBotsQueryKey() })
 
     syncDiscoveryRoots(normalizedDiscoveryRootDrafts.value)
     isDiscoveryDialogOpen.value = false
@@ -724,6 +731,7 @@ async function handleDelete(name?: string) {
     })
     toast.success(t('bots.skills.deleteSuccess'))
     await fetchSkills()
+    invalidateSidebarSkills()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.skills.deleteFailed')))
   } finally {
@@ -738,6 +746,19 @@ watch(() => props.botId, () => {
   syncDiscoveryRoots(DEFAULT_DISCOVERY_ROOTS)
   void fetchSkills()
 }, { immediate: true })
+
+// Refresh local skills list when chat-sidebar invalidates the shared catalog cache.
+watch(
+  () => {
+    const entries = queryCache.getEntries({ key: ['bot-skills-catalog', props.botId] })
+    return entries[0]?.state.value.data
+  },
+  (next, prev) => {
+    if (!props.botId) return
+    if (next === prev) return
+    void fetchSkills()
+  },
+)
 
 watch(bot, (value) => {
   if (!value) return

@@ -1,13 +1,33 @@
-import { createRouter, createMemoryHistory, type RouteLocationNormalized } from 'vue-router'
+import {
+  createRouter,
+  createMemoryHistory,
+  type RouteLocationNormalized,
+  type RouteRecordRaw,
+} from 'vue-router'
+import { SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
 
 // Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
-// (e.g. via the chat sidebar's settings button reused from @memohai/web)
-// is intercepted in a navigation guard and forwarded to the main process,
-// which opens the dedicated settings BrowserWindow instead of routing
-// in-place. Memory history matches Electron's file:// runtime cleanly and
-// keeps the URL bar irrelevant.
+// (e.g. via the chat sidebar's settings button or any reused @memohai/web
+// component that pushes `name: 'bot-detail'`, `name: 'bots'`, etc.) is
+// intercepted in a navigation guard and forwarded to the main process,
+// which focuses the dedicated settings BrowserWindow and instructs it to
+// router.push the requested path. Memory history matches Electron's file://
+// runtime cleanly and keeps the URL bar irrelevant.
 
-const routes = [
+// Stub component used by the settings name placeholders below. The
+// `beforeEach` guard returns `false` before vue-router ever renders these,
+// so the placeholder never instantiates — it exists purely so that
+// `router.push({ name: 'bot-detail', params: { botId } })` resolves to a
+// concrete `/settings/...` path that we can hand off to the IPC bridge.
+const SettingsRouteStub = { render: () => null }
+
+const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(({ name, path }) => ({
+  name,
+  path,
+  component: SettingsRouteStub,
+}))
+
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@memohai/web/pages/main-section/index.vue'),
@@ -34,6 +54,7 @@ const routes = [
     path: '/oauth/mcp/callback',
     component: () => import('@memohai/web/pages/oauth/mcp-callback.vue'),
   },
+  ...settingsStubs,
 ]
 
 const router = createRouter({
@@ -55,15 +76,22 @@ router.onError((error: Error) => {
 })
 
 router.beforeEach((to: RouteLocationNormalized) => {
-  // Settings lives in its own BrowserWindow. Any in-app `router.push('/settings')`
-  // (e.g. from @memohai/web's chat sidebar) is hijacked here and forwarded to
-  // the main process. Returning `false` aborts the navigation so the chat
-  // window stays where it was — must happen unconditionally, otherwise the
-  // router falls through to the auth check below and bounces to `/login`.
+  // Settings lives in its own BrowserWindow. Any in-app navigation aimed at
+  // the settings tree — whether via path (`router.push('/settings/bots')`)
+  // or via name resolved through the placeholder stubs above
+  // (`router.push({ name: 'bot-detail', params: { botId }, query: { tab } })`)
+  // — is forwarded to the main process. The handler focuses an existing
+  // settings window or creates one, then asks the renderer to push the same
+  // full path internally. Returning `false` aborts the in-place navigation
+  // so the chat window stays where it was.
+  //
+  // Must run before the auth check below — otherwise an anonymous user
+  // bouncing through a settings link would be sent to /login on the chat
+  // side instead of opening settings.
   if (to.path === '/settings' || to.path.startsWith('/settings/')) {
     const openSettings = window.api?.window?.openSettings
     if (typeof openSettings === 'function') {
-      void openSettings()
+      void openSettings(to.fullPath)
     } else {
       // Most common cause: a long-running `electron-vite dev` session is
       // serving a renderer page paired with a preload bundle that pre-dates

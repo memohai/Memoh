@@ -4,7 +4,7 @@
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { PiniaColada } from '@pinia/colada'
+import { PiniaColada, useQueryCache } from '@pinia/colada'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import i18n from '@memohai/web/i18n'
@@ -18,14 +18,29 @@ import 'katex/dist/katex.min.css'
 
 import App from './chat/App.vue'
 import router from './chat/router'
+import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
-setupApiClient({
-  onUnauthorized: () => router.replace({ name: 'Login' }),
-})
+async function bootstrap() {
+  const token = await window.api.desktop.authToken()
+  if (token) {
+    localStorage.setItem('token', token)
+  }
+  setupApiClient({
+    baseUrl: await window.api.desktop.apiBaseUrl(),
+    onUnauthorized: () => router.replace({ name: 'Login' }),
+  })
 
-createApp(App)
-  .use(createPinia().use(piniaPluginPersistedstate))
-  .use(PiniaColada)
-  .use(router)
-  .use(i18n)
-  .mount('#app')
+  const app = createApp(App)
+    .use(createPinia().use(piniaPluginPersistedstate))
+    .use(PiniaColada)
+    .use(router)
+    .use(i18n)
+
+  // Bridge query-cache invalidations between chat and settings windows.
+  // Must run after `PiniaColada` is installed so the store is registered.
+  setupCrossWindowCacheSync(useQueryCache())
+
+  app.mount('#app')
+}
+
+void bootstrap()

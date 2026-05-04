@@ -1931,21 +1931,11 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 			result = append(result, item)
 			continue
 		}
-		item.ContentHash = asset.ContentHash
-		item.URL = p.mediaService.AccessPath(asset)
-		item.PlatformKey = ""
-		item.Base64 = ""
-		if item.Metadata == nil {
-			item.Metadata = make(map[string]any)
-		}
-		item.Metadata["bot_id"] = botID
-		item.Metadata["storage_key"] = asset.StorageKey
-		if strings.TrimSpace(item.Mime) == "" {
-			item.Mime = attachment.NormalizeMime(asset.Mime)
-		}
-		if item.Size == 0 && asset.SizeBytes > 0 {
-			item.Size = asset.SizeBytes
-		}
+		item = channel.AttachmentFromBundle(channel.BundleFromAttachment(item).WithAssetAccess(
+			botID,
+			asset,
+			p.mediaService.AccessPath(asset),
+		))
 		result = append(result, item)
 	}
 	return result
@@ -2195,15 +2185,7 @@ func isHTTPURL(raw string) bool {
 // extractStorageKey derives the media storage key from a container-internal
 // access path. The expected path format is /data/media/<storage_key>.
 func extractStorageKey(accessPath string, _ string) string {
-	marker := filepath.Join("/data", "media")
-	if !strings.HasSuffix(marker, "/") {
-		marker += "/"
-	}
-	idx := strings.Index(accessPath, marker)
-	if idx < 0 {
-		return ""
-	}
-	return accessPath[idx+len(marker):]
+	return attachment.ExtractStorageKey(accessPath)
 }
 
 // isLocalChannelType returns true for channels that already publish to RouteHub
@@ -2290,11 +2272,7 @@ func channelAttachmentsToAssetRefs(attachments []channel.Attachment, role string
 			Name:        strings.TrimSpace(att.Name),
 			Metadata:    att.Metadata,
 		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
+		ref.StorageKey = attachment.MetadataString(att.Metadata, attachment.MetadataKeyStorageKey)
 		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
@@ -2312,20 +2290,16 @@ func mapChannelToChatAttachments(attachments []channel.Attachment) []conversatio
 		if att.Type == channel.AttachmentAudio || att.Type == channel.AttachmentVoice {
 			continue
 		}
-		ca := conversation.ChatAttachment{
-			Type:        string(att.Type),
-			PlatformKey: att.PlatformKey,
-			ContentHash: att.ContentHash,
-			Name:        att.Name,
-			Mime:        attachment.NormalizeMime(att.Mime),
-			Size:        att.Size,
-			Metadata:    att.Metadata,
-			Base64:      attachment.NormalizeBase64DataURL(att.Base64, attachment.NormalizeMime(att.Mime)),
-		}
-		if strings.TrimSpace(att.ContentHash) != "" {
-			ca.Path = att.URL
-		} else {
-			ca.URL = att.URL
+		bundle := channel.BundleFromAttachment(att)
+		ca := conversation.ChatAttachmentFromBundle(bundle)
+		switch {
+		case strings.TrimSpace(bundle.ContentHash) != "" && bundle.Path != "":
+			ca.Path = bundle.Path
+			ca.URL = ""
+		case bundle.URL != "":
+			ca.URL = bundle.URL
+		case bundle.Path != "":
+			ca.URL = bundle.Path
 		}
 		result = append(result, ca)
 	}
@@ -2337,40 +2311,14 @@ func parseAttachmentDelta(raw json.RawMessage) []channel.Attachment {
 	if len(raw) == 0 {
 		return nil
 	}
-	var items []struct {
-		Type        string         `json:"type"`
-		URL         string         `json:"url"`
-		Path        string         `json:"path"`
-		PlatformKey string         `json:"platform_key"`
-		ContentHash string         `json:"content_hash"`
-		Name        string         `json:"name"`
-		Mime        string         `json:"mime"`
-		Size        int64          `json:"size"`
-		Metadata    map[string]any `json:"metadata"`
-	}
+	var items []map[string]any
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil
 	}
 	attachments := make([]channel.Attachment, 0, len(items))
 	for _, item := range items {
-		url := strings.TrimSpace(item.URL)
-		if url == "" {
-			url = strings.TrimSpace(item.Path)
-		}
-		name := strings.TrimSpace(item.Name)
-		if name == "" && url != "" && !isDataURL(url) {
-			name = filepath.Base(url)
-		}
-		attachments = append(attachments, channel.Attachment{
-			Type:        channel.AttachmentType(strings.TrimSpace(item.Type)),
-			URL:         url,
-			PlatformKey: strings.TrimSpace(item.PlatformKey),
-			ContentHash: strings.TrimSpace(item.ContentHash),
-			Name:        name,
-			Mime:        strings.TrimSpace(item.Mime),
-			Size:        item.Size,
-			Metadata:    item.Metadata,
-		})
+		bundle := attachment.BundleFromMap(item)
+		attachments = append(attachments, channel.AttachmentFromBundle(bundle))
 	}
 	return attachments
 }
@@ -2475,11 +2423,7 @@ func buildAssetRefs(attachments []channel.Attachment, startOrdinal int) []conver
 			Name:        strings.TrimSpace(att.Name),
 			Metadata:    att.Metadata,
 		}
-		if att.Metadata != nil {
-			if sk, ok := att.Metadata["storage_key"].(string); ok {
-				ref.StorageKey = sk
-			}
-		}
+		ref.StorageKey = attachment.MetadataString(att.Metadata, attachment.MetadataKeyStorageKey)
 		refs = append(refs, ref)
 	}
 	return refs

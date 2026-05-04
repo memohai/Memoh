@@ -256,14 +256,14 @@ const saveLoading = ref(false)
 const deleteLoading = ref(false)
 
 const { data: modelData } = useQuery({
-  key: ['all-models'],
+  key: ['models'],
   query: async () => {
     const { data } = await getModels({ throwOnError: true })
     return data
   },
 })
 const { data: providerData } = useQuery({
-  key: ['all-providers'],
+  key: ['providers'],
   query: async () => {
     const { data } = await getProviders({ throwOnError: true })
     return data

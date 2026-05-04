@@ -2,21 +2,15 @@ name: Deploy Docs
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-      - '.github/workflows/deploy-docs.yml'
+    tags:
+      - "v*"
   workflow_dispatch:
 
-# 设置 GITHUB_TOKEN 权限以允许部署到 GitHub Pages
 permissions:
   contents: write
   pages: write
   id-token: write
 
-# 只允许一个并发部署，跳过正在运行和最新排队之间的运行队列
-# 但是，不要取消正在进行的运行，因为我们希望允许这些生产部署完成
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -26,10 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 如果未启用 lastUpdated，则不需要
+          ref: main
+          fetch-depth: 0
       
       - name: Setup Node
         uses: actions/setup-node@v4

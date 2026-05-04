@@ -12,7 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // Load reads all .yaml / .yml files from dir and returns parsed provider
@@ -59,7 +60,7 @@ func Load(log *slog.Logger, dir string) ([]ProviderDefinition, error) {
 // are created with enable=false and an empty API key. Existing providers get
 // their icon and client_type refreshed. Models are upserted by (provider_id,
 // model_id), overwriting name/type/config.
-func Sync(ctx context.Context, logger *slog.Logger, queries *sqlc.Queries, defs []ProviderDefinition) error {
+func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, defs []ProviderDefinition) error {
 	for _, def := range defs {
 		var icon pgtype.Text
 		if def.Icon != "" {

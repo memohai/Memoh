@@ -284,6 +284,10 @@ function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
         layers: event.layers,
       }
       return false
+    case 'pull_skipped':
+    case 'pull_delegated':
+      createProgress.value = { phase: 'pulling', image: event.image }
+      return false
     case 'creating':
       createProgress.value = { phase: 'creating' }
       return false

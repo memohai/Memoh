@@ -29,74 +29,76 @@
     </div>
 
     <div class="flex-1 min-h-0 relative">
-      <ScrollArea class="absolute inset-0">
-        <div class="px-2 py-2">
-          <div
-            v-if="!items.length && !isLoading"
-            class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
-          >
-            <CalendarClock class="mb-2 size-6 opacity-40" />
-            <p class="text-xs">
-              {{ t('chat.scheduleEmpty') }}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              class="mt-3 text-xs h-7"
-              @click="goToSettings()"
-            >
-              {{ t('chat.scheduleManageInSettings') }}
-            </Button>
-          </div>
-
-          <div
-            v-else
-            class="flex flex-col gap-1"
-          >
+      <div class="absolute inset-0">
+        <ScrollArea class="h-full">
+          <div class="px-2 py-2">
             <div
-              v-for="item in items"
-              :key="item.id"
-              class="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/40 transition-colors"
+              v-if="!items.length && !isLoading"
+              class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
             >
-              <CalendarClock class="size-4 text-muted-foreground shrink-0 mt-0.5" />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5">
-                  <span class="truncate text-xs font-medium text-foreground leading-[18px]">
-                    {{ item.name || t('chat.untitledSchedule') }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground leading-[14px]">
-                  <span class="truncate font-mono">
-                    {{ item.description || item.pattern || '--' }}
-                  </span>
-                  <span
-                    v-if="callsLabel(item)"
-                    class="shrink-0 tabular-nums"
-                  >
-                    · {{ callsLabel(item) }}
-                  </span>
-                </div>
-              </div>
+              <CalendarClock class="mb-2 size-6 opacity-40" />
+              <p class="text-xs">
+                {{ t('chat.scheduleEmpty') }}
+              </p>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                class="size-6 p-0 shrink-0"
-                :title="t('chat.scheduleManageInSettings')"
-                :aria-label="t('chat.scheduleManageInSettings')"
-                @click.stop="goToSettings()"
+                class="mt-3 text-xs h-7"
+                @click="goToSettings()"
               >
-                <ExternalLink class="size-3.5" />
+                {{ t('chat.scheduleManageInSettings') }}
               </Button>
-              <Switch
-                :model-value="item.enabled"
-                :disabled="!!togglingId && togglingId === item.id"
-                class="shrink-0"
-                @update:model-value="(val) => onToggle(item, !!val)"
-              />
+            </div>
+
+            <div
+              v-else
+              class="flex flex-col gap-1"
+            >
+              <div
+                v-for="item in items"
+                :key="item.id"
+                class="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/40 transition-colors"
+              >
+                <CalendarClock class="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate text-xs font-medium text-foreground leading-[18px]">
+                      {{ item.name || t('chat.untitledSchedule') }}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground leading-[14px]">
+                    <span class="truncate font-mono">
+                      {{ item.description || item.pattern || '--' }}
+                    </span>
+                    <span
+                      v-if="callsLabel(item)"
+                      class="shrink-0 tabular-nums"
+                    >
+                      · {{ callsLabel(item) }}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="size-6 p-0 shrink-0"
+                  :title="t('chat.scheduleManageInSettings')"
+                  :aria-label="t('chat.scheduleManageInSettings')"
+                  @click.stop="goToSettings()"
+                >
+                  <ExternalLink class="size-3.5" />
+                </Button>
+                <Switch
+                  :model-value="item.enabled"
+                  :disabled="!!togglingId && togglingId === item.id"
+                  class="shrink-0"
+                  @update:model-value="(val) => onToggle(item, !!val)"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </ScrollArea>
+        </ScrollArea>
+      </div>
     </div>
   </div>
 </template>

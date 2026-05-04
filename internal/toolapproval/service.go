@@ -13,17 +13,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 type Service struct {
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	settings *settings.Service
 	logger   *slog.Logger
 }
 
-func NewService(log *slog.Logger, queries *sqlc.Queries, settings *settings.Service) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, settings *settings.Service) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

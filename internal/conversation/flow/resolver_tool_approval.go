@@ -153,10 +153,17 @@ func (r *Resolver) continueToolApprovalSession(ctx context.Context, approval too
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
-			if _, storeErr := r.tryStoreStream(ctx, req, data, resolved.ModelID, resolvedContext{model: models.GetResponse{ID: resolved.ModelID}}); storeErr != nil {
-				return storeErr
+			if snap, ok := extractTerminalSnapshot(data); ok {
+				if storeErr := r.persistTerminalSnapshot(
+					context.WithoutCancel(ctx),
+					req,
+					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
+					snap,
+				); storeErr != nil {
+					return storeErr
+				}
+				stored = true
 			}
-			stored = true
 		}
 		if eventCh != nil {
 			select {

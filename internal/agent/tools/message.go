@@ -43,13 +43,22 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"bot_id":      map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
-					"platform":    map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
-					"target":      map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use get_contacts to find targets for other conversations."},
-					"text":        map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
-					"reply_to":    map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
-					"attachments": map[string]any{"type": "array", "description": "File paths or URLs to attach.", "items": map[string]any{"type": "string"}},
-					"message":     map[string]any{"type": "object", "description": "Structured message payload with text/parts/attachments"},
+					"bot_id":   map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
+					"platform": map[string]any{"type": "string", "description": "Channel platform name. Defaults to current session platform."},
+					"target":   map[string]any{"type": "string", "description": "Channel target (chat/group/thread ID). Optional — omit to send in the current conversation. Use get_contacts to find targets for other conversations."},
+					"text":     map[string]any{"type": "string", "description": "Message text shortcut when message object is omitted"},
+					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The reply will reference this message on the platform."},
+					"attachments": map[string]any{
+						"type":        "array",
+						"description": "File paths, URLs, data URLs, or attachment objects to attach.",
+						"items": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "string"},
+								map[string]any{"type": "object"},
+							},
+						},
+					},
+					"message": map[string]any{"type": "object", "description": "Structured message payload with text/parts/attachments"},
 				},
 				"required": []string{},
 			},
@@ -136,15 +145,7 @@ func channelAttachmentsToToolAttachments(atts []channel.Attachment) []Attachment
 	}
 	result := make([]Attachment, 0, len(atts))
 	for _, a := range atts {
-		result = append(result, Attachment{
-			Type:        string(a.Type),
-			URL:         a.URL,
-			Mime:        a.Mime,
-			Name:        a.Name,
-			ContentHash: a.ContentHash,
-			Size:        a.Size,
-			Metadata:    a.Metadata,
-		})
+		result = append(result, toolAttachmentFromChannelAttachment(a))
 	}
 	return result
 }

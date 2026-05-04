@@ -83,15 +83,63 @@
         </template>
       </template>
 
-      <!-- External Links -->
       <section>
         <Separator class="mb-4" />
+        <div class="grid grid-cols-[1fr_auto_1fr] gap-4 px-3 mb-3">
+          <div class="flex items-center gap-2">
+            <Globe class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="flex-1 text-xs">{{ $t('settings.language') }}</span>
+            <Select
+              :model-value="language"
+              @update:model-value="(v) => v && setLanguage(v as Locale)"
+            >
+              <SelectTrigger
+                class="w-24"
+                :aria-label="$t('settings.language')"
+              >
+                <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="zh">
+                    {{ $t('settings.langZh') }}
+                  </SelectItem>
+                  <SelectItem value="en">
+                    {{ $t('settings.langEn') }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <Separator orientation="vertical" />
+          <div class="flex items-center gap-2">
+            <span class="flex-1 text-xs">{{ $t('settings.theme') }}</span>
+            <div class="flex h-9 items-center rounded-md border border-input p-1">
+              <button
+                class="flex size-7 items-center justify-center rounded-sm transition-colors"
+                :class="theme === 'light' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
+                :aria-label="$t('settings.themeLight')"
+                @click="setTheme('light')"
+              >
+                <Sun class="size-4" />
+              </button>
+              <button
+                class="flex size-7 items-center justify-center rounded-sm transition-colors"
+                :class="theme === 'dark' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
+                :aria-label="$t('settings.themeDark')"
+                @click="setTheme('dark')"
+              >
+                <Moon class="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
         <div class="space-y-1">
           <a
             href="https://github.com/memohai/memoh"
             target="_blank"
             rel="noopener noreferrer"
-            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+            class="flex h-9 items-center gap-3 rounded-lg px-3 text-xs text-foreground hover:bg-accent transition-colors"
           >
             <Github class="size-4 text-muted-foreground" />
             {{ $t('about.github') }}
@@ -101,7 +149,7 @@
             href="https://docs.memoh.ai"
             target="_blank"
             rel="noopener noreferrer"
-            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+            class="flex h-9 items-center gap-3 rounded-lg px-3 text-xs text-foreground hover:bg-accent transition-colors"
           >
             <BookOpen class="size-4 text-muted-foreground" />
             {{ $t('about.docs') }}
@@ -111,7 +159,7 @@
             href="https://github.com/memohai/memoh/issues"
             target="_blank"
             rel="noopener noreferrer"
-            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs text-foreground hover:bg-accent transition-colors"
+            class="flex h-9 items-center gap-3 rounded-lg px-3 text-xs text-foreground hover:bg-accent transition-colors"
           >
             <MessageSquare class="size-4 text-muted-foreground" />
             {{ $t('about.feedback') }}
@@ -128,11 +176,12 @@ import { computed, ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { RefreshCw, ExternalLink, Github, BookOpen, MessageSquare, CircleCheck } from 'lucide-vue-next'
-import { Badge, Button, Separator, Spinner } from '@memohai/ui'
+import { RefreshCw, ExternalLink, Github, BookOpen, MessageSquare, CircleCheck, Globe, Sun, Moon } from 'lucide-vue-next'
+import { Badge, Button, Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue, Separator, Spinner } from '@memohai/ui'
 import MarkdownRender from 'markstream-vue'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
+import type { Locale } from '@/i18n'
 
 const GITHUB_REPO = 'memohai/memoh'
 
@@ -151,6 +200,8 @@ const normalizeVersion = (version?: string | null) => (version ?? '').replace(/^
 const normalizedServerVersion = computed(() => normalizeVersion(serverVersion.value))
 
 const settingsStore = useSettingsStore()
+const { language, theme } = storeToRefs(settingsStore)
+const { setLanguage, setTheme } = settingsStore
 const isDark = computed(() => settingsStore.theme === 'dark')
 
 const checking = ref(false)

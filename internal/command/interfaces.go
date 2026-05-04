@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
 // Skill represents a single skill loaded from a bot's container.
@@ -34,7 +34,7 @@ type ContainerFS interface {
 }
 
 // CommandQueries captures the sqlc methods used by slash commands.
-// *dbsqlc.Queries satisfies this interface directly.
+// dbstore.Queries satisfies this interface directly.
 type CommandQueries interface {
 	GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error)
 	CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)

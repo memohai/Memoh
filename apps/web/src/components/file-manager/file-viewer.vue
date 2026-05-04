@@ -13,6 +13,8 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
 import { isTextFile, isImageFile } from './utils'
+import { useChatStore } from '@/store/chat-list'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps<{
   botId: string
@@ -122,6 +124,22 @@ watch(() => props.file.path, () => {
     void loadImageBlob()
   }
 }, { immediate: true })
+
+// Reload the file when the chat agent runs a fs-mutating tool (write/edit/exec)
+// against the same bot. Skip if the user has unsaved changes — we don't want to
+// silently overwrite their edits.
+const chatStore = useChatStore()
+const { fsChangedAt, currentBotId } = storeToRefs(chatStore)
+watch(fsChangedAt, () => {
+  if (!props.botId || props.botId !== currentBotId.value) return
+  if (isDirty.value) return
+  if (isText.value) {
+    void loadTextContent()
+  } else if (isImage.value) {
+    cleanupImageUrl()
+    void loadImageBlob()
+  }
+})
 
 function handleKeydown(e: KeyboardEvent) {
   const isSave = (e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')

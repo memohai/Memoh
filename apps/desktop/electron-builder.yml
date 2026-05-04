@@ -13,6 +13,19 @@ files:
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
 asarUnpack:
   - resources/**
+extraResources:
+  - from: resources/server
+    to: server
+  - from: resources/runtime
+    to: runtime
+  - from: resources/config
+    to: config
+  - from: resources/providers
+    to: providers
+  - from: resources/qdrant
+    to: qdrant
+    filter:
+      - ${env.MEMOH_DESKTOP_QDRANT_TARGET}/**/*
 mac:
   category: public.app-category.productivity
   target:

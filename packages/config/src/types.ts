@@ -3,8 +3,13 @@ export interface Config {
   server: ServerConfig;
   admin: AdminConfig;
   auth: AuthConfig;
+  database: DatabaseConfig;
+  container: ContainerConfig;
   containerd: ContainerdConfig;
-  workspace: WorkspaceConfig;
+  docker?: DockerConfig;
+  kubernetes?: KubernetesConfig;
+  apple?: AppleConfig;
+  workspace?: WorkspaceConfig;
   postgres: PostgresConfig;
   qdrant: QdrantConfig;
   sparse: SparseConfig;
@@ -34,14 +39,43 @@ export interface AuthConfig {
   jwt_expires_in: string;
 }
 
+export interface DatabaseConfig {
+  driver: string;
+}
+
+export interface ContainerConfig extends WorkspaceConfig {
+  backend: string;
+}
+
 export interface ContainerdConfig {
   socket_path: string;
   namespace: string;
 }
 
+export interface DockerConfig {
+  host?: string;
+}
+
+export interface KubernetesConfig {
+  namespace?: string;
+  kubeconfig?: string;
+  in_cluster?: boolean;
+  service_account_name?: string;
+  image_pull_secret?: string;
+  pvc_storage_class?: string;
+  pvc_size?: string;
+  bridge_port?: number;
+}
+
+export interface AppleConfig {
+  socket_path?: string;
+  binary_path?: string;
+}
+
 export interface WorkspaceConfig {
   registry?: string;
   default_image: string;
+  image_pull_policy?: string;
   snapshotter: string;
   data_root: string;
   cni_bin_dir?: string;

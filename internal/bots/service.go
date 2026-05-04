@@ -15,13 +15,14 @@ import (
 
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	tzutil "github.com/memohai/memoh/internal/timezone"
 )
 
 // Service provides bot CRUD and membership management.
 type Service struct {
-	queries               *sqlc.Queries
+	queries               dbstore.Queries
 	logger                *slog.Logger
 	containerLifecycle    ContainerLifecycle
 	checkers              []RuntimeChecker
@@ -39,7 +40,7 @@ var (
 )
 
 // NewService creates a new bot service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

@@ -14,7 +14,8 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 var (
@@ -24,12 +25,12 @@ var (
 
 // Service provides CRUD operations for models.
 type Service struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewService creates a new models service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
 		queries: queries,
 		logger:  log.With(slog.String("service", "models")),
@@ -461,7 +462,7 @@ func IsLLMClientType(clientType ClientType) bool {
 
 // SelectMemoryModel selects a chat model for memory operations.
 // It only considers models from enabled providers.
-func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sqlc.Queries) (GetResponse, sqlc.Provider, error) {
+func SelectMemoryModel(ctx context.Context, modelsService *Service, queries dbstore.Queries) (GetResponse, sqlc.Provider, error) {
 	if modelsService == nil {
 		return GetResponse{}, sqlc.Provider{}, errors.New("models service not configured")
 	}
@@ -483,7 +484,7 @@ func SelectMemoryModel(ctx context.Context, modelsService *Service, queries *sql
 // SelectMemoryModelForBot selects a chat model for memory operations.
 // If botID is provided, it attempts to use the bot's configured chat model first,
 // falling back to the first enabled chat model globally.
-func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries *sqlc.Queries, chatModelID string) (GetResponse, sqlc.Provider, error) {
+func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, queries dbstore.Queries, chatModelID string) (GetResponse, sqlc.Provider, error) {
 	// If a specific model is configured (e.g. bot's chat_model_id), try to use it.
 	if chatModelID = strings.TrimSpace(chatModelID); chatModelID != "" {
 		model, err := modelsService.GetByModelID(ctx, chatModelID)
@@ -507,7 +508,7 @@ func SelectMemoryModelForBot(ctx context.Context, modelsService *Service, querie
 }
 
 // FetchProviderByID fetches a provider by ID.
-func FetchProviderByID(ctx context.Context, queries *sqlc.Queries, providerID string) (sqlc.Provider, error) {
+func FetchProviderByID(ctx context.Context, queries dbstore.Queries, providerID string) (sqlc.Provider, error) {
 	if strings.TrimSpace(providerID) == "" {
 		return sqlc.Provider{}, errors.New("provider id missing")
 	}

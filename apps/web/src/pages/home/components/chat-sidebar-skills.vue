@@ -20,59 +20,61 @@
     </div>
 
     <div class="flex-1 min-h-0 relative">
-      <ScrollArea class="absolute inset-0">
-        <div class="px-2 py-2">
-          <div
-            v-if="!skills.length && !isLoading"
-            class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
-          >
-            <Sparkles class="mb-2 size-6 opacity-40" />
-            <p class="text-xs">
-              {{ t('chat.skillsEmpty') }}
-            </p>
-          </div>
-
-          <div
-            v-else
-            class="flex flex-col gap-1"
-          >
-            <button
-              v-for="skill in skills"
-              :key="skillKey(skill)"
-              type="button"
-              class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors disabled:cursor-default"
-              :class="skill.source_path
-                ? 'cursor-pointer hover:bg-sidebar-accent/40'
-                : 'cursor-default'"
-              :disabled="!skill.source_path"
-              :title="skill.source_path"
-              @click="handleSkillClick(skill)"
+      <div class="absolute inset-0">
+        <ScrollArea class="h-full">
+          <div class="px-2 py-2">
+            <div
+              v-if="!skills.length && !isLoading"
+              class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
             >
-              <Sparkles class="size-3.5 text-muted-foreground shrink-0 mt-0.5" />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5">
-                  <span class="truncate text-xs font-medium text-foreground leading-[18px]">
-                    {{ skill.name || t('chat.untitledSkill') }}
-                  </span>
-                  <Badge
-                    v-if="skill.state && skill.state !== 'effective'"
-                    variant="outline"
-                    class="text-[9px] px-1 py-0 h-3.5 leading-none shrink-0"
+              <Sparkles class="mb-2 size-6 opacity-40" />
+              <p class="text-xs">
+                {{ t('chat.skillsEmpty') }}
+              </p>
+            </div>
+
+            <div
+              v-else
+              class="flex flex-col gap-1"
+            >
+              <button
+                v-for="skill in skills"
+                :key="skillKey(skill)"
+                type="button"
+                class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors disabled:cursor-default"
+                :class="skill.source_path
+                  ? 'cursor-pointer hover:bg-sidebar-accent/40'
+                  : 'cursor-default'"
+                :disabled="!skill.source_path"
+                :title="skill.source_path"
+                @click="handleSkillClick(skill)"
+              >
+                <Sparkles class="size-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate text-xs font-medium text-foreground leading-[18px]">
+                      {{ skill.name || t('chat.untitledSkill') }}
+                    </span>
+                    <Badge
+                      v-if="skill.state && skill.state !== 'effective'"
+                      variant="outline"
+                      class="text-[9px] px-1 py-0 h-3.5 leading-none shrink-0"
+                    >
+                      {{ stateLabel(skill.state) }}
+                    </Badge>
+                  </div>
+                  <p
+                    v-if="skill.description"
+                    class="text-[11px] text-muted-foreground line-clamp-2 leading-[14px] mt-0.5"
                   >
-                    {{ stateLabel(skill.state) }}
-                  </Badge>
+                    {{ skill.description }}
+                  </p>
                 </div>
-                <p
-                  v-if="skill.description"
-                  class="text-[11px] text-muted-foreground line-clamp-2 leading-[14px] mt-0.5"
-                >
-                  {{ skill.description }}
-                </p>
-              </div>
-            </button>
+              </button>
+            </div>
           </div>
-        </div>
-      </ScrollArea>
+        </ScrollArea>
+      </div>
     </div>
   </div>
 </template>

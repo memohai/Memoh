@@ -23,6 +23,7 @@ declare module '@memohai/web/i18n' {
 
 declare module '@memohai/web/api-client' {
   export interface SetupApiClientOptions {
+    baseUrl?: string
     onUnauthorized?: () => void
   }
   export function setupApiClient(options?: SetupApiClientOptions): void
@@ -32,6 +33,28 @@ declare module '@memohai/web/store/settings' {
   // We don't need the concrete Pinia store type here — desktop just calls the
   // composable for its registration side-effect.
   export function useSettingsStore(): unknown
+}
+
+declare module '@memohai/web/store/capabilities' {
+  export function useCapabilitiesStore(): {
+    localWorkspaceEnabled: boolean
+    load: () => Promise<void>
+  }
+}
+
+declare module '@memohai/web/composables/useDialogMutation' {
+  export function useDialogMutation(): {
+    run: <T>(action: () => Promise<T>, options?: { fallbackMessage?: string, onSuccess?: () => void }) => Promise<T | undefined>
+  }
+}
+
+declare module '@memohai/web/constants/acl-presets' {
+  export const defaultAclPreset: string
+  export const aclPresetOptions: Array<{ value: string, titleKey: string, descriptionKey?: string }>
+}
+
+declare module '@memohai/web/utils/timezones' {
+  export const emptyTimezoneValue: string
 }
 
 declare module '@memohai/web/lib/desktop-shell' {

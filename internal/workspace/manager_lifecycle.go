@@ -8,13 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	ctr "github.com/memohai/memoh/internal/containerd"
+	"github.com/memohai/memoh/internal/config"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,14 +88,31 @@ func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
 	return err == nil && task.Status == ctr.TaskStatusRunning
 }
 
-func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) (string, error) {
+func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, containerID string) netctl.AttachmentRequest {
+	runtimeReq := netctl.RuntimeNetworkRequest{
+		ContainerID: containerID,
+	}
+	if task, err := m.service.GetTaskInfo(ctx, containerID); err == nil {
+		runtimeReq.JoinTarget = netctl.NetworkJoinTarget{
+			Kind: task.NetworkJoinTarget.Kind,
+			Path: task.NetworkJoinTarget.Value,
+			PID:  task.NetworkJoinTarget.PID,
+		}
+	}
+	return netctl.AttachmentRequest{
+		BotID:       botID,
+		ContainerID: containerID,
+		Runtime:     runtimeReq,
+	}
+}
+
+func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, containerID string) (string, error) {
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return "127.0.0.1", nil
+	}
 	var lastErr error
 	for attempt := range 2 {
-		result, err := m.service.SetupNetwork(ctx, ctr.NetworkSetupRequest{
-			ContainerID: containerID,
-			CNIBinDir:   m.cfg.CNIBinaryDir,
-			CNIConfDir:  m.cfg.CNIConfigDir,
-		})
+		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 		if err != nil {
 			lastErr = err
 			m.logger.Warn("network setup attempt failed",
@@ -102,17 +121,17 @@ func (m *Manager) setupNetworkAndGetIP(ctx context.Context, containerID string) 
 				slog.Any("error", err))
 			continue
 		}
-		if strings.TrimSpace(result.IP) == "" {
+		if strings.TrimSpace(result.Runtime.IP) == "" {
 			lastErr = fmt.Errorf("network setup returned no IP for %s", containerID)
 			continue
 		}
-		return result.IP, nil
+		return result.Runtime.IP, nil
 	}
 	return "", fmt.Errorf("network setup failed for container %s: %w", containerID, lastErr)
 }
 
-func (m *Manager) setupNetworkOrFail(ctx context.Context, containerID, botID string) error {
-	ip, err := m.setupNetworkAndGetIP(ctx, containerID)
+func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID string) error {
+	ip, err := m.ensureContainerNetworkAndGetIP(ctx, botID, containerID)
 	if err != nil {
 		return err
 	}
@@ -121,6 +140,40 @@ func (m *Manager) setupNetworkOrFail(ctx context.Context, containerID, botID str
 		m.SetLegacyIP(botID, ip)
 	}
 	return nil
+}
+
+func (m *Manager) removeContainerNetwork(ctx context.Context, botID, containerID string) error {
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return nil
+	}
+	return m.networkController.Detach(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
+}
+
+func (m *Manager) startTaskAndEnsureNetwork(ctx context.Context, botID, containerID string) error {
+	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
+		if !m.waitTaskRunning(ctx, containerID, 5*time.Second) {
+			return err
+		}
+	}
+	return m.ensureContainerNetwork(ctx, containerID, botID)
+}
+
+func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		task, err := m.service.GetTaskInfo(ctx, containerID)
+		if err == nil && task.Status == ctr.TaskStatusRunning {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +195,7 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 
 	_, err = m.service.GetContainer(ctx, containerID)
 	if err != nil {
-		if !errdefs.IsNotFound(err) {
+		if !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.Warn("container missing in containerd, rebuilding",
@@ -153,23 +206,20 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
 	if err == nil {
 		if taskInfo.Status == ctr.TaskStatusRunning {
-			return m.setupNetworkOrFail(ctx, containerID, botID)
+			return m.ensureContainerNetwork(ctx, containerID, botID)
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-			if !errdefs.IsNotFound(err) {
+			if !ctr.IsNotFound(err) {
 				m.logger.Warn("cleanup: delete task failed",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				return err
 			}
 		}
-	} else if !errdefs.IsNotFound(err) {
+	} else if !ctr.IsNotFound(err) {
 		return err
 	}
 
-	if err := m.service.StartContainer(ctx, containerID, nil); err != nil {
-		return err
-	}
-	return m.setupNetworkOrFail(ctx, containerID, botID)
+	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
 }
 
 // StopBot stops the container task for a bot and marks it stopped in DB.
@@ -182,11 +232,15 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 	if err := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{
 		Timeout: 10 * time.Second,
 		Force:   true,
-	}); err != nil && !errdefs.IsNotFound(err) {
+	}); err != nil && !ctr.IsNotFound(err) {
 		return err
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 		m.logger.Warn("cleanup: delete task failed",
+			slog.String("container_id", containerID), slog.Any("error", err))
+	}
+	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
+		m.logger.Warn("cleanup: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 
@@ -216,6 +270,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				}
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
+					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend, row.ContainerID),
 					Image:            row.Image,
 					Status:           row.Status,
 					Namespace:        row.Namespace,
@@ -237,13 +292,14 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	}
 	info, err := m.service.GetContainer(ctx, containerID)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return nil, ErrContainerNotFound
 		}
 		return nil, err
 	}
 	return &ContainerStatus{
 		ContainerID:      info.ID,
+		WorkspaceBackend: workspaceBackendFromRecord("", info.ID),
 		Image:            info.Image,
 		Status:           "unknown",
 		Namespace:        m.namespace,
@@ -256,18 +312,19 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	}, nil
 }
 
-// PullImage pulls a container image. This is exposed so the HTTP layer can
-// pass progress callbacks for SSE streaming without needing direct ctr.Service access.
-func (m *Manager) PullImage(ctx context.Context, image string, opts *ctr.PullImageOptions) (ctr.ImageInfo, error) {
-	return m.service.PullImage(ctx, image, opts)
-}
-
 // ---------------------------------------------------------------------------
 // Container lifecycle (bots.ContainerLifecycle interface)
 // ---------------------------------------------------------------------------
 
 // SetupBotContainer creates/starts the container and upserts the DB record.
 func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
+	workspaceCfg, err := m.botWorkspaceStartPreference(ctx, botID)
+	if err != nil {
+		m.logger.Error("setup bot container: resolve workspace backend failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err))
+		return err
+	}
 	image, err := m.resolveWorkspaceImage(ctx, botID)
 	if err != nil {
 		m.logger.Error("setup bot container: resolve image failed",
@@ -275,18 +332,46 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 			slog.Any("error", err))
 		return err
 	}
+	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
+		if _, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+			Unpack:        true,
+			StorageDriver: m.cfg.Snapshotter,
+		}); err != nil {
+			m.logger.Error("setup bot container: prepare image failed",
+				slog.String("bot_id", botID),
+				slog.String("image", image),
+				slog.Any("error", err))
+			return err
+		}
+	} else {
+		image = "local"
+	}
+	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
+	if err != nil {
+		return err
+	}
 
-	if err := m.StartWithResolvedImage(ctx, botID, image); err != nil {
+	if err := m.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspaceCfg); err != nil {
 		m.logger.Error("setup bot container: start failed",
 			slog.String("bot_id", botID),
 			slog.Any("error", err))
 		return err
 	}
-	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
-		m.logger.Warn("setup bot container: remember workspace image failed",
-			slog.String("bot_id", botID),
-			slog.String("image", image),
-			slog.Any("error", err))
+	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
+		if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
+			m.logger.Warn("setup bot container: remember workspace image failed",
+				slog.String("bot_id", botID),
+				slog.String("image", image),
+				slog.Any("error", err))
+		}
+	}
+	if workspaceCfg.Backend == bridge.WorkspaceBackendLocal && strings.TrimSpace(workspaceCfg.LocalWorkspacePath) == "" {
+		// Persist the generated default so subsequent lifecycle runs are stable.
+		if err := m.rememberWorkspaceBackend(ctx, botID, bridge.WorkspaceBackendLocal, m.defaultLocalWorkspacePath(ctx, botID)); err != nil {
+			m.logger.Warn("setup bot container: remember local workspace path failed",
+				slog.String("bot_id", botID),
+				slog.Any("error", err))
+		}
 	}
 
 	containerID := m.resolveContainerID(ctx, botID)
@@ -304,7 +389,7 @@ func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserv
 			// failed to preserve data.
 			return err
 		}
-		if !errdefs.IsNotFound(err) {
+		if !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.Warn("cleanup: container not found in containerd, continuing",
@@ -343,7 +428,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
-			if !errdefs.IsNotFound(err) {
+			if !ctr.IsNotFound(err) {
 				m.logger.Error("reconcile: failed to get container",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				continue
@@ -373,7 +458,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 					continue
 				}
 			}
-			if ip, netErr := m.setupNetworkAndGetIP(ctx, containerID); netErr != nil {
+			if ip, netErr := m.ensureContainerNetworkAndGetIP(ctx, botID, containerID); netErr != nil {
 				m.logger.Error("reconcile: network setup failed for legacy container",
 					slog.String("bot_id", botID), slog.Any("error", netErr))
 			} else {
@@ -390,7 +475,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			if row.Status != "running" {
 				m.markContainerStarted(ctx, botID)
 			}
-			if netErr := m.setupNetworkOrFail(ctx, containerID, botID); netErr != nil {
+			if netErr := m.ensureContainerNetwork(ctx, containerID, botID); netErr != nil {
 				m.logger.Error("reconcile: network setup failed for running task, container unreachable",
 					slog.String("bot_id", botID),
 					slog.String("container_id", containerID),
@@ -440,13 +525,15 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 		ns = "default"
 	}
 	if dbErr := m.queries.UpsertContainer(ctx, dbsqlc.UpsertContainerParams{
-		BotID:         pgBotID,
-		ContainerID:   containerID,
-		ContainerName: containerID,
-		Image:         image,
-		Status:        status,
-		Namespace:     ns,
-		AutoStart:     true,
+		BotID:            pgBotID,
+		ContainerID:      containerID,
+		ContainerName:    containerID,
+		Image:            image,
+		Status:           status,
+		Namespace:        ns,
+		AutoStart:        true,
+		ContainerPath:    m.containerRecordPath(ctx, containerID),
+		WorkspaceBackend: m.containerRecordBackend(ctx, containerID),
 	}); dbErr != nil {
 		m.logger.Error("failed to upsert container record",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
@@ -454,6 +541,37 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 	if status == "running" {
 		m.markContainerStarted(ctx, botID)
 	}
+}
+
+func (m *Manager) containerRecordPath(ctx context.Context, containerID string) string {
+	if info, err := m.service.GetContainer(ctx, containerID); err == nil {
+		if strings.TrimSpace(info.StorageRef.Key) != "" && strings.TrimSpace(info.StorageRef.Driver) == localRuntimeName {
+			return info.StorageRef.Key
+		}
+	}
+	return config.DefaultDataMount
+}
+
+func (m *Manager) containerRecordBackend(ctx context.Context, containerID string) string {
+	if info, err := m.service.GetContainer(ctx, containerID); err == nil {
+		if strings.TrimSpace(info.StorageRef.Driver) == localRuntimeName {
+			return bridge.WorkspaceBackendLocal
+		}
+	}
+	return workspaceBackendFromRecord("", containerID)
+}
+
+func workspaceBackendFromRecord(recordValue, containerID string) string {
+	switch strings.ToLower(strings.TrimSpace(recordValue)) {
+	case bridge.WorkspaceBackendLocal:
+		return bridge.WorkspaceBackendLocal
+	case bridge.WorkspaceBackendContainer:
+		return bridge.WorkspaceBackendContainer
+	}
+	if strings.HasPrefix(strings.TrimSpace(containerID), LocalContainerPrefix) {
+		return bridge.WorkspaceBackendLocal
+	}
+	return bridge.WorkspaceBackendContainer
 }
 
 func (m *Manager) deleteContainerRecord(ctx context.Context, botID string) {

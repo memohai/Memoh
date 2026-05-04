@@ -9,7 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 const (
@@ -106,7 +107,7 @@ func ResolvePreset(raw string) (Preset, error) {
 	}
 }
 
-func ApplyPreset(ctx context.Context, queries *sqlc.Queries, botID, createdByUserID, rawPreset string) error {
+func ApplyPreset(ctx context.Context, queries dbstore.Queries, botID, createdByUserID, rawPreset string) error {
 	if queries == nil {
 		return errors.New("acl queries not configured")
 	}
@@ -137,7 +138,7 @@ func ApplyPreset(ctx context.Context, queries *sqlc.Queries, botID, createdByUse
 	return nil
 }
 
-func applyPresetRule(ctx context.Context, queries *sqlc.Queries, botID pgtype.UUID, createdByUserID string, rule CreateRuleRequest) error {
+func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.UUID, createdByUserID string, rule CreateRuleRequest) error {
 	if err := validateEffect(rule.Effect); err != nil {
 		return err
 	}

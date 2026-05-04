@@ -10,18 +10,19 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 )
 
 // Service manages context compaction for bot conversations.
 type Service struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewService creates a new compaction Service.
-func NewService(log *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
 		queries: queries,
 		logger:  log,

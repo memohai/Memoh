@@ -78,13 +78,12 @@ import {
 } from '@memohai/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 
-withDefaults(defineProps<{
-  // When true, the back-to-chat button in the sidebar header is hidden.
-  // Used by the desktop shell where settings lives in a dedicated window
-  // and "back to chat" is not a meaningful action.
+const props = withDefaults(defineProps<{
   hideHeader?: boolean
+  excludeItems?: string[]
 }>(), {
   hideHeader: false,
+  excludeItems: () => [],
 })
 
 const topInset = inject(DesktopShellKey, false)
@@ -111,66 +110,24 @@ function isItemActive(name: string): boolean {
   return route.name === name
 }
 
-const navItems = computed<{ title: string; name: string; icon: Component }[]>(() => [
-  {
-    title: t('sidebar.bots'),
-    name: 'bots',
-    icon: Bot,
-  },
-  {
-    title: t('sidebar.providers'),
-    name: 'providers',
-    icon: Boxes,
-  },
-  {
-    title: t('sidebar.webSearch'),
-    name: 'web-search',
-    icon: Globe,
-  },
-  {
-    title: t('sidebar.memory'),
-    name: 'memory',
-    icon: Brain,
-  },
-  {
-    title: t('sidebar.speech'),
-    name: 'speech',
-    icon: Volume2,
-  },
-  {
-    title: t('sidebar.transcription'),
-    name: 'transcription',
-    icon: AudioLines,
-  },
-  {
-    title: t('sidebar.email'),
-    name: 'email',
-    icon: Mail,
-  },
-  {
-    title: t('sidebar.browser'),
-    name: 'browser',
-    icon: AppWindow,
-  },
-  {
-    title: t('sidebar.supermarket'),
-    name: 'supermarket',
-    icon: Store,
-  },
-  {
-    title: t('sidebar.usage'),
-    name: 'usage',
-    icon: ChartLine,
-  },
-  {
-    title: t('sidebar.profile'),
-    name: 'profile',
-    icon: User,
-  },
-  {
-    title: t('sidebar.about'),
-    name: 'about',
-    icon: Info,
-  },
-])
+const allNavItems: { title: string; name: string; icon: Component }[] = [
+  { title: t('sidebar.bots'), name: 'bots', icon: Bot },
+  { title: t('sidebar.providers'), name: 'providers', icon: Boxes },
+  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
+  { title: t('sidebar.memory'), name: 'memory', icon: Brain },
+  { title: t('sidebar.speech'), name: 'speech', icon: Volume2 },
+  { title: t('sidebar.transcription'), name: 'transcription', icon: AudioLines },
+  { title: t('sidebar.email'), name: 'email', icon: Mail },
+  { title: t('sidebar.browser'), name: 'browser', icon: AppWindow },
+  { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
+  { title: t('sidebar.usage'), name: 'usage', icon: ChartLine },
+  { title: t('sidebar.profile'), name: 'profile', icon: User },
+  { title: t('sidebar.about'), name: 'about', icon: Info },
+]
+
+const navItems = computed(() =>
+  props.excludeItems.length > 0
+    ? allNavItems.filter(item => !props.excludeItems.includes(item.name))
+    : allNavItems,
+)
 </script>

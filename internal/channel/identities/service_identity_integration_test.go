@@ -12,10 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func setupChannelIdentityIdentityIntegrationTest(t *testing.T) (*identities.Service, *sqlc.Queries, func()) {
+func setupChannelIdentityIdentityIntegrationTest(t *testing.T) (*identities.Service, dbstore.Queries, func()) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
@@ -33,7 +35,7 @@ func setupChannelIdentityIdentityIntegrationTest(t *testing.T) (*identities.Serv
 		t.Skipf("skip integration test: database ping failed: %v", err)
 	}
 
-	queries := sqlc.New(pool)
+	queries := postgresstore.NewQueries(sqlc.New(pool))
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	svc := identities.NewService(logger, queries)
 	return svc, queries, func() { pool.Close() }

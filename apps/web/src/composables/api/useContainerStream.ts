@@ -16,6 +16,8 @@ export type ContainerCreateLayerStatus = {
 export type ContainerCreateStreamEvent =
   | { type: 'pulling'; image: string }
   | { type: 'pull_progress'; layers: ContainerCreateLayerStatus[] }
+  | { type: 'pull_skipped'; image: string; message?: string }
+  | { type: 'pull_delegated'; image: string; message?: string }
   | { type: 'creating' }
   | { type: 'restoring' }
   | { type: 'complete'; container: HandlersCreateContainerResponse }
@@ -42,6 +44,10 @@ function isContainerCreateStreamEvent(value: unknown): value is ContainerCreateS
       return typeof event.image === 'string'
     case 'pull_progress':
       return Array.isArray(event.layers) && event.layers.every(isLayerStatus)
+    case 'pull_skipped':
+    case 'pull_delegated':
+      return typeof event.image === 'string'
+        && (event.message === undefined || typeof event.message === 'string')
     case 'creating':
     case 'restoring':
       return true

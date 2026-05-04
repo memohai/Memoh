@@ -12,13 +12,13 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 type SessionInfoHandler struct {
-	queries         *sqlc.Queries
+	queries         dbstore.Queries
 	botService      *bots.Service
 	accountService  *accounts.Service
 	modelsService   *models.Service
@@ -26,7 +26,7 @@ type SessionInfoHandler struct {
 	logger          *slog.Logger
 }
 
-func NewSessionInfoHandler(log *slog.Logger, queries *sqlc.Queries, botService *bots.Service, accountService *accounts.Service, modelsService *models.Service, settingsService *settings.Service) *SessionInfoHandler {
+func NewSessionInfoHandler(log *slog.Logger, queries dbstore.Queries, botService *bots.Service, accountService *accounts.Service, modelsService *models.Service, settingsService *settings.Service) *SessionInfoHandler {
 	return &SessionInfoHandler{
 		queries:         queries,
 		botService:      botService,

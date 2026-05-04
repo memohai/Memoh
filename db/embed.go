@@ -4,5 +4,5 @@ import "embed"
 
 // MigrationsFS contains all SQL migration files embedded at compile time.
 //
-//go:embed migrations/*.sql
+//go:embed postgres/migrations/*.sql sqlite/migrations/*.sql
 var MigrationsFS embed.FS

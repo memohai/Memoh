@@ -57,6 +57,7 @@ const { mutateAsync: importModelsMutation, isLoading } = useMutation({
   },
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['provider-models'] })
+    queryCache.invalidateQueries({ key: ['models'] })
   },
 })
 

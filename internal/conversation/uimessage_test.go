@@ -256,6 +256,73 @@ func TestUIMessageStreamConverterMergesRepeatedToolCallStart(t *testing.T) {
 	}
 }
 
+func TestUIMessageStreamConverterKeepsParallelSameNameToolCallsSeparate(t *testing.T) {
+	t.Parallel()
+
+	converter := NewUIMessageStreamConverter()
+
+	startA := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "search",
+		ToolCallID: "call-A",
+		Input:      map[string]any{"query": "A"},
+	})
+	startB := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "search",
+		ToolCallID: "call-B",
+		Input:      map[string]any{"query": "B"},
+	})
+	startC := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "search",
+		ToolCallID: "call-C",
+		Input:      map[string]any{"query": "C"},
+	})
+
+	if len(startA) != 1 || len(startB) != 1 || len(startC) != 1 {
+		t.Fatalf("expected one snapshot per start, got A=%#v B=%#v C=%#v", startA, startB, startC)
+	}
+	if startA[0].ID == startB[0].ID || startB[0].ID == startC[0].ID || startA[0].ID == startC[0].ID {
+		t.Fatalf("expected each parallel tool call to receive a distinct id, got A=%d B=%d C=%d",
+			startA[0].ID, startB[0].ID, startC[0].ID)
+	}
+	if startA[0].ToolCallID != "call-A" || startB[0].ToolCallID != "call-B" || startC[0].ToolCallID != "call-C" {
+		t.Fatalf("expected each snapshot to keep its own tool_call_id, got A=%q B=%q C=%q",
+			startA[0].ToolCallID, startB[0].ToolCallID, startC[0].ToolCallID)
+	}
+
+	endA := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "search",
+		ToolCallID: "call-A",
+		Output:     map[string]any{"hits": "A"},
+	})
+	endB := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "search",
+		ToolCallID: "call-B",
+		Output:     map[string]any{"hits": "B"},
+	})
+	endC := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "search",
+		ToolCallID: "call-C",
+		Output:     map[string]any{"hits": "C"},
+	})
+
+	if endA[0].ID != startA[0].ID || endB[0].ID != startB[0].ID || endC[0].ID != startC[0].ID {
+		t.Fatalf("expected tool_call_end to reuse the matching start id, got endA=%d endB=%d endC=%d (startA=%d startB=%d startC=%d)",
+			endA[0].ID, endB[0].ID, endC[0].ID, startA[0].ID, startB[0].ID, startC[0].ID)
+	}
+	if !reflect.DeepEqual(endA[0].Input, map[string]any{"query": "A"}) ||
+		!reflect.DeepEqual(endB[0].Input, map[string]any{"query": "B"}) ||
+		!reflect.DeepEqual(endC[0].Input, map[string]any{"query": "C"}) {
+		t.Fatalf("expected each tool_call_end to preserve its own input, got A=%#v B=%#v C=%#v",
+			endA[0].Input, endB[0].Input, endC[0].Input)
+	}
+}
+
 func TestUIMessageStreamConverterStartsNewTextBlockAfterTool(t *testing.T) {
 	converter := NewUIMessageStreamConverter()
 

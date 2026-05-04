@@ -53,11 +53,12 @@ func NewContainerProvider(log *slog.Logger, clients bridge.Provider, bgManager *
 	return &ContainerProvider{clients: clients, bgManager: bgManager, execWorkDir: wd, logger: log.With(slog.String("tool", "container"))}
 }
 
-func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
-	wd := p.execWorkDir
+func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+	workspace := p.resolveToolWorkspace(ctx, session)
+	wd := workspace.defaultWorkDir
 	sess := session
 
-	readDesc := "Read file content inside the bot container. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported."
+	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
@@ -69,7 +70,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
 					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
 				},
@@ -81,11 +82,11 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        "write",
-			Description: "Write file content inside the bot container. Creates parent directories automatically. Handles files of any size.",
+			Description: fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"path":    map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"content": map[string]any{"type": "string", "description": "File content"},
 				},
 				"required": []string{"path", "content"},
@@ -96,11 +97,11 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        "list",
-			Description: fmt.Sprintf("List directory entries inside the bot container. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", listMaxEntries, listCollapseThreshold),
+			Description: fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute inside container)", wd)},
+					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
 					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
 					"limit":     map[string]any{"type": "integer", "description": fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries), "minimum": 1, "maximum": listMaxEntries, "default": listMaxEntries},
@@ -113,11 +114,11 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        "edit",
-			Description: "Replace exact text in a file inside the bot container.",
+			Description: fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute inside container)", wd)},
+					"path":     map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
 					"old_text": map[string]any{"type": "string", "description": "Exact text to find"},
 					"new_text": map[string]any{"type": "string", "description": "Replacement text"},
 				},
@@ -129,7 +130,7 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 		},
 		{
 			Name: "exec",
-			Description: fmt.Sprintf(`Execute a shell command in the bot container. Runs in the bot's data directory (%s) by default.
+			Description: fmt.Sprintf(`Execute a shell command %s. Runs in %s by default.
 
 # Instructions
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
@@ -141,12 +142,12 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
   - If your command is long running, use run_in_background. No sleep needed.
   - Do not retry failing commands in a sleep loop — diagnose the root cause.
   - If waiting for a background task, you will be notified when it completes automatically.
-  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.`, wd, background.MaxExecTimeout, background.DefaultExecTimeout),
+  - sleep N (N >= 2) in foreground is blocked. If you genuinely need a short delay, keep it under 2 seconds.`, workspace.locationDescription, wd, background.MaxExecTimeout, background.DefaultExecTimeout),
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command":           map[string]any{"type": "string", "description": "Shell command to run (e.g. ls -la, npm install, python script.py)"},
-					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory inside the container (default: %s)", wd)},
+					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
 					"description":       map[string]any{"type": "string", "description": `Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → "List files with details". For complex commands add enough context: curl -s url | jq '.data[]' → "Fetch JSON and extract data array".`},
 					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
 					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. You will be notified when it completes. Use for long-running commands (installs, builds, test suites). You do not need to use '&' at the end of the command."},
@@ -175,12 +176,46 @@ func (p *ContainerProvider) Tools(_ context.Context, session SessionContext) ([]
 	}, nil
 }
 
-func (p *ContainerProvider) normalizePath(path string) string {
+type toolWorkspace struct {
+	defaultWorkDir          string
+	locationDescription     string
+	absolutePathDescription string
+}
+
+func (p *ContainerProvider) resolveToolWorkspace(ctx context.Context, session SessionContext) toolWorkspace {
+	info := bridge.WorkspaceInfo{
+		Backend:        bridge.WorkspaceBackendContainer,
+		DefaultWorkDir: p.execWorkDir,
+	}
+	if resolver, ok := p.clients.(bridge.WorkspaceInfoProvider); ok {
+		if resolved, err := resolver.WorkspaceInfo(ctx, session.BotID); err == nil {
+			info = resolved
+		}
+	}
+	wd := strings.TrimSpace(info.DefaultWorkDir)
+	if wd == "" {
+		wd = p.execWorkDir
+	}
+	if strings.EqualFold(info.Backend, bridge.WorkspaceBackendLocal) {
+		return toolWorkspace{
+			defaultWorkDir:          wd,
+			locationDescription:     "on the local machine",
+			absolutePathDescription: "host path",
+		}
+	}
+	return toolWorkspace{
+		defaultWorkDir:          wd,
+		locationDescription:     "inside the bot container",
+		absolutePathDescription: "inside container",
+	}
+}
+
+func (*ContainerProvider) normalizePath(path, workDir string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return path
 	}
-	prefix := p.execWorkDir
+	prefix := strings.TrimRight(strings.TrimSpace(workDir), "/")
 	if prefix == "" {
 		prefix = defaultContainerExecWorkDir
 	}
@@ -213,7 +248,7 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"))
+	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -307,7 +342,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"))
+	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
 	content := StringArg(args, "content")
 	if filePath == "" {
 		return nil, errors.New("path is required")
@@ -337,7 +372,7 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	if err != nil {
 		return nil, err
 	}
-	dirPath := p.normalizePath(StringArg(args, "path"))
+	dirPath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
 	if dirPath == "" {
 		dirPath = "."
 	}
@@ -409,7 +444,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	if err != nil {
 		return nil, err
 	}
-	filePath := p.normalizePath(StringArg(args, "path"))
+	filePath := p.normalizePath(StringArg(args, "path"), p.resolveToolWorkspace(ctx, session).defaultWorkDir)
 	oldText := StringArg(args, "old_text")
 	newText := StringArg(args, "new_text")
 	if filePath == "" || oldText == "" {
@@ -458,7 +493,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	}
 	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
 	if workDir == "" {
-		workDir = p.execWorkDir
+		workDir = p.resolveToolWorkspace(ctx, session).defaultWorkDir
 	}
 	description := strings.TrimSpace(StringArg(args, "description"))
 

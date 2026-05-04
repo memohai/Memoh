@@ -21,7 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
-	dbsqlc "github.com/memohai/memoh/internal/db/sqlc"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -1939,7 +1939,7 @@ func TestIngestOutboundAttachments_ContainerPath(t *testing.T) {
 	}
 	p := &ChannelInboundProcessor{mediaService: ms}
 	attachments := []channel.Attachment{
-		{Type: channel.AttachmentImage, URL: "/data/media/26da/26da0cc7.jpg"},
+		{Type: channel.AttachmentImage, Path: "/data/media/26da/26da0cc7.jpg"},
 	}
 	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
@@ -1961,14 +1961,14 @@ func TestIngestOutboundAttachments_ContainerPathNotFound(t *testing.T) {
 	}
 	p := &ChannelInboundProcessor{mediaService: ms}
 	attachments := []channel.Attachment{
-		{Type: channel.AttachmentImage, URL: "/data/media/26da/missing.jpg"},
+		{Type: channel.AttachmentImage, Path: "/data/media/26da/missing.jpg"},
 	}
 	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
 		t.Fatalf("expected unresolved container attachment to remain unchanged, got %d", len(result))
 	}
-	if result[0].URL != "/data/media/26da/missing.jpg" {
-		t.Fatalf("expected original path preserved, got %q", result[0].URL)
+	if result[0].Path != "/data/media/26da/missing.jpg" {
+		t.Fatalf("expected original path preserved, got %q", result[0].Path)
 	}
 	if result[0].ContentHash != "" {
 		t.Fatalf("expected empty content_hash for unresolved path, got %q", result[0].ContentHash)
@@ -1982,7 +1982,7 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 		{
 			Type:        channel.AttachmentImage,
 			ContentHash: "asset-1",
-			URL:         "/data/media/ab/c.png",
+			Path:        "/data/media/ab/c.png",
 			Base64:      "AAAA",
 			Mime:        "image/png",
 		},

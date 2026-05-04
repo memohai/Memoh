@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: memoh
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - config-secret.yaml
+  - runtime-installer.yaml
+  - postgres.yaml
+  - qdrant.yaml
+  - server.yaml
+  - web.yaml
+  - browser.yaml

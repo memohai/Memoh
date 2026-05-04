@@ -29,70 +29,72 @@
     </div>
 
     <div class="flex-1 min-h-0 relative">
-      <ScrollArea class="absolute inset-0">
-        <div class="px-2 py-2">
-          <div
-            v-if="!items.length && !isLoading"
-            class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
-          >
-            <Plug class="mb-2 size-6 opacity-40" />
-            <p class="text-xs">
-              {{ t('chat.mcpEmpty') }}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              class="mt-3 text-xs h-7"
-              @click="goToSettings()"
-            >
-              {{ t('chat.mcpManageInSettings') }}
-            </Button>
-          </div>
-
-          <div
-            v-else
-            class="flex flex-col gap-1"
-          >
+      <div class="absolute inset-0">
+        <ScrollArea class="h-full">
+          <div class="px-2 py-2">
             <div
-              v-for="item in items"
-              :key="item.id"
-              class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/40 transition-colors"
+              v-if="!items.length && !isLoading"
+              class="flex flex-col items-center justify-center py-12 text-center text-muted-foreground"
             >
-              <div class="relative shrink-0">
-                <Plug class="size-4 text-muted-foreground" />
-                <span
-                  class="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full ring-1 ring-sidebar"
-                  :class="statusDotClass(item)"
+              <Plug class="mb-2 size-6 opacity-40" />
+              <p class="text-xs">
+                {{ t('chat.mcpEmpty') }}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                class="mt-3 text-xs h-7"
+                @click="goToSettings()"
+              >
+                {{ t('chat.mcpManageInSettings') }}
+              </Button>
+            </div>
+
+            <div
+              v-else
+              class="flex flex-col gap-1"
+            >
+              <div
+                v-for="item in items"
+                :key="item.id"
+                class="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/40 transition-colors"
+              >
+                <div class="relative shrink-0">
+                  <Plug class="size-4 text-muted-foreground" />
+                  <span
+                    class="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full ring-1 ring-sidebar"
+                    :class="statusDotClass(item)"
+                  />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="truncate text-xs font-medium text-foreground leading-[18px]">
+                    {{ item.name || t('chat.untitledMcp') }}
+                  </div>
+                  <div class="text-[11px] text-muted-foreground leading-[14px]">
+                    {{ statusText(item) }}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="size-6 p-0 shrink-0"
+                  :title="t('chat.mcpOpenInSettings')"
+                  :aria-label="t('chat.mcpOpenInSettings')"
+                  @click.stop="goToSettings(item.id)"
+                >
+                  <ExternalLink class="size-3.5" />
+                </Button>
+                <Switch
+                  :model-value="item.is_active"
+                  :disabled="!!togglingId && togglingId === item.id"
+                  class="shrink-0"
+                  @update:model-value="(val) => onToggle(item, !!val)"
                 />
               </div>
-              <div class="flex-1 min-w-0">
-                <div class="truncate text-xs font-medium text-foreground leading-[18px]">
-                  {{ item.name || t('chat.untitledMcp') }}
-                </div>
-                <div class="text-[11px] text-muted-foreground leading-[14px]">
-                  {{ statusText(item) }}
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="size-6 p-0 shrink-0"
-                :title="t('chat.mcpOpenInSettings')"
-                :aria-label="t('chat.mcpOpenInSettings')"
-                @click.stop="goToSettings(item.id)"
-              >
-                <ExternalLink class="size-3.5" />
-              </Button>
-              <Switch
-                :model-value="item.is_active"
-                :disabled="!!togglingId && togglingId === item.id"
-                class="shrink-0"
-                @update:model-value="(val) => onToggle(item, !!val)"
-              />
             </div>
           </div>
-        </div>
-      </ScrollArea>
+        </ScrollArea>
+      </div>
     </div>
   </div>
 </template>

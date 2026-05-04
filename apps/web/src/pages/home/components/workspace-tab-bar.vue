@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center h-12 shrink-0 border-b border-border bg-background gap-1">
+  <div class="flex items-center h-12 shrink-0 border-b border-border bg-background gap-1 [-webkit-app-region:drag]">
     <div
       ref="tabsContainerRef"
       class="flex items-center flex-1 min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap"
@@ -9,7 +9,7 @@
         :ref="(el) => setTabRef(tab.id, el as Element | null)"
         :key="tab.id"
         type="button"
-        class="group inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md px-2.5 text-xs transition-colors max-w-[200px]"
+        class="group inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md px-2.5 text-xs transition-colors max-w-[200px] [-webkit-app-region:no-drag]"
         :class="tab.id === activeId
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
           : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground'"
@@ -26,7 +26,7 @@
         <span
           role="button"
           tabindex="0"
-          class="inline-flex items-center justify-center size-4 rounded-sm shrink-0 opacity-0 group-hover:opacity-100 hover:bg-muted-foreground/20 transition-opacity"
+          class="inline-flex items-center justify-center size-4 rounded-sm shrink-0 opacity-0 group-hover:opacity-100 hover:bg-muted-foreground/20 transition-opacity [-webkit-app-region:no-drag]"
           :class="{ 'opacity-100': tab.id === activeId }"
           :aria-label="t('chat.tabClose')"
           @click.stop="store.closeTab(tab.id)"
@@ -41,7 +41,7 @@
     <div class="flex items-center shrink-0 px-1.5 pt-2 pb-1 gap-0.5 border-l border-border">
       <button
         type="button"
-        class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors"
+        class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
         :title="t('chat.tabBarToolkit.newTerminal')"
         :aria-label="t('chat.tabBarToolkit.newTerminal')"
         @click="store.openTerminal()"
@@ -52,7 +52,7 @@
         <DropdownMenuTrigger as-child>
           <button
             type="button"
-            class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors"
+            class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
             :title="t('chat.tabBarToolkit.menu')"
             :aria-label="t('chat.tabBarToolkit.menu')"
           >

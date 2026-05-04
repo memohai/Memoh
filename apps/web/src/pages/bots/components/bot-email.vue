@@ -208,9 +208,10 @@ import {
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { Plus } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getEmailProviders,
   getBotsByBotIdEmailBindings,
@@ -225,14 +226,47 @@ import { formatDateTime } from '@/utils/date-time'
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
 
-const providers = ref<EmailProviderResponse[]>([])
-const bindings = ref<EmailBindingResponse[]>([])
-const bindingsLoading = ref(false)
+const queryCache = useQueryCache()
+
+const { data: providersData } = useQuery({
+  key: () => ['email-providers'],
+  query: async () => {
+    const { data } = await getEmailProviders({ throwOnError: true })
+    return data ?? []
+  },
+})
+
+const { data: bindingsData, isLoading: bindingsLoading, refetch: refetchBindings } = useQuery({
+  key: () => ['bot-email-bindings', props.botId],
+  query: async () => {
+    if (!props.botId) return [] as EmailBindingResponse[]
+    const { data } = await getBotsByBotIdEmailBindings({ path: { bot_id: props.botId }, throwOnError: true })
+    return data ?? []
+  },
+  enabled: () => !!props.botId,
+})
+
+const { data: outboxData, isLoading: outboxLoading } = useQuery({
+  key: () => ['bot-email-outbox', props.botId],
+  query: async () => {
+    if (!props.botId) return [] as EmailOutboxItemResponse[]
+    const { data } = await getBotsByBotIdEmailOutbox({
+      path: { bot_id: props.botId },
+      query: { limit: 50, offset: 0 },
+      throwOnError: true,
+    })
+    return ((data as Record<string, unknown>)?.items as EmailOutboxItemResponse[]) ?? []
+  },
+  enabled: () => !!props.botId,
+})
+
+const providers = computed<EmailProviderResponse[]>(() => providersData.value ?? [])
+const bindings = computed<EmailBindingResponse[]>(() => bindingsData.value ?? [])
+const outboxItems = computed<EmailOutboxItemResponse[]>(() => outboxData.value ?? [])
+
 const addingBinding = ref(false)
 const addingProviderId = ref('')
 const deletingId = ref('')
-const outboxItems = ref<EmailOutboxItemResponse[]>([])
-const outboxLoading = ref(false)
 
 const providerNameMap = computed(() => {
   const map: Record<string, string> = {}
@@ -247,33 +281,8 @@ const unboundProviders = computed(() => {
   return providers.value.filter((p) => !boundIds.has(p.id))
 })
 
-async function loadProviders() {
-  const { data } = await getEmailProviders({ throwOnError: true })
-  providers.value = data ?? []
-}
-
-async function loadBindings() {
-  bindingsLoading.value = true
-  try {
-    const { data } = await getBotsByBotIdEmailBindings({ path: { bot_id: props.botId }, throwOnError: true })
-    bindings.value = data ?? []
-  } finally {
-    bindingsLoading.value = false
-  }
-}
-
-async function loadOutbox() {
-  outboxLoading.value = true
-  try {
-    const { data } = await getBotsByBotIdEmailOutbox({
-      path: { bot_id: props.botId },
-      query: { limit: 50, offset: 0 },
-      throwOnError: true,
-    })
-    outboxItems.value = (data as Record<string, unknown>)?.items as typeof outboxItems.value ?? []
-  } finally {
-    outboxLoading.value = false
-  }
+function invalidateBindings() {
+  queryCache.invalidateQueries({ key: ['bot-email-bindings', props.botId] })
 }
 
 async function handleAddBinding(provider: EmailProviderResponse) {
@@ -292,7 +301,8 @@ async function handleAddBinding(provider: EmailProviderResponse) {
       },
       throwOnError: true,
     })
-    await loadBindings()
+    invalidateBindings()
+    await refetchBindings()
     toast.success(t('bots.email.bindSuccess'))
   } catch (e: unknown) {
     toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
@@ -309,7 +319,8 @@ async function handleTogglePerm(binding: EmailBindingResponse, field: string, va
       body: { [field]: value },
       throwOnError: true,
     })
-    await loadBindings()
+    invalidateBindings()
+    await refetchBindings()
   } catch (e: unknown) {
     toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
   }
@@ -322,7 +333,8 @@ async function handleDeleteBinding(id: string) {
       path: { bot_id: props.botId, id },
       throwOnError: true,
     })
-    await loadBindings()
+    invalidateBindings()
+    await refetchBindings()
     toast.success(t('bots.email.unbindSuccess'))
   } catch (e: unknown) {
     toast.error(e instanceof Error ? e.message : t('common.saveFailed'))
@@ -334,10 +346,4 @@ async function handleDeleteBinding(id: string) {
 function formatDate(value: string | undefined) {
   return formatDateTime(value, { fallback: '-' })
 }
-
-watch(() => props.botId, () => {
-  void loadProviders()
-  void loadBindings()
-  void loadOutbox()
-}, { immediate: true })
 </script>

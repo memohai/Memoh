@@ -4,11 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "db/migrations/**"
+      - "db/postgres/migrations/**"
+      - "db/sqlite/migrations/**"
   pull_request:
     branches: [main]
     paths:
-      - "db/migrations/**"
+      - "db/postgres/migrations/**"
+      - "db/sqlite/migrations/**"
 
 concurrency:
   group: migrations-${{ github.ref }}
@@ -18,7 +20,8 @@ permissions:
   contents: read
 
 jobs:
-  migrate:
+  postgres:
+    name: PostgreSQL migrations
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -54,6 +57,40 @@ jobs:
           password = "memoh123"
           database = "memoh_test"
           sslmode = "disable"
+          TOML
+
+      - name: Migrate up
+        run: ./memoh-server migrate up
+
+      - name: Migrate down
+        run: ./memoh-server migrate down
+
+      - name: Migrate up (idempotent)
+        run: ./memoh-server migrate up
+
+  sqlite:
+    name: SQLite migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build -o memoh-server ./cmd/agent
+
+      - name: Generate config
+        run: |
+          cat > config.toml <<'TOML'
+          [database]
+          driver = "sqlite"
+
+          [sqlite]
+          path = "memoh_test.db"
+          wal = true
+          busy_timeout_ms = 5000
           TOML
 
       - name: Migrate up

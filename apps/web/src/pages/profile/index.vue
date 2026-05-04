@@ -23,68 +23,6 @@
         </div>
       </div>
 
-      <!-- Display Settings -->
-      <section>
-        <h2 class="mb-2 flex items-center text-xs font-medium">
-          <Settings
-            class="mr-2 size-3.5"
-          />
-          {{ $t('settings.display') }}
-        </h2>
-        <Separator />
-        <div class="mt-4 space-y-4">
-          <div class="flex items-center justify-between">
-            <Label>{{ $t('settings.language') }}</Label>
-            <Select
-              :model-value="language"
-              @update:model-value="(v) => v && setLanguage(v as Locale)"
-            >
-              <SelectTrigger
-                class="w-40"
-                :aria-label="$t('settings.language')"
-              >
-                <SelectValue :placeholder="$t('settings.languagePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="zh">
-                    {{ $t('settings.langZh') }}
-                  </SelectItem>
-                  <SelectItem value="en">
-                    {{ $t('settings.langEn') }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <Separator />
-          <div class="flex items-center justify-between">
-            <Label>{{ $t('settings.theme') }}</Label>
-            <Select
-              :model-value="theme"
-              @update:model-value="(v) => v && setTheme(v as 'light' | 'dark')"
-            >
-              <SelectTrigger
-                class="w-40"
-                :aria-label="$t('settings.theme')"
-              >
-                <SelectValue :placeholder="$t('settings.themePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="light">
-                    {{ $t('settings.themeLight') }}
-                  </SelectItem>
-                  <SelectItem value="dark">
-                    {{ $t('settings.themeDark') }}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </section>
-
       <!-- Logout -->
       <section>
         <Separator class="mb-4" />
@@ -199,21 +137,13 @@ import {
   AvatarImage,
   Badge,
   Button,
-  Label,
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Separator,
 } from '@memohai/ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { storeToRefs } from 'pinia'
-import { Settings, Network } from 'lucide-vue-next'
+import { Network } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProfileSection from './components/profile-section.vue'
 import PasswordSection from './components/password-section.vue'
@@ -222,8 +152,6 @@ import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from
 import { client } from '@memohai/sdk/client'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
-import { useSettingsStore } from '@/store/settings'
-import type { Locale } from '@/i18n'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
 import { useClipboard } from '@/composables/useClipboard'
@@ -245,11 +173,6 @@ const router = useRouter()
 const userStore = useUserStore()
 const { copyText } = useClipboard()
 const { userInfo, exitLogin, patchUserInfo } = userStore
-
-// ---- Display settings ----
-const settingsStore = useSettingsStore()
-const { language, theme } = storeToRefs(settingsStore)
-const { setLanguage, setTheme } = settingsStore
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

@@ -644,6 +644,7 @@ import { Search, Plus, RefreshCw, Lock, Copy, KeyRound, Wrench, Plug } from 'luc
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { useQueryCache } from '@pinia/colada'
 import {
   Badge,
   Button,
@@ -961,6 +962,12 @@ function buildRequestBody(
   return body
 }
 
+const queryCache = useQueryCache()
+
+function invalidateSidebarMcp() {
+  queryCache.invalidateQueries({ key: ['bot-mcp', props.botId] })
+}
+
 async function loadList() {
   loading.value = true
   try {
@@ -1042,6 +1049,7 @@ async function handleSubmit() {
       savedId = data?.id
       removeDraft()
       await loadList()
+      invalidateSidebarMcp()
       const created = items.value.find((i) => i.id === savedId) ?? items.value.find((i) => i.name === body.name)
       if (created) selectItem(created)
       toast.success(t('mcp.createSuccess'))
@@ -1053,6 +1061,7 @@ async function handleSubmit() {
         throwOnError: true,
       })
       await loadList()
+      invalidateSidebarMcp()
       toast.success(t('mcp.updateSuccess'))
     }
     if (savedId && selectedItem.value) {
@@ -1079,6 +1088,7 @@ async function handleDelete(item: McpItem) {
     })
     if (selectedItem.value?.id === item.id) selectedItem.value = null
     await loadList()
+    invalidateSidebarMcp()
     toast.success(t('mcp.deleteSuccess'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.deleteFailed')))
@@ -1100,6 +1110,7 @@ async function handleImportFromDialog() {
     importDialogOpen.value = false
     importJson.value = ''
     await loadList()
+    invalidateSidebarMcp()
     toast.success(t('mcp.importSuccess'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.importFailed')))
@@ -1309,6 +1320,20 @@ watch(() => props.botId, async () => {
     applyPendingDraft()
   }
 }, { immediate: true })
+
+// Refresh local list when chat-sidebar invalidates the shared MCP cache
+// (e.g. user toggled is_active in the chat sidebar).
+watch(
+  () => {
+    const entries = queryCache.getEntries({ key: ['bot-mcp', props.botId] })
+    return entries[0]?.state.value.data
+  },
+  (next, prev) => {
+    if (!props.botId) return
+    if (next === prev) return
+    void loadList()
+  },
+)
 
 // Keep ?mcpId in sync with the currently selected connection (drafts ignored).
 watch(selectedItem, (item) => {

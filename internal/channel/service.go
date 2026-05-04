@@ -13,7 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
@@ -21,12 +22,12 @@ var ErrChannelConfigNotFound = errors.New("channel config not found")
 
 // Store provides CRUD operations for channel configurations, user bindings, and sessions.
 type Store struct {
-	queries  *sqlc.Queries
+	queries  dbstore.Queries
 	registry *Registry
 }
 
 // NewStore creates a Store backed by the given database queries and adapter registry.
-func NewStore(queries *sqlc.Queries, registry *Registry) *Store {
+func NewStore(queries dbstore.Queries, registry *Registry) *Store {
 	if registry == nil {
 		registry = NewRegistry()
 	}

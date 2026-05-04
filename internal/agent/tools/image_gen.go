@@ -11,7 +11,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/db/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
@@ -24,7 +24,7 @@ type ImageGenProvider struct {
 	logger     *slog.Logger
 	settings   *settings.Service
 	models     *models.Service
-	queries    *sqlc.Queries
+	queries    dbstore.Queries
 	containers bridge.Provider
 	dataMount  string
 }
@@ -33,7 +33,7 @@ func NewImageGenProvider(
 	log *slog.Logger,
 	settingsSvc *settings.Service,
 	modelsSvc *models.Service,
-	queries *sqlc.Queries,
+	queries dbstore.Queries,
 	containers bridge.Provider,
 	dataMount string,
 ) *ImageGenProvider {
@@ -166,7 +166,13 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 		ext = "webp"
 	}
 
-	containerPath := fmt.Sprintf("%s/%d.%s", imageGenDir, time.Now().UnixMilli(), ext)
+	imageDir := strings.TrimRight(p.dataMount, "/") + strings.TrimPrefix(imageGenDir, "/data")
+	if resolver, ok := p.containers.(bridge.WorkspaceInfoProvider); ok {
+		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil && info.Backend == bridge.WorkspaceBackendLocal && strings.TrimSpace(info.DefaultWorkDir) != "" {
+			imageDir = strings.TrimRight(info.DefaultWorkDir, "/") + "/generated-images"
+		}
+	}
+	containerPath := fmt.Sprintf("%s/%d.%s", imageDir, time.Now().UnixMilli(), ext)
 
 	client, clientErr := p.containers.MCPClient(ctx, botID)
 	if clientErr != nil {
@@ -178,7 +184,7 @@ func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session Sessio
 		}, nil
 	}
 
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", imageGenDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", imageDir)
 	_, _ = client.Exec(ctx, mkdirCmd, "/", 5)
 
 	if writeErr := client.WriteFile(ctx, containerPath, imgBytes); writeErr != nil {

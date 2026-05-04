@@ -12,17 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 // EventStore persists and loads CanonicalEvents from the database.
 type EventStore struct {
-	queries *sqlc.Queries
+	queries dbstore.Queries
 	logger  *slog.Logger
 }
 
 // NewEventStore creates an EventStore.
-func NewEventStore(log *slog.Logger, queries *sqlc.Queries) *EventStore {
+func NewEventStore(log *slog.Logger, queries dbstore.Queries) *EventStore {
 	if log == nil {
 		log = slog.Default()
 	}

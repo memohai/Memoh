@@ -13,17 +13,18 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
 type TokenUsageHandler struct {
-	queries        *sqlc.Queries
+	queries        dbstore.Queries
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
 }
 
-func NewTokenUsageHandler(log *slog.Logger, queries *sqlc.Queries, botService *bots.Service, accountService *accounts.Service) *TokenUsageHandler {
+func NewTokenUsageHandler(log *slog.Logger, queries dbstore.Queries, botService *bots.Service, accountService *accounts.Service) *TokenUsageHandler {
 	return &TokenUsageHandler{
 		queries:        queries,
 		botService:     botService,

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -74,16 +75,22 @@ func (p *Provider) Delete(ctx context.Context, key string) error {
 // AccessPath returns the container-internal path for a storage key.
 func (*Provider) AccessPath(key string) string {
 	_, sub := splitRoutingKey(key)
-	return filepath.Join("/data", containerMediaRoot, sub)
+	return attachmentpkg.MediaAccessPath(sub)
 }
 
 // OpenContainerFile opens a file from a bot's /data/ directory.
 func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
-	dataPrefix := "/data/"
-	if !strings.HasPrefix(containerPath, dataPrefix) {
-		return nil, fmt.Errorf("path must start with %s", dataPrefix)
+	subPath, ok := attachmentpkg.DataSubpath(containerPath)
+	if !ok {
+		if !filepath.IsAbs(strings.TrimSpace(containerPath)) {
+			return nil, fmt.Errorf("path must start with %s/ or be an absolute local workspace path", attachmentpkg.DataMountPath(""))
+		}
+		client, err := p.clients.MCPClient(ctx, botID)
+		if err != nil {
+			return nil, fmt.Errorf("get client: %w", err)
+		}
+		return client.ReadRaw(ctx, filepath.Clean(containerPath))
 	}
-	subPath := containerPath[len(dataPrefix):]
 	if subPath == "" || strings.Contains(subPath, "..") {
 		return nil, errors.New("invalid container path")
 	}

@@ -15,20 +15,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/containerd/errdefs"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/containerd"
+	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
-	manager          *workspace.Manager
+	manager          containerWorkspace
 	cfg              config.WorkspaceConfig
 	containerBackend string
 	logger           *slog.Logger
@@ -46,14 +45,18 @@ type ContainerGPURequest struct {
 }
 
 type CreateContainerRequest struct {
-	Snapshotter string               `json:"snapshotter,omitempty"`
-	RestoreData bool                 `json:"restore_data,omitempty"`
-	Image       string               `json:"image,omitempty"`
-	GPU         *ContainerGPURequest `json:"gpu,omitempty"`
+	Snapshotter        string               `json:"snapshotter,omitempty"`
+	RestoreData        bool                 `json:"restore_data,omitempty"`
+	Image              string               `json:"image,omitempty"`
+	WorkspaceBackend   string               `json:"workspace_backend,omitempty"`
+	LocalWorkspacePath string               `json:"local_workspace_path,omitempty"`
+	GPU                *ContainerGPURequest `json:"gpu,omitempty"`
 }
 
 type CreateContainerResponse struct {
 	ContainerID      string   `json:"container_id"`
+	WorkspaceBackend string   `json:"workspace_backend"`
+	ContainerPath    string   `json:"container_path"`
 	Image            string   `json:"image"`
 	Snapshotter      string   `json:"snapshotter"`
 	CDIDevices       []string `json:"cdi_devices,omitempty"`
@@ -72,6 +75,12 @@ type createContainerPullingEvent struct {
 type createContainerPullProgressEvent struct {
 	Type   string            `json:"type"`
 	Layers []ctr.LayerStatus `json:"layers"`
+}
+
+type createContainerPullStatusEvent struct {
+	Type    string `json:"type"`
+	Image   string `json:"image"`
+	Message string `json:"message,omitempty"`
 }
 
 type createContainerCreatingEvent struct {
@@ -94,6 +103,7 @@ type createContainerErrorEvent struct {
 
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
+	WorkspaceBackend string    `json:"workspace_backend"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -114,6 +124,7 @@ type ContainerMetricsStatusResponse struct {
 type ContainerCPUMetricsResponse struct {
 	UsagePercent      float64 `json:"usage_percent"`
 	UsageNanoseconds  uint64  `json:"usage_nanoseconds"`
+	UsageNanocores    uint64  `json:"usage_nanocores"`
 	UserNanoseconds   uint64  `json:"user_nanoseconds"`
 	KernelNanoseconds uint64  `json:"kernel_nanoseconds"`
 }
@@ -182,7 +193,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
 		manager:          manager,
 		cfg:              cfg,
@@ -308,26 +319,41 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerErrorEvent{Type: "error", Message: msg})
 	}
 
-	// Phase 1: Pull image with progress
-	send(createContainerPullingEvent{Type: "pulling", Image: image})
+	workspaceBackend := strings.ToLower(strings.TrimSpace(req.WorkspaceBackend))
+	if workspaceBackend == "" {
+		workspaceBackend = "container"
+	}
+	if workspaceBackend == "local" {
+		image = "local"
+		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: "local workspace does not use container images"})
+	} else {
+		// Phase 1: Pull image with progress
+		send(createContainerPullingEvent{Type: "pulling", Image: image})
 
-	var pullDone atomic.Bool
-	_, pullErr := h.manager.PullImage(ctx, image, &ctr.PullImageOptions{
-		Unpack:      true,
-		Snapshotter: snapshotter,
-		OnProgress: func(p ctr.PullProgress) {
-			if pullDone.Load() {
-				return
-			}
-			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
-		},
-	})
-	pullDone.Store(true)
-	if pullErr != nil {
-		h.logger.Error("image pull failed",
-			slog.String("image", image), slog.Any("error", pullErr))
-		sendError("image pull failed: " + pullErr.Error())
-		return nil
+		var pullDone atomic.Bool
+		prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+			Unpack:        true,
+			StorageDriver: snapshotter,
+			OnProgress: func(p ctr.PullProgress) {
+				if pullDone.Load() {
+					return
+				}
+				send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
+			},
+		})
+		pullDone.Store(true)
+		if pullErr != nil {
+			h.logger.Error("image preparation failed",
+				slog.String("image", image), slog.Any("error", pullErr))
+			sendError("image preparation failed: " + pullErr.Error())
+			return nil
+		}
+		switch prepareResult.Mode {
+		case workspace.ImagePrepareSkipped:
+			send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
+		case workspace.ImagePrepareDelegated:
+			send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
+		}
 	}
 
 	// Phase 2: Create container (image is local, should be fast)
@@ -339,7 +365,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerRestoringEvent{Type: "restoring"})
 	}
 
-	if err := h.manager.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
+	if err := h.manager.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspace.WorkspaceStartConfig{
+		Backend:            workspaceBackend,
+		LocalWorkspacePath: strings.TrimSpace(req.LocalWorkspacePath),
+	}); err != nil {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		sendError("container start failed: " + err.Error())
@@ -383,8 +412,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 			slog.String("bot_id", botID), slog.Any("error", statusErr))
 	}
 	cdiDevices := gpu.Devices
+	containerPath := ""
+	responseBackend := workspaceBackend
 	if status != nil {
 		cdiDevices = status.CDIDevices
+		containerPath = status.ContainerPath
+		responseBackend = status.WorkspaceBackend
 	}
 
 	// Phase 3: Complete
@@ -392,6 +425,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		Type: "complete",
 		Container: CreateContainerResponse{
 			ContainerID:      containerID,
+			WorkspaceBackend: responseBackend,
+			ContainerPath:    containerPath,
 			Image:            image,
 			Snapshotter:      snapshotter,
 			CDIDevices:       cdiDevices,
@@ -426,6 +461,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, GetContainerResponse{
 		ContainerID:      status.ContainerID,
+		WorkspaceBackend: status.WorkspaceBackend,
 		Image:            status.Image,
 		Status:           status.Status,
 		Namespace:        status.Namespace,
@@ -571,7 +607,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	}
 	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -609,7 +645,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if ctr.IsNotFound(err) {
 			return echo.NewHTTPError(http.StatusNotFound, "container not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -619,7 +655,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "snapshotter does not match container snapshotter")
 	}
 
-	snapshotKey := strings.TrimSpace(data.Info.SnapshotKey)
+	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
 	if snapshotKey == "" {
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
 	}
@@ -849,6 +885,7 @@ func toContainerCPUMetricsResponse(metrics *ctr.CPUMetrics) *ContainerCPUMetrics
 	return &ContainerCPUMetricsResponse{
 		UsagePercent:      metrics.UsagePercent,
 		UsageNanoseconds:  metrics.UsageNanoseconds,
+		UsageNanocores:    metrics.UsageNanocores,
 		UserNanoseconds:   metrics.UserNanoseconds,
 		KernelNanoseconds: metrics.KernelNanoseconds,
 	}

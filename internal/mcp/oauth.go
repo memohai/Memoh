@@ -18,19 +18,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/sqlc"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/textutil"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
 type OAuthService struct {
-	queries     *sqlc.Queries
+	queries     dbstore.Queries
 	logger      *slog.Logger
 	httpClient  *http.Client
 	callbackURL string
 }
 
-func NewOAuthService(log *slog.Logger, queries *sqlc.Queries, callbackURL string) *OAuthService {
+func NewOAuthService(log *slog.Logger, queries dbstore.Queries, callbackURL string) *OAuthService {
 	if log == nil {
 		log = slog.Default()
 	}
