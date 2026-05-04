@@ -16,8 +16,7 @@ LIMIT 1;
 -- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens
+  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.usage IS NOT NULL;

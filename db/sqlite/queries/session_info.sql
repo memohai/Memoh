@@ -17,8 +17,7 @@ LIMIT 1;
 -- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS total_input_tokens,
-  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens,
-  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheWriteTokens') AS INTEGER)), 0) AS cache_write_tokens
+  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens
 FROM bot_history_messages m
 WHERE m.session_id = sqlc.arg(session_id)
   AND m.usage IS NOT NULL

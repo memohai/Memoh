@@ -646,7 +646,6 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 			usage:        512,
 			cacheRow: dbsqlc.GetSessionCacheStatsRow{
 				CacheReadTokens:  64,
-				CacheWriteTokens: 32,
 				TotalInputTokens: 512,
 			},
 			skills: []string{"search"},

@@ -828,7 +828,7 @@ const cacheBreakdownOption = computed(() => {
   const types = activeTypes.value
   const maps = dayMaps.value
 
-  function sumField(day: string, field: 'cache_read_tokens' | 'cache_write_tokens' | 'input_tokens') {
+  function sumField(day: string, field: 'cache_read_tokens' | 'input_tokens') {
     let total = 0
     for (const tp of types) {
       total += (maps[tp].get(day)?.[field] ?? 0) as number
@@ -839,7 +839,7 @@ const cacheBreakdownOption = computed(() => {
   return {
     tooltip: { trigger: 'axis' as const },
     legend: {
-      data: [t('usage.cacheRead'), t('usage.cacheWrite'), t('usage.noCache')],
+      data: [t('usage.cacheRead'), t('usage.noCache')],
       bottom: 0,
       left: 'center',
       itemGap: 16,
@@ -855,20 +855,13 @@ const cacheBreakdownOption = computed(() => {
         data: days.map(d => sumField(d, 'cache_read_tokens')),
       },
       {
-        name: t('usage.cacheWrite'),
-        type: 'bar' as const,
-        stack: 'cache',
-        data: days.map(d => sumField(d, 'cache_write_tokens')),
-      },
-      {
         name: t('usage.noCache'),
         type: 'bar' as const,
         stack: 'cache',
         data: days.map(d => {
           const totalInput = sumField(d, 'input_tokens')
           const cacheRead = sumField(d, 'cache_read_tokens')
-          const cacheWrite = sumField(d, 'cache_write_tokens')
-          return Math.max(0, totalInput - cacheRead - cacheWrite)
+          return Math.max(0, totalInput - cacheRead)
         }),
       },
     ],

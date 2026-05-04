@@ -11777,9 +11777,6 @@ const docTemplate = `{
                 "cache_read_tokens": {
                     "type": "integer"
                 },
-                "cache_write_tokens": {
-                    "type": "integer"
-                },
                 "total_input_tokens": {
                     "type": "integer"
                 }
@@ -11999,9 +11996,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cache_read_tokens": {
-                    "type": "integer"
-                },
-                "cache_write_tokens": {
                     "type": "integer"
                 },
                 "day": {
@@ -12743,9 +12737,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cache_read_tokens": {
-                    "type": "integer"
-                },
-                "cache_write_tokens": {
                     "type": "integer"
                 },
                 "created_at": {

@@ -131,7 +131,7 @@ CREATE TABLE bot_history_messages (
 	if len(rows) != 1 {
 		t.Fatalf("usage row count = %d, want 1", len(rows))
 	}
-	if rows[0].InputTokens != 10 || rows[0].OutputTokens != 5 || rows[0].CacheReadTokens != 3 || rows[0].CacheWriteTokens != 2 || rows[0].ReasoningTokens != 1 {
+	if rows[0].InputTokens != 10 || rows[0].OutputTokens != 5 || rows[0].CacheReadTokens != 3 || rows[0].ReasoningTokens != 1 {
 		t.Fatalf("usage row = %+v, want token totals", rows[0])
 	}
 	if !rows[0].Day.Valid || rows[0].Day.Time.Format("2006-01-02") != "2026-05-01" {

@@ -1468,8 +1468,6 @@ definitions:
         type: number
       cache_read_tokens:
         type: integer
-      cache_write_tokens:
-        type: integer
       total_input_tokens:
         type: integer
     type: object
@@ -1612,8 +1610,6 @@ definitions:
   handlers.DailyTokenUsage:
     properties:
       cache_read_tokens:
-        type: integer
-      cache_write_tokens:
         type: integer
       day:
         type: string
@@ -2095,8 +2091,6 @@ definitions:
   handlers.TokenUsageRecord:
     properties:
       cache_read_tokens:
-        type: integer
-      cache_write_tokens:
         type: integer
       created_at:
         type: string

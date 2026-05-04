@@ -55,7 +55,6 @@ type ContextUsage struct {
 
 type CacheStats struct {
 	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	TotalInputTokens int64   `json:"total_input_tokens"`
 	CacheHitRate     float64 `json:"cache_hit_rate"`
 }
@@ -142,7 +141,6 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		},
 		CacheStats: CacheStats{
 			CacheReadTokens:  cacheRow.CacheReadTokens,
-			CacheWriteTokens: cacheRow.CacheWriteTokens,
 			TotalInputTokens: cacheRow.TotalInputTokens,
 			CacheHitRate:     cacheHitRate,
 		},

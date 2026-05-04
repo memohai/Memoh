@@ -62,8 +62,7 @@ func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, botID string) (st
 const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS total_input_tokens,
-  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens,
-  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheWriteTokens') AS INTEGER)), 0) AS cache_write_tokens
+  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens
 FROM bot_history_messages m
 WHERE m.session_id = ?1
   AND m.usage IS NOT NULL
@@ -73,13 +72,12 @@ WHERE m.session_id = ?1
 type GetSessionCacheStatsRow struct {
 	TotalInputTokens interface{} `json:"total_input_tokens"`
 	CacheReadTokens  interface{} `json:"cache_read_tokens"`
-	CacheWriteTokens interface{} `json:"cache_write_tokens"`
 }
 
 func (q *Queries) GetSessionCacheStats(ctx context.Context, sessionID sql.NullString) (GetSessionCacheStatsRow, error) {
 	row := q.db.QueryRowContext(ctx, getSessionCacheStats, sessionID)
 	var i GetSessionCacheStatsRow
-	err := row.Scan(&i.TotalInputTokens, &i.CacheReadTokens, &i.CacheWriteTokens)
+	err := row.Scan(&i.TotalInputTokens, &i.CacheReadTokens)
 	return i, err
 }
 

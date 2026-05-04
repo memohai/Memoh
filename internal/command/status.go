@@ -94,7 +94,6 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 		{"Context", contextUsage},
 		{"Cache Hit Rate", fmt.Sprintf("%.1f%%", cacheHitRate)},
 		{"Cache Read", formatTokens(cacheRow.CacheReadTokens)},
-		{"Cache Write", formatTokens(cacheRow.CacheWriteTokens)},
 	}
 	if len(skills) > 0 {
 		pairs = append(pairs, kv{"Skills", strings.Join(skills, ", ")})

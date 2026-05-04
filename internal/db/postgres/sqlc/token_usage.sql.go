@@ -61,7 +61,6 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
@@ -83,13 +82,12 @@ type GetTokenUsageByDayAndTypeParams struct {
 }
 
 type GetTokenUsageByDayAndTypeRow struct {
-	SessionType      string      `json:"session_type"`
-	Day              pgtype.Date `json:"day"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	ReasoningTokens  int64       `json:"reasoning_tokens"`
+	SessionType     string      `json:"session_type"`
+	Day             pgtype.Date `json:"day"`
+	InputTokens     int64       `json:"input_tokens"`
+	OutputTokens    int64       `json:"output_tokens"`
+	CacheReadTokens int64       `json:"cache_read_tokens"`
+	ReasoningTokens int64       `json:"reasoning_tokens"`
 }
 
 func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsageByDayAndTypeParams) ([]GetTokenUsageByDayAndTypeRow, error) {
@@ -112,7 +110,6 @@ func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsa
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CacheReadTokens,
-			&i.CacheWriteTokens,
 			&i.ReasoningTokens,
 		); err != nil {
 			return nil, err
@@ -202,7 +199,6 @@ SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
   COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
   COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
-  COALESCE((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint, 0)::bigint AS cache_write_tokens,
   COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
@@ -237,19 +233,18 @@ type ListTokenUsageRecordsParams struct {
 }
 
 type ListTokenUsageRecordsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	SessionID        pgtype.UUID        `json:"session_id"`
-	SessionType      string             `json:"session_type"`
-	ModelID          pgtype.UUID        `json:"model_id"`
-	ModelSlug        string             `json:"model_slug"`
-	ModelName        string             `json:"model_name"`
-	ProviderName     string             `json:"provider_name"`
-	InputTokens      int64              `json:"input_tokens"`
-	OutputTokens     int64              `json:"output_tokens"`
-	CacheReadTokens  int64              `json:"cache_read_tokens"`
-	CacheWriteTokens int64              `json:"cache_write_tokens"`
-	ReasoningTokens  int64              `json:"reasoning_tokens"`
+	ID              pgtype.UUID        `json:"id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	SessionType     string             `json:"session_type"`
+	ModelID         pgtype.UUID        `json:"model_id"`
+	ModelSlug       string             `json:"model_slug"`
+	ModelName       string             `json:"model_name"`
+	ProviderName    string             `json:"provider_name"`
+	InputTokens     int64              `json:"input_tokens"`
+	OutputTokens    int64              `json:"output_tokens"`
+	CacheReadTokens int64              `json:"cache_read_tokens"`
+	ReasoningTokens int64              `json:"reasoning_tokens"`
 }
 
 func (q *Queries) ListTokenUsageRecords(ctx context.Context, arg ListTokenUsageRecordsParams) ([]ListTokenUsageRecordsRow, error) {
@@ -281,7 +276,6 @@ func (q *Queries) ListTokenUsageRecords(ctx context.Context, arg ListTokenUsageR
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CacheReadTokens,
-			&i.CacheWriteTokens,
 			&i.ReasoningTokens,
 		); err != nil {
 			return nil, err

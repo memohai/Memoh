@@ -875,7 +875,6 @@ export type HandlersBrowserCoresResponse = {
 export type HandlersCacheStats = {
     cache_hit_rate?: number;
     cache_read_tokens?: number;
-    cache_write_tokens?: number;
     total_input_tokens?: number;
 };
 
@@ -965,7 +964,6 @@ export type HandlersCreateSnapshotResponse = {
 
 export type HandlersDailyTokenUsage = {
     cache_read_tokens?: number;
-    cache_write_tokens?: number;
     day?: string;
     input_tokens?: number;
     output_tokens?: number;
@@ -1252,7 +1250,6 @@ export type HandlersSupermarketTagsResponse = {
 
 export type HandlersTokenUsageRecord = {
     cache_read_tokens?: number;
-    cache_write_tokens?: number;
     created_at?: string;
     id?: string;
     input_tokens?: number;

@@ -62,8 +62,7 @@ func (q *Queries) GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID
 const getSessionCacheStats = `-- name: GetSessionCacheStats :one
 SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens
+  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_history_messages m
 WHERE m.session_id = $1
   AND m.usage IS NOT NULL
@@ -72,13 +71,12 @@ WHERE m.session_id = $1
 type GetSessionCacheStatsRow struct {
 	TotalInputTokens int64 `json:"total_input_tokens"`
 	CacheReadTokens  int64 `json:"cache_read_tokens"`
-	CacheWriteTokens int64 `json:"cache_write_tokens"`
 }
 
 func (q *Queries) GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (GetSessionCacheStatsRow, error) {
 	row := q.db.QueryRow(ctx, getSessionCacheStats, sessionID)
 	var i GetSessionCacheStatsRow
-	err := row.Scan(&i.TotalInputTokens, &i.CacheReadTokens, &i.CacheWriteTokens)
+	err := row.Scan(&i.TotalInputTokens, &i.CacheReadTokens)
 	return i, err
 }
 

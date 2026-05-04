@@ -8,7 +8,6 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
-  COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint), 0)::bigint AS cache_write_tokens,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
@@ -55,7 +54,6 @@ SELECT
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
   COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
   COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
-  COALESCE((m.usage->'inputTokenDetails'->>'cacheWriteTokens')::bigint, 0)::bigint AS cache_write_tokens,
   COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id

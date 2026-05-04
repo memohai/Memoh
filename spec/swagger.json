@@ -11768,9 +11768,6 @@
                 "cache_read_tokens": {
                     "type": "integer"
                 },
-                "cache_write_tokens": {
-                    "type": "integer"
-                },
                 "total_input_tokens": {
                     "type": "integer"
                 }
@@ -11990,9 +11987,6 @@
             "type": "object",
             "properties": {
                 "cache_read_tokens": {
-                    "type": "integer"
-                },
-                "cache_write_tokens": {
                     "type": "integer"
                 },
                 "day": {
@@ -12734,9 +12728,6 @@
             "type": "object",
             "properties": {
                 "cache_read_tokens": {
-                    "type": "integer"
-                },
-                "cache_write_tokens": {
                     "type": "integer"
                 },
                 "created_at": {

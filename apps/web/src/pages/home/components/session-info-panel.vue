@@ -58,11 +58,6 @@
             <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_read_tokens ?? 0) }}</span>
           </div>
 
-          <!-- Cache Write -->
-          <div class="flex items-center justify-between py-2">
-            <span class="text-muted-foreground">{{ $t('chat.infoCacheWrite') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_write_tokens ?? 0) }}</span>
-          </div>
         </div>
 
         <!-- Compact Now -->

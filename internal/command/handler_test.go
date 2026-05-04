@@ -389,7 +389,6 @@ func TestExecute_StatusLatest(t *testing.T) {
 		latestUsage:     1200,
 		cacheRow: dbsqlc.GetSessionCacheStatsRow{
 			CacheReadTokens:  300,
-			CacheWriteTokens: 150,
 			TotalInputTokens: 1200,
 		},
 		skills: []string{"search", "browser"},

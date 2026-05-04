@@ -8,7 +8,6 @@ SELECT
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER)), 0) AS input_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.outputTokens') AS INTEGER)), 0) AS output_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER)), 0) AS cache_read_tokens,
-  COALESCE(SUM(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheWriteTokens') AS INTEGER)), 0) AS cache_write_tokens,
   COALESCE(SUM(CAST(json_extract(m.usage, '$.outputTokenDetails.reasoningTokens') AS INTEGER)), 0) AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
@@ -57,7 +56,6 @@ SELECT
   COALESCE(CAST(json_extract(m.usage, '$.inputTokens') AS INTEGER), 0) AS input_tokens,
   COALESCE(CAST(json_extract(m.usage, '$.outputTokens') AS INTEGER), 0) AS output_tokens,
   COALESCE(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheReadTokens') AS INTEGER), 0) AS cache_read_tokens,
-  COALESCE(CAST(json_extract(m.usage, '$.inputTokenDetails.cacheWriteTokens') AS INTEGER), 0) AS cache_write_tokens,
   COALESCE(CAST(json_extract(m.usage, '$.outputTokenDetails.reasoningTokens') AS INTEGER), 0) AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id
