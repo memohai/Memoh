@@ -63,7 +63,10 @@ func (*atomicMockProvider) TestModel(context.Context, string) (*sdk.ModelTestRes
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (m *atomicMockProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (m *atomicMockProvider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	call := int(m.calls.Add(1))
 	return m.handler(call, params)
 }
