@@ -72,7 +72,7 @@ func NewClient(baseURL, token string) *Client {
 // (e.g. desktop has never been launched on this machine, so config.toml
 // is missing). Callers should surface a "open Memoh.app once" message.
 func NewLocalClient(ctx context.Context) (*Client, error) {
-	configPath, err := local.ConfigPath()
+	configPath, err := local.ResolveConfigPath()
 	if err != nil {
 		return nil, err
 	}

@@ -94,7 +94,8 @@ func IsAlive(pid int) bool {
 type SpawnOptions struct {
 	// Binary defaults to BundledServerBinary().
 	Binary string
-	// ConfigPath defaults to ConfigPath().
+	// ConfigPath defaults to ResolveConfigPath() — i.e. picks
+	// whichever of the packaged or dev config.toml exists.
 	ConfigPath string
 	// WorkingDir defaults to UserDataDir().
 	WorkingDir string
@@ -126,13 +127,12 @@ func StartServer(opts SpawnOptions) (*ManagedPid, error) {
 	}
 	configPath := opts.ConfigPath
 	if configPath == "" {
-		resolved, err := ConfigPath()
+		resolved, err := ResolveConfigPath()
 		if err != nil {
 			return nil, err
 		}
 		configPath = resolved
-	}
-	if _, err := os.Stat(configPath); err != nil {
+	} else if _, err := os.Stat(configPath); err != nil {
 		return nil, fmt.Errorf("config not found at %s; open Memoh.app once to initialize: %w", configPath, err)
 	}
 	workDir := opts.WorkingDir

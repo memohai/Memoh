@@ -63,14 +63,49 @@ func MustUserDataDir() string {
 	return dir
 }
 
-// ConfigPath returns the path to the rendered config.toml that desktop
-// generates on first launch.
+// ConfigPath returns the path where a packaged Memoh.app writes
+// config.toml. Use ResolveConfigPath when you need to read it — that
+// helper also recognizes the dev-mode location.
 func ConfigPath() (string, error) {
 	dir, err := UserDataDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "config.toml"), nil
+}
+
+// devConfigPath mirrors `desktopServerWorkDir()` in
+// apps/desktop/src/main/paths.ts: in dev (electron-vite) the desktop
+// renders config.toml into userData/local-server/config.toml so it
+// can sit next to the freshly-built dev server binary.
+func devConfigPath() (string, error) {
+	dir, err := UserDataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "local-server", "config.toml"), nil
+}
+
+// ResolveConfigPath returns whichever config.toml actually exists on
+// disk — the packaged location takes precedence, falling back to the
+// dev location. Returns an error with both candidates listed when
+// neither file is present so users know to launch the desktop once.
+func ResolveConfigPath() (string, error) {
+	packaged, err := ConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(packaged); statErr == nil {
+		return packaged, nil
+	}
+	dev, err := devConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(dev); statErr == nil {
+		return dev, nil
+	}
+	return "", fmt.Errorf("config.toml not found in either %q or %q; open Memoh.app once to initialize", packaged, dev)
 }
 
 // PidPath returns the path to the desktop-managed server's pid file.
