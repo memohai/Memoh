@@ -206,6 +206,12 @@ func (c *UIMessageStreamConverter) findToolState(toolCallID, toolName string) *u
 		if state, ok := c.tools[trimmed]; ok {
 			return state
 		}
+		// An explicit but unknown tool_call_id means this is a new call,
+		// not a continuation of an in-flight one. Falling back to a
+		// name-based match here would merge unrelated calls of the same
+		// tool (e.g. three sequential `search` invocations) into one UI
+		// message, which is exactly what we want to avoid.
+		return nil
 	}
 
 	normalizedName := strings.TrimSpace(toolName)
