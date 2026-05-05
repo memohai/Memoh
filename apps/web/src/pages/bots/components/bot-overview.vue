@@ -1,5 +1,38 @@
 <template>
   <div class="max-w-2xl mx-auto pb-12 space-y-5">
+    <!-- Top Action Bar -->
+    <div class="flex items-start justify-between pb-4 border-b border-border/50">
+      <div class="space-y-1">
+        <h3 class="text-sm font-semibold text-foreground">
+          {{ $t('bots.tabs.overview') }}
+        </h3>
+        <p class="text-[11px] text-muted-foreground">
+          {{ $t('bots.tabs.overviewSubtitle') }}
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <p class="text-[11px] text-muted-foreground hidden sm:block">
+          {{ $t('bots.checks.lastSync', { time: lastSyncTime }) }}
+        </p>
+        <Button
+          size="sm"
+          class="h-8 text-xs font-medium min-w-24 shadow-none mt-1"
+          :disabled="checksLoading"
+          @click="handleRefreshChecks"
+        >
+          <RotateCcw
+            v-if="!checksLoading"
+            class="size-3.5 shrink-0 mr-1.5"
+          />
+          <Spinner
+            v-else
+            class="size-3.5 shrink-0 mr-1.5"
+          />
+          {{ $t('common.refresh') }}
+        </Button>
+      </div>
+    </div>
+
     <!-- Hero Section -->
     <div class="space-y-4 rounded-md border p-4">
       <!-- Section Header -->
@@ -13,7 +46,7 @@
       </div>
 
       <!-- Metrics Grid -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <div class="grid gap-3 sm:grid-cols-2">
         <!-- Health Status Card -->
         <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
           <div class="space-y-2">
@@ -69,37 +102,6 @@
                 v-if="checks.length === 0"
                 class="h-full w-full bg-muted rounded-full"
               />
-            </div>
-          </div>
-        </div>
-
-        <!-- Actions Card -->
-        <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
-          <p class="text-xs text-muted-foreground mb-2">
-            {{ $t('bots.checks.actionsTitle') }}
-          </p>
-          <div class="flex flex-col space-y-3 mt-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              class="w-full justify-center h-8"
-              :disabled="checksLoading"
-              @click="handleRefreshChecks"
-            >
-              <RotateCcw
-                v-if="!checksLoading"
-                class="size-3.5 shrink-0"
-              />
-              <Spinner
-                v-else
-                class="size-3.5 shrink-0"
-              />
-              {{ $t('common.refresh') }}
-            </Button>
-            <div class="min-h-[32px] flex items-center">
-              <p class="text-[11px] leading-4 text-muted-foreground break-words">
-                {{ $t('bots.checks.lastSync', { time: lastSyncTime }) }}
-              </p>
             </div>
           </div>
         </div>

@@ -834,6 +834,7 @@
     },
     "tabs": {
       "overview": "Overview",
+      "overviewSubtitle": "Monitor system services and troubleshoot runtime errors.",
       "general": "General",
       "toolApproval": "Tool Approval",
       "memory": "Memory",

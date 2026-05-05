@@ -830,6 +830,7 @@
     },
     "tabs": {
       "overview": "概览",
+      "overviewSubtitle": "监控系统服务状态，并排查运行时的各类错误日志。",
       "general": "通用",
       "toolApproval": "工具审核",
       "memory": "记忆",
