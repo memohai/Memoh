@@ -16,15 +16,15 @@
       <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.chatLanguage') }}</Label>
         <SearchableSelectPopover
-          :model-value="form.language"
+          :model-value="form.language || 'auto'"
           :options="languageOptions"
           :placeholder="$t('bots.settings.chatLanguagePlaceholder')"
           :search-placeholder="$t('common.search')"
           :empty-text="$t('common.noData')"
           :show-group-headers="false"
-          @update:model-value="(v) => form.language = v"
+          @update:model-value="(v) => form.language = (v === 'auto' ? '' : v)"
         >
-          <template #trigger="{ open, displayLabel }">
+          <template #trigger="{ open, displayLabel, selectedOption }">
             <Button
               variant="outline"
               role="combobox"
@@ -33,6 +33,10 @@
               class="shadow-none border-border bg-transparent rounded-md text-xs h-8 w-full font-normal justify-between"
             >
               <span class="flex min-w-0 items-center gap-2 truncate">
+                <Sparkles 
+                  v-if="selectedOption?.value === 'auto' || !selectedOption" 
+                  class="size-3.5 shrink-0 text-primary" 
+                />
                 <span
                   class="truncate"
                   :title="displayLabel || $t('bots.settings.chatLanguagePlaceholder')"
@@ -43,10 +47,16 @@
               />
             </Button>
           </template>
+          <template #option-icon="{ option }">
+            <Sparkles 
+              v-if="option.value === 'auto'" 
+              class="size-3.5 shrink-0 text-primary" 
+            />
+          </template>
           <template #option-label="{ option }">
             <span
               class="truncate flex-1 text-left text-xs"
-              :class="{ 'text-muted-foreground': !option.value }"
+              :class="{ 'text-muted-foreground': option.value === 'auto' }"
               :title="option.label"
             >
               {{ option.label }}
@@ -74,7 +84,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Label, Button } from '@memohai/ui'
-import { Search } from 'lucide-vue-next'
+import { Search, Sparkles } from 'lucide-vue-next'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { emptyTimezoneValue } from '@/utils/timezones'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
@@ -90,7 +100,7 @@ defineProps<{
 
 const languageOptions = computed<SearchableSelectOption[]>(() => {
   const autoOption: SearchableSelectOption = {
-    value: '',
+    value: 'auto',
     label: t('languages.auto') || t('bots.settings.chatLanguagePlaceholder'),
     keywords: ['auto', t('languages.auto'), t('bots.settings.chatLanguagePlaceholder')],
   }
