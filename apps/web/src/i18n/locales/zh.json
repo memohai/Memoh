@@ -9,6 +9,7 @@
     "edit": "编辑",
     "delete": "删除",
     "search": "搜索",
+    "noData": "暂无数据",
     "loading": "加载中...",
     "operation": "操作",
     "enable": "启用",
@@ -57,7 +58,7 @@
     "retryHint": "请检查后重新输入"
   },
   "sidebar": {
-    "session":"会话",
+    "session": "会话",
     "chat": "对话",
     "bots": "Bots",
     "providers": "模型",
@@ -326,7 +327,7 @@
     "compatibility": {
       "vision": "视觉",
       "tool-call": "工具调用",
-      "image-output": "图片生成",
+      "image-output": "生图",
       "reasoning": "推理"
     },
     "contextWindow": "上下文窗口",
@@ -785,12 +786,12 @@
       "deleteFailed": "删除失败"
     },
     "checks": {
-      "title": "运行时检查",
-      "subtitle": "查看当前健康状态与异常详情。",
-      "ok": "无异常",
+      "title": "系统自检",
+      "subtitle": "监控核心服务的运行状况与错误日志。",
+      "ok": "一切正常",
       "hasIssue": "存在异常",
-      "issueCount": "{count} 个异常",
-      "empty": "暂无检查项",
+      "issueCount": "{count} 项告警",
+      "empty": "当前系统未注册任何自检项。",
       "loadFailed": "加载运行时检查失败",
       "actions": {},
       "titles": {
@@ -813,8 +814,19 @@
         "ok": "正常",
         "warn": "警告",
         "error": "错误",
-        "unknown": "未知"
-      }
+        "unknown": "未知",
+        "issue": "运行异常",
+        "stable": "运行平稳"
+      },
+      "statusTitle": "当前状态",
+      "vitalityTitle": "健康度",
+      "vitalityUnit": "项",
+      "actionsTitle": "快捷操作",
+      "lastSync": "上次刷新：{time}",
+      "diagnosticTitle": "诊断日志",
+      "diagnosticSubtitle": "查看底层的调用链路与报错堆栈。",
+      "expandAll": "全部展开",
+      "collapse": "全部收起"
     },
     "tabs": {
       "overview": "概览",
@@ -1095,7 +1107,21 @@
       "save": "保存设置",
       "dangerZone": "危险操作",
       "deleteBotDescription": "删除此 Bot 后无法恢复，请谨慎操作。",
-      "deleteBot": "删除 Bot"
+      "deleteBot": "删除 Bot",
+      "blocks": {
+        "global": "全局设置",
+        "interaction": "模型与行为",
+        "context": "知识与上下文",
+        "multimedia": "多媒体交互",
+        "globalDescription": "基础运行环境与语言偏好。",
+        "interactionDescription": "设置驱动对话的核心大模型及其输出偏好。",
+        "contextDescription": "配置联网搜索、浏览器环境与长期记忆数据库。",
+        "multimediaDescription": "设置语音合成、语音识别及图像生成的专属模型。"
+      },
+      "showMemoryDetails": "展开详细索引状态",
+      "hideMemoryDetails": "收起详细索引状态",
+      "chatLanguage": "对话语言",
+      "chatLanguagePlaceholder": "自动检测"
     },
     "access": {
       "title": "访问控制",
@@ -1537,5 +1563,17 @@
     "skillInstallTitle": "安装 Skill",
     "loadError": "从市场加载失败",
     "submit": "提交"
+  },
+  "languages": {
+    "auto": "自动检测",
+    "zh-CN": "简体中文 (zh-CN)",
+    "en-US": "英语 (en-US)",
+    "ja-JP": "日语 (ja-JP)",
+    "ko-KR": "韩语 (ko-KR)",
+    "fr-FR": "法语 (fr-FR)",
+    "de-DE": "德语 (de-DE)",
+    "es-ES": "西班牙语 (es-ES)",
+    "ru-RU": "俄语 (ru-RU)",
+    "it-IT": "意大利语 (it-IT)"
   }
 }
