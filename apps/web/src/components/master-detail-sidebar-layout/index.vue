@@ -4,7 +4,7 @@
     :default-open="true"
   >
     <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full!"
+      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-56! border-r-0! bg-muted/10!"
     >
       <SidebarHeader v-if="slots['sidebar-header']">
         <slot name="sidebar-header" />
