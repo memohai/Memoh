@@ -11,7 +11,7 @@
         </p>
       </div>
       <div class="flex items-center gap-3">
-        <p class="text-[11px] text-muted-foreground hidden sm:block">
+        <p class="text-[11px] text-muted-foreground/60 hidden sm:block mt-1 tracking-wide">
           {{ $t('bots.checks.lastSync', { time: lastSyncTime }) }}
         </p>
         <Button
