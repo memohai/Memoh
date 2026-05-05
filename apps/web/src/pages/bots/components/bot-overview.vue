@@ -15,25 +15,29 @@
       <!-- Metrics Grid -->
       <div class="grid gap-3 sm:grid-cols-3">
         <!-- Health Status Card -->
-        <div class="rounded-md border bg-background/70 p-3 space-y-2">
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.checks.statusTitle') }}
-          </p>
-          <div class="flex items-center gap-2 mt-2">
-            <component 
-              :is="hasIssue ? AlertCircle : CheckCircle2" 
-              :class="[
-                'w-5 h-5 shrink-0 transition-colors',
-                hasIssue ? 'text-destructive' : 'text-foreground'
-              ]"
-            />
-            <p class="text-2xl font-semibold">
-              {{ hasIssue ? $t('bots.checks.status.issue') : $t('bots.checks.status.stable') }}
+        <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
+          <div class="space-y-2">
+            <p class="text-xs text-muted-foreground">
+              {{ $t('bots.checks.statusTitle') }}
+            </p>
+            <div class="flex items-center gap-2 mt-2">
+              <component 
+                :is="hasIssue ? AlertCircle : CheckCircle2" 
+                :class="[
+                  'w-5 h-5 shrink-0 transition-colors',
+                  hasIssue ? 'text-destructive' : 'text-foreground'
+                ]"
+              />
+              <p class="text-2xl font-semibold">
+                {{ hasIssue ? $t('bots.checks.status.issue') : $t('bots.checks.status.stable') }}
+              </p>
+            </div>
+          </div>
+          <div class="mt-3 min-h-[32px] flex items-center">
+            <p class="text-[11px] leading-4 text-muted-foreground break-words">
+              {{ checksSummaryText }}
             </p>
           </div>
-          <p class="mt-2 text-[11px] text-muted-foreground">
-            {{ checksSummaryText }}
-          </p>
         </div>
 
         <!-- System Vitality Card -->
@@ -49,21 +53,23 @@
           </div>
           
           <!-- Segmented Progress Bar -->
-          <div class="flex gap-1 h-1.5 w-full mt-3">
-            <div 
-              v-for="(check, index) in checks" 
-              :key="index"
-              class="h-full rounded-full transition-all duration-500"
-              :class="[
-                check.status === 'ok' ? 'bg-foreground' : 
-                check.status === 'error' ? 'bg-destructive' : 'bg-muted-foreground/40',
-                'flex-1'
-              ]"
-            />
-            <div
-              v-if="checks.length === 0"
-              class="h-full w-full bg-muted rounded-full"
-            />
+          <div class="mt-3 min-h-[32px] flex items-center w-full">
+            <div class="flex gap-1 h-1.5 w-full">
+              <div 
+                v-for="(check, index) in checks" 
+                :key="index"
+                class="h-full rounded-full transition-all duration-500"
+                :class="[
+                  check.status === 'ok' ? 'bg-foreground' : 
+                  check.status === 'error' ? 'bg-destructive' : 'bg-muted-foreground/40',
+                  'flex-1'
+                ]"
+              />
+              <div
+                v-if="checks.length === 0"
+                class="h-full w-full bg-muted rounded-full"
+              />
+            </div>
           </div>
         </div>
 
@@ -82,17 +88,19 @@
             >
               <RotateCcw
                 v-if="!checksLoading"
-                class="mr-2 w-3.5 h-3.5"
+                class="size-3.5 shrink-0"
               />
               <Spinner
                 v-else
-                class="mr-2"
+                class="size-3.5 shrink-0"
               />
               {{ $t('common.refresh') }}
             </Button>
-            <p class="text-[11px] text-muted-foreground break-all">
-              {{ $t('bots.checks.lastSync', { time: lastSyncTime }) }}
-            </p>
+            <div class="min-h-[32px] flex items-center">
+              <p class="text-[11px] leading-4 text-muted-foreground break-words">
+                {{ $t('bots.checks.lastSync', { time: lastSyncTime }) }}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -152,8 +160,18 @@
         <div
           v-for="i in 5"
           :key="i"
-          class="h-12 rounded-md border bg-muted/10 animate-pulse"
-        />
+          class="rounded-md border transition-opacity opacity-60"
+        >
+          <div class="flex w-full items-center justify-between gap-3 px-3 py-2">
+            <div class="flex items-center gap-3 min-w-0 w-full">
+              <div class="w-4 h-4 shrink-0 rounded-full bg-muted/40 animate-pulse" />
+              <div class="min-w-0 space-y-0.5 w-full">
+                <div class="h-3 w-32 rounded bg-muted/40 animate-pulse" />
+              </div>
+            </div>
+            <div class="size-4 shrink-0 rounded-sm bg-muted/40 animate-pulse" />
+          </div>
+        </div>
       </div>
 
       <!-- Smart Collapsible List -->
