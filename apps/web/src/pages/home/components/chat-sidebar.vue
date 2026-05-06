@@ -4,25 +4,27 @@
     :style="{ width: `${sidebarWidth}px` }"
   >
     <div class="flex flex-col h-full flex-1 min-w-0 bg-sidebar border-r border-border">
-      <div class="flex items-center h-12 shrink-0 border-b border-border bg-sidebar/60 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:drag]">
-        <button
-          v-for="tab in activityTabs"
-          :key="tab.id"
-          type="button"
-          class="relative flex items-center justify-center size-8 shrink-0 rounded-md transition-colors before:absolute before:h-0.5 before:left-1.5 before:right-1.5 before:top-0 before:rounded-full [-webkit-app-region:no-drag]"
-          :class="activeTab === tab.id
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground before:bg-[#8B56E3]'
-            : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground before:bg-transparent'"
-          :title="tab.label"
-          :aria-label="tab.label"
-          :aria-current="activeTab === tab.id ? 'page' : undefined"
-          @click="activeTab = tab.id"
-        >
-          <component
-            :is="tab.icon"
-            class="size-4"
-          />
-        </button>
+      <div class="flex items-center h-12 shrink-0 border-b border-border bg-sidebar/60 [-webkit-app-region:drag]">
+        <div class="flex items-center min-w-0 max-w-full px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:no-drag]">
+          <button
+            v-for="tab in activityTabs"
+            :key="tab.id"
+            type="button"
+            class="relative flex items-center justify-center size-8 shrink-0 rounded-md transition-colors before:absolute before:h-0.5 before:left-1.5 before:right-1.5 before:top-0 before:rounded-full"
+            :class="activeTab === tab.id
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground before:bg-[#8B56E3]'
+              : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground before:bg-transparent'"
+            :title="tab.label"
+            :aria-label="tab.label"
+            :aria-current="activeTab === tab.id ? 'page' : undefined"
+            @click="activeTab = tab.id"
+          >
+            <component
+              :is="tab.icon"
+              class="size-4"
+            />
+          </button>
+        </div>
       </div>
 
       <div class="flex-1 min-h-0 relative">
