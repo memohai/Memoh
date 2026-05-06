@@ -102,7 +102,6 @@ In `/help` output, owner-only actions are marked with `[owner]`.
 | `/model` | View and switch bot models | None |
 | `/memory` | View and switch memory providers | None |
 | `/search` | View and switch search providers | None |
-| `/browser` | View and switch browser contexts | None |
 | `/usage` | View token usage | `summary` |
 | `/email` | Inspect email providers, bindings, and outbox | None |
 | `/heartbeat` | View recent heartbeat logs | `logs` |
@@ -299,18 +298,6 @@ Actions:
 | `list` | `/search list` | All |
 | `current` | `/search current` | All |
 | `set` | `/search set <name>` | Owner |
-
-### `/browser`
-
-Shows or switches the active browser context.
-
-Actions:
-
-| Action | Usage | Permission |
-|--------|-------|------------|
-| `list` | `/browser list` | All |
-| `current` | `/browser current` | All |
-| `set` | `/browser set <name>` | Owner |
 
 ### `/mcp`
 

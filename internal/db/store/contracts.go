@@ -166,14 +166,6 @@ type SearchProviderStore interface {
 	Delete(ctx context.Context, id ID) error
 }
 
-type BrowserContextStore interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	GetByID(ctx context.Context, id ID) (Record, error)
-	List(ctx context.Context) ([]Record, error)
-	Update(ctx context.Context, id ID, input Patch) (Record, error)
-	Delete(ctx context.Context, id ID) error
-}
-
 type MessageRepository interface {
 	Create(ctx context.Context, input Input) (Record, error)
 	CreateAsset(ctx context.Context, input Input) (Record, error)

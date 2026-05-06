@@ -31,7 +31,6 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				{"Heartbeat Model", h.resolveModelName(cc, s.HeartbeatModelID)},
 				{"Search Provider", h.resolveSearchProviderName(cc, s.SearchProviderID)},
 				{"Memory Provider", h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
-				{"Browser Context", h.resolveBrowserContextName(cc, s.BrowserContextID)},
 			}), nil
 		},
 	})
@@ -163,21 +162,6 @@ func (h *Handler) resolveMemoryProviderName(cc CommandContext, id string) string
 		return id
 	}
 	p, err := h.memProvService.Get(cc.Ctx, id)
-	if err != nil {
-		return id
-	}
-	return p.Name
-}
-
-// resolveBrowserContextName resolves a browser context UUID to its name.
-func (h *Handler) resolveBrowserContextName(cc CommandContext, id string) string {
-	if id == "" {
-		return "(none)"
-	}
-	if h.browserCtxService == nil {
-		return id
-	}
-	p, err := h.browserCtxService.GetByID(cc.Ctx, id)
 	if err != nil {
 		return id
 	}

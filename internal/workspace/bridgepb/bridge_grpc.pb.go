@@ -26,6 +26,7 @@ const (
 	ContainerService_Mkdir_FullMethodName      = "/bridgepb.ContainerService/Mkdir"
 	ContainerService_Rename_FullMethodName     = "/bridgepb.ContainerService/Rename"
 	ContainerService_Exec_FullMethodName       = "/bridgepb.ContainerService/Exec"
+	ContainerService_Tunnel_FullMethodName     = "/bridgepb.ContainerService/Tunnel"
 	ContainerService_ReadRaw_FullMethodName    = "/bridgepb.ContainerService/ReadRaw"
 	ContainerService_WriteRaw_FullMethodName   = "/bridgepb.ContainerService/WriteRaw"
 	ContainerService_DeleteFile_FullMethodName = "/bridgepb.ContainerService/DeleteFile"
@@ -42,6 +43,7 @@ type ContainerServiceClient interface {
 	Mkdir(ctx context.Context, in *MkdirRequest, opts ...grpc.CallOption) (*MkdirResponse, error)
 	Rename(ctx context.Context, in *RenameRequest, opts ...grpc.CallOption) (*RenameResponse, error)
 	Exec(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecInput, ExecOutput], error)
+	Tunnel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TunnelFrame, TunnelFrame], error)
 	ReadRaw(ctx context.Context, in *ReadRawRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DataChunk], error)
 	WriteRaw(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteRawChunk, WriteRawResponse], error)
 	DeleteFile(ctx context.Context, in *DeleteFileRequest, opts ...grpc.CallOption) (*DeleteFileResponse, error)
@@ -128,9 +130,22 @@ func (c *containerServiceClient) Exec(ctx context.Context, opts ...grpc.CallOpti
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ContainerService_ExecClient = grpc.BidiStreamingClient[ExecInput, ExecOutput]
 
+func (c *containerServiceClient) Tunnel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TunnelFrame, TunnelFrame], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ContainerService_ServiceDesc.Streams[1], ContainerService_Tunnel_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TunnelFrame, TunnelFrame]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ContainerService_TunnelClient = grpc.BidiStreamingClient[TunnelFrame, TunnelFrame]
+
 func (c *containerServiceClient) ReadRaw(ctx context.Context, in *ReadRawRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DataChunk], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ContainerService_ServiceDesc.Streams[1], ContainerService_ReadRaw_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ContainerService_ServiceDesc.Streams[2], ContainerService_ReadRaw_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +164,7 @@ type ContainerService_ReadRawClient = grpc.ServerStreamingClient[DataChunk]
 
 func (c *containerServiceClient) WriteRaw(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteRawChunk, WriteRawResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ContainerService_ServiceDesc.Streams[2], ContainerService_WriteRaw_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ContainerService_ServiceDesc.Streams[3], ContainerService_WriteRaw_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +196,7 @@ type ContainerServiceServer interface {
 	Mkdir(context.Context, *MkdirRequest) (*MkdirResponse, error)
 	Rename(context.Context, *RenameRequest) (*RenameResponse, error)
 	Exec(grpc.BidiStreamingServer[ExecInput, ExecOutput]) error
+	Tunnel(grpc.BidiStreamingServer[TunnelFrame, TunnelFrame]) error
 	ReadRaw(*ReadRawRequest, grpc.ServerStreamingServer[DataChunk]) error
 	WriteRaw(grpc.ClientStreamingServer[WriteRawChunk, WriteRawResponse]) error
 	DeleteFile(context.Context, *DeleteFileRequest) (*DeleteFileResponse, error)
@@ -214,6 +230,9 @@ func (UnimplementedContainerServiceServer) Rename(context.Context, *RenameReques
 }
 func (UnimplementedContainerServiceServer) Exec(grpc.BidiStreamingServer[ExecInput, ExecOutput]) error {
 	return status.Error(codes.Unimplemented, "method Exec not implemented")
+}
+func (UnimplementedContainerServiceServer) Tunnel(grpc.BidiStreamingServer[TunnelFrame, TunnelFrame]) error {
+	return status.Error(codes.Unimplemented, "method Tunnel not implemented")
 }
 func (UnimplementedContainerServiceServer) ReadRaw(*ReadRawRequest, grpc.ServerStreamingServer[DataChunk]) error {
 	return status.Error(codes.Unimplemented, "method ReadRaw not implemented")
@@ -360,6 +379,13 @@ func _ContainerService_Exec_Handler(srv interface{}, stream grpc.ServerStream) e
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ContainerService_ExecServer = grpc.BidiStreamingServer[ExecInput, ExecOutput]
 
+func _ContainerService_Tunnel_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ContainerServiceServer).Tunnel(&grpc.GenericServerStream[TunnelFrame, TunnelFrame]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ContainerService_TunnelServer = grpc.BidiStreamingServer[TunnelFrame, TunnelFrame]
+
 func _ContainerService_ReadRaw_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ReadRawRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -436,6 +462,12 @@ var ContainerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Exec",
 			Handler:       _ContainerService_Exec_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Tunnel",
+			Handler:       _ContainerService_Tunnel_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

@@ -24,7 +24,6 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
   { name: 'speech', path: '/settings/speech', loader: () => import('@memohai/web/pages/speech/index.vue') },
   { name: 'transcription', path: '/settings/transcription', loader: () => import('@memohai/web/pages/transcription/index.vue') },
   { name: 'email', path: '/settings/email', loader: () => import('@memohai/web/pages/email/index.vue') },
-  { name: 'browser', path: '/settings/browser', loader: () => import('@memohai/web/pages/browser/index.vue') },
   { name: 'usage', path: '/settings/usage', loader: () => import('@memohai/web/pages/usage/index.vue') },
   { name: 'platform', path: '/settings/platform', loader: () => import('@memohai/web/pages/platform/index.vue') },
   { name: 'supermarket', path: '/settings/supermarket', loader: () => import('@memohai/web/pages/supermarket/index.vue') },

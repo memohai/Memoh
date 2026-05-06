@@ -10,7 +10,6 @@ The manifests include:
 
 - `memoh-server`: API server and in-process agent
 - `memoh-web`: web UI
-- `memoh-browser`: browser gateway
 - `memoh-postgres`: PostgreSQL StatefulSet
 - `memoh-qdrant`: Qdrant StatefulSet
 - `memoh-server` initContainer: runs `migrate up` before the server starts
@@ -79,7 +78,7 @@ For local clusters that can see locally built images, use the included overlay:
 kubectl apply -k deploy/kubernetes-local
 ```
 
-It rewrites `memohai/server`, `memohai/web`, and `memohai/browser` to the `k8s-dev` tag.
+It rewrites `memohai/server` and `memohai/web` to the `k8s-dev` tag.
 
 ## Updating images
 

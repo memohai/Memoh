@@ -365,9 +365,10 @@ const isContainerTaskRunning = computed(() => {
   const info = containerInfo.value
   if (!info) return false
 
+  if (info.task_running) return true
   const status = (info.status ?? '').trim().toLowerCase()
   if (status === 'stopped' || status === 'exited') return false
-  return !!info.task_running
+  return false
 })
 
 const hasPreservedData = computed(() => !!containerInfo.value?.has_preserved_data)

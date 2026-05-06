@@ -513,24 +513,6 @@ export type BotsUpdateBotRequest = {
     timezone?: string;
 };
 
-export type BrowsercontextsBrowserContext = {
-    config?: Array<number>;
-    created_at?: string;
-    id?: string;
-    name?: string;
-    updated_at?: string;
-};
-
-export type BrowsercontextsCreateRequest = {
-    config?: Array<number>;
-    name?: string;
-};
-
-export type BrowsercontextsUpdateRequest = {
-    config?: Array<number>;
-    name?: string;
-};
-
 export type ChannelAction = {
     label?: string;
     type?: string;
@@ -745,6 +727,13 @@ export type CompactionLog = {
     usage?: unknown;
 };
 
+export type DisplaySessionInfo = {
+    codec?: string;
+    created_at?: string;
+    id?: string;
+    state?: string;
+};
+
 export type EmailBindingResponse = {
     bot_id?: string;
     can_delete?: boolean;
@@ -866,10 +855,6 @@ export type GithubComMemohaiMemohInternalMcpConnection = {
 
 export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
-};
-
-export type HandlersBrowserCoresResponse = {
-    cores?: Array<string>;
 };
 
 export type HandlersCacheStats = {
@@ -1291,6 +1276,38 @@ export type HandlersCreateSessionRequest = {
         [key: string]: unknown;
     };
     title?: string;
+};
+
+export type HandlersDisplayInfoResponse = {
+    available?: boolean;
+    browser_available?: boolean;
+    desktop_available?: boolean;
+    enabled?: boolean;
+    encoder?: string;
+    encoder_available?: boolean;
+    prepare_supported?: boolean;
+    prepare_system?: string;
+    running?: boolean;
+    toolkit_available?: boolean;
+    transport?: string;
+    unavailable_reason?: string;
+};
+
+export type HandlersDisplaySessionListResponse = {
+    items?: Array<DisplaySessionInfo>;
+};
+
+export type HandlersDisplayWebRtcOfferRequest = {
+    candidate_host?: string;
+    sdp?: string;
+    session_id?: string;
+    type?: string;
+};
+
+export type HandlersDisplayWebRtcOfferResponse = {
+    sdp?: string;
+    session_id?: string;
+    type?: string;
 };
 
 export type HandlersEmailOAuthStatusResponse = {
@@ -1810,13 +1827,13 @@ export type SessionSession = {
 
 export type SettingsSettings = {
     acl_default_effect?: string;
-    browser_context_id?: string;
     chat_model_id?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
+    display_enabled?: boolean;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -1861,13 +1878,13 @@ export type SettingsToolApprovalFilePolicy = {
 
 export type SettingsUpsertRequest = {
     acl_default_effect?: string;
-    browser_context_id?: string;
     chat_model_id?: string;
     compaction_enabled?: boolean;
     compaction_model_id?: string;
     compaction_ratio?: number;
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
+    display_enabled?: boolean;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -2728,6 +2745,165 @@ export type PostBotsByBotIdContainerDataRestoreResponses = {
 };
 
 export type PostBotsByBotIdContainerDataRestoreResponse = PostBotsByBotIdContainerDataRestoreResponses[keyof PostBotsByBotIdContainerDataRestoreResponses];
+
+export type GetBotsByBotIdContainerDisplayData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display';
+};
+
+export type GetBotsByBotIdContainerDisplayErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerDisplayError = GetBotsByBotIdContainerDisplayErrors[keyof GetBotsByBotIdContainerDisplayErrors];
+
+export type GetBotsByBotIdContainerDisplayResponses = {
+    /**
+     * OK
+     */
+    200: HandlersDisplayInfoResponse;
+};
+
+export type GetBotsByBotIdContainerDisplayResponse = GetBotsByBotIdContainerDisplayResponses[keyof GetBotsByBotIdContainerDisplayResponses];
+
+export type PostBotsByBotIdContainerDisplayPrepareData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/prepare';
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareError = PostBotsByBotIdContainerDisplayPrepareErrors[keyof PostBotsByBotIdContainerDisplayPrepareErrors];
+
+export type PostBotsByBotIdContainerDisplayPrepareResponses = {
+    /**
+     * SSE stream of display preparation events
+     */
+    200: string;
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareResponse = PostBotsByBotIdContainerDisplayPrepareResponses[keyof PostBotsByBotIdContainerDisplayPrepareResponses];
+
+export type GetBotsByBotIdContainerDisplaySessionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/sessions';
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsError = GetBotsByBotIdContainerDisplaySessionsErrors[keyof GetBotsByBotIdContainerDisplaySessionsErrors];
+
+export type GetBotsByBotIdContainerDisplaySessionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersDisplaySessionListResponse;
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsResponse = GetBotsByBotIdContainerDisplaySessionsResponses[keyof GetBotsByBotIdContainerDisplaySessionsResponses];
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Display session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/sessions/{session_id}';
+};
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdError = DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors];
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostBotsByBotIdContainerDisplayWebrtcOfferData = {
+    /**
+     * WebRTC offer payload
+     */
+    body: HandlersDisplayWebRtcOfferRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/webrtc/offer';
+};
+
+export type PostBotsByBotIdContainerDisplayWebrtcOfferErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDisplayWebrtcOfferError = PostBotsByBotIdContainerDisplayWebrtcOfferErrors[keyof PostBotsByBotIdContainerDisplayWebrtcOfferErrors];
+
+export type PostBotsByBotIdContainerDisplayWebrtcOfferResponses = {
+    /**
+     * OK
+     */
+    200: HandlersDisplayWebRtcOfferResponse;
+};
+
+export type PostBotsByBotIdContainerDisplayWebrtcOfferResponse = PostBotsByBotIdContainerDisplayWebrtcOfferResponses[keyof PostBotsByBotIdContainerDisplayWebrtcOfferResponses];
 
 export type GetBotsByBotIdContainerFsData = {
     body?: never;
@@ -6637,191 +6813,6 @@ export type PutBotsByIdOwnerResponses = {
 };
 
 export type PutBotsByIdOwnerResponse = PutBotsByIdOwnerResponses[keyof PutBotsByIdOwnerResponses];
-
-export type GetBrowserContextsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/browser-contexts';
-};
-
-export type GetBrowserContextsErrors = {
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBrowserContextsError = GetBrowserContextsErrors[keyof GetBrowserContextsErrors];
-
-export type GetBrowserContextsResponses = {
-    /**
-     * OK
-     */
-    200: Array<BrowsercontextsBrowserContext>;
-};
-
-export type GetBrowserContextsResponse = GetBrowserContextsResponses[keyof GetBrowserContextsResponses];
-
-export type PostBrowserContextsData = {
-    /**
-     * Browser context configuration
-     */
-    body: BrowsercontextsCreateRequest;
-    path?: never;
-    query?: never;
-    url: '/browser-contexts';
-};
-
-export type PostBrowserContextsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBrowserContextsError = PostBrowserContextsErrors[keyof PostBrowserContextsErrors];
-
-export type PostBrowserContextsResponses = {
-    /**
-     * Created
-     */
-    201: BrowsercontextsBrowserContext;
-};
-
-export type PostBrowserContextsResponse = PostBrowserContextsResponses[keyof PostBrowserContextsResponses];
-
-export type GetBrowserContextsCoresData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/browser-contexts/cores';
-};
-
-export type GetBrowserContextsCoresErrors = {
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetBrowserContextsCoresError = GetBrowserContextsCoresErrors[keyof GetBrowserContextsCoresErrors];
-
-export type GetBrowserContextsCoresResponses = {
-    /**
-     * OK
-     */
-    200: HandlersBrowserCoresResponse;
-};
-
-export type GetBrowserContextsCoresResponse = GetBrowserContextsCoresResponses[keyof GetBrowserContextsCoresResponses];
-
-export type DeleteBrowserContextsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Browser Context ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/browser-contexts/{id}';
-};
-
-export type DeleteBrowserContextsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBrowserContextsByIdError = DeleteBrowserContextsByIdErrors[keyof DeleteBrowserContextsByIdErrors];
-
-export type DeleteBrowserContextsByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBrowserContextsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Browser Context ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/browser-contexts/{id}';
-};
-
-export type GetBrowserContextsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBrowserContextsByIdError = GetBrowserContextsByIdErrors[keyof GetBrowserContextsByIdErrors];
-
-export type GetBrowserContextsByIdResponses = {
-    /**
-     * OK
-     */
-    200: BrowsercontextsBrowserContext;
-};
-
-export type GetBrowserContextsByIdResponse = GetBrowserContextsByIdResponses[keyof GetBrowserContextsByIdResponses];
-
-export type PutBrowserContextsByIdData = {
-    /**
-     * Updated configuration
-     */
-    body: BrowsercontextsUpdateRequest;
-    path: {
-        /**
-         * Browser Context ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/browser-contexts/{id}';
-};
-
-export type PutBrowserContextsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBrowserContextsByIdError = PutBrowserContextsByIdErrors[keyof PutBrowserContextsByIdErrors];
-
-export type PutBrowserContextsByIdResponses = {
-    /**
-     * OK
-     */
-    200: BrowsercontextsBrowserContext;
-};
-
-export type PutBrowserContextsByIdResponse = PutBrowserContextsByIdResponses[keyof PutBrowserContextsByIdResponses];
 
 export type GetChannelsData = {
     body?: never;

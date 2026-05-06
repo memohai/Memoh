@@ -213,16 +213,6 @@
       />
     </div>
 
-    <!-- Browser Context -->
-    <div class="space-y-2">
-      <Label>{{ $t('bots.settings.browserContext') }}</Label>
-      <BrowserContextSelect
-        v-model="form.browser_context_id"
-        :contexts="browserContexts"
-        :placeholder="$t('bots.settings.browserContextPlaceholder')"
-      />
-    </div>
-
     <!-- Timezone -->
     <div class="space-y-2">
       <Label>{{ $t('bots.timezone') }}</Label>
@@ -379,9 +369,8 @@ import { EFFORT_LABELS, EFFORT_OPACITY } from './reasoning-effort'
 import SearchProviderSelect from './search-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
 import TtsModelSelect from './tts-model-select.vue'
-import BrowserContextSelect from './browser-context-select.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBrowserContexts, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type { Ref } from 'vue'
@@ -482,14 +471,6 @@ const { data: transcriptionProviderData } = useQuery({
   },
 })
 
-const { data: browserContextData } = useQuery({
-  key: ['browser-contexts'],
-  query: async () => {
-    const { data } = await getBrowserContexts({ throwOnError: true })
-    return data
-  },
-})
-
 const { mutateAsync: updateSettings, isLoading } = useMutation({
   mutation: async (body: Partial<SettingsSettings>) => {
     const { data } = await putBotsByBotIdSettings({
@@ -540,7 +521,6 @@ const transcriptionProviders = computed(() => (transcriptionProviderData.value ?
 const enabledTranscriptionProviderIds = computed(() => new Set(transcriptionProviders.value.map((p: Record<string, unknown>) => p.id as string)))
 const ttsModels = computed(() => (ttsModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTtsProviderIds.value.has(m.provider_id as string)))
 const transcriptionModels = computed(() => (transcriptionModelData.value ?? []).filter((m: Record<string, unknown>) => enabledTranscriptionProviderIds.value.has(m.provider_id as string)))
-const browserContexts = computed(() => browserContextData.value ?? [])
 // ---- Form ----
 const form = reactive({
   chat_model_id: '',
@@ -550,12 +530,12 @@ const form = reactive({
   memory_provider_id: '',
   tts_model_id: '',
   transcription_model_id: '',
-  browser_context_id: '',
   timezone: '',
   language: '',
   reasoning_enabled: false,
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
+  display_enabled: false,
 })
 
 const selectedMemoryProvider = computed(() =>
@@ -691,12 +671,12 @@ watch(settings, (val) => {
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
-    form.browser_context_id = val.browser_context_id ?? ''
     form.language = val.language ?? ''
     form.timezone = val.timezone ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
+    form.display_enabled = val.display_enabled ?? false
   }
 }, { immediate: true })
 
@@ -715,12 +695,12 @@ const hasSettingsChanges = computed(() => {
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
-    || form.browser_context_id !== (s.browser_context_id ?? '')
     || form.language !== (s.language ?? '')
     || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
+    || form.display_enabled !== (s.display_enabled ?? false)
   )
 })
 

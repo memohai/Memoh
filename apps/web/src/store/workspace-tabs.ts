@@ -13,6 +13,7 @@ export type WorkspaceTab =
   | { id: string; type: 'chat'; sessionId: string; title: string }
   | { id: string; type: 'file'; filePath: string; title: string }
   | { id: string; type: 'terminal'; title: string }
+  | { id: string; type: 'display'; title: string }
   | { id: string; type: 'draft'; title: string }
 
 const DRAFT_TAB_ID = 'draft'
@@ -21,6 +22,7 @@ interface BotTabState {
   tabs: WorkspaceTab[]
   activeId: string | null
   terminalCounter: number
+  displayCounter: number
   dirtyFileTabs: Record<string, boolean>
 }
 
@@ -38,13 +40,17 @@ function terminalTabId(counter: number): string {
   return `terminal:${counter}`
 }
 
+function displayTabId(counter: number): string {
+  return `display:${counter}`
+}
+
 function fileBaseName(filePath: string): string {
   const idx = filePath.lastIndexOf('/')
   return idx >= 0 ? filePath.slice(idx + 1) : filePath
 }
 
 function emptyBotState(): BotTabState {
-  return { tabs: [], activeId: null, terminalCounter: 0, dirtyFileTabs: {} }
+  return { tabs: [], activeId: null, terminalCounter: 0, displayCounter: 0, dirtyFileTabs: {} }
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
@@ -62,13 +68,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     } else {
       // Backfill fields added later so old persisted state stays usable.
       const cur = storage.value[bid]!
-      if (cur.terminalCounter === undefined || cur.dirtyFileTabs === undefined) {
+      const currentTabs = cur.tabs ?? []
+      const tabs = (currentTabs as Array<WorkspaceTab | { id: string; type: string; title: string }>).map((tab) =>
+        tab.type === 'vnc' ? { id: tab.id, type: 'display' as const, title: tab.title } : tab,
+      ) as WorkspaceTab[]
+      const tabsChanged = tabs.some((tab, index) => tab !== currentTabs[index])
+      if (cur.terminalCounter === undefined || cur.displayCounter === undefined || cur.dirtyFileTabs === undefined || tabsChanged) {
         storage.value = {
           ...storage.value,
           [bid]: {
-            tabs: cur.tabs ?? [],
+            tabs,
             activeId: cur.activeId ?? null,
             terminalCounter: cur.terminalCounter ?? 0,
+            displayCounter: cur.displayCounter ?? (tabs.some((tab) => tab.type === 'display') ? 1 : 0),
             dirtyFileTabs: cur.dirtyFileTabs ?? {},
           },
         }
@@ -100,6 +112,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         tabs: [...state.tabs],
         activeId: state.activeId,
         terminalCounter: state.terminalCounter,
+        displayCounter: state.displayCounter,
         dirtyFileTabs: { ...state.dirtyFileTabs },
       },
     }
@@ -240,6 +253,24 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  function openDisplay() {
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const nextCounter = state.displayCounter + 1
+    const id = displayTabId(nextCounter)
+    const tab: WorkspaceTab = {
+      id,
+      type: 'display',
+      title: `Desktop ${nextCounter}`,
+    }
+    commit({
+      ...state,
+      tabs: [...state.tabs, tab],
+      activeId: id,
+      displayCounter: nextCounter,
+    })
+  }
+
   function closeTab(id: string) {
     const state = ensureBot(currentBotId.value)
     if (!state) return
@@ -293,6 +324,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'file':
         return dirty[tab.id] === true
       case 'terminal':
+      case 'display':
       case 'draft':
         return false
     }
@@ -407,6 +439,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openChat,
     openFile,
     openTerminal,
+    openDisplay,
     openDraft,
     promoteDraftToChat,
     closeTab,

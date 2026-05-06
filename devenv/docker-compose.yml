@@ -42,6 +42,7 @@ services:
     working_dir: /workspace
     command: ["pnpm", "install"]
     environment:
+      CI: "true"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     volumes:
       - ..:/workspace
@@ -83,6 +84,8 @@ services:
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
@@ -101,6 +104,7 @@ services:
     ports:
       - "${MEMOH_DEV_SERVER_PORT:-18080}:8080"
       - "${MEMOH_DEV_OAUTH_PORT:-1455}:8080"
+      - "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1"]
       interval: 5s
@@ -128,30 +132,6 @@ services:
       - node_modules:/workspace/node_modules
     ports:
       - "${MEMOH_DEV_WEB_PORT:-18082}:8082"
-    depends_on:
-      deps:
-        condition: service_completed_successfully
-      server:
-        condition: service_healthy
-    restart: unless-stopped
-
-  browser:
-    build:
-      context: ..
-      dockerfile: devenv/Dockerfile.browser
-      args:
-        BROWSER_CORES: ${BROWSER_CORES:-chromium,firefox}
-    container_name: memoh-dev-browser
-    working_dir: /workspace/apps/browser
-    command: ["bun", "run", "--watch", "src/index.ts"]
-    environment:
-      - MEMOH_CONFIG_PATH=/workspace/devenv/app.dev.toml
-      - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
-    volumes:
-      - ..:/workspace
-      - node_modules:/workspace/node_modules
-    ports:
-      - "${MEMOH_DEV_BROWSER_PORT:-18083}:8083"
     depends_on:
       deps:
         condition: service_completed_successfully

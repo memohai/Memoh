@@ -26,7 +26,6 @@ export const zh = [
       { text: '超市', link: '/zh/getting-started/supermarket.md' },
       { text: 'MCP', link: '/zh/getting-started/mcp.md' },
       { text: '渠道（入门）', link: '/zh/getting-started/channels.md' },
-      { text: '浏览器', link: '/zh/getting-started/browser.md' },
       { text: '长期记忆', link: '/zh/getting-started/memory.md' },
       { text: '会话上下文压缩', link: '/zh/getting-started/compaction.md' },
       { text: '心跳', link: '/zh/getting-started/heartbeat.md' },

@@ -6,13 +6,12 @@ Memoh is a multi-member, structured long-memory, containerized AI agent system p
 
 ## Architecture Overview
 
-The system consists of three core services:
+The system consists of two core services:
 
 | Service | Tech Stack | Port | Description |
 |---------|-----------|------|-------------|
 | **Server** (Backend) | Go + Echo | 8080 | Main service: REST API, auth, database, container management, **in-process AI agent** |
 | **Web** (Frontend) | Vue 3 + Vite | 8082 | Management UI: visual configuration for Bots, Models, Channels, etc. |
-| **Browser Gateway** | Bun + Elysia + Playwright | 8083 | Browser automation service: headless browser actions for bots |
 
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
@@ -42,11 +41,6 @@ Infrastructure dependencies:
 - **Markdown**: markstream-vue + Shiki + Mermaid + KaTeX
 - **Desktop**: Electron + [electron-vite](https://electron-vite.github.io/) (thin shell whose renderer imports `@memohai/web`'s bootstrap)
 - **Package Manager**: pnpm monorepo
-
-### Browser Gateway (TypeScript)
-- **Runtime**: Bun
-- **Framework**: Elysia
-- **Browser Automation**: Playwright
 
 ### Tooling
 - **Task Runner**: mise
@@ -98,7 +92,6 @@ Memoh/
 │   │       ├── email.go        #       Email send tool
 │   │       ├── subagent.go     #       Sub-agent invocation tool
 │   │       ├── skill.go        #       Skill activation tool
-│   │       ├── browser.go      #       Browser automation tool
 │   │       ├── tts.go          #       Text-to-speech tool
 │   │       ├── federation.go   #       MCP federation tool
 │   │       ├── image_gen.go    #       Image generation tool
@@ -110,7 +103,6 @@ Memoh/
 │   ├── bind/                   #   Channel identity-to-user binding code management
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
-│   ├── browsercontexts/        #   Browser context management (CRUD)
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, local
 │   │   └── identities/        #     Channel identity service
@@ -160,15 +152,6 @@ Memoh/
 │       ├── bridge/             #     gRPC client for in-container bridge service
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
-│   ├── browser/                #   Browser Gateway (Bun/Elysia/Playwright)
-│   │   └── src/
-│   │       ├── index.ts        #     Elysia server entry point
-│   │       ├── browser.ts      #     Playwright browser lifecycle
-│   │       ├── modules/        #     Route modules (action, context, devices, session, cores)
-│   │       ├── middlewares/     #     CORS, error handling, bearer auth
-│   │       ├── types/          #     TypeScript type definitions
-│   │       ├── storage.ts      #     Browser context storage
-│   │       └── models.ts       #     Zod request schemas
 │   ├── desktop/                #   Electron desktop app (@memohai/desktop, electron-vite; renderer imports @memohai/web)
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
@@ -219,7 +202,7 @@ Memoh/
 2. Install toolchains and dependencies: `mise install`
 3. Initialize the project: `mise run setup`
 4. Start the dev environment: `mise run dev`
-5. Dev web UI: `http://localhost:18082` (server: `18080`, browser gateway: `18083`)
+5. Dev web UI: `http://localhost:18082` (server: `18080`)
 
 ### Common Commands
 
@@ -263,7 +246,7 @@ docker compose up -d        # Start all services
 ```
 
 Production services: `postgres`, `migrate`, `server`, `web`.
-Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search), `browser` (browser automation).
+Optional profiles: `qdrant` (vector DB), `sparse` (BM25 search).
 
 ## Key Development Rules
 
@@ -398,8 +381,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `schedule` — Scheduled tasks (cron)
 - `schedule_logs` — Schedule execution logs
 - `bot_heartbeat_logs` — Heartbeat execution records
-- `browser_contexts` — Browser context configurations (Playwright)
-
 **Storage**
 - `storage_providers` — Pluggable object storage backends
 - `bot_storage_bindings` — Per-bot storage backend selection
@@ -419,7 +400,6 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[sqlite]` — SQLite database file and WAL/lock settings
 - `[qdrant]` — Qdrant vector database connection
 - `[sparse]` — Sparse (BM25) search service connection
-- `[browser_gateway]` — Browser Gateway address
 - `[web]` — Web frontend address
 - `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
 - `[supermarket]` — Supermarket integration (base_url)

@@ -156,7 +156,6 @@ src/
 │   │       ├── reasoning-effort.ts    # Reasoning effort constants
 │   │       ├── search-provider-select.vue   # Search provider selector
 │   │       ├── memory-provider-select.vue   # Memory provider selector
-│   │       ├── browser-context-select.vue   # Browser context selector
 │   │       ├── tts-model-select.vue         # TTS model selector
 │   │       ├── channel-settings-panel.vue   # Channel settings panel
 │   │       ├── container-create-progress.vue # Container creation progress
@@ -166,7 +165,6 @@ src/
 │   ├── memory/                #   Memory provider management
 │   ├── speech/                #   TTS / speech provider & model management
 │   ├── email/                 #   Email provider management
-│   ├── browser/               #   Browser context management
 │   ├── supermarket/           #   Supermarket (template/skill marketplace)
 │   ├── usage/                 #   Token usage statistics
 │   ├── profile/               #   User profile settings (password, bind codes)
@@ -220,7 +218,6 @@ Both routes render the same `home/index.vue` component. The `home` route shows a
 | `/settings/memory` | memory | `memory/index.vue` | Memory provider management |
 | `/settings/speech` | speech | `speech/index.vue` | TTS / speech provider & model management |
 | `/settings/email` | email | `email/index.vue` | Email provider management |
-| `/settings/browser` | browser | `browser/index.vue` | Browser context management |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
 | `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
 | `/settings/profile` | profile | `profile/index.vue` | User profile settings |
@@ -253,7 +250,7 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
    - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
 
 3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:
-   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items: Bots, Providers, Web Search, Memory, Speech, Email, Browser, Supermarket, Usage, Profile, About.
+   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible settings navigation. Top has a "back to chat" button that restores the last selected bot/session. Menu items: Bots, Providers, Web Search, Memory, Speech, Email, Supermarket, Usage, Profile, About.
    - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
 
 4. **Home/Chat Page** (`pages/home/`) — Internal layout:
@@ -261,7 +258,7 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
    - **ChatArea** — Center panel: message list with scroll, input area with attachments.
    - **SessionInfoPanel** — Right panel: session info display.
 
-Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, speech, browser).
+Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, speech).
 
 ## CSS & Theming
 
@@ -450,7 +447,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 - Locales: `en` (English, default), `zh` (Chinese)
 - Files: `src/i18n/locales/en.json`, `src/i18n/locales/zh.json`
 - Usage: `const { t } = useI18n()` → `t('bots.title')`
-- Key namespaces: `common`, `auth`, `sidebar`, `breadcrumb`, `settings`, `about`, `chat`, `models`, `provider`, `webSearch`, `memory`, `speech`, `email`, `browser`, `mcp`, `home`, `bots`, `usage`, `supermarket`
+- Key namespaces: `common`, `auth`, `sidebar`, `breadcrumb`, `settings`, `about`, `chat`, `models`, `provider`, `webSearch`, `memory`, `speech`, `email`, `mcp`, `home`, `bots`, `usage`, `supermarket`
 
 ## Vite Configuration
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -77,5 +79,15 @@ func TestExecPipePreservesExitCodeAcrossStreamCancellation(t *testing.T) {
 	}
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+}
+
+func TestValidateTunnelAddressRequiresLoopback(t *testing.T) {
+	ctx := context.Background()
+	if _, err := validateTunnelAddress(ctx, "127.0.0.1:5999"); err != nil {
+		t.Fatalf("loopback address rejected: %v", err)
+	}
+	if _, err := validateTunnelAddress(ctx, "8.8.8.8:53"); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("non-loopback error = %v, want permission denied", err)
 	}
 }

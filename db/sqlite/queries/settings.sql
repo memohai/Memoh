@@ -20,10 +20,10 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
-  browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
   bots.tool_approval_config,
+  bots.display_enabled,
   bots.overlay_provider,
   bots.overlay_enabled,
   bots.overlay_config
@@ -37,7 +37,6 @@ LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
-LEFT JOIN browser_contexts ON browser_contexts.id = bots.browser_context_id
 WHERE bots.id = sqlc.arg(id);
 
 -- name: UpsertBotSettings :one
@@ -61,10 +60,10 @@ SET language = sqlc.arg(language),
     image_model_id = COALESCE(sqlc.narg(image_model_id), bots.image_model_id),
     tts_model_id = COALESCE(sqlc.narg(tts_model_id), bots.tts_model_id),
     transcription_model_id = COALESCE(sqlc.narg(transcription_model_id), bots.transcription_model_id),
-    browser_context_id = COALESCE(sqlc.narg(browser_context_id), bots.browser_context_id),
     persist_full_tool_results = sqlc.arg(persist_full_tool_results),
     show_tool_calls_in_im = sqlc.arg(show_tool_calls_in_im),
     tool_approval_config = sqlc.arg(tool_approval_config),
+    display_enabled = sqlc.arg(display_enabled),
     overlay_provider = sqlc.arg(overlay_provider),
     overlay_enabled = sqlc.arg(overlay_enabled),
     overlay_config = sqlc.arg(overlay_config),
@@ -91,10 +90,10 @@ RETURNING
   image_model_id,
   tts_model_id,
   transcription_model_id,
-  browser_context_id,
   persist_full_tool_results,
   show_tool_calls_in_im,
   tool_approval_config,
+  display_enabled,
   overlay_provider,
   overlay_enabled,
   overlay_config;
@@ -119,10 +118,10 @@ SET language = 'auto',
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,
-    browser_context_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
+    display_enabled = false,
     overlay_provider = '',
     overlay_enabled = false,
     overlay_config = '{}',

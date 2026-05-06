@@ -7,5 +7,3 @@ images:
     newTag: k8s-dev
   - name: memohai/web
     newTag: k8s-dev
-  - name: memohai/browser
-    newTag: k8s-dev

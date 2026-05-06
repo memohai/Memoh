@@ -76,11 +76,11 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ dbsqlc.GetT
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 // --- tests ---
@@ -271,7 +271,6 @@ func TestExecute_MissingArgs(t *testing.T) {
 		{"/model set-heartbeat", "Usage:"},
 		{"/memory set", "Usage:"},
 		{"/search set", "Usage:"},
-		{"/browser set", "Usage:"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.cmd, func(t *testing.T) {
@@ -343,7 +342,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	help := h.registry.GlobalHelp()
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
-		"model", "memory", "search", "browser", "usage",
+		"model", "memory", "search", "usage",
 		"email", "heartbeat", "skill", "fs", "access",
 	} {
 		if !strings.Contains(help, "/"+group) {
@@ -391,7 +390,7 @@ func TestExecute_StatusLatest(t *testing.T) {
 			CacheReadTokens:  300,
 			TotalInputTokens: 1200,
 		},
-		skills: []string{"search", "browser"},
+		skills: []string{"search", "files"},
 	})
 	result, err := h.Execute(context.Background(), "11111111-1111-1111-1111-111111111111", "user-1", "/status latest")
 	if err != nil {

@@ -183,6 +183,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import LoadingButton from '@/components/loading-button/index.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotToolApproval from './components/bot-tool-approval.vue'
+import BotDesktop from './components/bot-desktop.vue'
 import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
@@ -240,6 +241,7 @@ const tabList = computed(() => {
       value: 'overview', label: 'bots.tabs.overview', component: BotOverview, params: {}
     },
     { value: 'general', label: 'bots.tabs.general', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'desktop', label: 'bots.tabs.desktop', component: BotDesktop, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', component: BotContainer, params: {} },
     { value: 'network', label: 'bots.tabs.network', component: BotNetwork, params: { 'bot-id': bot_id } },
     { value: 'memory', label: 'bots.tabs.memory', component: BotMemory, params: { 'bot-id': bot_id } },

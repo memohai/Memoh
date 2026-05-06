@@ -820,39 +820,6 @@ definitions:
       timezone:
         type: string
     type: object
-  browsercontexts.BrowserContext:
-    properties:
-      config:
-        items:
-          type: integer
-        type: array
-      created_at:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  browsercontexts.CreateRequest:
-    properties:
-      config:
-        items:
-          type: integer
-        type: array
-      name:
-        type: string
-    type: object
-  browsercontexts.UpdateRequest:
-    properties:
-      config:
-        items:
-          type: integer
-        type: array
-      name:
-        type: string
-    type: object
   channel.Action:
     properties:
       label:
@@ -1256,6 +1223,17 @@ definitions:
         type: string
       usage: {}
     type: object
+  display.SessionInfo:
+    properties:
+      codec:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      state:
+        type: string
+    type: object
   email.BindingResponse:
     properties:
       bot_id:
@@ -1451,13 +1429,6 @@ definitions:
   handlers.BatchDeleteRequest:
     properties:
       ids:
-        items:
-          type: string
-        type: array
-    type: object
-  handlers.BrowserCoresResponse:
-    properties:
-      cores:
         items:
           type: string
         type: array
@@ -2165,6 +2136,60 @@ definitions:
         additionalProperties: {}
         type: object
       title:
+        type: string
+    type: object
+  handlers.displayInfoResponse:
+    properties:
+      available:
+        type: boolean
+      browser_available:
+        type: boolean
+      desktop_available:
+        type: boolean
+      enabled:
+        type: boolean
+      encoder:
+        type: string
+      encoder_available:
+        type: boolean
+      prepare_supported:
+        type: boolean
+      prepare_system:
+        type: string
+      running:
+        type: boolean
+      toolkit_available:
+        type: boolean
+      transport:
+        type: string
+      unavailable_reason:
+        type: string
+    type: object
+  handlers.displaySessionListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/display.SessionInfo'
+        type: array
+    type: object
+  handlers.displayWebRTCOfferRequest:
+    properties:
+      candidate_host:
+        type: string
+      sdp:
+        type: string
+      session_id:
+        type: string
+      type:
+        type: string
+    type: object
+  handlers.displayWebRTCOfferResponse:
+    properties:
+      sdp:
+        type: string
+      session_id:
+        type: string
+      type:
         type: string
     type: object
   handlers.emailOAuthStatusResponse:
@@ -3026,8 +3051,6 @@ definitions:
     properties:
       acl_default_effect:
         type: string
-      browser_context_id:
-        type: string
       chat_model_id:
         type: string
       compaction_enabled:
@@ -3040,6 +3063,8 @@ definitions:
         type: integer
       discuss_probe_model_id:
         type: string
+      display_enabled:
+        type: boolean
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3121,8 +3146,6 @@ definitions:
     properties:
       acl_default_effect:
         type: string
-      browser_context_id:
-        type: string
       chat_model_id:
         type: string
       compaction_enabled:
@@ -3135,6 +3158,8 @@ definitions:
         type: integer
       discuss_probe_model_id:
         type: string
+      display_enabled:
+        type: boolean
       heartbeat_enabled:
         type: boolean
       heartbeat_interval:
@@ -3833,6 +3858,123 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Restore previously preserved data into container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.displayInfoResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check workspace display availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/prepare:
+    post:
+      description: Installs the workspace desktop/VNC/browser packages when needed,
+        starts the display server, and launches the browser.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of display preparation events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Prepare workspace display dependencies
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/sessions:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.displaySessionListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List active workspace display WebRTC sessions
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/sessions/{session_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Display session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Close a workspace display WebRTC session
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/webrtc/offer:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: WebRTC offer payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.displayWebRTCOfferRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.displayWebRTCOfferResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create a WebRTC answer for bot workspace display
       tags:
       - containerd
   /bots/{bot_id}/container/fs:
@@ -7055,155 +7197,6 @@ paths:
       summary: Transfer bot owner (admin only)
       tags:
       - bots
-  /browser-contexts:
-    get:
-      description: List all browser context configurations
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/browsercontexts.BrowserContext'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List browser contexts
-      tags:
-      - browser-contexts
-    post:
-      consumes:
-      - application/json
-      description: Create a browser context configuration
-      parameters:
-      - description: Browser context configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/browsercontexts.CreateRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/browsercontexts.BrowserContext'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create a browser context
-      tags:
-      - browser-contexts
-  /browser-contexts/{id}:
-    delete:
-      description: Delete browser context by ID
-      parameters:
-      - description: Browser Context ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete a browser context
-      tags:
-      - browser-contexts
-    get:
-      description: Get browser context by ID
-      parameters:
-      - description: Browser Context ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/browsercontexts.BrowserContext'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a browser context
-      tags:
-      - browser-contexts
-    put:
-      consumes:
-      - application/json
-      description: Update browser context by ID
-      parameters:
-      - description: Browser Context ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Updated configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/browsercontexts.UpdateRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/browsercontexts.BrowserContext'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a browser context
-      tags:
-      - browser-contexts
-  /browser-contexts/cores:
-    get:
-      description: Get the list of browser cores available in the Browser Gateway
-        container
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BrowserCoresResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get available browser cores
-      tags:
-      - browser-contexts
   /channels:
     get:
       description: List channel meta information including capabilities and schemas

@@ -55,7 +55,7 @@ busy_timeout_ms = 5000
 启动：
 
 ```bash
-docker compose -f docker-compose.sqlite.yml --profile qdrant --profile browser up -d
+docker compose -f docker-compose.sqlite.yml --profile qdrant up -d
 ```
 
 如果你要用内置记忆的 sparse 模式，再加 `--profile sparse`。
@@ -88,7 +88,7 @@ docker run --rm \
   -v memoh_memoh_data:/data:ro \
   -v "$PWD":/backup \
   busybox tar czf /backup/memoh-sqlite-backup.tgz -C /data .
-docker compose -f docker-compose.sqlite.yml --profile qdrant --profile browser up -d
+docker compose -f docker-compose.sqlite.yml --profile qdrant up -d
 ```
 
 恢复时先停服务，把压缩包解回 `memoh_data` volume，再启动。

@@ -191,5 +191,5 @@ You do not need to force one model to do everything.
 
 ## Next Steps
 
-- To assign chat, image, browser, memory, and TTS settings to a bot, see [Bot Management](/getting-started/bot).
+- To assign chat, image, memory, and TTS settings to a bot, see [Bot Management](/getting-started/bot).
 - To configure speech providers and speech models, see [TTS Providers](/tts-providers/index.md).

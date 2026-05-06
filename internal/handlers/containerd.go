@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	ctr "github.com/memohai/memoh/internal/container"
+	displaypkg "github.com/memohai/memoh/internal/display"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/workspace"
@@ -38,6 +39,7 @@ type ContainerdHandler struct {
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
+	displayService   *displaypkg.Service
 }
 
 type ContainerGPURequest struct {
@@ -205,6 +207,7 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 		accountService:   accountService,
 		policyService:    policyService,
 	}
+	h.displayService = displaypkg.NewService(h.logger, manager)
 	return h
 }
 
@@ -229,6 +232,12 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	// Terminal routes
 	group.GET("/terminal", h.GetTerminalInfo)
 	group.GET("/terminal/ws", h.HandleTerminalWS)
+	// Display routes
+	group.GET("/display", h.GetDisplayInfo)
+	group.POST("/display/prepare", h.PrepareDisplay)
+	group.GET("/display/sessions", h.ListDisplaySessions)
+	group.DELETE("/display/sessions/:session_id", h.CloseDisplaySession)
+	group.POST("/display/webrtc/offer", h.HandleDisplayWebRTCOffer)
 	// File manager routes
 	group.GET("/fs", h.FSStat)
 	group.GET("/fs/list", h.FSList)

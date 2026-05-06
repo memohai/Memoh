@@ -37,10 +37,10 @@ type Bot struct {
 	DiscussProbeModelID    sql.NullString `json:"discuss_probe_model_id"`
 	TtsModelID             sql.NullString `json:"tts_model_id"`
 	TranscriptionModelID   sql.NullString `json:"transcription_model_id"`
-	BrowserContextID       sql.NullString `json:"browser_context_id"`
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
+	DisplayEnabled         int64          `json:"display_enabled"`
 	OverlayProvider        string         `json:"overlay_provider"`
 	OverlayEnabled         int64          `json:"overlay_enabled"`
 	OverlayConfig          string         `json:"overlay_config"`
@@ -202,14 +202,6 @@ type BotStorageBinding struct {
 	BasePath          string `json:"base_path"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`
-}
-
-type BrowserContext struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Config    string `json:"config"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
 }
 
 type ChannelIdentity struct {

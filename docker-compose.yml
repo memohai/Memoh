@@ -42,6 +42,9 @@ services:
     container_name: memoh-server
     privileged: true
     pid: host
+    environment:
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
@@ -55,6 +58,7 @@ services:
     ports:
       - "8080:8080"
       - "1455:8080"
+      - "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -105,22 +109,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
-  browser:
-    image: memohai/browser:${BROWSER_TAG:-local}
-    container_name: memoh-browser
-    profiles: [browser]
-    environment:
-      - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
-    volumes:
-      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
-    ports:
-      - "8083:8083"
-    depends_on:
-      - server
     restart: unless-stopped
     networks:
       - memoh-network

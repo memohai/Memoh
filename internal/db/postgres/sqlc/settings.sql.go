@@ -31,10 +31,10 @@ SET language = 'auto',
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,
-    browser_context_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
+    display_enabled = false,
     overlay_provider = '',
     overlay_enabled = false,
     overlay_config = '{}'::jsonb,
@@ -69,10 +69,10 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
-  browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
   bots.tool_approval_config,
+  bots.display_enabled,
   bots.overlay_provider,
   bots.overlay_enabled,
   bots.overlay_config
@@ -86,7 +86,6 @@ LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
-LEFT JOIN browser_contexts ON browser_contexts.id = bots.browser_context_id
 WHERE bots.id = $1
 `
 
@@ -111,10 +110,10 @@ type GetSettingsByBotIDRow struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
-	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -144,10 +143,10 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
-		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.DisplayEnabled,
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,
@@ -177,16 +176,16 @@ WITH updated AS (
       image_model_id = COALESCE($17::uuid, bots.image_model_id),
       tts_model_id = COALESCE($18::uuid, bots.tts_model_id),
       transcription_model_id = COALESCE($19::uuid, bots.transcription_model_id),
-      browser_context_id = COALESCE($20::uuid, bots.browser_context_id),
-      persist_full_tool_results = $21,
-      show_tool_calls_in_im = $22,
-      tool_approval_config = $23,
+      persist_full_tool_results = $20,
+      show_tool_calls_in_im = $21,
+      tool_approval_config = $22,
+      display_enabled = $23,
       overlay_provider = $24,
       overlay_enabled = $25,
       overlay_config = $26,
       updated_at = now()
   WHERE bots.id = $27
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.browser_context_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config
 )
 SELECT
   updated.id AS bot_id,
@@ -209,10 +208,10 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
-  browser_contexts.id AS browser_context_id,
   updated.persist_full_tool_results,
   updated.show_tool_calls_in_im,
   updated.tool_approval_config,
+  updated.display_enabled,
   updated.overlay_provider,
   updated.overlay_enabled,
   updated.overlay_config
@@ -226,7 +225,6 @@ LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = updated.transcription_model_id
-LEFT JOIN browser_contexts ON browser_contexts.id = updated.browser_context_id
 `
 
 type UpsertBotSettingsParams struct {
@@ -249,10 +247,10 @@ type UpsertBotSettingsParams struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
-	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -280,10 +278,10 @@ type UpsertBotSettingsRow struct {
 	ImageModelID           pgtype.UUID `json:"image_model_id"`
 	TtsModelID             pgtype.UUID `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
-	BrowserContextID       pgtype.UUID `json:"browser_context_id"`
 	PersistFullToolResults bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
 	OverlayProvider        string      `json:"overlay_provider"`
 	OverlayEnabled         bool        `json:"overlay_enabled"`
 	OverlayConfig          []byte      `json:"overlay_config"`
@@ -310,10 +308,10 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ImageModelID,
 		arg.TtsModelID,
 		arg.TranscriptionModelID,
-		arg.BrowserContextID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
 		arg.ToolApprovalConfig,
+		arg.DisplayEnabled,
 		arg.OverlayProvider,
 		arg.OverlayEnabled,
 		arg.OverlayConfig,
@@ -341,10 +339,10 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
-		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
+		&i.DisplayEnabled,
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,

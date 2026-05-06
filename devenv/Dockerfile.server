@@ -17,6 +17,11 @@ RUN apk add --no-cache \
     containerd \
     containerd-ctr \
     git \
+    gstreamer-tools \
+    gst-plugins-bad \
+    gst-plugins-base \
+    gst-plugins-good \
+    gst-plugins-ugly \
     iptables \
     make \
     tzdata \

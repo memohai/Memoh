@@ -88,6 +88,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current := normalizeBotSetting(botRow.Language, aclDefaultEffect, botRow.ReasoningEnabled, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionRatio)
 	if settingsRow, err := s.queries.GetSettingsByBotID(ctx, pgID); err == nil {
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
+		current.DisplayEnabled = settingsRow.DisplayEnabled
 	}
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
@@ -127,6 +128,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.ToolApprovalConfig != nil {
 		current.ToolApprovalConfig = NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
+	}
+	if req.DisplayEnabled != nil {
+		current.DisplayEnabled = *req.DisplayEnabled
 	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
@@ -219,14 +223,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		transcriptionModelUUID = modelID
 	}
-	browserContextUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.BrowserContextID); value != "" {
-		ctxID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
-		}
-		browserContextUUID = ctxID
-	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
 	if err != nil {
 		return Settings{}, err
@@ -280,10 +276,10 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
 		TranscriptionModelID:   transcriptionModelUUID,
-		BrowserContextID:       browserContextUUID,
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
+		DisplayEnabled:         current.DisplayEnabled,
 		OverlayProvider:        normalizedNetwork.OverlayProvider,
 		OverlayEnabled:         normalizedNetwork.OverlayEnabled,
 		OverlayConfig:          overlayConfigJSON,
@@ -382,10 +378,10 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
-		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.DisplayEnabled,
 		row.OverlayProvider,
 		row.OverlayEnabled,
 		row.OverlayConfig,
@@ -412,10 +408,10 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
-		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
+		row.DisplayEnabled,
 		row.OverlayProvider,
 		row.OverlayEnabled,
 		row.OverlayConfig,
@@ -441,10 +437,10 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	transcriptionModelID pgtype.UUID,
-	browserContextID pgtype.UUID,
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
+	displayEnabled bool,
 	overlayProvider string,
 	overlayEnabled bool,
 	overlayConfig []byte,
@@ -480,12 +476,10 @@ func normalizeBotSettingsFields(
 	if transcriptionModelID.Valid {
 		settings.TranscriptionModelID = uuid.UUID(transcriptionModelID.Bytes).String()
 	}
-	if browserContextID.Valid {
-		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
-	}
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
+	settings.DisplayEnabled = displayEnabled
 	settings.OverlayProvider = strings.TrimSpace(overlayProvider)
 	settings.OverlayEnabled = overlayEnabled
 	settings.OverlayConfig = normalizeJSONObject(overlayConfig)

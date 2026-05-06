@@ -13,7 +13,6 @@ type Settings struct {
 	MemoryProviderID       string             `json:"memory_provider_id"`
 	TtsModelID             string             `json:"tts_model_id"`
 	TranscriptionModelID   string             `json:"transcription_model_id"`
-	BrowserContextID       string             `json:"browser_context_id"`
 	Language               string             `json:"language"`
 	AclDefaultEffect       string             `json:"acl_default_effect"`
 	Timezone               string             `json:"timezone"`
@@ -31,6 +30,7 @@ type Settings struct {
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIM      bool               `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     ToolApprovalConfig `json:"tool_approval_config"`
+	DisplayEnabled         bool               `json:"display_enabled"`
 	OverlayEnabled         bool               `json:"overlay_enabled"`
 	OverlayProvider        string             `json:"overlay_provider,omitempty"`
 	OverlayConfig          map[string]any     `json:"overlay_config,omitempty"`
@@ -43,7 +43,6 @@ type UpsertRequest struct {
 	MemoryProviderID       string              `json:"memory_provider_id,omitempty"`
 	TtsModelID             string              `json:"tts_model_id,omitempty"`
 	TranscriptionModelID   string              `json:"transcription_model_id,omitempty"`
-	BrowserContextID       string              `json:"browser_context_id,omitempty"`
 	Language               string              `json:"language,omitempty"`
 	AclDefaultEffect       string              `json:"acl_default_effect,omitempty"`
 	Timezone               *string             `json:"timezone,omitempty"`
@@ -61,6 +60,7 @@ type UpsertRequest struct {
 	PersistFullToolResults *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM      *bool               `json:"show_tool_calls_in_im,omitempty"`
 	ToolApprovalConfig     *ToolApprovalConfig `json:"tool_approval_config,omitempty"`
+	DisplayEnabled         *bool               `json:"display_enabled,omitempty"`
 	OverlayEnabled         *bool               `json:"overlay_enabled,omitempty"`
 	OverlayProvider        *string             `json:"overlay_provider,omitempty"`
 	OverlayConfig          map[string]any      `json:"overlay_config,omitempty"`

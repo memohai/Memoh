@@ -3,6 +3,7 @@ package bridge
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -35,7 +36,19 @@ func mapError(err error) error {
 		return fmt.Errorf("%w: %s", ErrForbidden, msg)
 	case codes.Unavailable, codes.Aborted:
 		return fmt.Errorf("%w: %s", ErrUnavailable, msg)
+	case codes.Canceled:
+		if isConnectionClosingMessage(msg) {
+			return fmt.Errorf("%w: %s", ErrUnavailable, msg)
+		}
+		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
 	default:
 		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
 	}
+}
+
+func isConnectionClosingMessage(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "client connection is closing") ||
+		strings.Contains(lower, "transport is closing") ||
+		strings.Contains(lower, "use of closed network connection")
 }

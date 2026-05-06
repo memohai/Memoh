@@ -441,25 +441,6 @@ func (q *Queries) CreateBotEmailBinding(ctx context.Context, arg pgsqlc.CreateBo
 	return result, nil
 }
 
-func (q *Queries) CreateBrowserContext(ctx context.Context, arg pgsqlc.CreateBrowserContextParams) (pgsqlc.BrowserContext, error) {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.BrowserContext{}, errSQLiteQueriesNotConfigured
-	}
-	var sqliteArg sqlitesqlc.CreateBrowserContextParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.BrowserContext{}, err
-	}
-	out, err := q.store.queries.CreateBrowserContext(ctx, sqliteArg)
-	if err != nil {
-		return pgsqlc.BrowserContext{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BrowserContext
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BrowserContext{}, err
-	}
-	return result, nil
-}
-
 func (q *Queries) CreateChannelIdentity(ctx context.Context, arg pgsqlc.CreateChannelIdentityParams) (pgsqlc.ChannelIdentity, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.ChannelIdentity{}, errSQLiteQueriesNotConfigured
@@ -923,18 +904,6 @@ func (q *Queries) DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) err
 		return err
 	}
 	err := q.store.queries.DeleteBotEmailBinding(ctx, sqliteId)
-	return mapQueryErr(err)
-}
-
-func (q *Queries) DeleteBrowserContext(ctx context.Context, id pgtype.UUID) error {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return errSQLiteQueriesNotConfigured
-	}
-	var sqliteId string
-	if err := convertValue(id, &sqliteId); err != nil {
-		return err
-	}
-	err := q.store.queries.DeleteBrowserContext(ctx, sqliteId)
 	return mapQueryErr(err)
 }
 
@@ -1519,25 +1488,6 @@ func (q *Queries) GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (
 	var result pgsqlc.BotStorageBinding
 	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.BotStorageBinding{}, err
-	}
-	return result, nil
-}
-
-func (q *Queries) GetBrowserContextByID(ctx context.Context, id pgtype.UUID) (pgsqlc.BrowserContext, error) {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.BrowserContext{}, errSQLiteQueriesNotConfigured
-	}
-	var sqliteId string
-	if err := convertValue(id, &sqliteId); err != nil {
-		return pgsqlc.BrowserContext{}, err
-	}
-	out, err := q.store.queries.GetBrowserContextByID(ctx, sqliteId)
-	if err != nil {
-		return pgsqlc.BrowserContext{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BrowserContext
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BrowserContext{}, err
 	}
 	return result, nil
 }
@@ -2752,21 +2702,6 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListBotsByOwnerRow
-	if err := convertValue(out, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func (q *Queries) ListBrowserContexts(ctx context.Context) ([]pgsqlc.BrowserContext, error) {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return nil, errSQLiteQueriesNotConfigured
-	}
-	out, err := q.store.queries.ListBrowserContexts(ctx)
-	if err != nil {
-		return nil, mapQueryErr(err)
-	}
-	var result []pgsqlc.BrowserContext
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}
@@ -4397,25 +4332,6 @@ func (q *Queries) UpdateBotStatus(ctx context.Context, arg pgsqlc.UpdateBotStatu
 	}
 	err := q.store.queries.UpdateBotStatus(ctx, sqliteArg)
 	return mapQueryErr(err)
-}
-
-func (q *Queries) UpdateBrowserContext(ctx context.Context, arg pgsqlc.UpdateBrowserContextParams) (pgsqlc.BrowserContext, error) {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.BrowserContext{}, errSQLiteQueriesNotConfigured
-	}
-	var sqliteArg sqlitesqlc.UpdateBrowserContextParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.BrowserContext{}, err
-	}
-	out, err := q.store.queries.UpdateBrowserContext(ctx, sqliteArg)
-	if err != nil {
-		return pgsqlc.BrowserContext{}, mapQueryErr(err)
-	}
-	var result pgsqlc.BrowserContext
-	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BrowserContext{}, err
-	}
-	return result, nil
 }
 
 func (q *Queries) UpdateChatRouteMetadata(ctx context.Context, arg pgsqlc.UpdateChatRouteMetadataParams) error {

@@ -640,7 +640,6 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 		&fakeCommandQueries{
 			messageCount: 9,
 			usage:        512,

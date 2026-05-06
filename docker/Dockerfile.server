@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM alpine:latest AS toolkit-assembly
 ARG TARGETARCH
 
-RUN apk add --no-cache xz
+RUN apk add --no-cache wget xz
 COPY docker/toolkit/install.sh /tmp/install.sh
 RUN /tmp/install.sh /assembly/toolkit "${TARGETARCH:-amd64}"
 
@@ -70,6 +70,7 @@ RUN apk add --no-cache containerd containerd-ctr
 
 # CNI plugins + iptables (for workspace container networking)
 RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
+      gstreamer-tools gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly \
     && mkdir -p /opt/cni/bin \
     && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
     && (cp -a /usr/libexec/cni/. /opt/cni/bin/ 2>/dev/null || true) \

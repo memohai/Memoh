@@ -268,15 +268,20 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				if row.UpdatedAt.Valid {
 					updatedAt = row.UpdatedAt.Time
 				}
+				taskRunning := m.isTaskRunning(ctx, row.ContainerID)
+				status := row.Status
+				if taskRunning {
+					status = "running"
+				}
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
 					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend, row.ContainerID),
 					Image:            row.Image,
-					Status:           row.Status,
+					Status:           status,
 					Namespace:        row.Namespace,
 					ContainerPath:    row.ContainerPath,
 					CDIDevices:       cdiDevices,
-					TaskRunning:      m.isTaskRunning(ctx, row.ContainerID),
+					TaskRunning:      taskRunning,
 					HasPreservedData: m.HasPreservedData(botID),
 					Legacy:           m.IsLegacyContainer(ctx, row.ContainerID),
 					CreatedAt:        createdAt,
@@ -297,14 +302,19 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 		}
 		return nil, err
 	}
+	taskRunning := m.isTaskRunning(ctx, containerID)
+	status := "unknown"
+	if taskRunning {
+		status = "running"
+	}
 	return &ContainerStatus{
 		ContainerID:      info.ID,
 		WorkspaceBackend: workspaceBackendFromRecord("", info.ID),
 		Image:            info.Image,
-		Status:           "unknown",
+		Status:           status,
 		Namespace:        m.namespace,
 		CDIDevices:       workspaceCDIDevicesFromLabels(info.Labels),
-		TaskRunning:      m.isTaskRunning(ctx, containerID),
+		TaskRunning:      taskRunning,
 		HasPreservedData: m.HasPreservedData(botID),
 		Legacy:           m.IsLegacyContainer(ctx, containerID),
 		CreatedAt:        info.CreatedAt,

@@ -24,7 +24,7 @@ Once created, clicking on a bot card takes you to its **Detail Page**, where you
 | Tab | Description |
 |-----|-------------|
 | **Overview** | Health checks for container, database, channels, and memory. |
-| **General** | Core runtime settings: chat/title/image models, memory/search/browser/TTS bindings, timezone, language, reasoning, and danger zone. |
+| **General** | Core runtime settings: chat/title/image models, memory/search/TTS bindings, timezone, language, reasoning, and danger zone. |
 | **Container** | Container lifecycle (create/start/stop), snapshots, data export/import. |
 | **Memory** | Browse, search, create, edit, and compact memories. |
 | **Platforms** | Channel configurations such as Telegram, Discord, Feishu, QQ, Matrix, WeCom, WeChat, Misskey, DingTalk, and Web. |
@@ -55,7 +55,6 @@ If you have not created these resources yet, set them up first:
 - [Providers And Models](/getting-started/provider-and-model.md)
 - [Built-in Memory Provider](/memory-providers/builtin.md)
 - [Search Providers](/getting-started/search-provider.md)
-- [Browser Contexts](/getting-started/browser.md)
 - [TTS Providers](/tts-providers/index.md)
 
 ---
@@ -72,7 +71,6 @@ The **General** tab contains the settings that shape everyday conversation behav
 | **Memory Provider** | The memory backend assigned to the bot. The built-in provider can optionally define its own memory and embedding models. |
 | **Search Provider** | The search engine used for web browsing capabilities. |
 | **TTS Model** | Optional speech model used for text-to-speech output. Speech models come from the TTS Providers flow, not the normal chat provider flow. |
-| **Browser Context** | The browser environment used for web automation, such as viewport, locale, and mobile behavior. |
 | **Timezone** | Per-bot timezone. If empty, Memoh inherits the user timezone and then falls back to the system timezone. |
 | **Language** | The bot's primary communication language. |
 | **Reasoning Enabled** | Available when the selected chat model exposes `reasoning` compatibility. |

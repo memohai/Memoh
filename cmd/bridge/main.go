@@ -67,6 +67,8 @@ func main() {
 	// Container-native tools take priority since toolkit is appended at the end.
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
+	startDisplaySupervisor(ctx)
+
 	// PID 1 zombie reaping: when bridge runs as PID 1 inside a container,
 	// orphaned child processes become zombies unless reaped.
 	// On Linux 5.3+, Go's os/exec uses pidfd_open which avoids races between

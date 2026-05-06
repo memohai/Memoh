@@ -83,22 +83,6 @@ services:
     networks:
       - memoh-network
 
-  browser:
-    image: memohai/browser:${BROWSER_TAG:-local}
-    container_name: memoh-browser
-    profiles: [browser]
-    environment:
-      - BROWSER_CORES=${BROWSER_CORES:-chromium,firefox}
-    volumes:
-      - ${MEMOH_CONFIG:-./config.toml}:/config.toml:ro
-    ports:
-      - "8083:8083"
-    depends_on:
-      - server
-    restart: unless-stopped
-    networks:
-      - memoh-network
-
 volumes:
   containerd_data:
     driver: local
