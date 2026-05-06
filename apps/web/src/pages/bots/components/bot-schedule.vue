@@ -39,147 +39,138 @@
     </div>
 
     <!-- Inline form -->
-    <div
-      v-if="formVisible"
-      class="rounded-md border p-4 space-y-4"
-    >
-      <div class="flex items-center justify-between">
-        <h4 class="text-sm font-medium">
+    <Dialog v-model:open="formVisible">
+      <DialogContent aria-describedby="undefined">
+        <DialogTitle>
           {{ formMode === 'create' ? $t('bots.schedule.create') : $t('bots.schedule.edit') }}
-        </h4>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="size-7"
-          @click="handleFormCancel"
-        >
-          <X class="size-4" />
-        </Button>
-      </div>
+        </DialogTitle>
+        <DialogDescription>
+          <form @submit.prevent="handleFormSubmit">
+            <div class="flex flex-col gap-4">
+              <div class="flex items-end gap-3">
+                <div class="space-y-1.5 flex-1 min-w-0">
+                  <Label for="schedule-name">
+                    {{ $t('bots.schedule.form.name') }}
+                  </Label>
+                  <Input
+                    id="schedule-name"
+                    v-model="form.name"
+                    :placeholder="$t('bots.schedule.form.namePlaceholder')"
+                  />
+                </div>
+                <div class="flex items-center gap-2 h-9 shrink-0">
+                  <Label
+                    class="cursor-pointer text-xs"
+                    @click="form.enabled = !form.enabled"
+                  >
+                    {{ $t('bots.schedule.form.enabled') }}
+                  </Label>
+                  <Switch
+                    :model-value="form.enabled"
+                    @update:model-value="(v: boolean) => form.enabled = !!v"
+                  />
+                </div>
+              </div>
 
-      <form @submit.prevent="handleFormSubmit">
-        <div class="flex flex-col gap-4">
-          <div class="flex items-end gap-3">
-            <div class="space-y-1.5 flex-1 min-w-0">
-              <Label for="schedule-name">
-                {{ $t('bots.schedule.form.name') }}
-              </Label>
-              <Input
-                id="schedule-name"
-                v-model="form.name"
-                :placeholder="$t('bots.schedule.form.namePlaceholder')"
-              />
-            </div>
-            <div class="flex items-center gap-2 h-9 shrink-0">
-              <Label
-                class="cursor-pointer text-xs"
-                @click="form.enabled = !form.enabled"
-              >
-                {{ $t('bots.schedule.form.enabled') }}
-              </Label>
-              <Switch
-                :model-value="form.enabled"
-                @update:model-value="(v: boolean) => form.enabled = !!v"
-              />
-            </div>
-          </div>
-
-          <div class="space-y-1.5">
-            <Label
-              for="schedule-description"
-              class="flex items-center gap-1.5"
-            >
-              {{ $t('bots.schedule.form.description') }}
-              <span class="text-[11px] text-muted-foreground font-normal">
-                ({{ $t('common.optional') }})
-              </span>
-            </Label>
-            <Input
-              id="schedule-description"
-              v-model="form.description"
-              :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <Label for="schedule-command">
-              {{ $t('bots.schedule.form.command') }}
-            </Label>
-            <Textarea
-              id="schedule-command"
-              v-model="form.command"
-              class="text-xs"
-              :placeholder="$t('bots.schedule.form.commandPlaceholder')"
-              rows="3"
-            />
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.schedule.form.commandHint') }}
-            </p>
-          </div>
-
-          <div class="space-y-1.5">
-            <Label>{{ $t('bots.schedule.form.pattern') }}</Label>
-            <SchedulePatternBuilder
-              :state="patternState"
-              :timezone="botTimezone"
-              @update:state="(next) => patternState = next"
-            />
-          </div>
-
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between">
-              <Label>{{ $t('bots.schedule.form.maxCalls') }}</Label>
-              <div class="flex items-center gap-2">
-                <Switch
-                  :model-value="maxCallsUnlimited"
-                  @update:model-value="(v: boolean) => handleMaxCallsUnlimited(!!v)"
+              <div class="space-y-1.5">
+                <Label
+                  for="schedule-description"
+                  class="flex items-center gap-1.5"
+                >
+                  {{ $t('bots.schedule.form.description') }}
+                  <span class="text-[11px] text-muted-foreground font-normal">
+                    ({{ $t('common.optional') }})
+                  </span>
+                </Label>
+                <Input
+                  id="schedule-description"
+                  v-model="form.description"
+                  :placeholder="$t('bots.schedule.form.descriptionPlaceholder')"
                 />
-                <span class="text-xs text-muted-foreground">
-                  {{ $t('bots.schedule.form.maxCallsUnlimited') }}
-                </span>
+              </div>
+
+              <div class="space-y-1.5">
+                <Label for="schedule-command">
+                  {{ $t('bots.schedule.form.command') }}
+                </Label>
+                <Textarea
+                  id="schedule-command"
+                  v-model="form.command"
+                  class="text-xs"
+                  :placeholder="$t('bots.schedule.form.commandPlaceholder')"
+                  rows="3"
+                />
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.schedule.form.commandHint') }}
+                </p>
+              </div>
+
+              <div class="space-y-1.5">
+                <Label>{{ $t('bots.schedule.form.pattern') }}</Label>
+                <SchedulePatternBuilder
+                  :state="patternState"
+                  :timezone="botTimezone"
+                  @update:state="(next) => patternState = next"
+                />
+              </div>
+
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <Label>{{ $t('bots.schedule.form.maxCalls') }}</Label>
+                  <div class="flex items-center gap-2">
+                    <Switch
+                      :model-value="maxCallsUnlimited"
+                      @update:model-value="(v: boolean) => handleMaxCallsUnlimited(!!v)"
+                    />
+                    <span class="text-xs text-muted-foreground">
+                      {{ $t('bots.schedule.form.maxCallsUnlimited') }}
+                    </span>
+                  </div>
+                </div>
+                <Input
+                  v-if="!maxCallsUnlimited"
+                  :model-value="form.maxCalls ?? 1"
+                  type="number"
+                  :min="1"
+                  :placeholder="'1'"
+                  @update:model-value="(v) => form.maxCalls = Math.max(1, Math.floor(Number(v) || 1))"
+                />
+              </div>
+
+              <p
+                v-if="submitError"
+                class="text-xs text-destructive"
+              >
+                {{ submitError }}
+              </p>
+
+              <div class="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  @click="handleFormCancel"
+                >
+                  {{ $t('common.cancel') }}
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  :disabled="!canSubmit || isSaving"
+                >
+                  <Spinner
+                    v-if="isSaving"
+                    class="mr-1"
+                  />
+                  {{ formMode === 'create' ? $t('common.create') : $t('common.save') }}
+                </Button>
               </div>
             </div>
-            <Input
-              v-if="!maxCallsUnlimited"
-              :model-value="form.maxCalls ?? 1"
-              type="number"
-              :min="1"
-              :placeholder="'1'"
-              @update:model-value="(v) => form.maxCalls = Math.max(1, Math.floor(Number(v) || 1))"
-            />
-          </div>
-
-          <p
-            v-if="submitError"
-            class="text-xs text-destructive"
-          >
-            {{ submitError }}
-          </p>
-
-          <div class="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              @click="handleFormCancel"
-            >
-              {{ $t('common.cancel') }}
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              :disabled="!canSubmit || isSaving"
-            >
-              <Spinner
-                v-if="isSaving"
-                class="mr-1"
-              />
-              {{ formMode === 'create' ? $t('common.create') : $t('common.save') }}
-            </Button>
-          </div>
-        </div>
-      </form>
-    </div>
+          </form>
+        </DialogDescription>
+      </DialogContent>
+    </Dialog>
+   
 
     <!-- Loading -->
     <div
@@ -358,7 +349,7 @@
 </template>
 
 <script setup lang="ts">
-import { Calendar, Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { Calendar, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -368,6 +359,7 @@ import {
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
+  Dialog,DialogContent,DialogTitle,DialogDescription
 } from '@memohai/ui'
 import {
   deleteBotsByBotIdScheduleById,
@@ -380,6 +372,7 @@ import type {
   ScheduleSchedule,
   ScheduleCreateRequest,
   ScheduleUpdateRequest,
+  
 } from '@memohai/sdk'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
