@@ -4,56 +4,6 @@ export type ClientOptions = {
     baseUrl: string;
 };
 
-export type AccountsAccount = {
-    avatar_url?: string;
-    created_at?: string;
-    display_name?: string;
-    email?: string;
-    id?: string;
-    is_active?: boolean;
-    last_login_at?: string;
-    role?: string;
-    timezone?: string;
-    updated_at?: string;
-    username?: string;
-};
-
-export type AccountsCreateAccountRequest = {
-    avatar_url?: string;
-    display_name?: string;
-    email?: string;
-    is_active?: boolean;
-    password?: string;
-    role?: string;
-    username?: string;
-};
-
-export type AccountsListAccountsResponse = {
-    items?: Array<AccountsAccount>;
-};
-
-export type AccountsResetPasswordRequest = {
-    new_password?: string;
-};
-
-export type AccountsUpdateAccountRequest = {
-    avatar_url?: string;
-    display_name?: string;
-    is_active?: boolean;
-    role?: string;
-};
-
-export type AccountsUpdatePasswordRequest = {
-    current_password?: string;
-    new_password?: string;
-};
-
-export type AccountsUpdateProfileRequest = {
-    avatar_url?: string;
-    display_name?: string;
-    timezone?: string;
-};
-
 export type AclChannelIdentityCandidate = {
     avatar_url?: string;
     channel?: string;
@@ -846,6 +796,53 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
+export type GithubComMemohaiMemohInternalAccountsAccount = {
+    avatar_url?: string;
+    created_at?: string;
+    display_name?: string;
+    email?: string;
+    id?: string;
+    is_active?: boolean;
+    last_login_at?: string;
+    timezone?: string;
+    updated_at?: string;
+    username?: string;
+};
+
+export type GithubComMemohaiMemohInternalAccountsCreateAccountRequest = {
+    avatar_url?: string;
+    display_name?: string;
+    email?: string;
+    is_active?: boolean;
+    password?: string;
+    username?: string;
+};
+
+export type GithubComMemohaiMemohInternalAccountsListAccountsResponse = {
+    items?: Array<GithubComMemohaiMemohInternalAccountsAccount>;
+};
+
+export type GithubComMemohaiMemohInternalAccountsResetPasswordRequest = {
+    new_password?: string;
+};
+
+export type GithubComMemohaiMemohInternalAccountsUpdateAccountRequest = {
+    avatar_url?: string;
+    display_name?: string;
+    is_active?: boolean;
+};
+
+export type GithubComMemohaiMemohInternalAccountsUpdatePasswordRequest = {
+    current_password?: string;
+    new_password?: string;
+};
+
+export type GithubComMemohaiMemohInternalAccountsUpdateProfileRequest = {
+    avatar_url?: string;
+    display_name?: string;
+    timezone?: string;
+};
+
 export type GithubComMemohaiMemohInternalMcpConnection = {
     auth_type?: string;
     bot_id?: string;
@@ -974,6 +971,10 @@ export type HandlersErrorResponse = {
     message?: string;
 };
 
+export type HandlersExchangeSsoCodeRequest = {
+    code?: string;
+};
+
 export type HandlersFsDeleteRequest = {
     path?: string;
     recursive?: boolean;
@@ -1042,6 +1043,140 @@ export type HandlersGetContainerResponse = {
     workspace_backend?: string;
 };
 
+export type HandlersIamGroupMemberRequest = {
+    provider_id?: string;
+    source?: string;
+    user_id?: string;
+};
+
+export type HandlersIamGroupMemberResponse = {
+    created_at?: string;
+    display_name?: string;
+    email?: string;
+    group_id?: string;
+    provider_id?: string;
+    source?: string;
+    user_id?: string;
+    username?: string;
+};
+
+export type HandlersIamGroupRequest = {
+    display_name?: string;
+    external_id?: string;
+    key?: string;
+    metadata?: Array<number>;
+    source?: string;
+};
+
+export type HandlersIamGroupResponse = {
+    created_at?: string;
+    display_name?: string;
+    external_id?: string;
+    id?: string;
+    key?: string;
+    metadata?: Array<number>;
+    source?: string;
+    updated_at?: string;
+};
+
+export type HandlersIamListGroupMembersResponse = {
+    items?: Array<HandlersIamGroupMemberResponse>;
+};
+
+export type HandlersIamListGroupsResponse = {
+    items?: Array<HandlersIamGroupResponse>;
+};
+
+export type HandlersIamListPrincipalRolesResponse = {
+    items?: Array<HandlersIamPrincipalRoleResponse>;
+};
+
+export type HandlersIamListRolesResponse = {
+    items?: Array<HandlersIamRoleResponse>;
+};
+
+export type HandlersIamListSsoGroupMappingsResponse = {
+    items?: Array<HandlersIamssoGroupMappingResponse>;
+};
+
+export type HandlersIamListSsoProvidersResponse = {
+    items?: Array<HandlersIamssoProviderResponse>;
+};
+
+export type HandlersIamPrincipalRoleRequest = {
+    principal_id?: string;
+    principal_type?: string;
+    role_key?: string;
+};
+
+export type HandlersIamPrincipalRoleResponse = {
+    created_at?: string;
+    group_display_name?: string;
+    group_key?: string;
+    id?: string;
+    principal_id?: string;
+    principal_type?: string;
+    provider_id?: string;
+    resource_id?: string;
+    resource_type?: string;
+    role_id?: string;
+    role_key?: string;
+    role_scope?: string;
+    source?: string;
+    user_display_name?: string;
+    user_email?: string;
+    user_username?: string;
+};
+
+export type HandlersIamRoleResponse = {
+    created_at?: string;
+    id?: string;
+    is_system?: boolean;
+    key?: string;
+    scope?: string;
+};
+
+export type HandlersIamssoGroupMappingRequest = {
+    external_group?: string;
+    group_id?: string;
+};
+
+export type HandlersIamssoGroupMappingResponse = {
+    created_at?: string;
+    external_group?: string;
+    group_display_name?: string;
+    group_id?: string;
+    group_key?: string;
+    provider_id?: string;
+};
+
+export type HandlersIamssoProviderRequest = {
+    attribute_mapping?: Array<number>;
+    config?: Array<number>;
+    email_linking_policy?: string;
+    enabled?: boolean;
+    jit_enabled?: boolean;
+    key?: string;
+    name?: string;
+    trust_email?: boolean;
+    type?: string;
+};
+
+export type HandlersIamssoProviderResponse = {
+    attribute_mapping?: Array<number>;
+    config?: Array<number>;
+    created_at?: string;
+    email_linking_policy?: string;
+    enabled?: boolean;
+    id?: string;
+    jit_enabled?: boolean;
+    key?: string;
+    name?: string;
+    trust_email?: boolean;
+    type?: string;
+    updated_at?: string;
+};
+
 export type HandlersInstallMcpRequest = {
     env?: {
         [key: string]: string;
@@ -1051,6 +1186,10 @@ export type HandlersInstallMcpRequest = {
 
 export type HandlersInstallSkillRequest = {
     skill_id?: string;
+};
+
+export type HandlersListSsoProvidersResponse = {
+    items?: Array<HandlersSsoProviderResponse>;
 };
 
 export type HandlersListSnapshotsResponse = {
@@ -1073,7 +1212,7 @@ export type HandlersLoginResponse = {
     access_token?: string;
     display_name?: string;
     expires_at?: string;
-    role?: string;
+    session_id?: string;
     timezone?: string;
     token_type?: string;
     user_id?: string;
@@ -1105,6 +1244,10 @@ export type HandlersModelTokenUsage = {
     provider_name?: string;
 };
 
+export type HandlersOidcStartResponse = {
+    redirect_url?: string;
+};
+
 export type HandlersPingResponse = {
     commit_hash?: string;
     container_backend?: string;
@@ -1129,6 +1272,14 @@ export type HandlersRefreshResponse = {
 
 export type HandlersRollbackRequest = {
     version?: number;
+};
+
+export type HandlersSsoProviderResponse = {
+    enabled?: boolean;
+    id?: string;
+    key?: string;
+    name?: string;
+    type?: SsoProviderType;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -1891,6 +2042,8 @@ export type SettingsUpsertRequest = {
     tts_model_id?: string;
 };
 
+export type SsoProviderType = 'oidc' | 'saml';
+
 export type PostAuthLoginData = {
     /**
      * Login request
@@ -1955,6 +2108,239 @@ export type PostAuthRefreshResponses = {
 };
 
 export type PostAuthRefreshResponse = PostAuthRefreshResponses[keyof PostAuthRefreshResponses];
+
+export type PostAuthSsoExchangeData = {
+    /**
+     * SSO exchange request
+     */
+    body: HandlersExchangeSsoCodeRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/sso/exchange';
+};
+
+export type PostAuthSsoExchangeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostAuthSsoExchangeError = PostAuthSsoExchangeErrors[keyof PostAuthSsoExchangeErrors];
+
+export type PostAuthSsoExchangeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersLoginResponse;
+};
+
+export type PostAuthSsoExchangeResponse = PostAuthSsoExchangeResponses[keyof PostAuthSsoExchangeResponses];
+
+export type GetAuthSsoProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/sso/providers';
+};
+
+export type GetAuthSsoProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetAuthSsoProvidersError = GetAuthSsoProvidersErrors[keyof GetAuthSsoProvidersErrors];
+
+export type GetAuthSsoProvidersResponses = {
+    /**
+     * OK
+     */
+    200: HandlersListSsoProvidersResponse;
+};
+
+export type GetAuthSsoProvidersResponse = GetAuthSsoProvidersResponses[keyof GetAuthSsoProvidersResponses];
+
+export type GetAuthSsoByProviderIdCallbackData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID or key
+         */
+        provider_id: string;
+    };
+    query: {
+        /**
+         * OIDC authorization code
+         */
+        code: string;
+        /**
+         * OIDC state
+         */
+        state: string;
+    };
+    url: '/auth/sso/{provider_id}/callback';
+};
+
+export type GetAuthSsoByProviderIdCallbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetAuthSsoByProviderIdCallbackError = GetAuthSsoByProviderIdCallbackErrors[keyof GetAuthSsoByProviderIdCallbackErrors];
+
+export type PostAuthSsoByProviderIdSamlAcsData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID or key
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/auth/sso/{provider_id}/saml/acs';
+};
+
+export type PostAuthSsoByProviderIdSamlAcsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostAuthSsoByProviderIdSamlAcsError = PostAuthSsoByProviderIdSamlAcsErrors[keyof PostAuthSsoByProviderIdSamlAcsErrors];
+
+export type GetAuthSsoByProviderIdSamlMetadataData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID or key
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/auth/sso/{provider_id}/saml/metadata';
+};
+
+export type GetAuthSsoByProviderIdSamlMetadataErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetAuthSsoByProviderIdSamlMetadataError = GetAuthSsoByProviderIdSamlMetadataErrors[keyof GetAuthSsoByProviderIdSamlMetadataErrors];
+
+export type GetAuthSsoByProviderIdSamlMetadataResponses = {
+    /**
+     * OK
+     */
+    200: string;
+};
+
+export type GetAuthSsoByProviderIdSamlMetadataResponse = GetAuthSsoByProviderIdSamlMetadataResponses[keyof GetAuthSsoByProviderIdSamlMetadataResponses];
+
+export type GetAuthSsoByProviderIdSamlStartData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID or key
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/auth/sso/{provider_id}/saml/start';
+};
+
+export type GetAuthSsoByProviderIdSamlStartErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetAuthSsoByProviderIdSamlStartError = GetAuthSsoByProviderIdSamlStartErrors[keyof GetAuthSsoByProviderIdSamlStartErrors];
+
+export type GetAuthSsoByProviderIdStartData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID or key
+         */
+        provider_id: string;
+    };
+    query?: never;
+    url: '/auth/sso/{provider_id}/start';
+};
+
+export type GetAuthSsoByProviderIdStartErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetAuthSsoByProviderIdStartError = GetAuthSsoByProviderIdStartErrors[keyof GetAuthSsoByProviderIdStartErrors];
+
+export type GetAuthSsoByProviderIdStartResponses = {
+    /**
+     * OK
+     */
+    200: HandlersOidcStartResponse;
+};
+
+export type GetAuthSsoByProviderIdStartResponse = GetAuthSsoByProviderIdStartResponses[keyof GetAuthSsoByProviderIdStartResponses];
 
 export type GetBotsData = {
     body?: never;
@@ -7237,6 +7623,759 @@ export type GetEmailOauthCallbackResponses = {
 
 export type GetEmailOauthCallbackResponse = GetEmailOauthCallbackResponses[keyof GetEmailOauthCallbackResponses];
 
+export type GetIamBotsByBotIdPrincipalRolesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/iam/bots/{bot_id}/principal-roles';
+};
+
+export type GetIamBotsByBotIdPrincipalRolesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamBotsByBotIdPrincipalRolesError = GetIamBotsByBotIdPrincipalRolesErrors[keyof GetIamBotsByBotIdPrincipalRolesErrors];
+
+export type GetIamBotsByBotIdPrincipalRolesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListPrincipalRolesResponse;
+};
+
+export type GetIamBotsByBotIdPrincipalRolesResponse = GetIamBotsByBotIdPrincipalRolesResponses[keyof GetIamBotsByBotIdPrincipalRolesResponses];
+
+export type PostIamBotsByBotIdPrincipalRolesData = {
+    /**
+     * Principal role payload
+     */
+    body: HandlersIamPrincipalRoleRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/iam/bots/{bot_id}/principal-roles';
+};
+
+export type PostIamBotsByBotIdPrincipalRolesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostIamBotsByBotIdPrincipalRolesError = PostIamBotsByBotIdPrincipalRolesErrors[keyof PostIamBotsByBotIdPrincipalRolesErrors];
+
+export type PostIamBotsByBotIdPrincipalRolesResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostIamBotsByBotIdPrincipalRolesResponse = PostIamBotsByBotIdPrincipalRolesResponses[keyof PostIamBotsByBotIdPrincipalRolesResponses];
+
+export type GetIamGroupsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/iam/groups';
+};
+
+export type GetIamGroupsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamGroupsError = GetIamGroupsErrors[keyof GetIamGroupsErrors];
+
+export type GetIamGroupsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListGroupsResponse;
+};
+
+export type GetIamGroupsResponse = GetIamGroupsResponses[keyof GetIamGroupsResponses];
+
+export type PostIamGroupsData = {
+    /**
+     * Group payload
+     */
+    body: HandlersIamGroupRequest;
+    path?: never;
+    query?: never;
+    url: '/iam/groups';
+};
+
+export type PostIamGroupsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostIamGroupsError = PostIamGroupsErrors[keyof PostIamGroupsErrors];
+
+export type PostIamGroupsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamGroupResponse;
+};
+
+export type PostIamGroupsResponse = PostIamGroupsResponses[keyof PostIamGroupsResponses];
+
+export type DeleteIamGroupsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Group ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/groups/{id}';
+};
+
+export type DeleteIamGroupsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteIamGroupsByIdError = DeleteIamGroupsByIdErrors[keyof DeleteIamGroupsByIdErrors];
+
+export type DeleteIamGroupsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutIamGroupsByIdData = {
+    /**
+     * Group payload
+     */
+    body: HandlersIamGroupRequest;
+    path?: {
+        /**
+         * Group ID
+         */
+        id?: string;
+    };
+    query?: never;
+    url: '/iam/groups/{id}';
+};
+
+export type PutIamGroupsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutIamGroupsByIdError = PutIamGroupsByIdErrors[keyof PutIamGroupsByIdErrors];
+
+export type PutIamGroupsByIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamGroupResponse;
+};
+
+export type PutIamGroupsByIdResponse = PutIamGroupsByIdResponses[keyof PutIamGroupsByIdResponses];
+
+export type GetIamGroupsByIdMembersData = {
+    body?: never;
+    path: {
+        /**
+         * Group ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/groups/{id}/members';
+};
+
+export type GetIamGroupsByIdMembersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamGroupsByIdMembersError = GetIamGroupsByIdMembersErrors[keyof GetIamGroupsByIdMembersErrors];
+
+export type GetIamGroupsByIdMembersResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListGroupMembersResponse;
+};
+
+export type GetIamGroupsByIdMembersResponse = GetIamGroupsByIdMembersResponses[keyof GetIamGroupsByIdMembersResponses];
+
+export type PostIamGroupsByIdMembersData = {
+    /**
+     * Group member payload
+     */
+    body: HandlersIamGroupMemberRequest;
+    path: {
+        /**
+         * Group ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/groups/{id}/members';
+};
+
+export type PostIamGroupsByIdMembersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostIamGroupsByIdMembersError = PostIamGroupsByIdMembersErrors[keyof PostIamGroupsByIdMembersErrors];
+
+export type PostIamGroupsByIdMembersResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostIamGroupsByIdMembersResponse = PostIamGroupsByIdMembersResponses[keyof PostIamGroupsByIdMembersResponses];
+
+export type DeleteIamGroupsByIdMembersByUserIdData = {
+    body?: never;
+    path: {
+        /**
+         * Group ID
+         */
+        id: string;
+        /**
+         * User ID
+         */
+        user_id: string;
+    };
+    query?: never;
+    url: '/iam/groups/{id}/members/{user_id}';
+};
+
+export type DeleteIamGroupsByIdMembersByUserIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteIamGroupsByIdMembersByUserIdError = DeleteIamGroupsByIdMembersByUserIdErrors[keyof DeleteIamGroupsByIdMembersByUserIdErrors];
+
+export type DeleteIamGroupsByIdMembersByUserIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteIamPrincipalRolesByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Principal role assignment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/principal-roles/{id}';
+};
+
+export type DeleteIamPrincipalRolesByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteIamPrincipalRolesByIdError = DeleteIamPrincipalRolesByIdErrors[keyof DeleteIamPrincipalRolesByIdErrors];
+
+export type DeleteIamPrincipalRolesByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetIamRolesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/iam/roles';
+};
+
+export type GetIamRolesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamRolesError = GetIamRolesErrors[keyof GetIamRolesErrors];
+
+export type GetIamRolesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListRolesResponse;
+};
+
+export type GetIamRolesResponse = GetIamRolesResponses[keyof GetIamRolesResponses];
+
+export type GetIamSsoProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/iam/sso/providers';
+};
+
+export type GetIamSsoProvidersErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamSsoProvidersError = GetIamSsoProvidersErrors[keyof GetIamSsoProvidersErrors];
+
+export type GetIamSsoProvidersResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListSsoProvidersResponse;
+};
+
+export type GetIamSsoProvidersResponse = GetIamSsoProvidersResponses[keyof GetIamSsoProvidersResponses];
+
+export type PostIamSsoProvidersData = {
+    /**
+     * SSO provider payload
+     */
+    body: HandlersIamssoProviderRequest;
+    path?: {
+        /**
+         * SSO provider ID
+         */
+        id?: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers';
+};
+
+export type PostIamSsoProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostIamSsoProvidersError = PostIamSsoProvidersErrors[keyof PostIamSsoProvidersErrors];
+
+export type PostIamSsoProvidersResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamssoProviderResponse;
+};
+
+export type PostIamSsoProvidersResponse = PostIamSsoProvidersResponses[keyof PostIamSsoProvidersResponses];
+
+export type DeleteIamSsoProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers/{id}';
+};
+
+export type DeleteIamSsoProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteIamSsoProvidersByIdError = DeleteIamSsoProvidersByIdErrors[keyof DeleteIamSsoProvidersByIdErrors];
+
+export type DeleteIamSsoProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutIamSsoProvidersByIdData = {
+    /**
+     * SSO provider payload
+     */
+    body: HandlersIamssoProviderRequest;
+    path?: {
+        /**
+         * SSO provider ID
+         */
+        id?: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers/{id}';
+};
+
+export type PutIamSsoProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutIamSsoProvidersByIdError = PutIamSsoProvidersByIdErrors[keyof PutIamSsoProvidersByIdErrors];
+
+export type PutIamSsoProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamssoProviderResponse;
+};
+
+export type PutIamSsoProvidersByIdResponse = PutIamSsoProvidersByIdResponses[keyof PutIamSsoProvidersByIdResponses];
+
+export type GetIamSsoProvidersByIdGroupMappingsData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers/{id}/group-mappings';
+};
+
+export type GetIamSsoProvidersByIdGroupMappingsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetIamSsoProvidersByIdGroupMappingsError = GetIamSsoProvidersByIdGroupMappingsErrors[keyof GetIamSsoProvidersByIdGroupMappingsErrors];
+
+export type GetIamSsoProvidersByIdGroupMappingsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersIamListSsoGroupMappingsResponse;
+};
+
+export type GetIamSsoProvidersByIdGroupMappingsResponse = GetIamSsoProvidersByIdGroupMappingsResponses[keyof GetIamSsoProvidersByIdGroupMappingsResponses];
+
+export type PostIamSsoProvidersByIdGroupMappingsData = {
+    /**
+     * SSO group mapping payload
+     */
+    body: HandlersIamssoGroupMappingRequest;
+    path: {
+        /**
+         * SSO provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers/{id}/group-mappings';
+};
+
+export type PostIamSsoProvidersByIdGroupMappingsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostIamSsoProvidersByIdGroupMappingsError = PostIamSsoProvidersByIdGroupMappingsErrors[keyof PostIamSsoProvidersByIdGroupMappingsErrors];
+
+export type PostIamSsoProvidersByIdGroupMappingsResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type PostIamSsoProvidersByIdGroupMappingsResponse = PostIamSsoProvidersByIdGroupMappingsResponses[keyof PostIamSsoProvidersByIdGroupMappingsResponses];
+
+export type DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupData = {
+    body?: never;
+    path: {
+        /**
+         * SSO provider ID
+         */
+        id: string;
+        /**
+         * External group
+         */
+        external_group: string;
+    };
+    query?: never;
+    url: '/iam/sso/providers/{id}/group-mappings/{external_group}';
+};
+
+export type DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupError = DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupErrors[keyof DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupErrors];
+
+export type DeleteIamSsoProvidersByIdGroupMappingsByExternalGroupResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type GetMemoryProvidersData = {
     body?: never;
     path?: never;
@@ -9367,7 +10506,7 @@ export type GetUsersResponses = {
     /**
      * OK
      */
-    200: AccountsListAccountsResponse;
+    200: GithubComMemohaiMemohInternalAccountsListAccountsResponse;
 };
 
 export type GetUsersResponse = GetUsersResponses[keyof GetUsersResponses];
@@ -9376,7 +10515,7 @@ export type PostUsersData = {
     /**
      * User payload
      */
-    body: AccountsCreateAccountRequest;
+    body: GithubComMemohaiMemohInternalAccountsCreateAccountRequest;
     path?: never;
     query?: never;
     url: '/users';
@@ -9403,7 +10542,7 @@ export type PostUsersResponses = {
     /**
      * Created
      */
-    201: AccountsAccount;
+    201: GithubComMemohaiMemohInternalAccountsAccount;
 };
 
 export type PostUsersResponse = PostUsersResponses[keyof PostUsersResponses];
@@ -9432,7 +10571,7 @@ export type GetUsersMeResponses = {
     /**
      * OK
      */
-    200: AccountsAccount;
+    200: GithubComMemohaiMemohInternalAccountsAccount;
 };
 
 export type GetUsersMeResponse = GetUsersMeResponses[keyof GetUsersMeResponses];
@@ -9441,7 +10580,7 @@ export type PutUsersMeData = {
     /**
      * Profile payload
      */
-    body: AccountsUpdateProfileRequest;
+    body: GithubComMemohaiMemohInternalAccountsUpdateProfileRequest;
     path?: never;
     query?: never;
     url: '/users/me';
@@ -9464,7 +10603,7 @@ export type PutUsersMeResponses = {
     /**
      * OK
      */
-    200: AccountsAccount;
+    200: GithubComMemohaiMemohInternalAccountsAccount;
 };
 
 export type PutUsersMeResponse = PutUsersMeResponses[keyof PutUsersMeResponses];
@@ -9581,7 +10720,7 @@ export type PutUsersMePasswordData = {
     /**
      * Password payload
      */
-    body: AccountsUpdatePasswordRequest;
+    body: GithubComMemohaiMemohInternalAccountsUpdatePasswordRequest;
     path?: never;
     query?: never;
     url: '/users/me/password';
@@ -9644,7 +10783,7 @@ export type GetUsersByIdResponses = {
     /**
      * OK
      */
-    200: AccountsAccount;
+    200: GithubComMemohaiMemohInternalAccountsAccount;
 };
 
 export type GetUsersByIdResponse = GetUsersByIdResponses[keyof GetUsersByIdResponses];
@@ -9653,7 +10792,7 @@ export type PutUsersByIdData = {
     /**
      * User update payload
      */
-    body: AccountsUpdateAccountRequest;
+    body: GithubComMemohaiMemohInternalAccountsUpdateAccountRequest;
     path: {
         /**
          * User ID
@@ -9689,7 +10828,7 @@ export type PutUsersByIdResponses = {
     /**
      * OK
      */
-    200: AccountsAccount;
+    200: GithubComMemohaiMemohInternalAccountsAccount;
 };
 
 export type PutUsersByIdResponse = PutUsersByIdResponses[keyof PutUsersByIdResponses];
@@ -9698,7 +10837,7 @@ export type PutUsersByIdPasswordData = {
     /**
      * Password payload
      */
-    body: AccountsResetPasswordRequest;
+    body: GithubComMemohaiMemohInternalAccountsResetPasswordRequest;
     path: {
         /**
          * User ID

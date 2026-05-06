@@ -83,7 +83,7 @@ func TestToCode(t *testing.T) {
 	now := time.Now().UTC()
 	var usedBy pgtype.UUID
 	_ = usedBy.Scan("660e8400-e29b-41d4-a716-446655440001")
-	row := sqlc.ChannelIdentityBindCode{
+	row := sqlc.IamChannelIdentityBindCode{
 		ID:                      pgID,
 		Token:                   "ABC12345",
 		IssuedByUserID:          pgID,
@@ -121,7 +121,7 @@ func TestToCode_OptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	row := sqlc.ChannelIdentityBindCode{
+	row := sqlc.IamChannelIdentityBindCode{
 		ID:             pgID,
 		Token:          "TOKEN",
 		IssuedByUserID: pgID,

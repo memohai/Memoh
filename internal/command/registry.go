@@ -10,7 +10,7 @@ import (
 type CommandContext struct {
 	Ctx               context.Context
 	BotID             string
-	Role              string // "owner", "admin", "member", or "" (guest)
+	BotUpdateAllowed  bool
 	Args              []string
 	ChannelIdentityID string
 	UserID            string
@@ -60,7 +60,7 @@ func (g *CommandGroup) Usage() string {
 		sub := g.commands[name]
 		desc := subSummary(sub)
 		if sub.IsWrite {
-			desc += " [owner]"
+			desc += " [bot.update]"
 		}
 		fmt.Fprintf(&b, "- %s\n", desc)
 	}
@@ -84,7 +84,7 @@ func (g *CommandGroup) ActionHelp(action string) string {
 	}
 	fmt.Fprintf(&b, "- Usage: /%s %s\n", g.Name, usage)
 	if sub.IsWrite {
-		b.WriteString("- Access: owner only\n")
+		b.WriteString("- Access: bot.update\n")
 	}
 	fmt.Fprintf(&b, "- Tip: use /help %s to view sibling actions.", g.Name)
 	return strings.TrimRight(b.String(), "\n")

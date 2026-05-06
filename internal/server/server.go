@@ -80,6 +80,9 @@ func shouldSkipJWT(path string) bool {
 	if path == "/" || path == "/ping" || path == "/health" || path == "/api/swagger.json" || path == "/auth/login" {
 		return true
 	}
+	if path == "/auth/sso/providers" || path == "/auth/sso/exchange" || strings.HasPrefix(path, "/auth/sso/") {
+		return true
+	}
 	if strings.HasPrefix(path, "/assets/") {
 		return true
 	}

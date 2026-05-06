@@ -770,7 +770,7 @@ func toProviderOAuthToken(row sqlc.ProviderOauthToken) *oauthTokenRecord {
 	return token
 }
 
-func toUserProviderOAuthToken(row sqlc.UserProviderOauthToken) *oauthTokenRecord {
+func toUserProviderOAuthToken(row sqlc.IamUserProviderOauthToken) *oauthTokenRecord {
 	token := &oauthTokenRecord{
 		ProviderID:       row.ProviderID.String(),
 		UserID:           row.UserID.String(),

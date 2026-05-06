@@ -59,7 +59,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Issue a new JWT using the existing claims with updated expiration",
+                "description": "Issue a new JWT after validating the active IAM session",
                 "tags": [
                     "auth"
                 ],
@@ -73,6 +73,300 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/exchange": {
+            "post": {
+                "description": "Exchange a one-time SSO login code for a session JWT",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Exchange SSO login code",
+                "parameters": [
+                    {
+                        "description": "SSO exchange request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ExchangeSSOCodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LoginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/providers": {
+            "get": {
+                "description": "List enabled OIDC and SAML SSO providers available for login",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List SSO providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ListSSOProvidersResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/{provider_id}/callback": {
+            "get": {
+                "description": "Exchange the provider code, create an IAM session, and redirect to the web login callback with a short-lived login code",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Complete OIDC login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID or key",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "OIDC authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "OIDC state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/{provider_id}/saml/acs": {
+            "post": {
+                "description": "Validate the SAML response, create an IAM session, and redirect to the web login callback with a short-lived login code",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Complete SAML login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID or key",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/{provider_id}/saml/metadata": {
+            "get": {
+                "description": "Return the SAML service provider metadata XML for an SSO provider",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get SAML SP metadata",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID or key",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/{provider_id}/saml/start": {
+            "get": {
+                "description": "Create a SAML AuthnRequest, set the transient SAML state cookie, and redirect to the IdP",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start SAML login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID or key",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/sso/{provider_id}/start": {
+            "get": {
+                "description": "Build the provider authorization URL and set the transient OIDC state cookie",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start OIDC login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID or key",
+                        "name": "provider_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OIDCStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -5187,7 +5481,7 @@
         },
         "/bots/{id}": {
             "get": {
-                "description": "Get a bot by ID (owner/admin only)",
+                "description": "Get a bot by ID when the current user has bot.read",
                 "tags": [
                     "bots"
                 ],
@@ -5235,7 +5529,7 @@
                 }
             },
             "put": {
-                "description": "Update bot profile (owner/admin only)",
+                "description": "Update bot profile when the current user has bot.update",
                 "tags": [
                     "bots"
                 ],
@@ -5292,7 +5586,7 @@
                 }
             },
             "delete": {
-                "description": "Delete a bot user (owner/admin only)",
+                "description": "Delete a bot user when the current user has bot.delete",
                 "tags": [
                     "bots"
                 ],
@@ -5770,7 +6064,7 @@
                 "tags": [
                     "bots"
                 ],
-                "summary": "Transfer bot owner (admin only)",
+                "summary": "Transfer bot owner (system admin only)",
                 "parameters": [
                     {
                         "type": "string",
@@ -6514,6 +6808,1001 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/bots/{bot_id}/principal-roles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List user and group role assignments for a bot",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List bot role assignments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListPrincipalRolesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Assign a bot-scoped role to a user or group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Assign bot role",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Principal role payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMPrincipalRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List IAM groups",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List IAM groups",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListGroupsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create or update an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Upsert IAM group",
+                "parameters": [
+                    {
+                        "description": "Group payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/groups/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create or update an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Upsert IAM group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path"
+                    },
+                    {
+                        "description": "Group payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Delete IAM group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/groups/{id}/members": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List members of an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List IAM group members",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListGroupMembersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Add a user to an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Add IAM group member",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Group member payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMGroupMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/groups/{id}/members/{user_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove a user from an IAM group",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Delete IAM group member",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/principal-roles/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a user or group role assignment",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Delete role assignment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Principal role assignment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/roles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List built-in IAM roles",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List IAM roles",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListRolesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/sso/providers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List all IAM SSO providers for administration",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List IAM SSO providers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListSSOProvidersResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create or update an IAM SSO provider",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Upsert IAM SSO provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path"
+                    },
+                    {
+                        "description": "SSO provider payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMSSOProviderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMSSOProviderResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/sso/providers/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create or update an IAM SSO provider",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Upsert IAM SSO provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path"
+                    },
+                    {
+                        "description": "SSO provider payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMSSOProviderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMSSOProviderResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete an IAM SSO provider",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Delete IAM SSO provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/sso/providers/{id}/group-mappings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "List external group to IAM group mappings for an SSO provider",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "List SSO group mappings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMListSSOGroupMappingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create or update an external group to IAM group mapping",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Upsert SSO group mapping",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "SSO group mapping payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.IAMSSOGroupMappingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iam/sso/providers/{id}/group-mappings/{external_group}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete an external group mapping from an SSO provider",
+                "tags": [
+                    "iam"
+                ],
+                "summary": "Delete SSO group mapping",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SSO provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "External group",
+                        "name": "external_group",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -9109,7 +10398,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/accounts.ListAccountsResponse"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.ListAccountsResponse"
                         }
                     },
                     "400": {
@@ -9145,7 +10434,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/accounts.CreateAccountRequest"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.CreateAccountRequest"
                         }
                     }
                 ],
@@ -9153,7 +10442,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/accounts.Account"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
                         }
                     },
                     "400": {
@@ -9188,7 +10477,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/accounts.Account"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
                         }
                     },
                     "400": {
@@ -9218,7 +10507,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/accounts.UpdateProfileRequest"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.UpdateProfileRequest"
                         }
                     }
                 ],
@@ -9226,7 +10515,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/accounts.Account"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
                         }
                     },
                     "400": {
@@ -9382,7 +10671,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/accounts.UpdatePasswordRequest"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.UpdatePasswordRequest"
                         }
                     }
                 ],
@@ -9425,7 +10714,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/accounts.Account"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
                         }
                     },
                     "400": {
@@ -9474,7 +10763,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/accounts.UpdateAccountRequest"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.UpdateAccountRequest"
                         }
                     }
                 ],
@@ -9482,7 +10771,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/accounts.Account"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
                         }
                     },
                     "400": {
@@ -9533,7 +10822,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/accounts.ResetPasswordRequest"
+                            "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.ResetPasswordRequest"
                         }
                     }
                 ],
@@ -9570,131 +10859,6 @@
         }
     },
     "definitions": {
-        "accounts.Account": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_active": {
-                    "type": "boolean"
-                },
-                "last_login_at": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "timezone": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "accounts.CreateAccountRequest": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "is_active": {
-                    "type": "boolean"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "accounts.ListAccountsResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/accounts.Account"
-                    }
-                }
-            }
-        },
-        "accounts.ResetPasswordRequest": {
-            "type": "object",
-            "properties": {
-                "new_password": {
-                    "type": "string"
-                }
-            }
-        },
-        "accounts.UpdateAccountRequest": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "is_active": {
-                    "type": "boolean"
-                },
-                "role": {
-                    "type": "string"
-                }
-            }
-        },
-        "accounts.UpdatePasswordRequest": {
-            "type": "object",
-            "properties": {
-                "current_password": {
-                    "type": "string"
-                },
-                "new_password": {
-                    "type": "string"
-                }
-            }
-        },
-        "accounts.UpdateProfileRequest": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "timezone": {
-                    "type": "string"
-                }
-            }
-        },
         "acl.ChannelIdentityCandidate": {
             "type": "object",
             "properties": {
@@ -11689,6 +12853,122 @@
                 }
             }
         },
+        "github_com_memohai_memoh_internal_accounts.Account": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "last_login_at": {
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.CreateAccountRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.ListAccountsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_memohai_memoh_internal_accounts.Account"
+                    }
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.ResetPasswordRequest": {
+            "type": "object",
+            "properties": {
+                "new_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.UpdateAccountRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.UpdatePasswordRequest": {
+            "type": "object",
+            "properties": {
+                "current_password": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_memohai_memoh_internal_accounts.UpdateProfileRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_memohai_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
@@ -12011,6 +13291,14 @@
                 }
             }
         },
+        "handlers.ExchangeSSOCodeRequest": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.FSDeleteRequest": {
             "type": "object",
             "properties": {
@@ -12181,6 +13469,376 @@
                 }
             }
         },
+        "handlers.IAMGroupMemberRequest": {
+            "type": "object",
+            "properties": {
+                "provider_id": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMGroupMemberResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMGroupRequest": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "external_id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMGroupResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "external_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "source": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMListGroupMembersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMGroupMemberResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMListGroupsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMGroupResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMListPrincipalRolesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMPrincipalRoleResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMListRolesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMRoleResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMListSSOGroupMappingsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMSSOGroupMappingResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMListSSOProvidersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.IAMSSOProviderResponse"
+                    }
+                }
+            }
+        },
+        "handlers.IAMPrincipalRoleRequest": {
+            "type": "object",
+            "properties": {
+                "principal_id": {
+                    "type": "string"
+                },
+                "principal_type": {
+                    "type": "string"
+                },
+                "role_key": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMPrincipalRoleResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "group_display_name": {
+                    "type": "string"
+                },
+                "group_key": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "principal_id": {
+                    "type": "string"
+                },
+                "principal_type": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "resource_id": {
+                    "type": "string"
+                },
+                "resource_type": {
+                    "type": "string"
+                },
+                "role_id": {
+                    "type": "string"
+                },
+                "role_key": {
+                    "type": "string"
+                },
+                "role_scope": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "user_display_name": {
+                    "type": "string"
+                },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_username": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMRoleResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMSSOGroupMappingRequest": {
+            "type": "object",
+            "properties": {
+                "external_group": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMSSOGroupMappingResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "external_group": {
+                    "type": "string"
+                },
+                "group_display_name": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "group_key": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMSSOProviderRequest": {
+            "type": "object",
+            "properties": {
+                "attribute_mapping": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "email_linking_policy": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "jit_enabled": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "trust_email": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.IAMSSOProviderResponse": {
+            "type": "object",
+            "properties": {
+                "attribute_mapping": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "config": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email_linking_policy": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "jit_enabled": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "trust_email": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.InstallMcpRequest": {
             "type": "object",
             "properties": {
@@ -12200,6 +13858,17 @@
             "properties": {
                 "skill_id": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.ListSSOProvidersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SSOProviderResponse"
+                    }
                 }
             }
         },
@@ -12254,7 +13923,7 @@
                 "expires_at": {
                     "type": "string"
                 },
-                "role": {
+                "session_id": {
                     "type": "string"
                 },
                 "timezone": {
@@ -12337,6 +14006,14 @@
                 }
             }
         },
+        "handlers.OIDCStartResponse": {
+            "type": "object",
+            "properties": {
+                "redirect_url": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.PingResponse": {
             "type": "object",
             "properties": {
@@ -12399,6 +14076,26 @@
             "properties": {
                 "version": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.SSOProviderResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/sso.ProviderType"
                 }
             }
         },
@@ -14359,6 +16056,17 @@
                     "type": "string"
                 }
             }
+        },
+        "sso.ProviderType": {
+            "type": "string",
+            "enum": [
+                "oidc",
+                "saml"
+            ],
+            "x-enum-varnames": [
+                "ProviderTypeOIDC",
+                "ProviderTypeSAML"
+            ]
         }
     }
 }

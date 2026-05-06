@@ -122,6 +122,14 @@ const routes = [
         },
       },
       {
+        name: 'iam',
+        path: 'iam',
+        component: () => import('@/pages/iam/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.iam'),
+        },
+      },
+      {
         name: 'usage',
         path: 'usage',
         component: () => import('@/pages/usage/index.vue'),
@@ -169,6 +177,11 @@ const routes = [
     component: () => import('@/pages/login/index.vue'),
   },
   {
+    name: 'sso-callback',
+    path: '/login/sso/callback',
+    component: () => import('@/pages/login/sso-callback.vue'),
+  },
+  {
     name: 'oauth-mcp-callback',
     path: '/oauth/mcp/callback',
     component: () => import('@/pages/oauth/mcp-callback.vue'),
@@ -199,6 +212,9 @@ router.beforeEach((to) => {
 
   if (to.fullPath === '/login') {
     return token ? { path: '/' } : true
+  }
+  if (to.path === '/login/sso/callback') {
+    return true
   }
   if (to.path.startsWith('/oauth/')) {
     return true

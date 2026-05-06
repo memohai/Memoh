@@ -32,6 +32,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -345,12 +346,14 @@ func newSkillsTestEnvWithMetadata(t *testing.T, metadata map[string]any) *skills
 	queries := postgresstore.NewQueries(sqlc.New(db))
 	accountStore := postgresstore.NewWithQueries(sqlc.New(db))
 	manager := workspace.NewManager(slog.Default(), nil, nil, cfg, "", nil, queries)
+	botService := bots.NewService(slog.Default(), queries)
+	botService.SetRBACService(&skillsTestRBAC{allowed: true})
 	handler := NewContainerdHandler(
 		slog.Default(),
 		manager,
 		cfg,
 		"",
-		bots.NewService(slog.Default(), queries),
+		botService,
 		accounts.NewService(slog.Default(), accountStore),
 		nil,
 	)
@@ -453,13 +456,21 @@ func (*skillsTestDB) Query(context.Context, string, ...interface{}) (pgx.Rows, e
 
 func (d *skillsTestDB) QueryRow(_ context.Context, sql string, _ ...interface{}) pgx.Row {
 	switch {
-	case strings.Contains(sql, "FROM users WHERE id = $1"):
+	case strings.Contains(sql, "FROM iam_users") && strings.Contains(sql, "WHERE id = $1"):
 		return makeUserRow(mustParseUUID(d.userID), "user")
 	case strings.Contains(sql, "FROM bots"):
 		return makeBotRow(mustParseUUID(d.botID), mustParseUUID(d.userID), d.metadataJSON)
 	default:
 		return &skillsTestRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 	}
+}
+
+type skillsTestRBAC struct {
+	allowed bool
+}
+
+func (s *skillsTestRBAC) HasPermission(context.Context, rbac.Check) (bool, error) {
+	return s.allowed, nil
 }
 
 type skillsTestRow struct {

@@ -1,85 +1,4 @@
 definitions:
-  accounts.Account:
-    properties:
-      avatar_url:
-        type: string
-      created_at:
-        type: string
-      display_name:
-        type: string
-      email:
-        type: string
-      id:
-        type: string
-      is_active:
-        type: boolean
-      last_login_at:
-        type: string
-      role:
-        type: string
-      timezone:
-        type: string
-      updated_at:
-        type: string
-      username:
-        type: string
-    type: object
-  accounts.CreateAccountRequest:
-    properties:
-      avatar_url:
-        type: string
-      display_name:
-        type: string
-      email:
-        type: string
-      is_active:
-        type: boolean
-      password:
-        type: string
-      role:
-        type: string
-      username:
-        type: string
-    type: object
-  accounts.ListAccountsResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/accounts.Account'
-        type: array
-    type: object
-  accounts.ResetPasswordRequest:
-    properties:
-      new_password:
-        type: string
-    type: object
-  accounts.UpdateAccountRequest:
-    properties:
-      avatar_url:
-        type: string
-      display_name:
-        type: string
-      is_active:
-        type: boolean
-      role:
-        type: string
-    type: object
-  accounts.UpdatePasswordRequest:
-    properties:
-      current_password:
-        type: string
-      new_password:
-        type: string
-    type: object
-  accounts.UpdateProfileRequest:
-    properties:
-      avatar_url:
-        type: string
-      display_name:
-        type: string
-      timezone:
-        type: string
-    type: object
   acl.ChannelIdentityCandidate:
     properties:
       avatar_url:
@@ -1416,6 +1335,81 @@ definitions:
       provider:
         type: string
     type: object
+  github_com_memohai_memoh_internal_accounts.Account:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      last_login_at:
+        type: string
+      timezone:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_memohai_memoh_internal_accounts.CreateAccountRequest:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      is_active:
+        type: boolean
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_memohai_memoh_internal_accounts.ListAccountsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
+        type: array
+    type: object
+  github_com_memohai_memoh_internal_accounts.ResetPasswordRequest:
+    properties:
+      new_password:
+        type: string
+    type: object
+  github_com_memohai_memoh_internal_accounts.UpdateAccountRequest:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      is_active:
+        type: boolean
+    type: object
+  github_com_memohai_memoh_internal_accounts.UpdatePasswordRequest:
+    properties:
+      current_password:
+        type: string
+      new_password:
+        type: string
+    type: object
+  github_com_memohai_memoh_internal_accounts.UpdateProfileRequest:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      timezone:
+        type: string
+    type: object
   github_com_memohai_memoh_internal_mcp.Connection:
     properties:
       auth_type:
@@ -1625,6 +1619,11 @@ definitions:
       message:
         type: string
     type: object
+  handlers.ExchangeSSOCodeRequest:
+    properties:
+      code:
+        type: string
+    type: object
   handlers.FSDeleteRequest:
     properties:
       path:
@@ -1735,6 +1734,247 @@ definitions:
       workspace_backend:
         type: string
     type: object
+  handlers.IAMGroupMemberRequest:
+    properties:
+      provider_id:
+        type: string
+      source:
+        type: string
+      user_id:
+        type: string
+    type: object
+  handlers.IAMGroupMemberResponse:
+    properties:
+      created_at:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      group_id:
+        type: string
+      provider_id:
+        type: string
+      source:
+        type: string
+      user_id:
+        type: string
+      username:
+        type: string
+    type: object
+  handlers.IAMGroupRequest:
+    properties:
+      display_name:
+        type: string
+      external_id:
+        type: string
+      key:
+        type: string
+      metadata:
+        items:
+          type: integer
+        type: array
+      source:
+        type: string
+    type: object
+  handlers.IAMGroupResponse:
+    properties:
+      created_at:
+        type: string
+      display_name:
+        type: string
+      external_id:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      metadata:
+        items:
+          type: integer
+        type: array
+      source:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handlers.IAMListGroupMembersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMGroupMemberResponse'
+        type: array
+    type: object
+  handlers.IAMListGroupsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMGroupResponse'
+        type: array
+    type: object
+  handlers.IAMListPrincipalRolesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMPrincipalRoleResponse'
+        type: array
+    type: object
+  handlers.IAMListRolesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMRoleResponse'
+        type: array
+    type: object
+  handlers.IAMListSSOGroupMappingsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMSSOGroupMappingResponse'
+        type: array
+    type: object
+  handlers.IAMListSSOProvidersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.IAMSSOProviderResponse'
+        type: array
+    type: object
+  handlers.IAMPrincipalRoleRequest:
+    properties:
+      principal_id:
+        type: string
+      principal_type:
+        type: string
+      role_key:
+        type: string
+    type: object
+  handlers.IAMPrincipalRoleResponse:
+    properties:
+      created_at:
+        type: string
+      group_display_name:
+        type: string
+      group_key:
+        type: string
+      id:
+        type: string
+      principal_id:
+        type: string
+      principal_type:
+        type: string
+      provider_id:
+        type: string
+      resource_id:
+        type: string
+      resource_type:
+        type: string
+      role_id:
+        type: string
+      role_key:
+        type: string
+      role_scope:
+        type: string
+      source:
+        type: string
+      user_display_name:
+        type: string
+      user_email:
+        type: string
+      user_username:
+        type: string
+    type: object
+  handlers.IAMRoleResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      is_system:
+        type: boolean
+      key:
+        type: string
+      scope:
+        type: string
+    type: object
+  handlers.IAMSSOGroupMappingRequest:
+    properties:
+      external_group:
+        type: string
+      group_id:
+        type: string
+    type: object
+  handlers.IAMSSOGroupMappingResponse:
+    properties:
+      created_at:
+        type: string
+      external_group:
+        type: string
+      group_display_name:
+        type: string
+      group_id:
+        type: string
+      group_key:
+        type: string
+      provider_id:
+        type: string
+    type: object
+  handlers.IAMSSOProviderRequest:
+    properties:
+      attribute_mapping:
+        items:
+          type: integer
+        type: array
+      config:
+        items:
+          type: integer
+        type: array
+      email_linking_policy:
+        type: string
+      enabled:
+        type: boolean
+      jit_enabled:
+        type: boolean
+      key:
+        type: string
+      name:
+        type: string
+      trust_email:
+        type: boolean
+      type:
+        type: string
+    type: object
+  handlers.IAMSSOProviderResponse:
+    properties:
+      attribute_mapping:
+        items:
+          type: integer
+        type: array
+      config:
+        items:
+          type: integer
+        type: array
+      created_at:
+        type: string
+      email_linking_policy:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      jit_enabled:
+        type: boolean
+      key:
+        type: string
+      name:
+        type: string
+      trust_email:
+        type: boolean
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
   handlers.InstallMcpRequest:
     properties:
       env:
@@ -1748,6 +1988,13 @@ definitions:
     properties:
       skill_id:
         type: string
+    type: object
+  handlers.ListSSOProvidersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.SSOProviderResponse'
+        type: array
     type: object
   handlers.ListSnapshotsResponse:
     properties:
@@ -1782,7 +2029,7 @@ definitions:
         type: string
       expires_at:
         type: string
-      role:
+      session_id:
         type: string
       timezone:
         type: string
@@ -1836,6 +2083,11 @@ definitions:
       provider_name:
         type: string
     type: object
+  handlers.OIDCStartResponse:
+    properties:
+      redirect_url:
+        type: string
+    type: object
   handlers.PingResponse:
     properties:
       commit_hash:
@@ -1877,6 +2129,19 @@ definitions:
     properties:
       version:
         type: integer
+    type: object
+  handlers.SSOProviderResponse:
+    properties:
+      enabled:
+        type: boolean
+      id:
+        type: string
+      key:
+        type: string
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/sso.ProviderType'
     type: object
   handlers.SessionInfoResponse:
     properties:
@@ -3175,6 +3440,14 @@ definitions:
       tts_model_id:
         type: string
     type: object
+  sso.ProviderType:
+    enum:
+    - oidc
+    - saml
+    type: string
+    x-enum-varnames:
+    - ProviderTypeOIDC
+    - ProviderTypeSAML
 info:
   contact: {}
   title: Memoh API
@@ -3212,7 +3485,7 @@ paths:
       - auth
   /auth/refresh:
     post:
-      description: Issue a new JWT using the existing claims with updated expiration
+      description: Issue a new JWT after validating the active IAM session
       responses:
         "200":
           description: OK
@@ -3229,6 +3502,204 @@ paths:
       security:
       - BearerAuth: []
       summary: Refresh Token
+      tags:
+      - auth
+  /auth/sso/{provider_id}/callback:
+    get:
+      description: Exchange the provider code, create an IAM session, and redirect
+        to the web login callback with a short-lived login code
+      parameters:
+      - description: SSO provider ID or key
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      - description: OIDC authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: OIDC state
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Complete OIDC login
+      tags:
+      - auth
+  /auth/sso/{provider_id}/saml/acs:
+    post:
+      description: Validate the SAML response, create an IAM session, and redirect
+        to the web login callback with a short-lived login code
+      parameters:
+      - description: SSO provider ID or key
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Complete SAML login
+      tags:
+      - auth
+  /auth/sso/{provider_id}/saml/metadata:
+    get:
+      description: Return the SAML service provider metadata XML for an SSO provider
+      parameters:
+      - description: SSO provider ID or key
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get SAML SP metadata
+      tags:
+      - auth
+  /auth/sso/{provider_id}/saml/start:
+    get:
+      description: Create a SAML AuthnRequest, set the transient SAML state cookie,
+        and redirect to the IdP
+      parameters:
+      - description: SSO provider ID or key
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start SAML login
+      tags:
+      - auth
+  /auth/sso/{provider_id}/start:
+    get:
+      description: Build the provider authorization URL and set the transient OIDC
+        state cookie
+      parameters:
+      - description: SSO provider ID or key
+        in: path
+        name: provider_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OIDCStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start OIDC login
+      tags:
+      - auth
+  /auth/sso/exchange:
+    post:
+      description: Exchange a one-time SSO login code for a session JWT
+      parameters:
+      - description: SSO exchange request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ExchangeSSOCodeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange SSO login code
+      tags:
+      - auth
+  /auth/sso/providers:
+    get:
+      description: List enabled OIDC and SAML SSO providers available for login
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ListSSOProvidersResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List SSO providers
       tags:
       - auth
   /bots:
@@ -6632,7 +7103,7 @@ paths:
       - bots
   /bots/{id}:
     delete:
-      description: Delete a bot user (owner/admin only)
+      description: Delete a bot user when the current user has bot.delete
       parameters:
       - description: Bot ID
         in: path
@@ -6666,7 +7137,7 @@ paths:
       tags:
       - bots
     get:
-      description: Get a bot by ID (owner/admin only)
+      description: Get a bot by ID when the current user has bot.read
       parameters:
       - description: Bot ID
         in: path
@@ -6698,7 +7169,7 @@ paths:
       tags:
       - bots
     put:
-      description: Update bot profile (owner/admin only)
+      description: Update bot profile when the current user has bot.update
       parameters:
       - description: Bot ID
         in: path
@@ -7052,7 +7523,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Transfer bot owner (admin only)
+      summary: Transfer bot owner (system admin only)
       tags:
       - bots
   /browser-contexts:
@@ -7518,6 +7989,641 @@ paths:
       summary: OAuth2 callback for email providers
       tags:
       - email-oauth
+  /iam/bots/{bot_id}/principal-roles:
+    get:
+      description: List user and group role assignments for a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListPrincipalRolesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List bot role assignments
+      tags:
+      - iam
+    post:
+      description: Assign a bot-scoped role to a user or group
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Principal role payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMPrincipalRoleRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Assign bot role
+      tags:
+      - iam
+  /iam/groups:
+    get:
+      description: List IAM groups
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListGroupsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List IAM groups
+      tags:
+      - iam
+    post:
+      description: Create or update an IAM group
+      parameters:
+      - description: Group payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMGroupRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMGroupResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upsert IAM group
+      tags:
+      - iam
+  /iam/groups/{id}:
+    delete:
+      description: Delete an IAM group
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete IAM group
+      tags:
+      - iam
+    put:
+      description: Create or update an IAM group
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        type: string
+      - description: Group payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMGroupRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMGroupResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upsert IAM group
+      tags:
+      - iam
+  /iam/groups/{id}/members:
+    get:
+      description: List members of an IAM group
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListGroupMembersResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List IAM group members
+      tags:
+      - iam
+    post:
+      description: Add a user to an IAM group
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Group member payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMGroupMemberRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add IAM group member
+      tags:
+      - iam
+  /iam/groups/{id}/members/{user_id}:
+    delete:
+      description: Remove a user from an IAM group
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete IAM group member
+      tags:
+      - iam
+  /iam/principal-roles/{id}:
+    delete:
+      description: Delete a user or group role assignment
+      parameters:
+      - description: Principal role assignment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete role assignment
+      tags:
+      - iam
+  /iam/roles:
+    get:
+      description: List built-in IAM roles
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListRolesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List IAM roles
+      tags:
+      - iam
+  /iam/sso/providers:
+    get:
+      description: List all IAM SSO providers for administration
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListSSOProvidersResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List IAM SSO providers
+      tags:
+      - iam
+    post:
+      description: Create or update an IAM SSO provider
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        type: string
+      - description: SSO provider payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMSSOProviderRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMSSOProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upsert IAM SSO provider
+      tags:
+      - iam
+  /iam/sso/providers/{id}:
+    delete:
+      description: Delete an IAM SSO provider
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete IAM SSO provider
+      tags:
+      - iam
+    put:
+      description: Create or update an IAM SSO provider
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        type: string
+      - description: SSO provider payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMSSOProviderRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMSSOProviderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upsert IAM SSO provider
+      tags:
+      - iam
+  /iam/sso/providers/{id}/group-mappings:
+    get:
+      description: List external group to IAM group mappings for an SSO provider
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.IAMListSSOGroupMappingsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List SSO group mappings
+      tags:
+      - iam
+    post:
+      description: Create or update an external group to IAM group mapping
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: SSO group mapping payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.IAMSSOGroupMappingRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upsert SSO group mapping
+      tags:
+      - iam
+  /iam/sso/providers/{id}/group-mappings/{external_group}:
+    delete:
+      description: Delete an external group mapping from an SSO provider
+      parameters:
+      - description: SSO provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: External group
+        in: path
+        name: external_group
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete SSO group mapping
+      tags:
+      - iam
   /memory-providers:
     get:
       description: List configured memory providers
@@ -9228,7 +10334,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/accounts.ListAccountsResponse'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.ListAccountsResponse'
         "400":
           description: Bad Request
           schema:
@@ -9252,12 +10358,12 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/accounts.CreateAccountRequest'
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.CreateAccountRequest'
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/accounts.Account'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
         "400":
           description: Bad Request
           schema:
@@ -9286,7 +10392,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/accounts.Account'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
         "400":
           description: Bad Request
           schema:
@@ -9319,12 +10425,12 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/accounts.UpdateAccountRequest'
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.UpdateAccountRequest'
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/accounts.Account'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
         "400":
           description: Bad Request
           schema:
@@ -9358,7 +10464,7 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/accounts.ResetPasswordRequest'
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.ResetPasswordRequest'
       responses:
         "204":
           description: No Content
@@ -9388,7 +10494,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/accounts.Account'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
         "400":
           description: Bad Request
           schema:
@@ -9408,12 +10514,12 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/accounts.UpdateProfileRequest'
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.UpdateProfileRequest'
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/accounts.Account'
+            $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.Account'
         "400":
           description: Bad Request
           schema:
@@ -9516,7 +10622,7 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/accounts.UpdatePasswordRequest'
+          $ref: '#/definitions/github_com_memohai_memoh_internal_accounts.UpdatePasswordRequest'
       responses:
         "204":
           description: No Content

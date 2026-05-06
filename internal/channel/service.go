@@ -425,7 +425,7 @@ func normalizeChannelConfigFields(
 	}, nil
 }
 
-func normalizeChannelIdentityBinding(row sqlc.UserChannelBinding) (ChannelIdentityBinding, error) {
+func normalizeChannelIdentityBinding(row sqlc.IamUserChannelBinding) (ChannelIdentityBinding, error) {
 	config, err := DecodeConfigMap(row.Config)
 	if err != nil {
 		return ChannelIdentityBinding{}, err

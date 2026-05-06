@@ -23,7 +23,6 @@ type AccountRecord struct {
 	ID              string
 	Username        string
 	Email           string
-	Role            string
 	DisplayName     string
 	AvatarURL       string
 	Timezone        string
@@ -45,7 +44,6 @@ type CreateAccountInput struct {
 	Username     string
 	Email        string
 	PasswordHash string
-	Role         string
 	DisplayName  string
 	AvatarURL    string
 	IsActive     bool
@@ -54,7 +52,6 @@ type CreateAccountInput struct {
 
 type UpdateAccountAdminInput struct {
 	UserID      string
-	Role        string
 	DisplayName string
 	AvatarURL   string
 	IsActive    bool

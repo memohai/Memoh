@@ -107,14 +107,28 @@
           </CardContent>
 
           <CardFooter>
-            <Button
-              class="w-full"
-              type="submit"
-              @click="login"
-            >
-              <Spinner v-if="loading" />
-              {{ $t('auth.login') }}
-            </Button>
+            <div class="w-full flex flex-col gap-3">
+              <Button
+                class="w-full"
+                type="submit"
+                @click="login"
+              >
+                <Spinner v-if="loading" />
+                {{ $t('auth.login') }}
+              </Button>
+              <Button
+                v-for="provider in ssoProviders"
+                :key="provider.id"
+                class="w-full"
+                type="button"
+                variant="outline"
+                :disabled="ssoLoading === provider.id"
+                @click="startSSO(provider.id)"
+              >
+                <Spinner v-if="ssoLoading === provider.id" />
+                {{ provider.name }}
+              </Button>
+            </div>
           </CardFooter>
         </Card>
       </form>
@@ -148,11 +162,12 @@ import { useForm } from 'vee-validate'
 import * as z from 'zod'
 import { useUserStore } from '@/store/user'
 import { useSettingsStore } from '@/store/settings'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { postAuthLogin } from '@memohai/sdk'
+import { getAuthSsoByProviderIdStart, getAuthSsoProviders, postAuthLogin } from '@memohai/sdk'
+import type { HandlersSsoProviderResponse } from '@memohai/sdk'
 import type { Locale } from '@/i18n'
 
 const router = useRouter()
@@ -175,6 +190,35 @@ const form = useForm({
 
 const { login: loginHandle } = useUserStore()
 const loading = ref(false)
+const ssoLoading = ref('')
+type LoginSSOProvider = Required<Pick<HandlersSsoProviderResponse, 'id' | 'name' | 'type'>>
+
+const ssoProviders = ref<LoginSSOProvider[]>([])
+
+async function loadSSOProviders() {
+  const { data } = await getAuthSsoProviders()
+  ssoProviders.value = (data.items ?? [])
+    .filter((item): item is LoginSSOProvider => Boolean(item.id && item.name && item.type))
+}
+
+async function startSSO(providerID: string) {
+  try {
+    ssoLoading.value = providerID
+    const provider = ssoProviders.value.find((item) => item.id === providerID)
+    if (!provider) throw new Error(t('auth.loginFailed'))
+    if (provider.type === 'saml') {
+      window.location.href = `/api/auth/sso/${encodeURIComponent(providerID)}/saml/start`
+      return
+    }
+    const { data } = await getAuthSsoByProviderIdStart({ path: { provider_id: providerID } })
+    if (!data?.redirect_url) throw new Error(t('auth.loginFailed'))
+    window.location.href = data.redirect_url
+  } catch {
+    toast.error(t('auth.loginFailed'))
+  } finally {
+    ssoLoading.value = ''
+  }
+}
 
 const login = form.handleSubmit(async (values) => {
   try {
@@ -185,7 +229,6 @@ const login = form.handleSubmit(async (values) => {
         id: data.user_id,
         username: data.username,
         displayName: data.display_name ?? '',
-        role: data.role ?? '',
         avatarUrl: data.avatar_url ?? '',
         timezone: data.timezone ?? 'UTC',
       }, data.access_token)
@@ -200,5 +243,9 @@ const login = form.handleSubmit(async (values) => {
   } finally {
     loading.value = false
   }
+})
+
+onMounted(() => {
+  void loadSSOProviders()
 })
 </script>

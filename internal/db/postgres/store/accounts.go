@@ -25,15 +25,15 @@ func (s *Store) GetByUserID(ctx context.Context, userID string) (dbstore.Account
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return s.accountRecord(ctx, row), nil
 }
 
 func (s *Store) GetByIdentity(ctx context.Context, identity string) (dbstore.AccountRecord, error) {
-	row, err := s.queries.GetAccountByIdentity(ctx, pgtype.Text{String: identity, Valid: identity != ""})
+	row, err := s.queries.GetAccountByIdentity(ctx, identity)
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return s.accountRecord(ctx, row), nil
 }
 
 func (s *Store) List(ctx context.Context) ([]dbstore.AccountRecord, error) {
@@ -41,7 +41,7 @@ func (s *Store) List(ctx context.Context) ([]dbstore.AccountRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	return accountRecords(rows), nil
+	return s.accountRecords(ctx, rows), nil
 }
 
 func (s *Store) Search(ctx context.Context, query string, limit int32) ([]dbstore.AccountRecord, error) {
@@ -52,7 +52,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int32) ([]dbstor
 	if err != nil {
 		return nil, err
 	}
-	return accountRecords(rows), nil
+	return s.accountRecords(ctx, rows), nil
 }
 
 func (s *Store) CreateUser(ctx context.Context, input dbstore.CreateUserInput) (dbstore.AccountRecord, error) {
@@ -63,7 +63,7 @@ func (s *Store) CreateUser(ctx context.Context, input dbstore.CreateUserInput) (
 	if err != nil {
 		return dbstore.AccountRecord{}, err
 	}
-	return accountRecord(row), nil
+	return baseAccountRecord(row), nil
 }
 
 func (s *Store) CreateAccount(ctx context.Context, input dbstore.CreateAccountInput) (dbstore.AccountRecord, error) {
@@ -72,20 +72,30 @@ func (s *Store) CreateAccount(ctx context.Context, input dbstore.CreateAccountIn
 		return dbstore.AccountRecord{}, err
 	}
 	row, err := s.queries.CreateAccount(ctx, dbsqlc.CreateAccountParams{
-		UserID:       userID,
-		Username:     text(input.Username),
-		Email:        optionalText(input.Email),
-		PasswordHash: text(input.PasswordHash),
-		Role:         input.Role,
-		DisplayName:  optionalText(input.DisplayName),
-		AvatarUrl:    optionalText(input.AvatarURL),
-		IsActive:     input.IsActive,
-		DataRoot:     optionalText(input.DataRoot),
+		UserID:      userID,
+		Username:    text(input.Username),
+		Email:       optionalText(input.Email),
+		DisplayName: optionalText(input.DisplayName),
+		AvatarUrl:   optionalText(input.AvatarURL),
+		IsActive:    input.IsActive,
+		DataRoot:    optionalText(input.DataRoot),
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, err
 	}
-	return accountRecord(row), nil
+	_, err = s.queries.CreatePasswordIdentity(ctx, dbsqlc.CreatePasswordIdentityParams{
+		UserID:           userID,
+		Subject:          input.Username,
+		CredentialSecret: text(input.PasswordHash),
+		Email:            optionalText(input.Email),
+		Username:         text(input.Username),
+		DisplayName:      optionalText(input.DisplayName),
+		AvatarUrl:        optionalText(input.AvatarURL),
+	})
+	if err != nil {
+		return dbstore.AccountRecord{}, err
+	}
+	return s.accountRecord(ctx, row), nil
 }
 
 func (s *Store) UpdateLastLogin(ctx context.Context, accountID string) error {
@@ -104,7 +114,6 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 	}
 	row, err := s.queries.UpdateAccountAdmin(ctx, dbsqlc.UpdateAccountAdminParams{
 		UserID:      userID,
-		Role:        input.Role,
 		DisplayName: optionalText(input.DisplayName),
 		AvatarUrl:   optionalText(input.AvatarURL),
 		IsActive:    input.IsActive,
@@ -112,7 +121,7 @@ func (s *Store) UpdateAdmin(ctx context.Context, input dbstore.UpdateAccountAdmi
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return s.accountRecord(ctx, row), nil
 }
 
 func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountProfileInput) (dbstore.AccountRecord, error) {
@@ -130,7 +139,7 @@ func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountPr
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
 	}
-	return accountRecord(row), nil
+	return s.accountRecord(ctx, row), nil
 }
 
 func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountPasswordInput) error {
@@ -139,7 +148,7 @@ func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountP
 		return err
 	}
 	_, err = s.queries.UpdateAccountPassword(ctx, dbsqlc.UpdateAccountPasswordParams{
-		ID:           userID,
+		UserID:       userID,
 		PasswordHash: text(input.PasswordHash),
 	})
 	return mapQueryErr(err)
@@ -160,26 +169,35 @@ func optionalText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
 
-func accountRecords(rows []dbsqlc.User) []dbstore.AccountRecord {
+func (s *Store) accountRecords(ctx context.Context, rows []dbsqlc.IamUser) []dbstore.AccountRecord {
 	items := make([]dbstore.AccountRecord, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, accountRecord(row))
+		items = append(items, s.accountRecord(ctx, row))
 	}
 	return items
 }
 
-func accountRecord(row dbsqlc.User) dbstore.AccountRecord {
+func (s *Store) accountRecord(ctx context.Context, row dbsqlc.IamUser) dbstore.AccountRecord {
+	rec := baseAccountRecord(row)
+	if row.Username.Valid {
+		identity, err := s.queries.GetPasswordIdentityBySubject(ctx, row.Username.String)
+		if err == nil {
+			rec.PasswordHash = identity.CredentialSecret.String
+			rec.HasPasswordHash = identity.CredentialSecret.Valid
+		}
+	}
+	return rec
+}
+
+func baseAccountRecord(row dbsqlc.IamUser) dbstore.AccountRecord {
 	rec := dbstore.AccountRecord{
-		ID:              row.ID.String(),
-		Username:        row.Username.String,
-		Email:           row.Email.String,
-		Role:            row.Role,
-		DisplayName:     row.DisplayName.String,
-		AvatarURL:       row.AvatarUrl.String,
-		Timezone:        row.Timezone,
-		PasswordHash:    row.PasswordHash.String,
-		HasPasswordHash: row.PasswordHash.Valid,
-		IsActive:        row.IsActive,
+		ID:          row.ID.String(),
+		Username:    row.Username.String,
+		Email:       row.Email.String,
+		DisplayName: row.DisplayName.String,
+		AvatarURL:   row.AvatarUrl.String,
+		Timezone:    row.Timezone,
+		IsActive:    row.IsActive,
 	}
 	if row.CreatedAt.Valid {
 		rec.CreatedAt = row.CreatedAt.Time

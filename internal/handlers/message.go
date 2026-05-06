@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/iam/rbac"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
@@ -32,6 +33,7 @@ type MessageHandler struct {
 	mediaService        *media.Service
 	botService          *bots.Service
 	accountService      *accounts.Service
+	rbacService         SystemPermissionService
 	toolApproval        *toolapproval.Service
 	logger              *slog.Logger
 }
@@ -59,6 +61,10 @@ func (h *MessageHandler) SetMediaService(svc *media.Service) {
 
 func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
 	h.toolApproval = svc
+}
+
+func (h *MessageHandler) SetRBACService(svc SystemPermissionService) {
+	h.rbacService = svc
 }
 
 // Register registers all conversation routes.
@@ -452,9 +458,12 @@ func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, ch
 	if h.conversationService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "conversation service not configured")
 	}
-	// Admin bypass.
-	if h.accountService != nil {
-		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
+	if h.rbacService != nil {
+		isAdmin, err := h.rbacService.HasPermission(ctx, rbac.Check{
+			UserID:        channelIdentityID,
+			PermissionKey: rbac.PermissionSystemAdmin,
+			ResourceType:  rbac.ResourceSystem,
+		})
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

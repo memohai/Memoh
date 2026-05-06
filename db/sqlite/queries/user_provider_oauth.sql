@@ -1,5 +1,5 @@
 -- name: UpsertUserProviderOAuthToken :one
-INSERT INTO user_provider_oauth_tokens (id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata)
+INSERT INTO iam_user_provider_oauth_tokens (id, provider_id, user_id, access_token, refresh_token, expires_at, scope, token_type, state, pkce_code_verifier, metadata)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -30,17 +30,17 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
 RETURNING *;
 
 -- name: GetUserProviderOAuthToken :one
-SELECT * FROM user_provider_oauth_tokens
+SELECT * FROM iam_user_provider_oauth_tokens
 WHERE provider_id = sqlc.arg(provider_id)
   AND user_id = sqlc.arg(user_id);
 
 -- name: GetUserProviderOAuthTokenByState :one
-SELECT * FROM user_provider_oauth_tokens
+SELECT * FROM iam_user_provider_oauth_tokens
 WHERE state = sqlc.arg(state)
   AND state != '';
 
 -- name: UpdateUserProviderOAuthState :exec
-INSERT INTO user_provider_oauth_tokens (id, provider_id, user_id, state, pkce_code_verifier, metadata)
+INSERT INTO iam_user_provider_oauth_tokens (id, provider_id, user_id, state, pkce_code_verifier, metadata)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -60,6 +60,6 @@ ON CONFLICT (provider_id, user_id) DO UPDATE SET
   updated_at = CURRENT_TIMESTAMP;
 
 -- name: DeleteUserProviderOAuthToken :exec
-DELETE FROM user_provider_oauth_tokens
+DELETE FROM iam_user_provider_oauth_tokens
 WHERE provider_id = sqlc.arg(provider_id)
   AND user_id = sqlc.arg(user_id);

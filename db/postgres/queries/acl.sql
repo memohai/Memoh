@@ -50,8 +50,8 @@ SELECT
   linked.display_name AS linked_user_display_name,
   linked.avatar_url AS linked_user_avatar_url
 FROM bot_acl_rules r
-LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
-LEFT JOIN users linked ON linked.id = ci.user_id
+LEFT JOIN iam_channel_identities ci ON ci.id = r.channel_identity_id
+LEFT JOIN iam_users linked ON linked.id = ci.user_id
 WHERE r.bot_id = $1
   AND r.action = 'chat.trigger'
 ORDER BY r.priority ASC, r.created_at ASC;

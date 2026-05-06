@@ -1,5 +1,5 @@
 -- name: CreateChannelIdentity :one
-INSERT INTO channel_identities (id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata)
+INSERT INTO iam_channel_identities (id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -17,21 +17,21 @@ RETURNING id, user_id, channel_type, channel_subject_id, display_name, avatar_ur
 
 -- name: GetChannelIdentityByID :one
 SELECT id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
-FROM channel_identities
+FROM iam_channel_identities
 WHERE id = sqlc.arg(id);
 
 -- name: GetChannelIdentityByIDForUpdate :one
 SELECT id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
-FROM channel_identities
+FROM iam_channel_identities
 WHERE id = sqlc.arg(id);
 
 -- name: GetChannelIdentityByChannelSubject :one
 SELECT id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
-FROM channel_identities
+FROM iam_channel_identities
 WHERE channel_type = sqlc.arg(channel_type) AND channel_subject_id = sqlc.arg(channel_subject_id);
 
 -- name: UpsertChannelIdentityByChannelSubject :one
-INSERT INTO channel_identities (id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata)
+INSERT INTO iam_channel_identities (id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -47,16 +47,16 @@ VALUES (
 )
 ON CONFLICT (channel_type, channel_subject_id)
 DO UPDATE SET
-  display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), channel_identities.display_name),
-  avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), channel_identities.avatar_url),
+  display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), iam_channel_identities.display_name),
+  avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), iam_channel_identities.avatar_url),
   metadata = EXCLUDED.metadata,
-  user_id = COALESCE(channel_identities.user_id, EXCLUDED.user_id),
+  user_id = COALESCE(iam_channel_identities.user_id, EXCLUDED.user_id),
   updated_at = CURRENT_TIMESTAMP
 RETURNING id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at;
 
 -- name: ListChannelIdentitiesByUserID :many
 SELECT id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at
-FROM channel_identities
+FROM iam_channel_identities
 WHERE user_id = sqlc.arg(user_id)
 ORDER BY created_at DESC;
 
@@ -74,8 +74,8 @@ SELECT
   u.username AS linked_username,
   u.display_name AS linked_display_name,
   u.avatar_url AS linked_avatar_url
-FROM channel_identities ci
-LEFT JOIN users u ON u.id = ci.user_id
+FROM iam_channel_identities ci
+LEFT JOIN iam_users u ON u.id = ci.user_id
 WHERE
   sqlc.arg(query) = ''
   OR lower(ci.channel_type) LIKE '%' || lower(sqlc.arg(query)) || '%'
@@ -87,7 +87,7 @@ ORDER BY ci.updated_at DESC
 LIMIT sqlc.arg(limit_count);
 
 -- name: SetChannelIdentityLinkedUser :one
-UPDATE channel_identities
+UPDATE iam_channel_identities
 SET user_id = sqlc.arg(user_id), updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
 RETURNING id, user_id, channel_type, channel_subject_id, display_name, avatar_url, metadata, created_at, updated_at;

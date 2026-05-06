@@ -55,12 +55,12 @@ ORDER BY created_at DESC;
 
 -- name: GetUserChannelBinding :one
 SELECT id, user_id, channel_type, config, created_at, updated_at
-FROM user_channel_bindings
+FROM iam_user_channel_bindings
 WHERE user_id = $1 AND channel_type = $2
 LIMIT 1;
 
 -- name: UpsertUserChannelBinding :one
-INSERT INTO user_channel_bindings (user_id, channel_type, config)
+INSERT INTO iam_user_channel_bindings (user_id, channel_type, config)
 VALUES ($1, $2, $3)
 ON CONFLICT (user_id, channel_type)
 DO UPDATE SET
@@ -70,6 +70,6 @@ RETURNING id, user_id, channel_type, config, created_at, updated_at;
 
 -- name: ListUserChannelBindingsByPlatform :many
 SELECT id, user_id, channel_type, config, created_at, updated_at
-FROM user_channel_bindings
+FROM iam_user_channel_bindings
 WHERE channel_type = $1
 ORDER BY created_at DESC;

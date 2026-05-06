@@ -13,6 +13,7 @@ import (
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	"github.com/memohai/memoh/internal/iam/rbac"
 )
 
 // fakeRow implements pgx.Row with a custom scan function.
@@ -91,6 +92,17 @@ func mustParseUUID(s string) pgtype.UUID {
 	return u
 }
 
+type fakePermissionService struct {
+	allowed bool
+	err     error
+	check   rbac.Check
+}
+
+func (f *fakePermissionService) HasPermission(_ context.Context, check rbac.Check) (bool, error) {
+	f.check = check
+	return f.allowed, f.err
+}
+
 func TestAuthorizeAccess(t *testing.T) {
 	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
 	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
@@ -102,19 +114,20 @@ func TestAuthorizeAccess(t *testing.T) {
 	tests := []struct {
 		name      string
 		userID    string
-		isAdmin   bool
+		allowed   bool
 		wantErr   bool
 		wantErrIs error
 	}{
 		{
 			name:    "owner always allowed",
 			userID:  ownerID,
+			allowed: true,
 			wantErr: false,
 		},
 		{
-			name:    "admin always allowed",
+			name:    "rbac allowed",
 			userID:  strangerID,
-			isAdmin: true,
+			allowed: true,
 			wantErr: false,
 		},
 		{
@@ -134,8 +147,10 @@ func TestAuthorizeAccess(t *testing.T) {
 				},
 			}
 			svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+			permission := &fakePermissionService{allowed: tt.allowed}
+			svc.SetRBACService(permission)
 
-			_, err := svc.AuthorizeAccess(context.Background(), tt.userID, botID, tt.isAdmin)
+			_, err := svc.AuthorizeAccess(context.Background(), tt.userID, botID, false)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -145,6 +160,12 @@ func TestAuthorizeAccess(t *testing.T) {
 				}
 			} else if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if permission.check.PermissionKey != rbac.PermissionBotRead {
+				t.Fatalf("permission = %q, want %q", permission.check.PermissionKey, rbac.PermissionBotRead)
+			}
+			if permission.check.ResourceType != rbac.ResourceBot || permission.check.ResourceID != botID {
+				t.Fatalf("unexpected permission check: %+v", permission.check)
 			}
 		})
 	}
@@ -157,7 +178,7 @@ func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 	db := &fakeDBTX{
 		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
 			switch {
-			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "WHERE id = $1"):
+			case strings.Contains(sql, "FROM iam_users") && strings.Contains(sql, "WHERE id = $1"):
 				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
 			case strings.Contains(sql, "INSERT INTO bots"):
 				createCalled = true

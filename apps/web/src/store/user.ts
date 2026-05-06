@@ -6,7 +6,6 @@ import { useRouter } from 'vue-router'
 export interface UserInfo {
   id: string;
   username: string;
-  role: string;
   displayName: string;
   avatarUrl: string;
   timezone: string;
@@ -18,7 +17,6 @@ export const useUserStore = defineStore(
     const userInfo = reactive<UserInfo>({
       id: '',
       username: '',
-      role: '',
       displayName: '',
       avatarUrl: '',
       timezone: 'UTC',
