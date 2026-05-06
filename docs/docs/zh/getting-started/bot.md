@@ -50,7 +50,6 @@
 - [供应商与模型](/zh/getting-started/provider-and-model.md)
 - [内置记忆提供方](/zh/memory-providers/builtin.md)（如用）
 - [搜索提供方](/zh/getting-started/search-provider.md)
-- [浏览器上下文](/zh/getting-started/browser.md)
 - [TTS 提供方](/zh/tts-providers/index)
 
 ---
@@ -65,7 +64,6 @@
 | **Memory Provider** | 长期记忆后端；内置类型还可自带记忆/向量模型 |
 | **Search Provider** | 联网搜索用哪家 |
 | **TTS Model** | 来自 TTS 流，不是普通 chat 供应商里选 |
-| **Browser Context** | 自动化上网用的浏览器配置 |
 | **Timezone** | 不填则用户时区再落到系统 |
 | **Language** | 机器人主用语 |
 | **Reasoning Enabled** | 当前 chat 模型有 `reasoning` 时可用 |

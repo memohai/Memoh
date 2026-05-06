@@ -117,7 +117,7 @@ func fsHTTPError(err error) *echo.HTTPError {
 	case errors.Is(err, bridge.ErrForbidden):
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	case errors.Is(err, bridge.ErrUnavailable):
-		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "container not reachable")
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/browsercontexts"
 	"github.com/memohai/memoh/internal/compaction"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
@@ -54,7 +53,6 @@ type Handler struct {
 	providersService   *providers.Service
 	memProvService     *memprovider.Service
 	searchProvService  *searchproviders.Service
-	browserCtxService  *browsercontexts.Service
 	emailService       *emailpkg.Service
 	emailOutboxService *emailpkg.OutboxService
 	heartbeatService   *heartbeat.Service
@@ -93,7 +91,6 @@ func NewHandler(
 	providersService *providers.Service,
 	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
-	browserCtxService *browsercontexts.Service,
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
 	heartbeatService *heartbeat.Service,
@@ -114,7 +111,6 @@ func NewHandler(
 		providersService:   providersService,
 		memProvService:     memProvService,
 		searchProvService:  searchProvService,
-		browserCtxService:  browserCtxService,
 		emailService:       emailService,
 		emailOutboxService: emailOutboxService,
 		heartbeatService:   heartbeatService,

@@ -227,17 +227,43 @@ const entries = ref<HandlersFsFileInfo[]>([])
 const loading = ref(false)
 const uploadInputRef = ref<HTMLInputElement>()
 
+function isTransientWorkspaceError(error: unknown): boolean {
+  const detail = resolveApiErrorMessage(error, '').toLowerCase()
+  return detail.includes('container not reachable')
+    || detail.includes('unavailable')
+    || detail.includes('client connection is closing')
+    || detail.includes('transport is closing')
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
 async function loadDirectory(path: string) {
   if (!props.botId) return
   loading.value = true
   try {
-    const { data } = await getBotsByBotIdContainerFsList({
-      path: { bot_id: props.botId },
-      query: { path },
-      throwOnError: true,
-    })
-    entries.value = data.entries ?? []
-    currentPath.value = data.path ?? path
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { data } = await getBotsByBotIdContainerFsList({
+          path: { bot_id: props.botId },
+          query: { path },
+          throwOnError: true,
+        })
+        entries.value = data.entries ?? []
+        currentPath.value = data.path ?? path
+        return
+      } catch (error) {
+        lastError = error
+        if (attempt < 2 && isTransientWorkspaceError(error)) {
+          await wait(500 * (attempt + 1))
+          continue
+        }
+        throw error
+      }
+    }
+    throw lastError
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.loadFailed')))
   } finally {

@@ -50,10 +50,6 @@ var builtinToolCallEmoji = map[string]string{
 	"list_email":          "📧",
 	"read_email":          "📧",
 
-	"browser_action":         "🧭",
-	"browser_observe":        "🧭",
-	"browser_remote_session": "🧭",
-
 	"spawn":     "🤖",
 	"use_skill": "🧩",
 

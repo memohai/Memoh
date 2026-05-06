@@ -68,7 +68,7 @@ Memoh also distinguishes between the personal **WeChat** QR-login integration an
 Bots can use a rich set of built-in capabilities, including:
 
 - web search and web fetch
-- browser automation
+- container workspace automation
 - file editing and command execution inside the bot workspace
 - memory search and management
 - messaging, email, and TTS

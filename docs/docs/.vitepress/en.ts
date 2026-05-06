@@ -73,10 +73,6 @@ export const en = [
         link: '/getting-started/channels.md'
       },
       {
-        text: 'Browser',
-        link: '/getting-started/browser.md'
-      },
-      {
         text: 'Memory',
         link: '/getting-started/memory.md'
       },

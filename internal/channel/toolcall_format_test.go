@@ -20,7 +20,6 @@ func TestToolCallEmojiBuiltin(t *testing.T) {
 		"send":           "💬",
 		"get_contacts":   "👥",
 		"send_email":     "📧",
-		"browser_action": "🧭",
 		"spawn":          "🤖",
 		"use_skill":      "🧩",
 		"generate_image": "🖼️",

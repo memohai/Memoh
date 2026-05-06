@@ -1036,12 +1036,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/container/display/ws": {
-            "get": {
+        "/bots/{bot_id}/container/display/webrtc/offer": {
+            "post": {
                 "tags": [
                     "containerd"
                 ],
-                "summary": "WebSocket VNC relay for bot workspace display",
+                "summary": "Create a WebRTC answer for bot workspace display",
                 "parameters": [
                     {
                         "type": "string",
@@ -1051,15 +1051,21 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "string",
-                        "description": "Auth token",
-                        "name": "token",
-                        "in": "query"
+                        "description": "WebRTC offer payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.displayWebRTCOfferRequest"
+                        }
                     }
                 ],
                 "responses": {
-                    "101": {
-                        "description": "WebSocket upgrade"
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.displayWebRTCOfferResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -1067,8 +1073,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -5903,230 +5909,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/browser-contexts": {
-            "get": {
-                "description": "List all browser context configurations",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "List browser contexts",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/browsercontexts.BrowserContext"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Create a browser context configuration",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "Create a browser context",
-                "parameters": [
-                    {
-                        "description": "Browser context configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/browsercontexts.CreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/browsercontexts.BrowserContext"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/browser-contexts/cores": {
-            "get": {
-                "description": "Get the list of browser cores available in the Browser Gateway container",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "Get available browser cores",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.BrowserCoresResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/browser-contexts/{id}": {
-            "get": {
-                "description": "Get browser context by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "Get a browser context",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Browser Context ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/browsercontexts.BrowserContext"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Update browser context by ID",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "Update a browser context",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Browser Context ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Updated configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/browsercontexts.UpdateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/browsercontexts.BrowserContext"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete browser context by ID",
-                "tags": [
-                    "browser-contexts"
-                ],
-                "summary": "Delete a browser context",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Browser Context ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/channels": {
             "get": {
                 "description": "List channel meta information including capabilities and schemas",
@@ -10899,57 +10681,6 @@ const docTemplate = `{
                 }
             }
         },
-        "browsercontexts.BrowserContext": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "browsercontexts.CreateRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "browsercontexts.UpdateRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
         "channel.Action": {
             "type": "object",
             "properties": {
@@ -11821,17 +11552,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "handlers.BrowserCoresResponse": {
-            "type": "object",
-            "properties": {
-                "cores": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -12934,10 +12654,41 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "encoder": {
+                    "type": "string"
+                },
+                "encoder_available": {
+                    "type": "boolean"
+                },
                 "running": {
                     "type": "boolean"
                 },
+                "transport": {
+                    "type": "string"
+                },
                 "unavailable_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.displayWebRTCOfferRequest": {
+            "type": "object",
+            "properties": {
+                "sdp": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.displayWebRTCOfferResponse": {
+            "type": "object",
+            "properties": {
+                "sdp": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -14232,9 +13983,6 @@ const docTemplate = `{
                 "acl_default_effect": {
                     "type": "string"
                 },
-                "browser_context_id": {
-                    "type": "string"
-                },
                 "chat_model_id": {
                     "type": "string"
                 },
@@ -14377,9 +14125,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "acl_default_effect": {
-                    "type": "string"
-                },
-                "browser_context_id": {
                     "type": "string"
                 },
                 "chat_model_id": {

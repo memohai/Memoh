@@ -48,10 +48,6 @@ var toolFormatters = map[string]toolFormatter{
 	"list_email":          formatListEmail,
 	"read_email":          formatReadEmail,
 
-	"browser_action":         formatBrowserAction,
-	"browser_observe":        formatBrowserObserve,
-	"browser_remote_session": formatBrowserRemoteSession,
-
 	"spawn":     formatSpawn,
 	"use_skill": formatUseSkill,
 
@@ -934,94 +930,6 @@ func formatReadEmail(tc *StreamToolCall, status ToolCallStatus) ToolCallPresenta
 		p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: "Received: " + received})
 	}
 	p.Footer = "(body hidden)"
-	return p
-}
-
-// --- browser -----------------------------------------------------------
-
-func formatBrowserAction(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
-	in := inputMap(tc)
-	action := pickStringField(in, "action")
-	url := pickStringField(in, "url")
-	header := action
-	if url != "" {
-		header = fmt.Sprintf("%s · %s", action, url)
-	}
-	p := ToolCallPresentation{Header: header}
-	if status == ToolCallStatusRunning {
-		return p
-	}
-	if e, done := errorPresentation(p, status, tc); done {
-		return e
-	}
-	return p
-}
-
-func formatBrowserObserve(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
-	in := inputMap(tc)
-	kind := pickStringField(in, "type", "kind")
-	p := ToolCallPresentation{Header: kind}
-	if status == ToolCallStatusRunning {
-		return p
-	}
-	if e, done := errorPresentation(p, status, tc); done {
-		return e
-	}
-	res := resultMap(tc)
-	if res == nil {
-		return p
-	}
-	tabs := asSliceOfMaps(res["tabs"])
-	if len(tabs) > 0 {
-		p.Header = fmt.Sprintf("%s · %d tabs", kind, len(tabs))
-		preview := 5
-		for i, t := range tabs {
-			if i >= preview {
-				break
-			}
-			title := pickStringField(t, "title")
-			u := pickStringField(t, "url")
-			active := false
-			if b, ok := t["active"].(bool); ok {
-				active = b
-			}
-			prefix := "- "
-			if active {
-				prefix = "- [active] "
-			}
-			parts := []string{prefix + title}
-			if u != "" {
-				parts = append(parts, "— "+u)
-			}
-			p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: strings.Join(parts, " ")})
-		}
-	}
-	return p
-}
-
-func formatBrowserRemoteSession(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentation {
-	in := inputMap(tc)
-	action := pickStringField(in, "action")
-	p := ToolCallPresentation{Header: action}
-	if status == ToolCallStatusRunning {
-		return p
-	}
-	if e, done := errorPresentation(p, status, tc); done {
-		return e
-	}
-	res := resultMap(tc)
-	if res != nil {
-		id := pickStringField(res, "session_id")
-		expires := pickStringField(res, "expires", "expires_in", "ttl")
-		parts := []string{action}
-		if id != "" {
-			parts = append(parts, "session_id="+id)
-		}
-		if expires != "" {
-			parts = append(parts, "expires "+expires)
-		}
-		p.Header = strings.Join(parts, " · ")
-	}
 	return p
 }
 

@@ -44,14 +44,8 @@ if [ "${USE_SPARSE+x}" = x ]; then
 else
   USE_SPARSE_SET=false
 fi
-if [ "${BROWSER_CORE+x}" = x ]; then
-  BROWSER_CORE_SET=true
-else
-  BROWSER_CORE_SET=false
-fi
-
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
-PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant memoh-browser"
+PROJECT_CONTAINERS="memoh-postgres memoh-migrate memoh-server memoh-web memoh-sparse memoh-qdrant"
 PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_qdrant_data ${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
@@ -169,14 +163,6 @@ read_toml_value() {
     return 1
   fi
   printf '%s' "$value" | sed 's/\\"/"/g; s/\\\\/\\/g'
-}
-
-browser_core_from_cores() {
-  case "$1" in
-    firefox) printf '%s' "firefox" ;;
-    all|chromium,firefox|firefox,chromium) printf '%s' "all" ;;
-    *) printf '%s' "chromium" ;;
-  esac
 }
 
 normalize_database_driver() {
@@ -384,11 +370,6 @@ load_existing_settings() {
       [ -n "$value" ] && USE_SPARSE="$value"
     fi
 
-    if [ "$BROWSER_CORE_SET" = false ]; then
-      value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "BROWSER_CORES" || true)
-      [ -n "$value" ] && BROWSER_CORE=$(browser_core_from_cores "$value")
-    fi
-
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "POSTGRES_PASSWORD" || true)
     [ -n "$value" ] && PG_PASS="$value"
 
@@ -579,7 +560,6 @@ WORKSPACE="$WORKSPACE_DEFAULT"
 MEMOH_DATA_DIR="$MEMOH_DATA_DIR_DEFAULT"
 USE_CN_MIRROR="${USE_CN_MIRROR:-false}"
 USE_SPARSE="${USE_SPARSE:-false}"
-BROWSER_CORE="${BROWSER_CORE:-chromium}"
 
 if [ "$SILENT" = false ]; then
   echo "Configure Memoh (press Enter to use defaults):" > /dev/tty
@@ -689,31 +669,6 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   esac
 
   echo "" > /dev/tty
-  echo "  Browser core selection:" > /dev/tty
-  echo "    1) Chromium only (default, smaller image)" > /dev/tty
-  echo "    2) Firefox only" > /dev/tty
-  echo "    3) Both Chromium and Firefox" > /dev/tty
-  case "$BROWSER_CORE" in
-    firefox) browser_default="2" ;;
-    all) browser_default="3" ;;
-    *) browser_default="1" ;;
-  esac
-  printf "  Browser core [%s]: " "$browser_default" > /dev/tty
-  read -r input < /dev/tty || true
-  case "$input" in
-    2) BROWSER_CORE="firefox" ;;
-    3) BROWSER_CORE="all" ;;
-    "") 
-      case "$browser_default" in
-        2) BROWSER_CORE="firefox" ;;
-        3) BROWSER_CORE="all" ;;
-        *) BROWSER_CORE="chromium" ;;
-      esac
-      ;;
-    *) BROWSER_CORE="chromium" ;;
-  esac
-
-  echo "" > /dev/tty
 elif [ "$INSTALL_MODE" = "upgrade" ]; then
   echo "${GREEN}✓ Upgrade mode: reusing existing configuration and database credentials${NC}"
 fi
@@ -807,34 +762,8 @@ export MEMOH_CONFIG=./config.toml
 export MEMOH_DATA_DIR
 export POSTGRES_PASSWORD="${PG_PASS}"
 
-# Resolve browser tag and cores from BROWSER_CORE selection
-case "$BROWSER_CORE" in
-  firefox)
-    BROWSER_TAG_VARIANT="firefox"
-    BROWSER_CORES="firefox"
-    ;;
-  all)
-    BROWSER_TAG_VARIANT=""
-    BROWSER_CORES="chromium,firefox"
-    ;;
-  *)
-    BROWSER_TAG_VARIANT="chromium"
-    BROWSER_CORES="chromium"
-    ;;
-esac
-
-if [ -n "$BROWSER_TAG_VARIANT" ]; then
-  if [ "$MEMOH_DOCKER_VERSION" != "latest" ]; then
-    BROWSER_TAG="${MEMOH_DOCKER_VERSION}-${BROWSER_TAG_VARIANT}"
-  else
-    BROWSER_TAG="${BROWSER_TAG_VARIANT}-latest"
-  fi
-else
-  BROWSER_TAG="${MEMOH_DOCKER_VERSION}"
-fi
-
 COMPOSE_FILES="-f ${COMPOSE_FILE_NAME}"
-COMPOSE_PROFILES="--profile qdrant --profile browser"
+COMPOSE_PROFILES="--profile qdrant"
 if [ "$USE_SPARSE" = true ]; then
   COMPOSE_PROFILES="$COMPOSE_PROFILES --profile sparse"
   echo "${GREEN}✓ Sparse memory service enabled${NC}"
@@ -853,11 +782,8 @@ write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
 write_env_value "MEMOH_DATABASE_DRIVER" "$DATABASE_DRIVER"
 write_env_value "MEMOH_CONTAINER_BACKEND" "$CONTAINER_BACKEND"
 write_env_value "USE_SPARSE" "$USE_SPARSE"
-write_env_value "BROWSER_TAG" "$BROWSER_TAG"
-write_env_value "BROWSER_CORES" "$BROWSER_CORES"
 echo "${GREEN}✓ Database backend: ${DATABASE_DRIVER}${NC}"
 echo "${GREEN}✓ Workspace backend: ${CONTAINER_BACKEND}${NC}"
-echo "${GREEN}✓ Browser: ${BROWSER_CORE} (image tag: ${BROWSER_TAG})${NC}"
 
 if [ "$INSTALL_MODE" = "reinstall" ]; then
   cleanup_existing_installation
@@ -897,7 +823,6 @@ echo ""
 echo "  🌐 Web UI:            http://localhost:8082"
 echo "  🔌 API:               http://localhost:8080"
 echo "  🤖 Agent Gateway:     http://localhost:8081"
-echo "  🌍 Browser Gateway:   http://localhost:8083"
 echo ""
 echo "  🔑 Admin login:       ${ADMIN_USER} / ${ADMIN_PASS}"
 echo ""

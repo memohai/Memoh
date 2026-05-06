@@ -70,6 +70,7 @@ RUN apk add --no-cache containerd containerd-ctr
 
 # CNI plugins + iptables (for workspace container networking)
 RUN apk add --no-cache ca-certificates tzdata wget cni-plugins iptables \
+      gstreamer-tools gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly \
     && mkdir -p /opt/cni/bin \
     && (cp -a /usr/lib/cni/. /opt/cni/bin/ 2>/dev/null || true) \
     && (cp -a /usr/libexec/cni/. /opt/cni/bin/ 2>/dev/null || true) \

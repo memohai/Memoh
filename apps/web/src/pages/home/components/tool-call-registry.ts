@@ -6,7 +6,6 @@ import {
   CalendarCog,
   CalendarMinus,
   CalendarPlus,
-  Eye,
   FilePen,
   FilePlus2,
   FileText,
@@ -19,8 +18,6 @@ import {
   MailOpen,
   MailPlus,
   MessagesSquare,
-  MousePointerClick,
-  Plug,
   Search,
   SearchCheck,
   Send,
@@ -33,7 +30,6 @@ import {
   Wrench,
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
-import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
 import ToolCallDetailEmailAccounts from './tool-call-detail-email-accounts.vue'
@@ -334,31 +330,6 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailEmailRead,
       }
     }
-    case 'browser_action': {
-      const action = pickString(input, 'action')
-      const detail = pickString(input, 'url', 'selector', 'text', 'key')
-      const target = [action, detail].filter(Boolean).join(' ')
-      return {
-        icon: MousePointerClick,
-        actionKey: 'browser_action',
-        target,
-        detail: ToolCallDetailBrowser,
-      }
-    }
-    case 'browser_observe':
-      return {
-        icon: Eye,
-        actionKey: 'browser_observe',
-        target: pickString(input, 'observe'),
-        detail: ToolCallDetailBrowser,
-      }
-    case 'browser_remote_session':
-      return {
-        icon: Plug,
-        actionKey: 'browser_remote_session',
-        target: pickString(input, 'action'),
-        detail: ToolCallDetailBrowser,
-      }
     case 'speak': {
       const text = pickString(input, 'text')
       return {

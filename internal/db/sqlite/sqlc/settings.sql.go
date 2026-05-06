@@ -30,7 +30,6 @@ SET language = 'auto',
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,
-    browser_context_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
     tool_approval_config = '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',
@@ -69,7 +68,6 @@ SELECT
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
   transcription_models.id AS transcription_model_id,
-  browser_contexts.id AS browser_context_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
   bots.tool_approval_config,
@@ -87,7 +85,6 @@ LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
-LEFT JOIN browser_contexts ON browser_contexts.id = bots.browser_context_id
 WHERE bots.id = ?1
 `
 
@@ -112,7 +109,6 @@ type GetSettingsByBotIDRow struct {
 	ImageModelID           sql.NullString `json:"image_model_id"`
 	TtsModelID             sql.NullString `json:"tts_model_id"`
 	TranscriptionModelID   sql.NullString `json:"transcription_model_id"`
-	BrowserContextID       sql.NullString `json:"browser_context_id"`
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
@@ -146,7 +142,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSetting
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
-		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,
@@ -179,16 +174,15 @@ SET language = ?1,
     image_model_id = COALESCE(?17, bots.image_model_id),
     tts_model_id = COALESCE(?18, bots.tts_model_id),
     transcription_model_id = COALESCE(?19, bots.transcription_model_id),
-    browser_context_id = COALESCE(?20, bots.browser_context_id),
-    persist_full_tool_results = ?21,
-    show_tool_calls_in_im = ?22,
-    tool_approval_config = ?23,
-    display_enabled = ?24,
-    overlay_provider = ?25,
-    overlay_enabled = ?26,
-    overlay_config = ?27,
+    persist_full_tool_results = ?20,
+    show_tool_calls_in_im = ?21,
+    tool_approval_config = ?22,
+    display_enabled = ?23,
+    overlay_provider = ?24,
+    overlay_enabled = ?25,
+    overlay_config = ?26,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?28
+WHERE id = ?27
 RETURNING
   id AS bot_id,
   language,
@@ -210,7 +204,6 @@ RETURNING
   image_model_id,
   tts_model_id,
   transcription_model_id,
-  browser_context_id,
   persist_full_tool_results,
   show_tool_calls_in_im,
   tool_approval_config,
@@ -240,7 +233,6 @@ type UpsertBotSettingsParams struct {
 	ImageModelID           sql.NullString `json:"image_model_id"`
 	TtsModelID             sql.NullString `json:"tts_model_id"`
 	TranscriptionModelID   sql.NullString `json:"transcription_model_id"`
-	BrowserContextID       sql.NullString `json:"browser_context_id"`
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
@@ -272,7 +264,6 @@ type UpsertBotSettingsRow struct {
 	ImageModelID           sql.NullString `json:"image_model_id"`
 	TtsModelID             sql.NullString `json:"tts_model_id"`
 	TranscriptionModelID   sql.NullString `json:"transcription_model_id"`
-	BrowserContextID       sql.NullString `json:"browser_context_id"`
 	PersistFullToolResults int64          `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      int64          `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     string         `json:"tool_approval_config"`
@@ -303,7 +294,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ImageModelID,
 		arg.TtsModelID,
 		arg.TranscriptionModelID,
-		arg.BrowserContextID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
 		arg.ToolApprovalConfig,
@@ -335,7 +325,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ImageModelID,
 		&i.TtsModelID,
 		&i.TranscriptionModelID,
-		&i.BrowserContextID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
 		&i.ToolApprovalConfig,

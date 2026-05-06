@@ -14,7 +14,6 @@ export interface Config {
   qdrant: QdrantConfig;
   sparse: SparseConfig;
   agent_gateway: AgentGatewayConfig;
-  browser_gateway: BrowserGatewayConfig;
   supermarket: SupermarketConfig;
   web: WebConfig;
 }
@@ -104,12 +103,6 @@ export interface SparseConfig {
 }
 
 export interface AgentGatewayConfig {
-  host: string;
-  port: number;
-  server_addr?: string;
-}
-
-export interface BrowserGatewayConfig {
   host: string;
   port: number;
   server_addr?: string;

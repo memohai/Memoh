@@ -136,14 +136,6 @@ CREATE TABLE IF NOT EXISTS memory_providers (
   CONSTRAINT memory_providers_name_unique UNIQUE (name)
 );
 
-CREATE TABLE IF NOT EXISTS browser_contexts (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL DEFAULT '',
-  config      TEXT NOT NULL DEFAULT '{}',
-  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE IF NOT EXISTS bots (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -173,7 +165,6 @@ CREATE TABLE IF NOT EXISTS bots (
   discuss_probe_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   transcription_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
-  browser_context_id TEXT REFERENCES browser_contexts(id) ON DELETE SET NULL,
   persist_full_tool_results INTEGER NOT NULL DEFAULT 0,
   show_tool_calls_in_im INTEGER NOT NULL DEFAULT 0,
   tool_approval_config TEXT NOT NULL DEFAULT '{"enabled":false,"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"edit":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}',

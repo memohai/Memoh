@@ -58,7 +58,7 @@
     "retryHint": "请检查后重新输入"
   },
   "sidebar": {
-    "session":"会话",
+    "session": "会话",
     "chat": "对话",
     "bots": "Bots",
     "providers": "模型",
@@ -74,7 +74,6 @@
     "mcp": "MCP",
     "platform": "接入平台",
     "usage": "用量统计",
-    "browser": "浏览器",
     "supermarket": "市场",
     "about": "关于"
   },
@@ -196,9 +195,6 @@
       "send_email": "发送邮件",
       "list_email": "列出邮件",
       "read_email": "阅读邮件",
-      "browser_action": "浏览器",
-      "browser_observe": "观察页面",
-      "browser_remote_session": "远程浏览器",
       "speak": "朗读",
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
@@ -329,6 +325,7 @@
         "container": "工作区容器不可达",
         "bundle": "显示器运行时不可用，请先安装 toolkit",
         "server": "显示器服务未运行，请重新创建工作区容器后再试",
+        "encoder": "GStreamer 编码器不可用",
         "manager": "工作区管理器未配置"
       }
     }
@@ -637,33 +634,6 @@
       "logoutSuccess": "授权已撤销",
       "logoutFailed": "撤销授权失败"
     }
-  },
-  "browser": {
-    "title": "浏览器上下文",
-    "add": "添加浏览器上下文",
-    "searchPlaceholder": "搜索浏览器上下文...",
-    "emptyTitle": "暂无浏览器上下文",
-    "emptyDescription": "添加浏览器上下文以启用 Bot 的浏览器自动化功能",
-    "deleteConfirm": "确定要删除此浏览器上下文吗？使用它的 Bot 将无法使用浏览器功能。",
-    "saveSuccess": "浏览器上下文已保存",
-    "deleteSuccess": "浏览器上下文已删除",
-    "name": "名称",
-    "namePlaceholder": "输入上下文名称",
-    "viewportWidth": "视口宽度",
-    "viewportHeight": "视口高度",
-    "userAgent": "User Agent",
-    "userAgentPlaceholder": "自定义 User Agent 字符串",
-    "deviceScaleFactor": "设备缩放比",
-    "isMobile": "移动设备",
-    "locale": "语言区域",
-    "localePlaceholder": "例如 zh-CN",
-    "timezoneId": "时区",
-    "timezonePlaceholder": "例如 Asia/Tokyo",
-    "ignoreHTTPSErrors": "忽略 HTTPS 错误",
-    "core": "浏览器内核",
-    "chromium": "Chromium",
-    "firefox": "Firefox",
-    "config": "配置"
   },
   "mcp": {
     "addTitle": "添加 MCP",
@@ -1165,8 +1135,6 @@
       "toolApprovalDescription": "对 write、edit、exec 等敏感工具启用人工审核，可配置可跳过审核的路径或命令。",
       "toolApprovalBypass": "跳过审核",
       "toolApprovalMustReview": "必须审核",
-      "browserContext": "浏览器上下文",
-      "browserContextPlaceholder": "选择浏览器上下文（未配置时不启用）",
       "networkPageTitle": "网络",
       "networkPageSubtitle": "工作区网络状态与 SD-WAN 相关设置。",
       "networkStatusEmpty": "暂无可用状态字段。",

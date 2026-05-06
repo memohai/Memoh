@@ -32,6 +32,7 @@ const (
 	WorkspaceCDIDevicesLabelKey = "memoh.workspace.cdi_devices"
 	ContainerPrefix             = "workspace-"
 	LegacyContainerPrefix       = "mcp-"
+	DisplayRFBSocketName        = "display.rfb.sock"
 
 	legacyGRPCPort = 9090
 )
@@ -154,6 +155,12 @@ func (m *Manager) socketDir(botID string) string {
 // socketPath returns the path to the UDS socket file for a bot's container.
 func (m *Manager) socketPath(botID string) string {
 	return filepath.Join(m.socketDir(botID), "bridge.sock")
+}
+
+// DisplaySocketPath returns the host-side path to the workspace display RFB
+// Unix socket. The directory is mounted into the container at /run/memoh.
+func (m *Manager) DisplaySocketPath(botID string) string {
+	return filepath.Join(m.socketDir(botID), DisplayRFBSocketName)
 }
 
 // dialTarget returns the gRPC dial target for a bot. Legacy containers
@@ -318,7 +325,11 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	env = append(env, tzEnv...)
 	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 	if m.botDisplayEnabled(ctx, botID) {
-		env = append(env, "MEMOH_DISPLAY_ENABLED=true", "DISPLAY=:99")
+		env = append(env,
+			"MEMOH_DISPLAY_ENABLED=true",
+			"MEMOH_DISPLAY_RFB_UNIX_PATH=/run/memoh/"+DisplayRFBSocketName,
+			"DISPLAY=:99",
+		)
 	}
 	env = append(env, skillEnv...)
 

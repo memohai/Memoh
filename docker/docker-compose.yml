@@ -29,8 +29,3 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sparse
-
-  browser:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.browser

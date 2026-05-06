@@ -223,14 +223,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 		transcriptionModelUUID = modelID
 	}
-	browserContextUUID := pgtype.UUID{}
-	if value := strings.TrimSpace(req.BrowserContextID); value != "" {
-		ctxID, err := db.ParseUUID(value)
-		if err != nil {
-			return Settings{}, err
-		}
-		browserContextUUID = ctxID
-	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
 	if err != nil {
 		return Settings{}, err
@@ -284,7 +276,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		MemoryProviderID:       memoryProviderUUID,
 		TtsModelID:             ttsModelUUID,
 		TranscriptionModelID:   transcriptionModelUUID,
-		BrowserContextID:       browserContextUUID,
 		PersistFullToolResults: current.PersistFullToolResults,
 		ShowToolCallsInIm:      current.ShowToolCallsInIM,
 		ToolApprovalConfig:     toolApprovalConfig,
@@ -387,7 +378,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
-		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
@@ -418,7 +408,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.MemoryProviderID,
 		row.TtsModelID,
 		row.TranscriptionModelID,
-		row.BrowserContextID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
 		row.ToolApprovalConfig,
@@ -448,7 +437,6 @@ func normalizeBotSettingsFields(
 	memoryProviderID pgtype.UUID,
 	ttsModelID pgtype.UUID,
 	transcriptionModelID pgtype.UUID,
-	browserContextID pgtype.UUID,
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
 	toolApprovalConfig []byte,
@@ -487,9 +475,6 @@ func normalizeBotSettingsFields(
 	}
 	if transcriptionModelID.Valid {
 		settings.TranscriptionModelID = uuid.UUID(transcriptionModelID.Bytes).String()
-	}
-	if browserContextID.Valid {
-		settings.BrowserContextID = uuid.UUID(browserContextID.Bytes).String()
 	}
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM

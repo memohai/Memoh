@@ -314,6 +314,34 @@ install_uv() {
 write_display_wrappers() {
   mkdir -p "$DISPLAY_OUTDIR/bin"
 
+  write_display_musl_wrapper() {
+    name="$1"
+    cat > "$DISPLAY_OUTDIR/bin/$name" <<EOF
+#!/bin/sh
+set -eu
+SELF="\$0"
+if command -v readlink >/dev/null 2>&1; then
+  RESOLVED="\$(readlink -f "\$0" 2>/dev/null || true)"
+  if [ -n "\$RESOLVED" ]; then
+    SELF="\$RESOLVED"
+  fi
+fi
+ROOT="\$(CDPATH= cd -- "\$(dirname -- "\$SELF")/../root" && pwd)"
+ARCH="\$(uname -m)"
+case "\$ARCH" in
+  x86_64)  LOADER="\$ROOT/lib/ld-musl-x86_64.so.1" ;;
+  aarch64|arm64) LOADER="\$ROOT/lib/ld-musl-aarch64.so.1" ;;
+  *) echo "ERROR: unsupported architecture: \$ARCH" >&2; exit 1 ;;
+esac
+export PATH="\$ROOT/../bin:\$ROOT/usr/bin:\$PATH"
+export XKB_CONFIG_ROOT="\$ROOT/usr/share/X11/xkb"
+export FONTCONFIG_PATH="\$ROOT/etc/fonts"
+export XDG_DATA_DIRS="\$ROOT/usr/share:\${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+exec "\$LOADER" --library-path "\$ROOT/lib:\$ROOT/usr/lib" "\$ROOT/usr/bin/$name" "\$@"
+EOF
+    chmod +x "$DISPLAY_OUTDIR/bin/$name"
+  }
+
   cat > "$DISPLAY_OUTDIR/bin/xkbcomp" <<'EOF'
 #!/bin/sh
 set -eu
@@ -358,11 +386,15 @@ export FONTCONFIG_PATH="$ROOT/etc/fonts"
 exec "$LOADER" --library-path "$ROOT/lib:$ROOT/usr/lib" "$ROOT/usr/bin/Xvnc" -xkbdir "$ROOT/usr/share/X11/xkb" "$@"
 EOF
   chmod +x "$DISPLAY_OUTDIR/bin/Xvnc"
+
+  write_display_musl_wrapper xsetroot
+  write_display_musl_wrapper twm
+  write_display_musl_wrapper xterm
 }
 
 install_display_bundle() {
   mkdir -p "$DISPLAY_OUTDIR"
-	if [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ]; then
+	if [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xsetroot" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/twm" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xterm" ]; then
 		write_display_wrappers
     echo "Display bundle already installed to $DISPLAY_OUTDIR; skipping download."
     return
@@ -383,13 +415,16 @@ install_display_bundle() {
       --repository "$ALPINE_COMMUNITY_REPO" \
       tigervnc \
       xkeyboard-config \
-      font-misc-misc
+      font-misc-misc \
+      xsetroot \
+      twm \
+      xterm
   elif command -v docker >/dev/null 2>&1; then
     display_abs="$(cd "$DISPLAY_OUTDIR" && pwd)"
     docker run --rm \
       -v "$display_abs:/out" \
       "alpine:${ALPINE_VERSION}" \
-      sh -eu -c 'apk add --root /out/root --initdb --no-cache --no-scripts --allow-untrusted --repository "$1" --repository "$2" tigervnc xkeyboard-config font-misc-misc' \
+      sh -eu -c 'apk add --root /out/root --initdb --no-cache --no-scripts --allow-untrusted --repository "$1" --repository "$2" tigervnc xkeyboard-config font-misc-misc xsetroot twm xterm' \
       sh "$ALPINE_MAIN_REPO" "$ALPINE_COMMUNITY_REPO"
   else
     echo "ERROR: installing the display runtime requires apk or docker." >&2

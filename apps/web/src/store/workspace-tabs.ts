@@ -13,7 +13,7 @@ export type WorkspaceTab =
   | { id: string; type: 'chat'; sessionId: string; title: string }
   | { id: string; type: 'file'; filePath: string; title: string }
   | { id: string; type: 'terminal'; title: string }
-  | { id: string; type: 'vnc'; title: string }
+  | { id: string; type: 'display'; title: string }
   | { id: string; type: 'draft'; title: string }
 
 const DRAFT_TAB_ID = 'draft'
@@ -64,11 +64,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     } else {
       // Backfill fields added later so old persisted state stays usable.
       const cur = storage.value[bid]!
-      if (cur.terminalCounter === undefined || cur.dirtyFileTabs === undefined) {
+      const currentTabs = cur.tabs ?? []
+      const tabs = (currentTabs as Array<WorkspaceTab | { id: string; type: string; title: string }>).map((tab) =>
+        tab.type === 'vnc' ? { id: tab.id, type: 'display' as const, title: tab.title } : tab,
+      ) as WorkspaceTab[]
+      const tabsChanged = tabs.some((tab, index) => tab !== currentTabs[index])
+      if (cur.terminalCounter === undefined || cur.dirtyFileTabs === undefined || tabsChanged) {
         storage.value = {
           ...storage.value,
           [bid]: {
-            tabs: cur.tabs ?? [],
+            tabs,
             activeId: cur.activeId ?? null,
             terminalCounter: cur.terminalCounter ?? 0,
             dirtyFileTabs: cur.dirtyFileTabs ?? {},
@@ -252,7 +257,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     const tab: WorkspaceTab = {
       id: DISPLAY_TAB_ID,
-      type: 'vnc',
+      type: 'display',
       title: 'Display',
     }
     commit({ ...state, tabs: [...state.tabs, tab], activeId: DISPLAY_TAB_ID })
@@ -311,7 +316,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'file':
         return dirty[tab.id] === true
       case 'terminal':
-      case 'vnc':
+      case 'display':
       case 'draft':
         return false
     }

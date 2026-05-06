@@ -9,7 +9,6 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildModelGroup())
 	r.RegisterGroup(h.buildMemoryGroup())
 	r.RegisterGroup(h.buildSearchGroup())
-	r.RegisterGroup(h.buildBrowserGroup())
 	r.RegisterGroup(h.buildUsageGroup())
 	r.RegisterGroup(h.buildEmailGroup())
 	r.RegisterGroup(h.buildHeartbeatGroup())

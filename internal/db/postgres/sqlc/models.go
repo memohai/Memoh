@@ -35,7 +35,6 @@ type Bot struct {
 	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
 	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
-	BrowserContextID       pgtype.UUID        `json:"browser_context_id"`
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
 	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
@@ -202,14 +201,6 @@ type BotStorageBinding struct {
 	BasePath          string             `json:"base_path"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-}
-
-type BrowserContext struct {
-	ID        pgtype.UUID        `json:"id"`
-	Name      string             `json:"name"`
-	Config    []byte             `json:"config"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelIdentity struct {

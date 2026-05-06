@@ -155,7 +155,7 @@ function tabIcon(tab: WorkspaceTab): Component {
     case 'draft': return MessageSquare
     case 'file': return FileIcon
     case 'terminal': return TerminalSquare
-    case 'vnc': return Monitor
+    case 'display': return Monitor
   }
 }
 
@@ -169,7 +169,7 @@ function resolveTitle(tab: WorkspaceTab): string {
   if (tab.type === 'terminal') {
     return tab.title
   }
-  if (tab.type === 'vnc') {
+  if (tab.type === 'display') {
     return tab.title || t('chat.display.title')
   }
   return tab.title || tab.filePath

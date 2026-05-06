@@ -70,11 +70,6 @@ timeout_seconds = 10
 [sparse]
 base_url = "http://127.0.0.1:8085"
 
-[browser_gateway]
-host = "127.0.0.1"
-port = 8083
-server_addr = ":8080"
-
 [web]
 host = "127.0.0.1"
 port = 8082

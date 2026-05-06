@@ -55,7 +55,7 @@ busy_timeout_ms = 5000
 Then start the stack:
 
 ```bash
-docker compose -f docker-compose.sqlite.yml --profile qdrant --profile browser up -d
+docker compose -f docker-compose.sqlite.yml --profile qdrant up -d
 ```
 
 Add `--profile sparse` if you use the built-in memory provider in sparse mode.
@@ -88,7 +88,7 @@ docker run --rm \
   -v memoh_memoh_data:/data:ro \
   -v "$PWD":/backup \
   busybox tar czf /backup/memoh-sqlite-backup.tgz -C /data .
-docker compose -f docker-compose.sqlite.yml --profile qdrant --profile browser up -d
+docker compose -f docker-compose.sqlite.yml --profile qdrant up -d
 ```
 
 Restore by stopping the stack, unpacking the archive back into the `memoh_data` volume, and starting the stack again.

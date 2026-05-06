@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -40,26 +39,25 @@ const (
 )
 
 type Config struct {
-	Log            LogConfig            `toml:"log"`
-	Server         ServerConfig         `toml:"server"`
-	Admin          AdminConfig          `toml:"admin"`
-	Auth           AuthConfig           `toml:"auth"`
-	Timezone       string               `toml:"timezone"`
-	Database       DatabaseConfig       `toml:"database"`
-	Container      ContainerConfig      `toml:"container"`
-	Containerd     ContainerdConfig     `toml:"containerd"`
-	Docker         DockerConfig         `toml:"docker"`
-	Kubernetes     KubernetesConfig     `toml:"kubernetes"`
-	Apple          AppleConfig          `toml:"apple"`
-	Local          LocalConfig          `toml:"local"`
-	Workspace      WorkspaceConfig      `toml:"workspace"`
-	Postgres       PostgresConfig       `toml:"postgres"`
-	SQLite         SQLiteConfig         `toml:"sqlite"`
-	Qdrant         QdrantConfig         `toml:"qdrant"`
-	Sparse         SparseConfig         `toml:"sparse"`
-	BrowserGateway BrowserGatewayConfig `toml:"browser_gateway"`
-	Registry       RegistryConfig       `toml:"registry"`
-	Supermarket    SupermarketConfig    `toml:"supermarket"`
+	Log         LogConfig         `toml:"log"`
+	Server      ServerConfig      `toml:"server"`
+	Admin       AdminConfig       `toml:"admin"`
+	Auth        AuthConfig        `toml:"auth"`
+	Timezone    string            `toml:"timezone"`
+	Database    DatabaseConfig    `toml:"database"`
+	Container   ContainerConfig   `toml:"container"`
+	Containerd  ContainerdConfig  `toml:"containerd"`
+	Docker      DockerConfig      `toml:"docker"`
+	Kubernetes  KubernetesConfig  `toml:"kubernetes"`
+	Apple       AppleConfig       `toml:"apple"`
+	Local       LocalConfig       `toml:"local"`
+	Workspace   WorkspaceConfig   `toml:"workspace"`
+	Postgres    PostgresConfig    `toml:"postgres"`
+	SQLite      SQLiteConfig      `toml:"sqlite"`
+	Qdrant      QdrantConfig      `toml:"qdrant"`
+	Sparse      SparseConfig      `toml:"sparse"`
+	Registry    RegistryConfig    `toml:"registry"`
+	Supermarket SupermarketConfig `toml:"supermarket"`
 }
 
 type LogConfig struct {
@@ -286,23 +284,6 @@ func (c RegistryConfig) ProvidersPath() string {
 	return DefaultProvidersDir
 }
 
-type BrowserGatewayConfig struct {
-	Host string `toml:"host"`
-	Port int    `toml:"port"`
-}
-
-func (c BrowserGatewayConfig) BaseURL() string {
-	host := c.Host
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := c.Port
-	if port == 0 {
-		port = 8083
-	}
-	return "http://" + host + ":" + strconv.Itoa(port)
-}
-
 const DefaultSupermarketBaseURL = "https://supermarket.memoh.ai"
 
 type SupermarketConfig struct {
@@ -369,10 +350,6 @@ func Load(path string) (Config, error) {
 			Path:          DefaultSQLitePath,
 			WAL:           true,
 			BusyTimeoutMS: DefaultSQLiteBusyMS,
-		},
-		BrowserGateway: BrowserGatewayConfig{
-			Host: "127.0.0.1",
-			Port: 8083,
 		},
 	}
 

@@ -24,14 +24,9 @@
             :active="activeTab.id === tab.id"
           />
         </template>
-        <VncPane
-          v-if="activeTab.type === 'vnc' && currentBotId"
-          :key="`vnc-pane:${activeTab.id}`"
-          :bot-id="currentBotId"
-        />
       </template>
       <div
-        v-else
+        v-if="!activeTab"
         class="absolute inset-0 flex items-center justify-center"
       >
         <div class="text-center px-6">
@@ -43,6 +38,21 @@
           </p>
         </div>
       </div>
+
+      <!--
+        Display pane is intentionally kept mounted while the display tab exists,
+        even when another tab is focused. This preserves the WebRTC connection
+        and avoids a black-frame reconnect when the user comes back to it.
+        Visibility is toggled via v-show; pointer-events are disabled while
+        hidden so the offscreen video does not steal focus or events.
+      -->
+      <DisplayPane
+        v-if="displayTab && currentBotId"
+        v-show="activeTab?.type === 'display'"
+        :key="`display-pane:${displayTab.id}:${currentBotId}`"
+        :bot-id="currentBotId"
+        :class="{ 'pointer-events-none': activeTab?.type !== 'display' }"
+      />
     </div>
   </div>
 </template>
@@ -57,7 +67,7 @@ import WorkspaceTabBar from './workspace-tab-bar.vue'
 import ChatPane from './chat-pane.vue'
 import FilePane from './file-pane.vue'
 import TerminalPane from './terminal-pane.vue'
-import VncPane from './vnc-pane.vue'
+import DisplayPane from './display-pane.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
@@ -70,4 +80,9 @@ type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
 const terminalTabs = computed<TerminalTab[]>(() =>
   tabs.value.filter((tab): tab is TerminalTab => tab.type === 'terminal'),
 )
+
+// The display tab is unique per bot, so we only need to detect its presence.
+// Keeping it mounted while present preserves the WebRTC PeerConnection across
+// tab focus changes; closing the tab unmounts the pane and tears WebRTC down.
+const displayTab = computed(() => tabs.value.find((tab) => tab.type === 'display') ?? null)
 </script>

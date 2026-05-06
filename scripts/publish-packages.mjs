@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const CANDIDATE_DIRS = [
-  'apps/browser',
   'apps/desktop',
   'apps/web',
   'packages/sdk',

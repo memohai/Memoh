@@ -74,7 +74,6 @@
     "mcp": "MCP",
     "platform": "Platform",
     "usage": "Usage",
-    "browser": "Browser",
     "supermarket": "Supermarket",
     "about": "About"
   },
@@ -200,9 +199,6 @@
       "send_email": "Send email",
       "list_email": "List emails",
       "read_email": "Read email",
-      "browser_action": "Browser",
-      "browser_observe": "Observe",
-      "browser_remote_session": "Remote browser",
       "speak": "Speak",
       "transcribe_audio": "Transcribe",
       "generate_image": "Generate image",
@@ -333,6 +329,7 @@
         "container": "Workspace container is not reachable",
         "bundle": "Display runtime is unavailable. Install the toolkit first.",
         "server": "Display server is not running. Recreate the workspace container and try again.",
+        "encoder": "GStreamer encoder is unavailable",
         "manager": "Workspace manager is not configured"
       }
     }
@@ -641,33 +638,6 @@
       "logoutSuccess": "Authorization revoked",
       "logoutFailed": "Failed to revoke authorization"
     }
-  },
-  "browser": {
-    "title": "Browser Contexts",
-    "add": "Add Browser Context",
-    "searchPlaceholder": "Search browser contexts...",
-    "emptyTitle": "No Browser Contexts",
-    "emptyDescription": "Add a browser context to enable browser automation for your bots",
-    "deleteConfirm": "Are you sure you want to delete this browser context? Bots using it will lose browser access.",
-    "saveSuccess": "Browser context saved",
-    "deleteSuccess": "Browser context deleted",
-    "name": "Name",
-    "namePlaceholder": "Enter context name",
-    "viewportWidth": "Viewport Width",
-    "viewportHeight": "Viewport Height",
-    "userAgent": "User Agent",
-    "userAgentPlaceholder": "Custom user agent string",
-    "deviceScaleFactor": "Device Scale Factor",
-    "isMobile": "Mobile Device",
-    "locale": "Locale",
-    "localePlaceholder": "e.g. en-US",
-    "timezoneId": "Timezone",
-    "timezonePlaceholder": "e.g. America/New_York",
-    "ignoreHTTPSErrors": "Ignore HTTPS Errors",
-    "core": "Browser Core",
-    "chromium": "Chromium",
-    "firefox": "Firefox",
-    "config": "Configuration"
   },
   "mcp": {
     "addTitle": "Add MCP",
@@ -1169,8 +1139,6 @@
       "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
       "toolApprovalBypass": "Bypass",
       "toolApprovalMustReview": "Must review",
-      "browserContext": "Browser Context",
-      "browserContextPlaceholder": "Select browser context (disabled if empty)",
       "networkPageTitle": "Network",
       "networkPageSubtitle": "Workspace network status and SD-WAN settings.",
       "networkStatusEmpty": "No status fields to display.",
