@@ -9,36 +9,38 @@
           </h4>
           <div class="flex items-center gap-1">
             <Popover v-model:open="compactPopoverOpen">
-              <TooltipProvider>
-                <Tooltip
-                  :delay-duration="300"
-                  :open="compactPopoverOpen ? false : undefined"
-                >
-                  <TooltipTrigger as-child>
-                    <PopoverTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        type="button"
-                        class="size-8 p-0 hover:bg-muted/50 group"
-                        :disabled="loading || compactLoading || memories.length === 0"
-                        :aria-label="$t('bots.memory.compact')"
-                        @click="openCompactDialog"
+              <PopoverAnchor as-child>
+                <div class="inline-block">
+                  <TooltipProvider>
+                    <Tooltip
+                      :delay-duration="300"
+                      :open="compactPopoverOpen ? false : undefined"
+                    >
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          class="size-8 p-0 hover:bg-muted/50 group"
+                          :disabled="loading || compactLoading || memories.length === 0"
+                          :aria-label="$t('bots.memory.compact')"
+                          @click="openCompactDialog"
+                        >
+                          <Brain class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="bottom"
+                        align="center"
                       >
-                        <Brain class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors" />
-                      </Button>
-                    </PopoverTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent
-                    side="bottom"
-                    align="center"
-                  >
-                    <p class="text-[11px]">
-                      {{ $t('bots.memory.compact') }}
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                        <p class="text-[11px]">
+                          {{ $t('bots.memory.compact') }}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </PopoverAnchor>
 
               <PopoverContent
                 side="bottom"
@@ -566,7 +568,7 @@ import {
   DialogTitle,
   DialogFooter,
   Popover,
-  PopoverTrigger,
+  PopoverAnchor,
   PopoverContent,
   Badge,
   Label,
@@ -1279,9 +1281,13 @@ async function handleDelete() {
 }
 
 function openCompactDialog() {
-  compactRatio.value = '0.5'
-  compactDecayDate.value = ''
-  compactPopoverOpen.value = true
+  if (loading.value || compactLoading.value || memories.value.length === 0) return
+
+  if (!compactPopoverOpen.value) {
+    compactRatio.value = '0.5'
+    compactDecayDate.value = ''
+  }
+  compactPopoverOpen.value = !compactPopoverOpen.value
 }
 
 async function handleCompact() {
