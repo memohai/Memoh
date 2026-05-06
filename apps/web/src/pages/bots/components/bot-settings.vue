@@ -298,20 +298,6 @@
       />
     </div>
 
-    <!-- Workspace Display -->
-    <div class="flex items-center justify-between">
-      <div class="space-y-1">
-        <Label>{{ $t('bots.settings.displayEnabled') }}</Label>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('bots.settings.displayEnabledDescription') }}
-        </p>
-      </div>
-      <Switch
-        :model-value="form.display_enabled"
-        @update:model-value="(val) => form.display_enabled = !!val"
-      />
-    </div>
-
     <!-- Save -->
     <div class="flex justify-end">
       <Button

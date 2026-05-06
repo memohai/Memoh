@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -80,7 +79,15 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 // --- Messages ---
 
 func writeSSEData(writer *bufio.Writer, flusher http.Flusher, payload string) error {
-	if _, err := fmt.Fprintf(writer, "data: %s\n\n", payload); err != nil {
+	// SSE frames are line-oriented; fold CR/LF to avoid frame injection.
+	safePayload := strings.NewReplacer("\r", "\\r", "\n", "\\n").Replace(payload)
+	if _, err := writer.WriteString("data: "); err != nil {
+		return err
+	}
+	if _, err := writer.WriteString(safePayload); err != nil {
+		return err
+	}
+	if _, err := writer.WriteString("\n\n"); err != nil {
 		return err
 	}
 	if err := writer.Flush(); err != nil {

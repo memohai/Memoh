@@ -1,13 +1,19 @@
 package display
 
-import "testing"
+import (
+	"context"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestReadRTCSettings(t *testing.T) {
 	t.Setenv(rtcUDPPortMinEnv, "30000")
 	t.Setenv(rtcUDPPortMaxEnv, "30100")
 	t.Setenv(rtcNATIPsEnv, "127.0.0.1, 10.0.0.10")
 
-	cfg, err := readRTCSettings()
+	cfg, err := readRTCSettings(nil)
 	if err != nil {
 		t.Fatalf("readRTCSettings returned error: %v", err)
 	}
@@ -19,10 +25,30 @@ func TestReadRTCSettings(t *testing.T) {
 	}
 }
 
+func TestIsSocketReadyRequiresListener(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "memoh-display-ready-test.sock")
+	_ = os.Remove(path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	listenConfig := net.ListenConfig{}
+	listener, err := listenConfig.Listen(context.Background(), "unix", path)
+	if err != nil {
+		t.Fatalf("listen unix socket: %v", err)
+	}
+	if !isSocketReady(context.Background(), path) {
+		t.Fatal("expected active unix socket to be ready")
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	if isSocketReady(context.Background(), path) {
+		t.Fatal("closed unix socket file must not be reported ready")
+	}
+}
+
 func TestReadRTCSettingsRejectsPartialPortRange(t *testing.T) {
 	t.Setenv(rtcUDPPortMinEnv, "30000")
 
-	if _, err := readRTCSettings(); err == nil {
+	if _, err := readRTCSettings(nil); err == nil {
 		t.Fatal("expected partial port range to fail")
 	}
 }
@@ -30,8 +56,18 @@ func TestReadRTCSettingsRejectsPartialPortRange(t *testing.T) {
 func TestReadRTCSettingsRejectsInvalidNATIP(t *testing.T) {
 	t.Setenv(rtcNATIPsEnv, "localhost")
 
-	if _, err := readRTCSettings(); err == nil {
+	if _, err := readRTCSettings(nil); err == nil {
 		t.Fatal("expected invalid NAT IP to fail")
+	}
+}
+
+func TestReadRTCSettingsUsesInferredNATIPs(t *testing.T) {
+	cfg, err := readRTCSettings([]string{"100.123.2.67", "10.0.0.2"})
+	if err != nil {
+		t.Fatalf("readRTCSettings returned error: %v", err)
+	}
+	if len(cfg.NATIPs) != 2 || cfg.NATIPs[0] != "100.123.2.67" || cfg.NATIPs[1] != "10.0.0.2" {
+		t.Fatalf("unexpected inferred NAT IPs: %#v", cfg.NATIPs)
 	}
 }
 

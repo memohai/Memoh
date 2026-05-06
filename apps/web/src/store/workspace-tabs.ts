@@ -17,12 +17,12 @@ export type WorkspaceTab =
   | { id: string; type: 'draft'; title: string }
 
 const DRAFT_TAB_ID = 'draft'
-const DISPLAY_TAB_ID = 'display'
 
 interface BotTabState {
   tabs: WorkspaceTab[]
   activeId: string | null
   terminalCounter: number
+  displayCounter: number
   dirtyFileTabs: Record<string, boolean>
 }
 
@@ -40,13 +40,17 @@ function terminalTabId(counter: number): string {
   return `terminal:${counter}`
 }
 
+function displayTabId(counter: number): string {
+  return `display:${counter}`
+}
+
 function fileBaseName(filePath: string): string {
   const idx = filePath.lastIndexOf('/')
   return idx >= 0 ? filePath.slice(idx + 1) : filePath
 }
 
 function emptyBotState(): BotTabState {
-  return { tabs: [], activeId: null, terminalCounter: 0, dirtyFileTabs: {} }
+  return { tabs: [], activeId: null, terminalCounter: 0, displayCounter: 0, dirtyFileTabs: {} }
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
@@ -69,13 +73,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         tab.type === 'vnc' ? { id: tab.id, type: 'display' as const, title: tab.title } : tab,
       ) as WorkspaceTab[]
       const tabsChanged = tabs.some((tab, index) => tab !== currentTabs[index])
-      if (cur.terminalCounter === undefined || cur.dirtyFileTabs === undefined || tabsChanged) {
+      if (cur.terminalCounter === undefined || cur.displayCounter === undefined || cur.dirtyFileTabs === undefined || tabsChanged) {
         storage.value = {
           ...storage.value,
           [bid]: {
             tabs,
             activeId: cur.activeId ?? null,
             terminalCounter: cur.terminalCounter ?? 0,
+            displayCounter: cur.displayCounter ?? (tabs.some((tab) => tab.type === 'display') ? 1 : 0),
             dirtyFileTabs: cur.dirtyFileTabs ?? {},
           },
         }
@@ -107,6 +112,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         tabs: [...state.tabs],
         activeId: state.activeId,
         terminalCounter: state.terminalCounter,
+        displayCounter: state.displayCounter,
         dirtyFileTabs: { ...state.dirtyFileTabs },
       },
     }
@@ -250,17 +256,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function openDisplay() {
     const state = ensureBot(currentBotId.value)
     if (!state) return
-    const existing = state.tabs.find((t) => t.id === DISPLAY_TAB_ID)
-    if (existing) {
-      commit({ ...state, activeId: DISPLAY_TAB_ID })
-      return
-    }
+    const nextCounter = state.displayCounter + 1
+    const id = displayTabId(nextCounter)
     const tab: WorkspaceTab = {
-      id: DISPLAY_TAB_ID,
+      id,
       type: 'display',
-      title: 'Display',
+      title: `Desktop ${nextCounter}`,
     }
-    commit({ ...state, tabs: [...state.tabs, tab], activeId: DISPLAY_TAB_ID })
+    commit({
+      ...state,
+      tabs: [...state.tabs, tab],
+      activeId: id,
+      displayCounter: nextCounter,
+    })
   }
 
   function closeTab(id: string) {

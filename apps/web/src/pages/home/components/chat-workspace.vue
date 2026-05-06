@@ -47,11 +47,16 @@
         hidden so the offscreen video does not steal focus or events.
       -->
       <DisplayPane
-        v-if="displayTab && currentBotId"
-        v-show="activeTab?.type === 'display'"
-        :key="`display-pane:${displayTab.id}:${currentBotId}`"
-        :bot-id="currentBotId"
-        :class="{ 'pointer-events-none': activeTab?.type !== 'display' }"
+        v-for="tab in displayTabs"
+        v-show="activeTab?.id === tab.id"
+        :key="`display-pane:${tab.id}:${currentBotId}`"
+        :bot-id="currentBotId || ''"
+        :tab-id="tab.id"
+        :title="tab.title"
+        :active="activeTab?.id === tab.id"
+        :class="{ 'pointer-events-none': activeTab?.id !== tab.id }"
+        @close="store.closeTab(tab.id)"
+        @snapshot="handleDisplaySnapshot"
       />
     </div>
   </div>
@@ -63,6 +68,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceTabsStore, type WorkspaceTab } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
+import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
 import WorkspaceTabBar from './workspace-tab-bar.vue'
 import ChatPane from './chat-pane.vue'
 import FilePane from './file-pane.vue'
@@ -71,18 +77,27 @@ import DisplayPane from './display-pane.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
+const displaySnapshots = useDisplaySnapshotsStore()
 const { activeTab, tabs } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 
 type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
+type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
 
 const terminalTabs = computed<TerminalTab[]>(() =>
   tabs.value.filter((tab): tab is TerminalTab => tab.type === 'terminal'),
 )
 
-// The display tab is unique per bot, so we only need to detect its presence.
-// Keeping it mounted while present preserves the WebRTC PeerConnection across
-// tab focus changes; closing the tab unmounts the pane and tears WebRTC down.
-const displayTab = computed(() => tabs.value.find((tab) => tab.type === 'display') ?? null)
+const displayTabs = computed<DisplayTab[]>(() =>
+  currentBotId.value
+    ? tabs.value.filter((tab): tab is DisplayTab => tab.type === 'display')
+    : [],
+)
+
+function handleDisplaySnapshot(payload: { tabId: string; sessionId?: string; dataUrl: string }) {
+  const botId = currentBotId.value
+  if (!botId) return
+  displaySnapshots.upsert(botId, payload)
+}
 </script>

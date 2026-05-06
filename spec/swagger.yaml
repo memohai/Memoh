@@ -1223,6 +1223,17 @@ definitions:
         type: string
       usage: {}
     type: object
+  display.SessionInfo:
+    properties:
+      codec:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      state:
+        type: string
+    type: object
   email.BindingResponse:
     properties:
       bot_id:
@@ -2131,22 +2142,43 @@ definitions:
     properties:
       available:
         type: boolean
+      browser_available:
+        type: boolean
+      desktop_available:
+        type: boolean
       enabled:
         type: boolean
       encoder:
         type: string
       encoder_available:
         type: boolean
+      prepare_supported:
+        type: boolean
+      prepare_system:
+        type: string
       running:
+        type: boolean
+      toolkit_available:
         type: boolean
       transport:
         type: string
       unavailable_reason:
         type: string
     type: object
+  handlers.displaySessionListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/display.SessionInfo'
+        type: array
+    type: object
   handlers.displayWebRTCOfferRequest:
     properties:
+      candidate_host:
+        type: string
       sdp:
+        type: string
+      session_id:
         type: string
       type:
         type: string
@@ -2154,6 +2186,8 @@ definitions:
   handlers.displayWebRTCOfferResponse:
     properties:
       sdp:
+        type: string
+      session_id:
         type: string
       type:
         type: string
@@ -3844,6 +3878,73 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Check workspace display availability for bot container
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/prepare:
+    post:
+      description: Installs the workspace desktop/VNC/browser packages when needed,
+        starts the display server, and launches the browser.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of display preparation events
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Prepare workspace display dependencies
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/sessions:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.displaySessionListResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List active workspace display WebRTC sessions
+      tags:
+      - containerd
+  /bots/{bot_id}/container/display/sessions/{session_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Display session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Close a workspace display WebRTC session
       tags:
       - containerd
   /bots/{bot_id}/container/display/webrtc/offer:

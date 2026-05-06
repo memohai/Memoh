@@ -40,6 +40,7 @@ const (
 	videoFrameRate       = 15
 	h264FmtpLine         = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
 	displayProbePeriod   = 5 * time.Second
+	socketProbeTimeout   = 300 * time.Millisecond
 )
 
 var (
@@ -66,13 +67,23 @@ type Status struct {
 }
 
 type OfferRequest struct {
-	Type string `json:"type"`
-	SDP  string `json:"sdp"`
+	Type      string   `json:"type"`
+	SDP       string   `json:"sdp"`
+	SessionID string   `json:"session_id,omitempty"`
+	NATIPs    []string `json:"-"`
 }
 
 type OfferResponse struct {
-	Type string `json:"type"`
-	SDP  string `json:"sdp"`
+	Type      string `json:"type"`
+	SDP       string `json:"sdp"`
+	SessionID string `json:"session_id"`
+}
+
+type SessionInfo struct {
+	ID        string    `json:"id"`
+	Codec     string    `json:"codec"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type rtcSettings struct {
@@ -115,7 +126,7 @@ func (s *Service) Status(ctx context.Context, botID string) Status {
 	status.EncoderAvailable = gstErr == nil && strings.TrimSpace(gstLaunch) != ""
 
 	socketPath := s.workspace.DisplaySocketPath(botID)
-	status.Running = isSocketReady(socketPath)
+	status.Running = isSocketReady(ctx, socketPath)
 	status.Available = status.Enabled && status.Running && status.EncoderAvailable
 	switch {
 	case !status.Enabled:
@@ -142,7 +153,7 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 	}
 
 	socketPath := s.workspace.DisplaySocketPath(botID)
-	if !isSocketReady(socketPath) {
+	if !isSocketReady(ctx, socketPath) {
 		return OfferResponse{}, fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
 	}
 	gstLaunch, err := resolveGSTLaunch()
@@ -162,11 +173,36 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 	return sess.answer(ctx, req)
 }
 
+func (s *Service) ListSessions(botID string) []SessionInfo {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	sess := s.sessions[botID]
+	s.mu.Unlock()
+	if sess == nil || sess.closed() {
+		return nil
+	}
+	return sess.peerInfos()
+}
+
+func (s *Service) CloseSession(botID, sessionID string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	sess := s.sessions[botID]
+	s.mu.Unlock()
+	if sess == nil || sess.closed() {
+		return false
+	}
+	return sess.closePeer(sessionID)
+}
+
 func (s *Service) session(ctx context.Context, botID, socketPath, gstLaunch, codec string) (*session, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if sess := s.sessions[botID]; sess != nil && !sess.closed() {
+		s.mu.Unlock()
 		// Display sessions are shared across viewers via RTP fan-out. If a new
 		// viewer needs a different codec, we refuse rather than tearing down
 		// the existing pipeline — that would black out anyone already watching.
@@ -175,14 +211,28 @@ func (s *Service) session(ctx context.Context, botID, socketPath, gstLaunch, cod
 		}
 		return sess, nil
 	}
+	s.mu.Unlock()
 
 	sess := newSession(s, botID, socketPath, gstLaunch, codec)
 	if err := sess.start(ctx); err != nil {
 		sess.stop()
 		return nil, err
 	}
-	s.sessions[botID] = sess
-	return sess, nil
+
+	s.mu.Lock()
+	current := s.sessions[botID]
+	if current == nil || current.closed() {
+		s.sessions[botID] = sess
+		s.mu.Unlock()
+		return sess, nil
+	}
+	s.mu.Unlock()
+
+	sess.stop()
+	if current.codec != codec {
+		return nil, fmt.Errorf("%w: another viewer is already using %s", ErrCodecUnsupported, current.codec)
+	}
+	return current, nil
 }
 
 func (s *Service) removeSession(botID string, target *session) {
@@ -212,7 +262,22 @@ type session struct {
 	tracks   map[string]*webrtc.TrackLocalStaticRTP
 	input    *rfbInputClient
 
+	peersMu sync.RWMutex
+	peers   map[string]*peerSession
+
 	stopOnce sync.Once
+}
+
+type peerSession struct {
+	id        string
+	codec     string
+	createdAt time.Time
+
+	mu    sync.RWMutex
+	state string
+
+	closeOnce sync.Once
+	close     func()
 }
 
 func newSession(service *Service, botID, socketPath, gstLaunch, codec string) *session {
@@ -226,6 +291,7 @@ func newSession(service *Service, botID, socketPath, gstLaunch, codec string) *s
 		ctx:        ctx,
 		cancel:     cancel,
 		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
+		peers:      make(map[string]*peerSession),
 	}
 }
 
@@ -239,7 +305,7 @@ func (s *session) closed() bool {
 }
 
 func (s *session) start(ctx context.Context) error {
-	if !isSocketReady(s.socketPath) {
+	if !isSocketReady(ctx, s.socketPath) {
 		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.socketPath)
 	}
 
@@ -319,13 +385,17 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	if s.closed() {
 		return OfferResponse{}, fmt.Errorf("%w: display pipeline is not running", ErrEncoderUnavailable)
 	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
 
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := registerVideoCodec(mediaEngine, s.codec); err != nil {
 		return OfferResponse{}, err
 	}
 
-	api, rtcCfg, err := newWebRTCAPI(mediaEngine)
+	api, rtcCfg, err := newWebRTCAPI(mediaEngine, req.NATIPs)
 	if err != nil {
 		return OfferResponse{}, err
 	}
@@ -369,22 +439,33 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		})
 	})
 
-	trackID := uuid.NewString()
+	trackID := sessionID
 	s.addTrack(trackID, track)
+	peer := &peerSession{
+		id:        sessionID,
+		codec:     s.codec,
+		createdAt: time.Now(),
+		state:     "new",
+	}
 
 	var cleanupOnce sync.Once
 	cleanup := func(closePeer bool) {
 		cleanupOnce.Do(func() {
+			s.removePeer(sessionID)
 			s.removeTrack(trackID)
 			if closePeer {
 				_ = pc.Close()
 			}
 		})
 	}
+	peer.close = func() { cleanup(true) }
+	s.addPeer(peer)
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		peer.setState(state.String())
 		s.service.logger.Info("display webrtc connection state",
 			slog.String("bot_id", s.botID),
+			slog.String("session_id", sessionID),
 			slog.String("state", state.String()),
 		)
 		switch state {
@@ -398,6 +479,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		s.service.logger.Info("display webrtc ice state",
 			slog.String("bot_id", s.botID),
+			slog.String("session_id", sessionID),
 			slog.String("state", state.String()),
 		)
 	})
@@ -434,7 +516,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		return OfferResponse{}, errors.New("local session description unavailable")
 	}
 
-	return OfferResponse{Type: "answer", SDP: local.SDP}, nil
+	return OfferResponse{Type: "answer", SDP: local.SDP, SessionID: sessionID}, nil
 }
 
 type inputEvent struct {
@@ -481,6 +563,69 @@ func (s *session) removeTrack(id string) {
 	if empty {
 		go s.stop()
 	}
+}
+
+func (s *session) addPeer(peer *peerSession) {
+	s.peersMu.Lock()
+	s.peers[peer.id] = peer
+	s.peersMu.Unlock()
+}
+
+func (s *session) removePeer(id string) {
+	s.peersMu.Lock()
+	delete(s.peers, id)
+	s.peersMu.Unlock()
+}
+
+func (s *session) peerInfos() []SessionInfo {
+	s.peersMu.RLock()
+	defer s.peersMu.RUnlock()
+	infos := make([]SessionInfo, 0, len(s.peers))
+	for _, peer := range s.peers {
+		infos = append(infos, peer.info())
+	}
+	return infos
+}
+
+func (s *session) closePeer(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	s.peersMu.RLock()
+	peer := s.peers[id]
+	s.peersMu.RUnlock()
+	if peer == nil {
+		return false
+	}
+	peer.closeNow()
+	return true
+}
+
+func (p *peerSession) setState(state string) {
+	p.mu.Lock()
+	p.state = state
+	p.mu.Unlock()
+}
+
+func (p *peerSession) info() SessionInfo {
+	p.mu.RLock()
+	state := p.state
+	p.mu.RUnlock()
+	return SessionInfo{
+		ID:        p.id,
+		Codec:     p.codec,
+		State:     state,
+		CreatedAt: p.createdAt,
+	}
+}
+
+func (p *peerSession) closeNow() {
+	p.closeOnce.Do(func() {
+		if p.close != nil {
+			p.close()
+		}
+	})
 }
 
 func (s *session) stop() {
@@ -587,8 +732,8 @@ func drainRTCP(sender *webrtc.RTPSender) {
 	}
 }
 
-func newWebRTCAPI(mediaEngine *webrtc.MediaEngine) (*webrtc.API, rtcSettings, error) {
-	cfg, err := readRTCSettings()
+func newWebRTCAPI(mediaEngine *webrtc.MediaEngine, inferredNATIPs []string) (*webrtc.API, rtcSettings, error) {
+	cfg, err := readRTCSettings(inferredNATIPs)
 	if err != nil {
 		return nil, rtcSettings{}, err
 	}
@@ -612,7 +757,7 @@ func newWebRTCAPI(mediaEngine *webrtc.MediaEngine) (*webrtc.API, rtcSettings, er
 	return webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine)), cfg, nil
 }
 
-func readRTCSettings() (rtcSettings, error) {
+func readRTCSettings(inferredNATIPs []string) (rtcSettings, error) {
 	var cfg rtcSettings
 	minRaw := strings.TrimSpace(os.Getenv(rtcUDPPortMinEnv))
 	maxRaw := strings.TrimSpace(os.Getenv(rtcUDPPortMaxEnv))
@@ -641,6 +786,18 @@ func readRTCSettings() (rtcSettings, error) {
 			return cfg, fmt.Errorf("%s contains invalid IP %q", rtcNATIPsEnv, ip)
 		}
 		cfg.NATIPs = append(cfg.NATIPs, ip)
+	}
+	if len(cfg.NATIPs) == 0 {
+		for _, ip := range inferredNATIPs {
+			ip = strings.TrimSpace(ip)
+			if ip == "" {
+				continue
+			}
+			if net.ParseIP(ip) == nil {
+				return cfg, fmt.Errorf("inferred display WebRTC NAT IP %q is invalid", ip)
+			}
+			cfg.NATIPs = append(cfg.NATIPs, ip)
+		}
 	}
 	return cfg, nil
 }
@@ -809,16 +966,20 @@ func resolveExecutable(candidate string) (string, error) {
 	return exec.LookPath(candidate)
 }
 
-func isSocketReady(path string) bool {
+func isSocketReady(ctx context.Context, path string) bool {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return false
 	}
-	info, err := os.Stat(filepath.Clean(path))
+	dialCtx, cancel := context.WithTimeout(ctx, socketProbeTimeout)
+	defer cancel()
+	dialer := net.Dialer{Timeout: socketProbeTimeout}
+	conn, err := dialer.DialContext(dialCtx, "unix", filepath.Clean(path))
 	if err != nil {
 		return false
 	}
-	return info.Mode()&os.ModeSocket != 0
+	_ = conn.Close()
+	return true
 }
 
 type processLogWriter struct {

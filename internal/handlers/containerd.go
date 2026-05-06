@@ -234,6 +234,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/terminal/ws", h.HandleTerminalWS)
 	// Display routes
 	group.GET("/display", h.GetDisplayInfo)
+	group.POST("/display/prepare", h.PrepareDisplay)
+	group.GET("/display/sessions", h.ListDisplaySessions)
+	group.DELETE("/display/sessions/:session_id", h.CloseDisplaySession)
 	group.POST("/display/webrtc/offer", h.HandleDisplayWebRTCOffer)
 	// File manager routes
 	group.GET("/fs", h.FSStat)

@@ -45,7 +45,6 @@ services:
     environment:
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
-      MEMOH_DISPLAY_WEBRTC_NAT_IPS: "${MEMOH_DISPLAY_WEBRTC_NAT_IPS:-}"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro

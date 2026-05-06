@@ -309,28 +309,49 @@
     "sessionActions": "Session actions",
     "tabBarToolkit": {
       "newTerminal": "Open new terminal",
-      "openDisplay": "Open display",
+      "openDisplay": "Open desktop window",
       "menu": "Tab actions",
       "closeAll": "Close all",
       "closeFinished": "Close saved and finished"
     },
     "display": {
-      "title": "Display",
+      "title": "Desktop",
       "reconnect": "Reconnect",
+      "closeSession": "Close desktop session",
       "status": {
-        "idle": "Display is idle",
-        "connecting": "Connecting display...",
-        "connected": "Display connected",
-        "disconnected": "Display disconnected",
-        "unavailable": "Display unavailable"
+        "idle": "Desktop is idle",
+        "connecting": "Connecting desktop...",
+        "connected": "Desktop connected",
+        "disconnected": "Desktop disconnected",
+        "unavailable": "Desktop unavailable"
       },
       "unavailable": {
-        "disabled": "Workspace display is not enabled",
+        "disabled": "Workspace desktop is not enabled",
         "container": "Workspace container is not reachable",
-        "bundle": "Display runtime is unavailable. Install the toolkit first.",
-        "server": "Display server is not running. Recreate the workspace container and try again.",
+        "bundle": "Desktop runtime is unavailable",
+        "server": "VNC server is not running",
         "encoder": "GStreamer encoder is unavailable",
-        "manager": "Workspace manager is not configured"
+        "manager": "Workspace manager is not configured",
+        "browser": "Workspace browser is unavailable",
+        "desktop": "Workspace desktop is unavailable",
+        "toolkit": "Workspace toolkit is not installed"
+      },
+      "prepare": {
+        "title": "Preparing desktop",
+        "checking": "Checking desktop runtime",
+        "toolkit": "Workspace toolkit is not installed; trying system packages",
+        "system": "Checking workspace operating system",
+        "installing": "Installing desktop and VNC packages",
+        "browser": "Installing Chrome and CJK fonts",
+        "starting": "Starting VNC display",
+        "desktop": "Starting desktop session",
+        "complete": "Desktop is ready",
+        "default": "Preparing desktop",
+        "failed": "Failed to prepare desktop",
+        "stageCheck": "Check",
+        "stageInstall": "Install",
+        "stageBrowser": "Browser",
+        "stageDesktop": "Desktop"
       }
     }
   },
@@ -871,6 +892,7 @@
     "tabs": {
       "overview": "Overview",
       "general": "General",
+      "desktop": "Desktop",
       "toolApproval": "Tool Approval",
       "network": "Network",
       "memory": "Memory",
@@ -887,6 +909,35 @@
       "access": "Access",
       "terminal": "Terminal",
       "settings": "Settings"
+    },
+    "desktop": {
+      "runtimeTitle": "Runtime",
+      "runtimeButton": "Runtime",
+      "liveTitle": "Desktop 1",
+      "liveDescription": "Primary live workspace desktop.",
+      "previewTitle": "Other desktops",
+      "previewDescription": "Connected sessions appear here as screenshots.",
+      "previewEmpty": "Waiting for screenshot",
+      "sessionsTitle": "Sessions",
+      "summaryDisabled": "Desktop is disabled",
+      "summaryReady": "Desktop is ready",
+      "summaryPreparing": "Desktop runtime will be prepared when a window opens",
+      "enabled": "Enabled",
+      "runtime": "Runtime",
+      "vnc": "VNC",
+      "desktop": "Desktop",
+      "browser": "Browser",
+      "toolkit": "Toolkit",
+      "system": "System",
+      "session": "Session",
+      "state": "State",
+      "codec": "Codec",
+      "createdAt": "Created",
+      "actions": "Actions",
+      "noSessions": "No other desktop sessions",
+      "closeSession": "Close session",
+      "closeFailed": "Failed to close desktop session",
+      "unknown": "Unknown"
     },
     "terminal": {
       "title": "Terminal",
@@ -1135,6 +1186,8 @@
       "showToolCallsInIMDescription": "Surface tool execution status (running / completed / failed) as a single message in IM channels. Off by default.",
       "displayEnabled": "Enable Workspace Display",
       "displayEnabledDescription": "Start Xvnc when the container starts. Save and restart the workspace container for this to take effect.",
+      "desktopEnabled": "Desktop",
+      "desktopEnabledDescription": "Enable the workspace VNC desktop. If runtime packages are missing, Memoh will prepare Debian/Ubuntu or Alpine workspaces when the desktop is opened.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
       "toolApprovalBypass": "Bypass",

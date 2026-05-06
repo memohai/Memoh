@@ -1036,6 +1036,107 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/container/display/prepare": {
+            "post": {
+                "description": "Installs the workspace desktop/VNC/browser packages when needed, starts the display server, and launches the browser.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Prepare workspace display dependencies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of display preparation events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/display/sessions": {
+            "get": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List active workspace display WebRTC sessions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.displaySessionListResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/container/display/sessions/{session_id}": {
+            "delete": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Close a workspace display WebRTC session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Display session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/container/display/webrtc/offer": {
             "post": {
                 "tags": [
@@ -11259,6 +11360,23 @@ const docTemplate = `{
                 "usage": {}
             }
         },
+        "display.SessionInfo": {
+            "type": "object",
+            "properties": {
+                "codec": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "email.BindingResponse": {
             "type": "object",
             "properties": {
@@ -12651,6 +12769,12 @@ const docTemplate = `{
                 "available": {
                     "type": "boolean"
                 },
+                "browser_available": {
+                    "type": "boolean"
+                },
+                "desktop_available": {
+                    "type": "boolean"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -12660,7 +12784,16 @@ const docTemplate = `{
                 "encoder_available": {
                     "type": "boolean"
                 },
+                "prepare_supported": {
+                    "type": "boolean"
+                },
+                "prepare_system": {
+                    "type": "string"
+                },
                 "running": {
+                    "type": "boolean"
+                },
+                "toolkit_available": {
                     "type": "boolean"
                 },
                 "transport": {
@@ -12671,10 +12804,27 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.displaySessionListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/display.SessionInfo"
+                    }
+                }
+            }
+        },
         "handlers.displayWebRTCOfferRequest": {
             "type": "object",
             "properties": {
+                "candidate_host": {
+                    "type": "string"
+                },
                 "sdp": {
+                    "type": "string"
+                },
+                "session_id": {
                     "type": "string"
                 },
                 "type": {
@@ -12686,6 +12836,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "sdp": {
+                    "type": "string"
+                },
+                "session_id": {
                     "type": "string"
                 },
                 "type": {

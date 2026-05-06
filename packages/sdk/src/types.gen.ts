@@ -727,6 +727,13 @@ export type CompactionLog = {
     usage?: unknown;
 };
 
+export type DisplaySessionInfo = {
+    codec?: string;
+    created_at?: string;
+    id?: string;
+    state?: string;
+};
+
 export type EmailBindingResponse = {
     bot_id?: string;
     can_delete?: boolean;
@@ -1273,21 +1280,33 @@ export type HandlersCreateSessionRequest = {
 
 export type HandlersDisplayInfoResponse = {
     available?: boolean;
+    browser_available?: boolean;
+    desktop_available?: boolean;
     enabled?: boolean;
     encoder?: string;
     encoder_available?: boolean;
+    prepare_supported?: boolean;
+    prepare_system?: string;
     running?: boolean;
+    toolkit_available?: boolean;
     transport?: string;
     unavailable_reason?: string;
 };
 
+export type HandlersDisplaySessionListResponse = {
+    items?: Array<DisplaySessionInfo>;
+};
+
 export type HandlersDisplayWebRtcOfferRequest = {
+    candidate_host?: string;
     sdp?: string;
+    session_id?: string;
     type?: string;
 };
 
 export type HandlersDisplayWebRtcOfferResponse = {
     sdp?: string;
+    session_id?: string;
     type?: string;
 };
 
@@ -2756,6 +2775,98 @@ export type GetBotsByBotIdContainerDisplayResponses = {
 };
 
 export type GetBotsByBotIdContainerDisplayResponse = GetBotsByBotIdContainerDisplayResponses[keyof GetBotsByBotIdContainerDisplayResponses];
+
+export type PostBotsByBotIdContainerDisplayPrepareData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/prepare';
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareError = PostBotsByBotIdContainerDisplayPrepareErrors[keyof PostBotsByBotIdContainerDisplayPrepareErrors];
+
+export type PostBotsByBotIdContainerDisplayPrepareResponses = {
+    /**
+     * SSE stream of display preparation events
+     */
+    200: string;
+};
+
+export type PostBotsByBotIdContainerDisplayPrepareResponse = PostBotsByBotIdContainerDisplayPrepareResponses[keyof PostBotsByBotIdContainerDisplayPrepareResponses];
+
+export type GetBotsByBotIdContainerDisplaySessionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/sessions';
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsError = GetBotsByBotIdContainerDisplaySessionsErrors[keyof GetBotsByBotIdContainerDisplaySessionsErrors];
+
+export type GetBotsByBotIdContainerDisplaySessionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersDisplaySessionListResponse;
+};
+
+export type GetBotsByBotIdContainerDisplaySessionsResponse = GetBotsByBotIdContainerDisplaySessionsResponses[keyof GetBotsByBotIdContainerDisplaySessionsResponses];
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Display session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/display/sessions/{session_id}';
+};
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdError = DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors];
+
+export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PostBotsByBotIdContainerDisplayWebrtcOfferData = {
     /**
