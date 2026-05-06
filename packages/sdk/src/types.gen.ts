@@ -1587,6 +1587,520 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
+export type OrchestrationActionRecord = {
+    action_kind?: string;
+    attempt_id?: string;
+    created_at?: string;
+    error_payload?: unknown;
+    finished_at?: string;
+    id?: string;
+    input_payload?: unknown;
+    output_payload?: unknown;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    tool_call_id?: string;
+    tool_name?: string;
+    updated_at?: string;
+    verification_id?: string;
+};
+
+export type OrchestrationArtifact = {
+    attempt_id?: string;
+    content_type?: string;
+    created_at?: string;
+    digest?: string;
+    id?: string;
+    kind?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    run_id?: string;
+    summary?: string;
+    task_id?: string;
+    uri?: string;
+    version?: string;
+};
+
+export type OrchestrationArtifactPage = {
+    items?: Array<OrchestrationArtifact>;
+    next_after?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationCancelRunRequest = {
+    idempotency_key: string;
+};
+
+export type OrchestrationCancelRunResult = {
+    lifecycle_status?: string;
+    run_id?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationCheckpointDefaultAction = {
+    freeform_input?: string;
+    mode: string;
+    option_id: string;
+};
+
+export type OrchestrationCheckpointOption = {
+    description?: string;
+    id: string;
+    kind: string;
+    label?: string;
+};
+
+export type OrchestrationCheckpointResolution = {
+    freeform_input?: string;
+    idempotency_key: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    mode: string;
+    option_id?: string;
+};
+
+export type OrchestrationCheckpointResumePolicy = {
+    resume_mode: string;
+};
+
+export type OrchestrationCreateHumanCheckpointRequest = {
+    blocks_run?: boolean;
+    default_action?: OrchestrationCheckpointDefaultAction;
+    idempotency_key: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    options: Array<OrchestrationCheckpointOption>;
+    question: string;
+    resume_policy?: OrchestrationCheckpointResumePolicy;
+    timeout_at?: string;
+};
+
+export type OrchestrationCreateHumanCheckpointResult = {
+    checkpoint?: OrchestrationHumanCheckpoint;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationHumanCheckpoint = {
+    blocks_run?: boolean;
+    created_at?: string;
+    default_action?: OrchestrationCheckpointDefaultAction;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    options?: Array<OrchestrationCheckpointOption>;
+    planner_epoch?: number;
+    question?: string;
+    resolved_at?: string;
+    resolved_by?: string;
+    resolved_freeform_input?: string;
+    resolved_mode?: string;
+    resolved_option_id?: string;
+    resume_policy?: OrchestrationCheckpointResumePolicy;
+    run_id?: string;
+    status?: string;
+    status_version?: number;
+    superseded_by_planner_epoch?: number;
+    task_id?: string;
+    timeout_at?: string;
+    updated_at?: string;
+};
+
+export type OrchestrationHumanCheckpointPage = {
+    items?: Array<OrchestrationHumanCheckpoint>;
+    next_after?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationInjectRunHintRequest = {
+    hint: OrchestrationRunHint;
+    idempotency_key: string;
+};
+
+export type OrchestrationInjectRunHintResult = {
+    planning_intent_id?: string;
+    run_id?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationInputManifest = {
+    captured_artifact_versions?: Array<{
+        [key: string]: unknown;
+    }>;
+    captured_blackboard_revisions?: Array<{
+        [key: string]: unknown;
+    }>;
+    captured_task_inputs?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    id?: string;
+    projection_hash?: string;
+    run_id?: string;
+    task_id?: string;
+};
+
+export type OrchestrationInspectorAttempt = {
+    attempt_no?: number;
+    claim_epoch?: number;
+    created_at?: string;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    input_manifest_id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    park_checkpoint_id?: string;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationInspectorVerification = {
+    attempt_no?: number;
+    claim_epoch?: number;
+    created_at?: string;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    result_id?: string;
+    run_id?: string;
+    started_at?: string;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+    verdict?: string;
+    verifier_profile?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationInspectorWorkerLease = {
+    capabilities?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    display_name?: string;
+    executor_id?: string;
+    id?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    status?: string;
+    updated_at?: string;
+};
+
+export type OrchestrationResolveCheckpointResult = {
+    checkpoint_id?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationRetryTaskRequest = {
+    idempotency_key: string;
+    reason?: string;
+};
+
+export type OrchestrationRetryTaskResult = {
+    run_id?: string;
+    snapshot_seq?: number;
+    task_id?: string;
+};
+
+export type OrchestrationRun = {
+    control_policy?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    created_by?: string;
+    finished_at?: string;
+    goal?: string;
+    id?: string;
+    input?: {
+        [key: string]: unknown;
+    };
+    lifecycle_status?: string;
+    output_schema?: {
+        [key: string]: unknown;
+    };
+    owner_subject?: string;
+    planner_epoch?: number;
+    planning_status?: string;
+    policies?: {
+        [key: string]: unknown;
+    };
+    requested_control_policy?: {
+        [key: string]: unknown;
+    };
+    root_task_id?: string;
+    source_metadata?: {
+        [key: string]: unknown;
+    };
+    status_version?: number;
+    tenant_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+};
+
+export type OrchestrationRunEvent = {
+    aggregate_id?: string;
+    aggregate_type?: string;
+    aggregate_version?: number;
+    attempt_id?: string;
+    causation_event_id?: string;
+    checkpoint_id?: string;
+    correlation_id?: string;
+    created_at?: string;
+    id?: string;
+    idempotency_key?: string;
+    payload?: {
+        [key: string]: unknown;
+    };
+    published_at?: string;
+    run_id?: string;
+    seq?: number;
+    task_id?: string;
+    type?: string;
+};
+
+export type OrchestrationRunEventPage = {
+    items?: Array<OrchestrationRunEvent>;
+    until_seq?: number;
+};
+
+export type OrchestrationRunExecutionSpan = {
+    attempt_no?: number;
+    checkpoint_id?: string;
+    claimed_seq?: number;
+    completion_metadata?: {
+        [key: string]: unknown;
+    };
+    created_seq?: number;
+    executor_id?: string;
+    failure_class?: string;
+    finished_at?: string;
+    id?: string;
+    input_manifest_id?: string;
+    kind?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    related_event_types?: Array<string>;
+    requeue_seq?: number;
+    result_id?: string;
+    run_id?: string;
+    started_at?: string;
+    started_seq?: number;
+    status?: string;
+    summary?: string;
+    task_id?: string;
+    terminal_reason?: string;
+    terminal_seq?: number;
+    verdict?: string;
+    verifier_profile?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationRunHandle = {
+    root_task_id?: string;
+    run_id?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationRunHint = {
+    details?: {
+        [key: string]: unknown;
+    };
+    kind: string;
+    summary?: string;
+    target_task_id?: string;
+};
+
+export type OrchestrationRunInspector = {
+    action_records: Array<OrchestrationActionRecord>;
+    artifacts: Array<OrchestrationArtifact>;
+    attempts: Array<OrchestrationInspectorAttempt>;
+    checkpoints: Array<OrchestrationHumanCheckpoint>;
+    dependencies: Array<OrchestrationTaskDependency>;
+    execution_spans: Array<OrchestrationRunExecutionSpan>;
+    input_manifests: Array<OrchestrationInputManifest>;
+    results: Array<OrchestrationTaskResult>;
+    run: OrchestrationRun;
+    stuck_signals: Array<OrchestrationRunStuckSignal>;
+    summary: OrchestrationRunInspectorSummary;
+    tasks: Array<OrchestrationTask>;
+    timeline: Array<OrchestrationRunTimelineEntry>;
+    verifications: Array<OrchestrationInspectorVerification>;
+    workers: Array<OrchestrationInspectorWorkerLease>;
+};
+
+export type OrchestrationRunInspectorSummary = {
+    active_attempt_count: number;
+    active_verification_count: number;
+    active_worker_count: number;
+    blocked_task_count: number;
+    cancelled_task_count: number;
+    completed_task_count: number;
+    critical_signal_count: number;
+    dispatching_task_count: number;
+    failed_task_count: number;
+    open_checkpoint_count: number;
+    ready_task_count: number;
+    running_task_count: number;
+    stuck_signal_count: number;
+    verifying_task_count: number;
+    waiting_human_task_count: number;
+};
+
+export type OrchestrationRunListItem = {
+    created_at?: string;
+    finished_at?: string;
+    goal?: string;
+    id?: string;
+    lifecycle_status?: string;
+    planning_status?: string;
+    root_task_id?: string;
+    terminal_reason?: string;
+    updated_at?: string;
+};
+
+export type OrchestrationRunListPage = {
+    items?: Array<OrchestrationRunListItem>;
+};
+
+export type OrchestrationRunSnapshot = {
+    run?: OrchestrationRun;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationRunStuckSignal = {
+    attempt_id?: string;
+    code?: string;
+    last_heartbeat_at?: string;
+    lease_expires_at?: string;
+    message?: string;
+    observed_at?: string;
+    severity?: string;
+    status?: string;
+    task_id?: string;
+    verification_id?: string;
+    worker_id?: string;
+};
+
+export type OrchestrationRunTimelineEntry = {
+    aggregate_id?: string;
+    aggregate_type?: string;
+    attempt_id?: string;
+    checkpoint_id?: string;
+    created_at?: string;
+    payload?: {
+        [key: string]: unknown;
+    };
+    seq?: number;
+    task_id?: string;
+    type?: string;
+};
+
+export type OrchestrationStartRunRequest = {
+    bot_id?: string;
+    goal: string;
+    idempotency_key: string;
+    input?: {
+        [key: string]: unknown;
+    };
+    output_schema?: {
+        [key: string]: unknown;
+    };
+    policies?: {
+        [key: string]: unknown;
+    };
+    requested_control_policy?: {
+        [key: string]: unknown;
+    };
+    source_metadata?: {
+        [key: string]: unknown;
+    };
+};
+
+export type OrchestrationTask = {
+    blackboard_scope?: string;
+    blocked_reason?: string;
+    created_at?: string;
+    decomposed_from_task_id?: string;
+    goal?: string;
+    id?: string;
+    inputs?: {
+        [key: string]: unknown;
+    };
+    kind?: string;
+    latest_result_id?: string;
+    planner_epoch?: number;
+    priority?: number;
+    ready_at?: string;
+    retry_policy?: {
+        [key: string]: unknown;
+    };
+    run_id?: string;
+    status?: string;
+    status_version?: number;
+    superseded_by_planner_epoch?: number;
+    terminal_reason?: string;
+    updated_at?: string;
+    verification_policy?: {
+        [key: string]: unknown;
+    };
+    waiting_checkpoint_id?: string;
+    waiting_scope?: string;
+    worker_profile?: string;
+};
+
+export type OrchestrationTaskDependency = {
+    created_at?: string;
+    id?: string;
+    planner_epoch?: number;
+    predecessor_task_id?: string;
+    run_id?: string;
+    successor_task_id?: string;
+    superseded_by_planner_epoch?: number;
+    updated_at?: string;
+};
+
+export type OrchestrationTaskPage = {
+    items?: Array<OrchestrationTask>;
+    next_after?: string;
+    snapshot_seq?: number;
+};
+
+export type OrchestrationTaskResult = {
+    artifact_intents?: Array<{
+        [key: string]: unknown;
+    }>;
+    attempt_id?: string;
+    created_at?: string;
+    failure_class?: string;
+    id?: string;
+    request_replan?: boolean;
+    run_id?: string;
+    status?: string;
+    structured_output?: {
+        [key: string]: unknown;
+    };
+    summary?: string;
+    task_id?: string;
+    updated_at?: string;
+};
+
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -7822,6 +8336,722 @@ export type PostModelsByIdTestResponses = {
 };
 
 export type PostModelsByIdTestResponse = PostModelsByIdTestResponses[keyof PostModelsByIdTestResponses];
+
+export type GetOrchestrationBotsByBotIdRunsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Maximum number of runs
+         */
+        limit?: number;
+    };
+    url: '/orchestration/bots/{bot_id}/runs';
+};
+
+export type GetOrchestrationBotsByBotIdRunsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationBotsByBotIdRunsError = GetOrchestrationBotsByBotIdRunsErrors[keyof GetOrchestrationBotsByBotIdRunsErrors];
+
+export type GetOrchestrationBotsByBotIdRunsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunListPage;
+};
+
+export type GetOrchestrationBotsByBotIdRunsResponse = GetOrchestrationBotsByBotIdRunsResponses[keyof GetOrchestrationBotsByBotIdRunsResponses];
+
+export type PostOrchestrationCheckpointsByCheckpointIdResolveData = {
+    /**
+     * Checkpoint resolution
+     */
+    body: OrchestrationCheckpointResolution;
+    path: {
+        /**
+         * Checkpoint ID
+         */
+        checkpoint_id: string;
+    };
+    query?: never;
+    url: '/orchestration/checkpoints/{checkpoint_id}/resolve';
+};
+
+export type PostOrchestrationCheckpointsByCheckpointIdResolveErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationCheckpointsByCheckpointIdResolveError = PostOrchestrationCheckpointsByCheckpointIdResolveErrors[keyof PostOrchestrationCheckpointsByCheckpointIdResolveErrors];
+
+export type PostOrchestrationCheckpointsByCheckpointIdResolveResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationResolveCheckpointResult;
+};
+
+export type PostOrchestrationCheckpointsByCheckpointIdResolveResponse = PostOrchestrationCheckpointsByCheckpointIdResolveResponses[keyof PostOrchestrationCheckpointsByCheckpointIdResolveResponses];
+
+export type PostOrchestrationRunsData = {
+    /**
+     * Start run request
+     */
+    body: OrchestrationStartRunRequest;
+    path?: never;
+    query?: never;
+    url: '/orchestration/runs';
+};
+
+export type PostOrchestrationRunsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsError = PostOrchestrationRunsErrors[keyof PostOrchestrationRunsErrors];
+
+export type PostOrchestrationRunsResponses = {
+    /**
+     * Created
+     */
+    201: OrchestrationRunHandle;
+};
+
+export type PostOrchestrationRunsResponse = PostOrchestrationRunsResponses[keyof PostOrchestrationRunsResponses];
+
+export type GetOrchestrationRunsByRunIdArtifactsData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Filter by task ID
+         */
+        task_id?: string;
+        /**
+         * Comma-separated artifact kinds
+         */
+        kind?: string;
+        /**
+         * Opaque pagination cursor
+         */
+        after?: string;
+        /**
+         * Page size
+         */
+        limit?: number;
+        /**
+         * Committed snapshot sequence
+         */
+        as_of_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/artifacts';
+};
+
+export type GetOrchestrationRunsByRunIdArtifactsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdArtifactsError = GetOrchestrationRunsByRunIdArtifactsErrors[keyof GetOrchestrationRunsByRunIdArtifactsErrors];
+
+export type GetOrchestrationRunsByRunIdArtifactsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationArtifactPage;
+};
+
+export type GetOrchestrationRunsByRunIdArtifactsResponse = GetOrchestrationRunsByRunIdArtifactsResponses[keyof GetOrchestrationRunsByRunIdArtifactsResponses];
+
+export type PostOrchestrationRunsByRunIdCancelData = {
+    /**
+     * Cancel run request
+     */
+    body: OrchestrationCancelRunRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/cancel';
+};
+
+export type PostOrchestrationRunsByRunIdCancelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdCancelError = PostOrchestrationRunsByRunIdCancelErrors[keyof PostOrchestrationRunsByRunIdCancelErrors];
+
+export type PostOrchestrationRunsByRunIdCancelResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationCancelRunResult;
+};
+
+export type PostOrchestrationRunsByRunIdCancelResponse = PostOrchestrationRunsByRunIdCancelResponses[keyof PostOrchestrationRunsByRunIdCancelResponses];
+
+export type GetOrchestrationRunsByRunIdCheckpointsData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Comma-separated checkpoint statuses
+         */
+        status?: string;
+        /**
+         * Opaque pagination cursor
+         */
+        after?: string;
+        /**
+         * Page size
+         */
+        limit?: number;
+        /**
+         * Committed snapshot sequence
+         */
+        as_of_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/checkpoints';
+};
+
+export type GetOrchestrationRunsByRunIdCheckpointsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdCheckpointsError = GetOrchestrationRunsByRunIdCheckpointsErrors[keyof GetOrchestrationRunsByRunIdCheckpointsErrors];
+
+export type GetOrchestrationRunsByRunIdCheckpointsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationHumanCheckpointPage;
+};
+
+export type GetOrchestrationRunsByRunIdCheckpointsResponse = GetOrchestrationRunsByRunIdCheckpointsResponses[keyof GetOrchestrationRunsByRunIdCheckpointsResponses];
+
+export type GetOrchestrationRunsByRunIdEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Return events with seq greater than this value
+         */
+        after_seq?: number;
+        /**
+         * Maximum number of events
+         */
+        limit?: number;
+        /**
+         * Upper committed sequence bound for stable replay
+         */
+        until_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/events';
+};
+
+export type GetOrchestrationRunsByRunIdEventsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdEventsError = GetOrchestrationRunsByRunIdEventsErrors[keyof GetOrchestrationRunsByRunIdEventsErrors];
+
+export type GetOrchestrationRunsByRunIdEventsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunEventPage;
+};
+
+export type GetOrchestrationRunsByRunIdEventsResponse = GetOrchestrationRunsByRunIdEventsResponses[keyof GetOrchestrationRunsByRunIdEventsResponses];
+
+export type PostOrchestrationRunsByRunIdHintsData = {
+    /**
+     * Inject run hint request
+     */
+    body: OrchestrationInjectRunHintRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/hints';
+};
+
+export type PostOrchestrationRunsByRunIdHintsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdHintsError = PostOrchestrationRunsByRunIdHintsErrors[keyof PostOrchestrationRunsByRunIdHintsErrors];
+
+export type PostOrchestrationRunsByRunIdHintsResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationInjectRunHintResult;
+};
+
+export type PostOrchestrationRunsByRunIdHintsResponse = PostOrchestrationRunsByRunIdHintsResponses[keyof PostOrchestrationRunsByRunIdHintsResponses];
+
+export type GetOrchestrationRunsByRunIdInspectorData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/inspector';
+};
+
+export type GetOrchestrationRunsByRunIdInspectorErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdInspectorError = GetOrchestrationRunsByRunIdInspectorErrors[keyof GetOrchestrationRunsByRunIdInspectorErrors];
+
+export type GetOrchestrationRunsByRunIdInspectorResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunInspector;
+};
+
+export type GetOrchestrationRunsByRunIdInspectorResponse = GetOrchestrationRunsByRunIdInspectorResponses[keyof GetOrchestrationRunsByRunIdInspectorResponses];
+
+export type GetOrchestrationRunsByRunIdSnapshotData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Committed snapshot sequence
+         */
+        as_of_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/snapshot';
+};
+
+export type GetOrchestrationRunsByRunIdSnapshotErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdSnapshotError = GetOrchestrationRunsByRunIdSnapshotErrors[keyof GetOrchestrationRunsByRunIdSnapshotErrors];
+
+export type GetOrchestrationRunsByRunIdSnapshotResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRunSnapshot;
+};
+
+export type GetOrchestrationRunsByRunIdSnapshotResponse = GetOrchestrationRunsByRunIdSnapshotResponses[keyof GetOrchestrationRunsByRunIdSnapshotResponses];
+
+export type GetOrchestrationRunsByRunIdTasksData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Comma-separated task statuses
+         */
+        status?: string;
+        /**
+         * Opaque pagination cursor
+         */
+        after?: string;
+        /**
+         * Page size
+         */
+        limit?: number;
+        /**
+         * Committed snapshot sequence
+         */
+        as_of_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/tasks';
+};
+
+export type GetOrchestrationRunsByRunIdTasksErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdTasksError = GetOrchestrationRunsByRunIdTasksErrors[keyof GetOrchestrationRunsByRunIdTasksErrors];
+
+export type GetOrchestrationRunsByRunIdTasksResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationTaskPage;
+};
+
+export type GetOrchestrationRunsByRunIdTasksResponse = GetOrchestrationRunsByRunIdTasksResponses[keyof GetOrchestrationRunsByRunIdTasksResponses];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsData = {
+    /**
+     * Checkpoint definition
+     */
+    body: OrchestrationCreateHumanCheckpointRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/tasks/{task_id}/checkpoints';
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsError = PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsErrors[keyof PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsErrors];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses = {
+    /**
+     * Created
+     */
+    201: OrchestrationCreateHumanCheckpointResult;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponse = PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses[keyof PostOrchestrationRunsByRunIdTasksByTaskIdCheckpointsResponses];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryData = {
+    /**
+     * Retry task request
+     */
+    body: OrchestrationRetryTaskRequest;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+        /**
+         * Task ID
+         */
+        task_id: string;
+    };
+    query?: never;
+    url: '/orchestration/runs/{run_id}/tasks/{task_id}/retry';
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryError = PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors[keyof PostOrchestrationRunsByRunIdTasksByTaskIdRetryErrors];
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses = {
+    /**
+     * OK
+     */
+    200: OrchestrationRetryTaskResult;
+};
+
+export type PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponse = PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses[keyof PostOrchestrationRunsByRunIdTasksByTaskIdRetryResponses];
+
+export type GetOrchestrationRunsByRunIdWatchData = {
+    body?: never;
+    path: {
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: {
+        /**
+         * Exclusive committed event cursor
+         */
+        after_seq?: number;
+    };
+    url: '/orchestration/runs/{run_id}/watch';
+};
+
+export type GetOrchestrationRunsByRunIdWatchErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetOrchestrationRunsByRunIdWatchError = GetOrchestrationRunsByRunIdWatchErrors[keyof GetOrchestrationRunsByRunIdWatchErrors];
+
+export type GetOrchestrationRunsByRunIdWatchResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetOrchestrationRunsByRunIdWatchResponse = GetOrchestrationRunsByRunIdWatchResponses[keyof GetOrchestrationRunsByRunIdWatchResponses];
 
 export type GetPingData = {
     body?: never;

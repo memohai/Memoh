@@ -1,0 +1,1172 @@
+package orchestration
+
+import (
+	"encoding/base64"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/memohai/memoh/internal/db"
+	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+)
+
+func TestStartRunRequestHashTreatsNilMapsLikeEmptyMaps(t *testing.T) {
+	t.Parallel()
+
+	nilHash, err := startRunRequestHash(StartRunRequest{
+		Goal:           "plan a release",
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(nil maps) error = %v", err)
+	}
+
+	emptyHash, err := startRunRequestHash(StartRunRequest{
+		Goal:                   "plan a release",
+		IdempotencyKey:         "idem-1",
+		Input:                  map[string]any{},
+		OutputSchema:           map[string]any{},
+		RequestedControlPolicy: map[string]any{},
+		SourceMetadata:         map[string]any{},
+		Policies:               map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(empty maps) error = %v", err)
+	}
+
+	if nilHash != emptyHash {
+		t.Fatalf("startRunRequestHash nil/empty mismatch: %q != %q", nilHash, emptyHash)
+	}
+}
+
+func TestStartRunRequestHashNormalizesTopLevelBotIDIntoSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	withTopLevelBotID, err := startRunRequestHash(StartRunRequest{
+		Goal:           "plan a release",
+		BotID:          "bot-1",
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(bot_id) error = %v", err)
+	}
+
+	withSourceMetadataBotID, err := startRunRequestHash(StartRunRequest{
+		Goal:           "plan a release",
+		IdempotencyKey: "idem-1",
+		SourceMetadata: map[string]any{"bot_id": "bot-1"},
+	})
+	if err != nil {
+		t.Fatalf("startRunRequestHash(source_metadata.bot_id) error = %v", err)
+	}
+
+	if withTopLevelBotID != withSourceMetadataBotID {
+		t.Fatalf("startRunRequestHash bot_id normalization mismatch: %q != %q", withTopLevelBotID, withSourceMetadataBotID)
+	}
+}
+
+func TestNormalizeStartRunSourceMetadataRejectsConflictingBotIDs(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeStartRunSourceMetadata(StartRunRequest{
+		BotID:          "bot-a",
+		SourceMetadata: map[string]any{"bot_id": "bot-b"},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeStartRunSourceMetadata() error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestRootWorkerProfileUsesLLMForBotRunsAndBuiltinForMocks(t *testing.T) {
+	t.Parallel()
+
+	if got := rootWorkerProfile(nil, nil); got != BuiltinEchoWorkerProfile {
+		t.Fatalf("rootWorkerProfile(nil) = %q, want %q", got, BuiltinEchoWorkerProfile)
+	}
+	if got := rootWorkerProfile(nil, map[string]any{"bot_id": "bot-1"}); got != DefaultRootWorkerProfile {
+		t.Fatalf("rootWorkerProfile(bot) = %q, want %q", got, DefaultRootWorkerProfile)
+	}
+	if got := rootWorkerProfile(map[string]any{"builtin_workerd": map[string]any{"summary": "ok"}}, map[string]any{"bot_id": "bot-1"}); got != BuiltinEchoWorkerProfile {
+		t.Fatalf("rootWorkerProfile(builtin) = %q, want %q", got, BuiltinEchoWorkerProfile)
+	}
+}
+
+func TestNormalizeWorkerProfilesLetsDefaultWorkerClaimBuiltinEcho(t *testing.T) {
+	t.Parallel()
+
+	profiles := normalizeWorkerProfiles([]string{DefaultRootWorkerProfile})
+	if !containsStringForTest(profiles, DefaultRootWorkerProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, DefaultRootWorkerProfile)
+	}
+	if !containsStringForTest(profiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, BuiltinEchoWorkerProfile)
+	}
+}
+
+func TestNormalizeWorkerProfilesLetsDefaultVerifierClaimBuiltinBasic(t *testing.T) {
+	t.Parallel()
+
+	profiles := normalizeWorkerProfiles([]string{DefaultVerifierProfile})
+	if !containsStringForTest(profiles, DefaultVerifierProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, DefaultVerifierProfile)
+	}
+	if !containsStringForTest(profiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("profiles = %#v, missing %q", profiles, BuiltinBasicVerifierProfile)
+	}
+}
+
+func TestProfileCapabilitiesUseNormalizedProfiles(t *testing.T) {
+	t.Parallel()
+
+	workerCaps := WorkerProfileCapabilities([]string{DefaultRootWorkerProfile})
+	workerProfiles := profileValuesForTest(workerCaps, "worker_profiles")
+	if !containsAnyStringForTest(workerProfiles, DefaultRootWorkerProfile) || !containsAnyStringForTest(workerProfiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("worker capabilities = %#v, want default and builtin echo profiles", workerCaps)
+	}
+
+	verifierCaps := VerifierProfileCapabilities([]string{DefaultVerifierProfile})
+	verifierProfiles := profileValuesForTest(verifierCaps, "verifier_profiles")
+	if !containsAnyStringForTest(verifierProfiles, DefaultVerifierProfile) || !containsAnyStringForTest(verifierProfiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("verifier capabilities = %#v, want default and builtin basic profiles", verifierCaps)
+	}
+}
+
+func TestWorkerProfileAllowed(t *testing.T) {
+	t.Parallel()
+
+	if !workerProfileAllowed("custom.profile", nil) {
+		t.Fatal("workerProfileAllowed(nil set) = false, want true")
+	}
+	if workerProfileAllowed(DefaultRootWorkerProfile, map[string]struct{}{}) {
+		t.Fatal("workerProfileAllowed(empty set) = true, want false")
+	}
+	profileSet := executionProfileSet([]string{DefaultRootWorkerProfile})
+	if !workerProfileAllowed(DefaultRootWorkerProfile, profileSet) {
+		t.Fatalf("workerProfileAllowed(default) = false, want true")
+	}
+	if workerProfileAllowed("custom.profile", profileSet) {
+		t.Fatalf("workerProfileAllowed(custom.profile) = true, want false")
+	}
+
+	normalizedDefaultSet := executionProfileSet(NormalizeExecutionProfiles([]string{DefaultRootWorkerProfile}))
+	if !workerProfileAllowed(BuiltinEchoWorkerProfile, normalizedDefaultSet) {
+		t.Fatalf("workerProfileAllowed(builtin echo fallback) = false, want true")
+	}
+}
+
+func TestActiveWorkerProfilesOnlyUsesWorkerCapabilities(t *testing.T) {
+	t.Parallel()
+
+	profiles := activeWorkerProfiles([]WorkerLease{
+		{
+			ID:           "workerd",
+			Capabilities: WorkerProfileCapabilities([]string{DefaultRootWorkerProfile}),
+		},
+		{
+			ID:           "verifyd",
+			Capabilities: VerifierProfileCapabilities([]string{DefaultVerifierProfile}),
+		},
+		{
+			ID: "custom",
+			Capabilities: map[string]any{
+				"worker_profiles": []any{"custom.profile", DefaultRootWorkerProfile},
+			},
+		},
+	})
+
+	if !containsStringForTest(profiles, DefaultRootWorkerProfile) || !containsStringForTest(profiles, BuiltinEchoWorkerProfile) {
+		t.Fatalf("activeWorkerProfiles() = %#v, want normalized default worker profiles", profiles)
+	}
+	if !containsStringForTest(profiles, "custom.profile") {
+		t.Fatalf("activeWorkerProfiles() = %#v, missing custom.profile", profiles)
+	}
+	if containsStringForTest(profiles, DefaultVerifierProfile) || containsStringForTest(profiles, BuiltinBasicVerifierProfile) {
+		t.Fatalf("activeWorkerProfiles() = %#v, want verifier profiles ignored", profiles)
+	}
+}
+
+func TestVerifierProfileForTaskPolicyUsesLLMByDefaultAndBuiltinWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	if got := verifierProfileForTaskPolicy(map[string]any{"require_structured_output": true}); got != DefaultVerifierProfile {
+		t.Fatalf("verifierProfileForTaskPolicy(default) = %q, want %q", got, DefaultVerifierProfile)
+	}
+	if got := verifierProfileForTaskPolicy(map[string]any{"mode": VerificationModeBuiltinBasic}); got != BuiltinBasicVerifierProfile {
+		t.Fatalf("verifierProfileForTaskPolicy(builtin) = %q, want %q", got, BuiltinBasicVerifierProfile)
+	}
+	if got := verifierProfileForTaskPolicy(map[string]any{"mode": VerificationModeBuiltinBasic, "verifier_profile": "custom.verify"}); got != "custom.verify" {
+		t.Fatalf("verifierProfileForTaskPolicy(custom) = %q, want custom.verify", got)
+	}
+}
+
+func TestBuiltinVerifierProfilesKeepsServerVerifierOnBuiltinProfile(t *testing.T) {
+	t.Parallel()
+
+	if got := builtinVerifierProfiles([]string{DefaultVerifierProfile}); len(got) != 1 || got[0] != BuiltinBasicVerifierProfile {
+		t.Fatalf("builtinVerifierProfiles(default) = %#v, want [%q]", got, BuiltinBasicVerifierProfile)
+	}
+	if got := builtinVerifierProfiles([]string{"custom.llm"}); len(got) != 0 {
+		t.Fatalf("builtinVerifierProfiles(custom) = %#v, want empty", got)
+	}
+}
+
+func TestPlannedChildTasksFromSpecsRejectsEmptyGoal(t *testing.T) {
+	t.Parallel()
+
+	_, err := plannedChildTasksFromSpecs([]PlannedTaskSpec{
+		{Alias: "empty-goal"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("plannedChildTasksFromSpecs(empty goal) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestPlannedChildTasksFromSpecsNormalizesDefaults(t *testing.T) {
+	t.Parallel()
+
+	plans, err := plannedChildTasksFromSpecs([]PlannedTaskSpec{
+		{
+			Goal:             " child task ",
+			DependsOnAliases: []string{" parent "},
+		},
+	})
+	if err != nil {
+		t.Fatalf("plannedChildTasksFromSpecs() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans len = %d, want 1", len(plans))
+	}
+	if plans[0].Goal != "child task" || plans[0].Kind != "child" || plans[0].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("plan = %#v, want normalized defaults", plans[0])
+	}
+	if len(plans[0].DependsOnAliases) != 1 || plans[0].DependsOnAliases[0] != "parent" {
+		t.Fatalf("depends_on = %#v, want trimmed parent", plans[0].DependsOnAliases)
+	}
+}
+
+func TestNormalizeInjectRunHintRequestRejectsEmptyReplacementPlan(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := normalizeInjectRunHintRequest(InjectRunHintRequest{
+		Hint: RunHint{
+			Kind:         RunHintKindReplanRequest,
+			Summary:      "replace root",
+			TargetTaskID: "task-1",
+			Details: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{},
+				},
+			},
+		},
+	}, "idem-1")
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeInjectRunHintRequest(empty replacement) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestValidatePlannedChildTasksRejectsCycles(t *testing.T) {
+	t.Parallel()
+
+	err := validatePlannedChildTasks([]plannedChildTask{
+		{Alias: "a", Goal: "task a", DependsOnAliases: []string{"b"}},
+		{Alias: "b", Goal: "task b", DependsOnAliases: []string{"a"}},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validatePlannedChildTasks(cycle) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func containsStringForTest(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func profileValuesForTest(capabilities map[string]any, key string) []any {
+	values, _ := capabilities[key].([]any)
+	return values
+}
+
+func containsAnyStringForTest(values []any, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestNormalizeCheckpointResolutionUsesDefaultAction(t *testing.T) {
+	t.Parallel()
+
+	rawDefault := marshalJSON(CheckpointDefaultAction{
+		Mode:          " " + CheckpointResolutionModeFreeform + " ",
+		OptionID:      " freeform ",
+		FreeformInput: "continue with cached state",
+	})
+	rawOptions := marshalJSON([]CheckpointOption{
+		{ID: "accept", Kind: CheckpointOptionKindChoice},
+		{ID: "freeform", Kind: CheckpointOptionKindFreeform},
+	})
+
+	checkpoint := sqlc.OrchestrationHumanCheckpoint{
+		ID:            mustUUID(t, "550e8400-e29b-41d4-a716-446655440010"),
+		TaskID:        mustUUID(t, "550e8400-e29b-41d4-a716-446655440011"),
+		Status:        CheckpointStatusOpen,
+		Options:       rawOptions,
+		DefaultAction: rawDefault,
+	}
+
+	resolution, hash, err := normalizeCheckpointResolution(checkpoint, CheckpointResolution{
+		Mode:           CheckpointResolutionModeUseDefault,
+		IdempotencyKey: "idem-2",
+		Metadata:       nil,
+	})
+	if err != nil {
+		t.Fatalf("normalizeCheckpointResolution(use_default) error = %v", err)
+	}
+
+	if resolution.Mode != CheckpointResolutionModeFreeform {
+		t.Fatalf("normalized mode = %q, want %q", resolution.Mode, CheckpointResolutionModeFreeform)
+	}
+	if resolution.OptionID != "freeform" {
+		t.Fatalf("normalized option_id = %q, want freeform", resolution.OptionID)
+	}
+	if resolution.FreeformInput != "continue with cached state" {
+		t.Fatalf("normalized freeform_input = %q", resolution.FreeformInput)
+	}
+	if resolution.Metadata == nil {
+		t.Fatal("normalized metadata should be canonicalized to an empty object")
+	}
+	if hash == "" {
+		t.Fatal("normalizeCheckpointResolution should return a non-empty request hash")
+	}
+}
+
+func TestValidateCheckpointDefinitionRejectsDuplicateOptionIDs(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := validateCheckpointDefinition([]CheckpointOption{
+		{ID: "approve", Kind: CheckpointOptionKindChoice},
+		{ID: " approve ", Kind: CheckpointOptionKindFreeform},
+	}, nil, time.Time{})
+	if err == nil {
+		t.Fatal("validateCheckpointDefinition() error = nil, want duplicate option id error")
+	}
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("validateCheckpointDefinition() error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestValidateCheckpointDefinitionReturnsNormalizedValues(t *testing.T) {
+	t.Parallel()
+
+	options, defaultAction, err := validateCheckpointDefinition(
+		[]CheckpointOption{
+			{ID: " approve ", Kind: CheckpointOptionKindChoice, Label: "Approve"},
+			{ID: "details", Kind: CheckpointOptionKindFreeform, Label: "Details"},
+		},
+		&CheckpointDefaultAction{
+			Mode:     " " + CheckpointResolutionModeSelectOption + " ",
+			OptionID: " approve ",
+		},
+		time.Time{},
+	)
+	if err != nil {
+		t.Fatalf("validateCheckpointDefinition() error = %v", err)
+	}
+	if options[0].ID != "approve" {
+		t.Fatalf("normalized option id = %q, want %q", options[0].ID, "approve")
+	}
+	if defaultAction == nil {
+		t.Fatal("normalized default_action = nil")
+	}
+	if defaultAction.Mode != CheckpointResolutionModeSelectOption {
+		t.Fatalf("normalized default_action mode = %q, want %q", defaultAction.Mode, CheckpointResolutionModeSelectOption)
+	}
+	if defaultAction.OptionID != "approve" {
+		t.Fatalf("normalized default_action option_id = %q, want %q", defaultAction.OptionID, "approve")
+	}
+}
+
+func TestPaginateTasksProducesStableOpaqueCursor(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []Task{
+		{ID: "task-1", CreatedAt: base},
+		{ID: "task-2", CreatedAt: base.Add(time.Second)},
+		{ID: "task-3", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	page1, after, err := paginateTasks(items, "", 2, 41, filterHash([]string{"ready"}))
+	if err != nil {
+		t.Fatalf("paginateTasks(page1) error = %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+	if after == "" {
+		t.Fatal("page1 should emit next_after")
+	}
+	cursor, err := decodeCursor(after)
+	if err != nil {
+		t.Fatalf("decodeCursor(page1 after) error = %v", err)
+	}
+	if cursor.SnapshotSeq != 41 {
+		t.Fatalf("cursor snapshot_seq = %d, want 41", cursor.SnapshotSeq)
+	}
+	if cursor.FilterHash != filterHash([]string{"ready"}) {
+		t.Fatalf("cursor filter_hash = %q, want %q", cursor.FilterHash, filterHash([]string{"ready"}))
+	}
+
+	page2, nextAfter, err := paginateTasks(items, after, 2, 41, filterHash([]string{"ready"}))
+	if err != nil {
+		t.Fatalf("paginateTasks(page2) error = %v", err)
+	}
+	if len(page2) != 1 || page2[0].ID != "task-3" {
+		t.Fatalf("page2 = %+v, want only task-3", page2)
+	}
+	if nextAfter != "" {
+		t.Fatalf("final page next_after = %q, want empty", nextAfter)
+	}
+}
+
+func TestResolvePageAsOfSeqUsesSnapshotEmbeddedInCursor(t *testing.T) {
+	t.Parallel()
+
+	cursor := encodeCursor("task-1", time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC), 52, "")
+	asOfSeq, err := resolvePageAsOfSeq(80, 0, cursor)
+	if err != nil {
+		t.Fatalf("resolvePageAsOfSeq(cursor snapshot) error = %v", err)
+	}
+	if asOfSeq != 52 {
+		t.Fatalf("resolvePageAsOfSeq(cursor snapshot) = %d, want 52", asOfSeq)
+	}
+}
+
+func TestResolvePageAsOfSeqRejectsLegacyContinuationWithoutSnapshot(t *testing.T) {
+	t.Parallel()
+
+	legacyCursor := base64.RawURLEncoding.EncodeToString(marshalJSON(struct {
+		ID        string    `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+	}{
+		ID:        "task-1",
+		CreatedAt: time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC),
+	}))
+
+	_, err := resolvePageAsOfSeq(80, 0, legacyCursor)
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("resolvePageAsOfSeq(legacy cursor) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestResolvePageAsOfSeqRejectsSnapshotMismatch(t *testing.T) {
+	t.Parallel()
+
+	cursor := encodeCursor("task-1", time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC), 52, "")
+	_, err := resolvePageAsOfSeq(80, 53, cursor)
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("resolvePageAsOfSeq(mismatched snapshot) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestDecodePlannedChildTasksNormalizesMinimalPlan(t *testing.T) {
+	t.Parallel()
+
+	plans, err := decodePlannedChildTasks(map[string]any{
+		"child_tasks": []any{
+			map[string]any{
+				"alias":          "first",
+				"goal":           " first child ",
+				"worker_profile": " " + DefaultRootWorkerProfile + " ",
+				"priority":       float64(2),
+				"inputs":         map[string]any{"step": "one"},
+				"retry_policy":   map[string]any{"max_attempts": float64(3)},
+				"verification_policy": map[string]any{
+					"mode": "strict",
+				},
+				"blackboard_scope": " scope.one ",
+			},
+			map[string]any{
+				"goal":       "second child",
+				"depends_on": []any{"first"},
+			},
+			map[string]any{
+				"goal": "third child",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("decodePlannedChildTasks() error = %v", err)
+	}
+
+	if len(plans) != 3 {
+		t.Fatalf("decodePlannedChildTasks() len = %d, want 3", len(plans))
+	}
+	if plans[0].Goal != "first child" {
+		t.Fatalf("first child goal = %q, want %q", plans[0].Goal, "first child")
+	}
+	if plans[0].Alias != "first" {
+		t.Fatalf("first child alias = %q, want %q", plans[0].Alias, "first")
+	}
+	if plans[0].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("first child worker_profile = %q, want %q", plans[0].WorkerProfile, DefaultRootWorkerProfile)
+	}
+	if plans[0].Priority != 2 {
+		t.Fatalf("first child priority = %d, want 2", plans[0].Priority)
+	}
+	if plans[0].BlackboardScope != "scope.one" {
+		t.Fatalf("first child blackboard_scope = %q, want %q", plans[0].BlackboardScope, "scope.one")
+	}
+	if plans[1].Kind != "child" {
+		t.Fatalf("second child kind = %q, want %q", plans[1].Kind, "child")
+	}
+	if plans[1].WorkerProfile != DefaultRootWorkerProfile {
+		t.Fatalf("second child worker_profile = %q, want %q", plans[1].WorkerProfile, DefaultRootWorkerProfile)
+	}
+	if len(plans[1].DependsOnAliases) != 1 || plans[1].DependsOnAliases[0] != "first" {
+		t.Fatalf("second child depends_on = %#v, want [first]", plans[1].DependsOnAliases)
+	}
+}
+
+func TestDecodePlannedChildTasksRejectsInvalidSchema(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "unknown field",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "id": "legacy-id"},
+				},
+			},
+		},
+		{
+			name: "empty goal",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": " "},
+				},
+			},
+		},
+		{
+			name: "non object child task",
+			payload: map[string]any{
+				"child_tasks": []any{"step"},
+			},
+		},
+		{
+			name: "fractional priority",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "priority": float64(1.5)},
+				},
+			},
+		},
+		{
+			name: "legacy depends_on_aliases",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "depends_on_aliases": []any{"parent"}},
+				},
+			},
+		},
+		{
+			name: "non string dependency",
+			payload: map[string]any{
+				"child_tasks": []any{
+					map[string]any{"goal": "step", "depends_on": []any{float64(1)}},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := decodePlannedChildTasks(tt.payload)
+			if !errors.Is(err, ErrPlanningIntentInvalid) {
+				t.Fatalf("decodePlannedChildTasks() error = %v, want %v", err, ErrPlanningIntentInvalid)
+			}
+		})
+	}
+}
+
+func TestDecodeReplanChildTasksPropagatesInvalidReplacementPlan(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "replacement plan not object",
+			payload: map[string]any{
+				"replacement_plan": []any{},
+			},
+		},
+		{
+			name: "invalid child task",
+			payload: map[string]any{
+				"replacement_plan": map[string]any{
+					"child_tasks": []any{
+						map[string]any{"goal": "step", "extra": true},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := decodeReplanChildTasks(tt.payload)
+			if !errors.Is(err, ErrPlanningIntentInvalid) {
+				t.Fatalf("decodeReplanChildTasks() error = %v, want %v", err, ErrPlanningIntentInvalid)
+			}
+		})
+	}
+}
+
+func TestResolveEventUntilSeqDefaultsToCurrentAndRejectsInvalidBounds(t *testing.T) {
+	t.Parallel()
+
+	untilSeq, err := resolveEventUntilSeq(80, 0, 0)
+	if err != nil {
+		t.Fatalf("resolveEventUntilSeq(default current) error = %v", err)
+	}
+	if untilSeq != 80 {
+		t.Fatalf("resolveEventUntilSeq(default current) = %d, want 80", untilSeq)
+	}
+
+	_, err = resolveEventUntilSeq(80, 40, 39)
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("resolveEventUntilSeq(after>until) error = %v, want %v", err, ErrInvalidArgument)
+	}
+
+	_, err = resolveEventUntilSeq(80, 0, 81)
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("resolveEventUntilSeq(until>current) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestPaginateTasksRejectsFilterMismatchAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []Task{
+		{ID: "task-1", CreatedAt: base},
+		{ID: "task-2", CreatedAt: base.Add(time.Second)},
+		{ID: "task-3", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	_, after, err := paginateTasks(items, "", 2, 41, filterHash([]string{"ready"}))
+	if err != nil {
+		t.Fatalf("paginateTasks(page1) error = %v", err)
+	}
+
+	_, _, err = paginateTasks(items, after, 2, 41, filterHash([]string{"waiting_human"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateTasks(filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestBuildPhase1ControlPolicyAndAuthorizeRun(t *testing.T) {
+	t.Parallel()
+
+	caller := ControlIdentity{TenantID: "user-1", Subject: "user-1"}
+	policy := buildPhase1ControlPolicy(caller)
+	if got := policy["mode"]; got != ControlPolicyModeOwnerOnly {
+		t.Fatalf("control policy mode = %v, want %q", got, ControlPolicyModeOwnerOnly)
+	}
+	if got := policy["owner_subject"]; got != caller.Subject {
+		t.Fatalf("control policy owner_subject = %v, want %q", got, caller.Subject)
+	}
+	if _, ok := policy["runtime_limits"].(map[string]any); !ok {
+		t.Fatalf("control policy runtime_limits = %T, want object", policy["runtime_limits"])
+	}
+
+	run := sqlc.OrchestrationRun{
+		TenantID:     caller.TenantID,
+		OwnerSubject: caller.Subject,
+		ControlPolicy: marshalJSON(map[string]any{
+			"mode":          ControlPolicyModeOwnerOnly,
+			"owner_subject": caller.Subject,
+		}),
+	}
+	if err := authorizeRun(caller, run); err != nil {
+		t.Fatalf("authorizeRun(owner_only) error = %v", err)
+	}
+	if err := authorizeRun(ControlIdentity{TenantID: "other-tenant", Subject: caller.Subject}, run); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("authorizeRun(cross-tenant same-subject) error = %v, want %v", err, ErrAccessDenied)
+	}
+	if err := authorizeRun(ControlIdentity{TenantID: "user-2", Subject: "user-2"}, run); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("authorizeRun(non-owner) error = %v, want %v", err, ErrAccessDenied)
+	}
+}
+
+func TestBuildControlPolicyRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	caller := ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}
+	policy, err := buildControlPolicy(caller, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan":      float64(3),
+			"max_dependency_edges_per_plan": float64(5),
+			"max_total_tasks_per_run":       float64(9),
+			"max_replans_per_run":           float64(2),
+			"max_replan_depth":              float64(2),
+			"max_task_goal_chars":           float64(120),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildControlPolicy() error = %v", err)
+	}
+	limits := policy["runtime_limits"].(map[string]any)
+	if limits["max_child_tasks_per_plan"] != 3 {
+		t.Fatalf("max_child_tasks_per_plan = %v, want 3", limits["max_child_tasks_per_plan"])
+	}
+	if limits["max_dependency_edges_per_plan"] != 5 {
+		t.Fatalf("max_dependency_edges_per_plan = %v, want 5", limits["max_dependency_edges_per_plan"])
+	}
+	if limits["max_total_tasks_per_run"] != 9 {
+		t.Fatalf("max_total_tasks_per_run = %v, want 9", limits["max_total_tasks_per_run"])
+	}
+	if limits["max_replans_per_run"] != 2 {
+		t.Fatalf("max_replans_per_run = %v, want 2", limits["max_replans_per_run"])
+	}
+	if limits["max_replan_depth"] != 2 {
+		t.Fatalf("max_replan_depth = %v, want 2", limits["max_replan_depth"])
+	}
+	if limits["max_task_goal_chars"] != 120 {
+		t.Fatalf("max_task_goal_chars = %v, want 120", limits["max_task_goal_chars"])
+	}
+}
+
+func TestBuildControlPolicyRejectsInvalidRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildControlPolicy(ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan": float64(1.5),
+		},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("buildControlPolicy(invalid limit) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestBuildControlPolicyClampsRuntimeLimitsToAbsoluteMax(t *testing.T) {
+	t.Parallel()
+
+	policy, err := buildControlPolicy(ControlIdentity{TenantID: "tenant-1", Subject: "owner-1"}, map[string]any{
+		"runtime_limits": map[string]any{
+			"max_child_tasks_per_plan": float64(absoluteMaxChildTasksPerPlan * 10),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildControlPolicy(oversized limit) error = %v", err)
+	}
+	limits := policy["runtime_limits"].(map[string]any)
+	if limits["max_child_tasks_per_plan"] != absoluteMaxChildTasksPerPlan {
+		t.Fatalf("max_child_tasks_per_plan = %v, want absolute max %d", limits["max_child_tasks_per_plan"], absoluteMaxChildTasksPerPlan)
+	}
+}
+
+func TestValidateRuntimeLimitsRejectInvalidPersistedPolicy(t *testing.T) {
+	t.Parallel()
+
+	run := sqlc.OrchestrationRun{
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan": "not-an-integer",
+			},
+		}),
+	}
+	err := validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(invalid persisted policy) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	run.ControlPolicy = marshalJSON(map[string]any{
+		"runtime_limits": []any{"not", "an", "object"},
+	})
+	err = validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(invalid persisted runtime_limits) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestValidateStartRunPlanRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	run := sqlc.OrchestrationRun{
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan":      2,
+				"max_dependency_edges_per_plan": 1,
+				"max_total_tasks_per_run":       3,
+				"max_task_goal_chars":           20,
+			},
+		}),
+	}
+	err := validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+		{Alias: "b", Goal: "second", DependsOnAliases: []string{"a"}},
+		{Alias: "c", Goal: "third"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(too many children) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	err = validateStartRunPlanRuntimeLimits(run, []plannedChildTask{
+		{Alias: "a", Goal: "first"},
+		{Alias: "b", Goal: "this goal is intentionally too long"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateStartRunPlanRuntimeLimits(long goal) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestAttemptRetryBackoffSeconds(t *testing.T) {
+	t.Parallel()
+
+	if got := attemptRetryBackoffSeconds(map[string]any{}); got != 0 {
+		t.Fatalf("attemptRetryBackoffSeconds(empty) = %d, want 0", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(3)}); got != 3 {
+		t.Fatalf("attemptRetryBackoffSeconds(valid) = %d, want 3", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(1.5)}); got != 0 {
+		t.Fatalf("attemptRetryBackoffSeconds(fractional) = %d, want 0", got)
+	}
+	if got := attemptRetryBackoffSeconds(map[string]any{"backoff_seconds": float64(absoluteMaxRetryBackoffSeconds + 10)}); got != absoluteMaxRetryBackoffSeconds {
+		t.Fatalf("attemptRetryBackoffSeconds(clamped) = %d, want %d", got, absoluteMaxRetryBackoffSeconds)
+	}
+}
+
+func TestValidateReplanRuntimeLimits(t *testing.T) {
+	t.Parallel()
+
+	rootID := mustUUID(t, "550e8400-e29b-41d4-a716-446655440020")
+	childID := mustUUID(t, "550e8400-e29b-41d4-a716-446655440021")
+	run := sqlc.OrchestrationRun{
+		PlannerEpoch: 3,
+		ControlPolicy: marshalJSON(map[string]any{
+			"runtime_limits": map[string]any{
+				"max_child_tasks_per_plan":      2,
+				"max_dependency_edges_per_plan": 4,
+				"max_total_tasks_per_run":       4,
+				"max_replans_per_run":           2,
+				"max_replan_depth":              1,
+				"max_task_goal_chars":           100,
+			},
+		}),
+	}
+	allTasks := []sqlc.OrchestrationTask{
+		{ID: rootID},
+		{ID: childID, DecomposedFromTaskID: rootID},
+	}
+	err := validateReplanRuntimeLimits(run, allTasks[0], allTasks, []plannedChildTask{
+		{Alias: "replacement", Goal: "replacement"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateReplanRuntimeLimits(replan count) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+
+	run.PlannerEpoch = 1
+	err = validateReplanRuntimeLimits(run, allTasks[1], allTasks, []plannedChildTask{
+		{Alias: "replacement", Goal: "replacement"},
+	})
+	if !errors.Is(err, ErrPlanningIntentInvalid) {
+		t.Fatalf("validateReplanRuntimeLimits(depth) error = %v, want %v", err, ErrPlanningIntentInvalid)
+	}
+}
+
+func TestTaskAcceptsHumanCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	if taskAcceptsHumanCheckpoint(TaskStatusCompleted) {
+		t.Fatal("taskAcceptsHumanCheckpoint(completed) = true, want false")
+	}
+	if taskAcceptsHumanCheckpoint(TaskStatusFailed) {
+		t.Fatal("taskAcceptsHumanCheckpoint(failed) = true, want false")
+	}
+	if taskAcceptsHumanCheckpoint(TaskStatusCancelled) {
+		t.Fatal("taskAcceptsHumanCheckpoint(cancelled) = true, want false")
+	}
+	if !taskAcceptsHumanCheckpoint(TaskStatusRunning) {
+		t.Fatal("taskAcceptsHumanCheckpoint(running) = false, want true")
+	}
+}
+
+func TestNormalizeCheckpointResumePolicy(t *testing.T) {
+	t.Parallel()
+
+	policy, err := normalizeCheckpointResumePolicy(&CheckpointResumePolicy{ResumeMode: " " + CheckpointResumeModeNewAttempt + " "})
+	if err != nil {
+		t.Fatalf("normalizeCheckpointResumePolicy(valid) error = %v", err)
+	}
+	if policy == nil || policy.ResumeMode != CheckpointResumeModeNewAttempt {
+		t.Fatalf("normalizeCheckpointResumePolicy(valid) = %+v, want %q", policy, CheckpointResumeModeNewAttempt)
+	}
+
+	if _, err := normalizeCheckpointResumePolicy(&CheckpointResumePolicy{}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeCheckpointResumePolicy(empty) error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if _, err := normalizeCheckpointResumePolicy(&CheckpointResumePolicy{ResumeMode: CheckpointResumeModeResumeHeldEnv}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeCheckpointResumePolicy(resume_held_env) error = %v, want %v", err, ErrInvalidArgument)
+	}
+	if _, err := normalizeCheckpointResumePolicy(&CheckpointResumePolicy{ResumeMode: "resume_later"}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("normalizeCheckpointResumePolicy(unsupported) error = %v, want %v", err, ErrInvalidArgument)
+	}
+}
+
+func TestNormalizeIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeIdempotencyKey("  idem-1  "); got != "idem-1" {
+		t.Fatalf("normalizeIdempotencyKey() = %q, want %q", got, "idem-1")
+	}
+}
+
+func TestTaskPauseableByRunBarrier(t *testing.T) {
+	t.Parallel()
+
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusReady}) {
+		t.Fatal("taskPauseableByRunBarrier(ready) = false, want true")
+	}
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusDispatching}) {
+		t.Fatal("taskPauseableByRunBarrier(dispatching) = false, want true")
+	}
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusRunning}) {
+		t.Fatal("taskPauseableByRunBarrier(running) = false, want true")
+	}
+	if !taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusVerifying}) {
+		t.Fatal("taskPauseableByRunBarrier(verifying) = false, want true")
+	}
+	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusWaitingHuman}) {
+		t.Fatal("taskPauseableByRunBarrier(waiting_human) = true, want false")
+	}
+	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{Status: TaskStatusCompleted}) {
+		t.Fatal("taskPauseableByRunBarrier(completed) = true, want false")
+	}
+	if taskPauseableByRunBarrier(sqlc.OrchestrationTask{
+		Status:              TaskStatusVerifying,
+		WaitingCheckpointID: mustUUID(t, "550e8400-e29b-41d4-a716-446655440012"),
+	}) {
+		t.Fatal("taskPauseableByRunBarrier(waiting_checkpoint_id) = true, want false")
+	}
+}
+
+func TestTaskSupportsHumanCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	if !taskSupportsHumanCheckpoint(TaskStatusReady) {
+		t.Fatal("taskSupportsHumanCheckpoint(ready) = false, want true")
+	}
+	if !taskSupportsHumanCheckpoint(TaskStatusRunning) {
+		t.Fatal("taskSupportsHumanCheckpoint(running) = false, want true")
+	}
+	if !taskSupportsHumanCheckpoint(TaskStatusVerifying) {
+		t.Fatal("taskSupportsHumanCheckpoint(verifying) = false, want true")
+	}
+}
+
+func TestTaskWaitingOnRunBarrier(t *testing.T) {
+	t.Parallel()
+
+	checkpointID := mustUUID(t, "550e8400-e29b-41d4-a716-446655440013")
+	if !taskWaitingOnRunBarrier(sqlc.OrchestrationTask{
+		Status:              TaskStatusWaitingHuman,
+		WaitingScope:        "run",
+		WaitingCheckpointID: checkpointID,
+	}, checkpointID) {
+		t.Fatal("taskWaitingOnRunBarrier(valid) = false, want true")
+	}
+	if taskWaitingOnRunBarrier(sqlc.OrchestrationTask{
+		Status:              TaskStatusWaitingHuman,
+		WaitingScope:        "task",
+		WaitingCheckpointID: checkpointID,
+	}, checkpointID) {
+		t.Fatal("taskWaitingOnRunBarrier(task scope) = true, want false")
+	}
+}
+
+func TestNormalizeCheckpointResolutionCanonicalizesChoiceFreeformInput(t *testing.T) {
+	t.Parallel()
+
+	checkpoint := sqlc.OrchestrationHumanCheckpoint{
+		ID:      mustUUID(t, "550e8400-e29b-41d4-a716-446655440014"),
+		TaskID:  mustUUID(t, "550e8400-e29b-41d4-a716-446655440015"),
+		Status:  CheckpointStatusOpen,
+		Options: marshalJSON([]CheckpointOption{{ID: "approve", Kind: CheckpointOptionKindChoice}}),
+	}
+
+	a, hashA, err := normalizeCheckpointResolution(checkpoint, CheckpointResolution{
+		Mode:           CheckpointResolutionModeSelectOption,
+		OptionID:       "approve",
+		FreeformInput:  "   ",
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("normalizeCheckpointResolution(choice whitespace) error = %v", err)
+	}
+	b, hashB, err := normalizeCheckpointResolution(checkpoint, CheckpointResolution{
+		Mode:           CheckpointResolutionModeSelectOption,
+		OptionID:       "approve",
+		FreeformInput:  "",
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatalf("normalizeCheckpointResolution(choice empty) error = %v", err)
+	}
+	if a.FreeformInput != "" || b.FreeformInput != "" {
+		t.Fatalf("normalized choice freeform_input = %q / %q, want empty", a.FreeformInput, b.FreeformInput)
+	}
+	if hashA != hashB {
+		t.Fatalf("choice resolution hash mismatch: %q != %q", hashA, hashB)
+	}
+}
+
+func TestNormalizeObjectCanonicalizesTypedContainers(t *testing.T) {
+	t.Parallel()
+
+	normalized := normalizeObject(map[string]any{
+		"labels": []string{"a", "b"},
+		"attrs":  map[string]string{"x": "y"},
+		"empty":  []string(nil),
+	})
+
+	labels, ok := normalized["labels"].([]any)
+	if !ok || len(labels) != 2 {
+		t.Fatalf("normalizeObject(labels) = %#v, want []any len 2", normalized["labels"])
+	}
+	attrs, ok := normalized["attrs"].(map[string]any)
+	if !ok || attrs["x"] != "y" {
+		t.Fatalf("normalizeObject(attrs) = %#v, want map[x:y]", normalized["attrs"])
+	}
+	empty, ok := normalized["empty"].([]any)
+	if !ok || len(empty) != 0 {
+		t.Fatalf("normalizeObject(empty) = %#v, want empty []any", normalized["empty"])
+	}
+}
+
+func TestFilterArtifactsByTaskAndKind(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []Artifact{
+		{ID: "a1", TaskID: "task-1", Kind: "image", CreatedAt: base},
+		{ID: "a2", TaskID: "task-2", Kind: "text", CreatedAt: base.Add(time.Second)},
+		{ID: "a3", TaskID: "task-1", Kind: "text", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	filtered := filterArtifacts(items, "task-1", []string{"text"})
+	if len(filtered) != 1 || filtered[0].ID != "a3" {
+		t.Fatalf("filterArtifacts(task-1,text) = %+v, want only a3", filtered)
+	}
+
+	page, after, err := paginateArtifacts(items, "", 2, 12, filterHash([]string{"task-1"}, []string{"image", "text"}))
+	if err != nil {
+		t.Fatalf("paginateArtifacts(page1) error = %v", err)
+	}
+	if len(page) != 2 || after == "" {
+		t.Fatalf("paginateArtifacts(page1) = %+v, after=%q", page, after)
+	}
+	page, after, err = paginateArtifacts(items, after, 2, 12, filterHash([]string{"task-1"}, []string{"image", "text"}))
+	if err != nil {
+		t.Fatalf("paginateArtifacts(page2) error = %v", err)
+	}
+	if len(page) != 1 || page[0].ID != "a3" || after != "" {
+		t.Fatalf("paginateArtifacts(page2) = %+v, after=%q", page, after)
+	}
+}
+
+func TestPaginateCheckpointsRejectsFilterMismatchAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []HumanCheckpoint{
+		{ID: "cp-1", CreatedAt: base},
+		{ID: "cp-2", CreatedAt: base.Add(time.Second)},
+		{ID: "cp-3", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	_, after, err := paginateCheckpoints(items, "", 2, 41, filterHash([]string{"open"}))
+	if err != nil {
+		t.Fatalf("paginateCheckpoints(page1) error = %v", err)
+	}
+
+	_, _, err = paginateCheckpoints(items, after, 2, 41, filterHash([]string{"resolved"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateCheckpoints(filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestPaginateArtifactsRejectsFilterMismatchAcrossPages(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	items := []Artifact{
+		{ID: "a1", TaskID: "task-1", Kind: "image", CreatedAt: base},
+		{ID: "a2", TaskID: "task-1", Kind: "text", CreatedAt: base.Add(time.Second)},
+		{ID: "a3", TaskID: "task-1", Kind: "report", CreatedAt: base.Add(2 * time.Second)},
+	}
+
+	_, after, err := paginateArtifacts(items, "", 2, 12, filterHash([]string{"task-1"}, []string{"image", "text"}))
+	if err != nil {
+		t.Fatalf("paginateArtifacts(page1) error = %v", err)
+	}
+
+	_, _, err = paginateArtifacts(items, after, 2, 12, filterHash([]string{"task-2"}, []string{"image", "text"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateArtifacts(task filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+
+	_, _, err = paginateArtifacts(items, after, 2, 12, filterHash([]string{"task-1"}, []string{"report"}))
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("paginateArtifacts(kind filter mismatch) error = %v, want %v", err, ErrInvalidCursor)
+	}
+}
+
+func TestFilterHashDeduplicatesEquivalentFilters(t *testing.T) {
+	t.Parallel()
+
+	taskStatusSingle := filterHash([]string{"ready"})
+	taskStatusDup := filterHash([]string{" ready ", "ready", "ready"})
+	if taskStatusSingle != taskStatusDup {
+		t.Fatalf("filterHash duplicate status mismatch: %q != %q", taskStatusSingle, taskStatusDup)
+	}
+
+	artifactSingle := filterHash([]string{"task-1"}, []string{"report"})
+	artifactDup := filterHash([]string{" task-1 ", "task-1"}, []string{"report", "report"})
+	if artifactSingle != artifactDup {
+		t.Fatalf("filterHash duplicate artifact filter mismatch: %q != %q", artifactSingle, artifactDup)
+	}
+}
+
+func mustUUID(t *testing.T, raw string) pgtype.UUID {
+	t.Helper()
+	value, err := db.ParseUUID(raw)
+	if err != nil {
+		t.Fatalf("db.ParseUUID(%q): %v", raw, err)
+	}
+	return value
+}

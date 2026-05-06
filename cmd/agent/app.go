@@ -12,6 +12,7 @@ import (
 	stdpath "path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,6 +53,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	sqlitestore "github.com/memohai/memoh/internal/db/sqlite/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -82,6 +84,8 @@ import (
 	netctl "github.com/memohai/memoh/internal/network"
 	"github.com/memohai/memoh/internal/network/kubeapi"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
+	"github.com/memohai/memoh/internal/orchestration"
+	"github.com/memohai/memoh/internal/orchestrationexec"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -172,6 +176,13 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 		return nil, nil
 	}
 	return postgresstore.New(conn)
+}
+
+func providePostgresSQLC(store *postgresstore.Store) *dbsqlc.Queries {
+	if store == nil {
+		return nil
+	}
+	return store.SQLC()
 }
 
 func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
@@ -369,6 +380,27 @@ func injectToolProviders(a *agentpkg.Agent, msgService *message.DBService, provi
 	}
 }
 
+func configureOrchestrationStartRunPlanner(
+	log *slog.Logger,
+	queries *dbsqlc.Queries,
+	settingsService *settings.Service,
+	modelsService *models.Service,
+	agent *agentpkg.Agent,
+	rc *boot.RuntimeConfig,
+	orchestrationService *orchestration.Service,
+) {
+	runtime := orchestrationexec.NewRuntime(
+		log,
+		queries,
+		settingsService,
+		modelsService,
+		agent,
+		rc.TimezoneLocation,
+	)
+	orchestrationService.SetStartRunPlanner(runtime)
+	orchestrationService.SetReplanner(runtime)
+}
+
 func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, channelStore *channel.Store, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
@@ -564,7 +596,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, browserContextService *browsercontexts.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager, botService *bots.Service, orchestrationService *orchestration.Service) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -587,6 +619,7 @@ func provideToolProviders(log *slog.Logger, cfg config.Config, channelManager *c
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, fedSource),
 		agenttools.NewHistoryProvider(log, sessionService, queries),
+		agenttools.NewOrchestrationProvider(log, orchestrationService, botService),
 	}
 }
 
@@ -898,6 +931,70 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 			return heartbeatService.Bootstrap(ctx)
 		},
 	})
+}
+
+func startOrchestrationRuntime(lc fx.Lifecycle, orchestrationService *orchestration.Service) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	builtinVerifierEnabled := orchestrationBuiltinVerifierEnabled()
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			workerCount := 4
+			if builtinVerifierEnabled {
+				workerCount++
+			}
+			wg.Add(workerCount)
+			go func() {
+				defer wg.Done()
+				orchestrationService.RunPlannerLoop(ctx)
+			}()
+			go func() {
+				defer wg.Done()
+				orchestrationService.RunSchedulerLoop(ctx)
+			}()
+			go func() {
+				defer wg.Done()
+				orchestrationService.RunRecoveryLoop(ctx)
+			}()
+			go func() {
+				defer wg.Done()
+				orchestrationService.RunVerificationRecoveryLoop(ctx)
+			}()
+			if builtinVerifierEnabled {
+				go func() {
+					defer wg.Done()
+					orchestrationService.RunVerifierLoop(ctx)
+				}()
+			}
+			return nil
+		},
+		OnStop: func(stopCtx context.Context) error {
+			cancel()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				wg.Wait()
+			}()
+			select {
+			case <-stopCtx.Done():
+				return stopCtx.Err()
+			case <-done:
+				return nil
+			}
+		},
+	})
+}
+
+func orchestrationBuiltinVerifierEnabled() bool {
+	value := strings.TrimSpace(os.Getenv("MEMOH_ORCHESTRATION_BUILTIN_VERIFYD"))
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	case "", "0", "false", "no", "off":
+		return false
+	default:
+		return false
+	}
 }
 
 func wireResolverOutbound(resolver *flow.Resolver, channelManager *channel.Manager) {

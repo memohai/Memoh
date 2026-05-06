@@ -34,6 +34,24 @@ services:
       retries: 5
     restart: unless-stopped
 
+  nats:
+    image: nats:2-alpine
+    container_name: memoh-dev-nats
+    user: "0:0"
+    command: ["-js", "-sd", "/opt/memoh/data/nats/jetstream", "-m", "8222"]
+    volumes:
+      - memoh_data:/opt/memoh/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${MEMOH_DEV_NATS_PORT:-14222}:4222"
+      - "${MEMOH_DEV_NATS_HTTP_PORT:-18222}:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   deps:
     build:
       context: ..
@@ -83,10 +101,12 @@ services:
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
+      MEMOH_ORCHESTRATION_BUILTIN_VERIFYD: "false"
     volumes:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
+      - containerd_sock:/run/containerd
       - containerd_data:/var/lib/containerd
       - server_cni_state:/var/lib/cni
       - memoh_data:/opt/memoh/data
@@ -106,6 +126,68 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  verifyd:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-verifyd
+    healthcheck:
+      disable: true
+    working_dir: /workspace
+    entrypoint: []
+    command: ["go", "run", "./cmd/verifyd"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
+      - memoh_data:/opt/memoh/data
+      - ../.toolkit:/opt/memoh/runtime/toolkit
+      - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
+      - ../cmd/bridge/template:/opt/memoh/runtime/templates
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  workerd:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server
+    container_name: memoh-dev-workerd
+    healthcheck:
+      disable: true
+    working_dir: /workspace
+    entrypoint: []
+    command: ["go", "run", "./cmd/workerd"]
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ..:/workspace
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - containerd_sock:/run/containerd
+      - containerd_data:/var/lib/containerd
+      - memoh_data:/opt/memoh/data
+      - ../.toolkit:/opt/memoh/runtime/toolkit
+      - ../docker/toolkit/bin:/opt/memoh/runtime/toolkit/bin
+      - ../cmd/bridge/template:/opt/memoh/runtime/templates
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -133,6 +215,10 @@ services:
         condition: service_completed_successfully
       server:
         condition: service_healthy
+      workerd:
+        condition: service_started
+      verifyd:
+        condition: service_started
     restart: unless-stopped
 
   browser:
@@ -175,6 +261,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  containerd_sock:
+    driver: local
   postgres_data:
     driver: local
   qdrant_data:

@@ -64,6 +64,7 @@ type InjectMessage struct {
 type RunConfig struct {
 	Model              *sdk.Model
 	ReasoningEffort    string
+	ResponseFormat     *sdk.ResponseFormat
 	Messages           []sdk.Message
 	Query              string
 	System             string
@@ -112,6 +113,10 @@ type RunConfig struct {
 	BackgroundManager *background.Manager
 
 	ToolApprovalHandler func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error)
+
+	// ToolCallObserver receives start and finish callbacks for every tool call
+	// that actually executes inside the agent loop.
+	ToolCallObserver ToolCallObserver
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

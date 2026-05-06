@@ -98,3 +98,251 @@ func TestRefreshTokenFromContext_MissingUser(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
 	assert.Equal(t, "invalid token", httpErr.Message)
 }
+
+func TestTenantIDFromContext(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimTenantID: "tenant-123",
+			claimUserID:   "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	tenantID, err := TenantIDFromContext(c)
+	require.NoError(t, err)
+	assert.Equal(t, "tenant-123", tenantID)
+}
+
+func TestTenantIDFromContextRequiresExplicitClaim(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimUserID: "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	_, err := TenantIDFromContext(c)
+	require.Error(t, err)
+
+	httpErr := &echo.HTTPError{}
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
+	assert.Equal(t, "tenant id missing", httpErr.Message)
+}
+
+func TestUserIDFromContextRejectsChatRouteToken(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimType:   chatTokenType,
+			claimUserID: "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	_, err := UserIDFromContext(c)
+	require.Error(t, err)
+
+	httpErr := &echo.HTTPError{}
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
+	assert.Equal(t, "user token required", httpErr.Message)
+}
+
+func TestUserIDFromContextRejectsServiceToken(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimType:   serviceTokenType,
+			claimUserID: "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	_, err := UserIDFromContext(c)
+	require.Error(t, err)
+
+	httpErr := &echo.HTTPError{}
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
+	assert.Equal(t, "user token required", httpErr.Message)
+}
+
+func TestTenantIDFromContextRejectsServiceToken(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimType:     serviceTokenType,
+			claimUserID:   "user-123",
+			claimTenantID: "tenant-123",
+		},
+	}
+	c.Set("user", token)
+
+	_, err := TenantIDFromContext(c)
+	require.Error(t, err)
+
+	httpErr := &echo.HTTPError{}
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
+	assert.Equal(t, "user token required", httpErr.Message)
+}
+
+func TestTokenTypeFromContext(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimType:   "chat_route",
+			claimUserID: "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	tokenType, err := TokenTypeFromContext(c)
+	require.NoError(t, err)
+	assert.Equal(t, "chat_route", tokenType)
+}
+
+func TestTokenTypeFromContextMissingTypeReturnsEmpty(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimUserID: "user-123",
+		},
+	}
+	c.Set("user", token)
+
+	tokenType, err := TokenTypeFromContext(c)
+	require.NoError(t, err)
+	assert.Empty(t, tokenType)
+}
+
+func TestGenerateServiceTokenSetsTokenType(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	tokenStr, _, err := GenerateServiceToken("user-123", "test-secret", time.Minute)
+	require.NoError(t, err)
+
+	token, err := jwt.Parse(tokenStr, func(_ *jwt.Token) (interface{}, error) {
+		return []byte("test-secret"), nil
+	})
+	require.NoError(t, err)
+	c.Set("user", token)
+
+	tokenType, err := TokenTypeFromContext(c)
+	require.NoError(t, err)
+	assert.Equal(t, serviceTokenType, tokenType)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+	assert.Equal(t, "user-123", claims[claimTenantID])
+}
+
+func TestGenerateTokenSetsTenantClaim(t *testing.T) {
+	tokenStr, _, err := GenerateToken("user-123", "test-secret", time.Minute)
+	require.NoError(t, err)
+
+	token, err := jwt.Parse(tokenStr, func(_ *jwt.Token) (interface{}, error) {
+		return []byte("test-secret"), nil
+	})
+	require.NoError(t, err)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+	assert.Equal(t, "user-123", claims[claimTenantID])
+}
+
+func TestRefreshTokenFromContextBackfillsTenantClaim(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimUserID: "user-123",
+			"iat":       float64(time.Now().Add(-time.Minute).Unix()),
+			"exp":       float64(time.Now().Add(time.Minute).Unix()),
+		},
+	}
+	c.Set("user", token)
+
+	newTokenStr, _, err := RefreshTokenFromContext(c, "test-secret", time.Hour)
+	require.NoError(t, err)
+
+	newToken, err := jwt.Parse(newTokenStr, func(_ *jwt.Token) (interface{}, error) {
+		return []byte("test-secret"), nil
+	})
+	require.NoError(t, err)
+
+	claims, ok := newToken.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+	assert.Equal(t, "user-123", claims[claimTenantID])
+}
+
+func TestRefreshTokenFromContextRejectsTypedToken(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	token := &jwt.Token{
+		Valid: true,
+		Claims: jwt.MapClaims{
+			claimType:   serviceTokenType,
+			claimUserID: "user-123",
+			"iat":       float64(time.Now().Add(-time.Minute).Unix()),
+			"exp":       float64(time.Now().Add(time.Minute).Unix()),
+		},
+	}
+	c.Set("user", token)
+
+	_, _, err := RefreshTokenFromContext(c, "test-secret", time.Hour)
+	require.Error(t, err)
+
+	httpErr := &echo.HTTPError{}
+	require.ErrorAs(t, err, &httpErr)
+	assert.Equal(t, http.StatusUnauthorized, httpErr.Code)
+	assert.Equal(t, "user token required", httpErr.Message)
+}

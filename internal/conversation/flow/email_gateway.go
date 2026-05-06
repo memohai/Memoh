@@ -85,7 +85,7 @@ func (g *EmailChatGateway) generateToken(userID string) (string, error) {
 	if strings.TrimSpace(g.jwtSecret) == "" {
 		return "", errors.New("jwt secret not configured")
 	}
-	signed, _, err := auth.GenerateToken(userID, g.jwtSecret, emailTriggerTokenTTL)
+	signed, _, err := auth.GenerateServiceToken(userID, g.jwtSecret, emailTriggerTokenTTL)
 	if err != nil {
 		return "", err
 	}
