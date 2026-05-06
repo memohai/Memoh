@@ -1261,6 +1261,8 @@
       "empty": "No memory entries found.",
       "searchPlaceholder": "Search memory...",
       "newMemory": "New Memory",
+      "emptyHistory": "No conversation history available",
+      "unsavedChanges": "Unsaved changes",
       "compact": "Compact Memory",
       "compactConfirm": "Are you sure you want to compact the memory? This will merge similar content using AI and may reduce the number of entries.",
       "compactRatio": "Compression Ratio",
