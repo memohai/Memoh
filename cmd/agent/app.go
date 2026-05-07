@@ -594,6 +594,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount),
+		agenttools.NewBrowserProvider(log, settingsService, manager, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),

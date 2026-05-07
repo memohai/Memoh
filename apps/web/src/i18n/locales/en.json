@@ -352,6 +352,24 @@
         "stageInstall": "Install",
         "stageBrowser": "Browser",
         "stageDesktop": "Desktop"
+      },
+      "stats": {
+        "show": "Stats",
+        "hide": "Hide stats",
+        "title": "Stats",
+        "session": "Session",
+        "resolution": "Resolution",
+        "viewport": "Viewport",
+        "codec": "Codec",
+        "connection": "Connection",
+        "ice": "ICE",
+        "fps": "FPS",
+        "bitrate": "Bitrate",
+        "decoded": "Decoded",
+        "dropped": "Dropped",
+        "packetsLost": "Lost",
+        "jitter": "Jitter",
+        "rtt": "RTT"
       }
     }
   },

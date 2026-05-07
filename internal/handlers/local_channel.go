@@ -274,15 +274,18 @@ type wsClientMessage struct {
 // wsWriter serialises all WebSocket writes through a single goroutine to
 // avoid concurrent write panics with gorilla/websocket.
 type wsWriter struct {
-	conn *websocket.Conn
-	ch   chan []byte
-	done chan struct{}
+	conn      *websocket.Conn
+	ch        chan []byte
+	closeOnce sync.Once
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 func newWSWriter(conn *websocket.Conn) *wsWriter {
 	w := &wsWriter{
 		conn: conn,
 		ch:   make(chan []byte, 128),
+		stop: make(chan struct{}),
 		done: make(chan struct{}),
 	}
 	go w.loop()
@@ -291,15 +294,32 @@ func newWSWriter(conn *websocket.Conn) *wsWriter {
 
 func (w *wsWriter) loop() {
 	defer close(w.done)
-	for data := range w.ch {
-		_ = w.conn.WriteMessage(websocket.TextMessage, data)
+	for {
+		select {
+		case <-w.stop:
+			return
+		default:
+		}
+
+		select {
+		case data := <-w.ch:
+			_ = w.conn.WriteMessage(websocket.TextMessage, data)
+		case <-w.stop:
+			return
+		}
 	}
 }
 
 func (w *wsWriter) Send(data []byte) {
 	select {
+	case <-w.stop:
+		return
+	default:
+	}
+
+	select {
 	case w.ch <- data:
-	case <-w.done:
+	case <-w.stop:
 	}
 }
 
@@ -312,7 +332,9 @@ func (w *wsWriter) SendJSON(v any) {
 }
 
 func (w *wsWriter) Close() {
-	close(w.ch)
+	w.closeOnce.Do(func() {
+		close(w.stop)
+	})
 	<-w.done
 }
 
@@ -368,8 +390,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	writer := newWSWriter(conn)
 	defer writer.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	connCtx, connCancel := context.WithCancel(context.Background())
+	defer connCancel()
+	streamBaseCtx := context.WithoutCancel(c.Request().Context())
 
 	abortCh := make(chan struct{}, 1)
 	var activeCancel context.CancelFunc
@@ -377,7 +400,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	for {
 		_, raw, readErr := conn.ReadMessage()
 		if readErr != nil {
-			cancel()
+			connCancel()
+			h.logger.Debug("ws disconnected; active stream can finish in background",
+				slog.String("bot_id", botID),
+				slog.Any("error", readErr),
+			)
 			break
 		}
 		var msg wsClientMessage
@@ -407,7 +434,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if explicitID == "" && msg.ShortID > 0 {
 				explicitID = strconv.Itoa(msg.ShortID)
 			}
-			streamCtx, streamCancel := context.WithCancel(ctx)
+			streamCtx, streamCancel := context.WithCancel(streamBaseCtx)
 			activeCancel = streamCancel
 			eventCh := make(chan flow.WSStreamEvent, 64)
 
@@ -429,7 +456,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					Reason:                 strings.TrimSpace(msg.Reason),
 					ChatToken:              bearerToken,
 				}, eventCh); err != nil {
-					if ctx.Err() == nil {
+					if connCtx.Err() == nil {
 						h.logger.Error("ws approval stream error", slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
 						writer.SendJSON(map[string]string{"type": "error", "message": err.Error()})
 					}
@@ -487,7 +514,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				refs := outboundAssetRefs
 				outboundAssetMu.Unlock()
 				if len(refs) > 0 {
-					h.resolver.LinkOutboundAssets(context.WithoutCancel(ctx), botID, sessionID, refs)
+					h.resolver.LinkOutboundAssets(streamBaseCtx, botID, sessionID, refs)
 				}
 			}()
 
@@ -508,7 +535,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			default:
 			}
 
-			streamCtx, streamCancel := context.WithCancel(ctx)
+			streamCtx, streamCancel := context.WithCancel(streamBaseCtx)
 			activeCancel = streamCancel
 			eventCh := make(chan flow.WSStreamEvent, 64)
 
@@ -536,7 +563,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
 				}
 				if streamErr := h.resolver.StreamChatWS(streamCtx, req, eventCh, abortCh); streamErr != nil {
-					if ctx.Err() == nil {
+					if connCtx.Err() == nil {
 						h.logger.Error("ws stream error", slog.Any("error", streamErr), slog.String("bot_id", botID), slog.String("session_id", sessionID))
 						writer.SendJSON(map[string]string{"type": "error", "message": streamErr.Error()})
 					}
@@ -594,7 +621,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				refs := outboundAssetRefs
 				outboundAssetMu.Unlock()
 				if len(refs) > 0 {
-					h.resolver.LinkOutboundAssets(context.WithoutCancel(ctx), botID, sessionID, refs)
+					h.resolver.LinkOutboundAssets(streamBaseCtx, botID, sessionID, refs)
 				}
 			}()
 

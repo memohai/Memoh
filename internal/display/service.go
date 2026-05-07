@@ -1,11 +1,14 @@
 package display
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"net"
@@ -41,7 +44,17 @@ const (
 	h264FmtpLine         = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
 	displayProbePeriod   = 5 * time.Second
 	socketProbeTimeout   = 300 * time.Millisecond
+	screenshotTimeout    = 15 * time.Second
+	screenshotWidth      = 1280
+	screenshotQuality    = 82
+	screenshotMaxBytes   = 512 * 1024
+	screenshotMIME       = "image/jpeg"
 )
+
+type screenshotJPEGCandidate struct {
+	width   int
+	quality int
+}
 
 var (
 	ErrManagerUnavailable = errors.New("manager not configured")
@@ -50,6 +63,16 @@ var (
 	ErrEncoderUnavailable = errors.New("gstreamer unavailable")
 	ErrCodecUnsupported   = errors.New("no compatible video codec offered")
 )
+
+var screenshotJPEGCandidates = []screenshotJPEGCandidate{
+	{quality: screenshotQuality},
+	{quality: 72},
+	{width: 1024, quality: 68},
+	{width: 800, quality: 60},
+	{width: 640, quality: 52},
+	{width: 480, quality: 42},
+	{width: 320, quality: 30},
+}
 
 type Workspace interface {
 	BotDisplayEnabled(ctx context.Context, botID string) bool
@@ -84,6 +107,15 @@ type SessionInfo struct {
 	Codec     string    `json:"codec"`
 	State     string    `json:"state"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type ControlInput struct {
+	Type       string
+	X          int
+	Y          int
+	ButtonMask uint8
+	Keysym     uint32
+	Down       bool
 }
 
 type rtcSettings struct {
@@ -199,6 +231,106 @@ func (s *Service) CloseSession(botID, sessionID string) bool {
 	return sess.closePeer(sessionID)
 }
 
+func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string, error) {
+	if s == nil || s.workspace == nil {
+		return nil, "", ErrManagerUnavailable
+	}
+	if !s.workspace.BotDisplayEnabled(ctx, botID) {
+		return nil, "", ErrDisplayDisabled
+	}
+	socketPath := s.workspace.DisplaySocketPath(botID)
+	if !isSocketReady(ctx, socketPath) {
+		return nil, "", fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
+	}
+	gstLaunch, err := resolveGSTLaunch()
+	if err != nil {
+		return nil, "", errors.Join(ErrEncoderUnavailable, err)
+	}
+
+	output, err := os.CreateTemp("", "memoh-display-*.jpg")
+	if err != nil {
+		return nil, "", err
+	}
+	outputPath := output.Name()
+	_ = output.Close()
+	defer func() { _ = os.Remove(outputPath) }()
+
+	runCtx, cancel := context.WithTimeout(ctx, screenshotTimeout)
+
+	listenConfig := net.ListenConfig{}
+	proxy, err := listenConfig.Listen(runCtx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		cancel()
+		return nil, "", fmt.Errorf("start RFB screenshot shim: %w", err)
+	}
+	defer func() { _ = proxy.Close() }()
+	defer cancel()
+	go proxyRFBSocket(runCtx, proxy, socketPath, s.logger, botID)
+
+	proxyPort := proxy.Addr().(*net.TCPAddr).Port
+	cmd := exec.CommandContext(runCtx, gstLaunch, gstreamerScreenshotArgs(proxyPort, outputPath)...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
+	cmd.Stdout = processLogWriter{logger: s.logger, botID: botID}
+	cmd.Stderr = processLogWriter{logger: s.logger, botID: botID}
+	if err := cmd.Run(); err != nil {
+		return nil, "", fmt.Errorf("capture display screenshot: %w", err)
+	}
+	data, err := os.ReadFile(outputPath) //nolint:gosec // outputPath is a freshly-created temp file.
+	if err != nil {
+		return nil, "", err
+	}
+	if len(data) == 0 {
+		return nil, "", errors.New("display screenshot is empty")
+	}
+	data, err = limitJPEGSize(data, screenshotMaxBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, screenshotMIME, nil
+}
+
+func (s *Service) ControlInput(ctx context.Context, botID string, event ControlInput) error {
+	return s.ControlInputs(ctx, botID, []ControlInput{event})
+}
+
+func (s *Service) ControlInputs(ctx context.Context, botID string, events []ControlInput) error {
+	if s == nil || s.workspace == nil {
+		return ErrManagerUnavailable
+	}
+	if !s.workspace.BotDisplayEnabled(ctx, botID) {
+		return ErrDisplayDisabled
+	}
+	socketPath := s.workspace.DisplaySocketPath(botID)
+	if !isSocketReady(ctx, socketPath) {
+		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
+	}
+	input, err := newRFBInputClient(ctx, socketPath)
+	if err != nil {
+		return fmt.Errorf("connect display input: %w", err)
+	}
+	defer func() { _ = input.Close() }()
+	for _, event := range events {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		switch event.Type {
+		case "pointer":
+			if err := input.Pointer(event.X, event.Y, event.ButtonMask); err != nil {
+				return err
+			}
+		case "key":
+			if event.Keysym == 0 {
+				return errors.New("keysym is required")
+			}
+			if err := input.Key(event.Keysym, event.Down); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported input event type %q", event.Type)
+		}
+	}
+	return nil
+}
+
 func (s *Service) session(ctx context.Context, botID, socketPath, gstLaunch, codec string) (*session, error) {
 	s.mu.Lock()
 	if sess := s.sessions[botID]; sess != nil && !sess.closed() {
@@ -281,7 +413,7 @@ type peerSession struct {
 }
 
 func newSession(service *Service, botID, socketPath, gstLaunch, codec string) *session {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored on the session and called when the display session stops.
 	return &session{
 		service:    service,
 		botID:      botID,
@@ -687,6 +819,42 @@ func (s *session) proxyRFB(conn net.Conn) {
 	<-done
 }
 
+func proxyRFBSocket(ctx context.Context, listener net.Listener, socketPath string, logger *slog.Logger, botID string) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
+				logger.Warn("display RFB screenshot shim stopped", slog.String("bot_id", botID), slog.Any("error", err))
+			}
+			return
+		}
+		go proxyRFBConnection(ctx, conn, socketPath, logger, botID)
+	}
+}
+
+func proxyRFBConnection(ctx context.Context, conn net.Conn, socketPath string, logger *slog.Logger, botID string) {
+	defer func() { _ = conn.Close() }()
+
+	dialer := net.Dialer{Timeout: displayProbePeriod}
+	rfbConn, err := dialer.DialContext(ctx, "unix", socketPath)
+	if err != nil {
+		logger.Warn("display RFB socket dial failed", slog.String("bot_id", botID), slog.String("socket_path", socketPath), slog.Any("error", err))
+		return
+	}
+	defer func() { _ = rfbConn.Close() }()
+
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(conn, rfbConn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(rfbConn, conn)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
 func (s *session) forwardRTP() {
 	buf := make([]byte, 4096)
 	for {
@@ -900,7 +1068,7 @@ func forceVP8FromEnv() bool {
 func gstreamerArgs(codec string, rfbPort, rtpPort int) []string {
 	base := []string{
 		"-q",
-		"rfbsrc", "host=127.0.0.1", fmt.Sprintf("port=%d", rfbPort), "shared=true", "incremental=false", "do-timestamp=true",
+		"rfbsrc", "host=127.0.0.1", fmt.Sprintf("port=%d", rfbPort), "shared=true", "incremental=true", "use-copyrect=true", "do-timestamp=true",
 		"!", "videoconvert",
 		"!", "videorate",
 		"!", fmt.Sprintf("video/x-raw,framerate=%d/1", videoFrameRate),
@@ -926,6 +1094,77 @@ func gstreamerArgs(codec string, rfbPort, rtpPort int) []string {
 			"!", "udpsink", "host=127.0.0.1", fmt.Sprintf("port=%d", rtpPort), "sync=false", "async=false",
 		)
 	}
+}
+
+func gstreamerScreenshotArgs(rfbPort int, outputPath string) []string {
+	return []string{
+		"-q",
+		"rfbsrc", "host=127.0.0.1", fmt.Sprintf("port=%d", rfbPort), "shared=true", "incremental=false", "do-timestamp=true", "num-buffers=1",
+		"!", "videoconvert",
+		"!", "videoscale",
+		"!", fmt.Sprintf("video/x-raw,width=%d,pixel-aspect-ratio=1/1", screenshotWidth),
+		"!", "jpegenc", fmt.Sprintf("quality=%d", screenshotQuality),
+		"!", "filesink", "location=" + outputPath,
+	}
+}
+
+func limitJPEGSize(data []byte, maxBytes int) ([]byte, error) {
+	if maxBytes <= 0 || len(data) <= maxBytes {
+		return data, nil
+	}
+	source, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode oversized display screenshot: %w", err)
+	}
+
+	var last []byte
+	sourceWidth := source.Bounds().Dx()
+	for _, candidate := range screenshotJPEGCandidates {
+		img := source
+		if candidate.width > 0 && candidate.width < sourceWidth {
+			img = resizeNearest(source, candidate.width)
+		}
+		encoded, err := encodeJPEG(img, candidate.quality)
+		if err != nil {
+			return nil, err
+		}
+		if len(encoded) <= maxBytes {
+			return encoded, nil
+		}
+		last = encoded
+	}
+
+	return nil, fmt.Errorf("display screenshot exceeds size limit after compression: %d > %d bytes", len(last), maxBytes)
+}
+
+func encodeJPEG(img image.Image, quality int) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func resizeNearest(src image.Image, width int) image.Image {
+	bounds := src.Bounds()
+	srcWidth := bounds.Dx()
+	srcHeight := bounds.Dy()
+	if width <= 0 || srcWidth <= 0 || srcHeight <= 0 || width >= srcWidth {
+		return src
+	}
+	height := width * srcHeight / srcWidth
+	if height < 1 {
+		height = 1
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		sourceY := bounds.Min.Y + y*srcHeight/height
+		for x := 0; x < width; x++ {
+			sourceX := bounds.Min.X + x*srcWidth/width
+			dst.Set(x, y, src.At(sourceX, sourceY))
+		}
+	}
+	return dst
 }
 
 func resolveGSTLaunch() (string, error) {

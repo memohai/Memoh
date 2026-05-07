@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 
 	attachmentpkg "github.com/memohai/memoh/internal/attachment"
 	"github.com/memohai/memoh/internal/channel"
@@ -80,6 +86,52 @@ func TestFormatLocalStreamEvent_EncodesToolCallAsToolCallObject(t *testing.T) {
 	}
 	if _, ok := payload["toolName"]; ok {
 		t.Fatalf("unexpected camelCase toolName in payload")
+	}
+}
+
+func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				done <- fmt.Errorf("panic: %v", recovered)
+			}
+		}()
+
+		writer := newWSWriter(conn)
+		writer.Close()
+		writer.Send([]byte(`{"type":"late"}`))
+		writer.SendJSON(map[string]string{"type": "late"})
+		writer.Close()
+		done <- nil
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	client, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	_ = client.Close()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for websocket writer")
 	}
 }
 

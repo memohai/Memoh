@@ -250,7 +250,7 @@ import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send,
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
-import { useScroll, useElementBounding, useIntersectionObserver } from '@vueuse/core'
+import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
 import { getModels, getProviders, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
@@ -264,12 +264,21 @@ import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment } from '@/composables/api/useChat'
 
+const props = withDefaults(defineProps<{
+  tabId?: string
+  active?: boolean
+}>(), {
+  tabId: 'chat',
+  active: true,
+})
+
 const { t } = useI18n()
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const modelPopoverOpen = ref(false)
 const reasoningPopoverOpen = ref(false)
+const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
 
 const {
   messages,
@@ -283,6 +292,8 @@ const {
   overrideModelId,
   overrideReasoningEffort,
 } = storeToRefs(chatStore)
+
+const isActive = computed(() => props.active !== false)
 
 
 const { data: modelData } = useQuery({
@@ -387,19 +398,41 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const inputDraftKey = computed(() => {
+  const botId = (currentBotId.value ?? '').trim()
+  const tabId = props.tabId.trim()
+  if (!botId || !tabId) return ''
+  return `${botId}:${tabId}`
+})
 
-onMounted(async () => {
-  try {
-    if (chatStore.currentBotId || chatStore.sessionId) {
-      await chatStore.initialize()
-    }
-  } finally {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        isInstant.value = true
-      })
-    })
+function saveInputDraft(key: string, text: string) {
+  if (!key) return
+  const next = { ...inputDrafts.value }
+  if (text) {
+    next[key] = text
+  } else {
+    delete next[key]
   }
+  inputDrafts.value = next
+}
+
+watch(inputDraftKey, (nextKey, previousKey) => {
+  if (previousKey) {
+    saveInputDraft(previousKey, inputText.value)
+  }
+  inputText.value = nextKey ? inputDrafts.value[nextKey] ?? '' : ''
+}, { immediate: true })
+
+watch(inputText, (text) => {
+  saveInputDraft(inputDraftKey.value, text)
+})
+
+onMounted(() => {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      isInstant.value = true
+    })
+  })
 })
 
 const elNode = useTemplateRef('scrollContainer')
@@ -420,12 +453,14 @@ const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed
 const { height } = useElementBounding(descEl)
 
 watch(activeSession, async () => {
+  if (!isActive.value) return
   isInstant.value = false
   y.value = height.value
 }, { immediate: true, deep: true })
 
 
 watchEffect(() => {
+  if (!isActive.value) return
   if (directions.top) {
     isAutoScroll.value = false
     isInstant.value = true
@@ -438,6 +473,7 @@ watchEffect(() => {
 
 
 watchEffect(() => {
+  if (!isActive.value) return
   if (isAutoScroll.value) {
     y.value = height.value
   }
@@ -514,6 +550,7 @@ async function ensureOlderLoaded() {
 useIntersectionObserver(
   loadMoreSentinel,
   ([entry]) => {
+    if (!isActive.value) return
     if (!entry?.isIntersecting) return
     void ensureOlderLoaded()
   },
@@ -568,12 +605,15 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
 }
 
 async function handleSend() {
+  if (!isActive.value) return
   isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return
 
+  const sentDraftKey = inputDraftKey.value
   inputText.value = ''
+  saveInputDraft(sentDraftKey, '')
   pendingFiles.value = []
 
   let attachments: ChatAttachment[] | undefined

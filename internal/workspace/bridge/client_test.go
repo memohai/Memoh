@@ -23,6 +23,10 @@ type rawReadTestServer struct {
 	files map[string][]byte
 }
 
+type tunnelEchoTestServer struct {
+	pb.UnimplementedContainerServiceServer
+}
+
 func (s *rawReadTestServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
 	data, ok := s.files[req.GetPath()]
 	if !ok {
@@ -42,12 +46,41 @@ func (s *rawReadTestServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerS
 	return nil
 }
 
-func newTestReadRawClient(t *testing.T, files map[string][]byte) *Client {
+func (*tunnelEchoTestServer) Tunnel(stream pb.ContainerService_TunnelServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if first.GetOpen() == nil {
+		return status.Error(codes.InvalidArgument, "expected tunnel open")
+	}
+	if err := stream.Send(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{}}}); err != nil {
+		return err
+	}
+	for {
+		frame, err := stream.Recv()
+		if err != nil {
+			return nil
+		}
+		switch payload := frame.GetFrame().(type) {
+		case *pb.TunnelFrame_Data:
+			if data := payload.Data.GetData(); len(data) > 0 {
+				if err := stream.Send(&pb.TunnelFrame{Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{Data: data}}}); err != nil {
+					return err
+				}
+			}
+		case *pb.TunnelFrame_Close:
+			return nil
+		}
+	}
+}
+
+func newTestClient(t *testing.T, server pb.ContainerServiceServer) *Client {
 	t.Helper()
 
 	lis := bufconn.Listen(testBufSize)
 	srv := grpc.NewServer()
-	pb.RegisterContainerServiceServer(srv, &rawReadTestServer{files: files})
+	pb.RegisterContainerServiceServer(srv, server)
 
 	done := make(chan struct{})
 	go func() {
@@ -72,6 +105,11 @@ func newTestReadRawClient(t *testing.T, files map[string][]byte) *Client {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	return NewClientFromConn(conn)
+}
+
+func newTestReadRawClient(t *testing.T, files map[string][]byte) *Client {
+	t.Helper()
+	return newTestClient(t, &rawReadTestServer{files: files})
 }
 
 func TestClientReadRawMissingFileReturnsNotFoundImmediately(t *testing.T) {
@@ -126,5 +164,30 @@ func TestClientReadRawSupportsEmptyFile(t *testing.T) {
 	}
 	if len(data) != 0 {
 		t.Fatalf("expected empty payload, got %q", string(data))
+	}
+}
+
+func TestClientTunnelSurvivesDialContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	client := newTestClient(t, &tunnelEchoTestServer{})
+	dialCtx, cancel := context.WithCancel(context.Background())
+	conn, err := client.DialContext(dialCtx, "tcp", "127.0.0.1:9222")
+	if err != nil {
+		t.Fatalf("DialContext returned error: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	cancel()
+
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatalf("write after dial context cancellation failed: %v", err)
+	}
+	buf := make([]byte, 4)
+	n, err := io.ReadFull(conn, buf)
+	if err != nil {
+		t.Fatalf("read after dial context cancellation failed: %v", err)
+	}
+	if got := string(buf[:n]); got != "ping" {
+		t.Fatalf("expected echoed payload, got %q", got)
 	}
 }

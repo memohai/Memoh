@@ -513,6 +513,30 @@ xvnc_pids() {
 xvnc_running() {
   [ -n "$(xvnc_pids)" ]
 }
+browser_pids() {
+  for proc_dir in /proc/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    pid="${proc_dir#/proc/}"
+    cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
+    printf '%s\n' "$cmdline" | grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$' || continue
+    printf '%s\n' "$pid"
+  done
+  return 0
+}
+browser_cdp_running() {
+  for proc_dir in /proc/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
+    printf '%s\n' "$cmdline" | grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$' || continue
+    printf '%s\n' "$cmdline" | grep -Eq '^--type=' && continue
+    printf '%s\n' "$cmdline" | grep -Fq -- '--remote-debugging-port=9222' && return 0
+  done
+  return 1
+}
+cleanup_browser_profile() {
+  [ -n "$(browser_pids)" ] && return 0
+  rm -f /tmp/memoh-display-browser/SingletonLock /tmp/memoh-display-browser/SingletonSocket /tmp/memoh-display-browser/SingletonCookie
+}
 stop_xvnc() {
   pids="$(xvnc_pids)"
   [ -n "$pids" ] || return 0
@@ -521,6 +545,18 @@ stop_xvnc() {
   done
   sleep 1
   pids="$(xvnc_pids)"
+  for pid in $pids; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
+stop_browsers() {
+  pids="$(browser_pids)"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+  pids="$(browser_pids)"
   for pid in $pids; do
     kill -9 "$pid" 2>/dev/null || true
   done
@@ -650,8 +686,12 @@ if ! ps -ef 2>/dev/null | grep -E 'xfce4-session|xfwm4|twm' | grep -v grep >/dev
 fi
 
 progress 94 browser "Launching browser"
-if ! ps -ef 2>/dev/null | grep -E 'google-chrome|chromium' | grep -v grep >/dev/null 2>&1; then
-  nohup "$BROWSER" --no-sandbox --disable-dev-shm-usage --disable-gpu --no-first-run --no-default-browser-check --user-data-dir=/tmp/memoh-display-browser about:blank >/tmp/memoh-browser.log 2>&1 &
+if ! browser_cdp_running; then
+  if [ -n "$(browser_pids)" ]; then
+    stop_browsers
+  fi
+  cleanup_browser_profile
+  nohup "$BROWSER" --no-sandbox --disable-dev-shm-usage --disable-gpu --no-first-run --no-default-browser-check --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --remote-allow-origins='*' --user-data-dir=/tmp/memoh-display-browser about:blank >/tmp/memoh-browser.log 2>&1 &
 fi
 
 complete

@@ -327,13 +327,16 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	if network != "tcp" {
 		return nil, fmt.Errorf("unsupported tunnel network %q", network)
 	}
-	streamCtx, cancel := context.WithCancel(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	streamCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	stream, err := c.svc.Tunnel(streamCtx)
 	if err != nil {
 		cancel()
 		return nil, mapError(err)
 	}
-	if err := stream.Send(&pb.TunnelFrame{
+	if err := sendTunnelFrame(ctx, stream, &pb.TunnelFrame{
 		Frame: &pb.TunnelFrame_Open{Open: &pb.TunnelOpen{Address: address}},
 	}); err != nil {
 		cancel()
@@ -345,11 +348,24 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 		local:  tunnelAddr("memoh-bridge"),
 		remote: tunnelAddr(address),
 	}
-	if err := conn.waitOpen(); err != nil {
+	if err := conn.waitOpen(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	return conn, nil
+}
+
+func sendTunnelFrame(ctx context.Context, stream pb.ContainerService_TunnelClient, frame *pb.TunnelFrame) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- stream.Send(frame)
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type tunnelConn struct {
@@ -370,24 +386,37 @@ type tunnelAddr string
 func (tunnelAddr) Network() string  { return "bridge-tunnel" }
 func (a tunnelAddr) String() string { return string(a) }
 
-func (c *tunnelConn) waitOpen() error {
-	frame, err := c.stream.Recv()
-	if err != nil {
-		return mapError(err)
+func (c *tunnelConn) waitOpen(ctx context.Context) error {
+	type recvResult struct {
+		frame *pb.TunnelFrame
+		err   error
 	}
-	switch payload := frame.GetFrame().(type) {
-	case *pb.TunnelFrame_Data:
-		if data := payload.Data.GetData(); len(data) > 0 {
-			c.buf = data
+	resultCh := make(chan recvResult, 1)
+	go func() {
+		frame, err := c.stream.Recv()
+		resultCh <- recvResult{frame: frame, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			return mapError(result.err)
 		}
-		return nil
-	case *pb.TunnelFrame_Close:
-		if msg := payload.Close.GetError(); msg != "" {
-			return errors.New(msg)
+		switch payload := result.frame.GetFrame().(type) {
+		case *pb.TunnelFrame_Data:
+			if data := payload.Data.GetData(); len(data) > 0 {
+				c.buf = data
+			}
+			return nil
+		case *pb.TunnelFrame_Close:
+			if msg := payload.Close.GetError(); msg != "" {
+				return errors.New(msg)
+			}
+			return io.EOF
+		default:
+			return errors.New("unexpected tunnel open response")
 		}
-		return io.EOF
-	default:
-		return errors.New("unexpected tunnel open response")
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

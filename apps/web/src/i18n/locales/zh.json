@@ -348,6 +348,24 @@
         "stageInstall": "安装",
         "stageBrowser": "浏览器",
         "stageDesktop": "桌面"
+      },
+      "stats": {
+        "show": "统计信息",
+        "hide": "隐藏统计",
+        "title": "统计信息",
+        "session": "会话",
+        "resolution": "分辨率",
+        "viewport": "视口",
+        "codec": "编码",
+        "connection": "连接",
+        "ice": "ICE",
+        "fps": "帧率",
+        "bitrate": "码率",
+        "decoded": "已解码",
+        "dropped": "丢帧",
+        "packetsLost": "丢包",
+        "jitter": "抖动",
+        "rtt": "RTT"
       }
     }
   },

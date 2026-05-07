@@ -63,4 +63,13 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '(^|/)Xvnc$'") || !strings.Contains(displayPrepareMainCommand, "grep -Fxq ':99'") {
 		t.Fatal("Xvnc process detection must match real Xvnc processes on display :99")
 	}
+	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$'") {
+		t.Fatal("browser process detection must match real browser argv entries only")
+	}
+	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '^--type=' && continue") {
+		t.Fatal("CDP readiness detection must ignore Chromium child processes")
+	}
+	if !strings.Contains(displayPrepareMainCommand, "SingletonLock") {
+		t.Fatal("display prepare must clean stale Chromium profile locks before starting the browser")
+	}
 }

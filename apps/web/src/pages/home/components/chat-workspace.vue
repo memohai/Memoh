@@ -5,14 +5,18 @@
     <div class="flex-1 min-h-0 relative">
       <template v-if="activeTab">
         <ChatPane
-          v-if="activeTab.type === 'chat' || activeTab.type === 'draft'"
-          key="chat-pane"
+          v-for="tab in chatTabs"
+          v-show="activeTab.id === tab.id"
+          :key="`chat-pane:${currentBotId}:${tab.id}`"
+          :tab-id="tab.id"
+          :active="activeTab.id === tab.id"
         />
         <FilePane
-          v-else-if="activeTab.type === 'file'"
-          :key="`file-pane:${activeTab.id}`"
-          :tab-id="activeTab.id"
-          :file-path="activeTab.filePath"
+          v-for="tab in fileTabs"
+          v-show="activeTab.id === tab.id"
+          :key="`file-pane:${currentBotId}:${tab.id}`"
+          :tab-id="tab.id"
+          :file-path="tab.filePath"
         />
         <template v-if="currentBotId">
           <TerminalPane
@@ -84,6 +88,16 @@ const { currentBotId } = storeToRefs(chatStore)
 
 type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
 type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
+type ChatTab = Extract<WorkspaceTab, { type: 'chat' | 'draft' }>
+type FileTab = Extract<WorkspaceTab, { type: 'file' }>
+
+const chatTabs = computed<ChatTab[]>(() =>
+  tabs.value.filter((tab): tab is ChatTab => tab.type === 'chat' || tab.type === 'draft'),
+)
+
+const fileTabs = computed<FileTab[]>(() =>
+  tabs.value.filter((tab): tab is FileTab => tab.type === 'file'),
+)
 
 const terminalTabs = computed<TerminalTab[]>(() =>
   tabs.value.filter((tab): tab is TerminalTab => tab.type === 'terminal'),

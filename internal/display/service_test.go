@@ -1,7 +1,11 @@
 package display
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net"
 	"os"
 	"path/filepath"
@@ -73,8 +77,11 @@ func TestReadRTCSettingsUsesInferredNATIPs(t *testing.T) {
 
 func TestGStreamerArgsH264UsesX264AndH264Pay(t *testing.T) {
 	args := gstreamerArgs(CodecH264, 5901, 5004)
-	if !containsString(args, "incremental=false") {
-		t.Fatal("rfbsrc must request a full initial frame")
+	if !containsString(args, "incremental=true") {
+		t.Fatal("live rfbsrc must request incremental updates")
+	}
+	if !containsString(args, "use-copyrect=true") {
+		t.Fatal("live rfbsrc must allow copyrect updates")
 	}
 	if !containsString(args, "do-timestamp=true") {
 		t.Fatal("rfbsrc buffers must be timestamped for RTP encoding")
@@ -94,6 +101,59 @@ func TestGStreamerArgsVP8FallbackUsesVP8Pay(t *testing.T) {
 	}
 	if !containsString(args, "rtpvp8pay") {
 		t.Fatal("VP8 pipeline must use rtpvp8pay")
+	}
+}
+
+func TestGStreamerScreenshotArgsCapturesComputerUseJPEG(t *testing.T) {
+	args := gstreamerScreenshotArgs(5901, "/tmp/display.jpg")
+	if !containsString(args, "num-buffers=1") {
+		t.Fatal("screenshot pipeline must stop after one frame")
+	}
+	if !containsString(args, "videoscale") {
+		t.Fatal("screenshot pipeline must scale in GStreamer")
+	}
+	if !containsString(args, "video/x-raw,width=1280,pixel-aspect-ratio=1/1") {
+		t.Fatal("screenshot pipeline must capture a computer-use friendly desktop width without distorting aspect ratio")
+	}
+	if !containsString(args, "jpegenc") || !containsString(args, "quality=82") {
+		t.Fatal("screenshot pipeline must encode bounded-size JPEG directly")
+	}
+	if !containsString(args, "location=/tmp/display.jpg") {
+		t.Fatal("screenshot pipeline must write to requested path")
+	}
+	if !containsString(args, "incremental=false") {
+		t.Fatal("screenshot pipeline must request a full frame")
+	}
+}
+
+func TestLimitJPEGSizeRecompressesOversizedImage(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1280, 800))
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			img.Set(x, y, color.RGBA{
+				R: uint8((x * 17) % 256),
+				G: uint8((y * 31) % 256),
+				B: uint8((x*y + y) % 256),
+				A: 255,
+			})
+		}
+	}
+
+	var original bytes.Buffer
+	if err := jpeg.Encode(&original, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatalf("encode original jpeg: %v", err)
+	}
+
+	const maxBytes = 32 * 1024
+	bounded, err := limitJPEGSize(original.Bytes(), maxBytes)
+	if err != nil {
+		t.Fatalf("limitJPEGSize returned error: %v", err)
+	}
+	if len(bounded) > maxBytes {
+		t.Fatalf("bounded image is too large: %d > %d", len(bounded), maxBytes)
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(bounded)); err != nil {
+		t.Fatalf("bounded image must remain decodable JPEG: %v", err)
 	}
 }
 

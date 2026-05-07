@@ -18,6 +18,8 @@ const (
 	displayEnabledEnv     = "MEMOH_DISPLAY_ENABLED"
 	displayRFBUnixPathEnv = "MEMOH_DISPLAY_RFB_UNIX_PATH"
 	displayBrowserURLEnv  = "MEMOH_DISPLAY_BROWSER_URL"
+	displayBrowserCDPPort = "9222"
+	displayBrowserProfile = "/tmp/memoh-display-browser"
 	toolkitXvncPath       = "/opt/memoh/toolkit/display/bin/Xvnc"
 	toolkitXkbcompPath    = "/opt/memoh/toolkit/display/bin/xkbcomp"
 	toolkitXsetrootPath   = "/opt/memoh/toolkit/display/bin/xsetroot"
@@ -311,7 +313,7 @@ func startDisplayTerminal(ctx context.Context) {
 }
 
 func startDisplayBrowser(ctx context.Context) {
-	if displayProcessRunning(ctx, "google-chrome", "chromium") {
+	if browserProcessRunning(true) {
 		return
 	}
 	browser := resolveDisplayCommand("google-chrome-stable", "google-chrome", "chromium", "chromium-browser")
@@ -319,6 +321,11 @@ func startDisplayBrowser(ctx context.Context) {
 		logger.FromContext(ctx).Warn("display browser unavailable")
 		return
 	}
+	if browserProcessRunning(false) {
+		stopBrowserProcesses(ctx)
+		_ = sleepWithContext(ctx, time.Second)
+	}
+	cleanupBrowserProfile(ctx)
 	url := strings.TrimSpace(os.Getenv(displayBrowserURLEnv))
 	if url == "" {
 		url = "about:blank"
@@ -329,7 +336,10 @@ func startDisplayBrowser(ctx context.Context) {
 		"--disable-gpu",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir=/tmp/memoh-display-browser",
+		"--remote-debugging-address=127.0.0.1",
+		"--remote-debugging-port="+displayBrowserCDPPort,
+		"--remote-allow-origins=*",
+		"--user-data-dir="+displayBrowserProfile,
 		url,
 	)
 }
@@ -350,6 +360,81 @@ func displayProcessRunning(ctx context.Context, patterns ...string) bool {
 
 func xvncProcessRunning() bool {
 	return len(xvncProcessIDs()) > 0
+}
+
+func browserProcessRunning(requireCDP bool) bool {
+	return len(browserProcessIDs(requireCDP)) > 0
+}
+
+func browserProcessIDs(requireCDP bool) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", name, "cmdline")) //nolint:gosec // /proc entries are kernel-provided.
+		if err != nil || len(cmdline) == 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		hasBrowser := false
+		hasCDP := false
+		hasProcessType := false
+		for _, arg := range parts {
+			if isBrowserArg(arg) {
+				hasBrowser = true
+			}
+			if arg == "--remote-debugging-port="+displayBrowserCDPPort {
+				hasCDP = true
+			}
+			if strings.HasPrefix(arg, "--type=") {
+				hasProcessType = true
+			}
+		}
+		if hasBrowser && (!requireCDP || (hasCDP && !hasProcessType)) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func isBrowserArg(arg string) bool {
+	switch filepath.Base(strings.TrimSpace(arg)) {
+	case "google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome":
+		return true
+	default:
+		return false
+	}
+}
+
+func stopBrowserProcesses(_ context.Context) {
+	for _, pid := range browserProcessIDs(false) {
+		process, err := os.FindProcess(pid)
+		if err == nil {
+			_ = process.Kill()
+		}
+	}
+}
+
+func cleanupBrowserProfile(ctx context.Context) {
+	if browserProcessRunning(false) {
+		return
+	}
+	for _, name := range []string{"SingletonLock", "SingletonSocket", "SingletonCookie"} {
+		path := filepath.Join(displayBrowserProfile, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			logger.FromContext(ctx).Warn("failed to remove stale browser profile lock", slog.String("path", path), slog.Any("error", err))
+		}
+	}
 }
 
 func xvncProcessIDs() []int {
