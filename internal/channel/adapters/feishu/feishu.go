@@ -15,9 +15,9 @@ import (
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
-	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/channel/adapters/feishu/wsclient"
 	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/media"
 )
@@ -377,119 +377,36 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 		a.logger.Info("bot identity", slog.String("config_id", cfg.ID), slog.String("bot_open_id", botOpenID))
 	}
 	connCtx, cancel := context.WithCancel(ctx)
-	newClient := func() *larkws.Client {
-		eventDispatcher := dispatcher.NewEventDispatcher(
-			feishuCfg.VerificationToken,
-			feishuCfg.EncryptKey,
-		)
-		eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
-			if connCtx.Err() != nil {
-				return nil
-			}
-			msg := extractFeishuInbound(event, botOpenID, a.logger)
-			text := msg.Message.PlainText()
-			rawMessageID := ""
-			rawMessageType := ""
-			rawContent := ""
-			if event != nil && event.Event != nil && event.Event.Message != nil {
-				if event.Event.Message.MessageId != nil {
-					rawMessageID = strings.TrimSpace(*event.Event.Message.MessageId)
-				}
-				if event.Event.Message.MessageType != nil {
-					rawMessageType = strings.TrimSpace(*event.Event.Message.MessageType)
-				}
-				if event.Event.Message.Content != nil {
-					rawContent = common.SummarizeText(*event.Event.Message.Content)
-				}
-			}
-			if a.logger != nil {
-				a.logger.Debug("feishu inbound extracted",
-					slog.String("config_id", cfg.ID),
-					slog.String("message_id", rawMessageID),
-					slog.String("message_type", rawMessageType),
-					slog.String("text", common.SummarizeText(text)),
-					slog.Int("attachments", len(msg.Message.Attachments)),
-					slog.String("raw_content_prefix", rawContent),
-				)
-			}
-			if text == "" && len(msg.Message.Attachments) == 0 {
-				if a.logger != nil {
-					a.logger.Info(
-						"inbound ignored empty payload",
-						slog.String("config_id", cfg.ID),
-						slog.String("message_id", rawMessageID),
-						slog.String("message_type", rawMessageType),
-						slog.String("chat_type", msg.Conversation.Type),
-					)
-				}
-				return nil
-			}
-			a.enrichSenderProfile(connCtx, cfg, event, &msg)
-			a.enrichQuotedMessage(connCtx, cfg, &msg, botOpenID)
-			msg.BotID = cfg.BotID
-			if a.logger != nil {
-				isMentioned := false
-				if msg.Metadata != nil {
-					if v, ok := msg.Metadata["is_mentioned"].(bool); ok {
-						isMentioned = v
-					}
-				}
-				a.logger.Info(
-					"inbound received",
-					slog.String("config_id", cfg.ID),
-					slog.String("message_id", rawMessageID),
-					slog.String("message_type", rawMessageType),
-					slog.String("route_key", msg.RoutingKey()),
-					slog.String("chat_type", msg.Conversation.Type),
-					slog.Bool("is_mentioned", isMentioned),
-					slog.String("text", common.SummarizeText(text)),
-				)
-			}
-			go func() {
-				if err := handler(connCtx, cfg, msg); err != nil && a.logger != nil {
-					a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-				}
-			}()
-			return nil
-		})
-		eventDispatcher.OnP2MessageReadV1(func(_ context.Context, _ *larkim.P2MessageReadV1) error {
-			return nil
-		})
-		// Ignore reaction lifecycle events explicitly to avoid SDK "not found handler" noise logs.
-		// These events are expected because the adapter uses reactions for processing status.
-		eventDispatcher.OnP2MessageReactionCreatedV1(func(_ context.Context, _ *larkim.P2MessageReactionCreatedV1) error {
-			return nil
-		})
-		eventDispatcher.OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error {
-			return nil
-		})
-		feishuCfg.registerIMErrorSecrets()
-		return larkws.NewClient(
-			feishuCfg.AppID,
-			feishuCfg.AppSecret,
-			larkws.WithEventHandler(eventDispatcher),
-			larkws.WithDomain(feishuCfg.openBaseURL()),
-			larkws.WithLogger(newLarkSlogLogger(a.logger)),
-			larkws.WithLogLevel(larkcore.LogLevelDebug),
-		)
-	}
+	feishuCfg.registerIMErrorSecrets()
+	eventDispatcher := a.buildEventDispatcher(connCtx, cfg, feishuCfg, botOpenID, handler)
 
+	// done closes after the reconnect goroutine returns, which only
+	// happens once the in-flight wsclient.Run has torn down its
+	// websocket. Stop blocks on it so a follow-up Connect can't race a
+	// stale conn.
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		const reconnectDelay = 3 * time.Second
 		for {
 			if connCtx.Err() != nil {
 				return
 			}
-			client := newClient()
-			err := client.Start(connCtx)
+			client := wsclient.New(wsclient.Config{
+				AppID:     feishuCfg.AppID,
+				AppSecret: feishuCfg.AppSecret,
+				Domain:    feishuCfg.openBaseURL(),
+				Logger:    a.logger,
+			})
+			err := client.Run(connCtx, eventDispatcher)
 			if connCtx.Err() != nil {
 				return
 			}
 			if a.logger != nil {
 				if err != nil {
-					a.logger.Error("client start failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+					a.logger.Error("websocket client exited", slog.String("config_id", cfg.ID), slog.Any("error", err))
 				} else {
-					a.logger.Warn("client exited without error; reconnecting", slog.String("config_id", cfg.ID))
+					a.logger.Warn("websocket client exited without error; reconnecting", slog.String("config_id", cfg.ID))
 				}
 			}
 			timer := time.NewTimer(reconnectDelay)
@@ -502,11 +419,123 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 		}
 	}()
 
-	stop := func(context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		cancel()
-		return nil
+		select {
+		case <-done:
+			return nil
+		case <-stopCtx.Done():
+			// Returning the error makes Manager.ensureConnection refuse
+			// to start a replacement while the old goroutine may still
+			// hold a websocket.
+			if a.logger != nil {
+				a.logger.Warn("stop timed out waiting for goroutine to exit",
+					slog.String("config_id", cfg.ID),
+					slog.Any("error", stopCtx.Err()),
+				)
+			}
+			return stopCtx.Err()
+		}
 	}
 	return channel.NewConnection(cfg, stop), nil
+}
+
+// buildEventDispatcher returns the lark SDK dispatcher that decodes
+// inbound websocket frames. We build one per Connect so handlers can
+// capture connCtx and bail when the connection is torn down.
+func (a *FeishuAdapter) buildEventDispatcher(
+	connCtx context.Context,
+	cfg channel.ChannelConfig,
+	feishuCfg Config,
+	botOpenID string,
+	handler channel.InboundHandler,
+) *dispatcher.EventDispatcher {
+	eventDispatcher := dispatcher.NewEventDispatcher(
+		feishuCfg.VerificationToken,
+		feishuCfg.EncryptKey,
+	)
+	eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
+		if connCtx.Err() != nil {
+			return nil
+		}
+		msg := extractFeishuInbound(event, botOpenID, a.logger)
+		text := msg.Message.PlainText()
+		rawMessageID := ""
+		rawMessageType := ""
+		rawContent := ""
+		if event != nil && event.Event != nil && event.Event.Message != nil {
+			if event.Event.Message.MessageId != nil {
+				rawMessageID = strings.TrimSpace(*event.Event.Message.MessageId)
+			}
+			if event.Event.Message.MessageType != nil {
+				rawMessageType = strings.TrimSpace(*event.Event.Message.MessageType)
+			}
+			if event.Event.Message.Content != nil {
+				rawContent = common.SummarizeText(*event.Event.Message.Content)
+			}
+		}
+		if a.logger != nil {
+			a.logger.Debug("feishu inbound extracted",
+				slog.String("config_id", cfg.ID),
+				slog.String("message_id", rawMessageID),
+				slog.String("message_type", rawMessageType),
+				slog.String("text", common.SummarizeText(text)),
+				slog.Int("attachments", len(msg.Message.Attachments)),
+				slog.String("raw_content_prefix", rawContent),
+			)
+		}
+		if text == "" && len(msg.Message.Attachments) == 0 {
+			if a.logger != nil {
+				a.logger.Info(
+					"inbound ignored empty payload",
+					slog.String("config_id", cfg.ID),
+					slog.String("message_id", rawMessageID),
+					slog.String("message_type", rawMessageType),
+					slog.String("chat_type", msg.Conversation.Type),
+				)
+			}
+			return nil
+		}
+		a.enrichSenderProfile(connCtx, cfg, event, &msg)
+		a.enrichQuotedMessage(connCtx, cfg, &msg, botOpenID)
+		msg.BotID = cfg.BotID
+		if a.logger != nil {
+			isMentioned := false
+			if msg.Metadata != nil {
+				if v, ok := msg.Metadata["is_mentioned"].(bool); ok {
+					isMentioned = v
+				}
+			}
+			a.logger.Info(
+				"inbound received",
+				slog.String("config_id", cfg.ID),
+				slog.String("message_id", rawMessageID),
+				slog.String("message_type", rawMessageType),
+				slog.String("route_key", msg.RoutingKey()),
+				slog.String("chat_type", msg.Conversation.Type),
+				slog.Bool("is_mentioned", isMentioned),
+				slog.String("text", common.SummarizeText(text)),
+			)
+		}
+		go func() {
+			if err := handler(connCtx, cfg, msg); err != nil && a.logger != nil {
+				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			}
+		}()
+		return nil
+	})
+	eventDispatcher.OnP2MessageReadV1(func(_ context.Context, _ *larkim.P2MessageReadV1) error {
+		return nil
+	})
+	// Ignore reaction lifecycle events explicitly to avoid SDK "not found handler" noise logs.
+	// These events are expected because the adapter uses reactions for processing status.
+	eventDispatcher.OnP2MessageReactionCreatedV1(func(_ context.Context, _ *larkim.P2MessageReactionCreatedV1) error {
+		return nil
+	})
+	eventDispatcher.OnP2MessageReactionDeletedV1(func(_ context.Context, _ *larkim.P2MessageReactionDeletedV1) error {
+		return nil
+	})
+	return eventDispatcher
 }
 
 // Send delivers an outbound message to Feishu, handling attachments, rich text, and replies.
