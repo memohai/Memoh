@@ -384,21 +384,21 @@ func (q *Queries) CreateBot(ctx context.Context, arg pgsqlc.CreateBotParams) (pg
 	return result, nil
 }
 
-func (q *Queries) CreateBotACLRule(ctx context.Context, arg pgsqlc.CreateBotACLRuleParams) (pgsqlc.BotAclRule, error) {
+func (q *Queries) CreateBotACLRule(ctx context.Context, arg pgsqlc.CreateBotACLRuleParams) (pgsqlc.CreateBotACLRuleRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.BotAclRule{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.CreateBotACLRuleRow{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateBotACLRuleParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.BotAclRule{}, err
+		return pgsqlc.CreateBotACLRuleRow{}, err
 	}
 	out, err := q.store.queries.CreateBotACLRule(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.BotAclRule{}, mapQueryErr(err)
+		return pgsqlc.CreateBotACLRuleRow{}, mapQueryErr(err)
 	}
-	var result pgsqlc.BotAclRule
+	var result pgsqlc.CreateBotACLRuleRow
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BotAclRule{}, err
+		return pgsqlc.CreateBotACLRuleRow{}, err
 	}
 	return result, nil
 }
@@ -4101,21 +4101,21 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg pgsqlc.UpdateAcc
 	return result, nil
 }
 
-func (q *Queries) UpdateBotACLRule(ctx context.Context, arg pgsqlc.UpdateBotACLRuleParams) (pgsqlc.BotAclRule, error) {
+func (q *Queries) UpdateBotACLRule(ctx context.Context, arg pgsqlc.UpdateBotACLRuleParams) (pgsqlc.UpdateBotACLRuleRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.BotAclRule{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.UpdateBotACLRuleRow{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpdateBotACLRuleParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.BotAclRule{}, err
+		return pgsqlc.UpdateBotACLRuleRow{}, err
 	}
 	out, err := q.store.queries.UpdateBotACLRule(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.BotAclRule{}, mapQueryErr(err)
+		return pgsqlc.UpdateBotACLRuleRow{}, mapQueryErr(err)
 	}
-	var result pgsqlc.BotAclRule
+	var result pgsqlc.UpdateBotACLRuleRow
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.BotAclRule{}, err
+		return pgsqlc.UpdateBotACLRuleRow{}, err
 	}
 	return result, nil
 }

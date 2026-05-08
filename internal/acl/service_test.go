@@ -230,14 +230,13 @@ func TestValidateTarget(t *testing.T) {
 			}
 			return &fakeRow{scanFunc: func(dest ...any) error {
 				*dest[0].(*pgtype.UUID) = identityUUID
-				*dest[1].(*pgtype.UUID) = pgtype.UUID{}
-				*dest[2].(*string) = "telegram"
-				*dest[3].(*string) = "alice"
-				*dest[4].(*pgtype.Text) = pgtype.Text{String: "Alice", Valid: true}
-				*dest[5].(*pgtype.Text) = pgtype.Text{}
-				*dest[6].(*[]byte) = []byte("{}")
+				*dest[1].(*string) = "telegram"
+				*dest[2].(*string) = "alice"
+				*dest[3].(*pgtype.Text) = pgtype.Text{String: "Alice", Valid: true}
+				*dest[4].(*pgtype.Text) = pgtype.Text{}
+				*dest[5].(*[]byte) = []byte("{}")
+				*dest[6].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 				*dest[7].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-				*dest[8].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 				return nil
 			}}
 		},
