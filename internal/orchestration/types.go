@@ -1,6 +1,9 @@
 package orchestration
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const (
 	LifecycleStatusCreated      = "created"
@@ -159,6 +162,119 @@ type PlannedTaskSpec struct {
 	EnvPreconditions   EnvPreconditions `json:"env_preconditions"`
 	BlackboardScope    string           `json:"blackboard_scope,omitempty"`
 }
+
+// EnvManager is the slice of orchestrationenv.Manager the kernel needs at
+// dispatch and attempt completion time. The interface stays primitive-typed
+// so unit tests can substitute a fake without pulling in the full env
+// package, and the wiring layer in cmd/agent adapts a real
+// *orchestrationenv.Manager to it.
+type EnvManager interface {
+	GetEnvResourceByName(ctx context.Context, tenantID, name string) (EnvResourceRef, error)
+	AcquireEnvSession(ctx context.Context, req EnvAcquireRequest) (EnvSessionLease, error)
+	CreateEnvBinding(ctx context.Context, req EnvCreateBindingRequest) (EnvBindingHandle, error)
+	ReleaseEnvBinding(ctx context.Context, req EnvReleaseBindingRequest) error
+	HoldEnvBinding(ctx context.Context, req EnvHoldBindingRequest) error
+	ReleaseEnvSession(ctx context.Context, req EnvReleaseSessionRequest) error
+}
+
+// EnvResourceRef is the read-only projection the kernel needs to validate a
+// planner-supplied resource_name. Capacity / Status decisions stay inside the
+// env manager; the kernel only checks that kind matches what the planner
+// declared so we fail fast on a misconfigured plan.
+type EnvResourceRef struct {
+	ID       string
+	TenantID string
+	Kind     string
+	Name     string
+	Status   string
+	Capacity int
+}
+
+// EnvAcquireRequest mirrors orchestrationenv.AcquireSessionRequest with the
+// fields the kernel populates at dispatch time. LeaseTTL is supplied by the
+// kernel from a configurable default rather than the planner so a runaway
+// plan cannot pin a session indefinitely.
+type EnvAcquireRequest struct {
+	TenantID        string
+	ResourceID      string
+	LeaseHolderKind string
+	LeaseHolderID   string
+	LeaseTTL        time.Duration
+	RunID           string
+	TaskID          string
+	AttemptID       string
+	Metadata        map[string]any
+}
+
+// EnvSessionLease is what the kernel captures into the input manifest. It
+// carries enough state for the worker (and a verifier replay) to drive the
+// runtime without re-resolving the resource and for ReleaseEnvBinding /
+// ReleaseEnvSession to fence stale callers.
+type EnvSessionLease struct {
+	SessionID      string
+	ResourceID     string
+	ResourceKind   string
+	ResourceName   string
+	LeaseToken     string
+	LeaseEpoch     int64
+	LeaseExpiresAt *time.Time
+	RuntimeHandle  map[string]any
+}
+
+// EnvCreateBindingRequest pairs a session with the dispatching task / attempt.
+// Lease fencing fields are echoed back so the binding write rejects stale
+// callers exactly the way orchestrationenv.Manager.CreateBinding requires.
+type EnvCreateBindingRequest struct {
+	SessionID  string
+	LeaseToken string
+	LeaseEpoch int64
+	RunID      string
+	TaskID     string
+	AttemptID  string
+	Purpose    string
+	Metadata   map[string]any
+}
+
+type EnvBindingHandle struct {
+	BindingID string
+}
+
+type EnvReleaseBindingRequest struct {
+	BindingID  string
+	LeaseToken string
+	LeaseEpoch int64
+	Reason     string
+}
+
+type EnvHoldBindingRequest struct {
+	BindingID           string
+	LeaseToken          string
+	LeaseEpoch          int64
+	HeldForCheckpointID string
+	Metadata            map[string]any
+}
+
+type EnvReleaseSessionRequest struct {
+	SessionID  string
+	LeaseToken string
+	LeaseEpoch int64
+	Reason     string
+}
+
+// EnvLeaseHolder* mirror orchestrationenv.LeaseHolder* but stay in the
+// kernel-facing surface so dispatch / release callers do not have to
+// import the env package for a string constant.
+const (
+	EnvLeaseHolderWorker       = "worker"
+	EnvLeaseHolderVerifier     = "verifier"
+	EnvLeaseHolderOrchestrator = "orchestrator"
+	EnvLeaseHolderHuman        = "human"
+)
+
+// EnvBindingPurposePrimary is the only purpose the dispatch hook records
+// today. Stage 3-G adds resume_held_env which may attach a secondary
+// binding when a held session is re-attached to a fresh attempt.
+const EnvBindingPurposePrimary = "primary"
 
 // EnvPreconditions is the planner-emitted contract that tells the kernel
 // whether a task depends on a leasable runtime environment (a container or a

@@ -580,6 +580,11 @@ SELECT *
 FROM orchestration_input_manifests
 WHERE id = sqlc.arg(id);
 
+-- name: UpdateOrchestrationInputManifestEnvCapture :exec
+UPDATE orchestration_input_manifests
+SET captured_env_preconditions = sqlc.arg(captured_env_preconditions)
+WHERE id = sqlc.arg(id);
+
 -- name: CreateOrchestrationTaskAttempt :one
 INSERT INTO orchestration_task_attempts (
   id,

@@ -6857,6 +6857,22 @@ func (q *Queries) UpdateOrchestrationEnvSessionStatus(ctx context.Context, arg U
 	return i, err
 }
 
+const updateOrchestrationInputManifestEnvCapture = `-- name: UpdateOrchestrationInputManifestEnvCapture :exec
+UPDATE orchestration_input_manifests
+SET captured_env_preconditions = $1
+WHERE id = $2
+`
+
+type UpdateOrchestrationInputManifestEnvCaptureParams struct {
+	CapturedEnvPreconditions []byte      `json:"captured_env_preconditions"`
+	ID                       pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateOrchestrationInputManifestEnvCapture(ctx context.Context, arg UpdateOrchestrationInputManifestEnvCaptureParams) error {
+	_, err := q.db.Exec(ctx, updateOrchestrationInputManifestEnvCapture, arg.CapturedEnvPreconditions, arg.ID)
+	return err
+}
+
 const updateOrchestrationRunInput = `-- name: UpdateOrchestrationRunInput :one
 UPDATE orchestration_runs
 SET input = $1,

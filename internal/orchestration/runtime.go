@@ -1348,16 +1348,30 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 			continue
 		}
 		capturedBlackboardRevisions := s.captureBlackboardRevisions(ctx, qtx, taskRow.RunID, taskRow.ID)
+		envPreconditions := decodeEnvPreconditions(taskRow.EnvPreconditions)
+		envCapture, err := s.acquireEnvForDispatch(ctx, runRow, taskRow, envPreconditions)
+		if err != nil {
+			return false, err
+		}
+		releaseEnvOnAbort := func(reason string) {
+			if envCapture == nil {
+				return
+			}
+			s.releaseEnvAfterFailedDispatch(ctx, envCapture, reason)
+		}
 		manifestHash, err := hashJSON(map[string]any{
 			"task_id":                       taskRow.ID.String(),
 			"inputs":                        decodeJSONObject(taskRow.Inputs),
 			"captured_blackboard_revisions": capturedBlackboardRevisions,
+			"captured_env_preconditions":    envCaptureForHash(envCapture, envPreconditions),
 		})
 		if err != nil {
+			releaseEnvOnAbort("manifest_hash_failed")
 			return false, fmt.Errorf("hash input manifest: %w", err)
 		}
 		_, manifestUUID, err := newPGUUID()
 		if err != nil {
+			releaseEnvOnAbort("manifest_uuid_failed")
 			return false, err
 		}
 		manifestRow, err := qtx.CreateOrchestrationInputManifest(ctx, sqlc.CreateOrchestrationInputManifestParams{
@@ -1367,10 +1381,11 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 			CapturedTaskInputs:          taskRow.Inputs,
 			CapturedArtifactVersions:    marshalJSON([]map[string]any{}),
 			CapturedBlackboardRevisions: marshalJSON(capturedBlackboardRevisions),
-			CapturedEnvPreconditions:    defaultEnvPreconditionsJSON(),
+			CapturedEnvPreconditions:    marshalCapturedEnvPreconditions(envCapture, envPreconditions),
 			ProjectionHash:              manifestHash,
 		})
 		if err != nil {
+			releaseEnvOnAbort("manifest_write_failed")
 			return false, fmt.Errorf("create input manifest: %w", err)
 		}
 		attemptNo, err := qtx.GetNextOrchestrationTaskAttemptNo(ctx, taskRow.ID)
@@ -1391,7 +1406,14 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 			ParkCheckpointID: pgtype.UUID{},
 		})
 		if err != nil {
+			releaseEnvOnAbort("attempt_write_failed")
 			return false, fmt.Errorf("create task attempt: %w", err)
+		}
+		if envCapture != nil {
+			if err := s.bindEnvAndPersistCapture(ctx, qtx, runRow.TenantID, manifestRow.ID, createdAttempt, envCapture); err != nil {
+				releaseEnvOnAbort("binding_create_failed")
+				return false, err
+			}
 		}
 		if _, err := s.appendEvent(ctx, qtx, taskRow.RunID, eventSpec{
 			TaskID:           createdAttempt.TaskID,
@@ -1409,10 +1431,12 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 				"input_manifest_id": manifestRow.ID.String(),
 			},
 		}); err != nil {
+			releaseEnvOnAbort("attempt_event_failed")
 			return false, err
 		}
 		dispatchingTask, err := qtx.MarkOrchestrationTaskDispatching(ctx, taskRow.ID)
 		if err != nil {
+			releaseEnvOnAbort("task_status_failed")
 			return false, fmt.Errorf("mark task dispatching: %w", err)
 		}
 		if _, err := s.appendEvent(ctx, qtx, taskRow.RunID, eventSpec{
@@ -1429,6 +1453,7 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 				"attempt_id":      createdAttempt.ID.String(),
 			},
 		}); err != nil {
+			releaseEnvOnAbort("dispatching_event_failed")
 			return false, err
 		}
 		selectedTask = dispatchingTask
@@ -1445,6 +1470,9 @@ func (s *Service) dispatchNextReadyTask(ctx context.Context, workerProfileSet ma
 		return false, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
+		// committing the dispatch failed — the env binding/session are now
+		// orphaned. Best-effort release; the reclaim sweep is the backstop.
+		s.releaseEnvForAttemptCommitFailure(ctx, createdAttempt)
 		return false, fmt.Errorf("commit scheduler tx: %w", err)
 	}
 	if err := s.attemptAssignments.PublishAttemptAssignment(ctx, toTaskAttempt(createdAttempt)); err != nil {
@@ -2050,6 +2078,7 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 			if err := tx.Commit(ctx); err != nil {
 				return nil, fmt.Errorf("commit attempt completion cancellation tx: %w", err)
 			}
+			s.releaseEnvForAttempt(ctx, lostAttempt.InputManifestID, "run_cancelled")
 			attempt := toTaskAttempt(lostAttempt)
 			return &attempt, nil
 		}
@@ -2241,6 +2270,7 @@ func (s *Service) CompleteAttempt(ctx context.Context, input AttemptCompletion) 
 		return nil, fmt.Errorf("commit complete attempt tx: %w", err)
 	}
 	s.publishTaskCompletionToBlackboard(ctx, finalAttempt, completionStatus, input)
+	s.releaseEnvForAttempt(ctx, finalAttempt.InputManifestID, "attempt_"+completionStatus)
 	attempt := toTaskAttempt(finalAttempt)
 	return &attempt, nil
 }

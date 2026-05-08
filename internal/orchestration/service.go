@@ -38,6 +38,8 @@ type Service struct {
 	eventBus           orchestrationbus.Bus
 	bbStore            orchestrationblackboard.Store
 	bbWriter           *orchestrationblackboard.Writer
+	envManager         EnvManager
+	envLeaseTTL        time.Duration
 }
 
 type StartRunPlanner interface {
@@ -83,6 +85,37 @@ func (s *Service) SetEventCommittedHook(fn func()) {
 // latency per event.
 func (s *Service) SetEventBus(bus orchestrationbus.Bus) {
 	s.eventBus = bus
+}
+
+// defaultEnvLeaseTTL is the lease window the kernel applies when the planner
+// does not request a custom one. Thirty minutes covers most LLM-driven
+// container / browser tasks while keeping the reclaim sweep useful when a
+// worker crashes mid-attempt.
+const defaultEnvLeaseTTL = 30 * time.Minute
+
+// SetEnvManager wires the Stage 3-E environment session runtime. When the
+// manager is non-nil the kernel reserves a session and creates a binding for
+// every dispatch whose task declares env_preconditions.required=true, captures
+// the resulting lease into the input manifest, and releases (or holds, for
+// HITL paths) the binding once the attempt completes. Tasks without env
+// requirements are unaffected. Passing nil is supported so test harnesses
+// that never run env-bound tasks do not have to spin up a manager.
+func (s *Service) SetEnvManager(manager EnvManager) {
+	s.envManager = manager
+	if s.envLeaseTTL == 0 {
+		s.envLeaseTTL = defaultEnvLeaseTTL
+	}
+}
+
+// SetEnvLeaseTTL overrides the dispatch-time lease TTL. Operators can use
+// this to align with their reclaim cadence; the constant default works for
+// the dev environment.
+func (s *Service) SetEnvLeaseTTL(ttl time.Duration) {
+	if ttl <= 0 {
+		s.envLeaseTTL = defaultEnvLeaseTTL
+		return
+	}
+	s.envLeaseTTL = ttl
 }
 
 // SetBlackboardStore wires the Stage 2 blackboard runtime view. When the
