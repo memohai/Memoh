@@ -39,11 +39,7 @@ func SQLiteDSN(cfg config.SQLiteConfig) string {
 	if dsn := strings.TrimSpace(cfg.DSN); dsn != "" {
 		return dsn
 	}
-	path := strings.TrimSpace(cfg.Path)
-	if path == "" {
-		path = config.DefaultSQLitePath
-	}
-	path = filepath.Clean(path)
+	path := filepath.Clean(cfg.PathOrDefault())
 	query := url.Values{}
 	if cfg.WAL {
 		query.Set("_journal_mode", "WAL")

@@ -596,10 +596,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 }
 
 func (m *Manager) dataRoot() string {
-	if m.cfg.DataRoot == "" {
-		return config.DefaultDataRoot
-	}
-	return m.cfg.DataRoot
+	return m.cfg.DataRootPath()
 }
 
 func (m *Manager) imageRef() string {

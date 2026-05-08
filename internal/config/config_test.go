@@ -155,10 +155,9 @@ func TestLoadAppLocalTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read app.local.toml: %v", err)
 	}
-	rendered := strings.ReplaceAll(string(raw), "__PROJECT_ROOT__", filepath.ToSlash(filepath.Join("..", "..")))
 	configPath := filepath.Join(t.TempDir(), "app.local.toml")
 	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
-	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
 		t.Fatalf("write rendered app.local.toml: %v", err)
 	}
 	cfg, err := Load(configPath)
@@ -173,6 +172,60 @@ func TestLoadAppLocalTemplate(t *testing.T) {
 	}
 	if cfg.Database.DriverOrDefault() != "sqlite" {
 		t.Fatalf("database driver = %q, want sqlite", cfg.Database.DriverOrDefault())
+	}
+	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
+		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
+	}
+	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
+		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
+	}
+	if !filepath.IsAbs(cfg.SQLite.Path) {
+		t.Fatalf("sqlite path = %q, want absolute path", cfg.SQLite.Path)
+	}
+	if !filepath.IsAbs(cfg.Registry.ProvidersPath()) {
+		t.Fatalf("providers path = %q, want absolute path", cfg.Registry.ProvidersPath())
+	}
+}
+
+func TestLoadResolvesRelativeLocalPaths(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	data := []byte(`
+[database]
+driver = "sqlite"
+
+[container]
+data_root = "data/local"
+runtime_dir = "data/runtime"
+
+[local]
+metadata_root = "data/local/containers"
+
+[sqlite]
+path = "data/local/memoh.db"
+
+[registry]
+providers_dir = "conf/providers"
+`)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	for name, path := range map[string]string{
+		"data_root":     cfg.Workspace.DataRoot,
+		"runtime_dir":   cfg.Workspace.RuntimeDir,
+		"metadata_root": cfg.Local.MetadataRoot,
+		"sqlite.path":   cfg.SQLite.Path,
+		"providers_dir": cfg.Registry.ProvidersPath(),
+	} {
+		if !filepath.IsAbs(path) {
+			t.Fatalf("%s = %q, want absolute path", name, path)
+		}
 	}
 }
 

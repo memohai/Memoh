@@ -157,7 +157,15 @@ RUNTIME_DIR="${MEMOH_LOCAL_RUNTIME_DIR:-data/runtime}"
 PROJECT_ROOT="$(pwd)"
 
 mkdir -p data/local "$RUNTIME_DIR"
-go build -o "$RUNTIME_DIR/bridge" ./cmd/bridge
+DOCKER_OS="$(docker info 2>/dev/null | awk -F': ' '$1 == "OSType" || $1 == " OSType" { print $2; exit }')"
+DOCKER_ARCH="$(docker info 2>/dev/null | awk -F': ' '$1 == "Architecture" || $1 == " Architecture" { print $2; exit }')"
+DOCKER_OS="${DOCKER_OS:-$(go env GOHOSTOS)}"
+DOCKER_ARCH="${DOCKER_ARCH:-$(go env GOHOSTARCH)}"
+case "$DOCKER_ARCH" in
+  x86_64) DOCKER_ARCH="amd64" ;;
+  aarch64) DOCKER_ARCH="arm64" ;;
+esac
+CGO_ENABLED=0 GOOS="$DOCKER_OS" GOARCH="$DOCKER_ARCH" go build -o "$RUNTIME_DIR/bridge" ./cmd/bridge
 sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" "$TEMPLATE_CONFIG" > "$GENERATED_CONFIG"
 
 if [ -d ".toolkit" ]; then
