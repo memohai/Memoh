@@ -223,15 +223,11 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	result := make([]acl.ChannelIdentityCandidate, 0, len(items))
 	for _, item := range items {
 		result = append(result, acl.ChannelIdentityCandidate{
-			ID:                item.ID,
-			Channel:           item.Channel,
-			ChannelSubjectID:  item.ChannelSubjectID,
-			DisplayName:       item.DisplayName,
-			AvatarURL:         item.AvatarURL,
-			LinkedUserID:      item.UserID,
-			LinkedUsername:    item.LinkedUsername,
-			LinkedDisplayName: item.LinkedDisplayName,
-			LinkedAvatarURL:   item.LinkedAvatarURL,
+			ID:               item.ID,
+			Channel:          item.Channel,
+			ChannelSubjectID: item.ChannelSubjectID,
+			DisplayName:      item.DisplayName,
+			AvatarURL:        item.AvatarURL,
 		})
 	}
 	return c.JSON(http.StatusOK, acl.ChannelIdentityCandidateListResponse{Items: result})

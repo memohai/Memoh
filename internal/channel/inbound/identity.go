@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 )
@@ -61,8 +60,6 @@ func IdentityStateFromContext(ctx context.Context) (IdentityState, bool) {
 type ChannelIdentityService interface {
 	ResolveByChannelIdentity(ctx context.Context, channel, channelSubjectID, displayName string, meta map[string]any) (identities.ChannelIdentity, error)
 	Canonicalize(ctx context.Context, channelIdentityID string) (string, error)
-	GetLinkedUserID(ctx context.Context, channelIdentityID string) (string, error)
-	LinkChannelIdentityToUser(ctx context.Context, channelIdentityID, userID string) error
 }
 
 // PolicyService resolves access policy for a bot.
@@ -70,21 +67,13 @@ type PolicyService interface {
 	BotOwnerUserID(ctx context.Context, botID string) (string, error)
 }
 
-// BindService handles channel identity bind code validation and consumption.
-type BindService interface {
-	Get(ctx context.Context, token string) (bind.Code, error)
-	Consume(ctx context.Context, code bind.Code, channelIdentityID string) error
-}
-
-// IdentityResolver implements identity resolution with bind code and bot scope checks.
+// IdentityResolver implements identity resolution with bot scope checks.
 type IdentityResolver struct {
 	registry          *channel.Registry
 	channelIdentities ChannelIdentityService
 	policy            PolicyService
-	bind              BindService
 	logger            *slog.Logger
 	unboundReply      string
-	bindReply         string
 }
 
 // NewIdentityResolver creates an IdentityResolver.
@@ -93,7 +82,6 @@ func NewIdentityResolver(
 	registry *channel.Registry,
 	channelIdentityService ChannelIdentityService,
 	policyService PolicyService,
-	bindService BindService,
 	unboundReply string,
 ) *IdentityResolver {
 	if log == nil {
@@ -106,10 +94,8 @@ func NewIdentityResolver(
 		registry:          registry,
 		channelIdentities: channelIdentityService,
 		policy:            policyService,
-		bind:              bindService,
 		logger:            log.With(slog.String("component", "channel_identity")),
 		unboundReply:      unboundReply,
-		bindReply:         "Binding successful! Your identity has been linked.",
 	}
 }
 
@@ -159,26 +145,14 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		return state, errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
-	channelIdentityID, linkedUserID, err := r.resolveIdentityWithLinkedUser(ctx, msg, subjectID, displayName, avatarURL)
+	channelIdentityID, err := r.resolveIdentity(ctx, msg, subjectID, displayName, avatarURL)
 	if err != nil {
 		return state, err
 	}
 	state.Identity.ChannelIdentityID = channelIdentityID
-	state.Identity.UserID = strings.TrimSpace(linkedUserID)
-	if strings.TrimSpace(state.Identity.UserID) == "" {
-		state.Identity.UserID = r.tryLinkConfiglessChannelIdentityToUser(ctx, msg, channelIdentityID)
-	}
+	state.Identity.UserID = r.configlessUserID(msg)
 	state.Identity.DisplayName = displayName
 	state.Identity.AvatarURL = avatarURL
-
-	// Bind code check runs before membership/guest checks so linking is always reachable.
-	if handled, decision, newUserID, err := r.tryHandleBindCode(ctx, msg, channelIdentityID, subjectID); handled {
-		if strings.TrimSpace(newUserID) != "" {
-			state.Identity.UserID = strings.TrimSpace(newUserID)
-		}
-		state.Decision = &decision
-		return state, err
-	}
 
 	// Owner bypass — owner messages always pass identity resolution.
 	if r.policy != nil && strings.TrimSpace(state.Identity.UserID) != "" {
@@ -195,10 +169,10 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 	return state, nil
 }
 
-func (r *IdentityResolver) resolveIdentityWithLinkedUser(ctx context.Context, msg channel.InboundMessage, primarySubjectID, displayName, avatarURL string) (string, string, error) {
+func (r *IdentityResolver) resolveIdentity(ctx context.Context, msg channel.InboundMessage, primarySubjectID, displayName, avatarURL string) (string, error) {
 	candidates := identitySubjectCandidates(msg, primarySubjectID)
 	if len(candidates) == 0 {
-		return "", "", errors.New("cannot resolve identity: no channel_subject_id")
+		return "", errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
 	var meta map[string]any
@@ -206,91 +180,18 @@ func (r *IdentityResolver) resolveIdentityWithLinkedUser(ctx context.Context, ms
 		meta = map[string]any{"avatar_url": strings.TrimSpace(avatarURL)}
 	}
 
-	firstChannelIdentityID := ""
 	for _, subjectID := range candidates {
 		channelIdentity, err := r.channelIdentities.ResolveByChannelIdentity(ctx, msg.Channel.String(), subjectID, displayName, meta)
 		if err != nil {
-			return "", "", fmt.Errorf("resolve channel identity: %w", err)
+			return "", fmt.Errorf("resolve channel identity: %w", err)
 		}
 		channelIdentityID := strings.TrimSpace(channelIdentity.ID)
 		if channelIdentityID == "" {
 			continue
 		}
-		if firstChannelIdentityID == "" {
-			firstChannelIdentityID = channelIdentityID
-		}
-		linkedUserID, err := r.channelIdentities.GetLinkedUserID(ctx, channelIdentityID)
-		if err != nil {
-			return "", "", err
-		}
-		linkedUserID = strings.TrimSpace(linkedUserID)
-		if linkedUserID != "" {
-			return channelIdentityID, linkedUserID, nil
-		}
+		return channelIdentityID, nil
 	}
-	return firstChannelIdentityID, "", nil
-}
-
-func (r *IdentityResolver) tryHandleBindCode(ctx context.Context, msg channel.InboundMessage, channelIdentityID, subjectID string) (bool, IdentityDecision, string, error) {
-	tokenText := strings.TrimSpace(msg.Message.PlainText())
-	if tokenText == "" || r.bind == nil {
-		return false, IdentityDecision{}, "", nil
-	}
-	code, err := r.bind.Get(ctx, tokenText)
-	if err != nil {
-		if errors.Is(err, bind.ErrCodeNotFound) {
-			return false, IdentityDecision{}, "", nil
-		}
-		return true, IdentityDecision{}, "", err
-	}
-	reply := func(text string) IdentityDecision {
-		return IdentityDecision{Stop: true, Reply: channel.Message{Text: text}}
-	}
-	if !code.UsedAt.IsZero() {
-		if code.UsedByChannelIdentityID == channelIdentityID {
-			return true, reply(r.bindReply), code.IssuedByUserID, nil
-		}
-		return true, reply("Bind code already used."), "", nil
-	}
-	if !code.ExpiresAt.IsZero() && time.Now().UTC().After(code.ExpiresAt) {
-		return true, reply("Bind code expired."), "", nil
-	}
-	if strings.TrimSpace(code.Platform) != "" && !strings.EqualFold(strings.TrimSpace(code.Platform), msg.Channel.String()) {
-		return true, reply("Bind code mismatch."), "", nil
-	}
-	if subjectID == "" {
-		return true, reply("Cannot identify current account."), "", nil
-	}
-
-	// Consume: mark used + link source channel identity to issuer user.
-	if err := r.bind.Consume(ctx, code, channelIdentityID); err != nil {
-		switch {
-		case errors.Is(err, bind.ErrCodeUsed):
-			return true, reply("Bind code already used."), "", nil
-		case errors.Is(err, bind.ErrCodeExpired):
-			return true, reply("Bind code expired."), "", nil
-		case errors.Is(err, bind.ErrCodeMismatch):
-			return true, reply("Bind code mismatch."), "", nil
-		case errors.Is(err, bind.ErrLinkConflict):
-			return true, reply("Current identity has already been linked to another account."), "", nil
-		default:
-			return true, IdentityDecision{}, "", fmt.Errorf("consume bind code: %w", err)
-		}
-	}
-
-	// Resolve linked user after binding.
-	newUserID := code.IssuedByUserID
-	if r.channelIdentities != nil {
-		linkedUserID, err := r.channelIdentities.GetLinkedUserID(ctx, channelIdentityID)
-		if err != nil {
-			return true, IdentityDecision{}, "", fmt.Errorf("resolve linked user after bind: %w", err)
-		}
-		if strings.TrimSpace(linkedUserID) != "" {
-			newUserID = linkedUserID
-		}
-	}
-
-	return true, reply(r.bindReply), newUserID, nil
+	return "", errors.New("cannot resolve identity: channel identity not found")
 }
 
 func extractSubjectIdentity(msg channel.InboundMessage) string {
@@ -348,6 +249,13 @@ func extractDisplayName(msg channel.InboundMessage) string {
 	return ""
 }
 
+func (r *IdentityResolver) configlessUserID(msg channel.InboundMessage) string {
+	if r.registry == nil || !r.registry.IsConfigless(msg.Channel) {
+		return ""
+	}
+	return strings.TrimSpace(msg.Sender.Attribute("user_id"))
+}
+
 // resolveProfile resolves display name and avatar URL for the sender.
 // Always queries directory for avatar; prefers message-level display name over directory name.
 func (r *IdentityResolver) resolveProfile(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage, subjectID string) (string, string) {
@@ -401,29 +309,4 @@ func extractThreadID(msg channel.InboundMessage) string {
 		return strings.TrimSpace(msg.Conversation.ThreadID)
 	}
 	return ""
-}
-
-func (r *IdentityResolver) tryLinkConfiglessChannelIdentityToUser(ctx context.Context, msg channel.InboundMessage, channelIdentityID string) string {
-	if r.registry == nil || !r.registry.IsConfigless(msg.Channel) {
-		return ""
-	}
-	if r.channelIdentities == nil {
-		return ""
-	}
-	candidateUserID := strings.TrimSpace(msg.Sender.Attribute("user_id"))
-	if candidateUserID == "" {
-		return ""
-	}
-	if err := r.channelIdentities.LinkChannelIdentityToUser(ctx, channelIdentityID, candidateUserID); err != nil {
-		if r.logger != nil {
-			r.logger.Warn("auto link configless channel identity failed",
-				slog.String("channel", msg.Channel.String()),
-				slog.String("channel_identity_id", channelIdentityID),
-				slog.String("user_id", candidateUserID),
-				slog.Any("error", err),
-			)
-		}
-		return ""
-	}
-	return candidateUserID
 }

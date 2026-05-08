@@ -19,13 +19,6 @@
    - **Enable Input Hint**：是否显示「正在输入」类提示（默认多开）。
 4. **Save and Enable**。
 
-## 3. 绑定身份（可选）
-
-跨渠道认出同一人时，可绑 Memoh 账号：
-
-1. **Profile** → **Bind Code** → 选 **QQ** → **Generate**。
-2. 在 QQ 里给机器人**私聊**发绑定码。
-
 ## 支持的能力
 
 - 文本、**Markdown**、**附件**。

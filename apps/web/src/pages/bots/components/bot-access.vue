@@ -385,7 +385,7 @@
                     {{ option.label }}
                   </div>
                   <div
-                    v-if="option.meta?.channelLabel || option.meta?.linkedUsername"
+                    v-if="option.meta?.channelLabel"
                     class="truncate text-xs text-muted-foreground"
                   >
                     {{ formatIdentityOptionSubtitle(option.meta) }}
@@ -907,7 +907,6 @@ const identityOptions = computed(() =>
         avatarUrl: i.avatar_url,
         channel: i.channel,
         channelLabel: formatPlatformName(i.channel),
-        linkedUsername: i.linked_username,
       },
     })),
 )
@@ -918,11 +917,8 @@ const filteredIdentityOptions = computed(() => {
   return identityOptions.value.filter(option => option.meta.channel === platform)
 })
 
-function formatIdentityOptionSubtitle(meta?: { channelLabel?: string; linkedUsername?: string }): string {
-  return [
-    meta?.channelLabel,
-    meta?.linkedUsername ? `@${meta.linkedUsername}` : '',
-  ].filter(Boolean).join(' · ')
+function formatIdentityOptionSubtitle(meta?: { channelLabel?: string }): string {
+  return meta?.channelLabel ?? ''
 }
 
 const observedConversationOptions = computed(() =>

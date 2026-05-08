@@ -63,69 +63,6 @@
         @update:confirm-password="passwordForm.confirmPassword = $event"
         @update-password="onUpdatePassword"
       />
-
-      <!-- Linked Channels -->
-      <section>
-        <h2 class="mb-2 flex items-center text-xs font-medium">
-          <Network
-            class="mr-2 size-3.5"
-          />
-          {{ $t('settings.linkedChannels') }}
-        </h2>
-        <Separator />
-        <div class="mt-4 space-y-3">
-          <p
-            v-if="loadingIdentities"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('common.loading') }}
-          </p>
-          <p
-            v-else-if="identities.length === 0"
-            class="text-xs text-muted-foreground"
-          >
-            {{ $t('settings.noLinkedChannels') }}
-          </p>
-          <template v-else>
-            <div
-              v-for="identity in identities"
-              :key="identity.id"
-              class="border rounded-md p-3 space-y-1"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <p class="text-xs font-medium truncate">
-                  {{ identity.display_name || identity.channel_subject_id }}
-                </p>
-                <Badge variant="secondary">
-                  {{ platformLabel(identity.channel) }}
-                </Badge>
-              </div>
-              <p class="text-xs text-muted-foreground truncate">
-                {{ identity.channel_subject_id }}
-              </p>
-              <p class="text-xs text-muted-foreground truncate">
-                {{ identity.id }}
-              </p>
-            </div>
-          </template>
-        </div>
-      </section>
-
-      <BindCodeSection
-        :any-platform-value="anyPlatformValue"
-        :platform="bindForm.platform"
-        :platform-options="platformOptions"
-        :ttl-seconds="bindForm.ttlSeconds"
-        :generating="generatingBindCode"
-        :loading="loadingInitial"
-        :bind-code="bindCode"
-        :platform-label="platformLabel"
-        :format-date="formatDate"
-        @update:platform="onPlatformChange"
-        @update:ttl-seconds="bindForm.ttlSeconds = $event"
-        @generate="onGenerateBindCode"
-        @copy="copyBindCode"
-      />
     </div>
   </section>
 </template>
@@ -135,7 +72,6 @@ import {
   Avatar,
   AvatarFallback,
   AvatarImage,
-  Badge,
   Button,
   Separator,
 } from '@memohai/ui'
@@ -143,47 +79,28 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { Network } from 'lucide-vue-next'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProfileSection from './components/profile-section.vue'
 import PasswordSection from './components/password-section.vue'
-import BindCodeSection from './components/bind-code-section.vue'
-import { getUsersMe, putUsersMe, putUsersMePassword, getUsersMeIdentities } from '@memohai/sdk'
-import { client } from '@memohai/sdk/client'
-import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest, IdentitiesChannelIdentity } from '@memohai/sdk'
+import { getUsersMe, putUsersMe, putUsersMePassword } from '@memohai/sdk'
+import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { formatDateTime } from '@/utils/date-time'
-import { useClipboard } from '@/composables/useClipboard'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { channelTypeDisplayName } from '@/utils/channel-type-label'
-
-interface IssueBindCodeResponse {
-  token: string
-  platform?: string
-  expires_at: string
-}
 
 type UserAccount = AccountsAccount
-
-const anyPlatformValue = '__all__'
 
 const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
-const { copyText } = useClipboard()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)
-const identities = ref<IdentitiesChannelIdentity[]>([])
-const bindCode = ref<IssueBindCodeResponse | null>(null)
 
 const loadingInitial = ref(false)
-const loadingIdentities = ref(false)
 const savingProfile = ref(false)
 const savingPassword = ref(false)
-const generatingBindCode = ref(false)
 
 const profileForm = reactive({
   display_name: '',
@@ -197,33 +114,12 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
-const bindForm = reactive({
-  platform: '',
-  ttlSeconds: 3600,
-})
-
 const displayUserID = computed(() => account.value?.id || userInfo.id || '')
 const displayUsername = computed(() => account.value?.username || userInfo.username || '')
 const displayTitle = computed(() => {
   return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || t('settings.user')
 })
 const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
-
-function platformLabel(platformKey: string): string {
-  if (!platformKey?.trim()) return platformKey ?? ''
-  return channelTypeDisplayName(t, platformKey, null) || platformKey
-}
-
-const platformOptions = computed(() => {
-  const options = new Set<string>(['telegram', 'feishu', 'discord', 'qq', 'matrix', 'slack'])
-  for (const identity of identities.value) {
-    const platform = identity.channel.trim()
-    if (platform) {
-      options.add(platform)
-    }
-  }
-  return Array.from(options)
-})
 
 onMounted(() => {
   void loadPageData()
@@ -232,7 +128,7 @@ onMounted(() => {
 async function loadPageData() {
   loadingInitial.value = true
   try {
-    await Promise.all([loadMyAccount(), loadMyIdentities()])
+    await loadMyAccount()
   } catch {
     toast.error(t('settings.loadUserFailed'))
   } finally {
@@ -254,16 +150,6 @@ async function loadMyAccount() {
     avatarUrl: data.avatar_url || '',
     timezone: data.timezone || 'UTC',
   })
-}
-
-async function loadMyIdentities() {
-  loadingIdentities.value = true
-  try {
-    const { data } = await getUsersMeIdentities({ throwOnError: true })
-    identities.value = data.items ?? []
-  } finally {
-    loadingIdentities.value = false
-  }
 }
 
 async function onSaveProfile() {
@@ -320,51 +206,6 @@ async function onUpdatePassword() {
   } finally {
     savingPassword.value = false
   }
-}
-
-function onPlatformChange(value: string) {
-  bindForm.platform = value === anyPlatformValue ? '' : value
-}
-
-async function onGenerateBindCode() {
-  generatingBindCode.value = true
-  try {
-    const ttl = Number.isFinite(bindForm.ttlSeconds) ? Math.max(60, Number(bindForm.ttlSeconds)) : 3600
-    const { data } = await client.post<IssueBindCodeResponse>({
-      url: '/users/me/bind_codes',
-      body: {
-        platform: bindForm.platform || undefined,
-        ttl_seconds: ttl,
-      },
-      throwOnError: true,
-    })
-    bindCode.value = data
-    toast.success(t('settings.bindCodeGenerated'))
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('settings.bindCodeGenerateFailed'), { prefixFallback: true }))
-  } finally {
-    generatingBindCode.value = false
-  }
-}
-
-async function copyBindCode() {
-  if (!bindCode.value?.token) {
-    return
-  }
-  try {
-    const copied = await copyText(bindCode.value.token)
-    if (copied) {
-      toast.success(t('settings.bindCodeCopied'))
-      return
-    }
-    toast.error(t('settings.bindCodeCopyFailed'))
-  } catch {
-    toast.error(t('settings.bindCodeCopyFailed'))
-  }
-}
-
-function formatDate(value: string) {
-  return formatDateTime(value, { fallback: value })
 }
 
 function onLogout() {

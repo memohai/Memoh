@@ -167,7 +167,7 @@ src/
 │   ├── email/                 #   Email provider management
 │   ├── supermarket/           #   Supermarket (template/skill marketplace)
 │   ├── usage/                 #   Token usage statistics
-│   ├── profile/               #   User profile settings (password, bind codes)
+│   ├── profile/               #   User profile settings (password)
 │   ├── platform/              #   Platform management
 │   ├── about/                 #   About page
 │   └── oauth/                 #   OAuth callback pages

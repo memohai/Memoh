@@ -31,10 +31,6 @@ type Rule struct {
 	ChannelIdentityAvatarURL    string       `json:"channel_identity_avatar_url,omitempty"`
 	SourceConversationName      string       `json:"source_conversation_name,omitempty"`
 	SourceConversationAvatarURL string       `json:"source_conversation_avatar_url,omitempty"`
-	LinkedUserID                string       `json:"linked_user_id,omitempty"`
-	LinkedUserUsername          string       `json:"linked_user_username,omitempty"`
-	LinkedUserDisplayName       string       `json:"linked_user_display_name,omitempty"`
-	LinkedUserAvatarURL         string       `json:"linked_user_avatar_url,omitempty"`
 	CreatedAt                   time.Time    `json:"created_at"`
 	UpdatedAt                   time.Time    `json:"updated_at"`
 }
@@ -85,15 +81,11 @@ type EvaluateRequest struct {
 }
 
 type ChannelIdentityCandidate struct {
-	ID                string `json:"id"`
-	Channel           string `json:"channel"`
-	ChannelSubjectID  string `json:"channel_subject_id"`
-	DisplayName       string `json:"display_name,omitempty"`
-	AvatarURL         string `json:"avatar_url,omitempty"`
-	LinkedUserID      string `json:"linked_user_id,omitempty"`
-	LinkedUsername    string `json:"linked_username,omitempty"`
-	LinkedDisplayName string `json:"linked_display_name,omitempty"`
-	LinkedAvatarURL   string `json:"linked_avatar_url,omitempty"`
+	ID               string `json:"id"`
+	Channel          string `json:"channel"`
+	ChannelSubjectID string `json:"channel_subject_id"`
+	DisplayName      string `json:"display_name,omitempty"`
+	AvatarURL        string `json:"avatar_url,omitempty"`
 }
 
 type ChannelIdentityCandidateListResponse struct {

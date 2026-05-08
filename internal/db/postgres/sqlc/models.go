@@ -37,7 +37,6 @@ type Bot struct {
 	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
-	AclDefaultEffect       string             `json:"acl_default_effect"`
 	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
 	DisplayEnabled         bool               `json:"display_enabled"`
 	OverlayProvider        string             `json:"overlay_provider"`
@@ -46,17 +45,15 @@ type Bot struct {
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	AclDefaultEffect       string             `json:"acl_default_effect"`
 }
 
 type BotAclRule struct {
 	ID                     pgtype.UUID        `json:"id"`
 	BotID                  pgtype.UUID        `json:"bot_id"`
-	Enabled                bool               `json:"enabled"`
-	Description            pgtype.Text        `json:"description"`
 	Action                 string             `json:"action"`
 	Effect                 string             `json:"effect"`
 	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
-	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 	SourceChannel          pgtype.Text        `json:"source_channel"`
 	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
 	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
@@ -64,6 +61,9 @@ type BotAclRule struct {
 	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	Enabled                bool               `json:"enabled"`
+	Description            pgtype.Text        `json:"description"`
+	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 }
 
 type BotChannelConfig struct {
@@ -203,7 +203,6 @@ type BotStorageBinding struct {
 
 type ChannelIdentity struct {
 	ID               pgtype.UUID        `json:"id"`
-	UserID           pgtype.UUID        `json:"user_id"`
 	ChannelType      string             `json:"channel_type"`
 	ChannelSubjectID string             `json:"channel_subject_id"`
 	DisplayName      pgtype.Text        `json:"display_name"`
@@ -211,17 +210,6 @@ type ChannelIdentity struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-type ChannelIdentityBindCode struct {
-	ID                      pgtype.UUID        `json:"id"`
-	Token                   string             `json:"token"`
-	IssuedByUserID          pgtype.UUID        `json:"issued_by_user_id"`
-	ChannelType             pgtype.Text        `json:"channel_type"`
-	ExpiresAt               pgtype.Timestamptz `json:"expires_at"`
-	UsedAt                  pgtype.Timestamptz `json:"used_at"`
-	UsedByChannelIdentityID pgtype.UUID        `json:"used_by_channel_identity_id"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type Container struct {

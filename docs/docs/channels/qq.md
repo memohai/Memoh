@@ -20,14 +20,6 @@ Connecting your Memoh Bot to QQ allows it to interact with users through QQ's of
    - **Enable Input Hint**: Show typing indicators (default: enabled).
 5. Click **Save and Enable**.
 
-## Step 3: Bind Your Identity (Optional)
-
-Binding your QQ identity to your Memoh account enables cross-platform identity recognition — the bot will know who you are regardless of which channel you use.
-
-1. In Memoh Web UI, go to **Profile** > **Bind Code**.
-2. Select **QQ** and click **Generate**.
-3. Copy the code and send it to your bot in a QQ direct message.
-
 ## Features Supported
 
 - **Message Content**: Full support for text messages.

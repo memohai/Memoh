@@ -38,7 +38,6 @@ type sessionState struct {
 type channelIdentityResolver interface {
 	GetByID(ctx context.Context, channelIdentityID string) (identitypkg.ChannelIdentity, error)
 	ListCanonicalChannelIdentities(ctx context.Context, channelIdentityID string) ([]identitypkg.ChannelIdentity, error)
-	ListUserChannelIdentities(ctx context.Context, userID string) ([]identitypkg.ChannelIdentity, error)
 }
 
 type routeResolver interface {

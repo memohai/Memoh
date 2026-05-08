@@ -60,10 +60,6 @@ export type AclChannelIdentityCandidate = {
     channel_subject_id?: string;
     display_name?: string;
     id?: string;
-    linked_avatar_url?: string;
-    linked_display_name?: string;
-    linked_user_id?: string;
-    linked_username?: string;
 };
 
 export type AclChannelIdentityCandidateListResponse = {
@@ -115,10 +111,6 @@ export type AclRule = {
     effect?: string;
     enabled?: boolean;
     id?: string;
-    linked_user_avatar_url?: string;
-    linked_user_display_name?: string;
-    linked_user_id?: string;
-    linked_user_username?: string;
     source_conversation_avatar_url?: string;
     source_conversation_name?: string;
     source_scope?: AclSourceScope;
@@ -1311,11 +1303,6 @@ export type HandlersFsOpResponse = {
     ok?: boolean;
 };
 
-export type HandlersListMyIdentitiesResponse = {
-    items?: Array<IdentitiesChannelIdentity>;
-    user_id?: string;
-};
-
 export type HandlersMemoryAddPayload = {
     embedding_enabled?: boolean;
     filters?: {
@@ -1408,20 +1395,6 @@ export type HeartbeatLog = {
     started_at?: string;
     status?: string;
     usage?: unknown;
-};
-
-export type IdentitiesChannelIdentity = {
-    avatar_url?: string;
-    channel?: string;
-    channel_subject_id?: string;
-    created_at?: string;
-    display_name?: string;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    updated_at?: string;
-    user_id?: string;
 };
 
 export type McpAuthorizeResult = {
@@ -9483,39 +9456,6 @@ export type PutUsersMeChannelsByPlatformResponses = {
 };
 
 export type PutUsersMeChannelsByPlatformResponse = PutUsersMeChannelsByPlatformResponses[keyof PutUsersMeChannelsByPlatformResponses];
-
-export type GetUsersMeIdentitiesData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/users/me/identities';
-};
-
-export type GetUsersMeIdentitiesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetUsersMeIdentitiesError = GetUsersMeIdentitiesErrors[keyof GetUsersMeIdentitiesErrors];
-
-export type GetUsersMeIdentitiesResponses = {
-    /**
-     * OK
-     */
-    200: HandlersListMyIdentitiesResponse;
-};
-
-export type GetUsersMeIdentitiesResponse = GetUsersMeIdentitiesResponses[keyof GetUsersMeIdentitiesResponses];
 
 export type PutUsersMePasswordData = {
     /**

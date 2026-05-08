@@ -178,10 +178,6 @@ SELECT
   ci.channel_subject_id,
   ci.display_name AS channel_identity_display_name,
   ci.avatar_url AS channel_identity_avatar_url,
-  linked.id AS linked_user_id,
-  linked.username AS linked_user_username,
-  linked.display_name AS linked_user_display_name,
-  linked.avatar_url AS linked_user_avatar_url,
   COALESCE(
     NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_name'), '')), ''),
     NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_handle'), '')), ''),
@@ -190,7 +186,6 @@ SELECT
   COALESCE(NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_avatar_url'), '')), ''), '') AS source_conversation_avatar_url
 FROM bot_acl_rules r
 LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
-LEFT JOIN users linked ON linked.id = ci.user_id
 LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id
   AND r.source_conversation_id IS NOT NULL
   AND source_route.external_conversation_id = r.source_conversation_id
@@ -220,10 +215,6 @@ type ListBotACLRulesRow struct {
 	ChannelSubjectID            sql.NullString `json:"channel_subject_id"`
 	ChannelIdentityDisplayName  sql.NullString `json:"channel_identity_display_name"`
 	ChannelIdentityAvatarUrl    sql.NullString `json:"channel_identity_avatar_url"`
-	LinkedUserID                sql.NullString `json:"linked_user_id"`
-	LinkedUserUsername          sql.NullString `json:"linked_user_username"`
-	LinkedUserDisplayName       sql.NullString `json:"linked_user_display_name"`
-	LinkedUserAvatarUrl         sql.NullString `json:"linked_user_avatar_url"`
 	SourceConversationName      interface{}    `json:"source_conversation_name"`
 	SourceConversationAvatarUrl interface{}    `json:"source_conversation_avatar_url"`
 }
@@ -256,10 +247,6 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID string) ([]ListBotA
 			&i.ChannelSubjectID,
 			&i.ChannelIdentityDisplayName,
 			&i.ChannelIdentityAvatarUrl,
-			&i.LinkedUserID,
-			&i.LinkedUserUsername,
-			&i.LinkedUserDisplayName,
-			&i.LinkedUserAvatarUrl,
 			&i.SourceConversationName,
 			&i.SourceConversationAvatarUrl,
 		); err != nil {

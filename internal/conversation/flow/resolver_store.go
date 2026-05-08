@@ -298,11 +298,6 @@ func (r *Resolver) resolvePersistSenderIDs(ctx context.Context, req conversation
 	if r.isExistingUserID(ctx, userID) {
 		senderUserID = userID
 	}
-	if senderUserID == "" && senderChannelIdentityID != "" {
-		if linked := r.linkedUserIDFromChannelIdentity(ctx, senderChannelIdentityID); linked != "" {
-			senderUserID = linked
-		}
-	}
 	return senderChannelIdentityID, senderUserID
 }
 

@@ -9246,41 +9246,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/users/me/identities": {
-            "get": {
-                "description": "List all channel identities linked to current user",
-                "tags": [
-                    "users"
-                ],
-                "summary": "List current user's channel identities",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.listMyIdentitiesResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/users/me/password": {
             "put": {
                 "description": "Update current user password with current password check",
@@ -9625,18 +9590,6 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
-                },
-                "linked_avatar_url": {
-                    "type": "string"
-                },
-                "linked_display_name": {
-                    "type": "string"
-                },
-                "linked_user_id": {
-                    "type": "string"
-                },
-                "linked_username": {
-                    "type": "string"
                 }
             }
         },
@@ -9770,18 +9723,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "id": {
-                    "type": "string"
-                },
-                "linked_user_avatar_url": {
-                    "type": "string"
-                },
-                "linked_user_display_name": {
-                    "type": "string"
-                },
-                "linked_user_id": {
-                    "type": "string"
-                },
-                "linked_user_username": {
                     "type": "string"
                 },
                 "source_conversation_avatar_url": {
@@ -12796,20 +12737,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.listMyIdentitiesResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/identities.ChannelIdentity"
-                    }
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.memoryAddPayload": {
             "type": "object",
             "properties": {
@@ -13024,39 +12951,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "usage": {}
-            }
-        },
-        "identities.ChannelIdentity": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "channel": {
-                    "type": "string"
-                },
-                "channel_subject_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "string"
-                }
             }
         },
         "mcp.AuthorizeResult": {

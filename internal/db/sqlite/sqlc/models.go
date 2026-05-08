@@ -204,7 +204,6 @@ type BotStorageBinding struct {
 
 type ChannelIdentity struct {
 	ID               string         `json:"id"`
-	UserID           sql.NullString `json:"user_id"`
 	ChannelType      string         `json:"channel_type"`
 	ChannelSubjectID string         `json:"channel_subject_id"`
 	DisplayName      sql.NullString `json:"display_name"`
@@ -212,17 +211,6 @@ type ChannelIdentity struct {
 	Metadata         string         `json:"metadata"`
 	CreatedAt        string         `json:"created_at"`
 	UpdatedAt        string         `json:"updated_at"`
-}
-
-type ChannelIdentityBindCode struct {
-	ID                      string         `json:"id"`
-	Token                   string         `json:"token"`
-	IssuedByUserID          string         `json:"issued_by_user_id"`
-	ChannelType             sql.NullString `json:"channel_type"`
-	ExpiresAt               sql.NullString `json:"expires_at"`
-	UsedAt                  sql.NullString `json:"used_at"`
-	UsedByChannelIdentityID sql.NullString `json:"used_by_channel_identity_id"`
-	CreatedAt               string         `json:"created_at"`
 }
 
 type Container struct {

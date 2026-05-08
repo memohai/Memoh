@@ -15,51 +15,42 @@ import (
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/identity"
 )
 
 // UsersHandler manages user/account CRUD and bot operations via REST API.
 type UsersHandler struct {
-	service                *accounts.Service
-	channelIdentityService *identities.Service
-	botService             *bots.Service
-	routeService           route.Service
-	channelStore           *channel.Store
-	channelLifecycle       *channel.Lifecycle
-	channelManager         *channel.Manager
-	registry               *channel.Registry
-	logger                 *slog.Logger
-}
-
-type listMyIdentitiesResponse struct {
-	UserID string                       `json:"user_id"`
-	Items  []identities.ChannelIdentity `json:"items"`
+	service          *accounts.Service
+	botService       *bots.Service
+	routeService     route.Service
+	channelStore     *channel.Store
+	channelLifecycle *channel.Lifecycle
+	channelManager   *channel.Manager
+	registry         *channel.Registry
+	logger           *slog.Logger
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, channelIdentityService *identities.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &UsersHandler{
-		service:                service,
-		channelIdentityService: channelIdentityService,
-		botService:             botService,
-		routeService:           routeService,
-		channelStore:           channelStore,
-		channelLifecycle:       channelLifecycle,
-		channelManager:         channelManager,
-		registry:               registry,
-		logger:                 log.With(slog.String("handler", "users")),
+		service:          service,
+		botService:       botService,
+		routeService:     routeService,
+		channelStore:     channelStore,
+		channelLifecycle: channelLifecycle,
+		channelManager:   channelManager,
+		registry:         registry,
+		logger:           log.With(slog.String("handler", "users")),
 	}
 }
 
 func (h *UsersHandler) Register(e *echo.Echo) {
 	userGroup := e.Group("/users")
 	userGroup.GET("/me", h.GetMe)
-	userGroup.GET("/me/identities", h.ListMyIdentities)
 	userGroup.PUT("/me", h.UpdateMe)
 	userGroup.PUT("/me/password", h.UpdateMyPassword)
 	userGroup.GET("", h.ListUsers)
@@ -102,33 +93,6 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
-}
-
-// ListMyIdentities godoc
-// @Summary List current user's channel identities
-// @Description List all channel identities linked to current user
-// @Tags users
-// @Success 200 {object} listMyIdentitiesResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /users/me/identities [get].
-func (h *UsersHandler) ListMyIdentities(c echo.Context) error {
-	userID, err := h.requireChannelIdentityID(c)
-	if err != nil {
-		return err
-	}
-	if h.channelIdentityService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel identity service not configured")
-	}
-	items, err := h.channelIdentityService.ListUserChannelIdentities(c.Request().Context(), userID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, listMyIdentitiesResponse{
-		UserID: userID,
-		Items:  items,
-	})
 }
 
 // UpdateMe godoc
@@ -415,21 +379,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if ownerFromToken {
 		if _, err := h.service.Get(c.Request().Context(), ownerID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				// Backward-compatible token path: token user_id might be a channel identity ID.
-				// Try to resolve to linked user first; if still missing, force re-login.
-				linkedUserID := ""
-				if h.channelIdentityService != nil {
-					linkedUserID, err = h.channelIdentityService.GetLinkedUserID(c.Request().Context(), ownerID)
-					if err != nil {
-						return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-					}
-				}
-				linkedUserID = strings.TrimSpace(linkedUserID)
-				if linkedUserID != "" {
-					ownerID = linkedUserID
-				} else {
-					return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
-				}
+				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			} else {
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 			}

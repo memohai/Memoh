@@ -154,7 +154,6 @@ func NewChannelInboundProcessor(
 	runner flow.Runner,
 	channelIdentityService ChannelIdentityService,
 	policyService PolicyService,
-	bindService BindService,
 	jwtSecret string,
 	tokenTTL time.Duration,
 ) *ChannelInboundProcessor {
@@ -164,7 +163,7 @@ func NewChannelInboundProcessor(
 	if tokenTTL <= 0 {
 		tokenTTL = 5 * time.Minute
 	}
-	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, bindService, "")
+	identityResolver := NewIdentityResolver(log, registry, channelIdentityService, policyService, "")
 	return &ChannelInboundProcessor{
 		runner:        runner,
 		routeResolver: routeResolver,
@@ -428,7 +427,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ConversationID:    msg.Conversation.ID,
 		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.UserID,
+		ChannelIdentityID: identity.ChannelIdentityID,
 		ChannelConfigID:   identity.ChannelConfigID,
 		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
 		Metadata:          routeMetadata,
@@ -2627,7 +2626,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		ConversationID:    msg.Conversation.ID,
 		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.UserID,
+		ChannelIdentityID: identity.ChannelIdentityID,
 		ChannelConfigID:   identity.ChannelConfigID,
 		ReplyTarget:       target,
 		Metadata:          routeMetadata,
@@ -2975,7 +2974,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		ConversationID:    msg.Conversation.ID,
 		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.UserID,
+		ChannelIdentityID: identity.ChannelIdentityID,
 		ChannelConfigID:   identity.ChannelConfigID,
 		ReplyTarget:       target,
 		Metadata:          routeMetadata,
@@ -3053,7 +3052,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		ConversationID:    msg.Conversation.ID,
 		ThreadID:          threadID,
 		ConversationType:  msg.Conversation.Type,
-		ChannelIdentityID: identity.UserID,
+		ChannelIdentityID: identity.ChannelIdentityID,
 		ChannelConfigID:   identity.ChannelConfigID,
 		ReplyTarget:       target,
 		Metadata:          routeMetadata,

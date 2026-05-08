@@ -67,11 +67,6 @@ func (a *QQAdapter) resolveIdentityTarget(ctx context.Context, id string) (strin
 	} else if found {
 		return mapped, true, nil
 	}
-	if mapped, found, err := lookupQQIdentityTarget(ctx, resolver.ListUserChannelIdentities, id); err != nil {
-		return "", false, err
-	} else if found {
-		return mapped, true, nil
-	}
 	item, err := resolver.GetByID(ctx, id)
 	if err != nil {
 		if isQQLookupMiss(err) {

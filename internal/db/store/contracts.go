@@ -236,9 +236,6 @@ type ChannelIdentityRepository interface {
 	GetByID(ctx context.Context, id ID) (Record, error)
 	UpsertByChannelSubject(ctx context.Context, input Input) (Record, error)
 	Search(ctx context.Context, filter Filter) ([]Record, error)
-	ListByUserID(ctx context.Context, userID ID) ([]Record, error)
-	SetLinkedUser(ctx context.Context, identityID ID, userID ID) (Record, error)
-	GetLinkedUserID(ctx context.Context, identityID ID) (ID, error)
 	GetUserByID(ctx context.Context, userID ID) (Record, error)
 }
 
@@ -267,12 +264,6 @@ type BotACLStore interface {
 type ObservedConversationStore interface {
 	ListByChannelIdentity(ctx context.Context, identityID ID) ([]Record, error)
 	ListByChannelType(ctx context.Context, channelType string) ([]Record, error)
-}
-
-type BindCodeStore interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	Get(ctx context.Context, token string) (Record, error)
-	Consume(ctx context.Context, token string, sourceIdentityID ID) error
 }
 
 type ScheduleStore interface {
