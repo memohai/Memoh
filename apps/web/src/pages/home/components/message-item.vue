@@ -175,14 +175,18 @@
           <button
             v-if="message.reply"
             type="button"
-            class="mb-1 min-w-0 rounded-sm border-l-2 py-1 pl-2 pr-2 leading-snug break-normal"
+            class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
             :class="[
-              isSelf ? 'border-background/60 bg-background/10' : 'border-primary/70 bg-background/40',
+              isSelf ? 'bg-background/10' : 'bg-background/40',
               canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/15 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
             ]"
             :disabled="!canJumpReply"
             @click.stop="handleReplyClick"
           >
+            <span
+              class="absolute inset-y-0 left-0 w-[3px]"
+              :class="isSelf ? 'bg-background/60' : 'bg-primary/70'"
+            />
             <div
               class="truncate text-[11px] font-semibold"
               :class="isSelf ? 'text-background' : 'text-primary'"
