@@ -51,11 +51,12 @@ type Attachment struct {
 
 // ForwardInfo describes a forwarded message origin.
 type ForwardInfo struct {
-	FromUserID string         `json:"from_user_id,omitempty"`
-	FromChatID string         `json:"from_chat_id,omitempty"`
-	Sender     *CanonicalUser `json:"sender,omitempty"`
-	SenderName string         `json:"sender_name,omitempty"`
-	Date       int64          `json:"date,omitempty"`
+	MessageID          string         `json:"message_id,omitempty"`
+	FromUserID         string         `json:"from_user_id,omitempty"`
+	FromConversationID string         `json:"from_conversation_id,omitempty"`
+	Sender             *CanonicalUser `json:"sender,omitempty"`
+	SenderName         string         `json:"sender_name,omitempty"`
+	Date               int64          `json:"date,omitempty"`
 }
 
 // ConversationMeta carries session-level context embedded in every event,

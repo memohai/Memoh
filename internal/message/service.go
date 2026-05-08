@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -328,6 +329,62 @@ func (s *DBService) ListBeforeBySession(ctx context.Context, sessionID string, b
 	return msgs, nil
 }
 
+func (s *DBService) LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return LocateResult{}, err
+	}
+	externalMessageID = strings.TrimSpace(externalMessageID)
+	if externalMessageID == "" {
+		return LocateResult{}, errors.New("external message id is required")
+	}
+	if beforeLimit < 0 {
+		beforeLimit = 0
+	}
+	if afterLimit < 0 {
+		afterLimit = 0
+	}
+
+	targetRow, err := s.queries.GetMessageByExternalIDBySession(ctx, sqlc.GetMessageByExternalIDBySessionParams{
+		SessionID:         pgSessionID,
+		ExternalMessageID: toPgText(externalMessageID),
+	})
+	if err != nil {
+		return LocateResult{}, err
+	}
+	target := toMessageFromExternalIDBySessionRow(targetRow)
+
+	beforeRows, err := s.queries.ListMessagesBeforeBySession(ctx, sqlc.ListMessagesBeforeBySessionParams{
+		SessionID: pgSessionID,
+		CreatedAt: pgtype.Timestamptz{
+			Time:  target.CreatedAt,
+			Valid: true,
+		},
+		MaxCount: beforeLimit,
+	})
+	if err != nil {
+		return LocateResult{}, err
+	}
+	afterRows, err := s.queries.ListMessagesAfterBySession(ctx, sqlc.ListMessagesAfterBySessionParams{
+		SessionID: pgSessionID,
+		CreatedAt: pgtype.Timestamptz{
+			Time:  target.CreatedAt,
+			Valid: true,
+		},
+		MaxCount: afterLimit,
+	})
+	if err != nil {
+		return LocateResult{}, err
+	}
+
+	messages := make([]Message, 0, len(beforeRows)+1+len(afterRows))
+	messages = append(messages, toMessagesFromBeforeBySession(beforeRows)...)
+	messages = append(messages, target)
+	messages = append(messages, toMessagesFromAfterBySession(afterRows)...)
+	s.enrichAssets(ctx, messages)
+	return LocateResult{Messages: messages, TargetID: target.ID}, nil
+}
+
 // LinkAssets links asset refs to an existing persisted message.
 func (s *DBService) LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error {
 	pgMsgID, err := dbpkg.ParseUUID(messageID)
@@ -638,6 +695,50 @@ func toMessageFromBeforeBySessionRow(row sqlc.ListMessagesBeforeBySessionRow) Me
 	)
 }
 
+func toMessageFromExternalIDBySessionRow(row sqlc.GetMessageByExternalIDBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
+func toMessageFromAfterBySessionRow(row sqlc.ListMessagesAfterBySessionRow) Message {
+	return toMessageFields(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+	)
+}
+
 func toMessageFields(
 	id pgtype.UUID,
 	botID pgtype.UUID,
@@ -758,6 +859,14 @@ func toMessagesFromBeforeBySession(rows []sqlc.ListMessagesBeforeBySessionRow) [
 	messages := make([]Message, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
 		messages = append(messages, toMessageFromBeforeBySessionRow(rows[i]))
+	}
+	return messages
+}
+
+func toMessagesFromAfterBySession(rows []sqlc.ListMessagesAfterBySessionRow) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, toMessageFromAfterBySessionRow(row))
 	}
 	return messages
 }

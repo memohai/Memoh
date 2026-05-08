@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/textutil"
 )
+
+const uiReplyPreviewMaxRunes = 120
 
 var (
 	uiMessageYAMLHeaderRe        = regexp.MustCompile(`(?s)\A---\n.*?\n---\n?`)
@@ -200,7 +203,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 			text := extractPersistedMessageText(raw, modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
-			if text == "" && len(attachments) == 0 {
+			reply := uiReplyFromMessage(raw)
+			forward := uiForwardFromMessage(raw)
+			if text == "" && len(attachments) == 0 && reply == nil && forward == nil {
 				continue
 			}
 			if task, ok := parseBackgroundTaskNotification(text); ok {
@@ -220,12 +225,15 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			}
 
 			turn := UITurn{
-				Role:        "user",
-				Text:        text,
-				Attachments: attachments,
-				Timestamp:   raw.CreatedAt,
-				Platform:    resolveUIPersistencePlatform(raw),
-				ID:          strings.TrimSpace(raw.ID),
+				Role:              "user",
+				Text:              text,
+				Attachments:       attachments,
+				Reply:             reply,
+				Forward:           forward,
+				Timestamp:         raw.CreatedAt,
+				Platform:          resolveUIPersistencePlatform(raw),
+				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
+				ID:                strings.TrimSpace(raw.ID),
 			}
 			if turn.Platform != "" {
 				turn.SenderDisplayName = strings.TrimSpace(raw.SenderDisplayName)
@@ -321,11 +329,12 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			}
 
 			result = append(result, UITurn{
-				Role:      "assistant",
-				Messages:  assistantMessages,
-				Timestamp: raw.CreatedAt,
-				Platform:  resolveUIPersistencePlatform(raw),
-				ID:        strings.TrimSpace(raw.ID),
+				Role:              "assistant",
+				Messages:          assistantMessages,
+				Timestamp:         raw.CreatedAt,
+				Platform:          resolveUIPersistencePlatform(raw),
+				ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
+				ID:                strings.TrimSpace(raw.ID),
 			})
 			registerBackgroundTools(len(result) - 1)
 
@@ -358,10 +367,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 func newPendingAssistantTurn(raw messagepkg.Message) *uiPendingAssistantTurn {
 	return &uiPendingAssistantTurn{
 		Turn: UITurn{
-			Role:      "assistant",
-			Timestamp: raw.CreatedAt,
-			Platform:  resolveUIPersistencePlatform(raw),
-			ID:        strings.TrimSpace(raw.ID),
+			Role:              "assistant",
+			Timestamp:         raw.CreatedAt,
+			Platform:          resolveUIPersistencePlatform(raw),
+			ExternalMessageID: strings.TrimSpace(raw.ExternalMessageID),
+			ID:                strings.TrimSpace(raw.ID),
 		},
 		ToolIndexes: map[string]int{},
 	}
@@ -446,9 +456,62 @@ func extractPersistedMessageText(raw messagepkg.Message, message ModelMessage) s
 	}
 
 	if strings.EqualFold(raw.Role, "user") {
-		return strings.TrimSpace(stripPersistedYAMLHeader(text))
+		return strings.TrimSpace(stripPersistedUserStructuredContext(text))
 	}
 	return strings.TrimSpace(stripPersistedAgentTags(text))
+}
+
+func stripPersistedUserStructuredContext(text string) string {
+	text = strings.TrimSpace(stripPersistedYAMLHeader(text))
+	if text == "" {
+		return ""
+	}
+
+	text = stripPersistedMessageEnvelope(text)
+	lines := strings.Split(text, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if isPersistedUserContextLine(strings.TrimSpace(line)) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func stripPersistedMessageEnvelope(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "<message") {
+		return text
+	}
+
+	openEnd := strings.IndexByte(text, '>')
+	if openEnd < 0 {
+		return text
+	}
+	openTag := strings.TrimSpace(text[:openEnd+1])
+	if strings.HasSuffix(openTag, "/>") {
+		return ""
+	}
+
+	body := strings.TrimSpace(text[openEnd+1:])
+	if !strings.HasSuffix(body, "</message>") {
+		return text
+	}
+	return strings.TrimSpace(strings.TrimSuffix(body, "</message>"))
+}
+
+func isPersistedUserContextLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	if strings.HasPrefix(line, "<attachment ") && strings.HasSuffix(line, "/>") {
+		return true
+	}
+	if strings.HasPrefix(line, "<image ") && strings.HasSuffix(line, "</image>") {
+		return true
+	}
+	return strings.HasPrefix(line, "<in-reply-to ") && strings.HasSuffix(line, "</in-reply-to>")
 }
 
 func extractAssistantStreamMessageText(message ModelMessage) string {
@@ -694,6 +757,72 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 		})
 	}
 	return attachments
+}
+
+func uiReplyFromMessage(raw messagepkg.Message) *UIReplyRef {
+	reply := UIReplyRef{MessageID: strings.TrimSpace(raw.SourceReplyToMessageID)}
+	if meta, ok := raw.Metadata["reply"].(map[string]any); ok {
+		if v, ok := meta["message_id"].(string); ok && strings.TrimSpace(v) != "" {
+			reply.MessageID = strings.TrimSpace(v)
+		}
+		if v, ok := meta["sender"].(string); ok {
+			reply.Sender = strings.TrimSpace(v)
+		}
+		if v, ok := meta["preview"].(string); ok {
+			reply.Preview = truncateUIReplyPreview(v)
+		}
+	}
+	if reply.MessageID == "" && reply.Sender == "" && reply.Preview == "" {
+		return nil
+	}
+	return &reply
+}
+
+func truncateUIReplyPreview(value string) string {
+	return textutil.TruncateRunesWithSuffix(strings.TrimSpace(value), uiReplyPreviewMaxRunes, "...")
+}
+
+func uiForwardFromMessage(raw messagepkg.Message) *UIForwardRef {
+	meta, ok := raw.Metadata["forward"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	forward := UIForwardRef{}
+	if v, ok := meta["message_id"].(string); ok {
+		forward.MessageID = strings.TrimSpace(v)
+	}
+	if v, ok := meta["from_user_id"].(string); ok {
+		forward.FromUserID = strings.TrimSpace(v)
+	}
+	if v, ok := meta["from_conversation_id"].(string); ok {
+		forward.FromConversationID = strings.TrimSpace(v)
+	}
+	if v, ok := meta["sender"].(string); ok {
+		forward.Sender = strings.TrimSpace(v)
+	}
+	forward.Date = int64FromAny(meta["date"])
+	if forward.MessageID == "" && forward.FromUserID == "" && forward.FromConversationID == "" && forward.Sender == "" && forward.Date == 0 {
+		return nil
+	}
+	return &forward
+}
+
+func int64FromAny(value any) int64 {
+	switch v := value.(type) {
+	case int:
+		return int64(v)
+	case int32:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	default:
+		return 0
+	}
 }
 
 func resolveUIPersistencePlatform(raw messagepkg.Message) string {

@@ -205,6 +205,42 @@ WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
+-- name: GetMessageByExternalIDBySession :one
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.source_message_id = sqlc.arg(external_message_id)
+ORDER BY m.created_at DESC
+LIMIT 1;
+
+-- name: ListMessagesAfterBySession :many
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.created_at > sqlc.arg(created_at)
+ORDER BY m.created_at ASC
+LIMIT sqlc.arg(max_count);
+
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);

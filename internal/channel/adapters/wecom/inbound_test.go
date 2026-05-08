@@ -29,6 +29,27 @@ func TestBuildInboundMessage_Text(t *testing.T) {
 	}
 }
 
+func TestBuildInboundMessage_Quote(t *testing.T) {
+	msg, ok := buildInboundMessage(MessageCallbackBody{
+		MsgID:    "m1",
+		ChatID:   "chat-1",
+		ChatType: "group",
+		From:     CallbackFrom{UserID: "u1"},
+		MsgType:  "text",
+		Text:     &MessageText{Content: "reply body"},
+		Quote:    &MessageQuote{MsgID: "source-msg"},
+	}, "req-1")
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if msg.Message.Reply == nil {
+		t.Fatal("expected reply ref")
+	}
+	if msg.Message.Reply.MessageID != "source-msg" || msg.Message.Reply.Target != "chat_id:chat-1" {
+		t.Fatalf("unexpected reply ref: %#v", msg.Message.Reply)
+	}
+}
+
 func TestBuildInboundMessage_Markdown(t *testing.T) {
 	msg, ok := buildInboundMessage(MessageCallbackBody{
 		MsgID:    "m2",

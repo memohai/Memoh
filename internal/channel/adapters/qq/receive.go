@@ -38,6 +38,10 @@ type MessageAttachment struct {
 	VoiceWavURL string `json:"voice_wav_url,omitempty"`
 }
 
+type MessageReference struct {
+	MessageID string `json:"message_id,omitempty"`
+}
+
 type C2CAuthor struct {
 	ID          string `json:"id,omitempty"`
 	UnionOpenID string `json:"union_openid,omitempty"`
@@ -56,31 +60,34 @@ type GuildAuthor struct {
 }
 
 type C2CMessageEvent struct {
-	Author      C2CAuthor           `json:"author"`
-	Content     string              `json:"content"`
-	ID          string              `json:"id"`
-	Timestamp   string              `json:"timestamp"`
-	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	Author           C2CAuthor           `json:"author"`
+	Content          string              `json:"content"`
+	ID               string              `json:"id"`
+	Timestamp        string              `json:"timestamp"`
+	Attachments      []MessageAttachment `json:"attachments,omitempty"`
+	MessageReference *MessageReference   `json:"message_reference,omitempty"`
 }
 
 type GroupMessageEvent struct {
-	Author      GroupAuthor         `json:"author"`
-	Content     string              `json:"content"`
-	ID          string              `json:"id"`
-	Timestamp   string              `json:"timestamp"`
-	GroupID     string              `json:"group_id,omitempty"`
-	GroupOpenID string              `json:"group_openid"`
-	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	Author           GroupAuthor         `json:"author"`
+	Content          string              `json:"content"`
+	ID               string              `json:"id"`
+	Timestamp        string              `json:"timestamp"`
+	GroupID          string              `json:"group_id,omitempty"`
+	GroupOpenID      string              `json:"group_openid"`
+	Attachments      []MessageAttachment `json:"attachments,omitempty"`
+	MessageReference *MessageReference   `json:"message_reference,omitempty"`
 }
 
 type GuildMessageEvent struct {
-	ID          string              `json:"id"`
-	ChannelID   string              `json:"channel_id"`
-	GuildID     string              `json:"guild_id,omitempty"`
-	Content     string              `json:"content"`
-	Timestamp   string              `json:"timestamp"`
-	Author      GuildAuthor         `json:"author"`
-	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	ID               string              `json:"id"`
+	ChannelID        string              `json:"channel_id"`
+	GuildID          string              `json:"guild_id,omitempty"`
+	Content          string              `json:"content"`
+	Timestamp        string              `json:"timestamp"`
+	Author           GuildAuthor         `json:"author"`
+	Attachments      []MessageAttachment `json:"attachments,omitempty"`
+	MessageReference *MessageReference   `json:"message_reference,omitempty"`
 }
 
 type wsPayload struct {
@@ -420,6 +427,7 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 				Format:      channel.MessageFormatPlain,
 				Text:        parseFaceTags(strings.TrimSpace(payload.Content)),
 				Attachments: toInboundAttachments(payload.Attachments),
+				Reply:       qqReplyRef(payload.MessageReference, "c2c:"+subjectID),
 			},
 			ReplyTarget: "c2c:" + subjectID,
 			Sender: channel.Identity{
@@ -457,6 +465,7 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 				Format:      channel.MessageFormatPlain,
 				Text:        parseFaceTags(strings.TrimSpace(payload.Content)),
 				Attachments: toInboundAttachments(payload.Attachments),
+				Reply:       qqReplyRef(payload.MessageReference, "group:"+groupID),
 			},
 			ReplyTarget: "group:" + groupID,
 			Sender: channel.Identity{
@@ -505,6 +514,7 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 				Format:      channel.MessageFormatPlain,
 				Text:        parseFaceTags(strings.TrimSpace(payload.Content)),
 				Attachments: toInboundAttachments(payload.Attachments),
+				Reply:       qqReplyRef(payload.MessageReference, "channel:"+channelID),
 			},
 			ReplyTarget: "channel:" + channelID,
 			Sender: channel.Identity{
@@ -531,6 +541,20 @@ func eventToInboundMessage(event InboundEvent, botID string) (channel.InboundMes
 		}, true
 	default:
 		return channel.InboundMessage{}, false
+	}
+}
+
+func qqReplyRef(ref *MessageReference, target string) *channel.ReplyRef {
+	if ref == nil {
+		return nil
+	}
+	messageID := strings.TrimSpace(ref.MessageID)
+	if messageID == "" {
+		return nil
+	}
+	return &channel.ReplyRef{
+		Target:    strings.TrimSpace(target),
+		MessageID: messageID,
 	}
 }
 

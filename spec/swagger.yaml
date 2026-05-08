@@ -1014,6 +1014,19 @@ definitions:
     - FieldBool
     - FieldNumber
     - FieldEnum
+  channel.ForwardRef:
+    properties:
+      date:
+        type: integer
+      from_conversation_id:
+        type: string
+      from_user_id:
+        type: string
+      message_id:
+        type: string
+      sender:
+        type: string
+    type: object
   channel.Message:
     properties:
       actions:
@@ -1026,6 +1039,8 @@ definitions:
         type: array
       format:
         $ref: '#/definitions/channel.MessageFormat'
+      forward:
+        $ref: '#/definitions/channel.ForwardRef'
       id:
         type: string
       metadata:
@@ -5863,6 +5878,61 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: List bot history messages
+      tags:
+      - messages
+  /bots/{bot_id}/messages/locate:
+    get:
+      description: Locate a session message by external message ID and return nearby
+        UI turns
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: query
+        name: session_id
+        required: true
+        type: string
+      - description: External message ID
+        in: query
+        name: external_message_id
+        required: true
+        type: string
+      - description: Messages before target
+        in: query
+        name: before
+        type: integer
+      - description: Messages after target
+        in: query
+        name: after
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Locate a bot history message
       tags:
       - messages
   /bots/{bot_id}/schedule:

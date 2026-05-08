@@ -159,13 +159,47 @@
         class="space-y-2"
       >
         <div
-          v-if="cleanUserText(message.text)"
+          v-if="cleanUserText(message.text) || message.forward || message.reply"
           class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
           :class="isSelf
             ? 'rounded-tr-sm bg-foreground text-background'
             : 'rounded-tl-sm bg-accent text-foreground'"
         >
-          {{ cleanUserText(message.text) }}
+          <div
+            v-if="message.forward"
+            class="mb-1 text-[11px] font-medium leading-snug"
+            :class="isSelf ? 'text-background/70' : 'text-muted-foreground'"
+          >
+            {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
+          </div>
+          <button
+            v-if="message.reply"
+            type="button"
+            class="mb-1 min-w-0 rounded-sm border-l-2 py-1 pl-2 pr-2 leading-snug break-normal"
+            :class="[
+              isSelf ? 'border-background/60 bg-background/10' : 'border-primary/70 bg-background/40',
+              canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/15 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
+            ]"
+            :disabled="!canJumpReply"
+            @click.stop="handleReplyClick"
+          >
+            <div
+              class="truncate text-[11px] font-semibold"
+              :class="isSelf ? 'text-background' : 'text-primary'"
+            >
+              {{ replySenderLabel }}
+            </div>
+            <div
+              v-if="message.reply.preview"
+              class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words"
+              :class="isSelf ? 'text-background/75' : 'text-muted-foreground'"
+            >
+              {{ message.reply.preview }}
+            </div>
+          </button>
+          <div v-if="cleanUserText(message.text)">
+            {{ cleanUserText(message.text) }}
+          </div>
         </div>
         <AttachmentBlock
           v-if="userAttachmentBlock"
@@ -278,7 +312,7 @@ import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 // import { useUserStore } from '@/store/user'
 // import { useChatStore } from '@/store/chat-list'
 // import { storeToRefs } from 'pinia'
-// import { useI18n } from 'vue-i18n'
+import { useI18n } from 'vue-i18n'
 import type {
   ChatMessage,
   ThinkingBlock as ThinkingBlockType,
@@ -297,6 +331,7 @@ const props = defineProps<{
   sessionType?: string
   botId?: string
   onOpenMedia?: (src: string) => void
+  onReplyClick?: (messageId: string) => void
 }>()
 
 // const chatStore = useChatStore()
@@ -313,7 +348,7 @@ const isSelf = computed(() =>
 // const botAvatarUrl = computed(() => currentBot.value?.avatar_url ?? '')
 // const botName = computed(() => currentBot.value?.display_name ?? '')
 
-// const { t } = useI18n()
+const { t } = useI18n()
 
 // const senderFallbackName = computed(() => {
 //   const p = (props.message.platform ?? '').trim()
@@ -327,6 +362,32 @@ const senderFallback = computed(() => {
   const name = props.message.role === 'user' ? (props.message.senderDisplayName ?? '') : ''
   return name.slice(0, 2).toUpperCase() || '?'
 })
+
+const replySenderLabel = computed(() => {
+  if (props.message.role !== 'user') return ''
+  return props.message.reply?.sender || props.message.reply?.message_id || t('chat.unknownMessage')
+})
+
+const forwardSenderLabel = computed(() => {
+  if (props.message.role !== 'user') return ''
+  return props.message.forward?.sender
+    || props.message.forward?.from_conversation_id
+    || props.message.forward?.from_user_id
+    || t('chat.unknownMessage')
+})
+
+const canJumpReply = computed(() =>
+  props.message.role === 'user'
+  && !!props.message.reply?.message_id?.trim()
+  && typeof props.onReplyClick === 'function',
+)
+
+function handleReplyClick() {
+  if (props.message.role !== 'user') return
+  const messageId = props.message.reply?.message_id?.trim()
+  if (!messageId || !props.onReplyClick) return
+  props.onReplyClick(messageId)
+}
 
 function cleanUserText(content?: string): string {
   if (!content) return ''

@@ -15,9 +15,9 @@ import (
 
 const feishuQuotedTextMaxLength = 200
 
-// enrichQuotedMessage fetches the parent message via API and prepends a
-// quoted-text summary to the inbound message so the AI can see what is
-// being replied to. It also sets the "is_reply_to_bot" metadata flag.
+// enrichQuotedMessage fetches the parent message via API and fills structured
+// reply context so the AI and UI can see what is being replied to. It also sets
+// the "is_reply_to_bot" metadata flag.
 func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.ChannelConfig, msg *channel.InboundMessage, botOpenID string) {
 	if msg == nil || msg.Message.Reply == nil {
 		return

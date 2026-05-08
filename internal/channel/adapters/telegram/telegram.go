@@ -633,10 +633,6 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 			attachments = append(attachments, quotedAttachments...)
 		}
 	}
-	// Prepend forward origin so the AI knows where the message was forwarded from.
-	if forwardCtx := buildTelegramForwardContext(raw); forwardCtx != "" {
-		text = forwardCtx + "\n" + text
-	}
 	subjectID, displayName, attrs := resolveTelegramSender(raw)
 	chatID := ""
 	chatTypeRaw := ""
@@ -649,6 +645,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		chatName = strings.TrimSpace(raw.Chat.Title)
 	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
+	forwardRef := buildTelegramForwardRef(raw)
 	botUsername := ""
 	botID := int64(0)
 	if bot != nil {
@@ -679,6 +676,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 			Parts:       mentionParts,
 			Attachments: attachments,
 			Reply:       replyRef,
+			Forward:     forwardRef,
 		},
 		ReplyTarget: chatID,
 		Sender: channel.Identity{
@@ -1265,37 +1263,41 @@ func resolveTelegramDisplayName(user *tgbotapi.User) string {
 	return ""
 }
 
-// buildTelegramForwardContext returns a text prefix describing the forward origin.
-// Handles three cases: forwarded from a user, from a channel, or from a hidden sender.
-// Returns an empty string when the message is not forwarded.
-func buildTelegramForwardContext(msg *tgbotapi.Message) string {
+func buildTelegramForwardRef(msg *tgbotapi.Message) *channel.ForwardRef {
 	if msg == nil {
-		return ""
+		return nil
 	}
+	ref := &channel.ForwardRef{}
 	if msg.ForwardFrom != nil {
-		name := resolveTelegramDisplayName(msg.ForwardFrom)
-		if name != "" {
-			return fmt.Sprintf("[Forwarded from %s]", name)
-		}
+		ref.FromUserID = strconv.FormatInt(msg.ForwardFrom.ID, 10)
+		ref.Sender = resolveTelegramDisplayName(msg.ForwardFrom)
 	}
 	if msg.ForwardFromChat != nil {
+		ref.FromConversationID = strconv.FormatInt(msg.ForwardFromChat.ID, 10)
 		title := strings.TrimSpace(msg.ForwardFromChat.Title)
 		username := strings.TrimSpace(msg.ForwardFromChat.UserName)
-		if title != "" && username != "" {
-			return fmt.Sprintf("[Forwarded from %s (@%s)]", title, username)
-		}
-		if title != "" {
-			return fmt.Sprintf("[Forwarded from %s]", title)
-		}
-		if username != "" {
-			return fmt.Sprintf("[Forwarded from @%s]", username)
+		switch {
+		case title != "" && username != "":
+			ref.Sender = title + " (@" + username + ")"
+		case title != "":
+			ref.Sender = title
+		case username != "":
+			ref.Sender = "@" + username
 		}
 	}
-	senderName := strings.TrimSpace(msg.ForwardSenderName)
-	if senderName != "" {
-		return fmt.Sprintf("[Forwarded from %s]", senderName)
+	if ref.Sender == "" {
+		ref.Sender = strings.TrimSpace(msg.ForwardSenderName)
 	}
-	return ""
+	if msg.ForwardFromMessageID > 0 {
+		ref.MessageID = strconv.Itoa(msg.ForwardFromMessageID)
+	}
+	if msg.ForwardDate > 0 {
+		ref.Date = int64(msg.ForwardDate)
+	}
+	if ref.MessageID == "" && ref.FromUserID == "" && ref.FromConversationID == "" && ref.Sender == "" && ref.Date == 0 {
+		return nil
+	}
+	return ref
 }
 
 // parseTelegramTarget resolves a target string into a numeric chat ID and an

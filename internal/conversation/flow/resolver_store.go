@@ -150,6 +150,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 		messageEventID := ""
 		displayText := ""
 		assets := []messagepkg.AssetRef(nil)
+		persistMeta := meta
 		if msg.Role == "user" {
 			messageSenderChannelIdentityID = senderChannelIdentityID
 			messageSenderUserID = senderUserID
@@ -173,6 +174,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 
 			if isOriginalQuery {
 				externalMessageID = req.ExternalMessageID
+				sourceReplyToMessageID = req.SourceReplyToMessageID
 				messageEventID = req.EventID
 				if req.RawQuery != "" {
 					displayText = req.RawQuery
@@ -180,6 +182,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 					displayText = strings.TrimSpace(req.Query)
 				}
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
+				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
 			} else {
 				// Use the message's own text as display text. For the
 				// read-media image-only injection this is empty, so
@@ -202,7 +205,7 @@ func (r *Resolver) storeMessages(ctx context.Context, req conversation.ChatReque
 			SourceReplyToMessageID:  sourceReplyToMessageID,
 			Role:                    msg.Role,
 			Content:                 content,
-			Metadata:                meta,
+			Metadata:                persistMeta,
 			Usage:                   msg.Usage,
 			Assets:                  assets,
 			ModelID:                 modelID,
@@ -283,6 +286,61 @@ func buildRouteMetadata(req conversation.ChatRequest) map[string]any {
 		meta["platform"] = req.CurrentChannel
 	}
 	return meta
+}
+
+func buildInteractionMetadata(req conversation.ChatRequest) map[string]any {
+	meta := map[string]any{}
+	reply := map[string]any{}
+	if v := strings.TrimSpace(req.SourceReplyToMessageID); v != "" {
+		reply["message_id"] = v
+	}
+	if v := strings.TrimSpace(req.ReplySender); v != "" {
+		reply["sender"] = v
+	}
+	if v := strings.TrimSpace(req.ReplyPreview); v != "" {
+		reply["preview"] = v
+	}
+	if len(reply) > 0 {
+		meta["reply"] = reply
+	}
+
+	forward := map[string]any{}
+	if v := strings.TrimSpace(req.ForwardMessageID); v != "" {
+		forward["message_id"] = v
+	}
+	if v := strings.TrimSpace(req.ForwardFromUserID); v != "" {
+		forward["from_user_id"] = v
+	}
+	if v := strings.TrimSpace(req.ForwardFromConversationID); v != "" {
+		forward["from_conversation_id"] = v
+	}
+	if v := strings.TrimSpace(req.ForwardSender); v != "" {
+		forward["sender"] = v
+	}
+	if req.ForwardDate > 0 {
+		forward["date"] = req.ForwardDate
+	}
+	if len(forward) > 0 {
+		meta["forward"] = forward
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
+func mergeMetadata(base, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
 }
 
 func (r *Resolver) resolvePersistSenderIDs(ctx context.Context, req conversation.ChatRequest) (string, string) {

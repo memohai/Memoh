@@ -101,6 +101,32 @@ func TestEventToInboundMessageGroupAt(t *testing.T) {
 	}
 }
 
+func TestEventToInboundMessageReplyReference(t *testing.T) {
+	t.Parallel()
+
+	msg, ok := eventToInboundMessage(InboundEvent{
+		Type: "GROUP_AT_MESSAGE_CREATE",
+		GroupMessage: &GroupMessageEvent{
+			ID:          "msg-2",
+			Content:     "@bot hi",
+			GroupOpenID: "group-openid",
+			Author:      GroupAuthor{MemberOpenID: "member-openid"},
+			MessageReference: &MessageReference{
+				MessageID: "source-msg",
+			},
+		},
+	}, "bot-2")
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if msg.Message.Reply == nil {
+		t.Fatal("expected reply ref")
+	}
+	if msg.Message.Reply.MessageID != "source-msg" || msg.Message.Reply.Target != "group:group-openid" {
+		t.Fatalf("unexpected reply ref: %#v", msg.Message.Reply)
+	}
+}
+
 func TestEventToInboundMessageChannelAt(t *testing.T) {
 	t.Parallel()
 

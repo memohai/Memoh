@@ -611,10 +611,19 @@ export type ChannelFieldSchema = {
 
 export type ChannelFieldType = 'string' | 'secret' | 'bool' | 'number' | 'enum';
 
+export type ChannelForwardRef = {
+    date?: number;
+    from_conversation_id?: string;
+    from_user_id?: string;
+    message_id?: string;
+    sender?: string;
+};
+
 export type ChannelMessage = {
     actions?: Array<ChannelAction>;
     attachments?: Array<ChannelAttachment>;
     format?: ChannelMessageFormat;
+    forward?: ChannelForwardRef;
     id?: string;
     metadata?: {
         [key: string]: unknown;
@@ -5193,6 +5202,67 @@ export type GetBotsByBotIdMessagesResponses = {
 };
 
 export type GetBotsByBotIdMessagesResponse = GetBotsByBotIdMessagesResponses[keyof GetBotsByBotIdMessagesResponses];
+
+export type GetBotsByBotIdMessagesLocateData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query: {
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * External message ID
+         */
+        external_message_id: string;
+        /**
+         * Messages before target
+         */
+        before?: number;
+        /**
+         * Messages after target
+         */
+        after?: number;
+    };
+    url: '/bots/{bot_id}/messages/locate';
+};
+
+export type GetBotsByBotIdMessagesLocateErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMessagesLocateError = GetBotsByBotIdMessagesLocateErrors[keyof GetBotsByBotIdMessagesLocateErrors];
+
+export type GetBotsByBotIdMessagesLocateResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
 
 export type GetBotsByBotIdScheduleData = {
     body?: never;

@@ -134,6 +134,75 @@ func (q *Queries) DeleteMessagesBySession(ctx context.Context, sessionID sql.Nul
 	return err
 }
 
+const getMessageByExternalIDBySession = `-- name: GetMessageByExternalIDBySession :one
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND m.source_message_id = ?2
+ORDER BY m.created_at DESC
+LIMIT 1
+`
+
+type GetMessageByExternalIDBySessionParams struct {
+	SessionID         sql.NullString `json:"session_id"`
+	ExternalMessageID sql.NullString `json:"external_message_id"`
+}
+
+type GetMessageByExternalIDBySessionRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg GetMessageByExternalIDBySessionParams) (GetMessageByExternalIDBySessionRow, error) {
+	row := q.db.QueryRowContext(ctx, getMessageByExternalIDBySession, arg.SessionID, arg.ExternalMessageID)
+	var i GetMessageByExternalIDBySessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.SenderChannelIdentityID,
+		&i.SenderUserID,
+		&i.ExternalMessageID,
+		&i.SourceReplyToMessageID,
+		&i.Role,
+		&i.Content,
+		&i.Metadata,
+		&i.Usage,
+		&i.EventID,
+		&i.DisplayText,
+		&i.CreatedAt,
+		&i.SenderDisplayName,
+		&i.SenderAvatarUrl,
+		&i.Platform,
+	)
+	return i, err
+}
+
 const listActiveMessagesSince = `-- name: ListActiveMessagesSince :many
 SELECT
   m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
@@ -355,6 +424,92 @@ func (q *Queries) ListMessages(ctx context.Context, botID string) ([]ListMessage
 	var items []ListMessagesRow
 	for rows.Next() {
 		var i ListMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesAfterBySession = `-- name: ListMessagesAfterBySession :many
+SELECT
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.event_id, m.display_text, m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform
+FROM bot_history_messages m
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
+LEFT JOIN bot_sessions s ON s.id = m.session_id
+WHERE m.session_id = ?1
+  AND m.created_at > ?2
+ORDER BY m.created_at ASC
+LIMIT ?3
+`
+
+type ListMessagesAfterBySessionParams struct {
+	SessionID sql.NullString `json:"session_id"`
+	CreatedAt string         `json:"created_at"`
+	MaxCount  int64          `json:"max_count"`
+}
+
+type ListMessagesAfterBySessionRow struct {
+	ID                      string         `json:"id"`
+	BotID                   string         `json:"bot_id"`
+	SessionID               sql.NullString `json:"session_id"`
+	SenderChannelIdentityID sql.NullString `json:"sender_channel_identity_id"`
+	SenderUserID            sql.NullString `json:"sender_user_id"`
+	ExternalMessageID       sql.NullString `json:"external_message_id"`
+	SourceReplyToMessageID  sql.NullString `json:"source_reply_to_message_id"`
+	Role                    string         `json:"role"`
+	Content                 string         `json:"content"`
+	Metadata                string         `json:"metadata"`
+	Usage                   sql.NullString `json:"usage"`
+	EventID                 sql.NullString `json:"event_id"`
+	DisplayText             sql.NullString `json:"display_text"`
+	CreatedAt               string         `json:"created_at"`
+	SenderDisplayName       sql.NullString `json:"sender_display_name"`
+	SenderAvatarUrl         sql.NullString `json:"sender_avatar_url"`
+	Platform                sql.NullString `json:"platform"`
+}
+
+func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg ListMessagesAfterBySessionParams) ([]ListMessagesAfterBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesAfterBySession, arg.SessionID, arg.CreatedAt, arg.MaxCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesAfterBySessionRow
+	for rows.Next() {
+		var i ListMessagesAfterBySessionRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,

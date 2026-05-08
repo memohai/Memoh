@@ -146,6 +146,7 @@ func TestBuildInboundMessage_QuotedText(t *testing.T) {
 				RefMsg: &RefMessage{
 					Title: "Original",
 					MessageItem: &MessageItem{
+						MsgID:    "source-msg",
 						Type:     ItemTypeText,
 						TextItem: &TextItem{Text: "original text"},
 					},
@@ -158,11 +159,16 @@ func TestBuildInboundMessage_QuotedText(t *testing.T) {
 	if !ok {
 		t.Fatal("expected valid inbound message")
 	}
-	if !strings.Contains(inbound.Message.Text, "引用") {
-		t.Errorf("text should contain quoted context, got: %q", inbound.Message.Text)
+	if inbound.Message.Text != "my reply" {
+		t.Errorf("text = %q, want original reply body only", inbound.Message.Text)
 	}
-	if !strings.Contains(inbound.Message.Text, "my reply") {
-		t.Errorf("text should contain reply text, got: %q", inbound.Message.Text)
+	if inbound.Message.Reply == nil {
+		t.Fatal("expected reply ref")
+	}
+	if inbound.Message.Reply.MessageID != "source-msg" ||
+		inbound.Message.Reply.Sender != "Original" ||
+		inbound.Message.Reply.Preview != "original text" {
+		t.Fatalf("unexpected reply ref: %#v", inbound.Message.Reply)
 	}
 }
 

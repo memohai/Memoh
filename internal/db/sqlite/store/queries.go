@@ -3087,6 +3087,44 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg pgsqlc.ListMessage
 	return result, nil
 }
 
+func (q *Queries) GetMessageByExternalIDBySession(ctx context.Context, arg pgsqlc.GetMessageByExternalIDBySessionParams) (pgsqlc.GetMessageByExternalIDBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetMessageByExternalIDBySessionRow{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetMessageByExternalIDBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.GetMessageByExternalIDBySessionRow{}, err
+	}
+	out, err := q.store.queries.GetMessageByExternalIDBySession(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.GetMessageByExternalIDBySessionRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetMessageByExternalIDBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetMessageByExternalIDBySessionRow{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListMessagesAfterBySession(ctx context.Context, arg pgsqlc.ListMessagesAfterBySessionParams) ([]pgsqlc.ListMessagesAfterBySessionRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListMessagesAfterBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListMessagesAfterBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListMessagesAfterBySessionRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListMessagesBeforeBySession(ctx context.Context, arg pgsqlc.ListMessagesBeforeBySessionParams) ([]pgsqlc.ListMessagesBeforeBySessionRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

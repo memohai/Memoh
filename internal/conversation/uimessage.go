@@ -31,6 +31,20 @@ type UIAttachment struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+type UIReplyRef struct {
+	MessageID string `json:"message_id,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	Preview   string `json:"preview,omitempty"`
+}
+
+type UIForwardRef struct {
+	MessageID          string `json:"message_id,omitempty"`
+	FromUserID         string `json:"from_user_id,omitempty"`
+	FromConversationID string `json:"from_conversation_id,omitempty"`
+	Sender             string `json:"sender,omitempty"`
+	Date               int64  `json:"date,omitempty"`
+}
+
 // UIMessage is the normalized assistant output block used by the web frontend.
 type UIMessage struct {
 	ID          int               `json:"id"`
@@ -62,12 +76,15 @@ type UITurn struct {
 	Messages          []UIMessage       `json:"messages,omitempty"`
 	Text              string            `json:"text,omitempty"`
 	Attachments       []UIAttachment    `json:"attachments,omitempty"`
+	Reply             *UIReplyRef       `json:"reply,omitempty"`
+	Forward           *UIForwardRef     `json:"forward,omitempty"`
 	BackgroundTask    *UIBackgroundTask `json:"background_task,omitempty"`
 	Timestamp         time.Time         `json:"timestamp"`
 	Platform          string            `json:"platform,omitempty"`
 	SenderDisplayName string            `json:"sender_display_name,omitempty"`
 	SenderAvatarURL   string            `json:"sender_avatar_url,omitempty"`
 	SenderUserID      string            `json:"sender_user_id,omitempty"`
+	ExternalMessageID string            `json:"external_message_id,omitempty"`
 	ID                string            `json:"id,omitempty"`
 }
 

@@ -41,6 +41,7 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 
 	content := adaptContent(msg.Message.Text)
 	attachments := adaptAttachments(msg.Message.Attachments)
+	forwardInfo := adaptForward(msg.Message.Forward)
 
 	var replyToMessageID, replyToSender, replyToPreview string
 	if msg.Message.Reply != nil {
@@ -65,6 +66,7 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 		ReplyToMessageID: replyToMessageID,
 		ReplyToSender:    replyToSender,
 		ReplyToPreview:   replyToPreview,
+		ForwardInfo:      forwardInfo,
 		Attachments:      attachments,
 		Conversation: ConversationMeta{
 			Channel:          msg.Channel.String(),
@@ -111,6 +113,26 @@ func adaptAttachments(atts []channel.Attachment) []Attachment {
 		result = append(result, att)
 	}
 	return result
+}
+
+func adaptForward(ref *channel.ForwardRef) *ForwardInfo {
+	if ref == nil {
+		return nil
+	}
+	forward := &ForwardInfo{
+		MessageID:          strings.TrimSpace(ref.MessageID),
+		FromUserID:         strings.TrimSpace(ref.FromUserID),
+		FromConversationID: strings.TrimSpace(ref.FromConversationID),
+		SenderName:         strings.TrimSpace(ref.Sender),
+		Date:               ref.Date,
+	}
+	if forward.MessageID == "" && forward.FromUserID == "" && forward.FromConversationID == "" && forward.SenderName == "" && forward.Date == 0 {
+		return nil
+	}
+	if forward.SenderName != "" {
+		forward.Sender = &CanonicalUser{DisplayName: forward.SenderName}
+	}
+	return forward
 }
 
 func adaptEdit(msg channel.InboundMessage, sessionID, channelIdentityID, displayName string) EditEvent {

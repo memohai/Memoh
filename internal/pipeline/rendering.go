@@ -107,6 +107,9 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	if msg.ForwardInfo != nil {
 		from := resolveForwardFrom(msg.ForwardInfo, params.ContactNames)
 		attrs = append(attrs, fmt.Sprintf("forwarded_from=%q", escapeXMLAttrValue(from)))
+		if msg.ForwardInfo.MessageID != "" {
+			attrs = append(attrs, fmt.Sprintf("forwarded_message_id=%q", escapeXMLAttrValue(msg.ForwardInfo.MessageID)))
+		}
 	}
 
 	if msg.Deleted {
@@ -286,8 +289,8 @@ func resolveForwardFrom(info *ForwardInfo, contactNames map[string]string) strin
 	if info.FromUserID != "" {
 		return "user:" + info.FromUserID
 	}
-	if info.FromChatID != "" {
-		return "chat:" + info.FromChatID
+	if info.FromConversationID != "" {
+		return "conversation:" + info.FromConversationID
 	}
 	return "unknown"
 }

@@ -108,6 +108,20 @@ export interface UIAttachment {
   metadata?: Record<string, unknown>
 }
 
+export interface UIReplyRef {
+  message_id?: string
+  sender?: string
+  preview?: string
+}
+
+export interface UIForwardRef {
+  message_id?: string
+  from_user_id?: string
+  from_conversation_id?: string
+  sender?: string
+  date?: number
+}
+
 export interface UITextMessage {
   id: number
   type: 'text'
@@ -176,11 +190,14 @@ export interface UIUserTurn {
   role: 'user'
   text: string
   attachments?: UIAttachment[]
+  reply?: UIReplyRef
+  forward?: UIForwardRef
   timestamp: string
   platform?: string
   sender_display_name?: string
   sender_avatar_url?: string
   sender_user_id?: string
+  external_message_id?: string
   id?: string
 }
 
@@ -189,6 +206,7 @@ export interface UIAssistantTurn {
   messages: UIMessage[]
   timestamp: string
   platform?: string
+  external_message_id?: string
   id?: string
 }
 

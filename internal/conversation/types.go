@@ -222,22 +222,30 @@ type OutboundAssetRef struct {
 
 // ChatRequest is the input for Chat and StreamChat.
 type ChatRequest struct {
-	BotID                   string `json:"-"`
-	ChatID                  string `json:"-"`
-	SessionID               string `json:"-"`
-	Token                   string `json:"-"`
-	UserID                  string `json:"-"`
-	SourceChannelIdentityID string `json:"-"`
-	DisplayName             string `json:"-"`
-	RouteID                 string `json:"-"`
-	ChatToken               string `json:"-"`
-	ExternalMessageID       string `json:"-"`
-	ReplyTarget             string `json:"-"`
-	ConversationType        string `json:"-"`
-	ConversationName        string `json:"-"`
-	UserMessagePersisted    bool   `json:"-"`
-	EventID                 string `json:"-"`
-	RawQuery                string `json:"-"`
+	BotID                     string `json:"-"`
+	ChatID                    string `json:"-"`
+	SessionID                 string `json:"-"`
+	Token                     string `json:"-"`
+	UserID                    string `json:"-"`
+	SourceChannelIdentityID   string `json:"-"`
+	DisplayName               string `json:"-"`
+	RouteID                   string `json:"-"`
+	ChatToken                 string `json:"-"`
+	ExternalMessageID         string `json:"-"`
+	ReplyTarget               string `json:"-"`
+	ConversationType          string `json:"-"`
+	ConversationName          string `json:"-"`
+	SourceReplyToMessageID    string `json:"-"`
+	ReplySender               string `json:"-"`
+	ReplyPreview              string `json:"-"`
+	ForwardMessageID          string `json:"-"`
+	ForwardFromUserID         string `json:"-"`
+	ForwardFromConversationID string `json:"-"`
+	ForwardSender             string `json:"-"`
+	ForwardDate               int64  `json:"-"`
+	UserMessagePersisted      bool   `json:"-"`
+	EventID                   string `json:"-"`
+	RawQuery                  string `json:"-"`
 
 	// OutboundAssetCollector returns asset refs accumulated during outbound streaming.
 	// Set by the inbound channel processor; called by the resolver at persist time.

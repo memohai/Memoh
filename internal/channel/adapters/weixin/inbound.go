@@ -6,7 +6,6 @@ package weixin
 import (
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +16,8 @@ import (
 // buildInboundMessage maps a WeixinMessage to a Memoh InboundMessage.
 func buildInboundMessage(msg WeixinMessage) (channel.InboundMessage, bool) {
 	text, attachments := extractContent(msg)
-	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
+	replyRef := extractReplyRef(msg)
+	if strings.TrimSpace(text) == "" && len(attachments) == 0 && replyRef == nil {
 		return channel.InboundMessage{}, false
 	}
 
@@ -53,6 +53,7 @@ func buildInboundMessage(msg WeixinMessage) (channel.InboundMessage, bool) {
 			Format:      channel.MessageFormatPlain,
 			Text:        text,
 			Attachments: attachments,
+			Reply:       replyRef,
 			Metadata:    meta,
 		},
 		ReplyTarget: fromUserID,
@@ -116,31 +117,52 @@ func extractTextFromItem(item MessageItem) string {
 	if item.TextItem == nil || strings.TrimSpace(item.TextItem.Text) == "" {
 		return ""
 	}
-	text := item.TextItem.Text
-	ref := item.RefMsg
-	if ref == nil {
-		return text
-	}
-	if ref.MessageItem != nil && isMediaItemType(ref.MessageItem.Type) {
-		return text
-	}
-	var parts []string
-	if strings.TrimSpace(ref.Title) != "" {
-		parts = append(parts, ref.Title)
-	}
-	if ref.MessageItem != nil {
-		if ref.MessageItem.TextItem != nil && strings.TrimSpace(ref.MessageItem.TextItem.Text) != "" {
-			parts = append(parts, ref.MessageItem.TextItem.Text)
-		}
-	}
-	if len(parts) == 0 {
-		return text
-	}
-	return fmt.Sprintf("[引用: %s]\n%s", strings.Join(parts, " | "), text)
+	return item.TextItem.Text
 }
 
-func isMediaItemType(t int) bool {
-	return t == ItemTypeImage || t == ItemTypeVideo || t == ItemTypeFile || t == ItemTypeVoice
+func extractReplyRef(msg WeixinMessage) *channel.ReplyRef {
+	for _, item := range msg.ItemList {
+		ref := item.RefMsg
+		if ref == nil {
+			continue
+		}
+		reply := &channel.ReplyRef{
+			Sender:  strings.TrimSpace(ref.Title),
+			Preview: previewRefMessageItem(ref.MessageItem),
+		}
+		if ref.MessageItem != nil {
+			reply.MessageID = strings.TrimSpace(ref.MessageItem.MsgID)
+		}
+		if reply.MessageID != "" || reply.Sender != "" || reply.Preview != "" {
+			return reply
+		}
+	}
+	return nil
+}
+
+func previewRefMessageItem(item *MessageItem) string {
+	if item == nil {
+		return ""
+	}
+	switch item.Type {
+	case ItemTypeText:
+		if item.TextItem != nil {
+			return trimPreview(item.TextItem.Text)
+		}
+	case ItemTypeVoice:
+		if item.VoiceItem != nil {
+			return trimPreview(item.VoiceItem.Text)
+		}
+	}
+	return ""
+}
+
+func trimPreview(value string) string {
+	preview := strings.TrimSpace(value)
+	if len([]rune(preview)) > 200 {
+		return string([]rune(preview)[:200]) + "..."
+	}
+	return preview
 }
 
 func hasMediaRef(item MessageItem) bool {

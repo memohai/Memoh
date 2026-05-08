@@ -305,6 +305,15 @@ type ReplyRef struct {
 	Preview   string `json:"preview,omitempty"`
 }
 
+// ForwardRef describes the structured origin of a forwarded message.
+type ForwardRef struct {
+	MessageID          string `json:"message_id,omitempty"`
+	FromUserID         string `json:"from_user_id,omitempty"`
+	FromConversationID string `json:"from_conversation_id,omitempty"`
+	Sender             string `json:"sender,omitempty"`
+	Date               int64  `json:"date,omitempty"`
+}
+
 // Message is the unified message structure used across all channels.
 type Message struct {
 	ID          string         `json:"id,omitempty"`
@@ -315,6 +324,7 @@ type Message struct {
 	Actions     []Action       `json:"actions,omitempty"`
 	Thread      *ThreadRef     `json:"thread,omitempty"`
 	Reply       *ReplyRef      `json:"reply,omitempty"`
+	Forward     *ForwardRef    `json:"forward,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 

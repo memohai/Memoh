@@ -19,6 +19,8 @@ import {
   type UIBackgroundTask,
   type UIMessage,
   type UIReasoningMessage,
+  type UIReplyRef,
+  type UIForwardRef,
   type UISystemTurn,
   type UITextMessage,
   type UIToolApproval,
@@ -31,6 +33,7 @@ import {
   sendLocalChannelMessage,
   streamMessageEvents,
   connectWebSocket,
+  locateMessageUI,
 } from '@/composables/api/useChat'
 
 export type TextBlock = UITextMessage
@@ -55,11 +58,14 @@ export interface ChatUserTurn {
   role: 'user'
   text: string
   attachments: AttachmentItem[]
+  reply?: UIReplyRef
+  forward?: UIForwardRef
   timestamp: string
   platform?: string
   senderDisplayName?: string
   senderAvatarUrl?: string
   senderUserId?: string
+  externalMessageId?: string
   streaming: boolean
   isSelf: boolean
 }
@@ -70,6 +76,7 @@ export interface ChatAssistantTurn {
   messages: ContentBlock[]
   timestamp: string
   platform?: string
+  externalMessageId?: string
   streaming: boolean
 }
 
@@ -235,6 +242,30 @@ export const useChatStore = defineStore('chat', () => {
 
   function normalizeAttachment(att: UIAttachment): AttachmentItem {
     return { ...att }
+  }
+
+  function normalizeReplyRef(reply?: UIReplyRef): UIReplyRef | undefined {
+    if (!reply) return undefined
+    const normalized = {
+      message_id: (reply.message_id ?? '').trim(),
+      sender: (reply.sender ?? '').trim(),
+      preview: (reply.preview ?? '').trim(),
+    }
+    return normalized.message_id || normalized.sender || normalized.preview ? normalized : undefined
+  }
+
+  function normalizeForwardRef(forward?: UIForwardRef): UIForwardRef | undefined {
+    if (!forward) return undefined
+    const normalized = {
+      message_id: (forward.message_id ?? '').trim(),
+      from_user_id: (forward.from_user_id ?? '').trim(),
+      from_conversation_id: (forward.from_conversation_id ?? '').trim(),
+      sender: (forward.sender ?? '').trim(),
+      date: typeof forward.date === 'number' && Number.isFinite(forward.date) ? forward.date : undefined,
+    }
+    return normalized.message_id || normalized.from_user_id || normalized.from_conversation_id || normalized.sender || normalized.date
+      ? normalized
+      : undefined
   }
 
   function asRecord(value: unknown): Record<string, unknown> {
@@ -417,11 +448,14 @@ export const useChatStore = defineStore('chat', () => {
         role: 'user',
         text: turn.text ?? '',
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
+        reply: normalizeReplyRef(turn.reply),
+        forward: normalizeForwardRef(turn.forward),
         timestamp: normalizeTimestamp(turn.timestamp),
         platform: (turn.platform ?? '').trim() || undefined,
         senderDisplayName: (turn.sender_display_name ?? '').trim() || undefined,
         senderAvatarUrl: (turn.sender_avatar_url ?? '').trim() || undefined,
         senderUserId: (turn.sender_user_id ?? '').trim() || undefined,
+        externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
         streaming: false,
         isSelf: resolveIsSelf(turn),
       }
@@ -450,6 +484,7 @@ export const useChatStore = defineStore('chat', () => {
       messages: (turn.messages ?? []).map(normalizeUIMessage),
       timestamp: normalizeTimestamp(turn.timestamp),
       platform: (turn.platform ?? '').trim() || undefined,
+      externalMessageId: (turn.external_message_id ?? '').trim() || undefined,
       streaming: false,
     }
   }
@@ -527,6 +562,26 @@ export const useChatStore = defineStore('chat', () => {
 
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
     setMessages(normalizeTurns(items, targetSessionId))
+  }
+
+  function sortChatMessages(items: ChatMessage[]): ChatMessage[] {
+    return [...items].sort((a, b) => {
+      const at = Date.parse(a.timestamp)
+      const bt = Date.parse(b.timestamp)
+      if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt
+      return a.id.localeCompare(b.id)
+    })
+  }
+
+  function mergeMessages(items: UITurn[], targetSessionId?: string) {
+    const merged = new Map<string, ChatMessage>()
+    for (const item of messages) {
+      merged.set(item.id, item)
+    }
+    for (const item of normalizeTurns(items, targetSessionId)) {
+      merged.set(item.id, item)
+    }
+    setMessages(sortChatMessages([...merged.values()]))
   }
 
   function sessionMessageKey(botId?: string | null, sid?: string | null): string {
@@ -1062,6 +1117,38 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function findMessageIdByExternalId(externalMessageId: string): string | null {
+    const target = externalMessageId.trim()
+    if (!target) return null
+    const found = messages.find(message =>
+      (message.role === 'user' || message.role === 'assistant')
+      && message.externalMessageId === target,
+    )
+    return found?.id ?? null
+  }
+
+  async function locateMessageByExternalId(externalMessageId: string): Promise<string | null> {
+    const localID = findMessageIdByExternalId(externalMessageId)
+    if (localID) return localID
+
+    const bid = currentBotId.value ?? ''
+    const sid = sessionId.value ?? ''
+    const target = externalMessageId.trim()
+    if (!bid || !sid || !target) return null
+
+    try {
+      const result = await locateMessageUI(bid, sid, target, PAGE_SIZE, PAGE_SIZE)
+      if (!result.items.length) return null
+      mergeMessages(result.items, sid)
+      hasMoreOlder.value = true
+      cacheCurrentMessages()
+      return result.target_id?.trim() || findMessageIdByExternalId(target)
+    } catch (error) {
+      console.error('Failed to locate message:', error)
+      return null
+    }
+  }
+
   function touchSession(targetSessionId: string) {
     const index = sessions.value.findIndex(session => session.id === targetSessionId)
     if (index < 0) return
@@ -1375,6 +1462,8 @@ export const useChatStore = defineStore('chat', () => {
     respondToolApproval,
     clearMessages,
     loadOlderMessages,
+    findMessageIdByExternalId,
+    locateMessageByExternalId,
     abort,
   }
 })

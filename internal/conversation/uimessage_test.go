@@ -3,6 +3,7 @@ package conversation
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +148,135 @@ func TestConvertMessagesToUITurnsStripsUserYAMLHeaderFallback(t *testing.T) {
 	}
 	if turns[0].Text != "hello" {
 		t.Fatalf("expected YAML header to be stripped, got %q", turns[0].Text)
+	}
+}
+
+func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-1",
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Role:      "user",
+		Content: mustUIMessageJSON(t, ModelMessage{
+			Role: "user",
+			Content: mustUIRawJSON(t, `<message id="msg-image-only" sender="Test User (@test_user)" t="2026-05-08T19:08:58Z" channel="telegram" conversation="Test Group" type="group" target="test-group">
+<attachment path="/data/media/test/test-image.webp"/>
+
+</message>`),
+		}),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "test-image-hash",
+			Mime:        "image/webp",
+			StorageKey:  "media/test/test-image.webp",
+			Name:        "image.webp",
+		}},
+		CreatedAt: now,
+	}})
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("expected XML envelope to be stripped, got %q", turns[0].Text)
+	}
+	if len(turns[0].Attachments) != 1 || turns[0].Attachments[0].Type != "image" {
+		t.Fatalf("expected image attachment to remain, got %#v", turns[0].Attachments)
+	}
+}
+
+func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:                     "user-1",
+		BotID:                  "bot-1",
+		SessionID:              "session-1",
+		Role:                   "user",
+		ExternalMessageID:      "external-user-1",
+		SourceReplyToMessageID: "reply-1",
+		Content: mustUIMessageJSON(t, ModelMessage{
+			Role:    "user",
+			Content: mustUIRawJSON(t, "hello"),
+		}),
+		Metadata: map[string]any{
+			"reply": map[string]any{
+				"message_id": "reply-1",
+				"sender":     "Original Sender",
+				"preview":    "quoted text",
+			},
+			"forward": map[string]any{
+				"message_id":           "forward-1",
+				"from_conversation_id": "source-conversation",
+				"sender":               "Source Channel",
+				"date":                 float64(1710000000),
+			},
+		},
+		CreatedAt: now,
+	}})
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].ExternalMessageID != "external-user-1" {
+		t.Fatalf("unexpected external message id: %q", turns[0].ExternalMessageID)
+	}
+	if turns[0].Reply == nil || turns[0].Reply.MessageID != "reply-1" || turns[0].Reply.Preview != "quoted text" {
+		t.Fatalf("unexpected reply metadata: %#v", turns[0].Reply)
+	}
+	if turns[0].Forward == nil || turns[0].Forward.MessageID != "forward-1" || turns[0].Forward.Sender != "Source Channel" {
+		t.Fatalf("unexpected forward metadata: %#v", turns[0].Forward)
+	}
+}
+
+func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
+	now := time.Now().UTC()
+	longPreview := strings.Repeat("预览", 80)
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-1",
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Role:      "user",
+		Content: mustUIMessageJSON(t, ModelMessage{
+			Role:    "user",
+			Content: mustUIRawJSON(t, "hello"),
+		}),
+		Metadata: map[string]any{
+			"reply": map[string]any{
+				"message_id": "reply-1",
+				"preview":    longPreview,
+			},
+		},
+		CreatedAt: now,
+	}})
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Reply == nil {
+		t.Fatal("expected reply metadata")
+	}
+	if got := len([]rune(turns[0].Reply.Preview)); got > uiReplyPreviewMaxRunes {
+		t.Fatalf("reply preview too long: %d", got)
+	}
+	if !strings.HasSuffix(turns[0].Reply.Preview, "...") {
+		t.Fatalf("expected ellipsis suffix, got %q", turns[0].Reply.Preview)
+	}
+}
+
+func TestConvertMessagesToUITurnsKeepsForwardOnlyUserMessage(t *testing.T) {
+	now := time.Now().UTC()
+	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-1",
+		BotID:     "bot-1",
+		Role:      "user",
+		Content:   json.RawMessage(`{"role":"user","content":[{"type":"text","text":""}]}`),
+		Metadata:  map[string]any{"forward": map[string]any{"message_id": "forward-1", "sender": "Source"}},
+		CreatedAt: now,
+	}})
+	if len(turns) != 1 {
+		t.Fatalf("expected one turn, got %d", len(turns))
+	}
+	if turns[0].Forward == nil || turns[0].Forward.MessageID != "forward-1" {
+		t.Fatalf("unexpected forward metadata: %#v", turns[0].Forward)
 	}
 }
 

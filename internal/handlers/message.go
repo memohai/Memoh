@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
@@ -71,6 +72,7 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	// Bot-scoped message container (single shared history per bot).
 	botGroup := e.Group("/bots/:bot_id")
 	botGroup.GET("/messages", h.ListMessages)
+	botGroup.GET("/messages/locate", h.LocateMessage)
 	botGroup.GET("/messages/events", h.StreamMessageEvents)
 	botGroup.DELETE("/messages", h.DeleteMessages)
 	botGroup.GET("/media/:content_hash", h.ServeMedia)
@@ -207,6 +209,96 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": messages})
+}
+
+// LocateMessage godoc
+// @Summary Locate a bot history message
+// @Description Locate a session message by external message ID and return nearby UI turns
+// @Tags messages
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param session_id query string true "Session ID"
+// @Param external_message_id query string true "External message ID"
+// @Param before query int false "Messages before target"
+// @Param after query int false "Messages after target"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/messages/locate [get].
+func (h *MessageHandler) LocateMessage(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+		return err
+	}
+	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
+		return err
+	}
+	if h.messageService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
+	}
+
+	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	if sessionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+	}
+	externalMessageID := strings.TrimSpace(c.QueryParam("external_message_id"))
+	if externalMessageID == "" {
+		externalMessageID = strings.TrimSpace(c.QueryParam("message_id"))
+	}
+	if externalMessageID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "external_message_id is required")
+	}
+
+	before := parseBoundedInt32(c.QueryParam("before"), 30, 0, 100)
+	after := parseBoundedInt32(c.QueryParam("after"), 30, 0, 100)
+	located, err := h.messageService.LocateByExternalIDBySession(c.Request().Context(), sessionID, externalMessageID, before, after)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "message not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	h.fillAssetMimeFromStorage(c.Request().Context(), botID, located.Messages)
+	items := conversation.ConvertMessagesToUITurns(located.Messages)
+	if h.bgManager != nil {
+		conversation.ApplyBackgroundTaskSnapshots(items, h.backgroundTaskSnapshots(botID, sessionID))
+	}
+	if h.toolApproval != nil {
+		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
+			mergeToolApprovals(items, approvals)
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"items":                      items,
+		"target_id":                  located.TargetID,
+		"target_external_message_id": externalMessageID,
+	})
+}
+
+func parseBoundedInt32(raw string, fallback int32, minValue int32, maxValue int32) int32 {
+	value := fallback
+	if s := strings.TrimSpace(raw); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 32); err == nil {
+			value = int32(n)
+		}
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conversation.UIBackgroundTask {

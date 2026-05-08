@@ -830,26 +830,34 @@ startStream:
 	}
 
 	chatReq := conversation.ChatRequest{
-		BotID:                   identity.BotID,
-		ChatID:                  activeChatID,
-		SessionID:               sessionID,
-		Token:                   token,
-		UserID:                  identity.UserID,
-		SourceChannelIdentityID: identity.ChannelIdentityID,
-		DisplayName:             identity.DisplayName,
-		RouteID:                 resolved.RouteID,
-		ChatToken:               chatToken,
-		ExternalMessageID:       sourceMessageID,
-		ReplyTarget:             target,
-		ConversationType:        msg.Conversation.Type,
-		ConversationName:        msg.Conversation.Name,
-		Query:                   text,
-		CurrentChannel:          msg.Channel.String(),
-		Channels:                []string{msg.Channel.String()},
-		UserMessagePersisted:    false,
-		Attachments:             attachments,
-		OutboundAssetCollector:  assetCollector,
-		EventID:                 eventID,
+		BotID:                     identity.BotID,
+		ChatID:                    activeChatID,
+		SessionID:                 sessionID,
+		Token:                     token,
+		UserID:                    identity.UserID,
+		SourceChannelIdentityID:   identity.ChannelIdentityID,
+		DisplayName:               identity.DisplayName,
+		RouteID:                   resolved.RouteID,
+		ChatToken:                 chatToken,
+		ExternalMessageID:         sourceMessageID,
+		ReplyTarget:               target,
+		ConversationType:          msg.Conversation.Type,
+		ConversationName:          msg.Conversation.Name,
+		SourceReplyToMessageID:    inboundReplyMessageID(msg.Message.Reply),
+		ReplySender:               inboundReplySender(msg.Message.Reply),
+		ReplyPreview:              inboundReplyPreview(msg.Message.Reply),
+		ForwardMessageID:          inboundForwardMessageID(msg.Message.Forward),
+		ForwardFromUserID:         inboundForwardFromUserID(msg.Message.Forward),
+		ForwardFromConversationID: inboundForwardFromConversationID(msg.Message.Forward),
+		ForwardSender:             inboundForwardSender(msg.Message.Forward),
+		ForwardDate:               inboundForwardDate(msg.Message.Forward),
+		Query:                     text,
+		CurrentChannel:            msg.Channel.String(),
+		Channels:                  []string{msg.Channel.String()},
+		UserMessagePersisted:      false,
+		Attachments:               attachments,
+		OutboundAssetCollector:    assetCollector,
+		EventID:                   eventID,
 	}
 	if injectCh != nil {
 		chatReq.InjectCh = injectCh
@@ -1132,6 +1140,108 @@ func rawTextForCommand(msg channel.InboundMessage, fallback string) string {
 	return fallback
 }
 
+func inboundReplyMessageID(reply *channel.ReplyRef) string {
+	if reply == nil {
+		return ""
+	}
+	return strings.TrimSpace(reply.MessageID)
+}
+
+func inboundReplySender(reply *channel.ReplyRef) string {
+	if reply == nil {
+		return ""
+	}
+	return strings.TrimSpace(reply.Sender)
+}
+
+func inboundReplyPreview(reply *channel.ReplyRef) string {
+	if reply == nil {
+		return ""
+	}
+	return strings.TrimSpace(reply.Preview)
+}
+
+func inboundForwardMessageID(forward *channel.ForwardRef) string {
+	if forward == nil {
+		return ""
+	}
+	return strings.TrimSpace(forward.MessageID)
+}
+
+func inboundForwardFromUserID(forward *channel.ForwardRef) string {
+	if forward == nil {
+		return ""
+	}
+	return strings.TrimSpace(forward.FromUserID)
+}
+
+func inboundForwardFromConversationID(forward *channel.ForwardRef) string {
+	if forward == nil {
+		return ""
+	}
+	return strings.TrimSpace(forward.FromConversationID)
+}
+
+func inboundForwardSender(forward *channel.ForwardRef) string {
+	if forward == nil {
+		return ""
+	}
+	return strings.TrimSpace(forward.Sender)
+}
+
+func inboundForwardDate(forward *channel.ForwardRef) int64 {
+	if forward == nil {
+		return 0
+	}
+	return forward.Date
+}
+
+func messageReplyMetadata(reply *channel.ReplyRef) map[string]any {
+	if reply == nil {
+		return nil
+	}
+	result := map[string]any{}
+	if v := strings.TrimSpace(reply.MessageID); v != "" {
+		result["message_id"] = v
+	}
+	if v := strings.TrimSpace(reply.Sender); v != "" {
+		result["sender"] = v
+	}
+	if v := strings.TrimSpace(reply.Preview); v != "" {
+		result["preview"] = v
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func messageForwardMetadata(forward *channel.ForwardRef) map[string]any {
+	if forward == nil {
+		return nil
+	}
+	result := map[string]any{}
+	if v := strings.TrimSpace(forward.MessageID); v != "" {
+		result["message_id"] = v
+	}
+	if v := strings.TrimSpace(forward.FromUserID); v != "" {
+		result["from_user_id"] = v
+	}
+	if v := strings.TrimSpace(forward.FromConversationID); v != "" {
+		result["from_conversation_id"] = v
+	}
+	if v := strings.TrimSpace(forward.Sender); v != "" {
+		result["sender"] = v
+	}
+	if forward.Date > 0 {
+		result["date"] = forward.Date
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func isDirectConversationType(conversationType string) bool {
 	return channel.IsPrivateConversationType(conversationType)
 }
@@ -1215,6 +1325,12 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		"route_id": strings.TrimSpace(routeID),
 		"platform": msg.Channel.String(),
 	}
+	if reply := messageReplyMetadata(msg.Message.Reply); reply != nil {
+		meta["reply"] = reply
+	}
+	if forward := messageForwardMetadata(msg.Message.Forward); forward != nil {
+		meta["forward"] = forward
+	}
 
 	var assets []messagepkg.AssetRef
 	for i, att := range attachments {
@@ -1245,6 +1361,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		SenderChannelIdentityID: strings.TrimSpace(ident.ChannelIdentityID),
 		SenderUserID:            strings.TrimSpace(ident.UserID),
 		ExternalMessageID:       strings.TrimSpace(msg.Message.ID),
+		SourceReplyToMessageID:  inboundReplyMessageID(msg.Message.Reply),
 		Role:                    "user",
 		Content:                 serialized,
 		Metadata:                meta,
@@ -2232,6 +2349,8 @@ func (p *ChannelInboundProcessor) broadcastInboundMessage(
 	inboundMsg := channel.Message{
 		Text:        text,
 		Attachments: resolvedAttachments,
+		Reply:       msg.Message.Reply,
+		Forward:     msg.Message.Forward,
 		Metadata: map[string]any{
 			"external_message_id": strings.TrimSpace(msg.Message.ID),
 			"sender_display_name": strings.TrimSpace(identity.DisplayName),

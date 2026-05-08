@@ -307,6 +307,7 @@ type misskeyNote struct {
 	Mentions   []string     `json:"mentions"`
 	Visibility string       `json:"visibility"`
 	Reply      *misskeyNote `json:"reply"`
+	Renote     *misskeyNote `json:"renote"`
 }
 
 type misskeyUser struct {
@@ -387,32 +388,18 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 
 func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (channel.InboundMessage, bool) {
 	text := strings.TrimSpace(note.Text)
-	if text == "" {
+	forwardRef := buildMisskeyForwardRef(note)
+	if text == "" && forwardRef == nil {
 		return channel.InboundMessage{}, false
 	}
 
 	// Strip the bot mention from the text.
-	if me != nil {
+	if me != nil && text != "" {
 		mention := "@" + me.Username
 		text = strings.TrimSpace(strings.Replace(text, mention, "", 1))
 	}
-	if text == "" {
+	if text == "" && forwardRef == nil {
 		return channel.InboundMessage{}, false
-	}
-
-	// Build quoted context for replies.
-	if note.Reply != nil && note.Reply.Text != "" {
-		quotedText := strings.TrimSpace(note.Reply.Text)
-		if len([]rune(quotedText)) > 200 {
-			quotedText = string([]rune(quotedText)[:200]) + "..."
-		}
-		senderName := note.Reply.User.Name
-		if senderName == "" {
-			senderName = note.Reply.User.Username
-		}
-		if senderName != "" {
-			text = fmt.Sprintf("[Reply to %s: %s]\n%s", senderName, quotedText, text)
-		}
 	}
 
 	senderID := note.UserID
@@ -434,12 +421,7 @@ func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (ch
 		convType = channel.ConversationTypePrivate
 	}
 
-	var replyRef *channel.ReplyRef
-	if note.ReplyID != "" {
-		replyRef = &channel.ReplyRef{
-			MessageID: note.ReplyID,
-		}
-	}
+	replyRef := buildMisskeyReplyRef(note)
 
 	receivedAt := time.Now().UTC()
 	if note.CreatedAt != "" {
@@ -461,10 +443,11 @@ func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (ch
 	return channel.InboundMessage{
 		Channel: Type,
 		Message: channel.Message{
-			ID:     note.ID,
-			Format: channel.MessageFormatPlain,
-			Text:   text,
-			Reply:  replyRef,
+			ID:      note.ID,
+			Format:  channel.MessageFormatPlain,
+			Text:    text,
+			Reply:   replyRef,
+			Forward: forwardRef,
 		},
 		ReplyTarget: note.ID,
 		Sender: channel.Identity{
@@ -484,6 +467,56 @@ func (*MisskeyAdapter) buildInboundMessage(me *meResponse, note misskeyNote) (ch
 			"note_id":      note.ID,
 		},
 	}, true
+}
+
+func buildMisskeyReplyRef(note misskeyNote) *channel.ReplyRef {
+	messageID := strings.TrimSpace(note.ReplyID)
+	if note.Reply != nil && strings.TrimSpace(note.Reply.ID) != "" {
+		messageID = strings.TrimSpace(note.Reply.ID)
+	}
+	reply := &channel.ReplyRef{MessageID: messageID}
+	if note.Reply != nil {
+		reply.Sender = misskeyUserDisplayName(note.Reply.User)
+		reply.Preview = trimMisskeyPreview(note.Reply.Text)
+	}
+	if reply.MessageID == "" && reply.Sender == "" && reply.Preview == "" {
+		return nil
+	}
+	return reply
+}
+
+func buildMisskeyForwardRef(note misskeyNote) *channel.ForwardRef {
+	messageID := strings.TrimSpace(note.RenoteID)
+	if note.Renote != nil && strings.TrimSpace(note.Renote.ID) != "" {
+		messageID = strings.TrimSpace(note.Renote.ID)
+	}
+	forward := &channel.ForwardRef{MessageID: messageID}
+	if note.Renote != nil {
+		forward.FromUserID = strings.TrimSpace(note.Renote.UserID)
+		forward.Sender = misskeyUserDisplayName(note.Renote.User)
+		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(note.Renote.CreatedAt)); err == nil {
+			forward.Date = t.Unix()
+		}
+	}
+	if forward.MessageID == "" && forward.FromUserID == "" && forward.Sender == "" && forward.Date == 0 {
+		return nil
+	}
+	return forward
+}
+
+func misskeyUserDisplayName(user misskeyUser) string {
+	if name := strings.TrimSpace(user.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(user.Username)
+}
+
+func trimMisskeyPreview(value string) string {
+	preview := strings.TrimSpace(value)
+	if len([]rune(preview)) > 200 {
+		return string([]rune(preview)[:200]) + "..."
+	}
+	return preview
 }
 
 func (a *MisskeyAdapter) logInbound(configID string, msg channel.InboundMessage) {

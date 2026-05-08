@@ -175,6 +175,9 @@
       "updated": "Background task updated"
     },
     "readonly": "Read-only",
+    "replyTo": "Reply to {sender}",
+    "forwardedFrom": "Forwarded from {sender}",
+    "unknownMessage": "message",
     "tools": {
       "read": "Read",
       "write": "Write",

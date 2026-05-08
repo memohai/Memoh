@@ -178,6 +178,49 @@ func TestBuildTelegramReplyRef(t *testing.T) {
 	}
 }
 
+func TestBuildTelegramForwardRefFromChannel(t *testing.T) {
+	t.Parallel()
+
+	ref := buildTelegramForwardRef(&tgbotapi.Message{
+		ForwardFromChat:      &tgbotapi.Chat{ID: -10001, Title: "Source Channel", UserName: "source_channel"},
+		ForwardFromMessageID: 99,
+		ForwardDate:          1710000000,
+	})
+	if ref == nil {
+		t.Fatal("expected forward ref")
+	}
+	if ref.MessageID != "99" || ref.FromConversationID != "-10001" {
+		t.Fatalf("unexpected forward ids: %+v", ref)
+	}
+	if ref.Sender != "Source Channel (@source_channel)" || ref.Date != 1710000000 {
+		t.Fatalf("unexpected forward metadata: %+v", ref)
+	}
+}
+
+func TestTelegramInboundKeepsForwardOutOfText(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewTelegramAdapter(nil)
+	inbound, ok := adapter.toInboundTelegramMessage(nil, channel.ChannelConfig{}, &tgbotapi.Message{
+		MessageID:            10,
+		Date:                 1710000000,
+		Chat:                 &tgbotapi.Chat{ID: -10001, Type: "group", Title: "Test Group"},
+		From:                 &tgbotapi.User{ID: 42, UserName: "sender"},
+		Text:                 "forwarded body",
+		ForwardFromChat:      &tgbotapi.Chat{ID: -10002, Title: "Source Channel"},
+		ForwardFromMessageID: 11,
+	}, "forwarded body", nil, nil)
+	if !ok {
+		t.Fatal("expected inbound message")
+	}
+	if inbound.Message.Text != "forwarded body" {
+		t.Fatalf("expected original text without forward prefix, got %q", inbound.Message.Text)
+	}
+	if inbound.Message.Forward == nil || inbound.Message.Forward.MessageID != "11" {
+		t.Fatalf("expected structured forward ref, got %+v", inbound.Message.Forward)
+	}
+}
+
 func TestPickTelegramPhoto(t *testing.T) {
 	t.Parallel()
 

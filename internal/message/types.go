@@ -73,6 +73,11 @@ type PersistInput struct {
 	DisplayText             string
 }
 
+type LocateResult struct {
+	Messages []Message
+	TargetID string
+}
+
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
@@ -91,6 +96,7 @@ type Service interface {
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
+	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error
 	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error

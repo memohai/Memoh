@@ -40,7 +40,7 @@ VALUES (
   $11::text,
   $4
 )
-RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type
 `
 
 type CreateBotACLRuleParams struct {
@@ -75,12 +75,9 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Enabled,
-		&i.Description,
 		&i.Action,
 		&i.Effect,
 		&i.ChannelIdentityID,
-		&i.SubjectChannelType,
 		&i.SourceChannel,
 		&i.SourceConversationType,
 		&i.SourceConversationID,
@@ -88,6 +85,9 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Enabled,
+		&i.Description,
+		&i.SubjectChannelType,
 	)
 	return i, err
 }
@@ -301,7 +301,7 @@ SET
   source_thread_id = $10::text,
   updated_at = now()
 WHERE id = $1
-RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, action, effect, channel_identity_id, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at, enabled, description, subject_channel_type
 `
 
 type UpdateBotACLRuleParams struct {
@@ -334,12 +334,9 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Enabled,
-		&i.Description,
 		&i.Action,
 		&i.Effect,
 		&i.ChannelIdentityID,
-		&i.SubjectChannelType,
 		&i.SourceChannel,
 		&i.SourceConversationType,
 		&i.SourceConversationID,
@@ -347,6 +344,9 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 		&i.CreatedByUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Enabled,
+		&i.Description,
+		&i.SubjectChannelType,
 	)
 	return i, err
 }

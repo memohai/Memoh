@@ -438,6 +438,11 @@ func (a *SlackAdapter) handleMessageEvent(
 	if ev.Message != nil && strings.TrimSpace(ev.Message.ThreadTimestamp) != "" {
 		threadID = strings.TrimSpace(ev.Message.ThreadTimestamp)
 	}
+	parentUserID := ""
+	if ev.Message != nil {
+		parentUserID = strings.TrimSpace(ev.Message.ParentUserId)
+	}
+	replyRef := buildSlackReplyRef(ev.Channel, ev.TimeStamp, threadID, parentUserID)
 	conversationName, _ := a.lookupConversationInfo(ctx, conn.api, cfg.ID, ev.Channel)
 
 	msg := channel.InboundMessage{
@@ -447,6 +452,7 @@ func (a *SlackAdapter) handleMessageEvent(
 			Format:      channel.MessageFormatPlain,
 			Text:        text,
 			Attachments: attachments,
+			Reply:       replyRef,
 		},
 		BotID:       cfg.BotID,
 		ReplyTarget: ev.Channel,
@@ -517,6 +523,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 	if conversationType == "" {
 		conversationType = channel.ConversationTypeGroup
 	}
+	replyRef := buildSlackReplyRef(ev.Channel, ev.TimeStamp, threadID, "")
 
 	msg := channel.InboundMessage{
 		Channel: Type,
@@ -525,6 +532,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 			Format:      channel.MessageFormatPlain,
 			Text:        text,
 			Attachments: attachments,
+			Reply:       replyRef,
 		},
 		BotID:       cfg.BotID,
 		ReplyTarget: ev.Channel,
@@ -1139,6 +1147,21 @@ func slackIdentityAttributes(userID, username, channelType, channelID string) ma
 		}
 	}
 	return attrs
+}
+
+func buildSlackReplyRef(channelID, timestamp, threadTimestamp, parentUserID string) *channel.ReplyRef {
+	threadTimestamp = strings.TrimSpace(threadTimestamp)
+	if threadTimestamp == "" || threadTimestamp == strings.TrimSpace(timestamp) {
+		return nil
+	}
+	ref := &channel.ReplyRef{
+		Target:    strings.TrimSpace(channelID),
+		MessageID: threadTimestamp,
+	}
+	if sender := strings.TrimSpace(parentUserID); sender != "" {
+		ref.Sender = sender
+	}
+	return ref
 }
 
 func (a *SlackAdapter) lookupConversationName(ctx context.Context, api *slack.Client, configID, channelID string) string {

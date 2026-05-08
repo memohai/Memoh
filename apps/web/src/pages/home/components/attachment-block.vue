@@ -8,22 +8,20 @@
       <button
         v-if="isImage(att) || isVideo(att)"
         type="button"
-        class="block w-48 h-48 rounded-lg overflow-hidden border bg-muted/20 hover:ring-2 ring-primary/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
+        class="inline-flex max-w-64 max-h-72 rounded-lg overflow-hidden hover:ring-2 ring-primary/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
         @click="handleMediaClick(att)"
       >
         <img
           v-if="isImage(att)"
           :src="getUrl(att)"
           :alt="String(att.name ?? 'image')"
-          class="w-full h-full object-contain pointer-events-none"
+          class="block max-w-64 max-h-72 w-auto h-auto object-contain pointer-events-none"
           loading="eager"
-          width="192"
-          height="192"
         >
         <video
           v-else
           :src="getUrl(att)"
-          class="w-full h-full object-contain pointer-events-none"
+          class="block max-w-64 max-h-72 w-auto h-auto object-contain pointer-events-none"
           preload="metadata"
           muted
           playsinline

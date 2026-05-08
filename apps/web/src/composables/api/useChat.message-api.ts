@@ -1,5 +1,5 @@
 import { client } from '@memohai/sdk/client'
-import { getBotsByBotIdMessages, postBotsByBotIdLocalMessages } from '@memohai/sdk'
+import { getBotsByBotIdMessages, getBotsByBotIdMessagesLocate, postBotsByBotIdLocalMessages } from '@memohai/sdk'
 import type { ChannelAttachment, ChannelMessage } from '@memohai/sdk'
 import type {
   ChatAttachment,
@@ -47,6 +47,38 @@ export async function fetchMessagesUI(
   })
 
   return (response.data as { items?: UITurn[] } | undefined)?.items ?? []
+}
+
+export interface LocateMessageResult {
+  items: UITurn[]
+  target_id?: string
+  target_external_message_id?: string
+}
+
+export async function locateMessageUI(
+  botId: string,
+  sessionId: string,
+  externalMessageId: string,
+  before = 30,
+  after = 30,
+): Promise<LocateMessageResult> {
+  const response = await getBotsByBotIdMessagesLocate({
+    path: { bot_id: botId },
+    query: {
+      session_id: sessionId,
+      external_message_id: externalMessageId,
+      before,
+      after,
+    },
+    throwOnError: true,
+  })
+
+  const data = response.data as unknown as LocateMessageResult | undefined
+  return {
+    items: data?.items ?? [],
+    target_id: data?.target_id,
+    target_external_message_id: data?.target_external_message_id,
+  }
 }
 
 export interface SendMessageOverrides {

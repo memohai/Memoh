@@ -64,6 +64,7 @@ func buildInboundMessage(body MessageCallbackBody, reqID string) (channel.Inboun
 			Format:      channel.MessageFormatPlain,
 			Text:        strings.TrimSpace(text),
 			Attachments: attachments,
+			Reply:       messageReplyRef(body.Quote, target),
 			Metadata: map[string]any{
 				"response_url": strings.TrimSpace(body.ResponseURL),
 			},
@@ -90,6 +91,20 @@ func buildInboundMessage(body MessageCallbackBody, reqID string) (channel.Inboun
 		},
 	}
 	return msg, true
+}
+
+func messageReplyRef(quote *MessageQuote, target string) *channel.ReplyRef {
+	if quote == nil {
+		return nil
+	}
+	messageID := strings.TrimSpace(quote.MsgID)
+	if messageID == "" {
+		return nil
+	}
+	return &channel.ReplyRef{
+		Target:    strings.TrimSpace(target),
+		MessageID: messageID,
+	}
 }
 
 func buildInboundEventMessage(body EventCallbackBody, reqID string) (channel.InboundMessage, bool) {

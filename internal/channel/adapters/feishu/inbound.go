@@ -115,6 +115,9 @@ func extractFeishuInbound(event *larkim.P2MessageReceiveV1, botOpenID string, lo
 	if message.ChatId != nil {
 		chatID = strings.TrimSpace(*message.ChatId)
 	}
+	if msg.Reply != nil && chatID != "" {
+		msg.Reply.Target = chatID
+	}
 	if message.ChatType != nil {
 		chatTypeRaw = strings.TrimSpace(*message.ChatType)
 		chatType = normalizeFeishuConversationType(chatTypeRaw)

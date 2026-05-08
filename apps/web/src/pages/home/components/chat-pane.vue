@@ -60,14 +60,22 @@
                 </p>
               </div>
 
-              <MessageItem
+              <div
                 v-for="msg in messages"
                 :key="msg.id"
-                :message="msg"
-                :session-type="activeSession?.type"
-                :bot-id="currentBotId"
-                :on-open-media="galleryOpenBySrc"
-              />
+                :data-message-id="msg.id"
+                :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
+                class="rounded-2xl transition-[background-color,box-shadow] duration-500"
+                :class="highlightedMessageId === msg.id ? 'bg-primary/10 ring-2 ring-primary/25' : ''"
+              >
+                <MessageItem
+                  :message="msg"
+                  :session-type="activeSession?.type"
+                  :bot-id="currentBotId"
+                  :on-open-media="galleryOpenBySrc"
+                  :on-reply-click="handleReplyJump"
+                />
+              </div>
             </div>
           </ScrollArea>
         </section>
@@ -252,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, useTemplateRef, watchEffect, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick } from 'vue'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, Lightbulb, CircleAlert } from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
@@ -457,8 +465,14 @@ const descEl = computed<HTMLElement | null>(() => {
 const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
 const isAutoScroll = ref(true)
 const isInstant = ref(false)
+const highlightedMessageId = ref('')
 const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
+let highlightTimer: ReturnType<typeof setTimeout> | null = null
+
+onBeforeUnmount(() => {
+  if (highlightTimer) clearTimeout(highlightTimer)
+})
 
 watch(activeSession, async () => {
   if (!isActive.value) return
@@ -568,6 +582,47 @@ useIntersectionObserver(
     threshold: 0,
   },
 )
+
+function findMessageElement(messageId: string): HTMLElement | null {
+  const root = scrollEl.value
+  if (!root) return null
+  for (const item of Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]'))) {
+    if (item.dataset.messageId === messageId) return item
+  }
+  return null
+}
+
+async function scrollToMessage(messageId: string): Promise<boolean> {
+  await nextTick()
+  const root = scrollEl.value
+  const target = findMessageElement(messageId)
+  if (!root || !target) return false
+  isAutoScroll.value = false
+  isInstant.value = true
+  const rootRect = root.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const offset = targetRect.top - rootRect.top - Math.max(24, root.clientHeight * 0.22)
+  root.scrollTo({ top: root.scrollTop + offset, behavior: 'smooth' })
+  highlightedMessageId.value = messageId
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => {
+    if (highlightedMessageId.value === messageId) {
+      highlightedMessageId.value = ''
+    }
+  }, 1800)
+  return true
+}
+
+async function handleReplyJump(messageId: string) {
+  const target = messageId.trim()
+  if (!target) return
+  const localId = chatStore.findMessageIdByExternalId(target)
+  if (localId && await scrollToMessage(localId)) return
+  const locatedId = await chatStore.locateMessageByExternalId(target)
+  if (locatedId) {
+    await scrollToMessage(locatedId)
+  }
+}
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
