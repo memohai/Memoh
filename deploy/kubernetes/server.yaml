@@ -38,11 +38,19 @@ spec:
         app.kubernetes.io/name: memoh-server
     spec:
       serviceAccountName: memoh-server
+      automountServiceAccountToken: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: migrate
           image: memohai/server:latest
           imagePullPolicy: IfNotPresent
           command: ["/app/memoh-server", "migrate", "up"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /app/config.toml
@@ -53,6 +61,10 @@ spec:
           image: memohai/server:latest
           imagePullPolicy: IfNotPresent
           command: ["/app/memoh-server", "serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8080

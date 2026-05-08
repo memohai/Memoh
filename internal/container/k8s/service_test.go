@@ -70,6 +70,22 @@ func TestCreateContainerCreatesPVCAndPod(t *testing.T) {
 	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
 		t.Fatalf("ImagePullPolicy = %q, want %q", got, corev1.PullIfNotPresent)
 	}
+	if got := pod.Spec.ServiceAccountName; got != workspaceServiceAcct {
+		t.Fatalf("ServiceAccountName = %q, want %q", got, workspaceServiceAcct)
+	}
+	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		t.Fatalf("AutomountServiceAccountToken = %v, want false", pod.Spec.AutomountServiceAccountToken)
+	}
+	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.SeccompProfile == nil || pod.Spec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatalf("pod seccomp profile = %#v, want RuntimeDefault", pod.Spec.SecurityContext)
+	}
+	securityContext := pod.Spec.Containers[0].SecurityContext
+	if securityContext == nil || securityContext.AllowPrivilegeEscalation == nil || *securityContext.AllowPrivilegeEscalation {
+		t.Fatalf("AllowPrivilegeEscalation = %#v, want false", securityContext)
+	}
+	if securityContext.Capabilities == nil || len(securityContext.Capabilities.Drop) != 1 || securityContext.Capabilities.Drop[0] != "ALL" {
+		t.Fatalf("capabilities drop = %#v, want ALL", securityContext.Capabilities)
+	}
 }
 
 func TestCreateContainerMapsImagePullPolicy(t *testing.T) {

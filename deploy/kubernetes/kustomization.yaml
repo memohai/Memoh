@@ -4,6 +4,7 @@ namespace: memoh
 resources:
   - namespace.yaml
   - rbac.yaml
+  - network-policy.yaml
   - config-secret.yaml
   - runtime-installer.yaml
   - postgres.yaml

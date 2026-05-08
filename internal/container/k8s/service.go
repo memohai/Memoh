@@ -35,6 +35,7 @@ import (
 const (
 	runtimeName          = "kubernetes"
 	workspaceContainer   = "workspace"
+	workspaceServiceAcct = "memoh-workspace"
 	dataVolumeName       = "workspace-data"
 	dataMountPath        = "/data"
 	defaultWorkspacePref = "workspace-"
@@ -662,6 +663,13 @@ func (s *Service) namespace() string { return s.cfg.Kubernetes.EffectiveNamespac
 
 func (s *Service) bridgePort() int { return s.cfg.Kubernetes.EffectiveBridgePort() }
 
+func (s *Service) workspaceServiceAccountName() string {
+	if name := strings.TrimSpace(s.cfg.Kubernetes.ServiceAccountName); name != "" {
+		return name
+	}
+	return workspaceServiceAcct
+}
+
 func (s *Service) ensurePVC(ctx context.Context, namespace, name string, req containerapi.CreateContainerRequest) error {
 	if existing, err := s.client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{}); err == nil {
 		if existing.Annotations == nil {
@@ -729,12 +737,27 @@ func (s *Service) ensurePod(ctx context.Context, namespace, pvcName string, req 
 			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy:                 corev1.RestartPolicyAlways,
-			ServiceAccountName:            strings.TrimSpace(s.cfg.Kubernetes.ServiceAccountName),
-			ImagePullSecrets:              imagePullSecrets(s.cfg.Kubernetes.ImagePullSecret),
-			DNSPolicy:                     corev1.DNSClusterFirst,
-			Volumes:                       []corev1.Volume{{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvcName}}}},
-			Containers:                    []corev1.Container{{Name: workspaceContainer, Image: req.ImageRef, ImagePullPolicy: imagePullPolicy(req.ImagePullPolicy), Command: req.Spec.Cmd, Env: env, WorkingDir: req.Spec.WorkDir, TTY: req.Spec.TTY, VolumeMounts: []corev1.VolumeMount{{Name: dataVolumeName, MountPath: dataMountPath}}, Ports: []corev1.ContainerPort{{Name: "bridge", ContainerPort: int32(s.bridgePort())}}}}, //nolint:gosec // bridge_port is validated as an operator-controlled small TCP port.
+			RestartPolicy:                corev1.RestartPolicyAlways,
+			ServiceAccountName:           s.workspaceServiceAccountName(),
+			AutomountServiceAccountToken: boolPtr(false),
+			ImagePullSecrets:             imagePullSecrets(s.cfg.Kubernetes.ImagePullSecret),
+			DNSPolicy:                    corev1.DNSClusterFirst,
+			SecurityContext:              workspacePodSecurityContext(),
+			Volumes: []corev1.Volume{
+				{Name: dataVolumeName, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pvcName}}},
+			},
+			Containers: []corev1.Container{{
+				Name:            workspaceContainer,
+				Image:           req.ImageRef,
+				ImagePullPolicy: imagePullPolicy(req.ImagePullPolicy),
+				Command:         req.Spec.Cmd,
+				Env:             env,
+				WorkingDir:      req.Spec.WorkDir,
+				TTY:             req.Spec.TTY,
+				SecurityContext: workspaceContainerSecurityContext(),
+				VolumeMounts:    []corev1.VolumeMount{{Name: dataVolumeName, MountPath: dataMountPath}},
+				Ports:           []corev1.ContainerPort{{Name: "bridge", ContainerPort: int32(s.bridgePort())}}, //nolint:gosec // bridge_port is validated as an operator-controlled small TCP port.
+			}},
 			TerminationGracePeriodSeconds: int64Ptr(10),
 		},
 	}
@@ -1083,6 +1106,21 @@ func addSpecMounts(pod *corev1.Pod, mounts []containerapi.MountSpec) {
 	}
 }
 
+func workspacePodSecurityContext() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+}
+
+func workspaceContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: boolPtr(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+	}
+}
+
 func imagePullSecrets(name string) []corev1.LocalObjectReference {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -1138,6 +1176,8 @@ func mapK8sMetricsErr(err error) error {
 }
 
 func stringPtr(v string) *string { return &v }
+
+func boolPtr(v bool) *bool { return &v }
 
 func int64Ptr(v int64) *int64 { return &v }
 

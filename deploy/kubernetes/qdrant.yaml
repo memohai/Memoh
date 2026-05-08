@@ -30,10 +30,18 @@ spec:
       labels:
         app.kubernetes.io/name: memoh-qdrant
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: qdrant
           image: qdrant/qdrant:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 6333

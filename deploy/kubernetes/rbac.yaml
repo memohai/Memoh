@@ -9,6 +9,7 @@ kind: ServiceAccount
 metadata:
   name: memoh-workspace
   namespace: memoh
+automountServiceAccountToken: false
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -17,11 +18,17 @@ metadata:
   namespace: memoh
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "persistentvolumeclaims", "services"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshots"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

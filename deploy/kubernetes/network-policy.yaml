@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memoh-workspace-bridge-ingress
+  namespace: memoh
+spec:
+  podSelector:
+    matchLabels:
+      memoh.workspace: v3
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memoh-server
+      ports:
+        - protocol: TCP
+          port: 9090
