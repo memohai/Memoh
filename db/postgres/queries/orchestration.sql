@@ -1461,3 +1461,236 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND target_id = sqlc.arg(target_id)
   AND idempotency_key = sqlc.arg(idempotency_key)
 RETURNING *;
+
+-- name: CreateOrchestrationEnvResource :one
+INSERT INTO orchestration_env_resources (
+  id, tenant_id, owner_subject, kind, name, config, capacity, status, metadata
+) VALUES (
+  sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(owner_subject), sqlc.arg(kind),
+  sqlc.arg(name), sqlc.arg(config), sqlc.arg(capacity), sqlc.arg(status), sqlc.arg(metadata)
+)
+RETURNING *;
+
+-- name: GetOrchestrationEnvResourceByID :one
+SELECT *
+FROM orchestration_env_resources
+WHERE id = sqlc.arg(id);
+
+-- name: GetOrchestrationEnvResourceByTenantName :one
+SELECT *
+FROM orchestration_env_resources
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND name = sqlc.arg(name);
+
+-- name: ListOrchestrationEnvResourcesByTenant :many
+SELECT *
+FROM orchestration_env_resources
+WHERE tenant_id = sqlc.arg(tenant_id)
+ORDER BY name ASC, id ASC;
+
+-- name: UpdateOrchestrationEnvResource :one
+UPDATE orchestration_env_resources
+SET config = sqlc.arg(config),
+    capacity = sqlc.arg(capacity),
+    status = sqlc.arg(status),
+    metadata = sqlc.arg(metadata),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CountActiveOrchestrationEnvSessionsByResource :one
+SELECT COUNT(*)::BIGINT AS active_count
+FROM orchestration_env_sessions
+WHERE resource_id = sqlc.arg(resource_id)
+  AND status IN ('reserved', 'committed', 'held');
+
+-- name: CreateOrchestrationEnvSession :one
+INSERT INTO orchestration_env_sessions (
+  id, tenant_id, resource_id, status, lease_holder_kind, lease_holder_id,
+  lease_token, lease_epoch, lease_acquired_at, lease_expires_at,
+  run_id, task_id, attempt_id, runtime_handle, metadata
+) VALUES (
+  sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(resource_id), sqlc.arg(status),
+  sqlc.arg(lease_holder_kind), sqlc.arg(lease_holder_id),
+  sqlc.arg(lease_token), sqlc.arg(lease_epoch),
+  sqlc.arg(lease_acquired_at), sqlc.arg(lease_expires_at),
+  sqlc.arg(run_id), sqlc.arg(task_id), sqlc.arg(attempt_id),
+  sqlc.arg(runtime_handle), sqlc.arg(metadata)
+)
+RETURNING *;
+
+-- name: GetOrchestrationEnvSessionByID :one
+SELECT *
+FROM orchestration_env_sessions
+WHERE id = sqlc.arg(id);
+
+-- name: GetOrchestrationEnvSessionByIDForUpdate :one
+SELECT *
+FROM orchestration_env_sessions
+WHERE id = sqlc.arg(id)
+FOR UPDATE;
+
+-- name: ListOrchestrationEnvSessionsByResource :many
+SELECT *
+FROM orchestration_env_sessions
+WHERE resource_id = sqlc.arg(resource_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListOrchestrationEnvSessionsByRun :many
+SELECT *
+FROM orchestration_env_sessions
+WHERE run_id = sqlc.arg(run_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListExpiredOrchestrationEnvSessions :many
+SELECT *
+FROM orchestration_env_sessions
+WHERE lease_expires_at IS NOT NULL
+  AND lease_expires_at < sqlc.arg(now)
+  AND status IN ('reserved', 'committed', 'held')
+ORDER BY lease_expires_at ASC, id ASC
+LIMIT sqlc.arg(max_rows);
+
+-- name: UpdateOrchestrationEnvSessionStatus :one
+UPDATE orchestration_env_sessions
+SET status = sqlc.arg(status),
+    runtime_handle = sqlc.arg(runtime_handle),
+    metadata = sqlc.arg(metadata),
+    released_at = sqlc.arg(released_at),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: UpdateOrchestrationEnvSessionLease :one
+UPDATE orchestration_env_sessions
+SET lease_holder_kind = sqlc.arg(lease_holder_kind),
+    lease_holder_id = sqlc.arg(lease_holder_id),
+    lease_token = sqlc.arg(lease_token),
+    lease_epoch = sqlc.arg(lease_epoch),
+    lease_acquired_at = sqlc.arg(lease_acquired_at),
+    lease_expires_at = sqlc.arg(lease_expires_at),
+    attempt_id = sqlc.arg(attempt_id),
+    task_id = sqlc.arg(task_id),
+    run_id = sqlc.arg(run_id),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CreateOrchestrationEnvLeaseReservation :one
+INSERT INTO orchestration_env_lease_reservations (
+  id, tenant_id, resource_id, requester_kind, requester_id,
+  run_id, task_id, attempt_id, priority, status, expires_at, metadata
+) VALUES (
+  sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(resource_id),
+  sqlc.arg(requester_kind), sqlc.arg(requester_id),
+  sqlc.arg(run_id), sqlc.arg(task_id), sqlc.arg(attempt_id),
+  sqlc.arg(priority), sqlc.arg(status), sqlc.arg(expires_at), sqlc.arg(metadata)
+)
+RETURNING *;
+
+-- name: GetOrchestrationEnvLeaseReservationByID :one
+SELECT *
+FROM orchestration_env_lease_reservations
+WHERE id = sqlc.arg(id);
+
+-- name: ListPendingOrchestrationEnvLeaseReservationsByResource :many
+SELECT *
+FROM orchestration_env_lease_reservations
+WHERE resource_id = sqlc.arg(resource_id)
+  AND status = 'pending'
+ORDER BY priority DESC, requested_at ASC, id ASC
+LIMIT sqlc.arg(max_rows);
+
+-- name: CommitOrchestrationEnvLeaseReservation :one
+UPDATE orchestration_env_lease_reservations
+SET status = 'committed',
+    committed_session_id = sqlc.arg(committed_session_id),
+    committed_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'pending'
+RETURNING *;
+
+-- name: AbortOrchestrationEnvLeaseReservation :one
+UPDATE orchestration_env_lease_reservations
+SET status = sqlc.arg(status),
+    aborted_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'pending'
+RETURNING *;
+
+-- name: CreateOrchestrationEnvBinding :one
+INSERT INTO orchestration_env_bindings (
+  id, tenant_id, run_id, task_id, attempt_id, session_id,
+  purpose, status, held_for_checkpoint_id, metadata
+) VALUES (
+  sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(run_id), sqlc.arg(task_id),
+  sqlc.arg(attempt_id), sqlc.arg(session_id),
+  sqlc.arg(purpose), sqlc.arg(status),
+  sqlc.arg(held_for_checkpoint_id), sqlc.arg(metadata)
+)
+RETURNING *;
+
+-- name: GetOrchestrationEnvBindingByID :one
+SELECT *
+FROM orchestration_env_bindings
+WHERE id = sqlc.arg(id);
+
+-- name: ListOrchestrationEnvBindingsBySession :many
+SELECT *
+FROM orchestration_env_bindings
+WHERE session_id = sqlc.arg(session_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListActiveOrchestrationEnvBindingsByRun :many
+SELECT *
+FROM orchestration_env_bindings
+WHERE run_id = sqlc.arg(run_id)
+  AND status IN ('active', 'held')
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListOrchestrationEnvBindingsByAttempt :many
+SELECT *
+FROM orchestration_env_bindings
+WHERE attempt_id = sqlc.arg(attempt_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: UpdateOrchestrationEnvBindingStatus :one
+UPDATE orchestration_env_bindings
+SET status = sqlc.arg(status),
+    held_for_checkpoint_id = sqlc.arg(held_for_checkpoint_id),
+    metadata = sqlc.arg(metadata),
+    released_at = sqlc.arg(released_at),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CreateOrchestrationEnvSnapshot :one
+INSERT INTO orchestration_env_snapshots (
+  id, tenant_id, session_id, run_id, task_id, attempt_id,
+  kind, effect_class, runtime_ref, digest, size_bytes, metadata
+) VALUES (
+  sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(session_id),
+  sqlc.arg(run_id), sqlc.arg(task_id), sqlc.arg(attempt_id),
+  sqlc.arg(kind), sqlc.arg(effect_class),
+  sqlc.arg(runtime_ref), sqlc.arg(digest), sqlc.arg(size_bytes), sqlc.arg(metadata)
+)
+RETURNING *;
+
+-- name: GetOrchestrationEnvSnapshotByID :one
+SELECT *
+FROM orchestration_env_snapshots
+WHERE id = sqlc.arg(id);
+
+-- name: ListOrchestrationEnvSnapshotsBySession :many
+SELECT *
+FROM orchestration_env_snapshots
+WHERE session_id = sqlc.arg(session_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListOrchestrationEnvSnapshotsByAttempt :many
+SELECT *
+FROM orchestration_env_snapshots
+WHERE attempt_id = sqlc.arg(attempt_id)
+ORDER BY created_at ASC, id ASC;

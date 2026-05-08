@@ -407,6 +407,94 @@ type OrchestrationArtifact struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type OrchestrationEnvBinding struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	RunID               pgtype.UUID        `json:"run_id"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	AttemptID           pgtype.UUID        `json:"attempt_id"`
+	SessionID           pgtype.UUID        `json:"session_id"`
+	Purpose             string             `json:"purpose"`
+	Status              string             `json:"status"`
+	HeldForCheckpointID pgtype.UUID        `json:"held_for_checkpoint_id"`
+	Metadata            []byte             `json:"metadata"`
+	ReleasedAt          pgtype.Timestamptz `json:"released_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationEnvLeaseReservation struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	ResourceID         pgtype.UUID        `json:"resource_id"`
+	RequesterKind      string             `json:"requester_kind"`
+	RequesterID        string             `json:"requester_id"`
+	RunID              pgtype.UUID        `json:"run_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	AttemptID          pgtype.UUID        `json:"attempt_id"`
+	Priority           int32              `json:"priority"`
+	Status             string             `json:"status"`
+	CommittedSessionID pgtype.UUID        `json:"committed_session_id"`
+	RequestedAt        pgtype.Timestamptz `json:"requested_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	CommittedAt        pgtype.Timestamptz `json:"committed_at"`
+	AbortedAt          pgtype.Timestamptz `json:"aborted_at"`
+	Metadata           []byte             `json:"metadata"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationEnvResource struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	OwnerSubject string             `json:"owner_subject"`
+	Kind         string             `json:"kind"`
+	Name         string             `json:"name"`
+	Config       []byte             `json:"config"`
+	Capacity     int32              `json:"capacity"`
+	Status       string             `json:"status"`
+	Metadata     []byte             `json:"metadata"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationEnvSession struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	ResourceID      pgtype.UUID        `json:"resource_id"`
+	Status          string             `json:"status"`
+	LeaseHolderKind string             `json:"lease_holder_kind"`
+	LeaseHolderID   string             `json:"lease_holder_id"`
+	LeaseToken      string             `json:"lease_token"`
+	LeaseEpoch      int64              `json:"lease_epoch"`
+	LeaseAcquiredAt pgtype.Timestamptz `json:"lease_acquired_at"`
+	LeaseExpiresAt  pgtype.Timestamptz `json:"lease_expires_at"`
+	RunID           pgtype.UUID        `json:"run_id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	AttemptID       pgtype.UUID        `json:"attempt_id"`
+	RuntimeHandle   []byte             `json:"runtime_handle"`
+	Metadata        []byte             `json:"metadata"`
+	ReleasedAt      pgtype.Timestamptz `json:"released_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OrchestrationEnvSnapshot struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	SessionID   pgtype.UUID        `json:"session_id"`
+	RunID       pgtype.UUID        `json:"run_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AttemptID   pgtype.UUID        `json:"attempt_id"`
+	Kind        string             `json:"kind"`
+	EffectClass string             `json:"effect_class"`
+	RuntimeRef  []byte             `json:"runtime_ref"`
+	Digest      string             `json:"digest"`
+	SizeBytes   int64              `json:"size_bytes"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type OrchestrationEvent struct {
 	ID               pgtype.UUID        `json:"id"`
 	RunID            pgtype.UUID        `json:"run_id"`
