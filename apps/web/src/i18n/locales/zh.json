@@ -173,6 +173,7 @@
     "readonly": "只读",
     "replyTo": "回复 {sender}",
     "forwardedFrom": "转发自 {sender}",
+    "replyPhoto": "图片",
     "unknownMessage": "消息",
     "tools": {
       "read": "读取",

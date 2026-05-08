@@ -174,13 +174,11 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 		var replyRef *channel.ReplyRef
 		if m.ReferencedMessage != nil {
-			if quotedAttachments := a.collectAttachments(m.ReferencedMessage); len(quotedAttachments) > 0 {
-				attachments = append(attachments, quotedAttachments...)
-			}
 			ref := m.ReferencedMessage
 			replyRef = &channel.ReplyRef{
-				MessageID: ref.ID,
-				Target:    m.ChannelID,
+				MessageID:   ref.ID,
+				Target:      m.ChannelID,
+				Attachments: a.collectAttachments(ref),
 			}
 			if ref.Author != nil {
 				replyRef.Sender = strings.TrimSpace(ref.Author.Username)

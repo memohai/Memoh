@@ -25,7 +25,7 @@ const (
 // request attachments by model input modalities, then merges the results
 // into a single []any for the gateway request.
 func (r *Resolver) routeAndMergeAttachments(ctx context.Context, model models.GetResponse, req conversation.ChatRequest) []any {
-	if len(req.Attachments) == 0 {
+	if len(req.Attachments) == 0 && len(req.ReplyAttachments) == 0 {
 		return []any{}
 	}
 	typed := r.prepareGatewayAttachments(ctx, req)
@@ -64,11 +64,12 @@ func (r *Resolver) routeAndMergeAttachments(ctx context.Context, model models.Ge
 }
 
 func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversation.ChatRequest) []gatewayAttachment {
-	if len(req.Attachments) == 0 {
+	attachments := requestAttachmentsForGateway(req)
+	if len(attachments) == 0 {
 		return nil
 	}
-	prepared := make([]gatewayAttachment, 0, len(req.Attachments))
-	for _, raw := range req.Attachments {
+	prepared := make([]gatewayAttachment, 0, len(attachments))
+	for _, raw := range attachments {
 		bundle := conversation.BundleFromChatAttachment(raw)
 		attachmentType := strings.ToLower(strings.TrimSpace(bundle.Type))
 		payload := strings.TrimSpace(bundle.Base64)
@@ -112,6 +113,16 @@ func (r *Resolver) prepareGatewayAttachments(ctx context.Context, req conversati
 		prepared = append(prepared, item)
 	}
 	return prepared
+}
+
+func requestAttachmentsForGateway(req conversation.ChatRequest) []conversation.ChatAttachment {
+	if len(req.ReplyAttachments) == 0 {
+		return req.Attachments
+	}
+	attachments := make([]conversation.ChatAttachment, 0, len(req.Attachments)+len(req.ReplyAttachments))
+	attachments = append(attachments, req.Attachments...)
+	attachments = append(attachments, req.ReplyAttachments...)
+	return attachments
 }
 
 func normalizeGatewayAttachmentPayload(item gatewayAttachment) gatewayAttachment {

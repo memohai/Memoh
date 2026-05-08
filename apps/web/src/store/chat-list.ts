@@ -250,8 +250,9 @@ export const useChatStore = defineStore('chat', () => {
       message_id: (reply.message_id ?? '').trim(),
       sender: (reply.sender ?? '').trim(),
       preview: (reply.preview ?? '').trim(),
+      attachments: (reply.attachments ?? []).map(normalizeAttachment),
     }
-    return normalized.message_id || normalized.sender || normalized.preview ? normalized : undefined
+    return normalized.message_id || normalized.sender || normalized.preview || normalized.attachments.length ? normalized : undefined
   }
 
   function normalizeForwardRef(forward?: UIForwardRef): UIForwardRef | undefined {

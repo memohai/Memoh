@@ -177,6 +177,7 @@
     "readonly": "Read-only",
     "replyTo": "Reply to {sender}",
     "forwardedFrom": "Forwarded from {sender}",
+    "replyPhoto": "Photo",
     "unknownMessage": "message",
     "tools": {
       "read": "Read",

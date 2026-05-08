@@ -203,6 +203,13 @@ func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 				"message_id": "reply-1",
 				"sender":     "Original Sender",
 				"preview":    "quoted text",
+				"attachments": []map[string]any{{
+					"type":         "image",
+					"content_hash": "image-hash",
+					"mime":         "image/png",
+					"name":         "quoted.png",
+					"metadata":     map[string]any{"bot_id": "bot-1", "storage_key": "im/image-hash.png"},
+				}},
 			},
 			"forward": map[string]any{
 				"message_id":           "forward-1",
@@ -222,6 +229,9 @@ func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 	}
 	if turns[0].Reply == nil || turns[0].Reply.MessageID != "reply-1" || turns[0].Reply.Preview != "quoted text" {
 		t.Fatalf("unexpected reply metadata: %#v", turns[0].Reply)
+	}
+	if len(turns[0].Reply.Attachments) != 1 || turns[0].Reply.Attachments[0].ContentHash != "image-hash" {
+		t.Fatalf("unexpected reply attachments: %#v", turns[0].Reply.Attachments)
 	}
 	if turns[0].Forward == nil || turns[0].Forward.MessageID != "forward-1" || turns[0].Forward.Sender != "Source Channel" {
 		t.Fatalf("unexpected forward metadata: %#v", turns[0].Forward)

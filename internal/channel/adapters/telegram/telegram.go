@@ -628,11 +628,6 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		return channel.InboundMessage{}, false
 	}
 	rawText := text
-	if raw.ReplyToMessage != nil {
-		if quotedAttachments := a.collectTelegramAttachments(bot, raw.ReplyToMessage); len(quotedAttachments) > 0 {
-			attachments = append(attachments, quotedAttachments...)
-		}
-	}
 	subjectID, displayName, attrs := resolveTelegramSender(raw)
 	chatID := ""
 	chatTypeRaw := ""
@@ -645,6 +640,9 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		chatName = strings.TrimSpace(raw.Chat.Title)
 	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
+	if replyRef != nil {
+		replyRef.Attachments = a.collectTelegramAttachments(bot, raw.ReplyToMessage)
+	}
 	forwardRef := buildTelegramForwardRef(raw)
 	botUsername := ""
 	botID := int64(0)

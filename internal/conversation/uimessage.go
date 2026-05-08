@@ -32,9 +32,10 @@ type UIAttachment struct {
 }
 
 type UIReplyRef struct {
-	MessageID string `json:"message_id,omitempty"`
-	Sender    string `json:"sender,omitempty"`
-	Preview   string `json:"preview,omitempty"`
+	MessageID   string         `json:"message_id,omitempty"`
+	Sender      string         `json:"sender,omitempty"`
+	Preview     string         `json:"preview,omitempty"`
+	Attachments []UIAttachment `json:"attachments,omitempty"`
 }
 
 type UIForwardRef struct {

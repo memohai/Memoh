@@ -419,11 +419,14 @@ func TestMatrixHandleEventExpandsRepliedImageContext(t *testing.T) {
 	if captured.Message.Reply.Sender != "Memoh" {
 		t.Fatalf("unexpected reply sender: %q", captured.Message.Reply.Sender)
 	}
-	if len(captured.Message.Attachments) != 1 {
-		t.Fatalf("expected one quoted attachment, got %d", len(captured.Message.Attachments))
+	if len(captured.Message.Attachments) != 0 {
+		t.Fatalf("expected no current attachments, got %d", len(captured.Message.Attachments))
 	}
-	if captured.Message.Attachments[0].PlatformKey != "mxc://matrix.example.com/media123" {
-		t.Fatalf("unexpected quoted attachment: %#v", captured.Message.Attachments[0])
+	if len(captured.Message.Reply.Attachments) != 1 {
+		t.Fatalf("expected one quoted attachment, got %d", len(captured.Message.Reply.Attachments))
+	}
+	if captured.Message.Reply.Attachments[0].PlatformKey != "mxc://matrix.example.com/media123" {
+		t.Fatalf("unexpected quoted attachment: %#v", captured.Message.Reply.Attachments[0])
 	}
 	isReplyToBot, _ := captured.Metadata["is_reply_to_bot"].(bool)
 	if !isReplyToBot {

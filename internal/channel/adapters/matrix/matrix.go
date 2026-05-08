@@ -625,6 +625,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 	rawText := body
 	isReplyToBot := false
 	var replySender, replyPreview string
+	var replyAttachments []channel.Attachment
 	if replyTo != "" {
 		repliedEvent, err := a.fetchRoomEvent(ctx, parsed, evt.RoomID, replyTo)
 		if err != nil {
@@ -637,9 +638,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 				)
 			}
 		} else {
-			if quotedAttachments := matrixQuotedAttachments(repliedEvent); len(quotedAttachments) > 0 {
-				attachments = append(attachments, quotedAttachments...)
-			}
+			replyAttachments = matrixQuotedAttachments(repliedEvent)
 			isReplyToBot = strings.EqualFold(strings.TrimSpace(repliedEvent.Sender), parsed.UserID)
 			replySender = matrixDisplayName(repliedEvent)
 			preview, _ := extractMatrixInboundContent(repliedEvent.Content)
@@ -694,10 +693,11 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 	}
 	if replyTo != "" {
 		msg.Message.Reply = &channel.ReplyRef{
-			Target:    evt.RoomID,
-			MessageID: replyTo,
-			Sender:    replySender,
-			Preview:   replyPreview,
+			Target:      evt.RoomID,
+			MessageID:   replyTo,
+			Sender:      replySender,
+			Preview:     replyPreview,
+			Attachments: replyAttachments,
 		}
 	}
 	if a.logger != nil {

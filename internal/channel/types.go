@@ -299,10 +299,11 @@ type ThreadRef struct {
 
 // ReplyRef points to a message being replied to.
 type ReplyRef struct {
-	Target    string `json:"target,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	Sender    string `json:"sender,omitempty"`
-	Preview   string `json:"preview,omitempty"`
+	Target      string       `json:"target,omitempty"`
+	MessageID   string       `json:"message_id,omitempty"`
+	Sender      string       `json:"sender,omitempty"`
+	Preview     string       `json:"preview,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // ForwardRef describes the structured origin of a forwarded message.

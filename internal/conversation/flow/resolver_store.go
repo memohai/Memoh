@@ -300,6 +300,9 @@ func buildInteractionMetadata(req conversation.ChatRequest) map[string]any {
 	if v := strings.TrimSpace(req.ReplyPreview); v != "" {
 		reply["preview"] = v
 	}
+	if attachments := chatAttachmentMetadata(req.ReplyAttachments); len(attachments) > 0 {
+		reply["attachments"] = attachments
+	}
 	if len(reply) > 0 {
 		meta["reply"] = reply
 	}
@@ -327,6 +330,23 @@ func buildInteractionMetadata(req conversation.ChatRequest) map[string]any {
 		return nil
 	}
 	return meta
+}
+
+func chatAttachmentMetadata(attachments []conversation.ChatAttachment) []map[string]any {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(attachments))
+	for _, att := range attachments {
+		item := conversation.BundleFromChatAttachment(att).ToMap()
+		if len(item) > 0 {
+			result = append(result, item)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func mergeMetadata(base, extra map[string]any) map[string]any {

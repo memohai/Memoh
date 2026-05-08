@@ -112,6 +112,7 @@ export interface UIReplyRef {
   message_id?: string
   sender?: string
   preview?: string
+  attachments?: UIAttachment[]
 }
 
 export interface UIForwardRef {

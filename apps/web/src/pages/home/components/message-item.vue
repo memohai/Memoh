@@ -187,18 +187,29 @@
               class="absolute inset-y-0 left-0 w-[3px]"
               :class="isSelf ? 'bg-background/60' : 'bg-primary/70'"
             />
-            <div
-              class="truncate text-[11px] font-semibold"
-              :class="isSelf ? 'text-background' : 'text-primary'"
-            >
-              {{ replySenderLabel }}
-            </div>
-            <div
-              v-if="message.reply.preview"
-              class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words"
-              :class="isSelf ? 'text-background/75' : 'text-muted-foreground'"
-            >
-              {{ message.reply.preview }}
+            <div class="flex min-w-0 items-start gap-2">
+              <div class="min-w-0 flex-1">
+                <div
+                  class="truncate text-[11px] font-semibold"
+                  :class="isSelf ? 'text-background' : 'text-primary'"
+                >
+                  {{ replySenderLabel }}
+                </div>
+                <div
+                  v-if="replyPreviewLabel"
+                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words"
+                  :class="isSelf ? 'text-background/75' : 'text-muted-foreground'"
+                >
+                  {{ replyPreviewLabel }}
+                </div>
+              </div>
+              <img
+                v-if="replyThumbnailSrc"
+                :src="replyThumbnailSrc"
+                :alt="replyPreviewLabel || replySenderLabel"
+                class="size-9 shrink-0 rounded-sm object-cover"
+                loading="lazy"
+              >
             </div>
           </button>
           <div v-if="cleanUserText(message.text)">
@@ -318,11 +329,13 @@ import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 // import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import type {
+  AttachmentItem,
   ChatMessage,
   ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
+import { resolveUrl } from '../composables/useMediaGallery'
 
 enableKatex()
 enableMermaid()
@@ -385,6 +398,27 @@ const canJumpReply = computed(() =>
   && !!props.message.reply?.message_id?.trim()
   && typeof props.onReplyClick === 'function',
 )
+
+const replyThumbnail = computed<AttachmentItem | null>(() => {
+  if (props.message.role !== 'user') return null
+  return (props.message.reply?.attachments ?? []).find((att) => isImageAttachment(att) && resolveUrl(att)) ?? null
+})
+
+const replyThumbnailSrc = computed(() => replyThumbnail.value ? resolveUrl(replyThumbnail.value) : '')
+
+const replyPreviewLabel = computed(() => {
+  if (props.message.role !== 'user') return ''
+  const preview = props.message.reply?.preview?.trim()
+  if (preview) return preview
+  return replyThumbnailSrc.value ? t('chat.replyPhoto') : ''
+})
+
+function isImageAttachment(att: AttachmentItem): boolean {
+  const type = String(att.type ?? '').toLowerCase()
+  if (type === 'image' || type === 'gif') return true
+  const mime = String(att.mime ?? '').toLowerCase()
+  return mime.startsWith('image/')
+}
 
 function handleReplyClick() {
   if (props.message.role !== 'user') return

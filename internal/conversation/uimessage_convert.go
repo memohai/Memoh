@@ -771,11 +771,68 @@ func uiReplyFromMessage(raw messagepkg.Message) *UIReplyRef {
 		if v, ok := meta["preview"].(string); ok {
 			reply.Preview = truncateUIReplyPreview(v)
 		}
+		reply.Attachments = uiAttachmentsFromReplyMetadata(meta["attachments"], raw.BotID)
 	}
-	if reply.MessageID == "" && reply.Sender == "" && reply.Preview == "" {
+	if reply.MessageID == "" && reply.Sender == "" && reply.Preview == "" && len(reply.Attachments) == 0 {
 		return nil
 	}
 	return &reply
+}
+
+func uiAttachmentsFromReplyMetadata(value any, botID string) []UIAttachment {
+	rawItems := replyAttachmentMetadataItems(value)
+	if len(rawItems) == 0 {
+		return nil
+	}
+	attachments := make([]UIAttachment, 0, len(rawItems))
+	for _, item := range rawItems {
+		att := UIAttachment{
+			Type:        normalizeUIAttachmentType(stringFromAny(item["type"]), stringFromAny(item["mime"])),
+			Path:        stringFromAny(item["path"]),
+			URL:         stringFromAny(item["url"]),
+			Base64:      stringFromAny(item["base64"]),
+			Name:        stringFromAny(item["name"]),
+			ContentHash: stringFromAny(item["content_hash"]),
+			BotID:       strings.TrimSpace(botID),
+			Mime:        stringFromAny(item["mime"]),
+			Size:        int64FromAny(item["size"]),
+			StorageKey:  stringFromAny(item["storage_key"]),
+		}
+		if meta, ok := item["metadata"].(map[string]any); ok {
+			att.Metadata = meta
+			if att.BotID == "" {
+				att.BotID = stringFromAny(meta["bot_id"])
+			}
+			if att.StorageKey == "" {
+				att.StorageKey = stringFromAny(meta["storage_key"])
+			}
+		}
+		if att.Type == "" {
+			att.Type = "file"
+		}
+		attachments = append(attachments, att)
+	}
+	if len(attachments) == 0 {
+		return nil
+	}
+	return attachments
+}
+
+func replyAttachmentMetadataItems(value any) []map[string]any {
+	switch items := value.(type) {
+	case []any:
+		result := make([]map[string]any, 0, len(items))
+		for _, raw := range items {
+			if item, ok := raw.(map[string]any); ok {
+				result = append(result, item)
+			}
+		}
+		return result
+	case []map[string]any:
+		return items
+	default:
+		return nil
+	}
 }
 
 func truncateUIReplyPreview(value string) string {

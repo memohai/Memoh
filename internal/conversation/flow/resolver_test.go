@@ -151,6 +151,26 @@ func TestRouteAndMergeAttachments_ImagePathOnlyFallsBackToFile(t *testing.T) {
 	}
 }
 
+func TestPrepareGatewayAttachments_IncludesReplyAttachments(t *testing.T) {
+	resolver := &Resolver{logger: slog.Default()}
+	req := conversation.ChatRequest{
+		Attachments: []conversation.ChatAttachment{
+			{Type: "image", URL: "https://example.com/current.png"},
+		},
+		ReplyAttachments: []conversation.ChatAttachment{
+			{Type: "image", URL: "https://example.com/reply.png"},
+		},
+	}
+
+	prepared := resolver.prepareGatewayAttachments(context.Background(), req)
+	if len(prepared) != 2 {
+		t.Fatalf("expected current and reply attachments, got %d", len(prepared))
+	}
+	if prepared[0].Payload != "https://example.com/current.png" || prepared[1].Payload != "https://example.com/reply.png" {
+		t.Fatalf("unexpected prepared attachments: %#v", prepared)
+	}
+}
+
 func TestPrepareGatewayAttachments_DetectsImageMimeWhenOctetStream(t *testing.T) {
 	jpegBytes := []byte{
 		0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46,

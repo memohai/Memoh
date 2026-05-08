@@ -403,8 +403,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	resolvedAttachments := p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Attachments)
 	msg.Message.Attachments = resolvedAttachments
+	if msg.Message.Reply != nil && len(msg.Message.Reply.Attachments) > 0 {
+		msg.Message.Reply.Attachments = p.ingestInboundAttachments(ctx, cfg, msg, strings.TrimSpace(identity.BotID), msg.Message.Reply.Attachments)
+	}
 	hadVoiceAttachment := containsVoiceAttachment(resolvedAttachments)
 	attachments := mapChannelToChatAttachments(resolvedAttachments)
+	replyAttachments := mapChannelToChatAttachments(replyAttachmentsFromMessage(msg.Message.Reply))
 	text = strings.TrimSpace(msg.Message.PlainText())
 
 	// Detect inbound mode from message prefix (/btw, /now, /next).
@@ -846,6 +850,7 @@ startStream:
 		SourceReplyToMessageID:    inboundReplyMessageID(msg.Message.Reply),
 		ReplySender:               inboundReplySender(msg.Message.Reply),
 		ReplyPreview:              inboundReplyPreview(msg.Message.Reply),
+		ReplyAttachments:          replyAttachments,
 		ForwardMessageID:          inboundForwardMessageID(msg.Message.Forward),
 		ForwardFromUserID:         inboundForwardFromUserID(msg.Message.Forward),
 		ForwardFromConversationID: inboundForwardFromConversationID(msg.Message.Forward),
@@ -1161,6 +1166,13 @@ func inboundReplyPreview(reply *channel.ReplyRef) string {
 	return strings.TrimSpace(reply.Preview)
 }
 
+func replyAttachmentsFromMessage(reply *channel.ReplyRef) []channel.Attachment {
+	if reply == nil {
+		return nil
+	}
+	return reply.Attachments
+}
+
 func inboundForwardMessageID(forward *channel.ForwardRef) string {
 	if forward == nil {
 		return ""
@@ -1209,6 +1221,26 @@ func messageReplyMetadata(reply *channel.ReplyRef) map[string]any {
 	}
 	if v := strings.TrimSpace(reply.Preview); v != "" {
 		result["preview"] = v
+	}
+	if attachments := channelAttachmentMetadata(reply.Attachments); len(attachments) > 0 {
+		result["attachments"] = attachments
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func channelAttachmentMetadata(attachments []channel.Attachment) []map[string]any {
+	if len(attachments) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(attachments))
+	for _, att := range attachments {
+		item := channel.BundleFromAttachment(att).ToMap()
+		if len(item) > 0 {
+			result = append(result, item)
+		}
 	}
 	if len(result) == 0 {
 		return nil
