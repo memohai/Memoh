@@ -164,7 +164,13 @@ export interface UIAttachmentsMessage {
   attachments: UIAttachment[]
 }
 
-export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage
+export interface UIErrorMessage {
+  id: number
+  type: 'error'
+  content: string
+}
+
+export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage
 
 export interface UIUserTurn {
   role: 'user'

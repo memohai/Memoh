@@ -223,6 +223,15 @@
             />
           </div>
 
+          <!-- Error block -->
+          <div
+            v-else-if="block.type === 'error' && block.content"
+            class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+            <span class="min-w-0 whitespace-pre-wrap break-words">{{ block.content }}</span>
+          </div>
+
           <!-- Attachment block -->
           <AttachmentBlock
             v-else-if="block.type === 'attachments'"
@@ -254,7 +263,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { LoaderCircle } from 'lucide-vue-next'
+import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'

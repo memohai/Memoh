@@ -119,6 +119,13 @@
             @change="handleFileInputChange"
           >
           <section>
+            <div
+              v-if="composerError"
+              class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+              <span class="min-w-0 break-words">{{ composerError }}</span>
+            </div>
             <InputGroup class="bg-transparent overflow-hidden shadow-none! ring-0! border-border!">
               <InputGroupTextarea
                 v-model="inputText"
@@ -246,7 +253,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, useTemplateRef, watchEffect, watch, nextTick } from 'vue'
-import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, Lightbulb } from 'lucide-vue-next'
+import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, Lightbulb, CircleAlert } from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
@@ -276,6 +283,7 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
+const composerError = ref('')
 const modelPopoverOpen = ref(false)
 const reasoningPopoverOpen = ref(false)
 const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
@@ -612,15 +620,28 @@ async function handleSend() {
   if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return
 
   const sentDraftKey = inputDraftKey.value
+  composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
   pendingFiles.value = []
 
   let attachments: ChatAttachment[] | undefined
-  if (files.length) {
-    attachments = await Promise.all(files.map(fileToAttachment))
+  try {
+    if (files.length) {
+      attachments = await Promise.all(files.map(fileToAttachment))
+    }
+  } catch (error) {
+    inputText.value = text
+    pendingFiles.value = files
+    composerError.value = error instanceof Error ? error.message : t('chat.sendFailed')
+    return
   }
 
-  chatStore.sendMessage(text, attachments)
+  const result = await chatStore.sendMessage(text, attachments)
+  if (!result.ok && result.stage === 'startup') {
+    inputText.value = result.restoreInput ?? text
+    pendingFiles.value = files
+    composerError.value = result.error || t('chat.sendFailed')
+  }
 }
 </script>

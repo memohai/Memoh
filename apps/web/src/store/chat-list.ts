@@ -15,6 +15,7 @@ import {
   type ChatWebSocket,
   type UIAttachment,
   type UIAttachmentsMessage,
+  type UIErrorMessage,
   type UIBackgroundTask,
   type UIMessage,
   type UIReasoningMessage,
@@ -36,6 +37,7 @@ export type TextBlock = UITextMessage
 export type ThinkingBlock = UIReasoningMessage
 export type AttachmentItem = UIAttachment
 export type AttachmentBlock = UIAttachmentsMessage
+export type ErrorBlock = UIErrorMessage
 
 export interface ToolCallBlock extends UIToolMessage {
   toolCallId: string
@@ -46,7 +48,7 @@ export interface ToolCallBlock extends UIToolMessage {
   backgroundTask?: BackgroundTask
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
 
 export interface ChatUserTurn {
   id: string
@@ -106,6 +108,27 @@ interface PendingAssistantStream {
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
+  streamError?: StreamFailureError
+}
+
+export type SendMessageStage = 'startup' | 'stream'
+
+export interface SendMessageResult {
+  ok: boolean
+  stage?: SendMessageStage
+  error?: string
+  restoreInput?: string
+  restoreAttachments?: ChatAttachment[]
+}
+
+class StreamFailureError extends Error {
+  stage: SendMessageStage
+
+  constructor(message: string, stage: SendMessageStage) {
+    super(message)
+    this.name = 'StreamFailureError'
+    this.stage = stage
+  }
 }
 
 interface SessionMessageState {
@@ -156,6 +179,7 @@ export const useChatStore = defineStore('chat', () => {
   // Switching tabs saves/restores from here; the active session remains the
   // only live `messages` array rendered by ChatPane.
   const sessionMessageStates = new Map<string, SessionMessageState>()
+  const ephemeralAssistantErrors = new Map<string, string[]>()
   const messageEventsStream = useRetryingStream()
 
   const activeSession = computed(() =>
@@ -379,6 +403,8 @@ export const useChatStore = defineStore('chat', () => {
           ...msg,
           attachments: msg.attachments.map(normalizeAttachment),
         }
+      case 'error':
+        return { ...msg }
       default:
         return { ...msg }
     }
@@ -468,9 +494,29 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function normalizeTurns(items: UITurn[]): ChatMessage[] {
+  function appendEphemeralErrors(items: ChatMessage[], targetSessionId?: string) {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    if (!sid) return
+    const errors = ephemeralAssistantErrors.get(sid)
+    if (!errors?.length) return
+    const assistantTurn = [...items].reverse().find((item): item is ChatAssistantTurn => item.role === 'assistant')
+    if (!assistantTurn) return
+    for (const error of errors) {
+      const text = error.trim()
+      if (!text) continue
+      if (assistantTurn.messages.some(block => block.type === 'error' && block.content === text)) continue
+      assistantTurn.messages.push({
+        id: nextAssistantMessageId(assistantTurn),
+        type: 'error',
+        content: text,
+      })
+    }
+  }
+
+  function normalizeTurns(items: UITurn[], targetSessionId?: string): ChatMessage[] {
     const normalized = items.map(normalizeTurn)
     reconcileBackgroundTasksInMessages(normalized)
+    appendEphemeralErrors(normalized, targetSessionId)
     return normalized
   }
 
@@ -479,8 +525,8 @@ export const useChatStore = defineStore('chat', () => {
     updateSinceFromMessages(items)
   }
 
-  function replaceMessages(items: UITurn[]) {
-    setMessages(normalizeTurns(items))
+  function replaceMessages(items: UITurn[], targetSessionId?: string) {
+    setMessages(normalizeTurns(items, targetSessionId))
   }
 
   function sessionMessageKey(botId?: string | null, sid?: string | null): string {
@@ -571,6 +617,10 @@ export const useChatStore = defineStore('chat', () => {
     session.assistantTurn.streaming = false
     session.done = true
     pendingAssistantStream = null
+    if (session.streamError) {
+      session.reject(session.streamError)
+      return
+    }
     session.resolve()
   }
 
@@ -603,25 +653,28 @@ export const useChatStore = defineStore('chat', () => {
     return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
   }
 
+  function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
+    return turn.messages.some(block => block.type !== 'error')
+  }
+
+  function rememberAssistantError(errorMessage: string) {
+    const sid = (streamingSessionId.value ?? sessionId.value ?? '').trim()
+    const text = errorMessage.trim()
+    if (!sid || !text) return
+    const current = ephemeralAssistantErrors.get(sid) ?? []
+    if (current.includes(text)) return
+    ephemeralAssistantErrors.set(sid, [...current, text].slice(-5))
+  }
+
   function appendAssistantError(session: PendingAssistantStream, errorMessage: string) {
     const text = errorMessage.trim()
     if (!text) return
 
-    for (let index = session.assistantTurn.messages.length - 1; index >= 0; index -= 1) {
-      const current = session.assistantTurn.messages[index]
-      if (current?.type === 'text') {
-        session.assistantTurn.messages[index] = {
-          ...current,
-          content: `${current.content}\n\n**Error:** ${text}`.trim(),
-        }
-        return
-      }
-    }
-
+    rememberAssistantError(text)
     session.assistantTurn.messages.push({
       id: nextAssistantMessageId(session.assistantTurn),
-      type: 'text',
-      content: `**Error:** ${text}`,
+      type: 'error',
+      content: text,
     })
   }
 
@@ -657,11 +710,22 @@ export const useChatStore = defineStore('chat', () => {
         break
       case 'error': {
         const session = ensureDiscussStream()
-        appendAssistantError(session, event.message || 'stream error')
-        rejectPendingAssistantStream(new Error(event.message || 'stream error'))
-        streamingSessionId.value = null
+        const message = event.message || 'stream error'
+        const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
+        if (stage === 'stream') {
+          appendAssistantError(session, message)
+          session.assistantTurn.streaming = false
+          session.streamError = new StreamFailureError(message, stage)
+        } else {
+          const idx = messages.indexOf(session.assistantTurn)
+          if (idx >= 0) messages.splice(idx, 1)
+          rejectPendingAssistantStream(new StreamFailureError(message, stage))
+        }
         loading.value = false
-        abortFn = null
+        if (stage === 'startup') {
+          streamingSessionId.value = null
+          abortFn = null
+        }
         break
       }
     }
@@ -710,7 +774,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const promise = (async () => {
       const turns = await fetchMessagesUI(bid, sid, { limit: PAGE_SIZE })
-      const normalized = normalizeTurns(turns)
+      const normalized = normalizeTurns(turns, sid)
       const moreOlder = turns.length > 0
       if (currentBotId.value === bid && sessionId.value === sid) {
         setMessages(normalized)
@@ -1118,12 +1182,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(text: string, attachments?: ChatAttachment[]) {
+  async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
-    if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return
+    if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return { ok: false, stage: 'startup' }
 
     loading.value = true
     let assistantTurn: ChatAssistantTurn | null = null
+    let userTurn: ChatUserTurn | null = null
 
     try {
       await ensureActiveSession()
@@ -1132,7 +1197,8 @@ export const useChatStore = defineStore('chat', () => {
       const sid = sessionId.value!
       streamingSessionId.value = sid
 
-      messages.push(createOptimisticUserTurn(trimmed, attachments))
+      userTurn = createOptimisticUserTurn(trimmed, attachments)
+      messages.push(userTurn)
       messages.push(createOptimisticAssistantTurn())
       assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
 
@@ -1142,6 +1208,9 @@ export const useChatStore = defineStore('chat', () => {
 
       const ws = ensureWebSocket(bid)
       if (ws) {
+        if (!ws.connected) {
+          throw new StreamFailureError('WebSocket is not connected', 'startup')
+        }
         const completion = createCompletionForAssistantTurn(assistantTurn)
         abortFn = () => {
           const abortError = new Error('aborted')
@@ -1170,15 +1239,27 @@ export const useChatStore = defineStore('chat', () => {
       loading.value = false
       abortFn = null
       touchSession(sid)
+      return { ok: true }
     } catch (error) {
       const isAbort = error instanceof Error && error.name === 'AbortError'
       const reason = error instanceof Error ? error.message : 'Unknown error'
-      if (!isAbort && assistantTurn) {
-        assistantTurn.messages = [{
-          id: 0,
-          type: 'text',
-          content: `Failed to send message: ${reason}`,
-        }]
+      const stage: SendMessageStage = error instanceof StreamFailureError
+        ? error.stage
+        : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+
+      if (!isAbort && stage === 'startup') {
+        if (assistantTurn) {
+          const idx = messages.indexOf(assistantTurn)
+          if (idx >= 0) messages.splice(idx, 1)
+        }
+        if (userTurn) {
+          const idx = messages.indexOf(userTurn)
+          if (idx >= 0) messages.splice(idx, 1)
+        }
+      } else if (!isAbort && assistantTurn && stage === 'stream') {
+        if (!assistantTurn.messages.some(block => block.type === 'error')) {
+          appendAssistantError({ assistantTurn, done: false, resolve: () => {}, reject: () => {} }, reason)
+        }
         assistantTurn.streaming = false
       } else if (!isAbort) {
         messages.push({
@@ -1186,8 +1267,8 @@ export const useChatStore = defineStore('chat', () => {
           role: 'assistant',
           messages: [{
             id: 0,
-            type: 'text',
-            content: `Failed to send message: ${reason}`,
+            type: 'error',
+            content: reason,
           }],
           timestamp: new Date().toISOString(),
           streaming: false,
@@ -1197,6 +1278,17 @@ export const useChatStore = defineStore('chat', () => {
       streamingSessionId.value = null
       loading.value = false
       abortFn = null
+      if (isAbort) return { ok: false, stage: 'stream', error: reason }
+      if (stage === 'startup') {
+        return {
+          ok: false,
+          stage,
+          error: reason,
+          restoreInput: text,
+          restoreAttachments: attachments,
+        }
+      }
+      return { ok: false, stage, error: reason }
     }
   }
 

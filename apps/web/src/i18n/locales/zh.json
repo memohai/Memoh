@@ -155,6 +155,7 @@
     "readonlyHint": "该聊天为只读",
     "readonlyPlaceholder": "该聊天为只读，无法发送消息",
     "send": "发送",
+    "sendFailed": "消息发送失败",
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "开启新对话",
