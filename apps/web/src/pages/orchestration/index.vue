@@ -73,6 +73,7 @@ import {
   type RunInspectorTask,
   type RunListItem,
 } from './model'
+import { useRunEventStream } from './composables/use-run-event-stream'
 
 type NodeKind = 'trigger' | 'llm' | 'planner' | 'search' | 'tool' | 'memory' | 'merge' | 'verify' | 'output'
 type InspectorTab = 'thinking' | 'config' | 'task' | 'inputs' | 'outputs' | 'logs'
@@ -356,12 +357,36 @@ watch(selectedRunId, async () => {
   resetCanvasView()
 })
 
+// SSE-driven refresh. While the watch stream is open we skip the poll loop
+// entirely; the timer below is just a safety net for when the bus is down,
+// so it ticks slowly on purpose.
+let streamRefetchTimer: number | null = null
+function scheduleInspectorRefetch() {
+  if (streamRefetchTimer !== null) return
+  streamRefetchTimer = window.setTimeout(() => {
+    streamRefetchTimer = null
+    if (!selectedRunId.value) return
+    void refetchInspector()
+  }, 250)
+}
+
+const isStreamEnabled = computed(() => Boolean(selectedRunId.value) && isInspectorRunActive())
+
+const { status: runEventStreamStatus } = useRunEventStream({
+  runId: selectedRunId,
+  enabled: isStreamEnabled,
+  onEvent: () => {
+    scheduleInspectorRefetch()
+  },
+})
+
 onMounted(() => {
   setupCanvasViewport()
   inspectorRefreshTimer = window.setInterval(() => {
     if (!selectedRunId.value || !isInspectorRunActive()) return
+    if (runEventStreamStatus.value === 'open') return
     void refetchInspector()
-  }, 2500)
+  }, 5000)
   nextTick(resetCanvasView)
 })
 
@@ -378,6 +403,10 @@ onBeforeUnmount(() => {
   if (zoomFrame) window.cancelAnimationFrame(zoomFrame)
   if (zoomCommitTimer) window.clearTimeout(zoomCommitTimer)
   if (inspectorRefreshTimer) window.clearInterval(inspectorRefreshTimer)
+  if (streamRefetchTimer !== null) {
+    window.clearTimeout(streamRefetchTimer)
+    streamRefetchTimer = null
+  }
   if (inspectorSelectionFrame) window.cancelAnimationFrame(inspectorSelectionFrame)
   if (taskScrollFrame) window.cancelAnimationFrame(taskScrollFrame)
 })
