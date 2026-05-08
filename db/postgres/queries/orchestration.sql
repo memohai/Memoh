@@ -1339,6 +1339,18 @@ WHERE run_id = sqlc.arg(run_id)
 ORDER BY seq ASC
 LIMIT sqlc.arg(limit_count);
 
+-- name: ListUnpublishedOrchestrationRunEvents :many
+SELECT *
+FROM orchestration_events
+WHERE published_at IS NULL
+ORDER BY run_id ASC, seq ASC
+LIMIT sqlc.arg(limit_count);
+
+-- name: MarkOrchestrationRunEventPublished :exec
+UPDATE orchestration_events
+SET published_at = NOW()
+WHERE id = sqlc.arg(id) AND published_at IS NULL;
+
 -- name: GetTerminalOrchestrationVerificationEventByID :one
 SELECT *
 FROM orchestration_events

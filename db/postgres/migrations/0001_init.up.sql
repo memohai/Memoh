@@ -1227,6 +1227,10 @@ CREATE INDEX IF NOT EXISTS idx_orchestration_events_run_seq ON orchestration_eve
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_aggregate_seq ON orchestration_events(run_id, aggregate_type, aggregate_id, seq DESC);
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_task_seq ON orchestration_events(task_id, seq) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_orchestration_events_checkpoint_seq ON orchestration_events(checkpoint_id, seq) WHERE checkpoint_id IS NOT NULL;
+-- Partial index used by the run-event outbox dispatcher to scan unpublished
+-- rows in commit order without paying for the published majority.
+CREATE INDEX IF NOT EXISTS idx_orchestration_events_unpublished
+    ON orchestration_events(run_id, seq) WHERE published_at IS NULL;
 
 -- orchestration_projection_snapshots: materialized projection snapshots keyed by seq
 CREATE TABLE IF NOT EXISTS orchestration_projection_snapshots (

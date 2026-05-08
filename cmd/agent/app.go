@@ -86,6 +86,7 @@ import (
 	"github.com/memohai/memoh/internal/orchestration"
 	"github.com/memohai/memoh/internal/orchestrationbus"
 	"github.com/memohai/memoh/internal/orchestrationexec"
+	"github.com/memohai/memoh/internal/orchestrationoutbox"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/providers"
@@ -376,6 +377,48 @@ func provideOrchestrationBus(lc fx.Lifecycle, log *slog.Logger, cfg config.Confi
 		},
 	})
 	return bus, nil
+}
+
+// provideOrchestrationOutbox wires the run-event outbox dispatcher. It runs
+// alongside the orchestration kernel and bridges committed Postgres events to
+// the bus.
+func provideOrchestrationOutbox(log *slog.Logger, queries *dbsqlc.Queries, bus orchestrationbus.Bus) *orchestrationoutbox.Dispatcher {
+	if queries == nil {
+		return nil
+	}
+	return orchestrationoutbox.New(log, queries, bus, orchestrationoutbox.Config{})
+}
+
+// startOrchestrationOutbox starts the dispatcher loop and stops it on shutdown.
+func startOrchestrationOutbox(lc fx.Lifecycle, log *slog.Logger, dispatcher *orchestrationoutbox.Dispatcher, orchestrationService *orchestration.Service, bus orchestrationbus.Bus) {
+	if dispatcher == nil {
+		return
+	}
+	if orchestrationService != nil {
+		orchestrationService.SetEventCommittedHook(dispatcher.Notify)
+		orchestrationService.SetEventBus(bus)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	lc.Append(fx.Hook{
+		OnStart: func(_ context.Context) error {
+			go func() {
+				defer close(done)
+				dispatcher.Run(ctx)
+			}()
+			return nil
+		},
+		OnStop: func(stopCtx context.Context) error {
+			cancel()
+			select {
+			case <-done:
+				return nil
+			case <-stopCtx.Done():
+				log.Warn("orchestration outbox did not stop in time", slog.Any("error", stopCtx.Err()))
+				return stopCtx.Err()
+			}
+		},
+	})
 }
 
 func provideAgent(log *slog.Logger, provider bridge.Provider) *agentpkg.Agent {

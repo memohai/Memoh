@@ -23,6 +23,7 @@ import (
 
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/orchestrationbus"
 )
 
 type Service struct {
@@ -32,6 +33,8 @@ type Service struct {
 	attemptAssignments AttemptAssignmentPublisher
 	startRunPlanner    StartRunPlanner
 	replanner          Replanner
+	eventCommittedHook func()
+	eventBus           orchestrationbus.Bus
 }
 
 type StartRunPlanner interface {
@@ -60,6 +63,39 @@ func (s *Service) SetStartRunPlanner(planner StartRunPlanner) {
 
 func (s *Service) SetReplanner(planner Replanner) {
 	s.replanner = planner
+}
+
+// SetEventCommittedHook registers a callback fired immediately after the
+// orchestration kernel commits a transaction that produced one or more
+// run events. The hook should return quickly: callers like the outbox
+// dispatcher use it to drop publish latency from one polling interval to
+// "near zero" by waking the dispatcher loop.
+func (s *Service) SetEventCommittedHook(fn func()) {
+	s.eventCommittedHook = fn
+}
+
+// SetEventBus registers the orchestration bus used by WatchRun to push
+// committed events without polling Postgres. When bus is nil the kernel
+// keeps the legacy polling fan-out, which is safe but adds 250-500ms of
+// latency per event.
+func (s *Service) SetEventBus(bus orchestrationbus.Bus) {
+	s.eventBus = bus
+}
+
+// notifyEventCommitted is wired from kernel commit paths in a follow-up
+// (PLAN.md Stage 1.5). The polling fall-back in the dispatcher already keeps
+// publish latency under one tick, so the helper is shipped pre-built but not
+// yet invoked.
+func (s *Service) notifyEventCommitted() { //nolint:unused // wired in follow-up
+	if s == nil || s.eventCommittedHook == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("event committed hook panicked", slog.Any("panic", r))
+		}
+	}()
+	s.eventCommittedHook()
 }
 
 func (s *Service) StartRun(ctx context.Context, caller ControlIdentity, req StartRunRequest) (RunHandle, error) {
@@ -730,17 +766,42 @@ func (s *Service) WatchRun(ctx context.Context, caller ControlIdentity, runID st
 	if err != nil {
 		return nil, err
 	}
+
+	// Subscribe before backfilling so we don't miss events that commit
+	// between the snapshot and the first ListRunEvents call. Anything that
+	// arrives both in backfill and on the bus is deduped by afterSeq below.
+	var sub orchestrationbus.RunEventSubscription
+	if s.eventBus != nil {
+		sub, err = s.eventBus.SubscribeRunEvents(ctx, runID)
+		if err != nil {
+			s.logger.Warn("watch run bus subscribe failed; falling back to polling",
+				slog.String("run_id", runID),
+				slog.Any("error", err),
+			)
+			sub = nil
+		}
+	}
+
 	snapshot, err := s.GetRunSnapshot(ctx, caller, runID)
 	if err != nil {
+		if sub != nil {
+			_ = sub.Close()
+		}
 		return nil, err
 	}
 	if req.AfterSeq > snapshot.SnapshotSeq {
+		if sub != nil {
+			_ = sub.Close()
+		}
 		return nil, fmt.Errorf("%w: after_seq exceeds current snapshot", ErrInvalidArgument)
 	}
 
 	events := make(chan RunEvent, 128)
 	go func() {
 		defer close(events)
+		if sub != nil {
+			defer func() { _ = sub.Close() }()
+		}
 
 		afterSeq := req.AfterSeq
 		flushUntil := func(targetSeq uint64) bool {
@@ -773,6 +834,12 @@ func (s *Service) WatchRun(ctx context.Context, caller ControlIdentity, runID st
 			return
 		}
 
+		if sub != nil {
+			s.streamRunEventsFromBus(ctx, caller, runID, sub, events, &afterSeq)
+			return
+		}
+
+		// Polling fallback for when the bus is unavailable.
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -797,6 +864,112 @@ func (s *Service) WatchRun(ctx context.Context, caller ControlIdentity, runID st
 	}()
 
 	return events, nil
+}
+
+// streamRunEventsFromBus pushes committed events from the bus to the
+// caller. A periodic Postgres reconcile catches the case where the bus
+// dropped or fell behind, so the watcher never silently stalls.
+func (s *Service) streamRunEventsFromBus(
+	ctx context.Context,
+	caller ControlIdentity,
+	runID string,
+	sub orchestrationbus.RunEventSubscription,
+	events chan<- RunEvent,
+	afterSeq *uint64,
+) {
+	const reconcileInterval = 5 * time.Second
+	reconcile := time.NewTicker(reconcileInterval)
+	defer reconcile.Stop()
+
+	flushUntil := func(targetSeq uint64) bool {
+		for *afterSeq < targetSeq {
+			page, listErr := s.ListRunEvents(ctx, caller, runID, ListRunEventsRequest{
+				AfterSeq: *afterSeq,
+				UntilSeq: targetSeq,
+				Limit:    defaultEventLimit,
+			})
+			if listErr != nil {
+				s.logger.Warn("watch run reconcile list failed", slog.String("run_id", runID), slog.Any("error", listErr))
+				return false
+			}
+			if len(page.Items) == 0 {
+				return true
+			}
+			for _, event := range page.Items {
+				select {
+				case <-ctx.Done():
+					return false
+				case events <- event:
+				}
+				*afterSeq = event.Seq
+			}
+		}
+		return true
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case env, ok := <-sub.Events():
+			if !ok {
+				// Bus closed the channel. Reconcile once from Postgres before
+				// exiting so the caller still gets anything we missed.
+				if snap, snapErr := s.GetRunSnapshot(ctx, caller, runID); snapErr == nil {
+					_ = flushUntil(snap.SnapshotSeq)
+				}
+				return
+			}
+			if env.Seq <= *afterSeq {
+				continue
+			}
+			runEvent := runEventFromBusEnvelope(env)
+			select {
+			case <-ctx.Done():
+				return
+			case events <- runEvent:
+			}
+			*afterSeq = env.Seq
+		case <-reconcile.C:
+			snap, err := s.GetRunSnapshot(ctx, caller, runID)
+			if err != nil {
+				s.logger.Warn("watch run reconcile snapshot failed", slog.String("run_id", runID), slog.Any("error", err))
+				continue
+			}
+			if snap.SnapshotSeq <= *afterSeq {
+				continue
+			}
+			if !flushUntil(snap.SnapshotSeq) {
+				return
+			}
+		}
+	}
+}
+
+func runEventFromBusEnvelope(env orchestrationbus.RunEventEnvelope) RunEvent {
+	var publishedAt *time.Time
+	if !env.PublishedAt.IsZero() {
+		ts := env.PublishedAt
+		publishedAt = &ts
+	}
+	return RunEvent{
+		ID:               env.EventID,
+		RunID:            env.RunID,
+		TaskID:           env.TaskID,
+		AttemptID:        env.AttemptID,
+		CheckpointID:     env.CheckpointID,
+		Seq:              env.Seq,
+		AggregateType:    env.AggregateType,
+		AggregateID:      env.AggregateID,
+		AggregateVersion: env.AggregateVersion,
+		Type:             env.Type,
+		CausationEventID: env.CausationEventID,
+		CorrelationID:    env.CorrelationID,
+		IdempotencyKey:   env.IdempotencyKey,
+		Payload:          sanitizeEventPayload(env.Payload),
+		CreatedAt:        env.CreatedAt,
+		PublishedAt:      publishedAt,
+	}
 }
 
 func (s *Service) InjectRunHint(ctx context.Context, caller ControlIdentity, runID string, req InjectRunHintRequest) (*InjectRunHintResult, error) {

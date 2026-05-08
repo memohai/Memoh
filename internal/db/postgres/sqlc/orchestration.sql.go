@@ -3493,6 +3493,51 @@ func (q *Queries) ListSchedulableOrchestrationTasks(ctx context.Context) ([]Orch
 	return items, nil
 }
 
+const listUnpublishedOrchestrationRunEvents = `-- name: ListUnpublishedOrchestrationRunEvents :many
+SELECT id, run_id, task_id, attempt_id, checkpoint_id, seq, aggregate_type, aggregate_id, aggregate_version, type, causation_event_id, correlation_id, idempotency_key, payload, created_at, published_at
+FROM orchestration_events
+WHERE published_at IS NULL
+ORDER BY run_id ASC, seq ASC
+LIMIT $1
+`
+
+func (q *Queries) ListUnpublishedOrchestrationRunEvents(ctx context.Context, limitCount int32) ([]OrchestrationEvent, error) {
+	rows, err := q.db.Query(ctx, listUnpublishedOrchestrationRunEvents, limitCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrchestrationEvent
+	for rows.Next() {
+		var i OrchestrationEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.TaskID,
+			&i.AttemptID,
+			&i.CheckpointID,
+			&i.Seq,
+			&i.AggregateType,
+			&i.AggregateID,
+			&i.AggregateVersion,
+			&i.Type,
+			&i.CausationEventID,
+			&i.CorrelationID,
+			&i.IdempotencyKey,
+			&i.Payload,
+			&i.CreatedAt,
+			&i.PublishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markOrchestrationHumanCheckpointCancelled = `-- name: MarkOrchestrationHumanCheckpointCancelled :one
 UPDATE orchestration_human_checkpoints
 SET status = 'cancelled',
@@ -3696,6 +3741,17 @@ func (q *Queries) MarkOrchestrationRunCompleted(ctx context.Context, id pgtype.U
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const markOrchestrationRunEventPublished = `-- name: MarkOrchestrationRunEventPublished :exec
+UPDATE orchestration_events
+SET published_at = NOW()
+WHERE id = $1 AND published_at IS NULL
+`
+
+func (q *Queries) MarkOrchestrationRunEventPublished(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markOrchestrationRunEventPublished, id)
+	return err
 }
 
 const markOrchestrationRunFailed = `-- name: MarkOrchestrationRunFailed :one

@@ -21,6 +21,8 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/orchestrationbus"
+	"github.com/memohai/memoh/internal/orchestrationoutbox"
 )
 
 type fixedStartRunPlanner struct {
@@ -11167,6 +11169,102 @@ func TestIntegrationWatchRunStreamsHistoricalAndLiveEvents(t *testing.T) {
 				seenReady = true
 			}
 		}
+	}
+}
+
+func TestIntegrationWatchRunDeliversEventsThroughBusOutbox(t *testing.T) {
+	svc, pool, cleanup := setupOrchestrationIntegrationTest(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	bus := orchestrationbus.NewInMemoryBus(0)
+	defer func() { _ = bus.Close() }()
+
+	dispatcher := orchestrationoutbox.New(slog.New(slog.DiscardHandler), sqlc.New(pool), bus, orchestrationoutbox.Config{
+		BatchSize:    32,
+		PollInterval: 100 * time.Millisecond,
+	})
+	svc.SetEventCommittedHook(dispatcher.Notify)
+	svc.SetEventBus(bus)
+
+	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
+	defer dispatcherCancel()
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(dispatcherCtx)
+	}()
+	defer func() {
+		dispatcherCancel()
+		<-dispatcherDone
+	}()
+
+	caller := ControlIdentity{TenantID: "tenant-bus-watch", Subject: "user-bus-watch"}
+	handle, err := svc.StartRun(ctx, caller, StartRunRequest{
+		Goal:           "watch via bus outbox",
+		IdempotencyKey: "watch-run-bus-start",
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	defer cleanupOrchestrationIntegrationRun(t, context.Background(), pool, handle.RunID)
+	defer cleanupOrchestrationIntegrationIdempotency(t, context.Background(), pool, caller.TenantID, caller.Subject)
+
+	stream, err := svc.WatchRun(ctx, caller, handle.RunID, WatchRunRequest{})
+	if err != nil {
+		t.Fatalf("WatchRun() error = %v", err)
+	}
+
+	processRunPlanningIntent(t, ctx, svc)
+
+	var (
+		seenCreated bool
+		seenReady   bool
+		lastSeq     uint64
+	)
+	for !seenCreated || !seenReady {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("bus-backed watch stream timed out: created=%v ready=%v", seenCreated, seenReady)
+		case event, ok := <-stream:
+			if !ok {
+				t.Fatal("bus-backed watch stream closed before expected events arrived")
+			}
+			if event.Seq <= lastSeq {
+				t.Fatalf("bus-backed watch stream seq = %d, want strictly increasing after %d", event.Seq, lastSeq)
+			}
+			lastSeq = event.Seq
+			switch event.Type {
+			case "run.event.created":
+				seenCreated = true
+			case "run.event.task.ready":
+				seenReady = true
+			}
+		}
+	}
+
+	pgRunID, err := db.ParseUUID(handle.RunID)
+	if err != nil {
+		t.Fatalf("parse run id: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var unpublished int
+		err := pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM orchestration_events WHERE run_id = $1 AND published_at IS NULL`, pgRunID,
+		).Scan(&unpublished)
+		if err != nil {
+			t.Fatalf("count unpublished events: %v", err)
+		}
+		if unpublished == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dispatcher left %d unpublished events for run %s", unpublished, handle.RunID)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

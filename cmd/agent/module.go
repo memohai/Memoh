@@ -75,6 +75,7 @@ func options() fx.Option {
 			audiopkg.NewService,
 			provideAudioTempStore,
 			provideOrchestrationBus,
+			provideOrchestrationOutbox,
 			orchestration.NewService,
 			emailpkg.NewDBOAuthTokenStore,
 			provideEmailRegistry,
@@ -166,6 +167,7 @@ func options() fx.Option {
 			startAudioTempStoreCleanup,
 			startServer,
 			startOrchestrationRuntime,
+			startOrchestrationOutbox,
 		),
 		fx.WithLogger(func(logger *slog.Logger) fxevent.Logger {
 			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
