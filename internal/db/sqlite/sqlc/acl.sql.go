@@ -12,8 +12,8 @@ import (
 
 const createBotACLRule = `-- name: CreateBotACLRule :one
 INSERT INTO bot_acl_rules (
-  id, bot_id, priority, enabled, description,
-  action, effect, subject_kind,
+  id, bot_id, enabled, description,
+  action, effect,
   channel_identity_id, subject_channel_type,
   source_channel, source_conversation_type,
   source_conversation_id, source_thread_id,
@@ -28,30 +28,26 @@ VALUES (
   ?1,
   ?2,
   ?3,
-  ?4,
   'chat.trigger',
+  ?4,
   ?5,
   ?6,
   ?7,
   ?8,
   ?9,
   ?10,
-  ?11,
-  ?12,
-  ?13
+  ?11
 )
-RETURNING id, bot_id, priority, enabled, description, action, effect, subject_kind, channel_identity_id,
+RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id,
   subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id,
   created_by_user_id, created_at, updated_at
 `
 
 type CreateBotACLRuleParams struct {
 	BotID                  string         `json:"bot_id"`
-	Priority               int64          `json:"priority"`
 	Enabled                int64          `json:"enabled"`
 	Description            sql.NullString `json:"description"`
 	Effect                 string         `json:"effect"`
-	SubjectKind            string         `json:"subject_kind"`
 	ChannelIdentityID      sql.NullString `json:"channel_identity_id"`
 	SubjectChannelType     sql.NullString `json:"subject_channel_type"`
 	SourceChannel          sql.NullString `json:"source_channel"`
@@ -64,11 +60,9 @@ type CreateBotACLRuleParams struct {
 func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRuleParams) (BotAclRule, error) {
 	row := q.db.QueryRowContext(ctx, createBotACLRule,
 		arg.BotID,
-		arg.Priority,
 		arg.Enabled,
 		arg.Description,
 		arg.Effect,
-		arg.SubjectKind,
 		arg.ChannelIdentityID,
 		arg.SubjectChannelType,
 		arg.SourceChannel,
@@ -81,12 +75,10 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Priority,
 		&i.Enabled,
 		&i.Description,
 		&i.Action,
 		&i.Effect,
-		&i.SubjectKind,
 		&i.ChannelIdentityID,
 		&i.SubjectChannelType,
 		&i.SourceChannel,
@@ -110,42 +102,45 @@ func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, id string) error {
 }
 
 const evaluateBotACLRule = `-- name: EvaluateBotACLRule :one
-SELECT effect
-FROM bot_acl_rules
-WHERE bot_id = ?1
-  AND enabled = true
-  AND action = ?2
-  AND (
-    subject_kind = 'all'
-    OR (subject_kind = 'channel_identity' AND channel_identity_id = ?3)
-    OR (subject_kind = 'channel_type' AND subject_channel_type = ?4)
-  )
-  AND (source_conversation_type IS NULL OR source_conversation_type = ?5)
-  AND (source_conversation_id IS NULL OR source_conversation_id = ?6)
-  AND (source_thread_id IS NULL OR source_thread_id = ?7)
-ORDER BY priority ASC, created_at ASC
-LIMIT 1
+SELECT COALESCE((
+  SELECT r.effect
+  FROM bot_acl_rules r
+  WHERE r.bot_id = b.id
+    AND r.enabled = true
+    AND r.action = ?1
+    AND r.effect <> b.acl_default_effect
+    AND (r.subject_channel_type IS NULL OR r.subject_channel_type = ?2)
+    AND (r.channel_identity_id IS NULL OR r.channel_identity_id = ?3)
+    AND (r.source_conversation_type IS NULL OR r.source_conversation_type = ?4)
+    AND (r.source_conversation_id IS NULL OR r.source_conversation_id = ?5)
+    AND (r.source_thread_id IS NULL OR r.source_thread_id = ?6)
+  LIMIT 1
+), b.acl_default_effect) AS effect
+FROM bots b
+WHERE b.id = ?7
 `
 
 type EvaluateBotACLRuleParams struct {
-	BotID                  string         `json:"bot_id"`
 	Action                 string         `json:"action"`
-	ChannelIdentityID      sql.NullString `json:"channel_identity_id"`
 	SubjectChannelType     sql.NullString `json:"subject_channel_type"`
+	ChannelIdentityID      sql.NullString `json:"channel_identity_id"`
 	SourceConversationType sql.NullString `json:"source_conversation_type"`
 	SourceConversationID   sql.NullString `json:"source_conversation_id"`
 	SourceThreadID         sql.NullString `json:"source_thread_id"`
+	BotID                  string         `json:"bot_id"`
 }
 
+// Mode-based ACL: only rules opposite to bots.acl_default_effect can override the default.
+// If no matching override exists, returns bots.acl_default_effect.
 func (q *Queries) EvaluateBotACLRule(ctx context.Context, arg EvaluateBotACLRuleParams) (string, error) {
 	row := q.db.QueryRowContext(ctx, evaluateBotACLRule,
-		arg.BotID,
 		arg.Action,
-		arg.ChannelIdentityID,
 		arg.SubjectChannelType,
+		arg.ChannelIdentityID,
 		arg.SourceConversationType,
 		arg.SourceConversationID,
 		arg.SourceThreadID,
+		arg.BotID,
 	)
 	var effect string
 	err := row.Scan(&effect)
@@ -167,12 +162,10 @@ const listBotACLRules = `-- name: ListBotACLRules :many
 SELECT
   r.id,
   r.bot_id,
-  r.priority,
   r.enabled,
   r.description,
   r.action,
   r.effect,
-  r.subject_kind,
   r.channel_identity_id,
   r.subject_channel_type,
   r.source_conversation_type,
@@ -188,40 +181,51 @@ SELECT
   linked.id AS linked_user_id,
   linked.username AS linked_user_username,
   linked.display_name AS linked_user_display_name,
-  linked.avatar_url AS linked_user_avatar_url
+  linked.avatar_url AS linked_user_avatar_url,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_name'), '')), ''),
+    NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_handle'), '')), ''),
+    ''
+  ) AS source_conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(json_extract(source_route.metadata, '$.conversation_avatar_url'), '')), ''), '') AS source_conversation_avatar_url
 FROM bot_acl_rules r
 LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
 LEFT JOIN users linked ON linked.id = ci.user_id
+LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id
+  AND r.source_conversation_id IS NOT NULL
+  AND source_route.external_conversation_id = r.source_conversation_id
+  AND COALESCE(source_route.external_thread_id, '') = COALESCE(r.source_thread_id, '')
+  AND (r.source_channel IS NULL OR source_route.channel_type = r.source_channel)
 WHERE r.bot_id = ?1
   AND r.action = 'chat.trigger'
-ORDER BY r.priority ASC, r.created_at ASC
+ORDER BY r.created_at DESC
 `
 
 type ListBotACLRulesRow struct {
-	ID                         string         `json:"id"`
-	BotID                      string         `json:"bot_id"`
-	Priority                   int64          `json:"priority"`
-	Enabled                    int64          `json:"enabled"`
-	Description                sql.NullString `json:"description"`
-	Action                     string         `json:"action"`
-	Effect                     string         `json:"effect"`
-	SubjectKind                string         `json:"subject_kind"`
-	ChannelIdentityID          sql.NullString `json:"channel_identity_id"`
-	SubjectChannelType         sql.NullString `json:"subject_channel_type"`
-	SourceConversationType     sql.NullString `json:"source_conversation_type"`
-	SourceConversationID       sql.NullString `json:"source_conversation_id"`
-	SourceThreadID             sql.NullString `json:"source_thread_id"`
-	CreatedByUserID            sql.NullString `json:"created_by_user_id"`
-	CreatedAt                  string         `json:"created_at"`
-	UpdatedAt                  string         `json:"updated_at"`
-	ChannelType                sql.NullString `json:"channel_type"`
-	ChannelSubjectID           sql.NullString `json:"channel_subject_id"`
-	ChannelIdentityDisplayName sql.NullString `json:"channel_identity_display_name"`
-	ChannelIdentityAvatarUrl   sql.NullString `json:"channel_identity_avatar_url"`
-	LinkedUserID               sql.NullString `json:"linked_user_id"`
-	LinkedUserUsername         sql.NullString `json:"linked_user_username"`
-	LinkedUserDisplayName      sql.NullString `json:"linked_user_display_name"`
-	LinkedUserAvatarUrl        sql.NullString `json:"linked_user_avatar_url"`
+	ID                          string         `json:"id"`
+	BotID                       string         `json:"bot_id"`
+	Enabled                     int64          `json:"enabled"`
+	Description                 sql.NullString `json:"description"`
+	Action                      string         `json:"action"`
+	Effect                      string         `json:"effect"`
+	ChannelIdentityID           sql.NullString `json:"channel_identity_id"`
+	SubjectChannelType          sql.NullString `json:"subject_channel_type"`
+	SourceConversationType      sql.NullString `json:"source_conversation_type"`
+	SourceConversationID        sql.NullString `json:"source_conversation_id"`
+	SourceThreadID              sql.NullString `json:"source_thread_id"`
+	CreatedByUserID             sql.NullString `json:"created_by_user_id"`
+	CreatedAt                   string         `json:"created_at"`
+	UpdatedAt                   string         `json:"updated_at"`
+	ChannelType                 sql.NullString `json:"channel_type"`
+	ChannelSubjectID            sql.NullString `json:"channel_subject_id"`
+	ChannelIdentityDisplayName  sql.NullString `json:"channel_identity_display_name"`
+	ChannelIdentityAvatarUrl    sql.NullString `json:"channel_identity_avatar_url"`
+	LinkedUserID                sql.NullString `json:"linked_user_id"`
+	LinkedUserUsername          sql.NullString `json:"linked_user_username"`
+	LinkedUserDisplayName       sql.NullString `json:"linked_user_display_name"`
+	LinkedUserAvatarUrl         sql.NullString `json:"linked_user_avatar_url"`
+	SourceConversationName      interface{}    `json:"source_conversation_name"`
+	SourceConversationAvatarUrl interface{}    `json:"source_conversation_avatar_url"`
 }
 
 func (q *Queries) ListBotACLRules(ctx context.Context, botID string) ([]ListBotACLRulesRow, error) {
@@ -236,12 +240,10 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID string) ([]ListBotA
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.Priority,
 			&i.Enabled,
 			&i.Description,
 			&i.Action,
 			&i.Effect,
-			&i.SubjectKind,
 			&i.ChannelIdentityID,
 			&i.SubjectChannelType,
 			&i.SourceConversationType,
@@ -258,6 +260,8 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID string) ([]ListBotA
 			&i.LinkedUserUsername,
 			&i.LinkedUserDisplayName,
 			&i.LinkedUserAvatarUrl,
+			&i.SourceConversationName,
+			&i.SourceConversationAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -289,30 +293,26 @@ func (q *Queries) SetBotACLDefaultEffect(ctx context.Context, arg SetBotACLDefau
 const updateBotACLRule = `-- name: UpdateBotACLRule :one
 UPDATE bot_acl_rules
 SET
-  priority = ?1,
-  enabled = ?2,
-  description = ?3,
-  effect = ?4,
-  subject_kind = ?5,
-  channel_identity_id = ?6,
-  subject_channel_type = ?7,
-  source_channel = ?8,
-  source_conversation_type = ?9,
-  source_conversation_id = ?10,
-  source_thread_id = ?11,
+  enabled = ?1,
+  description = ?2,
+  effect = ?3,
+  channel_identity_id = ?4,
+  subject_channel_type = ?5,
+  source_channel = ?6,
+  source_conversation_type = ?7,
+  source_conversation_id = ?8,
+  source_thread_id = ?9,
   updated_at = CURRENT_TIMESTAMP
-WHERE id = ?12
-RETURNING id, bot_id, priority, enabled, description, action, effect, subject_kind, channel_identity_id,
+WHERE id = ?10
+RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id,
   subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id,
   created_by_user_id, created_at, updated_at
 `
 
 type UpdateBotACLRuleParams struct {
-	Priority               int64          `json:"priority"`
 	Enabled                int64          `json:"enabled"`
 	Description            sql.NullString `json:"description"`
 	Effect                 string         `json:"effect"`
-	SubjectKind            string         `json:"subject_kind"`
 	ChannelIdentityID      sql.NullString `json:"channel_identity_id"`
 	SubjectChannelType     sql.NullString `json:"subject_channel_type"`
 	SourceChannel          sql.NullString `json:"source_channel"`
@@ -324,11 +324,9 @@ type UpdateBotACLRuleParams struct {
 
 func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRuleParams) (BotAclRule, error) {
 	row := q.db.QueryRowContext(ctx, updateBotACLRule,
-		arg.Priority,
 		arg.Enabled,
 		arg.Description,
 		arg.Effect,
-		arg.SubjectKind,
 		arg.ChannelIdentityID,
 		arg.SubjectChannelType,
 		arg.SourceChannel,
@@ -341,12 +339,10 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Priority,
 		&i.Enabled,
 		&i.Description,
 		&i.Action,
 		&i.Effect,
-		&i.SubjectKind,
 		&i.ChannelIdentityID,
 		&i.SubjectChannelType,
 		&i.SourceChannel,
@@ -358,18 +354,4 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const updateBotACLRulePriority = `-- name: UpdateBotACLRulePriority :exec
-UPDATE bot_acl_rules SET priority = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2
-`
-
-type UpdateBotACLRulePriorityParams struct {
-	Priority int64  `json:"priority"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) UpdateBotACLRulePriority(ctx context.Context, arg UpdateBotACLRulePriorityParams) error {
-	_, err := q.db.ExecContext(ctx, updateBotACLRulePriority, arg.Priority, arg.ID)
-	return err
 }

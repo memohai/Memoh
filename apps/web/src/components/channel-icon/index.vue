@@ -1,7 +1,14 @@
 <template>
+  <img
+    v-if="isMemohWeb"
+    src="/logo.svg"
+    alt="Memoh"
+    :style="imageStyle"
+    v-bind="$attrs"
+  >
   <component
     :is="iconComponent"
-    v-if="iconComponent"
+    v-else-if="iconComponent"
     :size="size"
     v-bind="$attrs"
   />
@@ -62,11 +69,24 @@ const iconComponent = computed<Component | undefined>(() =>
   channelIcons[normalizedChannel.value],
 )
 
+const isMemohWeb = computed(() =>
+  normalizedChannel.value === 'web',
+)
+
 const fallback = computed(() =>
   channelIconFallbackText(props.channel),
 )
 
+const normalizedSize = computed(() =>
+  typeof props.size === 'number' ? `${props.size}px` : props.size,
+)
+
+const imageStyle = computed(() => ({
+  width: normalizedSize.value,
+  height: normalizedSize.value,
+}))
+
 const fallbackStyle = computed(() => ({
-  fontSize: typeof props.size === 'number' ? `${props.size}px` : props.size,
+  fontSize: normalizedSize.value,
 }))
 </script>

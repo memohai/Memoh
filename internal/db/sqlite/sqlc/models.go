@@ -52,12 +52,10 @@ type Bot struct {
 type BotAclRule struct {
 	ID                     string         `json:"id"`
 	BotID                  string         `json:"bot_id"`
-	Priority               int64          `json:"priority"`
 	Enabled                int64          `json:"enabled"`
 	Description            sql.NullString `json:"description"`
 	Action                 string         `json:"action"`
 	Effect                 string         `json:"effect"`
-	SubjectKind            string         `json:"subject_kind"`
 	ChannelIdentityID      sql.NullString `json:"channel_identity_id"`
 	SubjectChannelType     sql.NullString `json:"subject_channel_type"`
 	SourceChannel          sql.NullString `json:"source_channel"`

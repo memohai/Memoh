@@ -14,12 +14,10 @@ import (
 const createBotACLRule = `-- name: CreateBotACLRule :one
 INSERT INTO bot_acl_rules (
   bot_id,
-  priority,
   enabled,
   description,
   action,
   effect,
-  subject_kind,
   channel_identity_id,
   subject_channel_type,
   source_channel,
@@ -31,28 +29,24 @@ INSERT INTO bot_acl_rules (
 VALUES (
   $1,
   $2,
-  $3,
-  $7::text,
+  $5::text,
   'chat.trigger',
-  $4,
-  $5,
-  $8::uuid,
+  $3,
+  $6::uuid,
+  $7::text,
+  $8::text,
   $9::text,
   $10::text,
   $11::text,
-  $12::text,
-  $13::text,
-  $6
+  $4
 )
-RETURNING id, bot_id, priority, enabled, description, action, effect, subject_kind, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
 `
 
 type CreateBotACLRuleParams struct {
 	BotID                  pgtype.UUID `json:"bot_id"`
-	Priority               int32       `json:"priority"`
 	Enabled                bool        `json:"enabled"`
 	Effect                 string      `json:"effect"`
-	SubjectKind            string      `json:"subject_kind"`
 	CreatedByUserID        pgtype.UUID `json:"created_by_user_id"`
 	Description            pgtype.Text `json:"description"`
 	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
@@ -63,33 +57,11 @@ type CreateBotACLRuleParams struct {
 	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
-type CreateBotACLRuleRow struct {
-	ID                     pgtype.UUID        `json:"id"`
-	BotID                  pgtype.UUID        `json:"bot_id"`
-	Priority               int32              `json:"priority"`
-	Enabled                bool               `json:"enabled"`
-	Description            pgtype.Text        `json:"description"`
-	Action                 string             `json:"action"`
-	Effect                 string             `json:"effect"`
-	SubjectKind            string             `json:"subject_kind"`
-	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
-	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
-	SourceChannel          pgtype.Text        `json:"source_channel"`
-	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
-	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
-	SourceThreadID         pgtype.Text        `json:"source_thread_id"`
-	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRuleParams) (CreateBotACLRuleRow, error) {
+func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRuleParams) (BotAclRule, error) {
 	row := q.db.QueryRow(ctx, createBotACLRule,
 		arg.BotID,
-		arg.Priority,
 		arg.Enabled,
 		arg.Effect,
-		arg.SubjectKind,
 		arg.CreatedByUserID,
 		arg.Description,
 		arg.ChannelIdentityID,
@@ -99,16 +71,14 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg CreateBotACLRulePara
 		arg.SourceConversationID,
 		arg.SourceThreadID,
 	)
-	var i CreateBotACLRuleRow
+	var i BotAclRule
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Priority,
 		&i.Enabled,
 		&i.Description,
 		&i.Action,
 		&i.Effect,
-		&i.SubjectKind,
 		&i.ChannelIdentityID,
 		&i.SubjectChannelType,
 		&i.SourceChannel,
@@ -132,44 +102,45 @@ func (q *Queries) DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) erro
 }
 
 const evaluateBotACLRule = `-- name: EvaluateBotACLRule :one
-SELECT effect
-FROM bot_acl_rules
-WHERE bot_id = $1
-  AND enabled = true
-  AND action = $2
-  AND (
-    subject_kind = 'all'
-    OR (subject_kind = 'channel_identity' AND channel_identity_id = $3::uuid)
-    OR (subject_kind = 'channel_type' AND subject_channel_type = $4::text)
-  )
-  AND (source_conversation_type IS NULL OR source_conversation_type = $5::text)
-  AND (source_conversation_id IS NULL OR source_conversation_id = $6::text)
-  AND (source_thread_id IS NULL OR source_thread_id = $7::text)
-ORDER BY priority ASC, created_at ASC
-LIMIT 1
+SELECT COALESCE((
+  SELECT r.effect
+  FROM bot_acl_rules r
+  WHERE r.bot_id = b.id
+    AND r.enabled = true
+    AND r.action = $1
+    AND r.effect <> b.acl_default_effect
+    AND (r.subject_channel_type IS NULL OR r.subject_channel_type = $2::text)
+    AND (r.channel_identity_id IS NULL OR r.channel_identity_id = $3::uuid)
+    AND (r.source_conversation_type IS NULL OR r.source_conversation_type = $4::text)
+    AND (r.source_conversation_id IS NULL OR r.source_conversation_id = $5::text)
+    AND (r.source_thread_id IS NULL OR r.source_thread_id = $6::text)
+  LIMIT 1
+), b.acl_default_effect) AS effect
+FROM bots b
+WHERE b.id = $7
 `
 
 type EvaluateBotACLRuleParams struct {
-	BotID                  pgtype.UUID `json:"bot_id"`
 	Action                 string      `json:"action"`
-	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
 	SubjectChannelType     pgtype.Text `json:"subject_channel_type"`
+	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
 	SourceConversationType pgtype.Text `json:"source_conversation_type"`
 	SourceConversationID   pgtype.Text `json:"source_conversation_id"`
 	SourceThreadID         pgtype.Text `json:"source_thread_id"`
+	BotID                  pgtype.UUID `json:"bot_id"`
 }
 
-// First-match-wins: returns the effect of the highest-priority matching enabled rule.
-// If no row is returned, the caller falls back to bots.acl_default_effect.
+// Mode-based ACL: only rules opposite to bots.acl_default_effect can override the default.
+// If no matching override exists, returns bots.acl_default_effect.
 func (q *Queries) EvaluateBotACLRule(ctx context.Context, arg EvaluateBotACLRuleParams) (string, error) {
 	row := q.db.QueryRow(ctx, evaluateBotACLRule,
-		arg.BotID,
 		arg.Action,
-		arg.ChannelIdentityID,
 		arg.SubjectChannelType,
+		arg.ChannelIdentityID,
 		arg.SourceConversationType,
 		arg.SourceConversationID,
 		arg.SourceThreadID,
+		arg.BotID,
 	)
 	var effect string
 	err := row.Scan(&effect)
@@ -191,12 +162,10 @@ const listBotACLRules = `-- name: ListBotACLRules :many
 SELECT
   r.id,
   r.bot_id,
-  r.priority,
   r.enabled,
   r.description,
   r.action,
   r.effect,
-  r.subject_kind,
   r.channel_identity_id,
   r.subject_channel_type,
   r.source_conversation_type,
@@ -212,40 +181,51 @@ SELECT
   linked.id AS linked_user_id,
   linked.username AS linked_user_username,
   linked.display_name AS linked_user_display_name,
-  linked.avatar_url AS linked_user_avatar_url
+  linked.avatar_url AS linked_user_avatar_url,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(source_route.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(source_route.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS source_conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(source_route.metadata->>'conversation_avatar_url', '')), ''), '')::text AS source_conversation_avatar_url
 FROM bot_acl_rules r
 LEFT JOIN channel_identities ci ON ci.id = r.channel_identity_id
 LEFT JOIN users linked ON linked.id = ci.user_id
+LEFT JOIN bot_channel_routes source_route ON source_route.bot_id = r.bot_id
+  AND r.source_conversation_id IS NOT NULL
+  AND source_route.external_conversation_id = r.source_conversation_id
+  AND COALESCE(source_route.external_thread_id, '') = COALESCE(r.source_thread_id, '')
+  AND (r.source_channel IS NULL OR source_route.channel_type = r.source_channel)
 WHERE r.bot_id = $1
   AND r.action = 'chat.trigger'
-ORDER BY r.priority ASC, r.created_at ASC
+ORDER BY r.created_at DESC
 `
 
 type ListBotACLRulesRow struct {
-	ID                         pgtype.UUID        `json:"id"`
-	BotID                      pgtype.UUID        `json:"bot_id"`
-	Priority                   int32              `json:"priority"`
-	Enabled                    bool               `json:"enabled"`
-	Description                pgtype.Text        `json:"description"`
-	Action                     string             `json:"action"`
-	Effect                     string             `json:"effect"`
-	SubjectKind                string             `json:"subject_kind"`
-	ChannelIdentityID          pgtype.UUID        `json:"channel_identity_id"`
-	SubjectChannelType         pgtype.Text        `json:"subject_channel_type"`
-	SourceConversationType     pgtype.Text        `json:"source_conversation_type"`
-	SourceConversationID       pgtype.Text        `json:"source_conversation_id"`
-	SourceThreadID             pgtype.Text        `json:"source_thread_id"`
-	CreatedByUserID            pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
-	ChannelType                pgtype.Text        `json:"channel_type"`
-	ChannelSubjectID           pgtype.Text        `json:"channel_subject_id"`
-	ChannelIdentityDisplayName pgtype.Text        `json:"channel_identity_display_name"`
-	ChannelIdentityAvatarUrl   pgtype.Text        `json:"channel_identity_avatar_url"`
-	LinkedUserID               pgtype.UUID        `json:"linked_user_id"`
-	LinkedUserUsername         pgtype.Text        `json:"linked_user_username"`
-	LinkedUserDisplayName      pgtype.Text        `json:"linked_user_display_name"`
-	LinkedUserAvatarUrl        pgtype.Text        `json:"linked_user_avatar_url"`
+	ID                          pgtype.UUID        `json:"id"`
+	BotID                       pgtype.UUID        `json:"bot_id"`
+	Enabled                     bool               `json:"enabled"`
+	Description                 pgtype.Text        `json:"description"`
+	Action                      string             `json:"action"`
+	Effect                      string             `json:"effect"`
+	ChannelIdentityID           pgtype.UUID        `json:"channel_identity_id"`
+	SubjectChannelType          pgtype.Text        `json:"subject_channel_type"`
+	SourceConversationType      pgtype.Text        `json:"source_conversation_type"`
+	SourceConversationID        pgtype.Text        `json:"source_conversation_id"`
+	SourceThreadID              pgtype.Text        `json:"source_thread_id"`
+	CreatedByUserID             pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	ChannelType                 pgtype.Text        `json:"channel_type"`
+	ChannelSubjectID            pgtype.Text        `json:"channel_subject_id"`
+	ChannelIdentityDisplayName  pgtype.Text        `json:"channel_identity_display_name"`
+	ChannelIdentityAvatarUrl    pgtype.Text        `json:"channel_identity_avatar_url"`
+	LinkedUserID                pgtype.UUID        `json:"linked_user_id"`
+	LinkedUserUsername          pgtype.Text        `json:"linked_user_username"`
+	LinkedUserDisplayName       pgtype.Text        `json:"linked_user_display_name"`
+	LinkedUserAvatarUrl         pgtype.Text        `json:"linked_user_avatar_url"`
+	SourceConversationName      string             `json:"source_conversation_name"`
+	SourceConversationAvatarUrl string             `json:"source_conversation_avatar_url"`
 }
 
 func (q *Queries) ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]ListBotACLRulesRow, error) {
@@ -260,12 +240,10 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]Lis
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
-			&i.Priority,
 			&i.Enabled,
 			&i.Description,
 			&i.Action,
 			&i.Effect,
-			&i.SubjectKind,
 			&i.ChannelIdentityID,
 			&i.SubjectChannelType,
 			&i.SourceConversationType,
@@ -282,6 +260,8 @@ func (q *Queries) ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]Lis
 			&i.LinkedUserUsername,
 			&i.LinkedUserDisplayName,
 			&i.LinkedUserAvatarUrl,
+			&i.SourceConversationName,
+			&i.SourceConversationAvatarUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -310,28 +290,24 @@ func (q *Queries) SetBotACLDefaultEffect(ctx context.Context, arg SetBotACLDefau
 const updateBotACLRule = `-- name: UpdateBotACLRule :one
 UPDATE bot_acl_rules
 SET
-  priority = $2,
-  enabled = $3,
-  description = $6::text,
-  effect = $4,
-  subject_kind = $5,
-  channel_identity_id = $7::uuid,
-  subject_channel_type = $8::text,
-  source_channel = $9::text,
-  source_conversation_type = $10::text,
-  source_conversation_id = $11::text,
-  source_thread_id = $12::text,
+  enabled = $2,
+  description = $4::text,
+  effect = $3,
+  channel_identity_id = $5::uuid,
+  subject_channel_type = $6::text,
+  source_channel = $7::text,
+  source_conversation_type = $8::text,
+  source_conversation_id = $9::text,
+  source_thread_id = $10::text,
   updated_at = now()
 WHERE id = $1
-RETURNING id, bot_id, priority, enabled, description, action, effect, subject_kind, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
+RETURNING id, bot_id, enabled, description, action, effect, channel_identity_id, subject_channel_type, source_channel, source_conversation_type, source_conversation_id, source_thread_id, created_by_user_id, created_at, updated_at
 `
 
 type UpdateBotACLRuleParams struct {
 	ID                     pgtype.UUID `json:"id"`
-	Priority               int32       `json:"priority"`
 	Enabled                bool        `json:"enabled"`
 	Effect                 string      `json:"effect"`
-	SubjectKind            string      `json:"subject_kind"`
 	Description            pgtype.Text `json:"description"`
 	ChannelIdentityID      pgtype.UUID `json:"channel_identity_id"`
 	SubjectChannelType     pgtype.Text `json:"subject_channel_type"`
@@ -341,33 +317,11 @@ type UpdateBotACLRuleParams struct {
 	SourceThreadID         pgtype.Text `json:"source_thread_id"`
 }
 
-type UpdateBotACLRuleRow struct {
-	ID                     pgtype.UUID        `json:"id"`
-	BotID                  pgtype.UUID        `json:"bot_id"`
-	Priority               int32              `json:"priority"`
-	Enabled                bool               `json:"enabled"`
-	Description            pgtype.Text        `json:"description"`
-	Action                 string             `json:"action"`
-	Effect                 string             `json:"effect"`
-	SubjectKind            string             `json:"subject_kind"`
-	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
-	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
-	SourceChannel          pgtype.Text        `json:"source_channel"`
-	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
-	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
-	SourceThreadID         pgtype.Text        `json:"source_thread_id"`
-	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRuleParams) (UpdateBotACLRuleRow, error) {
+func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRuleParams) (BotAclRule, error) {
 	row := q.db.QueryRow(ctx, updateBotACLRule,
 		arg.ID,
-		arg.Priority,
 		arg.Enabled,
 		arg.Effect,
-		arg.SubjectKind,
 		arg.Description,
 		arg.ChannelIdentityID,
 		arg.SubjectChannelType,
@@ -376,16 +330,14 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 		arg.SourceConversationID,
 		arg.SourceThreadID,
 	)
-	var i UpdateBotACLRuleRow
+	var i BotAclRule
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
-		&i.Priority,
 		&i.Enabled,
 		&i.Description,
 		&i.Action,
 		&i.Effect,
-		&i.SubjectKind,
 		&i.ChannelIdentityID,
 		&i.SubjectChannelType,
 		&i.SourceChannel,
@@ -397,18 +349,4 @@ func (q *Queries) UpdateBotACLRule(ctx context.Context, arg UpdateBotACLRulePara
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const updateBotACLRulePriority = `-- name: UpdateBotACLRulePriority :exec
-UPDATE bot_acl_rules SET priority = $2, updated_at = now() WHERE id = $1
-`
-
-type UpdateBotACLRulePriorityParams struct {
-	ID       pgtype.UUID `json:"id"`
-	Priority int32       `json:"priority"`
-}
-
-func (q *Queries) UpdateBotACLRulePriority(ctx context.Context, arg UpdateBotACLRulePriorityParams) error {
-	_, err := q.db.Exec(ctx, updateBotACLRulePriority, arg.ID, arg.Priority)
-	return err
 }

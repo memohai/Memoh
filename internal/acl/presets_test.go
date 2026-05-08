@@ -90,9 +90,7 @@ func TestApplyPreset(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
 
 	type createdRule struct {
-		priority         int32
 		effect           string
-		subjectKind      string
 		conversationType string
 	}
 
@@ -109,10 +107,8 @@ func TestApplyPreset(t *testing.T) {
 		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
 			if strings.Contains(sql, "INSERT INTO bot_acl_rules") {
 				createdRules = append(createdRules, createdRule{
-					priority:         args[1].(int32),
-					effect:           args[3].(string),
-					subjectKind:      args[4].(string),
-					conversationType: textFromArg(args[10]),
+					effect:           args[2].(string),
+					conversationType: textFromArg(args[8]),
 				})
 				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
 			}
@@ -131,14 +127,14 @@ func TestApplyPreset(t *testing.T) {
 	if len(createdRules) != 2 {
 		t.Fatalf("expected 2 created rules, got %d", len(createdRules))
 	}
-	if createdRules[0].priority != 100 || createdRules[0].conversationType != "group" {
+	if createdRules[0].conversationType != "group" {
 		t.Fatalf("unexpected first rule: %+v", createdRules[0])
 	}
-	if createdRules[1].priority != 110 || createdRules[1].conversationType != "thread" {
+	if createdRules[1].conversationType != "thread" {
 		t.Fatalf("unexpected second rule: %+v", createdRules[1])
 	}
 	for _, rule := range createdRules {
-		if rule.effect != EffectAllow || rule.subjectKind != SubjectKindAll {
+		if rule.effect != EffectAllow {
 			t.Fatalf("unexpected rule contents: %+v", rule)
 		}
 	}

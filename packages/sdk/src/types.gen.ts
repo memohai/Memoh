@@ -75,10 +75,8 @@ export type AclCreateRuleRequest = {
     description?: string;
     effect?: string;
     enabled?: boolean;
-    priority?: number;
     source_scope?: AclSourceScope;
     subject_channel_type?: string;
-    subject_kind?: string;
 };
 
 export type AclDefaultEffectResponse = {
@@ -91,6 +89,7 @@ export type AclListRulesResponse = {
 
 export type AclObservedConversationCandidate = {
     channel?: string;
+    conversation_avatar_url?: string;
     conversation_id?: string;
     conversation_name?: string;
     conversation_type?: string;
@@ -101,15 +100,6 @@ export type AclObservedConversationCandidate = {
 
 export type AclObservedConversationCandidateListResponse = {
     items?: Array<AclObservedConversationCandidate>;
-};
-
-export type AclReorderItem = {
-    id?: string;
-    priority?: number;
-};
-
-export type AclReorderRequest = {
-    items?: Array<AclReorderItem>;
 };
 
 export type AclRule = {
@@ -129,10 +119,10 @@ export type AclRule = {
     linked_user_display_name?: string;
     linked_user_id?: string;
     linked_user_username?: string;
-    priority?: number;
+    source_conversation_avatar_url?: string;
+    source_conversation_name?: string;
     source_scope?: AclSourceScope;
     subject_channel_type?: string;
-    subject_kind?: string;
     updated_at?: string;
 };
 
@@ -147,10 +137,8 @@ export type AclUpdateRuleRequest = {
     description?: string;
     effect?: string;
     enabled?: boolean;
-    priority?: number;
     source_scope?: AclSourceScope;
     subject_channel_type?: string;
-    subject_kind?: string;
 };
 
 export type AdaptersCdfPoint = {
@@ -2333,45 +2321,6 @@ export type PostBotsByBotIdAclRulesResponses = {
 };
 
 export type PostBotsByBotIdAclRulesResponse = PostBotsByBotIdAclRulesResponses[keyof PostBotsByBotIdAclRulesResponses];
-
-export type PutBotsByBotIdAclRulesReorderData = {
-    /**
-     * Reorder payload
-     */
-    body: AclReorderRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acl/rules/reorder';
-};
-
-export type PutBotsByBotIdAclRulesReorderErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdAclRulesReorderError = PutBotsByBotIdAclRulesReorderErrors[keyof PutBotsByBotIdAclRulesReorderErrors];
-
-export type PutBotsByBotIdAclRulesReorderResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
 
 export type DeleteBotsByBotIdAclRulesByRuleIdData = {
     body?: never;

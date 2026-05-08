@@ -3,7 +3,6 @@ package acl
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -54,10 +53,8 @@ func ResolvePreset(raw string) (Preset, error) {
 			DefaultEffect: EffectDeny,
 			Rules: []CreateRuleRequest{
 				{
-					Priority:    100,
 					Enabled:     true,
 					Effect:      EffectAllow,
-					SubjectKind: SubjectKindAll,
 					SourceScope: &SourceScope{ConversationType: "private"},
 				},
 			},
@@ -68,10 +65,8 @@ func ResolvePreset(raw string) (Preset, error) {
 			DefaultEffect: EffectDeny,
 			Rules: []CreateRuleRequest{
 				{
-					Priority:    100,
 					Enabled:     true,
 					Effect:      EffectAllow,
-					SubjectKind: SubjectKindAll,
 					SourceScope: &SourceScope{ConversationType: "group"},
 				},
 			},
@@ -82,17 +77,13 @@ func ResolvePreset(raw string) (Preset, error) {
 			DefaultEffect: EffectDeny,
 			Rules: []CreateRuleRequest{
 				{
-					Priority:    100,
 					Enabled:     true,
 					Effect:      EffectAllow,
-					SubjectKind: SubjectKindAll,
 					SourceScope: &SourceScope{ConversationType: "group"},
 				},
 				{
-					Priority:    110,
 					Enabled:     true,
 					Effect:      EffectAllow,
-					SubjectKind: SubjectKindAll,
 					SourceScope: &SourceScope{ConversationType: "thread"},
 				},
 			},
@@ -142,27 +133,22 @@ func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.
 	if err := validateEffect(rule.Effect); err != nil {
 		return err
 	}
-	if err := validateSubject(rule.SubjectKind, rule.ChannelIdentityID, rule.SubjectChannelType); err != nil {
-		return err
-	}
 
 	sourceScope, err := normalizeOptionalSourceScope(rule.SourceScope)
 	if err != nil {
 		return err
 	}
 
-	sourceChannel, err := presetSourceChannel(rule.SubjectKind, rule.SubjectChannelType, sourceScope)
+	sourceChannel, err := presetSourceChannel(rule.SubjectChannelType, sourceScope)
 	if err != nil {
 		return err
 	}
 
 	_, err = queries.CreateBotACLRule(ctx, sqlc.CreateBotACLRuleParams{
 		BotID:                  botID,
-		Priority:               rule.Priority,
 		Enabled:                rule.Enabled,
 		Description:            optionalText(rule.Description),
 		Effect:                 rule.Effect,
-		SubjectKind:            rule.SubjectKind,
 		ChannelIdentityID:      optionalUUID(rule.ChannelIdentityID),
 		SubjectChannelType:     optionalText(rule.SubjectChannelType),
 		SourceChannel:          optionalText(sourceChannel),
@@ -174,7 +160,7 @@ func applyPresetRule(ctx context.Context, queries dbstore.Queries, botID pgtype.
 	return err
 }
 
-func presetSourceChannel(subjectKind, subjectChannelType string, sourceScope SourceScope) (string, error) {
+func presetSourceChannel(subjectChannelType string, sourceScope SourceScope) (string, error) {
 	if sourceScope.IsZero() {
 		return "", nil
 	}
@@ -182,14 +168,9 @@ func presetSourceChannel(subjectKind, subjectChannelType string, sourceScope Sou
 		return "", nil
 	}
 
-	switch strings.TrimSpace(subjectKind) {
-	case SubjectKindChannelType:
-		return strings.TrimSpace(subjectChannelType), nil
-	case SubjectKindAll:
-		return "", fmt.Errorf("acl preset rule cannot scope subject_kind=%q to a concrete conversation without source channel", SubjectKindAll)
-	case SubjectKindChannelIdentity:
-		return "", fmt.Errorf("acl preset rule cannot scope subject_kind=%q to a concrete conversation without source channel", SubjectKindChannelIdentity)
-	default:
+	subjectChannelType = strings.TrimSpace(subjectChannelType)
+	if subjectChannelType == "" {
 		return "", ErrInvalidRuleSubject
 	}
+	return subjectChannelType, nil
 }

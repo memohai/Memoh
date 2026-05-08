@@ -118,13 +118,9 @@ definitions:
         type: string
       enabled:
         type: boolean
-      priority:
-        type: integer
       source_scope:
         $ref: '#/definitions/acl.SourceScope'
       subject_channel_type:
-        type: string
-      subject_kind:
         type: string
     type: object
   acl.DefaultEffectResponse:
@@ -142,6 +138,8 @@ definitions:
   acl.ObservedConversationCandidate:
     properties:
       channel:
+        type: string
+      conversation_avatar_url:
         type: string
       conversation_id:
         type: string
@@ -161,20 +159,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/acl.ObservedConversationCandidate'
-        type: array
-    type: object
-  acl.ReorderItem:
-    properties:
-      id:
-        type: string
-      priority:
-        type: integer
-    type: object
-  acl.ReorderRequest:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/acl.ReorderItem'
         type: array
     type: object
   acl.Rule:
@@ -211,13 +195,13 @@ definitions:
         type: string
       linked_user_username:
         type: string
-      priority:
-        type: integer
+      source_conversation_avatar_url:
+        type: string
+      source_conversation_name:
+        type: string
       source_scope:
         $ref: '#/definitions/acl.SourceScope'
       subject_channel_type:
-        type: string
-      subject_kind:
         type: string
       updated_at:
         type: string
@@ -241,13 +225,9 @@ definitions:
         type: string
       enabled:
         type: boolean
-      priority:
-        type: integer
       source_scope:
         $ref: '#/definitions/acl.SourceScope'
       subject_channel_type:
-        type: string
-      subject_kind:
         type: string
     type: object
   adapters.CDFPoint:
@@ -3483,7 +3463,7 @@ paths:
       - bots
   /bots/{bot_id}/acl/rules:
     get:
-      description: List all ACL rules for a bot ordered by priority
+      description: List all ACL rules for a bot
       parameters:
       - description: Bot ID
         in: path
@@ -3511,7 +3491,7 @@ paths:
       tags:
       - bots
     post:
-      description: Create a new priority-ordered ACL rule for chat.trigger
+      description: Create a new ACL rule for chat.trigger
       parameters:
       - description: Bot ID
         in: path
@@ -3613,39 +3593,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update ACL rule
-      tags:
-      - bots
-  /bots/{bot_id}/acl/rules/reorder:
-    put:
-      description: Batch-update priorities for multiple ACL rules
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Reorder payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/acl.ReorderRequest'
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Reorder ACL rules
       tags:
       - bots
   /bots/{bot_id}/compaction/logs:

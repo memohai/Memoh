@@ -403,21 +403,21 @@ func (q *Queries) CreateBot(ctx context.Context, arg pgsqlc.CreateBotParams) (pg
 	return result, nil
 }
 
-func (q *Queries) CreateBotACLRule(ctx context.Context, arg pgsqlc.CreateBotACLRuleParams) (pgsqlc.CreateBotACLRuleRow, error) {
+func (q *Queries) CreateBotACLRule(ctx context.Context, arg pgsqlc.CreateBotACLRuleParams) (pgsqlc.BotAclRule, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.CreateBotACLRuleRow{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.BotAclRule{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.CreateBotACLRuleParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.CreateBotACLRuleRow{}, err
+		return pgsqlc.BotAclRule{}, err
 	}
 	out, err := q.store.queries.CreateBotACLRule(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.CreateBotACLRuleRow{}, mapQueryErr(err)
+		return pgsqlc.BotAclRule{}, mapQueryErr(err)
 	}
-	var result pgsqlc.CreateBotACLRuleRow
+	var result pgsqlc.BotAclRule
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.CreateBotACLRuleRow{}, err
+		return pgsqlc.BotAclRule{}, err
 	}
 	return result, nil
 }
@@ -4215,35 +4215,23 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg pgsqlc.UpdateAcc
 	return result, nil
 }
 
-func (q *Queries) UpdateBotACLRule(ctx context.Context, arg pgsqlc.UpdateBotACLRuleParams) (pgsqlc.UpdateBotACLRuleRow, error) {
+func (q *Queries) UpdateBotACLRule(ctx context.Context, arg pgsqlc.UpdateBotACLRuleParams) (pgsqlc.BotAclRule, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
-		return pgsqlc.UpdateBotACLRuleRow{}, errSQLiteQueriesNotConfigured
+		return pgsqlc.BotAclRule{}, errSQLiteQueriesNotConfigured
 	}
 	var sqliteArg sqlitesqlc.UpdateBotACLRuleParams
 	if err := convertValue(arg, &sqliteArg); err != nil {
-		return pgsqlc.UpdateBotACLRuleRow{}, err
+		return pgsqlc.BotAclRule{}, err
 	}
 	out, err := q.store.queries.UpdateBotACLRule(ctx, sqliteArg)
 	if err != nil {
-		return pgsqlc.UpdateBotACLRuleRow{}, mapQueryErr(err)
+		return pgsqlc.BotAclRule{}, mapQueryErr(err)
 	}
-	var result pgsqlc.UpdateBotACLRuleRow
+	var result pgsqlc.BotAclRule
 	if err := convertValue(out, &result); err != nil {
-		return pgsqlc.UpdateBotACLRuleRow{}, err
+		return pgsqlc.BotAclRule{}, err
 	}
 	return result, nil
-}
-
-func (q *Queries) UpdateBotACLRulePriority(ctx context.Context, arg pgsqlc.UpdateBotACLRulePriorityParams) error {
-	if q == nil || q.store == nil || q.store.queries == nil {
-		return errSQLiteQueriesNotConfigured
-	}
-	var sqliteArg sqlitesqlc.UpdateBotACLRulePriorityParams
-	if err := convertValue(arg, &sqliteArg); err != nil {
-		return err
-	}
-	err := q.store.queries.UpdateBotACLRulePriority(ctx, sqliteArg)
-	return mapQueryErr(err)
 }
 
 func (q *Queries) UpdateBotChannelConfigDisabled(ctx context.Context, arg pgsqlc.UpdateBotChannelConfigDisabledParams) (pgsqlc.BotChannelConfig, error) {

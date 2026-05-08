@@ -240,6 +240,7 @@ SELECT
     NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_handle'), '')), ''),
     ''
   ) AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_avatar_url'), '')), ''), '') AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -273,6 +274,7 @@ SELECT
     NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_handle'), '')), ''),
     ''
   ) AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_avatar_url'), '')), ''), '') AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id

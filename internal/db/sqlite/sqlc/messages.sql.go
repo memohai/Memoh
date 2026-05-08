@@ -1001,6 +1001,7 @@ SELECT
     NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_handle'), '')), ''),
     ''
   ) AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_avatar_url'), '')), ''), '') AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -1013,13 +1014,14 @@ type ListObservedConversationsByChannelIdentityParams struct {
 }
 
 type ListObservedConversationsByChannelIdentityRow struct {
-	RouteID          string      `json:"route_id"`
-	Channel          string      `json:"channel"`
-	ConversationType string      `json:"conversation_type"`
-	ConversationID   string      `json:"conversation_id"`
-	ThreadID         string      `json:"thread_id"`
-	ConversationName interface{} `json:"conversation_name"`
-	LastObservedAt   interface{} `json:"last_observed_at"`
+	RouteID               string      `json:"route_id"`
+	Channel               string      `json:"channel"`
+	ConversationType      string      `json:"conversation_type"`
+	ConversationID        string      `json:"conversation_id"`
+	ThreadID              string      `json:"thread_id"`
+	ConversationName      interface{} `json:"conversation_name"`
+	ConversationAvatarUrl interface{} `json:"conversation_avatar_url"`
+	LastObservedAt        interface{} `json:"last_observed_at"`
 }
 
 func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context, arg ListObservedConversationsByChannelIdentityParams) ([]ListObservedConversationsByChannelIdentityRow, error) {
@@ -1038,6 +1040,7 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 			&i.ConversationID,
 			&i.ThreadID,
 			&i.ConversationName,
+			&i.ConversationAvatarUrl,
 			&i.LastObservedAt,
 		); err != nil {
 			return nil, err
@@ -1081,6 +1084,7 @@ SELECT
     NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_handle'), '')), ''),
     ''
   ) AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(json_extract(r.metadata, '$.conversation_avatar_url'), '')), ''), '') AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -1093,13 +1097,14 @@ type ListObservedConversationsByChannelTypeParams struct {
 }
 
 type ListObservedConversationsByChannelTypeRow struct {
-	RouteID          string      `json:"route_id"`
-	Channel          string      `json:"channel"`
-	ConversationType string      `json:"conversation_type"`
-	ConversationID   string      `json:"conversation_id"`
-	ThreadID         string      `json:"thread_id"`
-	ConversationName interface{} `json:"conversation_name"`
-	LastObservedAt   interface{} `json:"last_observed_at"`
+	RouteID               string      `json:"route_id"`
+	Channel               string      `json:"channel"`
+	ConversationType      string      `json:"conversation_type"`
+	ConversationID        string      `json:"conversation_id"`
+	ThreadID              string      `json:"thread_id"`
+	ConversationName      interface{} `json:"conversation_name"`
+	ConversationAvatarUrl interface{} `json:"conversation_avatar_url"`
+	LastObservedAt        interface{} `json:"last_observed_at"`
 }
 
 func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, arg ListObservedConversationsByChannelTypeParams) ([]ListObservedConversationsByChannelTypeRow, error) {
@@ -1118,6 +1123,7 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 			&i.ConversationID,
 			&i.ThreadID,
 			&i.ConversationName,
+			&i.ConversationAvatarUrl,
 			&i.LastObservedAt,
 		); err != nil {
 			return nil, err

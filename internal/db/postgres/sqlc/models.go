@@ -37,6 +37,7 @@ type Bot struct {
 	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
 	PersistFullToolResults bool               `json:"persist_full_tool_results"`
 	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
+	AclDefaultEffect       string             `json:"acl_default_effect"`
 	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
 	DisplayEnabled         bool               `json:"display_enabled"`
 	OverlayProvider        string             `json:"overlay_provider"`
@@ -45,16 +46,17 @@ type Bot struct {
 	Metadata               []byte             `json:"metadata"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	AclDefaultEffect       string             `json:"acl_default_effect"`
 }
 
 type BotAclRule struct {
 	ID                     pgtype.UUID        `json:"id"`
 	BotID                  pgtype.UUID        `json:"bot_id"`
+	Enabled                bool               `json:"enabled"`
+	Description            pgtype.Text        `json:"description"`
 	Action                 string             `json:"action"`
 	Effect                 string             `json:"effect"`
-	SubjectKind            string             `json:"subject_kind"`
 	ChannelIdentityID      pgtype.UUID        `json:"channel_identity_id"`
+	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 	SourceChannel          pgtype.Text        `json:"source_channel"`
 	SourceConversationType pgtype.Text        `json:"source_conversation_type"`
 	SourceConversationID   pgtype.Text        `json:"source_conversation_id"`
@@ -62,10 +64,6 @@ type BotAclRule struct {
 	CreatedByUserID        pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	Priority               int32              `json:"priority"`
-	Enabled                bool               `json:"enabled"`
-	Description            pgtype.Text        `json:"description"`
-	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 }
 
 type BotChannelConfig struct {

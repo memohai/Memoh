@@ -1077,6 +1077,7 @@ SELECT
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
     ''
   )::text AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -1097,13 +1098,14 @@ type ListObservedConversationsByChannelIdentityParams struct {
 }
 
 type ListObservedConversationsByChannelIdentityRow struct {
-	RouteID          pgtype.UUID        `json:"route_id"`
-	Channel          string             `json:"channel"`
-	ConversationType string             `json:"conversation_type"`
-	ConversationID   string             `json:"conversation_id"`
-	ThreadID         string             `json:"thread_id"`
-	ConversationName string             `json:"conversation_name"`
-	LastObservedAt   pgtype.Timestamptz `json:"last_observed_at"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	Channel               string             `json:"channel"`
+	ConversationType      string             `json:"conversation_type"`
+	ConversationID        string             `json:"conversation_id"`
+	ThreadID              string             `json:"thread_id"`
+	ConversationName      string             `json:"conversation_name"`
+	ConversationAvatarUrl string             `json:"conversation_avatar_url"`
+	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
 }
 
 func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context, arg ListObservedConversationsByChannelIdentityParams) ([]ListObservedConversationsByChannelIdentityRow, error) {
@@ -1122,6 +1124,7 @@ func (q *Queries) ListObservedConversationsByChannelIdentity(ctx context.Context
 			&i.ConversationID,
 			&i.ThreadID,
 			&i.ConversationName,
+			&i.ConversationAvatarUrl,
 			&i.LastObservedAt,
 		); err != nil {
 			return nil, err
@@ -1162,6 +1165,7 @@ SELECT
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
     ''
   )::text AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -1182,13 +1186,14 @@ type ListObservedConversationsByChannelTypeParams struct {
 }
 
 type ListObservedConversationsByChannelTypeRow struct {
-	RouteID          pgtype.UUID        `json:"route_id"`
-	Channel          string             `json:"channel"`
-	ConversationType string             `json:"conversation_type"`
-	ConversationID   string             `json:"conversation_id"`
-	ThreadID         string             `json:"thread_id"`
-	ConversationName string             `json:"conversation_name"`
-	LastObservedAt   pgtype.Timestamptz `json:"last_observed_at"`
+	RouteID               pgtype.UUID        `json:"route_id"`
+	Channel               string             `json:"channel"`
+	ConversationType      string             `json:"conversation_type"`
+	ConversationID        string             `json:"conversation_id"`
+	ThreadID              string             `json:"thread_id"`
+	ConversationName      string             `json:"conversation_name"`
+	ConversationAvatarUrl string             `json:"conversation_avatar_url"`
+	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
 }
 
 // Routes on this platform type where the bot has seen at least one message (any sender).
@@ -1208,6 +1213,7 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 			&i.ConversationID,
 			&i.ThreadID,
 			&i.ConversationName,
+			&i.ConversationAvatarUrl,
 			&i.LastObservedAt,
 		); err != nil {
 			return nil, err

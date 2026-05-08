@@ -262,8 +262,6 @@ type BotACLStore interface {
 	CreateRule(ctx context.Context, input Input) (Record, error)
 	UpdateRule(ctx context.Context, id ID, input Patch) (Record, error)
 	DeleteRule(ctx context.Context, id ID) error
-	UpdateRulePriority(ctx context.Context, id ID, priority int32) error
-	ReorderRules(ctx context.Context, botID ID, orderedIDs []ID) error
 }
 
 type ObservedConversationStore interface {

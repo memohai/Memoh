@@ -434,7 +434,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/acl/rules": {
             "get": {
-                "description": "List all ACL rules for a bot ordered by priority",
+                "description": "List all ACL rules for a bot",
                 "tags": [
                     "bots"
                 ],
@@ -476,7 +476,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Create a new priority-ordered ACL rule for chat.trigger",
+                "description": "Create a new ACL rule for chat.trigger",
                 "tags": [
                     "bots"
                 ],
@@ -505,56 +505,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/acl.Rule"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acl/rules/reorder": {
-            "put": {
-                "description": "Batch-update priorities for multiple ACL rules",
-                "tags": [
-                    "bots"
-                ],
-                "summary": "Reorder ACL rules",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Reorder payload",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/acl.ReorderRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -9716,16 +9666,10 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
-                "priority": {
-                    "type": "integer"
-                },
                 "source_scope": {
                     "$ref": "#/definitions/acl.SourceScope"
                 },
                 "subject_channel_type": {
-                    "type": "string"
-                },
-                "subject_kind": {
                     "type": "string"
                 }
             }
@@ -9755,6 +9699,9 @@ const docTemplate = `{
                 "channel": {
                     "type": "string"
                 },
+                "conversation_avatar_url": {
+                    "type": "string"
+                },
                 "conversation_id": {
                     "type": "string"
                 },
@@ -9782,28 +9729,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/acl.ObservedConversationCandidate"
-                    }
-                }
-            }
-        },
-        "acl.ReorderItem": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "priority": {
-                    "type": "integer"
-                }
-            }
-        },
-        "acl.ReorderRequest": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/acl.ReorderItem"
                     }
                 }
             }
@@ -9859,16 +9784,16 @@ const docTemplate = `{
                 "linked_user_username": {
                     "type": "string"
                 },
-                "priority": {
-                    "type": "integer"
+                "source_conversation_avatar_url": {
+                    "type": "string"
+                },
+                "source_conversation_name": {
+                    "type": "string"
                 },
                 "source_scope": {
                     "$ref": "#/definitions/acl.SourceScope"
                 },
                 "subject_channel_type": {
-                    "type": "string"
-                },
-                "subject_kind": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -9905,16 +9830,10 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
-                "priority": {
-                    "type": "integer"
-                },
                 "source_scope": {
                     "$ref": "#/definitions/acl.SourceScope"
                 },
                 "subject_channel_type": {
-                    "type": "string"
-                },
-                "subject_kind": {
                     "type": "string"
                 }
             }

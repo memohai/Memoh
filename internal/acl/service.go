@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
@@ -18,7 +17,7 @@ import (
 )
 
 var (
-	ErrInvalidRuleSubject = errors.New("invalid rule subject: subject_kind does not match provided subject fields")
+	ErrInvalidRuleSubject = errors.New("invalid rule target")
 	ErrInvalidSourceScope = errors.New("invalid source scope")
 	ErrInvalidEffect      = errors.New("effect must be 'allow' or 'deny'")
 )
@@ -39,8 +38,8 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 }
 
 // Evaluate checks whether the given request is allowed to perform chat.trigger.
-// It uses a single first-match-wins query over priority-ordered enabled rules,
-// falling back to the bot's acl_default_effect if no rule matches.
+// Rules only override the bot's default mode: deny rules matter in blacklist mode,
+// and allow rules matter in whitelist mode.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, error) {
 	// Validate scope before any service nil checks so callers get meaningful errors.
 	sourceScope, err := normalizeSourceScope(req.SourceScope)
@@ -71,14 +70,6 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, erro
 		SourceThreadID:         optionalText(sourceScope.ThreadID),
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// No rule matched — use the bot's default effect.
-			defaultEffect, err := s.queries.GetBotACLDefaultEffect(ctx, pgBotID)
-			if err != nil {
-				return false, err
-			}
-			return defaultEffect == EffectAllow, nil
-		}
 		return false, err
 	}
 	return effect == EffectAllow, nil
@@ -115,7 +106,7 @@ func (s *Service) SetDefaultEffect(ctx context.Context, botID, effect string) er
 	})
 }
 
-// ListRules returns all ACL rules for a bot ordered by priority.
+// ListRules returns all ACL rules for a bot, newest first.
 func (s *Service) ListRules(ctx context.Context, botID string) ([]Rule, error) {
 	if s == nil || s.queries == nil {
 		return nil, errors.New("acl service not configured")
@@ -143,14 +134,14 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 	if err := validateEffect(req.Effect); err != nil {
 		return Rule{}, err
 	}
-	if err := validateSubject(req.SubjectKind, req.ChannelIdentityID, req.SubjectChannelType); err != nil {
+	if err := s.validateTarget(ctx, req.ChannelIdentityID, req.SubjectChannelType); err != nil {
 		return Rule{}, err
 	}
 	sourceScope, err := normalizeOptionalSourceScope(req.SourceScope)
 	if err != nil {
 		return Rule{}, err
 	}
-	sourceChannel, err := s.resolveSourceChannel(ctx, sourceScope, req.SubjectKind, req.SubjectChannelType, req.ChannelIdentityID)
+	sourceChannel, err := s.resolveSourceChannel(ctx, sourceScope, req.SubjectChannelType, req.ChannelIdentityID)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -160,11 +151,9 @@ func (s *Service) CreateRule(ctx context.Context, botID, createdByUserID string,
 	}
 	row, err := s.queries.CreateBotACLRule(ctx, sqlc.CreateBotACLRuleParams{
 		BotID:                  pgBotID,
-		Priority:               req.Priority,
 		Enabled:                req.Enabled,
 		Description:            optionalText(req.Description),
 		Effect:                 req.Effect,
-		SubjectKind:            req.SubjectKind,
 		ChannelIdentityID:      optionalUUID(req.ChannelIdentityID),
 		SubjectChannelType:     optionalText(req.SubjectChannelType),
 		SourceChannel:          optionalText(sourceChannel),
@@ -187,14 +176,14 @@ func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleR
 	if err := validateEffect(req.Effect); err != nil {
 		return Rule{}, err
 	}
-	if err := validateSubject(req.SubjectKind, req.ChannelIdentityID, req.SubjectChannelType); err != nil {
+	if err := s.validateTarget(ctx, req.ChannelIdentityID, req.SubjectChannelType); err != nil {
 		return Rule{}, err
 	}
 	sourceScope, err := normalizeOptionalSourceScope(req.SourceScope)
 	if err != nil {
 		return Rule{}, err
 	}
-	sourceChannel, err := s.resolveSourceChannel(ctx, sourceScope, req.SubjectKind, req.SubjectChannelType, req.ChannelIdentityID)
+	sourceChannel, err := s.resolveSourceChannel(ctx, sourceScope, req.SubjectChannelType, req.ChannelIdentityID)
 	if err != nil {
 		return Rule{}, err
 	}
@@ -204,11 +193,9 @@ func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleR
 	}
 	row, err := s.queries.UpdateBotACLRule(ctx, sqlc.UpdateBotACLRuleParams{
 		ID:                     pgRuleID,
-		Priority:               req.Priority,
 		Enabled:                req.Enabled,
 		Description:            optionalText(req.Description),
 		Effect:                 req.Effect,
-		SubjectKind:            req.SubjectKind,
 		ChannelIdentityID:      optionalUUID(req.ChannelIdentityID),
 		SubjectChannelType:     optionalText(req.SubjectChannelType),
 		SourceChannel:          optionalText(sourceChannel),
@@ -222,16 +209,18 @@ func (s *Service) UpdateRule(ctx context.Context, ruleID string, req UpdateRuleR
 	return ruleFromUpdateRow(row), nil
 }
 
-// resolveSourceChannel derives the source_channel value from the rule's subject context.
+// resolveSourceChannel derives the source_channel value from the rule's target context.
 // source_channel is required by DB constraint whenever source_conversation_id or source_thread_id is set.
-func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, subjectKind, subjectChannelType, channelIdentityID string) (string, error) {
+func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, subjectChannelType, channelIdentityID string) (string, error) {
 	if scope.IsZero() {
 		return "", nil
 	}
-	switch subjectKind {
-	case SubjectKindChannelType:
-		return strings.TrimSpace(subjectChannelType), nil
-	case SubjectKindChannelIdentity:
+	subjectChannelType = strings.TrimSpace(subjectChannelType)
+	if subjectChannelType != "" {
+		return subjectChannelType, nil
+	}
+	channelIdentityID = strings.TrimSpace(channelIdentityID)
+	if channelIdentityID != "" {
 		pgID, err := db.ParseUUID(strings.TrimSpace(channelIdentityID))
 		if err != nil {
 			return "", fmt.Errorf("resolve source channel: %w", err)
@@ -241,9 +230,8 @@ func (s *Service) resolveSourceChannel(ctx context.Context, scope SourceScope, s
 			return "", fmt.Errorf("resolve source channel: get identity: %w", err)
 		}
 		return strings.TrimSpace(identity.ChannelType), nil
-	default:
-		return "", nil
 	}
+	return "", nil
 }
 
 // DeleteRule removes an ACL rule by ID.
@@ -256,26 +244,6 @@ func (s *Service) DeleteRule(ctx context.Context, ruleID string) error {
 		return err
 	}
 	return s.queries.DeleteBotACLRuleByID(ctx, pgRuleID)
-}
-
-// ReorderRules batch-updates the priority of multiple rules.
-func (s *Service) ReorderRules(ctx context.Context, items []ReorderItem) error {
-	if s == nil || s.queries == nil {
-		return errors.New("acl service not configured")
-	}
-	for _, item := range items {
-		pgID, err := db.ParseUUID(item.ID)
-		if err != nil {
-			return err
-		}
-		if err := s.queries.UpdateBotACLRulePriority(ctx, sqlc.UpdateBotACLRulePriorityParams{
-			ID:       pgID,
-			Priority: item.Priority,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ListObservedConversationsByChannelIdentity returns conversations observed for a specific
@@ -302,13 +270,14 @@ func (s *Service) ListObservedConversationsByChannelIdentity(ctx context.Context
 	items := make([]ObservedConversationCandidate, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, ObservedConversationCandidate{
-			RouteID:          row.RouteID.String(),
-			Channel:          strings.TrimSpace(row.Channel),
-			ConversationType: strings.TrimSpace(row.ConversationType),
-			ConversationID:   strings.TrimSpace(row.ConversationID),
-			ThreadID:         strings.TrimSpace(row.ThreadID),
-			ConversationName: strings.TrimSpace(row.ConversationName),
-			LastObservedAt:   timeFromPg(row.LastObservedAt),
+			RouteID:               row.RouteID.String(),
+			Channel:               strings.TrimSpace(row.Channel),
+			ConversationType:      strings.TrimSpace(row.ConversationType),
+			ConversationID:        strings.TrimSpace(row.ConversationID),
+			ThreadID:              strings.TrimSpace(row.ThreadID),
+			ConversationName:      strings.TrimSpace(row.ConversationName),
+			ConversationAvatarURL: strings.TrimSpace(row.ConversationAvatarUrl),
+			LastObservedAt:        timeFromPg(row.LastObservedAt),
 		})
 	}
 	return items, nil
@@ -338,13 +307,14 @@ func (s *Service) ListObservedConversationsByChannelType(ctx context.Context, bo
 	items := make([]ObservedConversationCandidate, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, ObservedConversationCandidate{
-			RouteID:          row.RouteID.String(),
-			Channel:          strings.TrimSpace(row.Channel),
-			ConversationType: strings.TrimSpace(row.ConversationType),
-			ConversationID:   strings.TrimSpace(row.ConversationID),
-			ThreadID:         strings.TrimSpace(row.ThreadID),
-			ConversationName: strings.TrimSpace(row.ConversationName),
-			LastObservedAt:   timeFromPg(row.LastObservedAt),
+			RouteID:               row.RouteID.String(),
+			Channel:               strings.TrimSpace(row.Channel),
+			ConversationType:      strings.TrimSpace(row.ConversationType),
+			ConversationID:        strings.TrimSpace(row.ConversationID),
+			ThreadID:              strings.TrimSpace(row.ThreadID),
+			ConversationName:      strings.TrimSpace(row.ConversationName),
+			ConversationAvatarURL: strings.TrimSpace(row.ConversationAvatarUrl),
+			LastObservedAt:        timeFromPg(row.LastObservedAt),
 		})
 	}
 	return items, nil
@@ -360,24 +330,21 @@ func validateEffect(effect string) error {
 	return ErrInvalidEffect
 }
 
-func validateSubject(kind, channelIdentityID, channelType string) error {
-	kind = strings.TrimSpace(kind)
+func (s *Service) validateTarget(ctx context.Context, channelIdentityID, channelType string) error {
 	channelIdentityID = strings.TrimSpace(channelIdentityID)
 	channelType = strings.TrimSpace(channelType)
-	switch kind {
-	case SubjectKindAll:
-		if channelIdentityID != "" || channelType != "" {
-			return ErrInvalidRuleSubject
-		}
-	case SubjectKindChannelIdentity:
-		if channelIdentityID == "" || channelType != "" {
-			return ErrInvalidRuleSubject
-		}
-	case SubjectKindChannelType:
-		if channelType == "" || channelIdentityID != "" {
-			return ErrInvalidRuleSubject
-		}
-	default:
+	if channelIdentityID == "" {
+		return nil
+	}
+	pgID, err := db.ParseUUID(channelIdentityID)
+	if err != nil {
+		return err
+	}
+	identity, err := s.queries.GetChannelIdentityByID(ctx, pgID)
+	if err != nil {
+		return err
+	}
+	if channelType != "" && strings.TrimSpace(identity.ChannelType) != channelType {
 		return ErrInvalidRuleSubject
 	}
 	return nil
@@ -435,24 +402,24 @@ func timeFromPg(value pgtype.Timestamptz) time.Time {
 
 func ruleFromListRow(row sqlc.ListBotACLRulesRow) Rule {
 	rule := Rule{
-		ID:                         uuid.UUID(row.ID.Bytes).String(),
-		BotID:                      uuid.UUID(row.BotID.Bytes).String(),
-		Priority:                   row.Priority,
-		Enabled:                    row.Enabled,
-		Description:                strings.TrimSpace(row.Description.String),
-		Action:                     row.Action,
-		Effect:                     row.Effect,
-		SubjectKind:                row.SubjectKind,
-		SubjectChannelType:         strings.TrimSpace(row.SubjectChannelType.String),
-		ChannelType:                strings.TrimSpace(row.ChannelType.String),
-		ChannelSubjectID:           strings.TrimSpace(row.ChannelSubjectID.String),
-		ChannelIdentityDisplayName: strings.TrimSpace(row.ChannelIdentityDisplayName.String),
-		ChannelIdentityAvatarURL:   strings.TrimSpace(row.ChannelIdentityAvatarUrl.String),
-		LinkedUserUsername:         strings.TrimSpace(row.LinkedUserUsername.String),
-		LinkedUserDisplayName:      strings.TrimSpace(row.LinkedUserDisplayName.String),
-		LinkedUserAvatarURL:        strings.TrimSpace(row.LinkedUserAvatarUrl.String),
-		CreatedAt:                  timeFromPg(row.CreatedAt),
-		UpdatedAt:                  timeFromPg(row.UpdatedAt),
+		ID:                          uuid.UUID(row.ID.Bytes).String(),
+		BotID:                       uuid.UUID(row.BotID.Bytes).String(),
+		Enabled:                     row.Enabled,
+		Description:                 strings.TrimSpace(row.Description.String),
+		Action:                      row.Action,
+		Effect:                      row.Effect,
+		SubjectChannelType:          strings.TrimSpace(row.SubjectChannelType.String),
+		ChannelType:                 strings.TrimSpace(row.ChannelType.String),
+		ChannelSubjectID:            strings.TrimSpace(row.ChannelSubjectID.String),
+		ChannelIdentityDisplayName:  strings.TrimSpace(row.ChannelIdentityDisplayName.String),
+		ChannelIdentityAvatarURL:    strings.TrimSpace(row.ChannelIdentityAvatarUrl.String),
+		SourceConversationName:      strings.TrimSpace(row.SourceConversationName),
+		SourceConversationAvatarURL: strings.TrimSpace(row.SourceConversationAvatarUrl),
+		LinkedUserUsername:          strings.TrimSpace(row.LinkedUserUsername.String),
+		LinkedUserDisplayName:       strings.TrimSpace(row.LinkedUserDisplayName.String),
+		LinkedUserAvatarURL:         strings.TrimSpace(row.LinkedUserAvatarUrl.String),
+		CreatedAt:                   timeFromPg(row.CreatedAt),
+		UpdatedAt:                   timeFromPg(row.UpdatedAt),
 	}
 	rule.SourceScope = sourceScopeFromPg(row.SourceConversationType, row.SourceConversationID, row.SourceThreadID)
 	if row.ChannelIdentityID.Valid {
@@ -464,16 +431,14 @@ func ruleFromListRow(row sqlc.ListBotACLRulesRow) Rule {
 	return rule
 }
 
-func ruleFromWrite(row sqlc.CreateBotACLRuleRow) Rule {
+func ruleFromWrite(row sqlc.BotAclRule) Rule {
 	rule := Rule{
 		ID:                 uuid.UUID(row.ID.Bytes).String(),
 		BotID:              uuid.UUID(row.BotID.Bytes).String(),
-		Priority:           row.Priority,
 		Enabled:            row.Enabled,
 		Description:        strings.TrimSpace(row.Description.String),
 		Action:             row.Action,
 		Effect:             row.Effect,
-		SubjectKind:        row.SubjectKind,
 		SubjectChannelType: strings.TrimSpace(row.SubjectChannelType.String),
 		SourceScope:        sourceScopeFromPg(row.SourceConversationType, row.SourceConversationID, row.SourceThreadID),
 		CreatedAt:          timeFromPg(row.CreatedAt),
@@ -485,16 +450,14 @@ func ruleFromWrite(row sqlc.CreateBotACLRuleRow) Rule {
 	return rule
 }
 
-func ruleFromUpdateRow(row sqlc.UpdateBotACLRuleRow) Rule {
+func ruleFromUpdateRow(row sqlc.BotAclRule) Rule {
 	rule := Rule{
 		ID:                 uuid.UUID(row.ID.Bytes).String(),
 		BotID:              uuid.UUID(row.BotID.Bytes).String(),
-		Priority:           row.Priority,
 		Enabled:            row.Enabled,
 		Description:        strings.TrimSpace(row.Description.String),
 		Action:             row.Action,
 		Effect:             row.Effect,
-		SubjectKind:        row.SubjectKind,
 		SubjectChannelType: strings.TrimSpace(row.SubjectChannelType.String),
 		SourceScope:        sourceScopeFromPg(row.SourceConversationType, row.SourceConversationID, row.SourceThreadID),
 		CreatedAt:          timeFromPg(row.CreatedAt),

@@ -346,6 +346,7 @@ SELECT
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
     ''
   )::text AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
@@ -388,6 +389,7 @@ SELECT
     NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
     ''
   )::text AS conversation_name,
+  COALESCE(NULLIF(TRIM(COALESCE(r.metadata->>'conversation_avatar_url', '')), ''), '')::text AS conversation_avatar_url,
   rr.last_observed_at
 FROM observed_routes rr
 JOIN bot_channel_routes r ON r.id = rr.route_id
