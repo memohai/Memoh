@@ -142,9 +142,9 @@ const iconComponent = computed<Component>(() => {
 
 const iconClass = computed(() => {
   switch (props.session.type) {
-    case 'heartbeat': return 'text-rose-400'
-    case 'schedule': return 'text-amber-400'
-    case 'subagent': return 'text-violet-400'
+    case 'heartbeat': return 'text-event-heartbeat'
+    case 'schedule': return 'text-event-schedule'
+    case 'subagent': return 'text-event-subagent'
     default: return 'text-muted-foreground'
   }
 })

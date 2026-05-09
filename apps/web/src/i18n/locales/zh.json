@@ -74,6 +74,7 @@
     "mcp": "MCP",
     "platform": "接入平台",
     "usage": "用量统计",
+    "appearance": "外观",
     "supermarket": "市场",
     "about": "关于"
   },
@@ -110,6 +111,28 @@
     "themePlaceholder": "选择主题",
     "themeLight": "浅色",
     "themeDark": "深色",
+    "appearance": {
+      "title": "外观",
+      "description": "调整语言、主题，以及 Memoh 全局使用的语义化配色。",
+      "interface": "界面",
+      "interfaceDescription": "这些偏好会立即生效，并保存在当前设备上。",
+      "colorScheme": "配色方案",
+      "colorSchemeDescription": "选择基础、品牌、状态、事件、图表、终端和 diff 颜色使用的调色盘。",
+      "colorSchemes": {
+        "memoh": "Memoh",
+        "ocean": "海洋",
+        "forest": "森林",
+        "rose": "玫瑰",
+        "amber": "琥珀"
+      },
+      "colorSchemeDescriptions": {
+        "memoh": "默认的克制紫色方案。",
+        "ocean": "冷静蓝色，信息状态更清晰。",
+        "forest": "以绿色为核心，更安静稳重。",
+        "rose": "温暖玫瑰色，保持柔和对比。",
+        "amber": "金色强调，搭配实用状态色。"
+      }
+    },
     "langZh": "中文",
     "langEn": "English",
     "version": "版本",

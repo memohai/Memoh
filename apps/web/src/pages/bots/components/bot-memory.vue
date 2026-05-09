@@ -481,6 +481,7 @@ import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatDateTimeSeconds } from '@/utils/date-time'
+import { useSettingsStore } from '@/store/settings'
 
 use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent])
 
@@ -521,6 +522,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const colorMode = useColorMode()
+const settingsStore = useSettingsStore()
 const { copyText } = useClipboard()
 const loading = ref(false)
 const actionLoading = ref(false)
@@ -583,12 +585,13 @@ const denseCumulativeSeries = computed(() => {
 })
 
 const chartPalette = computed(() => {
-  // Depend on theme so echarts colors recalculate on light/dark switch.
+  // Depend on theme and palette so echarts colors recalculate on appearance changes.
   void colorMode.value
+  void settingsStore.colorScheme
   return {
-    tooltipBackground: resolveCssColor('var(--popover)', '#ffffff'),
+    tooltipBackground: resolveCssColor('var(--popover)', 'white'),
     tooltipBorder: resolveCssColor('var(--border)', 'rgba(0,0,0,0.12)'),
-    tooltipText: resolveCssColor('var(--popover-foreground)', '#111827'),
+    tooltipText: resolveCssColor('var(--popover-foreground)', 'CanvasText'),
     axisText: resolveCssColor('var(--muted-foreground)', 'rgba(107,114,128,0.9)'),
     splitLine: resolveCssColor('color-mix(in oklab, var(--muted-foreground) 8%, transparent)', 'rgba(107,114,128,0.12)'),
     topKBar: resolveCssColor('color-mix(in oklab, var(--primary) 16%, transparent)', 'rgba(99,102,241,0.18)'),

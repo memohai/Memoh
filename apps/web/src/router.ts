@@ -122,6 +122,14 @@ const routes = [
         },
       },
       {
+        name: 'appearance',
+        path: 'appearance',
+        component: () => import('@/pages/appearance/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.appearance'),
+        },
+      },
+      {
         name: 'profile',
         path: 'profile',
         component: () => import('@/pages/profile/index.vue'),

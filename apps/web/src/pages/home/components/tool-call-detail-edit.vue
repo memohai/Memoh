@@ -64,11 +64,11 @@ onMounted(() => {
   background: transparent !important;
 }
 .shiki-diff-container .diff-remove {
-  background-color: oklch(0.55 0.12 25 / 0.12);
-  border-left: 3px solid oklch(0.55 0.12 25 / 0.5);
+  background-color: var(--diff-remove);
+  border-left: 3px solid var(--diff-remove-border);
 }
 .shiki-diff-container .diff-add {
-  background-color: oklch(0.55 0.12 145 / 0.12);
-  border-left: 3px solid oklch(0.55 0.12 145 / 0.5);
+  background-color: var(--diff-add);
+  border-left: 3px solid var(--diff-add-border);
 }
 </style>

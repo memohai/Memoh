@@ -100,9 +100,9 @@
       v-else-if="qrState === 'success'"
       class="flex flex-col items-center gap-3 py-4"
     >
-      <div class="flex size-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
+      <div class="flex size-12 items-center justify-center rounded-full bg-success-soft">
         <Check
-          class="size-5 text-green-600 dark:text-green-400"
+          class="size-5 text-success-foreground"
         />
       </div>
       <p class="text-xs font-medium">

@@ -179,9 +179,9 @@ function reload() {
 function statusDotClass(item: McpItem): string {
   if (!item.is_active) return 'bg-muted-foreground/40'
   switch (item.status) {
-    case 'connected': return 'bg-green-500'
+    case 'connected': return 'bg-success'
     case 'error': return 'bg-destructive'
-    default: return 'bg-amber-400'
+    default: return 'bg-warning'
   }
 }
 

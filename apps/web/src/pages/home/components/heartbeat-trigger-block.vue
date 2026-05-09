@@ -1,14 +1,14 @@
 <template>
   <div
-    class="w-full rounded-lg border border-rose-200 dark:border-rose-400/20 bg-rose-50/50 dark:bg-rose-950/20 px-4 py-3 cursor-pointer transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/30"
+    class="w-full rounded-lg border border-event-heartbeat-border bg-event-heartbeat-soft px-4 py-3 cursor-pointer transition-colors hover:bg-event-heartbeat-soft/80"
     @click="navigateToLogs"
   >
     <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center gap-2 text-xs font-medium text-rose-600 dark:text-rose-400">
+      <div class="flex items-center gap-2 text-xs font-medium text-event-heartbeat-foreground">
         <HeartPulse class="size-3.5" />
         {{ t('chat.heartbeatTrigger') }}
       </div>
-      <div class="flex items-center gap-1 text-[11px] text-rose-500/70 dark:text-rose-400/60">
+      <div class="flex items-center gap-1 text-[11px] text-event-heartbeat-foreground/70">
         {{ t('chat.viewHeartbeatLogs') }}
         <ExternalLink class="size-3" />
       </div>
@@ -58,7 +58,7 @@ const parsed = computed<HeartbeatInfo>(() => {
   const frontmatterMatch = text.match(/---\n([\s\S]*?)\n---/)
   if (!frontmatterMatch) return {}
 
-  const lines = frontmatterMatch[1].split('\n')
+  const lines = (frontmatterMatch[1] ?? '').split('\n')
   const info: HeartbeatInfo = {}
   for (const line of lines) {
     const idx = line.indexOf(':')

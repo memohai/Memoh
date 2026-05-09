@@ -95,7 +95,7 @@ function handleClick(entry: HandlersFsFileInfo) {
             <div class="flex flex-1 items-center gap-2 min-w-0">
               <component
                 :is="entry.isDir ? Folder : File"
-                :class="entry.isDir ? 'text-blue-500' : 'text-muted-foreground'"
+                :class="entry.isDir ? 'text-info' : 'text-muted-foreground'"
                 class="size-4 shrink-0"
               />
               <span class="truncate">{{ entry.name }}</span>

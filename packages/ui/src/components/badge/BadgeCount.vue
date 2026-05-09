@@ -10,7 +10,7 @@ const badgeCountVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-foreground text-background',
+        default: 'border border-border bg-secondary text-secondary-foreground',
         destructive: 'bg-destructive text-destructive-foreground',
         secondary: 'bg-accent text-foreground',
       },

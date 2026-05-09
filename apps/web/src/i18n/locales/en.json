@@ -74,6 +74,7 @@
     "mcp": "MCP",
     "platform": "Platform",
     "usage": "Usage",
+    "appearance": "Appearance",
     "supermarket": "Supermarket",
     "about": "About"
   },
@@ -114,6 +115,28 @@
     "themePlaceholder": "Select theme",
     "themeLight": "Light",
     "themeDark": "Dark",
+    "appearance": {
+      "title": "Appearance",
+      "description": "Adjust language, theme, and the semantic color palette used across Memoh.",
+      "interface": "Interface",
+      "interfaceDescription": "These preferences apply immediately and are stored on this device.",
+      "colorScheme": "Color scheme",
+      "colorSchemeDescription": "Choose a palette for base, brand, status, event, chart, terminal, and diff colors.",
+      "colorSchemes": {
+        "memoh": "Memoh",
+        "ocean": "Ocean",
+        "forest": "Forest",
+        "rose": "Rose",
+        "amber": "Amber"
+      },
+      "colorSchemeDescriptions": {
+        "memoh": "The default restrained purple palette.",
+        "ocean": "Cool blue with clear info states.",
+        "forest": "Green-focused and quiet.",
+        "rose": "Warm rose accents with soft contrast.",
+        "amber": "Golden highlights with practical status colors."
+      }
+    },
     "langZh": "中文",
     "langEn": "English",
     "version": "Version",

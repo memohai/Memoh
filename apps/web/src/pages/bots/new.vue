@@ -101,7 +101,7 @@
                   :placeholder="$t('bots.localWorkspacePathPlaceholder')"
                 />
               </div>
-              <div class="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              <div class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
                 {{ $t('bots.localWorkspaceWarning') }}
               </div>
             </template>

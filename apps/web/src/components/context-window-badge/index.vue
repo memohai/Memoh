@@ -25,10 +25,10 @@ const formatted = computed(() => {
 
 const badgeClass = computed(() => {
   const ctx = props.contextWindow ?? 0
-  if (ctx >= 1_000_000) return 'bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
-  if (ctx >= 100_000) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-  if (ctx >= 32_000) return 'bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
-  if (ctx >= 8_000) return 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
-  return 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'
+  if (ctx >= 1_000_000) return 'bg-context-window-xl text-context-window-foreground'
+  if (ctx >= 100_000) return 'bg-context-window-lg text-context-window-foreground'
+  if (ctx >= 32_000) return 'bg-context-window-md text-context-window-foreground'
+  if (ctx >= 8_000) return 'bg-context-window-sm text-context-window-foreground'
+  return 'bg-context-window-xs text-muted-foreground'
 })
 </script>

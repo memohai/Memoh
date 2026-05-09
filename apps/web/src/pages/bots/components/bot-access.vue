@@ -31,15 +31,14 @@
           type="button"
           class="rounded-lg border p-4 text-left transition-colors"
           :class="defaultEffectDraft === 'allow'
-            ? 'border-foreground bg-foreground text-background'
+            ? 'border-ring bg-secondary text-foreground ring-1 ring-ring/20'
             : 'border-border bg-background text-foreground hover:bg-accent'"
           :disabled="isSavingDefaultEffect"
           @click="handleSetDefaultEffect('allow')"
         >
           <span class="text-sm font-medium">{{ $t('bots.access.blacklistMode') }}</span>
           <span
-            class="mt-1 block text-xs"
-            :class="defaultEffectDraft === 'allow' ? 'text-background/75' : 'text-muted-foreground'"
+            class="mt-1 block text-xs text-muted-foreground"
           >
             {{ $t('bots.access.blacklistModeDescription') }}
           </span>
@@ -48,15 +47,14 @@
           type="button"
           class="rounded-lg border p-4 text-left transition-colors"
           :class="defaultEffectDraft === 'deny'
-            ? 'border-foreground bg-foreground text-background'
+            ? 'border-ring bg-secondary text-foreground ring-1 ring-ring/20'
             : 'border-border bg-background text-foreground hover:bg-accent'"
           :disabled="isSavingDefaultEffect"
           @click="handleSetDefaultEffect('deny')"
         >
           <span class="text-sm font-medium">{{ $t('bots.access.whitelistMode') }}</span>
           <span
-            class="mt-1 block text-xs"
-            :class="defaultEffectDraft === 'deny' ? 'text-background/75' : 'text-muted-foreground'"
+            class="mt-1 block text-xs text-muted-foreground"
           >
             {{ $t('bots.access.whitelistModeDescription') }}
           </span>
@@ -142,7 +140,7 @@
               </p>
               <span
                 class="shrink-0 rounded-full px-2 py-0.5 text-[11px]"
-                :class="rule.enabled ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' : 'bg-muted text-muted-foreground'"
+                :class="rule.enabled ? 'bg-success-soft text-success-foreground' : 'bg-muted text-muted-foreground'"
               >
                 {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
               </span>
@@ -406,8 +404,8 @@
               type="button"
               class="rounded-md border px-2 py-1.5 text-xs font-medium transition-colors text-center"
               :class="ruleForm.sourceConversationType === scope.value
-                ? 'border-foreground bg-foreground text-background'
-                : 'border-border text-muted-foreground hover:bg-accent'"
+                ? 'border-ring bg-secondary text-foreground ring-1 ring-ring/20'
+                : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'"
               @click="setChatScope(scope.value)"
             >
               {{ scope.label }}

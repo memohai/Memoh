@@ -1,14 +1,14 @@
 <template>
   <div
-    class="w-full rounded-lg border border-amber-200 dark:border-amber-400/20 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 cursor-pointer transition-colors hover:bg-amber-50 dark:hover:bg-amber-950/30"
+    class="w-full rounded-lg border border-event-schedule-border bg-event-schedule-soft px-4 py-3 cursor-pointer transition-colors hover:bg-event-schedule-soft/80"
     @click="navigateToSchedule"
   >
     <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center gap-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+      <div class="flex items-center gap-2 text-xs font-medium text-event-schedule-foreground">
         <Clock class="size-3.5" />
         {{ t('chat.scheduleTrigger') }}
       </div>
-      <div class="flex items-center gap-1 text-[11px] text-amber-500/70 dark:text-amber-400/60">
+      <div class="flex items-center gap-1 text-[11px] text-event-schedule-foreground/70">
         {{ t('chat.viewSchedule') }}
         <ExternalLink class="size-3" />
       </div>
@@ -24,7 +24,7 @@
         class="text-muted-foreground"
       >{{ t('chat.schedulePattern') }}</span>
       <span v-if="parsed.pattern">
-        <code class="text-[11px] px-1 py-0.5 rounded bg-amber-100/50 dark:bg-amber-900/30">{{ parsed.pattern }}</code>
+        <code class="text-[11px] px-1 py-0.5 rounded bg-event-schedule/10">{{ parsed.pattern }}</code>
       </span>
       <span
         v-if="parsed.description"
@@ -39,7 +39,7 @@
     </div>
     <div
       v-if="parsed.command"
-      class="mt-2 text-xs text-muted-foreground border-t border-amber-200/50 dark:border-amber-400/10 pt-2"
+      class="mt-2 text-xs text-muted-foreground border-t border-event-schedule-border/60 pt-2"
     >
       <pre class="whitespace-pre-wrap break-all font-mono text-[11px]">{{ parsed.command }}</pre>
     </div>
@@ -73,7 +73,7 @@ const parsed = computed<ScheduleInfo>(() => {
   const frontmatterMatch = text.match(/---\n([\s\S]*?)\n---/)
   if (!frontmatterMatch) return {}
 
-  const lines = frontmatterMatch[1].split('\n')
+  const lines = (frontmatterMatch[1] ?? '').split('\n')
   const info: ScheduleInfo = {}
   for (const line of lines) {
     const idx = line.indexOf(':')

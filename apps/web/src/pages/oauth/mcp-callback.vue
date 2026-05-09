@@ -7,7 +7,7 @@
       />
       <CircleCheck
         v-else-if="success"
-        class="size-8 text-green-500"
+        class="size-8 text-success"
       />
       <CircleX
         v-else

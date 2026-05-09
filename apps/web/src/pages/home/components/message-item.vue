@@ -129,7 +129,7 @@
       >
         <div
           v-if="message.text"
-          class="w-full rounded-lg border border-violet-200 dark:border-violet-400/20 bg-violet-50/50 dark:bg-violet-950/20 px-4 py-3"
+          class="w-full rounded-lg border border-event-subagent-border bg-event-subagent-soft px-4 py-3"
         >
           <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
             <MarkdownRender
@@ -162,13 +162,12 @@
           v-if="cleanUserText(message.text) || message.forward || message.reply"
           class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
           :class="isSelf
-            ? 'rounded-tr-sm bg-foreground text-background'
-            : 'rounded-tl-sm bg-accent text-foreground'"
+            ? 'rounded-tr-sm bg-accent text-foreground'
+            : 'rounded-tl-sm bg-muted text-foreground'"
         >
           <div
             v-if="message.forward"
-            class="mb-1 text-[11px] font-medium leading-snug"
-            :class="isSelf ? 'text-background/70' : 'text-muted-foreground'"
+            class="mb-1 text-[11px] font-medium leading-snug text-muted-foreground"
           >
             {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
           </div>
@@ -177,28 +176,27 @@
             type="button"
             class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
             :class="[
-              isSelf ? 'bg-background/10' : 'bg-background/40',
-              canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/15 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
+              'bg-background/55 dark:bg-background/20',
+              canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/70 dark:hover:bg-background/30 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
             ]"
             :disabled="!canJumpReply"
             @click.stop="handleReplyClick"
           >
             <span
               class="absolute inset-y-0 left-0 w-[3px]"
-              :class="isSelf ? 'bg-background/60' : 'bg-primary/70'"
+              :class="isSelf ? 'bg-border' : 'bg-primary/70'"
             />
             <div class="flex min-w-0 items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div
                   class="truncate text-[11px] font-semibold"
-                  :class="isSelf ? 'text-background' : 'text-primary'"
+                  :class="isSelf ? 'text-foreground' : 'text-primary'"
                 >
                   {{ replySenderLabel }}
                 </div>
                 <div
                   v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words"
-                  :class="isSelf ? 'text-background/75' : 'text-muted-foreground'"
+                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
                 >
                   {{ replyPreviewLabel }}
                 </div>

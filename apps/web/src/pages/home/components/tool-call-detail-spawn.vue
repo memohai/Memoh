@@ -31,7 +31,7 @@
       >
         <CircleCheck
           v-if="result.success"
-          class="size-3 text-emerald-500 shrink-0"
+          class="size-3 text-success shrink-0"
         />
         <CircleX
           v-else

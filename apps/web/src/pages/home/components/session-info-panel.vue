@@ -57,7 +57,6 @@
             <span class="text-muted-foreground">{{ $t('chat.infoCacheRead') }}</span>
             <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_read_tokens ?? 0) }}</span>
           </div>
-
         </div>
 
         <!-- Compact Now -->
@@ -165,7 +164,7 @@ const { data: skillCatalog } = useQuery({
 
 const contextBarColor = computed(() => {
   if (contextPercent.value >= 90) return 'bg-destructive'
-  if (contextPercent.value >= 70) return 'bg-amber-500'
+  if (contextPercent.value >= 70) return 'bg-warning'
   return 'bg-foreground'
 })
 

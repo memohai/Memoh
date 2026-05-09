@@ -123,10 +123,10 @@ const typeIcon = computed(() => {
 
 const statusDotClass = computed(() => {
   switch (testResult.value?.status) {
-    case 'ok': return 'bg-green-500'
-    case 'auth_error': return 'bg-yellow-500'
-    case 'error': return 'bg-red-500'
-    default: return 'bg-gray-400'
+    case 'ok': return 'bg-success'
+    case 'auth_error': return 'bg-warning'
+    case 'error': return 'bg-destructive'
+    default: return 'bg-muted-foreground'
   }
 })
 

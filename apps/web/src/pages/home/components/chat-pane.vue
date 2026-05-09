@@ -230,7 +230,7 @@
                   size="icon"
                   :disabled="(!inputText.trim() && !pendingFiles.length) || !currentBotId || activeChatReadOnly"
                   aria-label="Send message"
-                  class="size-7 rounded-full bg-[#8B56E3] text-white"
+                  class="size-7 rounded-full bg-primary text-primary-foreground"
                   @click="handleSend"
                 >
                   <Send

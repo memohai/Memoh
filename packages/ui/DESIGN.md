@@ -2,18 +2,20 @@
 
 ## Overview
 
-A modern, clean, and highly functional interface designed for the Memoh AI Agent platform. The design emphasizes a "high-contrast, flat" aesthetic. It moves away from mushy, ubiquitous soft shadows (`shadow-sm`) and brand-colored primary buttons, favoring a starker monochrome foundation with pure whites, light greys, and pure blacks. Brand colors are used extremely sparingly for distinct active states and primary conversion actions (like the chat "Send" button).
+A modern, clean, and highly functional interface designed for the Memoh AI Agent platform. The design emphasizes a "high-contrast, flat" aesthetic. It moves away from mushy, ubiquitous soft shadows (`shadow-sm`) and brand-colored primary buttons, favoring a tempered base palette with soft whites, light greys, and charcoal blacks. Brand colors are used extremely sparingly for distinct active states and primary conversion actions (like the chat "Send" button).
 
 ## Colors
 
-- **Primary** (`#8b56e3`): Brand purple. Its usage is heavily restricted to specific active indicators (sidebar selection, "Send" action, status dots). It is **not** used for generic primary buttons.
+- **Primary / Brand** (`--primary`, `--brand`): Scheme-aware brand accent. It drives explicit brand actions, active indicators, and status dots. Default filled controls should use pale natural surfaces from the base palette instead of brand tint.
 - **Primary Foreground** (`#fafafa`): Used heavily as the background for sidebars (Navigation, Session List, Metadata) to separate them from the main content area.
-- **Background** (`#ffffff`): Pure white, used for the central chat area, cards, alerts, and major input fields.
-- **Foreground** (`#171717` or `#0a0a0a`): Near black. Now acts as the default visual weight for **Primary Buttons** and **Default Badges**.
+- **Background** (`--background`): Soft off-white, used for the central chat area, cards, alerts, and major input fields. Avoid pure white unless an asset or overlay requires it.
+- **Foreground** (`--foreground`): Charcoal black. Now acts as the default visual weight for standard controls and default badges. Avoid pure black for normal UI fills.
 - **Muted Foreground** (`#737373`): Mid-grey, extensively used for timestamps, secondary labels, placeholders, and inactive icons.
 - **Accent** (`#f5f5f5`): Light grey, used for hover states, secondary buttons, code/badge backgrounds, and model selectors.
 - **Border** (`#e5e5e5`): Very light grey, used uniformly for all structural dividers and component borders.
-- **Destructive** (`#dc2626`): Pure red. Used exclusively for text or icons in critical actions (e.g., delete). It does not use colored backgrounds (e.g., no `bg-red-50`).
+- **Destructive** (`--destructive`): Scheme-aware critical action color. Used exclusively for text or icons in critical actions (e.g., delete). It does not use raw colored backgrounds (e.g., no `bg-red-50`).
+- **Semantic Colors**: Status, event, capability, diff, terminal, and chart colors must use global tokens (`--success`, `--warning`, `--success-solid-foreground`, `--warning-solid-foreground`, `--info`, `--event-*`, `--capability-*`, `--diff-*`, `--terminal-*`, `--chart-*`) rather than hardcoded Tailwind color families. If component states need more colors, extend the global palette tokens rather than adding component-specific color namespaces.
+- **Color Schemes**: Palettes are selected with `html[data-color-scheme]` and must provide light and dark values for the full semantic set. The default scheme is `memoh`.
 
 ## Typography
 
@@ -37,16 +39,16 @@ The system employs a **bimodal elevation strategy**:
 ### Base Atoms
 
 - **Avatars**: 26px rounded full. Default fallback uses `accent`. Status badges require a 2px knockout border matching the background.
-- **Badges**: 4px radius (`rounded-sm`). Default is pure black (`bg-foreground text-background`). Secondary is `bg-accent text-foreground`. Destructive is pure red background. Success is `bg-green-500 text-white`. Warning is `bg-amber-500 text-white`. Outline is `bg-background border-border text-foreground`. Supports `size="sm"` (`text-[11px] px-2`) alongside default.
-- **BadgeCount**: Circular numeric counter. `rounded-full`, `h-[18px] min-w-[18px] px-1`, `text-[11px] font-medium`. Variants: default (`bg-foreground text-background`), destructive (`bg-destructive text-destructive-foreground`), secondary (`bg-accent text-foreground`). Values above 99 display as "99+".
+- **Badges**: 4px radius (`rounded-sm`). Default uses `secondary/secondary-foreground` with `border-border`. Secondary uses `accent/foreground`. Destructive, success, and warning map to global status tokens. Outline uses `background/border/foreground`. Supports `size="sm"` (`text-[11px] px-2`) alongside default.
+- **BadgeCount**: Circular numeric counter. `rounded-full`, `h-[18px] min-w-[18px] px-1`, `text-[11px] font-medium`. Uses the same base/status mapping as Badge. Values above 99 display as "99+".
 - **Buttons**:
-  - Primary (Default): 8px radius, **`foreground` (black) background**, white text. Flat.
-  - Secondary / Outline: 8px radius, `accent` background, 1px `border`. Flat.
+  - Default: 8px radius, `secondary` background, `secondary-foreground` text, and `border-border`. Flat.
+  - Secondary / Outline: 8px radius, `accent` / `background` colors, 1px `border` where applicable. Flat.
   - Ghost: Icon buttons use `muted-foreground` defaulting to `foreground` on hover.
   - Grouped (`ButtonGroup`): Unified outer border (`border-border`, 8px radius). Internal items divided by `border-r` or `border-b`, no individual borders or radiuses.
-  - Brand Primary: Use `variant="primary"` explicitly for Send button or active CTA. This is the **only** case where `bg-primary` is used.
+  - Brand Primary: Use `variant="primary"` explicitly for Send button or active CTA. This maps directly to the active palette brand color.
 - **Inputs**: Flat design. 1px `border`, pure `background` fill, 8px/10px outer radius. Text must be `text-[16px]`. Focus state uses a stark black/grey ring, **not** primary purple.
-- **Checkboxes/Radios**: Flat, pure white background (`bg-background`). 1px `border`. The checked state marker (tick/dot) is `foreground` (black), avoiding brand colors.
+- **Checkboxes/Radios**: Flat, soft background (`bg-background`). 1px `border`. The checked state marker (tick/dot) is `foreground` (charcoal), avoiding brand colors.
 - **Separators**: Uniformly use the 1px `border` color. Do not use padding/margins that detach them from the container edges (e.g., use full width `border-b` in menus instead of `<Separator mx-1>`).
 
 ### Containers & Layouts
@@ -97,17 +99,17 @@ The system employs a **bimodal elevation strategy**:
 
 To ensure visual consistency when generating images or extrapolating designs via AI based on this system, strictly adhere to the following composition rules:
 
-1. **The "Flat Atom" Law:** If it's a basic interactive element (button, badge, input, toggle, checkbox), it **cannot** have a shadow. It must rely on `#e5e5e5` borders and background contrast (`#ffffff` vs `#f5f5f5` vs `#0a0a0a`).
+1. **The "Flat Atom" Law:** If it's a basic interactive element (button, badge, input, toggle, checkbox), it **cannot** have a shadow. It must rely on tokenized borders and background contrast (`--background` vs `--accent` vs `--foreground`).
 2. **The "Menu Underline" Law:** Whenever rendering a list of items inside a container (Dropdowns, Comboboxes, Sidebar Sub-menus, Collapsibles), items must be divided by a full-width, 1px horizontal line (`border-b`), terminating cleanly on the last item. Do not leave floating separators with margins.
-3. **The "Monochrome Hover" Law:** Focus and hover states for secondary items must always snap to `bg-[#f5f5f5]` and `text-[#0a0a0a]`. Never apply the brand purple (`#8b56e3`) as a background highlight for menus.
+3. **The "Monochrome Hover" Law:** Focus and hover states for secondary items must use `bg-accent` and `text-foreground`. Never apply the brand purple (`#8b56e3`) as a background highlight for menus.
 4. **The "Bimodal Elevation" Trigger:** Only use heavy, soft shadows (like `shadow-lg`) when rendering a standalone focal piece (like a login modal or a central dashboard card) that sits distinctly above a complex, flat background layer.
-5. **The "Purple Scarcity" Law:** The brand purple (`#8b56e3`) is the most expensive pixel on the screen. It can only be used for:
+5. **The "Brand Scarcity" Law:** The scheme brand color (`--brand` / `--primary`) is the most expensive pixel on the screen. It can only be used for:
    - The absolute primary completion action on a screen (e.g., the Chat "Send" button).
    - Micro-indicators of "current active state" (e.g., a 2px vertical bar next to an active sidebar menu item, or a 5px status dot).
 
 ## Do's and Don'ts
 
-- **Do** use `bg-foreground` (black) for standard primary actions like "Login" or "Register" instead of the brand purple.
+- **Do** use `bg-secondary` with `border-border` for standard filled controls; reserve `bg-primary` / `bg-brand` for explicit brand actions and high-emphasis CTAs.
 - **Don't** use `shadow-sm` on buttons, inputs, or alerts. Keep atomic components strictly flat.
 - **Do** use `shadow-lg` for large focal cards to make them pop against the flat UI.
 - **Don't** use colored backgrounds for Alert or Badge variants (like `bg-red-50`). Keep them white and use text/icon color to convey meaning (or solid red for destructive badges).

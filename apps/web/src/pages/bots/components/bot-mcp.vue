@@ -284,7 +284,7 @@
                 <Badge
                   v-if="selectedItem.status === 'connected'"
                   variant="outline"
-                  class="text-[10px] text-green-600"
+                  class="text-[10px] text-success-foreground"
                 >
                   {{ $t('mcp.statusConnected') }}
                 </Badge>
@@ -330,7 +330,7 @@
 
             <div
               v-if="probeAuthRequired"
-              class="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 rounded-md p-3 flex items-center gap-2"
+              class="text-xs text-warning-foreground bg-warning-soft rounded-md p-3 flex items-center gap-2"
             >
               <Lock />
               {{ $t('mcp.authRequired') }}
@@ -348,14 +348,14 @@
                 <Badge
                   v-if="oauthStatus?.has_token && !oauthStatus?.expired"
                   variant="outline"
-                  class="text-[10px] text-green-600"
+                  class="text-[10px] text-success-foreground"
                 >
                   {{ $t('mcp.oauth.authorized') }}
                 </Badge>
                 <Badge
                   v-else-if="oauthStatus?.has_token && oauthStatus?.expired"
                   variant="outline"
-                  class="text-[10px] text-amber-600"
+                  class="text-[10px] text-warning-foreground"
                 >
                   {{ $t('mcp.oauth.expired') }}
                 </Badge>
@@ -806,9 +806,9 @@ function statusDotClass(item: McpItem): string {
   if (!item.id) return 'bg-muted-foreground/40'
   if (!item.is_active) return 'bg-muted-foreground/40'
   switch (item.status) {
-    case 'connected': return 'bg-green-500'
+    case 'connected': return 'bg-success'
     case 'error': return 'bg-destructive'
-    default: return 'bg-amber-400'
+    default: return 'bg-warning'
   }
 }
 

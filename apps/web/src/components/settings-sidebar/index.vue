@@ -38,7 +38,7 @@
                   :tooltip="item.title"
                   :is-active="isItemActive(item.name)"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  class="h-9 gap-2 relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-[#8B56E3] group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+                  class="h-9 gap-2 relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-sidebar-primary group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
                   @click="router.push({ name: item.name })"
                 >
                   <component
@@ -63,7 +63,7 @@ import { computed, inject, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info } from 'lucide-vue-next'
+import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info, Palette } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
@@ -120,6 +120,7 @@ const allNavItems: { title: string; name: string; icon: Component }[] = [
   { title: t('sidebar.email'), name: 'email', icon: Mail },
   { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
   { title: t('sidebar.usage'), name: 'usage', icon: ChartLine },
+  { title: t('sidebar.appearance'), name: 'appearance', icon: Palette },
   { title: t('sidebar.profile'), name: 'profile', icon: User },
   { title: t('sidebar.about'), name: 'about', icon: Info },
 ]

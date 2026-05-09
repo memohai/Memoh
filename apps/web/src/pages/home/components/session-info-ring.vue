@@ -91,7 +91,7 @@ const dashOffset = computed(() => {
 
 const ringColorClass = computed(() => {
   if (contextPercent.value >= 90) return 'text-destructive'
-  if (contextPercent.value >= 70) return 'text-amber-500'
+  if (contextPercent.value >= 70) return 'text-warning'
   return 'text-foreground'
 })
 

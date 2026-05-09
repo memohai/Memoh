@@ -730,7 +730,7 @@ watch([activeTab, botId], ([tab]) => {
 
     <div
       v-if="botLifecyclePending"
-      class="rounded-md border border-yellow-300/50 bg-yellow-50/70 p-3 text-xs text-yellow-800 dark:border-yellow-800/50 dark:bg-yellow-900/10 dark:text-yellow-200"
+      class="rounded-md border border-warning-border bg-warning-soft p-3 text-xs text-warning-foreground"
     >
       {{ $t('bots.container.botNotReady') }}
     </div>
@@ -873,9 +873,9 @@ watch([activeTab, botId], ([tab]) => {
     >
       <div
         v-if="isLegacy"
-        class="flex items-center justify-between gap-3 rounded-md border border-amber-300/50 bg-amber-50/70 p-3 dark:border-amber-800/50 dark:bg-amber-900/10"
+        class="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-soft p-3"
       >
-        <p class="text-xs text-amber-800 dark:text-amber-200">
+        <p class="text-xs text-warning-foreground">
           {{ $t('bots.container.legacyWarning') }}
         </p>
         <Button

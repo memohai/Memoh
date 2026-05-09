@@ -62,7 +62,7 @@
             <div class="flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <Label class="flex items-center gap-1.5 text-xs font-medium">
-                  <ShieldCheck class="size-3.5 text-emerald-600 dark:text-emerald-500" />
+                  <ShieldCheck class="size-3.5 text-success-foreground" />
                   {{ $t('bots.toolApproval.bypass') }}
                 </Label>
                 <span class="text-xs text-muted-foreground tabular-nums">
@@ -83,7 +83,7 @@
             <div class="flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <Label class="flex items-center gap-1.5 text-xs font-medium">
-                  <ShieldAlert class="size-3.5 text-amber-600 dark:text-amber-500" />
+                  <ShieldAlert class="size-3.5 text-warning-foreground" />
                   {{ $t('bots.toolApproval.mustReview') }}
                 </Label>
                 <span class="text-xs text-muted-foreground tabular-nums">

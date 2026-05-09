@@ -53,7 +53,7 @@
               <div class="text-xs">
                 <span
                   v-if="!item.config?.disabled"
-                  class="text-green-600 dark:text-green-400"
+                  class="text-success-foreground"
                 >
                   {{ $t('bots.channels.statusActive') }}
                 </span>

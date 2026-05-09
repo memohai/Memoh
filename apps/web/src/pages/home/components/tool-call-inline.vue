@@ -36,11 +36,11 @@
       >{{ display.target }}</span>
       <span
         v-if="display.diffAdd"
-        class="font-mono shrink-0 text-emerald-600 dark:text-emerald-500"
+        class="font-mono shrink-0 text-success-foreground"
       >+{{ display.diffAdd }}</span>
       <span
         v-if="display.diffRemove"
-        class="font-mono shrink-0 text-rose-600 dark:text-rose-500"
+        class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
         v-if="display.errorSuffix"
@@ -48,7 +48,7 @@
       >{{ display.errorSuffix }}</span>
       <span
         v-if="approvalLabel"
-        class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
+        class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
       <ChevronRight
         v-if="!open"
@@ -91,11 +91,11 @@
       >{{ display.target }}</span>
       <span
         v-if="display.diffAdd"
-        class="font-mono shrink-0 text-emerald-600 dark:text-emerald-500"
+        class="font-mono shrink-0 text-success-foreground"
       >+{{ display.diffAdd }}</span>
       <span
         v-if="display.diffRemove"
-        class="font-mono shrink-0 text-rose-600 dark:text-rose-500"
+        class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
         v-if="display.errorSuffix"
@@ -103,7 +103,7 @@
       >{{ display.errorSuffix }}</span>
       <span
         v-if="approvalLabel"
-        class="font-mono shrink-0 text-xs text-amber-600 dark:text-amber-500"
+        class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
     </div>
 
@@ -128,7 +128,7 @@
     >
       <Button
         size="sm"
-        class="bg-emerald-600 hover:bg-emerald-700 text-white"
+        class="bg-success hover:bg-success/90 text-success-foreground"
         @click="handleApproval('approve')"
       >
         {{ t('chat.tools.approve', 'Allow') }}

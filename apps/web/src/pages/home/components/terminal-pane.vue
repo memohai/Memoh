@@ -1,5 +1,5 @@
 <template>
-  <div class="absolute inset-0 flex flex-col bg-[#1a1b26]">
+  <div class="absolute inset-0 flex flex-col bg-[var(--terminal-background)]">
     <div
       ref="wrapperRef"
       class="flex-1 relative min-h-0 terminal-wrapper"
@@ -38,6 +38,7 @@ import {
   terminalCacheKey,
   writeTerminalSnapshot,
 } from '@/composables/useTerminalCache'
+import { useSettingsStore } from '@/store/settings'
 import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(defineProps<{
@@ -49,17 +50,26 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
+const settingsStore = useSettingsStore()
+
+function cssVar(name: string): string {
+  if (typeof document === 'undefined') return ''
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+function resolveTerminalTheme() {
+  return {
+    background: cssVar('--terminal-background') || 'black',
+    foreground: cssVar('--terminal-foreground') || 'white',
+    cursor: cssVar('--terminal-cursor') || 'white',
+    selectionBackground: cssVar('--terminal-selection') || 'gray',
+  }
+}
 
 const TERMINAL_OPTIONS = {
   cursorBlink: true,
   fontSize: 14,
   fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-  theme: {
-    background: '#1a1b26',
-    foreground: '#a9b1d6',
-    cursor: '#c0caf5',
-    selectionBackground: '#33467c',
-  },
 } as const
 
 const wrapperRef = ref<HTMLDivElement | null>(null)
@@ -197,7 +207,7 @@ function setupResizeObserver() {
 
 onMounted(() => {
   if (!containerRef.value) return
-  const term = new Terminal({ ...TERMINAL_OPTIONS })
+  const term = new Terminal({ ...TERMINAL_OPTIONS, theme: resolveTerminalTheme() })
   const fa = new FitAddon()
   const sa = new SerializeAddon()
   term.loadAddon(fa)
@@ -248,6 +258,15 @@ watch(
   { flush: 'post' },
 )
 
+watch(
+  [() => settingsStore.theme, () => settingsStore.colorScheme],
+  () => {
+    if (terminal) {
+      terminal.options.theme = resolveTerminalTheme()
+    }
+  },
+)
+
 onBeforeUnmount(() => {
   persistSnapshot()
   if (fitTimer) {
@@ -265,9 +284,3 @@ onBeforeUnmount(() => {
   serializeAddon = null
 })
 </script>
-
-<style scoped>
-.terminal-wrapper {
-  background-color: #1a1b26;
-}
-</style>

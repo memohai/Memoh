@@ -21,7 +21,7 @@
           <CircleDot
             v-if="selected"
             class="size-3.5"
-            :class="selectedOption?.online ? 'text-emerald-500' : 'text-muted-foreground'"
+            :class="selectedOption?.online ? 'text-success' : 'text-muted-foreground'"
           />
           <span class="truncate">{{ displayLabel || placeholder }}</span>
         </span>
@@ -33,7 +33,7 @@
       <CircleDot
         v-if="option.value"
         class="size-3.5"
-        :class="option.meta?.online ? 'text-emerald-500' : 'text-muted-foreground'"
+        :class="option.meta?.online ? 'text-success' : 'text-muted-foreground'"
       />
     </template>
   </SearchableSelectPopover>

@@ -10,15 +10,15 @@ export const badgeVariants = cva(
     variants: {
       variant: {
         default:
-          'border-transparent bg-foreground text-background [a&]:hover:bg-foreground/90',
+          'border-border bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/80',
         secondary:
           'border-transparent bg-accent text-foreground [a&]:hover:bg-accent/80',
         destructive:
           'border-transparent bg-destructive text-destructive-foreground [a&]:hover:bg-destructive/90',
         success:
-          'border-transparent bg-green-500 text-white [a&]:hover:bg-green-500/90',
+          'border-transparent bg-success text-success-solid-foreground [a&]:hover:bg-success/90',
         warning:
-          'border-transparent bg-amber-500 text-white [a&]:hover:bg-amber-500/90',
+          'border-transparent bg-warning text-warning-solid-foreground [a&]:hover:bg-warning/90',
         outline:
           'text-foreground border-border bg-background [a&]:hover:bg-accent',
       },

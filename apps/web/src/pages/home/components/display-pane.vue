@@ -1,19 +1,18 @@
 <template>
   <div
     ref="rootRef"
-    class=" inset-0 flex flex-col bg-black z-10 "
+    class=" inset-0 flex flex-col bg-foreground z-10 "
     :class="isFullScroll?'fixed':'absolute'"
     @click="closeStatsMenu"
   >
     <Maximize
       ref="fullScreenIcon"
-      color="#ccc"
-      class="absolute top-4 right-4  transition-all opacity-0 duration-500"
+      class="absolute top-4 right-4 text-background/80 transition-all opacity-0 duration-500"
       @click="()=>toggle()"
     />
     <video
       ref="videoRef"
-      class="size-full min-h-0 flex-1 bg-black object-contain"
+      class="size-full min-h-0 flex-1 bg-foreground object-contain"
       autoplay
       playsinline
       muted

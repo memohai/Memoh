@@ -12,7 +12,7 @@
             type="button"
             class="relative flex items-center justify-center size-8 shrink-0 rounded-md transition-colors before:absolute before:h-0.5 before:left-1.5 before:right-1.5 before:top-0 before:rounded-full"
             :class="activeTab === tab.id
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground before:bg-[#8B56E3]'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground before:bg-sidebar-primary'
               : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground before:bg-transparent'"
             :title="tab.label"
             :aria-label="tab.label"

@@ -189,10 +189,10 @@ const filterIconComponent = computed<Component>(() => {
 
 const filterIconClass = computed(() => {
   switch (filterType.value) {
-    case 'discuss': return 'text-sky-400'
-    case 'heartbeat': return 'text-rose-400'
-    case 'schedule': return 'text-amber-400'
-    case 'subagent': return 'text-violet-400'
+    case 'discuss': return 'text-event-discuss'
+    case 'heartbeat': return 'text-event-heartbeat'
+    case 'schedule': return 'text-event-schedule'
+    case 'subagent': return 'text-event-subagent'
     default: return 'text-muted-foreground'
   }
 })

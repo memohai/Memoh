@@ -60,12 +60,12 @@ const iconClass = computed(() => {
     case 'running':
       return 'animate-spin text-muted-foreground'
     case 'completed':
-      return 'text-emerald-600 dark:text-emerald-500'
+      return 'text-success-foreground'
     case 'failed':
     case 'killed':
       return 'text-destructive'
     case 'stalled':
-      return 'text-amber-600 dark:text-amber-500'
+      return 'text-warning-foreground'
     default:
       return 'text-muted-foreground'
   }
@@ -74,12 +74,12 @@ const iconClass = computed(() => {
 const labelClass = computed(() => {
   switch (normalizedStatus.value) {
     case 'completed':
-      return 'text-emerald-700 dark:text-emerald-400'
+      return 'text-success-foreground'
     case 'failed':
     case 'killed':
       return 'text-destructive'
     case 'stalled':
-      return 'text-amber-700 dark:text-amber-400'
+      return 'text-warning-foreground'
     default:
       return ''
   }
