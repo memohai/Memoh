@@ -5,19 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_FILE="$REPO_ROOT/conf/providers/openrouter.yaml"
 
-if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-  echo "Error: OPENROUTER_API_KEY environment variable is required" >&2
-  exit 1
-fi
-
 command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "Error: curl is required but not installed" >&2; exit 1; }
 
 echo "Fetching models from OpenRouter API..."
 
-RESPONSE=$(curl -sS --fail-with-body \
-  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
-  "https://openrouter.ai/api/v1/models")
+curl_args=(-sS --fail-with-body)
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  curl_args+=(-H "Authorization: Bearer $OPENROUTER_API_KEY")
+fi
+curl_args+=("https://openrouter.ai/api/v1/models")
+
+RESPONSE=$(curl "${curl_args[@]}")
 
 if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.data' >/dev/null 2>&1; then
   echo "Error: failed to fetch models or unexpected response format" >&2
@@ -53,8 +52,8 @@ JQ_FILTER='
 ]
 | sort_by(.id)
 | .[]
-| "  - model_id: " + (if (.id | contains(":")) then "\"" + .id + "\"" else .id end) + "\n" +
-  "    name: " + .name + "\n" +
+| "  - model_id: " + (.id | @json) + "\n" +
+  "    name: " + (.name | @json) + "\n" +
   "    type: chat\n" +
   "    config:\n" +
   (if (.compats | length) > 0
