@@ -58,27 +58,6 @@ func TestQQResolveTargetMapsIdentityID(t *testing.T) {
 	}
 }
 
-func TestQQResolveTargetMapsUserID(t *testing.T) {
-	t.Parallel()
-
-	adapter := NewQQAdapter(nil)
-	adapter.SetChannelIdentityResolver(&fakeQQIdentityResolver{
-		userScoped: map[string][]identitypkg.ChannelIdentity{
-			"3fe2bad9-3eae-4f23-872c-b7a63662aa00": {
-				{ID: "qq-identity-1", Channel: "qq", ChannelSubjectID: testQQOpenID},
-			},
-		},
-	})
-
-	got, err := adapter.resolveTarget(context.Background(), "3fe2bad9-3eae-4f23-872c-b7a63662aa00")
-	if err != nil {
-		t.Fatalf("resolveTarget returned error: %v", err)
-	}
-	if got != "c2c:"+testQQOpenID {
-		t.Fatalf("unexpected mapped target: %q", got)
-	}
-}
-
 func TestQQResolveTargetSkipsNonOpenIDQQIdentity(t *testing.T) {
 	t.Parallel()
 
@@ -145,10 +124,8 @@ func TestParseTargetRejectsUUIDForC2C(t *testing.T) {
 type fakeQQIdentityResolver struct {
 	byID         map[string]identitypkg.ChannelIdentity
 	canonical    map[string][]identitypkg.ChannelIdentity
-	userScoped   map[string][]identitypkg.ChannelIdentity
 	byIDErr      error
 	canonicalErr error
-	userErr      error
 }
 
 func (f *fakeQQIdentityResolver) GetByID(_ context.Context, channelIdentityID string) (identitypkg.ChannelIdentity, error) {
@@ -169,17 +146,6 @@ func (f *fakeQQIdentityResolver) ListCanonicalChannelIdentities(_ context.Contex
 	items, ok := f.canonical[channelIdentityID]
 	if !ok {
 		return nil, identitypkg.ErrChannelIdentityNotFound
-	}
-	return items, nil
-}
-
-func (f *fakeQQIdentityResolver) ListUserChannelIdentities(_ context.Context, userID string) ([]identitypkg.ChannelIdentity, error) {
-	if f.userErr != nil {
-		return nil, f.userErr
-	}
-	items, ok := f.userScoped[userID]
-	if !ok {
-		return nil, nil
 	}
 	return items, nil
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/channel/identities"
@@ -57,35 +56,5 @@ func TestChannelIdentityResolveChannelIdentityStable(t *testing.T) {
 	}
 	if first.ID != second.ID {
 		t.Fatalf("expected same channelIdentity id, got %s and %s", first.ID, second.ID)
-	}
-}
-
-func TestChannelIdentityLinkToUser(t *testing.T) {
-	svc, queries, cleanup := setupChannelIdentityIdentityIntegrationTest(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	channelIdentity, err := svc.ResolveByChannelIdentity(ctx, "telegram", fmt.Sprintf("link_%d", time.Now().UnixNano()), "tg", nil)
-	if err != nil {
-		t.Fatalf("resolve channelIdentity failed: %v", err)
-	}
-	user, err := queries.CreateUser(ctx, sqlc.CreateUserParams{
-		IsActive: true,
-		Metadata: []byte("{}"),
-	})
-	if err != nil {
-		t.Fatalf("create user failed: %v", err)
-	}
-	userID := uuid.UUID(user.ID.Bytes).String()
-
-	if err := svc.LinkChannelIdentityToUser(ctx, channelIdentity.ID, userID); err != nil {
-		t.Fatalf("link channelIdentity to user failed: %v", err)
-	}
-	linkedUserID, err := svc.GetLinkedUserID(ctx, channelIdentity.ID)
-	if err != nil {
-		t.Fatalf("get linked user failed: %v", err)
-	}
-	if linkedUserID != userID {
-		t.Fatalf("expected linked user=%s, got %s", userID, linkedUserID)
 	}
 }

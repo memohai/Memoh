@@ -9,7 +9,6 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
 	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
@@ -69,7 +68,6 @@ func options() fx.Option {
 			mcp.NewConnectionService,
 			conversation.NewService,
 			identities.NewService,
-			bind.NewService,
 			event.NewHub,
 			provideAudioRegistry,
 			audiopkg.NewService,
@@ -121,7 +119,6 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewSettingsHandler),
 			provideServerHandler(handlers.NewToolApprovalHandler),
 			provideServerHandler(handlers.NewACLHandler),
-			provideServerHandler(handlers.NewBindHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),

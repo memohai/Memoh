@@ -337,7 +337,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `users` — User accounts (username, email, role, display_name, avatar)
 - `channel_identities` — Unified inbound identity subject (cross-platform)
 - `user_channel_bindings` — Outbound delivery config per user/channel
-- `channel_identity_bind_codes` — One-time codes for channel identity → user linking
 
 **Bots & Sessions**
 - `bots` — Bot definitions with model references and settings

@@ -97,7 +97,7 @@ Memoh is built for **always-on continuity** — an AI that stays online, and a m
 
 ### Core
 
-- 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats, remember each person's context, and support cross-platform identity binding.
+- 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats and remember each person's context.
 - 📦 **Containerized**: Each bot runs in its own isolated containerd container with a dedicated filesystem and network — like having its own computer. Supports snapshots, data export/import, and versioning.
 - 🗂️ **Persistent File System**: Every bot has a writable home directory that survives restarts, upgrades, and migrations. Bots can read, write, and organize files freely; you can browse, upload, download, and edit them visually through the web UI's file manager.
 - 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), provider-based long-term memory, memory compaction, and separate session-level context compaction. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.

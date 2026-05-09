@@ -203,7 +203,6 @@ type BotStorageBinding struct {
 
 type ChannelIdentity struct {
 	ID               pgtype.UUID        `json:"id"`
-	UserID           pgtype.UUID        `json:"user_id"`
 	ChannelType      string             `json:"channel_type"`
 	ChannelSubjectID string             `json:"channel_subject_id"`
 	DisplayName      pgtype.Text        `json:"display_name"`
@@ -211,17 +210,6 @@ type ChannelIdentity struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-}
-
-type ChannelIdentityBindCode struct {
-	ID                      pgtype.UUID        `json:"id"`
-	Token                   string             `json:"token"`
-	IssuedByUserID          pgtype.UUID        `json:"issued_by_user_id"`
-	ChannelType             pgtype.Text        `json:"channel_type"`
-	ExpiresAt               pgtype.Timestamptz `json:"expires_at"`
-	UsedAt                  pgtype.Timestamptz `json:"used_at"`
-	UsedByChannelIdentityID pgtype.UUID        `json:"used_by_channel_identity_id"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type Container struct {

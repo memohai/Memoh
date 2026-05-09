@@ -415,18 +415,12 @@ func ruleFromListRow(row sqlc.ListBotACLRulesRow) Rule {
 		ChannelIdentityAvatarURL:    strings.TrimSpace(row.ChannelIdentityAvatarUrl.String),
 		SourceConversationName:      strings.TrimSpace(row.SourceConversationName),
 		SourceConversationAvatarURL: strings.TrimSpace(row.SourceConversationAvatarUrl),
-		LinkedUserUsername:          strings.TrimSpace(row.LinkedUserUsername.String),
-		LinkedUserDisplayName:       strings.TrimSpace(row.LinkedUserDisplayName.String),
-		LinkedUserAvatarURL:         strings.TrimSpace(row.LinkedUserAvatarUrl.String),
 		CreatedAt:                   timeFromPg(row.CreatedAt),
 		UpdatedAt:                   timeFromPg(row.UpdatedAt),
 	}
 	rule.SourceScope = sourceScopeFromPg(row.SourceConversationType, row.SourceConversationID, row.SourceThreadID)
 	if row.ChannelIdentityID.Valid {
 		rule.ChannelIdentityID = uuid.UUID(row.ChannelIdentityID.Bytes).String()
-	}
-	if row.LinkedUserID.Valid {
-		rule.LinkedUserID = uuid.UUID(row.LinkedUserID.Bytes).String()
 	}
 	return rule
 }

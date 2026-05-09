@@ -5,9 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
-	"time"
 
-	"github.com/memohai/memoh/internal/bind"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/identities"
 )
@@ -17,7 +15,6 @@ type fakeChannelIdentityService struct {
 	bySubject       map[string]identities.ChannelIdentity
 	err             error
 	canonical       map[string]string
-	linked          map[string]string
 	calls           int
 	lastDisplayName string
 	lastMeta        map[string]any
@@ -48,25 +45,6 @@ func (f *fakeChannelIdentityService) Canonicalize(_ context.Context, channelIden
 	return channelIdentityID, nil
 }
 
-func (f *fakeChannelIdentityService) GetLinkedUserID(_ context.Context, channelIdentityID string) (string, error) {
-	if f.linked != nil {
-		if value, ok := f.linked[channelIdentityID]; ok {
-			return value, nil
-		}
-		return "", nil
-	}
-	// Default to one-to-one mapping for tests that do not set explicit links.
-	return channelIdentityID, nil
-}
-
-func (f *fakeChannelIdentityService) LinkChannelIdentityToUser(_ context.Context, channelIdentityID, userID string) error {
-	if f.linked == nil {
-		f.linked = map[string]string{}
-	}
-	f.linked[channelIdentityID] = userID
-	return nil
-}
-
 type fakePolicyService struct {
 	ownerUserID string
 	err         error
@@ -77,32 +55,6 @@ func (f *fakePolicyService) BotOwnerUserID(_ context.Context, _ string) (string,
 		return "", f.err
 	}
 	return f.ownerUserID, nil
-}
-
-type fakeBindService struct {
-	code          bind.Code
-	getErr        error
-	consumeErr    error
-	consumeCalled bool
-	onConsume     func(channelChannelIdentityID string)
-}
-
-func (f *fakeBindService) Get(_ context.Context, token string) (bind.Code, error) {
-	if f.getErr != nil {
-		return bind.Code{}, f.getErr
-	}
-	if f.code.Token == "" || f.code.Token != token {
-		return bind.Code{}, bind.ErrCodeNotFound
-	}
-	return f.code, nil
-}
-
-func (f *fakeBindService) Consume(_ context.Context, _ bind.Code, channelChannelIdentityID string) error {
-	f.consumeCalled = true
-	if f.onConsume != nil {
-		f.onConsume(channelChannelIdentityID)
-	}
-	return f.consumeErr
 }
 
 type fakeDirectoryAdapter struct {
@@ -144,7 +96,7 @@ func (f *fakeDirectoryAdapter) ResolveEntry(ctx context.Context, cfg channel.Cha
 func TestIdentityResolverAllowGuestWithoutMembershipSideEffect(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -188,7 +140,7 @@ func TestIdentityResolverResolveDisplayNameFromDirectory(t *testing.T) {
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-directory"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -228,7 +180,7 @@ func TestIdentityResolverDirectoryLookupFailureDoesNotFallbackToOpenID(t *testin
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-directory-fail"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -263,7 +215,7 @@ func TestIdentityResolverFeishuUsesOpenIDAsCanonicalSubject(t *testing.T) {
 		},
 	}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -308,7 +260,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-avatar"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), registry, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -341,7 +293,7 @@ func TestIdentityResolverDirectoryAvatarURLPropagated(t *testing.T) {
 func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-2"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -362,7 +314,7 @@ func TestIdentityResolverExistingMemberPasses(t *testing.T) {
 func TestIdentityResolverPublicBotGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-5"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "Access denied.")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -383,7 +335,7 @@ func TestIdentityResolverPublicBotGuestPasses(t *testing.T) {
 func TestIdentityResolverNonOwnerGroupMessagePassesToACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-group"}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
@@ -408,7 +360,7 @@ func TestIdentityResolverNonOwnerGroupMessagePassesToACL(t *testing.T) {
 func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner"}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
@@ -436,7 +388,7 @@ func TestIdentityResolverPersonalBotAllowsOwnerInGroup(t *testing.T) {
 func TestIdentityResolverPersonalBotAllowsOwnerDirectWithoutMembership(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-owner-direct"}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner-direct"}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
@@ -467,12 +419,9 @@ func TestIdentityResolverFeishuUnlinkedOpenIDPassesToACL(t *testing.T) {
 			"ou-open-owner": {ID: "channelIdentity-open-owner"},
 			"u-owner":       {ID: "channelIdentity-user-owner"},
 		},
-		linked: map[string]string{
-			"channelIdentity-user-owner": "owner-user-1",
-		},
 	}
 	policySvc := &fakePolicyService{ownerUserID: "owner-user-1"}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
@@ -510,7 +459,7 @@ func TestIdentityResolverFeishuUnlinkedOpenIDPassesToACL(t *testing.T) {
 func TestIdentityResolverNonOwnerDirectPassesToACL(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-non-owner"}}
 	policySvc := &fakePolicyService{ownerUserID: "channelIdentity-owner"}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "Access denied.")
 
 	msg := channel.InboundMessage{
 		BotID:   "bot-1",
@@ -532,130 +481,10 @@ func TestIdentityResolverNonOwnerDirectPassesToACL(t *testing.T) {
 	}
 }
 
-func TestIdentityResolverBindRunsBeforeMembershipCheck(t *testing.T) {
-	shadowID := "channelIdentity-shadow"
-	humanID := "channelIdentity-human"
-	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: shadowID},
-		linked: map[string]string{
-			shadowID: shadowID,
-		},
-	}
-	bindSvc := &fakeBindService{
-		code: bind.Code{
-			ID:             "code-1",
-			Platform:       "feishu",
-			Token:          "BIND123",
-			IssuedByUserID: humanID,
-			ExpiresAt:      time.Now().UTC().Add(1 * time.Hour),
-		},
-		onConsume: func(channelChannelIdentityID string) {
-			channelIdentitySvc.linked[channelChannelIdentityID] = humanID
-		},
-	}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, bindSvc, "")
-
-	msg := channel.InboundMessage{
-		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
-		Message:     channel.Message{Text: "BIND123"},
-		ReplyTarget: "target-id",
-		Sender:      channel.Identity{SubjectID: "ext-bind-1"},
-	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !bindSvc.consumeCalled {
-		t.Fatal("expected bind consume to run before membership shortcut")
-	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("bind flow should return stop decision")
-	}
-	if state.Identity.UserID != humanID {
-		t.Fatalf("expected linked user to switch to %s, got %s", humanID, state.Identity.UserID)
-	}
-}
-
-func TestIdentityResolverBindConsumeErrorHandledAsDecision(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-shadow"}}
-	bindSvc := &fakeBindService{
-		code: bind.Code{
-			ID:             "code-2",
-			Platform:       "telegram",
-			Token:          "BINDUSED",
-			IssuedByUserID: "channelIdentity-human",
-			ExpiresAt:      time.Now().UTC().Add(1 * time.Hour),
-		},
-		consumeErr: bind.ErrCodeUsed,
-	}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, bindSvc, "")
-
-	msg := channel.InboundMessage{
-		BotID:       "bot-1",
-		Channel:     channel.ChannelType("telegram"),
-		Message:     channel.Message{Text: "BINDUSED"},
-		ReplyTarget: "chat-123",
-		Sender:      channel.Identity{SubjectID: "ext-bind-2"},
-	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("bind consume errors should be converted into stop decision")
-	}
-}
-
-func TestIdentityResolverBindCodeNotScopedToCurrentBot(t *testing.T) {
-	shadowID := "channelIdentity-shadow-any-bot"
-	humanID := "channelIdentity-human-any-bot"
-	channelIdentitySvc := &fakeChannelIdentityService{
-		channelIdentity: identities.ChannelIdentity{ID: shadowID},
-		linked: map[string]string{
-			shadowID: shadowID,
-		},
-	}
-	bindSvc := &fakeBindService{
-		code: bind.Code{
-			ID:             "code-any-bot",
-			Platform:       "feishu",
-			Token:          "BINDANYBOT",
-			IssuedByUserID: humanID,
-			ExpiresAt:      time.Now().UTC().Add(1 * time.Hour),
-		},
-		onConsume: func(channelChannelIdentityID string) {
-			channelIdentitySvc.linked[channelChannelIdentityID] = humanID
-		},
-	}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, bindSvc, "")
-
-	msg := channel.InboundMessage{
-		BotID:       "bot-2",
-		Channel:     channel.ChannelType("feishu"),
-		Message:     channel.Message{Text: "BINDANYBOT"},
-		ReplyTarget: "target-id",
-		Sender:      channel.Identity{SubjectID: "ext-bind-any-bot"},
-	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !bindSvc.consumeCalled {
-		t.Fatal("bind consume should run even when message bot differs")
-	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("bind flow should return stop decision")
-	}
-	if state.Identity.UserID != humanID {
-		t.Fatalf("expected linked user to switch to %s, got %s", humanID, state.Identity.UserID)
-	}
-}
-
 func TestIdentityResolverPublicBotGroupGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-group-denied"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "Access denied.")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -680,7 +509,7 @@ func TestIdentityResolverPublicBotGroupGuestPasses(t *testing.T) {
 func TestIdentityResolverPublicBotDirectGuestPasses(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-direct-denied"}}
 	policySvc := &fakePolicyService{}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, nil, "Access denied.")
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "Access denied.")
 
 	msg := channel.InboundMessage{
 		BotID:       "bot-1",
@@ -699,37 +528,5 @@ func TestIdentityResolverPublicBotDirectGuestPasses(t *testing.T) {
 	}
 	if state.Decision != nil {
 		t.Fatal("public bot direct guest should pass identity resolution")
-	}
-}
-
-func TestIdentityResolverBindCodePlatformMismatch(t *testing.T) {
-	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-platform-mismatch"}}
-	bindSvc := &fakeBindService{
-		code: bind.Code{
-			ID:             "code-platform",
-			Platform:       "telegram",
-			Token:          "BINDPLATFORM",
-			IssuedByUserID: "channelIdentity-human-platform",
-			ExpiresAt:      time.Now().UTC().Add(1 * time.Hour),
-		},
-	}
-	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, nil, bindSvc, "")
-
-	msg := channel.InboundMessage{
-		BotID:       "bot-1",
-		Channel:     channel.ChannelType("feishu"),
-		Message:     channel.Message{Text: "BINDPLATFORM"},
-		ReplyTarget: "target-id",
-		Sender:      channel.Identity{SubjectID: "ext-bind-platform"},
-	}
-	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, msg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if bindSvc.consumeCalled {
-		t.Fatal("bind consume should not run when platform mismatches")
-	}
-	if state.Decision == nil || !state.Decision.Stop {
-		t.Fatal("platform mismatch should return stop decision")
 	}
 }
