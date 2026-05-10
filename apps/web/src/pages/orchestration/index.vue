@@ -51,6 +51,8 @@ import {
   getOrchestrationRunsByRunIdInspector,
   postOrchestrationRunsByRunIdCancel,
 } from '@memohai/sdk'
+import type { ToolCallBlock } from '@/store/chat-list'
+import ToolCallInline from '@/pages/home/components/tool-call-inline.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { fetchBots } from '@/composables/api/useChat.chat-api'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -71,7 +73,7 @@ import {
 import { useRunEventStream } from './composables/use-run-event-stream'
 
 type NodeKind = 'trigger' | 'llm' | 'planner' | 'search' | 'tool' | 'memory' | 'merge' | 'verify' | 'output'
-type InspectorTab = 'thinking' | 'config' | 'env' | 'task' | 'inputs' | 'outputs' | 'logs'
+type InspectorTab = 'act' | 'config' | 'env' | 'task' | 'inputs' | 'outputs' | 'logs'
 
 interface CanvasNode {
   task: RunInspectorTask
@@ -83,14 +85,6 @@ interface CanvasNode {
   level: number
   x: number
   y: number
-}
-
-interface ThinkingItem {
-  id: string
-  kind: 'reasoning' | 'tool' | 'output'
-  title: string
-  detail: string
-  status: string
 }
 
 interface EnvSnapshotItem {
@@ -113,8 +107,7 @@ const inspectedTaskId = ref('')
 const botSearchQuery = ref('')
 const runSearchQuery = ref('')
 const taskSearchQuery = ref('')
-const selectedInspectorTab = ref<InspectorTab>('thinking')
-const expandedThinkingItemIds = ref<string[]>([])
+const selectedInspectorTab = ref<InspectorTab>('act')
 const outputRawOpen = ref(false)
 const taskTechnicalOpen = ref(false)
 const expandedLogItemIds = ref<string[]>([])
@@ -148,6 +141,7 @@ let taskScrollFrame = 0
 let zoomFrame = 0
 let zoomCommitTimer = 0
 let inspectorRefreshTimer = 0
+let actRefreshTimer = 0
 let inspectorResizeStart: { clientX: number, width: number } | null = null
 
 const minCanvasZoom = 0.65
@@ -348,7 +342,6 @@ watch(selectedTaskId, (id) => {
 })
 
 watch(inspectedTaskId, () => {
-  expandedThinkingItemIds.value = []
   expandedLogItemIds.value = []
   outputRawOpen.value = false
   taskTechnicalOpen.value = false
@@ -362,7 +355,7 @@ watch(canvasViewportRef, () => {
 watch(selectedRunId, async () => {
   selectedTaskId.value = ''
   inspectedTaskId.value = ''
-  selectedInspectorTab.value = 'thinking'
+  selectedInspectorTab.value = 'act'
   await nextTick()
   resetCanvasView()
 })
@@ -397,6 +390,11 @@ onMounted(() => {
     if (runEventStreamStatus.value === 'open') return
     void refetchInspector()
   }, 5000)
+  actRefreshTimer = window.setInterval(() => {
+    if (!selectedRunId.value || !isInspectorRunActive()) return
+    if (selectedInspectorTab.value !== 'act') return
+    void refetchInspector()
+  }, 1000)
   nextTick(resetCanvasView)
 })
 
@@ -413,6 +411,7 @@ onBeforeUnmount(() => {
   if (zoomFrame) window.cancelAnimationFrame(zoomFrame)
   if (zoomCommitTimer) window.clearTimeout(zoomCommitTimer)
   if (inspectorRefreshTimer) window.clearInterval(inspectorRefreshTimer)
+  if (actRefreshTimer) window.clearInterval(actRefreshTimer)
   if (streamRefetchTimer !== null) {
     window.clearTimeout(streamRefetchTimer)
     streamRefetchTimer = null
@@ -477,73 +476,6 @@ const selectedTaskActionRecords = computed(() => {
     return (item.attempt_id && item.attempt_id === span.id) || (!item.attempt_id && !item.verification_id)
   })
 })
-const selectedTaskThinkingItems = computed<ThinkingItem[]>(() => {
-  const items: ThinkingItem[] = []
-	let pendingThinkingID = ''
-	let pendingThinkingContent = ''
-	let pendingThinkingStatus = ''
-  let pendingOutputID = ''
-  let pendingOutputContent = ''
-
-	const flushThinking = () => {
-		const detail = pendingThinkingContent.trim()
-		if (!pendingThinkingID || !detail) return
-		items.push({
-			id: pendingThinkingID,
-			kind: 'reasoning',
-			title: t('orchestration.thinkingReasoning'),
-			detail,
-			status: pendingThinkingStatus || 'running',
-		})
-		pendingThinkingID = ''
-		pendingThinkingContent = ''
-		pendingThinkingStatus = ''
-	}
-
-  const flushOutput = () => {
-    if (!pendingOutputID) return
-    items.push({
-      id: pendingOutputID,
-      kind: 'output',
-      title: t('orchestration.thinkingGeneratedResult'),
-      detail: String(selectedTaskLatestResult.value?.summary ?? '').trim() || compactResultSummary(pendingOutputContent),
-      status: 'completed',
-    })
-    pendingOutputID = ''
-    pendingOutputContent = ''
-  }
-
-  for (const action of selectedTaskActionRecords.value) {
-    if (action.tool_name === 'agent.output') {
-			flushThinking()
-      pendingOutputID ||= action.id || `output-${items.length}`
-      pendingOutputContent += formatActivityValue(actionDisplayValue(action))
-      continue
-    }
-
-    flushOutput()
-
-    if (action.tool_name === 'agent.thinking') {
-			pendingThinkingID ||= action.id || `thinking-${items.length}`
-			pendingThinkingContent += activityDeltaDetail(action)
-			pendingThinkingStatus = String(action.status || pendingThinkingStatus || 'running')
-      continue
-    }
-
-		flushThinking()
-    items.push({
-      id: action.id || `tool-${items.length}`,
-      kind: 'tool',
-      title: activityTitle(action),
-      detail: activityDetail(action),
-      status: action.status || 'running',
-    })
-  }
-
-	flushThinking()
-  flushOutput()
-  return items.slice(-30)
-})
 const selectedTaskActions = computed(() =>
   selectedTaskActionRecords.value
     .filter((item) =>
@@ -551,6 +483,9 @@ const selectedTaskActions = computed(() =>
       item.tool_name !== 'agent.output',
     )
     .slice(-20),
+)
+const selectedTaskToolBlocks = computed<ToolCallBlock[]>(() =>
+  selectedTaskActions.value.map((action, index) => actionRecordToToolBlock(action, index)),
 )
 const selectedTaskLatestResult = computed(() => selectedTaskResults.value[0] ?? null)
 const selectedTaskEnvActions = computed(() =>
@@ -718,7 +653,7 @@ watch([canvasWidth, canvasHeight, canvasZoom], () => {
 })
 
 const inspectorTabs = computed(() => [
-  { key: 'thinking' as const, label: t('orchestration.thinking') },
+  { key: 'act' as const, label: t('orchestration.act') },
   { key: 'config' as const, label: t('orchestration.config') },
   { key: 'env' as const, label: t('orchestration.env') },
   { key: 'task' as const, label: t('orchestration.taskInfo') },
@@ -1033,6 +968,71 @@ function runLabel(run: RunListItem): string {
   return compactTaskTitle(run.goal?.trim() || run.id, run.id).replace(/\s+/g, ' ')
 }
 
+function actionRecordToToolBlock(action: Record<string, unknown>, index: number): ToolCallBlock {
+  const status = String(action.status || '').trim()
+  const done = ['completed', 'failed', 'cancelled'].includes(status)
+  const toolName = String(action.tool_name || action.action_kind || 'tool').trim() || 'tool'
+  const input = normalizeActionPayload(action.input_payload)
+  const output = normalizeActionPayload(action.output_payload)
+  const error = normalizeActionPayload(action.error_payload)
+  const result = done
+    ? actionToolResult(status, output, error, action.summary)
+    : (output == null ? null : actionToolResult(status, output, error, action.summary))
+
+  return {
+    type: 'tool',
+    id: index,
+    name: toolName,
+    toolCallId: String(action.tool_call_id || action.id || `tool-${index}`),
+    tool_call_id: String(action.tool_call_id || action.id || `tool-${index}`),
+    toolName,
+    input,
+    output: result,
+    result,
+    done,
+    running: !done,
+  }
+}
+
+function normalizeActionPayload(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      return JSON.parse(trimmed)
+    }
+    catch {
+      return value
+    }
+  }
+  return value
+}
+
+function actionToolResult(status: string, output: unknown, error: unknown, summary: unknown): unknown {
+  if (status === 'failed' || status === 'cancelled' || error != null) {
+    return {
+      isError: true,
+      structuredContent: error ?? output ?? summary ?? null,
+    }
+  }
+  if (output && typeof output === 'object') return output
+  if (output != null) {
+    return {
+      structuredContent: output,
+    }
+  }
+  if (summary) {
+    return {
+      structuredContent: summary,
+    }
+  }
+  return null
+}
+
 function actionDisplayValue(action: Record<string, unknown>) {
   const output = action.output_payload as Record<string, unknown> | null | undefined
   if (output && typeof output === 'object' && typeof output.delta === 'string') {
@@ -1055,33 +1055,6 @@ function activityTitle(action: Record<string, unknown>) {
   }
 }
 
-function activityDetail(action: Record<string, unknown>) {
-  if (action.tool_name === 'agent.output') {
-    return String(selectedTaskLatestResult.value?.summary ?? action.summary ?? '').trim()
-  }
-  const value = actionDisplayValue(action)
-  const fullValue = formatActivityValue(value)
-  if (fullValue) return fullValue
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    for (const key of ['path', 'command', 'cmd', 'summary', 'message', 'text']) {
-      const item = record[key]
-      if (typeof item === 'string' && item.trim()) return item
-    }
-  }
-  const summary = String(action.summary || '').trim()
-  if (summary) return summary
-  return ''
-}
-
-function activityDeltaDetail(action: Record<string, unknown>) {
-	const output = action.output_payload as Record<string, unknown> | null | undefined
-	if (output && typeof output === 'object' && typeof output.delta === 'string') {
-		return output.delta
-	}
-	return activityDetail(action)
-}
-
 function formatActivityValue(value: unknown) {
   if (value == null) return ''
   if (typeof value !== 'string') return formatJsonValue(value)
@@ -1100,16 +1073,6 @@ function formatActivityValue(value: unknown) {
     }
   }
   return value
-}
-
-function toggleThinkingItem(id: string) {
-  expandedThinkingItemIds.value = expandedThinkingItemIds.value.includes(id)
-    ? expandedThinkingItemIds.value.filter((item) => item !== id)
-    : [...expandedThinkingItemIds.value, id]
-}
-
-function isThinkingItemExpanded(id: string) {
-  return expandedThinkingItemIds.value.includes(id)
 }
 
 function toggleLogItem(id: string) {
@@ -2330,49 +2293,26 @@ function buildTaskLevels(taskList: RunInspectorTask[], edges: RunInspectorDepend
               </div>
 
               <section
-                v-if="selectedInspectorTab === 'thinking'"
+                v-if="selectedInspectorTab === 'act'"
                 class="space-y-2"
               >
                 <div class="max-h-[500px] overflow-y-auto pr-1">
                   <div
-                    v-if="selectedTaskThinkingItems.length === 0"
+                    v-if="selectedTaskToolBlocks.length === 0"
                     class="text-[11px] text-muted-foreground"
                   >
-                    {{ $t('orchestration.noThinking') }}
+                    {{ $t('orchestration.noAct') }}
                   </div>
                   <div
                     v-else
-                    class="space-y-1"
+                    class="orchestration-act-list space-y-1.5"
+                    :class="inspectorWidth < 360 ? 'orchestration-act-list-compact' : ''"
                   >
-                    <div
-                      v-for="item in selectedTaskThinkingItems"
-                      :key="item.id"
-                      class="rounded-md text-[11px]"
-                    >
-                      <button
-                        type="button"
-                        class="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/40"
-                        @click="toggleThinkingItem(item.id)"
-                      >
-                        <ChevronDown
-                          class="size-3 shrink-0 text-muted-foreground transition-transform"
-                          :class="isThinkingItemExpanded(item.id) ? 'rotate-0' : '-rotate-90'"
-                        />
-                        <span
-                          class="size-1.5 shrink-0 rounded-full"
-                          :class="item.kind === 'output' ? 'bg-emerald-500' : item.kind === 'reasoning' ? 'bg-violet-500' : 'bg-muted-foreground/50'"
-                        />
-                        <span class="truncate text-muted-foreground">
-                          <span class="font-medium text-foreground">
-                            {{ item.title }}
-                          </span>
-                        </span>
-                      </button>
-                      <pre
-                        v-if="isThinkingItemExpanded(item.id) && item.detail"
-                        class="ml-8 mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/25 px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground"
-                      >{{ item.detail }}</pre>
-                    </div>
+                    <ToolCallInline
+                      v-for="block in selectedTaskToolBlocks"
+                      :key="block.toolCallId"
+                      :block="block"
+                    />
                   </div>
                 </div>
               </section>
@@ -2871,3 +2811,18 @@ function buildTaskLevels(taskList: RunInspectorTask[], edges: RunInspectorDepend
     </template>
   </div>
 </template>
+
+<style scoped>
+.orchestration-act-list :deep(.text-sm) {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}
+
+.orchestration-act-list-compact :deep(.ml-5) {
+  margin-left: 0.75rem;
+}
+
+.orchestration-act-list-compact :deep(pre) {
+  font-size: 0.6875rem;
+}
+</style>

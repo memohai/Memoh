@@ -778,6 +778,8 @@
     "inputs": "输入",
     "outputs": "输出",
     "logs": "日志",
+    "act": "动作",
+    "noAct": "暂无动作",
     "thinking": "思考",
     "noThinking": "暂无",
     "thinkingReasoning": "正在思考",

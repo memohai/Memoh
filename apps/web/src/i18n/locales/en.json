@@ -782,6 +782,8 @@
     "inputs": "Inputs",
     "outputs": "Outputs",
     "logs": "Logs",
+    "act": "Act",
+    "noAct": "No actions yet",
     "thinking": "Thinking",
     "noThinking": "None",
     "thinkingReasoning": "Thinking",
