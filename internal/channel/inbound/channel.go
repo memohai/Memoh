@@ -630,12 +630,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			case ModeQueue:
 				p.persistPassiveMessage(ctx, identity, msg, text, attachments, routeID, sessionID, eventID)
 				p.dispatcher.Enqueue(routeID, QueuedTask{
-					Ctx:     ctx,
-					Cfg:     cfg,
-					Msg:     msg,
-					Sender:  sender,
-					Ident:   identity,
-					Text:    text,
+					Ctx:         ctx,
+					Cfg:         cfg,
+					Msg:         msg,
+					Sender:      sender,
+					Ident:       identity,
+					Text:        text,
 					Attachments: attachments,
 				})
 				p.sendModeConfirmation(ctx, sender, msg, identity, "queue")

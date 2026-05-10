@@ -35,9 +35,11 @@ mac:
       arch: [arm64, x64]
     - target: zip
       arch: [arm64, x64]
-  icon: build/icon.icns
+  icon: build/icon.icon
   artifactName: ${productName}-Desktop-${version}-mac-${arch}.${ext}
   notarize: false
+dmg:
+  icon: build/icon.icns
 linux:
   category: Utility
   target:

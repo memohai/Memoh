@@ -419,7 +419,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('ai.memoh.desktop')
   await ensureLocalServer()
 
-  if (process.platform === 'darwin' && app.dock) {
+  if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)
   }
 
