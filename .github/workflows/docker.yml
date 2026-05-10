@@ -39,6 +39,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       sparse: ${{ steps.filter.outputs.sparse }}
+      vnc: ${{ steps.filter.outputs.vnc }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -68,6 +69,9 @@ jobs:
             sparse:
               - 'internal/memory/sparse/service/**'
               - 'docker/Dockerfile.sparse'
+            vnc:
+              - 'docker/Dockerfile.vnc'
+              - 'scripts/desktop-install.sh'
 
   build:
     name: build ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }} ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
@@ -75,9 +79,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, web, sparse]
+        image: [server, web, sparse, vnc]
         platform: [linux/amd64, linux/arm64]
-        variant: [""]
+        variant: ["", debian]
+        exclude:
+          - image: server
+            variant: debian
+          - image: web
+            variant: debian
+          - image: sparse
+            variant: debian
+          - image: vnc
+            variant: ""
         include:
           - image: server
             dockerfile: docker/Dockerfile.server
@@ -85,6 +98,8 @@ jobs:
             dockerfile: docker/Dockerfile.web
           - image: sparse
             dockerfile: docker/Dockerfile.sparse
+          - image: vnc
+            dockerfile: docker/Dockerfile.vnc
           - platform: linux/amd64
             runner: ubuntu-latest
           - platform: linux/arm64
@@ -106,6 +121,7 @@ jobs:
             server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
             web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
             sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
+            vnc)     CHANGED="${{ needs.detect-changes.outputs.vnc }}" ;;
           esac
           if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -217,6 +233,9 @@ jobs:
           - image: sparse
             artifact_key: sparse
             variant: ""
+          - image: vnc
+            artifact_key: vnc-debian
+            variant: debian
     steps:
       - name: Check if publish is needed
         id: should-publish
@@ -233,6 +252,7 @@ jobs:
             server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
             web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
             sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
+            vnc)     CHANGED="${{ needs.detect-changes.outputs.vnc }}" ;;
           esac
           if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -301,6 +321,9 @@ jobs:
 
           if [ "$GITHUB_REF" = "refs/heads/main" ]; then
             add_tag "$DEV_TAG"
+            if [ "${{ matrix.image }}" = "vnc" ] && [ -n "$VARIANT" ]; then
+              add_tag "$VARIANT"
+            fi
           fi
 
           if [[ "$GITHUB_REF" == refs/heads/v* ]]; then
@@ -314,6 +337,9 @@ jobs:
               add_tag "$LATEST_TAG"
               add_tag "${MAJOR_MINOR}${VERSION_TAG_SUFFIX}"
               add_tag "${MAJOR}${VERSION_TAG_SUFFIX}"
+              if [ "${{ matrix.image }}" = "vnc" ] && [ -n "$VARIANT" ]; then
+                add_tag "$VARIANT"
+              fi
             fi
           fi
 

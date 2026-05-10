@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /data
+
+COPY scripts/desktop-install.sh /tmp/memoh-desktop-install.sh
+
+RUN set -eux; \
+    progress() { :; }; \
+    has_cmd() { command -v "$1" >/dev/null 2>&1; }; \
+    find_browser() { \
+      for candidate in google-chrome-stable google-chrome chromium chromium-browser; do \
+        if has_cmd "$candidate"; then \
+          command -v "$candidate"; \
+          return 0; \
+        fi; \
+      done; \
+      return 1; \
+    }; \
+    . /tmp/memoh-desktop-install.sh; \
+    install_debian; \
+    rm -rf /var/lib/apt/lists/* /tmp/memoh-desktop-install.sh; \
+    mkdir -p /data /tmp/.X11-unix; \
+    chmod 0755 /data; \
+    chmod 1777 /tmp/.X11-unix

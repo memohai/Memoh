@@ -26,7 +26,7 @@ driver = "sqlite"
 [container]
 # Keep Docker available for bots that still need isolated workspaces.
 backend = "docker"
-default_image = "debian:bookworm-slim"
+default_image = "memohai/vnc:debian"
 image_pull_policy = "if_not_present"
 snapshotter = "docker"
 data_root = "data/local"

@@ -49,6 +49,7 @@ const (
 	screenshotQuality    = 82
 	screenshotMaxBytes   = 512 * 1024
 	screenshotMIME       = "image/jpeg"
+	rfbTCPAddress        = "127.0.0.1:5999"
 )
 
 type screenshotJPEGCandidate struct {
@@ -77,6 +78,10 @@ var screenshotJPEGCandidates = []screenshotJPEGCandidate{
 type Workspace interface {
 	BotDisplayEnabled(ctx context.Context, botID string) bool
 	DisplaySocketPath(botID string) string
+}
+
+type workspaceDisplayDialer interface {
+	DisplayDialContext(ctx context.Context, botID, network, address string) (net.Conn, error)
 }
 
 type Status struct {
@@ -143,6 +148,49 @@ func NewService(logger *slog.Logger, workspace Workspace) *Service {
 	}
 }
 
+func (s *Service) displayTarget(botID string) string {
+	if _, ok := s.workspace.(workspaceDisplayDialer); ok {
+		return "bridge-tcp://" + rfbTCPAddress
+	}
+	return s.workspace.DisplaySocketPath(botID)
+}
+
+func (s *Service) displayReachable(ctx context.Context, botID string) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, socketProbeTimeout)
+	defer cancel()
+	conn, err := s.dialRFB(probeCtx, botID)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func (s *Service) dialRFB(ctx context.Context, botID string) (net.Conn, error) {
+	if dialer, ok := s.workspace.(workspaceDisplayDialer); ok {
+		conn, err := dialer.DisplayDialContext(ctx, botID, "tcp", rfbTCPAddress)
+		if err == nil {
+			return conn, nil
+		}
+		if socketPath := strings.TrimSpace(s.workspace.DisplaySocketPath(botID)); socketPath != "" {
+			if fallback, fallbackErr := dialRFBSocket(ctx, socketPath); fallbackErr == nil {
+				return fallback, nil
+			}
+		}
+		return nil, fmt.Errorf("dial workspace display %s: %w", rfbTCPAddress, err)
+	}
+	return dialRFBSocket(ctx, s.workspace.DisplaySocketPath(botID))
+}
+
+func dialRFBSocket(ctx context.Context, socketPath string) (net.Conn, error) {
+	socketPath = strings.TrimSpace(socketPath)
+	if socketPath == "" {
+		return nil, ErrDisplayUnavailable
+	}
+	dialer := net.Dialer{Timeout: displayProbePeriod}
+	return dialer.DialContext(ctx, "unix", filepath.Clean(socketPath))
+}
+
 func (s *Service) Status(ctx context.Context, botID string) Status {
 	status := Status{
 		Transport: TransportWebRTC,
@@ -157,8 +205,9 @@ func (s *Service) Status(ctx context.Context, botID string) Status {
 	gstLaunch, gstErr := resolveGSTLaunch()
 	status.EncoderAvailable = gstErr == nil && strings.TrimSpace(gstLaunch) != ""
 
-	socketPath := s.workspace.DisplaySocketPath(botID)
-	status.Running = isSocketReady(ctx, socketPath)
+	if status.Enabled {
+		status.Running = s.displayReachable(ctx, botID)
+	}
 	status.Available = status.Enabled && status.Running && status.EncoderAvailable
 	switch {
 	case !status.Enabled:
@@ -184,9 +233,8 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 		return OfferResponse{}, fmt.Errorf("unsupported session description type %q", req.Type)
 	}
 
-	socketPath := s.workspace.DisplaySocketPath(botID)
-	if !isSocketReady(ctx, socketPath) {
-		return OfferResponse{}, fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
+	if !s.displayReachable(ctx, botID) {
+		return OfferResponse{}, fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.displayTarget(botID))
 	}
 	gstLaunch, err := resolveGSTLaunch()
 	if err != nil {
@@ -198,7 +246,7 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 		return OfferResponse{}, err
 	}
 
-	sess, err := s.session(ctx, botID, socketPath, gstLaunch, codec)
+	sess, err := s.session(ctx, botID, gstLaunch, codec)
 	if err != nil {
 		return OfferResponse{}, err
 	}
@@ -238,9 +286,8 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 	if !s.workspace.BotDisplayEnabled(ctx, botID) {
 		return nil, "", ErrDisplayDisabled
 	}
-	socketPath := s.workspace.DisplaySocketPath(botID)
-	if !isSocketReady(ctx, socketPath) {
-		return nil, "", fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
+	if !s.displayReachable(ctx, botID) {
+		return nil, "", fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.displayTarget(botID))
 	}
 	gstLaunch, err := resolveGSTLaunch()
 	if err != nil {
@@ -265,7 +312,9 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 	}
 	defer func() { _ = proxy.Close() }()
 	defer cancel()
-	go proxyRFBSocket(runCtx, proxy, socketPath, s.logger, botID)
+	go proxyRFBListener(runCtx, proxy, func(ctx context.Context) (net.Conn, error) {
+		return s.dialRFB(ctx, botID)
+	}, s.logger, botID)
 
 	proxyPort := proxy.Addr().(*net.TCPAddr).Port
 	cmd := exec.CommandContext(runCtx, gstLaunch, gstreamerScreenshotArgs(proxyPort, outputPath)...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
@@ -299,11 +348,14 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []Cont
 	if !s.workspace.BotDisplayEnabled(ctx, botID) {
 		return ErrDisplayDisabled
 	}
-	socketPath := s.workspace.DisplaySocketPath(botID)
-	if !isSocketReady(ctx, socketPath) {
-		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, socketPath)
+	if !s.displayReachable(ctx, botID) {
+		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.displayTarget(botID))
 	}
-	input, err := newRFBInputClient(ctx, socketPath)
+	conn, err := s.dialRFB(ctx, botID)
+	if err != nil {
+		return fmt.Errorf("connect display input: %w", err)
+	}
+	input, err := newRFBInputClient(conn)
 	if err != nil {
 		return fmt.Errorf("connect display input: %w", err)
 	}
@@ -331,7 +383,7 @@ func (s *Service) ControlInputs(ctx context.Context, botID string, events []Cont
 	return nil
 }
 
-func (s *Service) session(ctx context.Context, botID, socketPath, gstLaunch, codec string) (*session, error) {
+func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (*session, error) {
 	s.mu.Lock()
 	if sess := s.sessions[botID]; sess != nil && !sess.closed() {
 		s.mu.Unlock()
@@ -345,7 +397,7 @@ func (s *Service) session(ctx context.Context, botID, socketPath, gstLaunch, cod
 	}
 	s.mu.Unlock()
 
-	sess := newSession(s, botID, socketPath, gstLaunch, codec)
+	sess := newSession(s, botID, gstLaunch, codec)
 	if err := sess.start(ctx); err != nil {
 		sess.stop()
 		return nil, err
@@ -376,11 +428,10 @@ func (s *Service) removeSession(botID string, target *session) {
 }
 
 type session struct {
-	service    *Service
-	botID      string
-	socketPath string
-	gstLaunch  string
-	codec      string
+	service   *Service
+	botID     string
+	gstLaunch string
+	codec     string
 
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -412,18 +463,17 @@ type peerSession struct {
 	close     func()
 }
 
-func newSession(service *Service, botID, socketPath, gstLaunch, codec string) *session {
+func newSession(service *Service, botID, gstLaunch, codec string) *session {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored on the session and called when the display session stops.
 	return &session{
-		service:    service,
-		botID:      botID,
-		socketPath: filepath.Clean(socketPath),
-		gstLaunch:  gstLaunch,
-		codec:      codec,
-		ctx:        ctx,
-		cancel:     cancel,
-		tracks:     make(map[string]*webrtc.TrackLocalStaticRTP),
-		peers:      make(map[string]*peerSession),
+		service:   service,
+		botID:     botID,
+		gstLaunch: gstLaunch,
+		codec:     codec,
+		ctx:       ctx,
+		cancel:    cancel,
+		tracks:    make(map[string]*webrtc.TrackLocalStaticRTP),
+		peers:     make(map[string]*peerSession),
 	}
 }
 
@@ -437,8 +487,8 @@ func (s *session) closed() bool {
 }
 
 func (s *session) start(ctx context.Context) error {
-	if !isSocketReady(ctx, s.socketPath) {
-		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.socketPath)
+	if !s.service.displayReachable(ctx, s.botID) {
+		return fmt.Errorf("%w: %s", ErrDisplayUnavailable, s.service.displayTarget(s.botID))
 	}
 
 	runCtx, runCtxCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -480,8 +530,15 @@ func (s *session) start(ctx context.Context) error {
 		return fmt.Errorf("start gstreamer display pipeline: %w", err)
 	}
 	s.cmd = cmd
-	if input, err := newRFBInputClient(runCtx, s.socketPath); err == nil {
-		s.input = input
+
+	if conn, err := s.service.dialRFB(runCtx, s.botID); err == nil {
+		input, inputErr := newRFBInputClient(conn)
+		if inputErr != nil {
+			_ = conn.Close()
+			s.service.logger.Warn("display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", inputErr))
+		} else {
+			s.input = input
+		}
 	} else {
 		s.service.logger.Warn("display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", err))
 	}
@@ -490,7 +547,7 @@ func (s *session) start(ctx context.Context) error {
 
 	s.service.logger.Info("display encoder started",
 		slog.String("bot_id", s.botID),
-		slog.String("socket_path", s.socketPath),
+		slog.String("rfb_target", s.service.displayTarget(s.botID)),
 		slog.String("gst_launch", s.gstLaunch),
 		slog.String("codec", s.codec),
 		slog.Int("proxy_port", proxyPort),
@@ -797,29 +854,12 @@ func (s *session) acceptProxy() {
 }
 
 func (s *session) proxyRFB(conn net.Conn) {
-	defer func() { _ = conn.Close() }()
-
-	dialer := net.Dialer{Timeout: displayProbePeriod}
-	rfbConn, err := dialer.DialContext(s.ctx, "unix", s.socketPath)
-	if err != nil {
-		s.service.logger.Warn("display RFB socket dial failed", slog.String("bot_id", s.botID), slog.String("socket_path", s.socketPath), slog.Any("error", err))
-		return
-	}
-	defer func() { _ = rfbConn.Close() }()
-
-	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(conn, rfbConn)
-		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(rfbConn, conn)
-		done <- struct{}{}
-	}()
-	<-done
+	proxyRFBConnection(s.ctx, conn, func(ctx context.Context) (net.Conn, error) {
+		return s.service.dialRFB(ctx, s.botID)
+	}, s.service.logger, s.botID)
 }
 
-func proxyRFBSocket(ctx context.Context, listener net.Listener, socketPath string, logger *slog.Logger, botID string) {
+func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -828,17 +868,16 @@ func proxyRFBSocket(ctx context.Context, listener net.Listener, socketPath strin
 			}
 			return
 		}
-		go proxyRFBConnection(ctx, conn, socketPath, logger, botID)
+		go proxyRFBConnection(ctx, conn, dialRFB, logger, botID)
 	}
 }
 
-func proxyRFBConnection(ctx context.Context, conn net.Conn, socketPath string, logger *slog.Logger, botID string) {
+func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string) {
 	defer func() { _ = conn.Close() }()
 
-	dialer := net.Dialer{Timeout: displayProbePeriod}
-	rfbConn, err := dialer.DialContext(ctx, "unix", socketPath)
+	rfbConn, err := dialRFB(ctx)
 	if err != nil {
-		logger.Warn("display RFB socket dial failed", slog.String("bot_id", botID), slog.String("socket_path", socketPath), slog.Any("error", err))
+		logger.Warn("display RFB dial failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return
 	}
 	defer func() { _ = rfbConn.Close() }()
@@ -1239,14 +1278,7 @@ type rfbInputClient struct {
 	conn net.Conn
 }
 
-func newRFBInputClient(ctx context.Context, socketPath string) (*rfbInputClient, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, displayProbePeriod)
-	defer cancel()
-	dialer := net.Dialer{Timeout: displayProbePeriod}
-	conn, err := dialer.DialContext(dialCtx, "unix", socketPath)
-	if err != nil {
-		return nil, err
-	}
+func newRFBInputClient(conn net.Conn) (*rfbInputClient, error) {
 	client := &rfbInputClient{conn: conn}
 	if err := client.handshake(); err != nil {
 		_ = conn.Close()

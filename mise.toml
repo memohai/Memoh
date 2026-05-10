@@ -229,6 +229,10 @@ run = "brew tap socktainer/tap && brew install socktainer"
 description = "Install workspace toolkit"
 run = "./docker/toolkit/install.sh .toolkit"
 
+[tasks."docker:vnc:build"]
+description = "Build the Debian VNC workspace image used by desktop"
+run = "docker build -f docker/Dockerfile.vnc -t memohai/vnc:debian ."
+
 [tasks.lint]
 description = "Run all linters"
 depends = [

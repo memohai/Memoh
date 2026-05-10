@@ -496,7 +496,7 @@ is_alpine() {
     *) return 1 ;;
   esac
 }
-RFB_SOCKET=/run/memoh/display.rfb.sock
+RFB_PORT=5999
 X_SOCKET=/tmp/.X11-unix/X99
 X_LOCK=/tmp/.X99-lock
 xvnc_pids() {
@@ -562,7 +562,7 @@ stop_browsers() {
   done
 }
 display_socket_ready() {
-  xvnc_running && [ -S "$RFB_SOCKET" ] && [ -S "$X_SOCKET" ]
+  xvnc_running && [ -S "$X_SOCKET" ] && awk -v port="$(printf '%04X' "$RFB_PORT")" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
 display_ready() {
   display_socket_ready && find_browser >/dev/null 2>&1 && has_desktop
@@ -633,18 +633,18 @@ wait_for_socket() {
 
 cleanup_stale_display() {
   xvnc_running && return 0
-  rm -f "$RFB_SOCKET" "$X_SOCKET" "$X_LOCK"
+  rm -f "$X_SOCKET" "$X_LOCK"
 }
 
 if ! display_socket_ready; then
   progress 78 starting "Starting VNC display"
   if xvnc_running; then
-    wait_for_socket "$RFB_SOCKET" 10 || true
+    wait_for_socket "$X_SOCKET" 10 || true
   fi
   if ! display_socket_ready; then
     stop_xvnc
     cleanup_stale_display
-    nohup "$XVNC" :99 -geometry 1280x800 -depth 24 -SecurityTypes None -rfbunixpath "$RFB_SOCKET" -rfbunixmode 0660 -rfbport 0 >/tmp/memoh-xvnc.log 2>&1 &
+    nohup "$XVNC" :99 -geometry 1280x800 -depth 24 -SecurityTypes None -localhost -rfbport "$RFB_PORT" >/tmp/memoh-xvnc.log 2>&1 &
     wait_i=0
     while [ "$wait_i" -lt 25 ]; do
       display_socket_ready && break

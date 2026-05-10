@@ -72,4 +72,10 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 	if !strings.Contains(displayPrepareMainCommand, "SingletonLock") {
 		t.Fatal("display prepare must clean stale Chromium profile locks before starting the browser")
 	}
+	if strings.Contains(displayPrepareMainCommand, "rfbunixpath") || strings.Contains(displayPrepareMainCommand, "RFB_SOCKET") {
+		t.Fatal("display prepare should use loopback TCP VNC instead of a bind-mounted Unix RFB socket")
+	}
+	if !strings.Contains(displayPrepareMainCommand, "-localhost -rfbport \"$RFB_PORT\"") {
+		t.Fatal("display prepare must keep VNC on container loopback")
+	}
 }

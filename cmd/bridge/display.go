@@ -16,7 +16,7 @@ import (
 
 const (
 	displayEnabledEnv     = "MEMOH_DISPLAY_ENABLED"
-	displayRFBUnixPathEnv = "MEMOH_DISPLAY_RFB_UNIX_PATH"
+	displayRFBTCPAddrEnv  = "MEMOH_DISPLAY_RFB_TCP_ADDR"
 	displayBrowserURLEnv  = "MEMOH_DISPLAY_BROWSER_URL"
 	displayBrowserCDPPort = "9222"
 	displayBrowserProfile = "/tmp/memoh-display-browser"
@@ -31,7 +31,7 @@ const (
 	xvncGeometry          = "1280x800"
 	xvncSocketPath        = x11SocketDir + "/X99"
 	xvncLockPath          = "/tmp/.X99-lock"
-	defaultRFBUnixPath    = "/run/memoh/display.rfb.sock"
+	defaultRFBTCPAddr     = "127.0.0.1:5999"
 	displayReadyTimeout   = 30 * time.Second
 )
 
@@ -71,12 +71,12 @@ func superviseXvnc(ctx context.Context) {
 			continue
 		}
 		ensureDisplayRuntimeLinks(ctx, resolveDisplayCommand(toolkitXkbcompPath, "/usr/bin/xkbcomp", "/usr/local/bin/xkbcomp", "xkbcomp"))
-		rfbUnixPath := displayRFBUnixPath()
+		rfbTCPAddr := displayRFBTCPAddr()
 		prepareX11SocketDir(ctx)
-		if displaySocketReady(ctx, rfbUnixPath) {
-			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_unix_path", rfbUnixPath))
+		if displayTCPReady(ctx, rfbTCPAddr) {
+			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
 			go startDisplaySession(ctx)
-			if waitExistingDisplay(ctx, rfbUnixPath) {
+			if waitExistingDisplay(ctx, rfbTCPAddr) {
 				return
 			}
 			backoff = time.Second
@@ -85,15 +85,14 @@ func superviseXvnc(ctx context.Context) {
 		if xvncProcessRunning() {
 			stopXvncProcesses(ctx)
 		}
-		prepareDisplaySockets(ctx, rfbUnixPath)
+		prepareDisplaySockets(ctx)
 		cmd := exec.CommandContext(ctx, xvncPath, //nolint:gosec // path is a fixed runtime bundle executable
 			xvncDisplay,
 			"-geometry", xvncGeometry,
 			"-depth", "24",
 			"-SecurityTypes", "None",
-			"-rfbunixpath", rfbUnixPath,
-			"-rfbunixmode", "0660",
-			"-rfbport", "0",
+			"-localhost",
+			"-rfbport", displayRFBTCPPort(rfbTCPAddr),
 		)
 		cmd.Env = withDisplayEnv(os.Environ())
 		cmd.Stdout = os.Stdout
@@ -102,7 +101,7 @@ func superviseXvnc(ctx context.Context) {
 		if err := cmd.Start(); err != nil {
 			logger.FromContext(ctx).Warn("failed to start Xvnc", slog.Any("error", err))
 		} else {
-			logger.FromContext(ctx).Info("Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_unix_path", rfbUnixPath))
+			logger.FromContext(ctx).Info("Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
 			go startDisplaySession(ctx)
 			waitErr := make(chan error, 1)
 			go func() {
@@ -147,7 +146,7 @@ func waitDisplayRetry(ctx context.Context, backoff time.Duration) bool {
 	}
 }
 
-func waitExistingDisplay(ctx context.Context, rfbUnixPath string) bool {
+func waitExistingDisplay(ctx context.Context, rfbTCPAddr string) bool {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -155,22 +154,22 @@ func waitExistingDisplay(ctx context.Context, rfbUnixPath string) bool {
 		case <-ctx.Done():
 			return true
 		case <-ticker.C:
-			if !displaySocketReady(ctx, rfbUnixPath) {
+			if !displayTCPReady(ctx, rfbTCPAddr) {
 				return false
 			}
 		}
 	}
 }
 
-func displaySocketReady(ctx context.Context, path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
+func displayTCPReady(ctx context.Context, addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
 		return false
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
 	dialer := net.Dialer{Timeout: 300 * time.Millisecond}
-	conn, err := dialer.DialContext(dialCtx, "unix", filepath.Clean(path))
+	conn, err := dialer.DialContext(dialCtx, "tcp", addr)
 	if err != nil {
 		return false
 	}
@@ -178,23 +177,23 @@ func displaySocketReady(ctx context.Context, path string) bool {
 	return true
 }
 
-func displayRFBUnixPath() string {
-	path := strings.TrimSpace(os.Getenv(displayRFBUnixPathEnv))
-	if path == "" {
-		return defaultRFBUnixPath
+func displayRFBTCPAddr() string {
+	addr := strings.TrimSpace(os.Getenv(displayRFBTCPAddrEnv))
+	if addr == "" {
+		return defaultRFBTCPAddr
 	}
-	return filepath.Clean(path)
+	return addr
 }
 
-func prepareDisplaySockets(ctx context.Context, path string) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		logger.FromContext(ctx).Warn("failed to create display socket directory", slog.String("dir", dir), slog.Any("error", err))
-		return
+func displayRFBTCPPort(addr string) string {
+	_, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err == nil && strings.TrimSpace(port) != "" {
+		return port
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		logger.FromContext(ctx).Warn("failed to remove stale display socket", slog.String("path", path), slog.Any("error", err))
-	}
+	return "5999"
+}
+
+func prepareDisplaySockets(ctx context.Context) {
 	if xvncProcessRunning() {
 		return
 	}

@@ -6,20 +6,24 @@ install_debian() {
   progress 18 system "Detected Debian workspace"
   progress 24 installing "Updating package index"
   apt-get update
+  if ! has_cmd apt-extracttemplates; then
+    apt-get install -y --no-install-recommends apt-utils
+  fi
   progress 42 installing "Installing VNC, desktop, and CJK fonts"
-  apt-get install -y --no-install-recommends ca-certificates curl gnupg dbus-x11 x11-xserver-utils xterm xfce4 tigervnc-standalone-server fontconfig fonts-dejavu fonts-noto-cjk fonts-noto-color-emoji
+  apt-get install -y --no-install-recommends ca-certificates curl gnupg dbus-x11 x11-xserver-utils xterm xfce4 tigervnc-standalone-server fontconfig fonts-dejavu fonts-noto-cjk fonts-noto-color-emoji procps
   if ! find_browser >/dev/null 2>&1; then
-    progress 66 browser "Installing Chrome"
+    progress 66 browser "Installing browser"
+    if apt-get install -y --no-install-recommends chromium || apt-get install -y --no-install-recommends chromium-browser; then
+      return 0
+    fi
+    arch="$(dpkg --print-architecture)"
+    [ "$arch" = "amd64" ] || return 1
     install -d -m 0755 /etc/apt/keyrings
     rm -f /etc/apt/keyrings/google-chrome.gpg
-    if curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --dearmor -o /etc/apt/keyrings/google-chrome.gpg; then
-      arch="$(dpkg --print-architecture)"
-      echo "deb [arch=$arch signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >/etc/apt/sources.list.d/google-chrome.list
-      apt-get update
-      apt-get install -y --no-install-recommends google-chrome-stable || apt-get install -y --no-install-recommends chromium || apt-get install -y --no-install-recommends chromium-browser
-    else
-      apt-get install -y --no-install-recommends chromium || apt-get install -y --no-install-recommends chromium-browser
-    fi
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >/etc/apt/sources.list.d/google-chrome.list
+    apt-get update
+    apt-get install -y --no-install-recommends google-chrome-stable
   fi
 }
 

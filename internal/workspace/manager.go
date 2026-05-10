@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -327,7 +328,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	if m.botDisplayEnabled(ctx, botID) {
 		env = append(env,
 			"MEMOH_DISPLAY_ENABLED=true",
-			"MEMOH_DISPLAY_RFB_UNIX_PATH=/run/memoh/"+DisplayRFBSocketName,
+			"MEMOH_DISPLAY_RFB_TCP_ADDR=127.0.0.1:5999",
 			"DISPLAY=:99",
 		)
 	}
@@ -358,6 +359,14 @@ func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) bool {
 
 func (m *Manager) BotDisplayEnabled(ctx context.Context, botID string) bool {
 	return m.botDisplayEnabled(ctx, botID)
+}
+
+func (m *Manager) DisplayDialContext(ctx context.Context, botID, network, address string) (net.Conn, error) {
+	client, err := m.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return client.DialContext(ctx, network, address)
 }
 
 func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, gpu WorkspaceGPUConfig) error {
