@@ -43,7 +43,7 @@ body:
     attributes:
       label: Version
       description: What version of Memoh are you running?
-      placeholder: e.g. v0.5.0
+      placeholder: e.g. v0.8.0, commit hash, or "main"
     validations:
       required: true
 
@@ -52,7 +52,7 @@ body:
     attributes:
       label: Model Used
       description: Which LLM model were you using when the bug occurred?
-      placeholder: e.g. gpt-4o, claude-sonnet-4-20250514, gemini-2.0-flash
+      placeholder: e.g. gpt-4.1, claude-sonnet-4.5, gemini-2.5-flash
     validations:
       required: false
 
@@ -64,10 +64,17 @@ body:
       options:
         - Telegram
         - Discord
-        - Lark (Feishu)
-        - Email
+        - Feishu (Lark)
+        - DingTalk
         - QQ
-        - Local
+        - Matrix
+        - Misskey
+        - Slack
+        - WeCom
+        - WeChat
+        - WeChat Official Account
+        - Email
+        - Web
         - Other
     validations:
       required: false

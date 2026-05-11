@@ -34,6 +34,50 @@ body:
     validations:
       required: false
 
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Memoh does this feature request affect most?
+      options:
+        - Agent / Chat
+        - Memory
+        - Providers / Models
+        - Containers / Workspace
+        - Channels
+        - Email
+        - MCP / Tools
+        - Web UI
+        - Desktop App / CLI
+        - Documentation
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      description: If this feature is channel-specific, which channel is it for?
+      options:
+        - Not channel-specific
+        - Telegram
+        - Discord
+        - Feishu (Lark)
+        - DingTalk
+        - QQ
+        - Matrix
+        - Misskey
+        - Slack
+        - WeCom
+        - WeChat
+        - WeChat Official Account
+        - Email
+        - Web
+        - Other
+    validations:
+      required: false
+
   - type: textarea
     id: alternatives
     attributes:
