@@ -181,16 +181,11 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	return nil
 }
 
-// detectShell probes the container for an interactive shell with readline support.
-// Prefers bash > zsh > /bin/sh.
-func detectShell(ctx context.Context, client *bridge.Client) string {
-	for _, sh := range []string{"/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh"} {
-		result, err := client.Exec(ctx, "test -x "+sh, "/", 5)
-		if err == nil && result.ExitCode == 0 {
-			return sh
-		}
-	}
-	return "/bin/sh"
+// detectShell returns the interactive shell launcher used for browser terminals.
+// The bash-vs-sh decision happens inside the PTY process so terminal startup
+// does not depend on a separate, potentially flaky probe exec.
+func detectShell(_ context.Context, _ *bridge.Client) string {
+	return `if [ -x /bin/bash ]; then exec /bin/bash; elif [ -x /usr/bin/bash ]; then exec /usr/bin/bash; elif command -v bash >/dev/null 2>&1; then exec bash; else exec /bin/sh; fi`
 }
 
 func parseUint32Query(c echo.Context, name string, fallback uint32) uint32 {
