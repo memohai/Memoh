@@ -4,13 +4,13 @@
       <InputGroup class="h-[30px]">
         <InputGroupAddon class="pl-2.5">
           <Search
-            class="size-[11px] text-muted-foreground"
+            class="size-2.75 text-muted-foreground"
           />
         </InputGroupAddon>
         <InputGroupInput
           v-model="searchQuery"
           :placeholder="t('chat.searchSessionPlaceholder')"
-          class="text-xs h-[30px]"
+          class="text-xs h-7.5"
         />
       </InputGroup>
     </div>
@@ -29,7 +29,7 @@
       </Button>
     </div>
 
-    <div class="px-3.5 h-[38px] flex items-center shrink-0">
+    <div class="px-3.5 h-9.5 flex items-center shrink-0">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
           <button class="flex items-center gap-1">

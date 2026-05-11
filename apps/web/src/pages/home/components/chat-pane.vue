@@ -18,10 +18,13 @@
       <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
           <ScrollArea
+          
             ref="scrollContainer"
-            class="h-full"
+            :class="`${transitionScroll?'opacity-100':'opacity-0'} h-full`"
           >
-            <div class="w-full max-w-4xl mx-auto px-10 pt-6 pb-6 space-y-6">
+            <div            
+              class="w-full max-w-4xl mx-auto px-10 pt-6 pb-6 space-y-6"
+            >
               <div
                 ref="loadMoreSentinel"
                 aria-hidden="true"
@@ -31,14 +34,12 @@
                 v-if="loadingOlder"
                 class="flex justify-center py-2"
               >
-                <LoaderCircle
-                  class="size-3.5 animate-spin text-muted-foreground"
-                />
+                <LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
               </div>
 
               <div
                 v-if="messages.length === 0 && !loadingChats"
-                class="flex items-center justify-center min-h-[300px]"
+                class="flex items-center justify-center min-h-75"
               >
                 <p
                   v-if="activeSession?.type === 'subagent'"
@@ -67,6 +68,7 @@
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
                 class="rounded-2xl transition-[background-color,box-shadow] duration-500"
                 :class="highlightedMessageId === msg.id ? 'bg-primary/10 ring-2 ring-primary/25' : ''"
+                :data-anchor="msg.id"
               >
                 <MessageItem
                   :message="msg"
@@ -74,6 +76,9 @@
                   :bot-id="currentBotId"
                   :on-open-media="galleryOpenBySrc"
                   :on-reply-click="handleReplyJump"
+                  :root-el="scrollEl"
+                  :is-scrolling="isScrolling"
+                  @active="isActiveEl"
                 />
               </div>
             </div>
@@ -112,9 +117,7 @@
                 :aria-label="`${$t('common.delete')}: ${file.name}`"
                 @click="pendingFiles.splice(i, 1)"
               >
-                <X
-                  class="size-3"
-                />
+                <X class="size-3" />
               </button>
             </div>
           </div>
@@ -214,9 +217,7 @@
                   aria-label="Attach files"
                   @click="fileInput?.click()"
                 >
-                  <Paperclip
-                    class="size-3.5"
-                  />
+                  <Paperclip class="size-3.5" />
                 </Button>
 
                 <SessionInfoRing
@@ -233,9 +234,7 @@
                   class="size-7 rounded-full bg-primary text-primary-foreground"
                   @click="handleSend"
                 >
-                  <Send
-                    class="size-3"
-                  />
+                  <Send class="size-3" />
                 </Button>
                 <Button
                   v-else
@@ -246,9 +245,7 @@
                   aria-label="Stop generating response"
                   @click="chatStore.abort()"
                 >
-                  <LoaderCircle
-                    class="size-3.5 animate-spin"
-                  />
+                  <LoaderCircle class="size-3.5 animate-spin" />
                 </Button>
               </InputGroupAddon>
             </InputGroup>
@@ -260,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, Lightbulb, CircleAlert } from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
@@ -306,7 +303,7 @@ const {
   loadingChats,
   hasMoreOlder,
   overrideModelId,
-  overrideReasoningEffort,
+  overrideReasoningEffort
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
@@ -443,14 +440,6 @@ watch(inputText, (text) => {
   saveInputDraft(inputDraftKey.value, text)
 })
 
-onMounted(() => {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      isInstant.value = true
-    })
-  })
-})
-
 const elNode = useTemplateRef('scrollContainer')
 // Resolve the real scrollable viewport via data-slot to avoid coupling to the
 // child-index DOM shape of @memohai/ui's ScrollArea (which wraps reka-ui).
@@ -466,7 +455,7 @@ const loadMoreSentinel = useTemplateRef<HTMLElement>('loadMoreSentinel')
 const isAutoScroll = ref(true)
 const isInstant = ref(false)
 const highlightedMessageId = ref('')
-const { y, directions, arrivedState } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
+const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -474,31 +463,105 @@ onBeforeUnmount(() => {
   if (highlightTimer) clearTimeout(highlightTimer)
 })
 
-watch(activeSession, async () => {
-  if (!isActive.value) return
-  isInstant.value = false
-  y.value = height.value
-}, { immediate: true, deep: true })
 
+const elId: { id: string, top: number }[] = []
+function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
+  if (lockScroll.value) return
+  let index = elId.findIndex(v => v.id === item.id)
+  if (isActive) {
+    if ((index < 0)) {
+      elId.push(item)
+    } else {
+      elId[index]!.top = item.top
+    }
+  } else {
+    if (index >= 0) {
+      elId.splice(index, 1)
+    }
+  }
+}
+
+
+const lockScroll = ref(true)
+let isInit = false
+const transitionScroll=ref(false)
+onActivated(() => {
+  if (!isActive.value) return
+  transitionScroll.value=false
+  const unwatch = watch(loadingChats, async (newValue) => {
+    
+    if (elId[0]?.id && !newValue) {
+      elId.sort((v1, v2) => Math.abs(v1.top) - Math.abs(v2.top))
+      const el: HTMLElement | null = document.querySelector(`[data-message-id="${elId[0]?.id}"]`)
+      if (el) {
+        let cachePos = elId[0]?.top
+        el.scrollIntoView()
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollEl.value?.scrollBy({
+              top: cachePos * -1
+            })
+            transitionScroll.value=true
+          })
+        })
+
+      }
+      setTimeout(() => {
+        lockScroll.value = false
+        isInit = true
+        unwatch()
+      })
+    } else {
+     
+      isInit = true
+      if (!newValue) {
+        setTimeout(async () => {
+          lockScroll.value = false
+          transitionScroll.value=true
+          unwatch()
+        })
+      }
+    }
+  }, {
+    immediate: true,
+    flush: 'post'
+  })
+
+})
+
+onDeactivated(() => {
+  lockScroll.value = true
+  isInstant.value = false
+  isAutoScroll.value = true
+  isInit = false
+  if (arrivedState.bottom) {
+    elId.length=0
+  }
+})
 
 watchEffect(() => {
   if (!isActive.value) return
-  if (directions.top) {
+  if (directions.top && !lockScroll.value) {
     isAutoScroll.value = false
-    isInstant.value = true
+    isInstant.value = false
+    return
   }
-  if (arrivedState.bottom) {
+
+  if (arrivedState.bottom && !lockScroll.value) {
     isAutoScroll.value = true
     isInstant.value = true
+    return
   }
-}, { flush: 'post' })
+})
 
-
-watchEffect(() => {
+watch([isAutoScroll, height, isActive], async () => {
   if (!isActive.value) return
-  if (isAutoScroll.value) {
+  if (isAutoScroll.value && height.value && isInit) {
     y.value = height.value
   }
+}, {
+  flush: 'post',
+  deep: true
 })
 
 // Sentinel-based infinite scroll for older history. The IntersectionObserver
@@ -521,11 +584,13 @@ function isSentinelStillInRange(scrollElement: HTMLElement): boolean {
 }
 
 async function ensureOlderLoaded() {
+
   if (isLoadingOlderInFlight) return
   if (loadingOlder.value || !hasMoreOlder.value) return
   if (!messages.value.length) return
   const scrollElement = scrollEl.value
   if (!scrollElement) return
+
 
   isLoadingOlderInFlight = true
   // The `if (isAutoScroll) y = height` watchEffect above will otherwise stomp
@@ -535,11 +600,11 @@ async function ensureOlderLoaded() {
   // is at the top by definition (sentinel just intersected), so disabling
   // stick-to-bottom here is correct; arrivedState.bottom will re-enable it
   // when the user scrolls back down to the latest messages.
-  isAutoScroll.value = false
+  // isAutoScroll.value = false
   try {
     while (hasMoreOlder.value) {
       const prevScrollHeight = scrollElement.scrollHeight
-      const prevScrollTop = scrollElement.scrollTop
+      // const prevScrollTop = scrollElement.scrollTop
 
       let count = 0
       try {
@@ -551,10 +616,11 @@ async function ensureOlderLoaded() {
       if (count <= 0) return
 
       await nextTick()
+
       const newScrollHeight = scrollElement.scrollHeight
       const delta = newScrollHeight - prevScrollHeight
       if (delta > 0) {
-        scrollElement.scrollTop = prevScrollTop + delta
+        // scrollElement.scrollTop = prevScrollTop + delta
       }
 
       // Yield one frame so the browser can re-evaluate layout and IO entries,
@@ -597,11 +663,12 @@ async function scrollToMessage(messageId: string): Promise<boolean> {
   const root = scrollEl.value
   const target = findMessageElement(messageId)
   if (!root || !target) return false
-  isAutoScroll.value = false
-  isInstant.value = true
+  // isAutoScroll.value = false
+  // isInstant.value = true
   const rootRect = root.getBoundingClientRect()
   const targetRect = target.getBoundingClientRect()
   const offset = targetRect.top - rootRect.top - Math.max(24, root.clientHeight * 0.22)
+
   root.scrollTo({ top: root.scrollTop + offset, behavior: 'smooth' })
   highlightedMessageId.value = messageId
   if (highlightTimer) clearTimeout(highlightTimer)
@@ -627,6 +694,7 @@ async function handleReplyJump(messageId: string) {
 function handleKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
   e.preventDefault()
+  isAutoScroll.value = true
   handleSend()
 }
 
@@ -669,7 +737,7 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
 
 async function handleSend() {
   if (!isActive.value) return
-  isAutoScroll.value = true
+  // isAutoScroll.value = true
   const text = inputText.value.trim()
   const files = [...pendingFiles.value]
   if ((!text && !files.length) || streaming.value || activeChatReadOnly.value) return

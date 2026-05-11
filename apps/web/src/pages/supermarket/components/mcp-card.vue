@@ -74,7 +74,7 @@
       </div>
       <Button
         size="sm"
-        class="shrink-0"
+        class="shrink-0 self-end"
         @click.stop="$emit('install', mcp)"
       >
         <Download class="size-3.5 mr-1.5" />

@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="messageItem"
     class="flex gap-3 items-start"
     :class="message.role === 'user' && isSelf && !isSpecialUserMessage ? 'justify-end' : ''"
   >
@@ -221,7 +222,7 @@
         />
         <p
           class="text-xs text-muted-foreground/80 mt-1 text-right"
-          :title="fullTimestamp" 
+          :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
         </p>
@@ -292,9 +293,7 @@
           v-if="message.streaming && !hasVisibleAssistantBlocks"
           class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
-          <LoaderCircle
-            class="size-3.5 animate-spin"
-          />
+          <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
         <p
@@ -309,7 +308,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
@@ -333,13 +332,22 @@ import type {
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
+
 import { resolveUrl } from '../composables/useMediaGallery'
+import { useElementVisibility } from '@vueuse/core'
+
 
 enableKatex()
 enableMermaid()
 
+
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
+
+const messageEl = useTemplateRef('messageItem')
+const emit = defineEmits<{
+  active: [isActive: boolean, { id: string, top: number,  }]
+}>()
 
 const props = defineProps<{
   message: ChatMessage
@@ -347,10 +355,19 @@ const props = defineProps<{
   botId?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
+  isScrolling: boolean
 }>()
 
-// const chatStore = useChatStore()
-// const { currentBotId, bots } = storeToRefs(chatStore)
+const isVisible = useElementVisibility(messageEl, {
+  threshold: 0.1
+})
+
+watch([isVisible, toRef(props, 'isScrolling')], () => { 
+  emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
+}, {
+  immediate: true,
+  deep:true
+})
 
 const isSelf = computed(() =>
   props.message.role !== 'user' || props.message.isSelf !== false,
@@ -365,7 +382,7 @@ const isSelf = computed(() =>
 
 const { t } = useI18n()
 
-// const senderFallbackName = computed(() => {
+// const senderFallbackName = computed(() => {rootEl
 //   const p = (props.message.platform ?? '').trim()
 //   const platformLabel = p
 //     ? t(`bots.channels.types.${p}`, p.charAt(0).toUpperCase() + p.slice(1))
@@ -464,7 +481,7 @@ function isAssistantBlockStreaming(index: number): boolean {
 
 const hasVisibleAssistantBlocks = computed(() =>
   props.message.role === 'assistant'
-    && props.message.messages.length > 0,
+  && props.message.messages.length > 0,
 )
 
 const relativeTimestamp = computed(() =>

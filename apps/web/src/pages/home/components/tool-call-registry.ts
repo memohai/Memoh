@@ -143,7 +143,7 @@ function hostnameOrUrl(url: string): string {
 
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
-
+  
   switch (block.toolName) {
     case 'read': {
       const path = pickString(input, 'path')

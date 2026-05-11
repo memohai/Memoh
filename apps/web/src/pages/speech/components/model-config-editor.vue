@@ -226,6 +226,7 @@
         <Input
           type="file"
           accept="audio/*"
+          class="file:-mt-1"
           @change="handleFileChange"
         />
         <p

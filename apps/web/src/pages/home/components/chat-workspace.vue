@@ -3,14 +3,16 @@
     <WorkspaceTabBar />
 
     <div class="flex-1 min-h-0 relative">
-      <template v-if="activeTab">
-        <ChatPane
-          v-for="tab in chatTabs"
-          v-show="activeTab.id === tab.id"
-          :key="`chat-pane:${currentBotId}:${tab.id}`"
-          :tab-id="tab.id"
-          :active="activeTab.id === tab.id"
-        />
+      <template v-if="currentChat&&activeTab">
+        <KeepAlive>
+          <component
+            :is="ChatPane"
+            :key="`chat-pane:${currentBotId}:${currentChat.id}`"
+            :tab-id="currentChat.id"
+            :active="activeTab.id === currentChat.id"
+          />
+        </KeepAlive>
+      
         <FilePane
           v-for="tab in fileTabs"
           v-show="activeTab.id === tab.id"
@@ -79,12 +81,25 @@ import FilePane from './file-pane.vue'
 import TerminalPane from './terminal-pane.vue'
 import DisplayPane from './display-pane.vue'
 
+
+
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
 const displaySnapshots = useDisplaySnapshotsStore()
 const { activeTab, tabs } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
+
+/*
+     <!-- <ChatPane
+            v-for="tab in chatTabs"
+            v-show="activeTab.id === tab.id"
+            :key="`chat-pane:${currentBotId}:${tab.id}`"
+            :tab-id="tab.id"
+            :active="activeTab.id === tab.id"
+          /> -->
+*/ 
+
 
 type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
 type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
@@ -94,6 +109,13 @@ type FileTab = Extract<WorkspaceTab, { type: 'file' }>
 const chatTabs = computed<ChatTab[]>(() =>
   tabs.value.filter((tab): tab is ChatTab => tab.type === 'chat' || tab.type === 'draft'),
 )
+
+const currentChat = computed(() => {
+
+  if (!activeTab.value?.id) return
+  return chatTabs.value.find(v=>v.id === activeTab.value?.id)
+})
+
 
 const fileTabs = computed<FileTab[]>(() =>
   tabs.value.filter((tab): tab is FileTab => tab.type === 'file'),
