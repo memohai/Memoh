@@ -8,6 +8,7 @@ type ProviderDefinition struct {
 	BaseURL    string            `yaml:"base_url,omitempty"`
 	Config     map[string]any    `yaml:"config,omitempty"`
 	Models     []ModelDefinition `yaml:"models"`
+	Source     string            `yaml:"-"`
 }
 
 // ModelDefinition describes a model within a provider definition.
