@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/memohai/memoh/internal/conversation"
@@ -12,15 +11,9 @@ import (
 // DecodeTurnResponseEntry converts a persisted bot message into a TR entry for
 // pipeline context composition.
 //
-// Unlike the old implementation (which only kept plain text and dropped all
-// tool-call / tool-result payloads), this version renders the full turn —
-// including tool calls and their results — into a single structured string
-// so the LLM can observe its own prior tool usage when the conversation is
-// later replayed or summarised.
-//
-// The rendering is intentionally compact and XML-flavoured so it survives
-// round-trips through the merge/compose pipeline without being confused with
-// the user-facing XML used by Rendering.
+// Tool calls and tool results are preserved as native structured content
+// parts. They must not be rendered as assistant-visible pseudo-protocol text:
+// models may imitate that text instead of emitting real provider tool calls.
 func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 	role := strings.TrimSpace(msg.Role)
 	if role != "assistant" && role != "tool" {
@@ -32,22 +25,23 @@ func DecodeTurnResponseEntry(msg messagepkg.Message) (TurnResponseEntry, bool) {
 		return TurnResponseEntry{}, false
 	}
 
-	var rendered string
+	var rawContent json.RawMessage
 	switch role {
 	case "tool":
-		rendered = renderToolRoleMessage(modelMsg)
+		rawContent = nativeToolRoleContent(modelMsg)
 	default:
-		rendered = renderAssistantMessage(modelMsg)
+		rawContent = nativeAssistantContent(modelMsg)
 	}
 
-	if strings.TrimSpace(rendered) == "" {
+	if len(rawContent) == 0 || strings.TrimSpace(string(rawContent)) == "" {
 		return TurnResponseEntry{}, false
 	}
 
 	return TurnResponseEntry{
 		RequestedAtMs: msg.CreatedAt.UnixMilli(),
 		Role:          role,
-		Content:       rendered,
+		Content:       debugContent(rawContent),
+		RawContent:    rawContent,
 	}, true
 }
 
@@ -64,16 +58,18 @@ type turnResponsePart struct {
 	Result     json.RawMessage `json:"result,omitempty"`
 }
 
-func renderAssistantMessage(msg conversation.ModelMessage) string {
-	var b strings.Builder
-
+func nativeAssistantContent(msg conversation.ModelMessage) json.RawMessage {
+	var out []map[string]any
 	// 1) Plain-string content (legacy format).
 	if len(msg.Content) > 0 {
 		var plain string
 		if err := json.Unmarshal(msg.Content, &plain); err == nil {
 			plain = strings.TrimSpace(plain)
 			if plain != "" {
-				b.WriteString(plain)
+				out = append(out, map[string]any{
+					"type": "text",
+					"text": plain,
+				})
 			}
 		}
 	}
@@ -91,22 +87,22 @@ func renderAssistantMessage(msg conversation.ModelMessage) string {
 			if text == "" {
 				continue
 			}
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(text)
+			out = append(out, map[string]any{
+				"type": "text",
+				"text": text,
+			})
 		case "reasoning":
 			// Intentionally omitted: reasoning is model-internal and must not
 			// leak back into subsequent prompts verbatim.
 			continue
 		case "tool-call":
-			writeToolCallTag(&b, p.ToolCallID, p.ToolName, p.Input)
+			out = append(out, nativeToolCallPart(p.ToolCallID, p.ToolName, p.Input))
 		case "tool-result":
 			payload := p.Output
 			if len(payload) == 0 {
 				payload = p.Result
 			}
-			writeToolResultTag(&b, p.ToolCallID, p.ToolName, payload)
+			out = append(out, nativeToolResultPart(p.ToolCallID, p.ToolName, payload))
 		}
 	}
 
@@ -126,18 +122,18 @@ func renderAssistantMessage(msg conversation.ModelMessage) string {
 				input = encoded
 			}
 		}
-		writeToolCallTag(&b, id, name, input)
+		out = append(out, nativeToolCallPart(id, name, input))
 	}
 
-	return b.String()
+	return marshalParts(out)
 }
 
-func renderToolRoleMessage(msg conversation.ModelMessage) string {
+func nativeToolRoleContent(msg conversation.ModelMessage) json.RawMessage {
 	// Two possible persistence shapes:
 	//   a) Content is a JSON array of parts with type="tool-result".
 	//   b) Content is the tool result itself, and ToolCallID is set on the
 	//      ModelMessage envelope (older OpenAI-style format).
-	var b strings.Builder
+	var out []map[string]any
 
 	var parts []turnResponsePart
 	if len(msg.Content) > 0 {
@@ -151,69 +147,78 @@ func renderToolRoleMessage(msg conversation.ModelMessage) string {
 		if len(payload) == 0 {
 			payload = p.Result
 		}
-		writeToolResultTag(&b, p.ToolCallID, p.ToolName, payload)
-	}
-	if b.Len() > 0 {
-		return b.String()
+		out = append(out, nativeToolResultPart(p.ToolCallID, p.ToolName, payload))
 	}
 
+	if len(out) > 0 {
+		return marshalParts(out)
+	}
 	if strings.TrimSpace(msg.ToolCallID) != "" {
-		writeToolResultTag(&b, msg.ToolCallID, msg.Name, msg.Content)
+		out = append(out, nativeToolResultPart(msg.ToolCallID, msg.Name, msg.Content))
 	}
-	return b.String()
+	return marshalParts(out)
 }
 
-func writeToolCallTag(b *strings.Builder, id, name string, input json.RawMessage) {
-	if b.Len() > 0 {
-		b.WriteByte('\n')
+func nativeToolCallPart(id, name string, input json.RawMessage) map[string]any {
+	part := map[string]any{
+		"type":       "tool-call",
+		"toolCallId": strings.TrimSpace(id),
+		"toolName":   strings.TrimSpace(name),
 	}
-	fmt.Fprintf(b, `<tool_call id=%q name=%q>`, escapeXMLAttrValue(strings.TrimSpace(id)), escapeXMLAttrValue(strings.TrimSpace(name)))
-	if payload := formatToolPayload(input); payload != "" {
-		b.WriteString(payload)
+	if len(input) > 0 && strings.TrimSpace(string(input)) != "" {
+		part["input"] = input
+	} else {
+		part["input"] = map[string]any{}
 	}
-	b.WriteString("</tool_call>")
+	return part
 }
 
-func writeToolResultTag(b *strings.Builder, id, name string, payload json.RawMessage) {
-	if b.Len() > 0 {
-		b.WriteByte('\n')
+func nativeToolResultPart(id, name string, payload json.RawMessage) map[string]any {
+	part := map[string]any{
+		"type":       "tool-result",
+		"toolCallId": strings.TrimSpace(id),
+		"toolName":   strings.TrimSpace(name),
 	}
-	fmt.Fprintf(b, `<tool_result id=%q name=%q>`, escapeXMLAttrValue(strings.TrimSpace(id)), escapeXMLAttrValue(strings.TrimSpace(name)))
-	if rendered := formatToolPayload(payload); rendered != "" {
-		b.WriteString(rendered)
+	if len(payload) > 0 && strings.TrimSpace(string(payload)) != "" {
+		part["result"] = payload
+	} else {
+		part["result"] = nil
 	}
-	b.WriteString("</tool_result>")
+	return part
 }
 
-// formatToolPayload returns a compact textual representation of a tool
-// input/output payload safe to embed inside a tag body.
-func formatToolPayload(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
+func marshalParts(parts []map[string]any) json.RawMessage {
+	if len(parts) == 0 {
+		return nil
 	}
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return ""
+	raw, err := json.Marshal(parts)
+	if err != nil {
+		return nil
 	}
+	return raw
+}
 
-	// If the payload is a JSON string, unquote it so the body reads naturally.
-	var asString string
-	if err := json.Unmarshal(raw, &asString); err == nil {
-		s := strings.TrimSpace(asString)
-		if s == "" {
-			return ""
+func debugContent(raw json.RawMessage) string {
+	var plain string
+	if err := json.Unmarshal(raw, &plain); err == nil {
+		return plain
+	}
+	var parts []turnResponsePart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return string(raw)
+	}
+	var texts []string
+	for _, p := range parts {
+		switch strings.ToLower(strings.TrimSpace(p.Type)) {
+		case "text":
+			if text := strings.TrimSpace(p.Text); text != "" {
+				texts = append(texts, text)
+			}
+		case "tool-call":
+			texts = append(texts, "[tool call: "+strings.TrimSpace(p.ToolName)+"]")
+		case "tool-result":
+			texts = append(texts, "[tool result: "+strings.TrimSpace(p.ToolName)+"]")
 		}
-		return escapeXMLText(s)
 	}
-
-	// Otherwise, re-encode as compact JSON so whitespace is normalised and
-	// any nested structured content round-trips losslessly.
-	var v any
-	if err := json.Unmarshal(raw, &v); err == nil {
-		encoded, err := json.Marshal(v)
-		if err == nil {
-			return escapeXMLText(string(encoded))
-		}
-	}
-	return escapeXMLText(trimmed)
+	return strings.Join(texts, "\n")
 }

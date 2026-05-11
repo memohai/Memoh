@@ -263,9 +263,13 @@ func (r *Resolver) buildMessagesFromPipeline(ctx context.Context, req conversati
 
 	messages := make([]conversation.ModelMessage, 0, len(composed.Messages))
 	for _, m := range composed.Messages {
-		contentJSON, err := json.Marshal(m.Content)
-		if err != nil {
-			continue
+		contentJSON := m.RawContent
+		if len(contentJSON) == 0 {
+			var err error
+			contentJSON, err = json.Marshal(m.Content)
+			if err != nil {
+				continue
+			}
 		}
 		messages = append(messages, conversation.ModelMessage{
 			Role:    m.Role,
@@ -352,6 +356,16 @@ func stripToolMessages(messages []conversation.ModelMessage) []conversation.Mode
 			text := m.TextContent()
 			if strings.TrimSpace(text) == "" {
 				continue
+			}
+			m.ToolCalls = nil
+			if parts := filterVisibleContentParts(m.ContentParts()); len(parts) > 0 {
+				if content, err := json.Marshal(parts); err == nil {
+					m.Content = content
+				} else {
+					m.Content = conversation.NewTextContent(text)
+				}
+			} else {
+				m.Content = conversation.NewTextContent(text)
 			}
 		}
 		filtered = append(filtered, m)

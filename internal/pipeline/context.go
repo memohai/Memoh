@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"math"
 	"sort"
 	"strings"
@@ -11,15 +12,17 @@ const charsPerToken = 2
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
 // used as the "TR" stream in context composition.
 type TurnResponseEntry struct {
-	RequestedAtMs int64  `json:"requested_at_ms"`
-	Role          string `json:"role"`
-	Content       string `json:"content"`
+	RequestedAtMs int64           `json:"requested_at_ms"`
+	Role          string          `json:"role"`
+	Content       string          `json:"content"`
+	RawContent    json.RawMessage `json:"raw_content,omitempty"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	RawContent json.RawMessage `json:"raw_content,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -49,8 +52,9 @@ type mergeEntry struct {
 	// For RC entries
 	rcContent []RenderedContentPiece
 	// For TR entries
-	trRole    string
-	trContent string
+	trRole       string
+	trContent    string
+	trRawContent json.RawMessage
 }
 
 // MergeContext interleaves RC segments and TR entries by timestamp.
@@ -71,11 +75,12 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 
 	for i, tr := range trs {
 		entries = append(entries, mergeEntry{
-			kind:      "tr",
-			time:      tr.RequestedAtMs,
-			step:      i,
-			trRole:    tr.Role,
-			trContent: tr.Content,
+			kind:         "tr",
+			time:         tr.RequestedAtMs,
+			step:         i,
+			trRole:       tr.Role,
+			trContent:    tr.Content,
+			trRawContent: tr.RawContent,
 		})
 	}
 
@@ -112,8 +117,9 @@ func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage 
 		} else {
 			flushRC()
 			messages = append(messages, ContextMessage{
-				Role:    entry.trRole,
-				Content: entry.trContent,
+				Role:       entry.trRole,
+				Content:    entry.trContent,
+				RawContent: entry.trRawContent,
 			})
 		}
 	}
@@ -149,5 +155,8 @@ func estimateMessagesTokens(messages []ContextMessage) int {
 }
 
 func estimateMessageTokens(m ContextMessage) int {
+	if len(m.RawContent) > 0 {
+		return int(math.Ceil(float64(len(m.RawContent)) / charsPerToken))
+	}
 	return int(math.Ceil(float64(len(m.Content)) / charsPerToken))
 }

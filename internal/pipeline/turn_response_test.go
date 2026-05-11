@@ -44,6 +44,7 @@ func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
 	if strings.Contains(entry.Content, "thinking") {
 		t.Fatalf("reasoning leaked into TR: %q", entry.Content)
 	}
+	assertRawPart(t, entry.RawContent, "text", "任务完成", "")
 }
 
 func TestDecodeTurnResponseEntryPreservesToolCallOnlyPayload(t *testing.T) {
@@ -78,14 +79,13 @@ func TestDecodeTurnResponseEntryPreservesToolCallOnlyPayload(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool-call-only payload to be preserved as TR")
 	}
-	if !strings.Contains(entry.Content, `<tool_call id="call-1" name="read">`) {
-		t.Fatalf("missing tool_call tag: %q", entry.Content)
-	}
-	if !strings.Contains(entry.Content, `"path":"/tmp/a.txt"`) {
-		t.Fatalf("tool input missing: %q", entry.Content)
-	}
 	if strings.Contains(entry.Content, "thinking") {
 		t.Fatalf("reasoning leaked: %q", entry.Content)
+	}
+	part := assertRawPart(t, entry.RawContent, "tool-call", "read", "call-1")
+	input, ok := part["input"].(map[string]any)
+	if !ok || input["path"] != "/tmp/a.txt" {
+		t.Fatalf("tool input missing: %#v", part["input"])
 	}
 }
 
@@ -122,9 +122,8 @@ func TestDecodeTurnResponseEntryRendersTextAndToolCall(t *testing.T) {
 	if !strings.Contains(entry.Content, "Let me check.") {
 		t.Fatalf("missing text portion: %q", entry.Content)
 	}
-	if !strings.Contains(entry.Content, `<tool_call id="call-42" name="web_search">`) {
-		t.Fatalf("missing tool_call tag: %q", entry.Content)
-	}
+	assertRawPart(t, entry.RawContent, "text", "Let me check.", "")
+	assertRawPart(t, entry.RawContent, "tool-call", "web_search", "call-42")
 }
 
 func TestDecodeTurnResponseEntryToolRoleWithPartsResult(t *testing.T) {
@@ -160,11 +159,10 @@ func TestDecodeTurnResponseEntryToolRoleWithPartsResult(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool role entry")
 	}
-	if !strings.Contains(entry.Content, `<tool_result id="call-1" name="web_search">`) {
-		t.Fatalf("missing tool_result tag: %q", entry.Content)
-	}
-	if !strings.Contains(entry.Content, `"count":3`) || !strings.Contains(entry.Content, `"summary":"ok"`) {
-		t.Fatalf("structured tool output not preserved: %q", entry.Content)
+	part := assertRawPart(t, entry.RawContent, "tool-result", "web_search", "call-1")
+	result, ok := part["result"].(map[string]any)
+	if !ok || result["count"] != float64(3) || result["summary"] != "ok" {
+		t.Fatalf("structured tool output not preserved: %#v", part["result"])
 	}
 }
 
@@ -191,11 +189,10 @@ func TestDecodeTurnResponseEntryToolRoleLegacyEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatal("expected entry for legacy tool envelope")
 	}
-	if !strings.Contains(entry.Content, `<tool_result id="call-99" name="ping">`) {
-		t.Fatalf("missing tool_result tag: %q", entry.Content)
-	}
-	if !strings.Contains(entry.Content, `"status":"ok"`) {
-		t.Fatalf("legacy tool body missing: %q", entry.Content)
+	part := assertRawPart(t, entry.RawContent, "tool-result", "ping", "call-99")
+	result, ok := part["result"].(map[string]any)
+	if !ok || result["status"] != "ok" {
+		t.Fatalf("legacy tool body missing: %#v", part["result"])
 	}
 }
 
@@ -253,10 +250,34 @@ func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
 	if !ok {
 		t.Fatal("expected legacy tool-calls envelope to decode")
 	}
-	if !strings.Contains(entry.Content, `<tool_call id="call-legacy" name="send">`) {
-		t.Fatalf("missing tool_call tag: %q", entry.Content)
+	part := assertRawPart(t, entry.RawContent, "tool-call", "send", "call-legacy")
+	input, ok := part["input"].(map[string]any)
+	if !ok || input["text"] != "hi" {
+		t.Fatalf("arguments missing: %#v", part["input"])
 	}
-	if !strings.Contains(entry.Content, `"text":"hi"`) {
-		t.Fatalf("arguments missing: %q", entry.Content)
+}
+
+func assertRawPart(t *testing.T, raw json.RawMessage, partType, nameOrText, callID string) map[string]any {
+	t.Helper()
+	var parts []map[string]any
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		t.Fatalf("unmarshal raw content: %v; raw=%s", err, raw)
 	}
+	for _, part := range parts {
+		if part["type"] != partType {
+			continue
+		}
+		switch partType {
+		case "text":
+			if part["text"] == nameOrText {
+				return part
+			}
+		case "tool-call", "tool-result":
+			if part["toolName"] == nameOrText && part["toolCallId"] == callID {
+				return part
+			}
+		}
+	}
+	t.Fatalf("missing %s part name/text=%q callID=%q in %#v", partType, nameOrText, callID, parts)
+	return nil
 }

@@ -494,11 +494,29 @@ func buildLateBindingPrompt(isMentioned bool) string {
 func contextMessagesToSDK(messages []ContextMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(messages))
 	for _, m := range messages {
+		if len(m.RawContent) > 0 {
+			raw, err := json.Marshal(struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			}{
+				Role:    m.Role,
+				Content: m.RawContent,
+			})
+			if err == nil {
+				var msg sdk.Message
+				if json.Unmarshal(raw, &msg) == nil {
+					result = append(result, msg)
+					continue
+				}
+			}
+		}
 		switch m.Role {
 		case "user":
 			result = append(result, sdk.UserMessage(m.Content))
 		case "assistant":
 			result = append(result, sdk.AssistantMessage(m.Content))
+		case "tool":
+			result = append(result, sdk.UserMessage(m.Content))
 		default:
 			result = append(result, sdk.UserMessage(m.Content))
 		}
