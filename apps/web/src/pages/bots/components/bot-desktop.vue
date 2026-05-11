@@ -63,6 +63,7 @@
 
       <div class="relative h-[min(62vh,620px)] min-h-[360px] overflow-hidden rounded-md border border-border bg-black">
         <DisplayPane
+          v-if="props.botId"
           :bot-id="props.botId"
           tab-id="settings-desktop"
           :title="$t('bots.desktop.liveTitle')"

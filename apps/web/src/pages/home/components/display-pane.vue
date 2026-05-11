@@ -212,8 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import {Maximize} from 'lucide-vue-next'
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Component,useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Component, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   deleteBotsByBotIdContainerDisplaySessionsBySessionId,
@@ -221,37 +220,39 @@ import {
   postBotsByBotIdContainerDisplayWebrtcOffer,
 } from '@memohai/sdk'
 import { Button, Spinner } from '@memohai/ui'
-import { Activity, Globe, Monitor, Package, Wrench, X } from 'lucide-vue-next'
+import { Activity, Globe, Maximize, Monitor, Package, Wrench, X } from 'lucide-vue-next'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { captureDisplaySnapshot } from '@/utils/display-snapshot'
 import {
   postBotsByBotIdContainerDisplayPrepareStream,
   type DisplayPrepareStreamEvent,
 } from '@/composables/api/useDisplayPrepareStream'
-import { useToggle, useMouseInElement,useMagicKeys } from '@vueuse/core'
+import { useMagicKeys, useMouseInElement, useToggle } from '@vueuse/core'
 
 const screenEl = useTemplateRef('rootRef')
-const fullScreenIcon=useTemplateRef('fullScreenIcon')
+const fullScreenIcon = useTemplateRef('fullScreenIcon')
 const { isOutside, x, y } = useMouseInElement(screenEl)
 
-let timeId:unknown
+let fullScreenIconTimer: ReturnType<typeof setTimeout> | null = null
 watch([isOutside, x, y], () => {
-  if (!fullScreenIcon.value) {
+  const icon = fullScreenIcon.value
+  if (!icon) {
     return
   }
   if (!isOutside.value) {
-    fullScreenIcon.value.classList.remove('opacity-0')
-    if (typeof timeId==='number') {
-      clearTimeout(timeId)  
+    icon.classList.remove('opacity-0')
+    if (fullScreenIconTimer) {
+      clearTimeout(fullScreenIconTimer)
     }
-    timeId=setTimeout(() => {
-      fullScreenIcon.value.classList.add('opacity-0')
-    },5000)
+    fullScreenIconTimer = setTimeout(() => {
+      fullScreenIcon.value?.classList.add('opacity-0')
+      fullScreenIconTimer = null
+    }, 5000)
   } else {
-    fullScreenIcon.value?.classList.add('opacity-0')
+    icon.classList.add('opacity-0')
   }
 }, {
-  deep:true
+  deep: true,
 })
 
 const [isFullScroll, toggle] = useToggle()
@@ -1209,6 +1210,10 @@ watch(() => props.botId, () => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (fullScreenIconTimer) {
+    clearTimeout(fullScreenIconTimer)
+    fullScreenIconTimer = null
+  }
   cleanup()
 })
 </script>
