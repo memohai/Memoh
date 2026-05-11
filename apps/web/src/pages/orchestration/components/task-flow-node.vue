@@ -16,6 +16,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  RefreshCw,
   Wrench,
   type LucideIcon,
 } from 'lucide-vue-next'
@@ -102,6 +103,11 @@ const kind = computed(() => kindStyle(props.data.kind))
 const statusInfo = computed(() => statusStyle(status.value))
 const showLevelLabel = computed(() => `L${props.data.level}`)
 const isDimmed = computed(() => props.data.hasSelection && !props.data.isRelated)
+
+function retryTask() {
+  if (!props.data.canRetry || props.data.isRetrying || !taskID.value) return
+  props.data.onRetryTask?.(taskID.value)
+}
 </script>
 
 <template>
@@ -114,6 +120,26 @@ const isDimmed = computed(() => props.data.hasSelection && !props.data.isRelated
       isDimmed ? 'opacity-45' : '',
     ]"
   >
+    <button
+      v-if="data.canRetry"
+      type="button"
+      class="nodrag nopan absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100"
+      :disabled="data.isRetrying"
+      :title="t('orchestration.retryTask')"
+      @pointerdown.stop
+      @mousedown.stop
+      @click.stop="retryTask"
+    >
+      <LoaderCircle
+        v-if="data.isRetrying"
+        class="size-3.5 animate-spin"
+      />
+      <RefreshCw
+        v-else
+        class="size-3.5"
+      />
+    </button>
+
     <Handle
       type="target"
       :position="Position.Left"

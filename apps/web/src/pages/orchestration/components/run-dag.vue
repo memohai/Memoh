@@ -15,11 +15,14 @@ const props = defineProps<{
   inspector: RunInspectorPayload | null | undefined
   selectedTaskId: string
   inspectorOpen: boolean
+  retryableTaskIds?: string[]
+  retryingTaskId?: string
 }>()
 
 const emit = defineEmits<{
   'select-task': [string]
   'open-inspector': []
+  'retry-task': [string]
 }>()
 
 const { t } = useI18n()
@@ -27,6 +30,23 @@ const { t } = useI18n()
 const { nodes, edges } = useDagGraph(
   computed(() => props.inspector),
   computed(() => props.selectedTaskId),
+)
+
+const retryableTaskIdSet = computed(() => new Set(props.retryableTaskIds ?? []))
+const displayNodes = computed(() =>
+  nodes.value.map((node) => {
+    if (node.type !== 'taskFlow') return node
+    const canRetry = retryableTaskIdSet.value.has(node.id)
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        canRetry,
+        isRetrying: canRetry && props.retryingTaskId === node.id,
+        onRetryTask: (taskID: string) => emit('retry-task', taskID),
+      },
+    }
+  }),
 )
 
 const {
@@ -58,7 +78,7 @@ async function refit() {
 function topologySignature(): string {
   return [
     props.inspector?.run.id ?? '',
-    nodes.value.map((n) => `${n.id}:${n.type}:${Math.round(n.position.x)},${Math.round(n.position.y)}`).join('|'),
+    displayNodes.value.map((n) => `${n.id}:${n.type}:${Math.round(n.position.x)},${Math.round(n.position.y)}`).join('|'),
     edges.value.map((e) => `${e.id}:${e.source}->${e.target}`).join('|'),
   ].join('#')
 }
@@ -66,7 +86,7 @@ function topologySignature(): string {
 let lastTopology = ''
 
 watch(
-  nodes,
+  displayNodes,
   (next) => {
     const sig = topologySignature()
     if (sig !== lastTopology) {

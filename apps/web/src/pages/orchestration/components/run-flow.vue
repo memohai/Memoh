@@ -16,11 +16,14 @@ const props = defineProps<{
   inspector: RunInspectorPayload | null | undefined
   selectedTaskId: string
   inspectorOpen: boolean
+  retryableTaskIds?: string[]
+  retryingTaskId?: string
 }>()
 
 const emit = defineEmits<{
   'select-task': [string]
   'open-inspector': []
+  'retry-task': [string]
 }>()
 
 const { t } = useI18n()
@@ -28,6 +31,24 @@ const { t } = useI18n()
 const { nodes, edges, summary } = useFlowGraph(
   computed(() => props.inspector),
   computed(() => props.selectedTaskId),
+)
+
+const retryableTaskIdSet = computed(() => new Set(props.retryableTaskIds ?? []))
+const displayNodes = computed(() =>
+  nodes.value.map((node) => {
+    if (node.type !== 'flowSpan') return node
+    const taskID = String(node.data.span?.task_id ?? '').trim()
+    const canRetry = !!taskID && retryableTaskIdSet.value.has(taskID)
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        canRetry,
+        isRetrying: canRetry && props.retryingTaskId === taskID,
+        onRetryTask: (id: string) => emit('retry-task', id),
+      },
+    }
+  }),
 )
 
 const {
@@ -68,14 +89,14 @@ async function refit() {
 function topologySignature(): string {
   return [
     props.inspector?.run.id ?? '',
-    nodes.value.map((n) => n.id).join('|'),
+    displayNodes.value.map((n) => n.id).join('|'),
   ].join('#')
 }
 
 let lastTopology = ''
 
 watch(
-  nodes,
+  displayNodes,
   (next) => {
     const sig = topologySignature()
     if (sig !== lastTopology) {

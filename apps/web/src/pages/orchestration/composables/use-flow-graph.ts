@@ -18,6 +18,9 @@ export interface FlowSpanNodeData {
   isSelected: boolean
   isRelated: boolean
   hasSelection: boolean
+  canRetry?: boolean
+  isRetrying?: boolean
+  onRetryTask?: (taskID: string) => void
   index: number
   total: number
   taskTitle: string

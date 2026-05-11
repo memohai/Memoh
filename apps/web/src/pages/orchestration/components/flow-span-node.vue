@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { NodeProps } from '@vue-flow/core'
+import { LoaderCircle, RefreshCw } from 'lucide-vue-next'
 import { formatRelativeDate } from '../model'
 import { useOrchestrationMeta } from '../composables/use-orchestration-meta'
 import type { FlowSpanNodeData } from '../composables/use-flow-graph'
@@ -50,6 +51,12 @@ const toolSummary = computed(() => {
 })
 
 const isDimmed = computed(() => props.data.hasSelection && !props.data.isRelated)
+
+function retryTask() {
+  const taskID = String(span.value.task_id ?? '').trim()
+  if (!props.data.canRetry || props.data.isRetrying || !taskID) return
+  props.data.onRetryTask?.(taskID)
+}
 </script>
 
 <template>
@@ -95,6 +102,25 @@ const isDimmed = computed(() => props.data.hasSelection && !props.data.isRelated
       >
         {{ seqLabel }}
       </span>
+      <button
+        v-if="data.canRetry"
+        type="button"
+        class="nodrag nopan -mr-1 -mt-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        :disabled="data.isRetrying"
+        :title="t('orchestration.retryTask')"
+        @pointerdown.stop
+        @mousedown.stop
+        @click.stop="retryTask"
+      >
+        <LoaderCircle
+          v-if="data.isRetrying"
+          class="size-3.5 animate-spin"
+        />
+        <RefreshCw
+          v-else
+          class="size-3.5"
+        />
+      </button>
     </div>
 
     <div class="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">

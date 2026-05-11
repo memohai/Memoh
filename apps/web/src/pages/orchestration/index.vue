@@ -43,7 +43,8 @@ import {
   getOrchestrationRuns,
   postOrchestrationCheckpointsByCheckpointIdResolve,
   getOrchestrationRunsByRunIdInspector,
-  postOrchestrationRunsByRunIdCancel,
+  postOrchestrationRunsByRunIdTasksByTaskIdCancel,
+  postOrchestrationRunsByRunIdTasksByTaskIdRetry,
 } from '@memohai/sdk'
 import type { ToolCallBlock } from '@/store/chat-list'
 import ToolCallInline from '@/pages/home/components/tool-call-inline.vue'
@@ -77,13 +78,6 @@ type NodeKind = TaskNodeKind
 type InspectorTab = 'act' | 'config' | 'env' | 'task' | 'inputs' | 'outputs' | 'logs'
 type RunViewMode = 'dag' | 'flow'
 
-interface EnvSnapshotItem {
-  id: string
-  kind: string
-  actionKind: string
-  createdAt: string
-}
-
 const { t } = useI18n()
 const { statusMeta } = useOrchestrationMeta()
 const { copyText, isSupported: clipboardSupported } = useClipboard()
@@ -107,7 +101,8 @@ const botSelectOpen = ref(false)
 const runSelectOpen = ref(false)
 const inspectorOpen = ref(true)
 const inspectorWidth = ref(340)
-const stoppingRun = ref(false)
+const stoppingTaskId = ref('')
+const retryingTaskId = ref('')
 const resolvingCheckpointId = ref('')
 let inspectorSelectionFrame = 0
 let taskScrollFrame = 0
@@ -211,7 +206,20 @@ const filteredRuns = computed(() => {
   })
 })
 
-const tasks = computed(() => inspector.value?.tasks ?? [])
+const tasks = computed<RunInspectorTask[]>(() => {
+  const value = inspector.value
+  const items = value?.tasks ?? []
+  if (!value || value.run.lifecycle_status !== 'failed') return items
+  const terminalReason = String(value.run.terminal_reason ?? '').trim()
+  return items.map((task) => {
+    if (task.id !== value.run.root_task_id || task.status !== 'created') return task
+    return {
+      ...task,
+      status: 'failed',
+      terminal_reason: task.terminal_reason || terminalReason,
+    }
+  })
+})
 const dependencies = computed(() => inspector.value?.dependencies ?? [])
 const results = computed(() => inspector.value?.results ?? [])
 const verifications = computed(() => inspector.value?.verifications ?? [])
@@ -359,11 +367,23 @@ const selectedRunLabel = computed(() => {
   const run = runsWithSelected.value.find((item) => item.id === selectedRunId.value)
   return run ? runLabel(run) : t('orchestration.noRunsTitle')
 })
-const canStopRun = computed(() =>
+const isTaskRetryable = (task: RunInspectorTask) =>
   !!selectedRunId.value &&
-  ['created', 'running', 'cancelling', 'waiting_human'].includes(String(inspector.value?.run.lifecycle_status ?? '')) &&
-  inspector.value?.run.lifecycle_status !== 'cancelling',
+  String(task.status ?? '') === 'failed'
+const canRetryTaskCard = (task: RunInspectorTask) =>
+  isTaskRetryable(task) &&
+  !retryingTaskId.value
+const retryableTaskIds = computed(() =>
+  tasks.value
+    .filter((task) => isTaskRetryable(task))
+    .map((task) => String(task.id ?? '').trim())
+    .filter(Boolean),
 )
+const canStopTaskCard = (task: RunInspectorTask) =>
+  !!selectedRunId.value &&
+  !stoppingTaskId.value &&
+  ['ready', 'dispatching', 'running', 'verifying'].includes(String(task.status ?? '')) &&
+  String(inspector.value?.run.lifecycle_status ?? '') === 'running'
 
 const selectedTaskResults = computed(() =>
   results.value.filter((item) => String(item.task_id ?? '') === inspectedTaskId.value),
@@ -415,15 +435,6 @@ const selectedTaskToolBlocks = computed<ToolCallBlock[]>(() =>
   selectedTaskActions.value.map((action, index) => actionRecordToToolBlock(action, index)),
 )
 const selectedTaskLatestResult = computed(() => selectedTaskResults.value[0] ?? null)
-const selectedTaskEnvActions = computed(() =>
-  selectedTaskActionRecords.value.filter((item) =>
-    String(item.env_session_id ?? '').trim() !== '' ||
-    String(item.env_binding_id ?? '').trim() !== '' ||
-    String(item.before_env_snapshot_id ?? '').trim() !== '' ||
-    String(item.after_env_snapshot_id ?? '').trim() !== '' ||
-    String(item.action_kind ?? '').startsWith('env_'),
-  ),
-)
 const selectedTaskEnvManifest = computed<Record<string, unknown>>(() => {
   const manifest = selectedTaskInputManifests.value
     .slice()
@@ -432,50 +443,20 @@ const selectedTaskEnvManifest = computed<Record<string, unknown>>(() => {
   return recordValue(manifest?.captured_env_preconditions)
 })
 const selectedTaskEnvInfo = computed(() => {
-  const actions = selectedTaskEnvActions.value
   const manifest = selectedTaskEnvManifest.value
   const preconditions = recordValue(selectedTask.value?.env_preconditions)
-  const firstPayload = actions.map((item) => envActionPayload(item)).find((payload) => Object.keys(payload).length > 0) ?? {}
-  const firstAction = actions[0]
-  const lastAction = actions[actions.length - 1]
-  const snapshots = buildEnvSnapshots(actions, manifest)
-  const sessionID = firstNonEmptyString(
-    firstAction?.env_session_id,
-    lastAction?.env_session_id,
-    firstPayload.session_id,
-    manifest.session_id,
-  )
-  const bindingID = firstNonEmptyString(
-    firstAction?.env_binding_id,
-    lastAction?.env_binding_id,
-    firstPayload.binding_id,
-    manifest.binding_id,
-  )
-  const beforeSnapshotID = firstNonEmptyString(
-    manifest.before_snapshot_id,
-    ...actions.map((item) => item.before_env_snapshot_id),
-    ...actions.map((item) => envActionPayload(item).before_snapshot),
-  )
-  const afterSnapshotID = firstNonEmptyString(
-    manifest.after_snapshot_id,
-    ...actions.slice().reverse().map((item) => item.after_env_snapshot_id),
-    ...actions.slice().reverse().map((item) => envActionPayload(item).after_snapshot),
-  )
+  const actionPayload = selectedTaskActionRecords.value
+    .map((item) => ({
+      ...recordValue(item.input_payload),
+      ...recordValue(item.output_payload),
+    }))
+    .find((payload) => hasObjectValue(payload)) ?? {}
+  const kind = firstNonEmptyString(preconditions.kind, manifest.kind, actionPayload.kind)
+  const name = firstNonEmptyString(preconditions.resource_name, manifest.resource_name, actionPayload.resource_name)
   return {
-    hasEnv: actions.length > 0 || hasObjectValue(manifest) || preconditions.required === true || hasObjectValue(preconditions),
-    sessionID,
-    bindingID,
-    kind: firstNonEmptyString(firstPayload.kind, manifest.kind, preconditions.kind),
-    resourceName: firstNonEmptyString(firstPayload.resource_name, manifest.resource_name, preconditions.resource_name),
-    mode: firstNonEmptyString(firstPayload.mode, manifest.mode, preconditions.mode),
-    effectClass: firstNonEmptyString(firstAction?.effect_class, firstPayload.effect_class, manifest.effect_class, preconditions.effect_class),
-    leaseEpoch: firstNonEmptyString(firstPayload.lease_epoch, manifest.lease_epoch),
-    leaseToken: firstNonEmptyString(manifest.lease_token),
-    beforeSnapshotID,
-    afterSnapshotID,
-    driftStatus: envDriftStatus(beforeSnapshotID, afterSnapshotID, snapshots.length),
-    snapshots,
-    actions,
+    hasEnv: preconditions.required === true || !!kind || !!name || hasObjectValue(manifest),
+    kind,
+    name,
   }
 })
 
@@ -794,86 +775,6 @@ function firstNonEmptyString(...values: unknown[]) {
   return ''
 }
 
-function envActionPayload(action: Record<string, unknown>) {
-  const output = recordValue(action.output_payload)
-  const input = recordValue(action.input_payload)
-  return {
-    ...input,
-    ...output,
-  }
-}
-
-function buildEnvSnapshots(actions: Record<string, unknown>[], manifest: Record<string, unknown>) {
-  const items: EnvSnapshotItem[] = []
-  const seen = new Set<string>()
-  const push = (id: unknown, kind: string, action: Record<string, unknown> | null) => {
-    const snapshotID = String(id ?? '').trim()
-    if (!snapshotID || seen.has(`${kind}:${snapshotID}`)) return
-    seen.add(`${kind}:${snapshotID}`)
-    items.push({
-      id: snapshotID,
-      kind,
-      actionKind: String(action?.action_kind ?? action?.tool_name ?? '').trim(),
-      createdAt: String(action?.created_at ?? action?.finished_at ?? '').trim(),
-    })
-  }
-
-  push(manifest.before_snapshot_id, 'pre_action', null)
-  push(manifest.after_snapshot_id, 'post_action', null)
-  for (const action of actions) {
-    const payload = envActionPayload(action)
-    push(action.before_env_snapshot_id ?? payload.before_snapshot, 'pre_action', action)
-    push(action.after_env_snapshot_id ?? payload.after_snapshot, 'post_action', action)
-  }
-  return items
-}
-
-function envDriftStatus(beforeSnapshotID: string, afterSnapshotID: string, snapshotCount: number) {
-  if (beforeSnapshotID && afterSnapshotID) {
-    return beforeSnapshotID === afterSnapshotID ? 'unchanged' : 'changed'
-  }
-  return snapshotCount > 0 ? 'unknown' : 'not_applicable'
-}
-
-function envDriftLabel(status: string) {
-  switch (status) {
-    case 'changed':
-      return t('orchestration.envChanged')
-    case 'unchanged':
-      return t('orchestration.envUnchanged')
-    case 'unknown':
-      return t('orchestration.envChangeUnknown')
-    default:
-      return t('orchestration.envNotUsed')
-  }
-}
-
-function envDriftClass(status: string) {
-  switch (status) {
-    case 'changed':
-      return 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-    case 'unchanged':
-      return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-    case 'unknown':
-      return 'border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-    default:
-      return 'border-border bg-muted/70 text-muted-foreground'
-  }
-}
-
-function envSnapshotKindLabel(kind: string) {
-  switch (kind) {
-    case 'pre_action':
-      return t('orchestration.envSnapshotBefore')
-    case 'post_action':
-      return t('orchestration.envSnapshotAfter')
-    case 'periodic':
-      return t('orchestration.envSnapshotPeriodic')
-    default:
-      return kind.replaceAll('_', ' ') || '--'
-  }
-}
-
 function envKindLabel(kind: string) {
   switch (kind) {
     case 'container':
@@ -885,73 +786,61 @@ function envKindLabel(kind: string) {
   }
 }
 
-function envActionKindLabel(actionKind: string) {
-  switch (actionKind) {
-    case 'env_acquire':
-      return t('orchestration.envActionReserved')
-    case 'env_release':
-      return t('orchestration.envActionReleased')
-    case 'env_hold':
-      return t('orchestration.envActionHeld')
-    case 'env_resume':
-      return t('orchestration.envActionResumed')
-    default:
-      return actionKind.replaceAll('_', ' ') || '--'
-  }
-}
-
-function envModeLabel(mode: string) {
-  switch (mode) {
-    case 'read':
-    case 'readonly':
-      return t('orchestration.envModeRead')
-    case 'write':
-    case 'readwrite':
-      return t('orchestration.envModeWrite')
-    default:
-      return mode || '--'
-  }
-}
-
-function envEffectLabel(effectClass: string) {
-  switch (effectClass) {
-    case 'env_local_read':
-      return t('orchestration.envEffectLocalRead')
-    case 'env_local_mutation':
-      return t('orchestration.envEffectLocalChange')
-    case 'external_read':
-      return t('orchestration.envEffectExternalRead')
-    case 'external_write':
-      return t('orchestration.envEffectExternalWrite')
-    case 'external_irreversible':
-      return t('orchestration.envEffectExternalIrreversible')
-    default:
-      return effectClass.replaceAll('_', ' ') || '--'
-  }
-}
-
 function newIdempotencyKey(prefix: string) {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return `${prefix}-${random}`
 }
 
-async function stopCurrentRun() {
-  if (!selectedRunId.value || stoppingRun.value || !canStopRun.value) return
-  stoppingRun.value = true
+async function stopTask(task: RunInspectorTask) {
+  const taskID = String(task.id ?? '').trim()
+  if (!selectedRunId.value || !taskID || stoppingTaskId.value || !canStopTaskCard(task)) return
+  stoppingTaskId.value = taskID
   try {
-    await postOrchestrationRunsByRunIdCancel({
-      path: { run_id: selectedRunId.value },
-      body: { idempotency_key: newIdempotencyKey('cancel-run') },
+    await postOrchestrationRunsByRunIdTasksByTaskIdCancel({
+      path: { run_id: selectedRunId.value, task_id: taskID },
+      body: {
+        reason: 'operator stopped task',
+        idempotency_key: newIdempotencyKey('cancel-task'),
+      },
       throwOnError: true,
     })
-    toast.success(t('orchestration.runStopRequested'))
+    toast.success(t('orchestration.taskStopRequested'))
     await refetchInspector()
     queryCache.invalidateQueries({ key: ['orchestration-runs'] })
   } catch (err) {
-    toast.error(resolveApiErrorMessage(err, t('orchestration.runStopFailed')))
+    toast.error(resolveApiErrorMessage(err, t('orchestration.taskStopFailed')))
   } finally {
-    stoppingRun.value = false
+    stoppingTaskId.value = ''
   }
+}
+
+async function retryTask(task: RunInspectorTask) {
+  const taskID = String(task.id ?? '').trim()
+  if (!selectedRunId.value || !taskID || retryingTaskId.value || !canRetryTaskCard(task)) return
+  retryingTaskId.value = taskID
+  try {
+    await postOrchestrationRunsByRunIdTasksByTaskIdRetry({
+      path: { run_id: selectedRunId.value, task_id: taskID },
+      body: {
+        reason: 'operator retried task',
+        idempotency_key: newIdempotencyKey('retry-task'),
+      },
+      throwOnError: true,
+    })
+    toast.success(t('orchestration.taskRetryStarted'))
+    await refetchInspector()
+    queryCache.invalidateQueries({ key: ['orchestration-runs'] })
+  } catch (err) {
+    toast.error(resolveApiErrorMessage(err, t('orchestration.taskRetryFailed')))
+  } finally {
+    retryingTaskId.value = ''
+  }
+}
+
+async function retryTaskById(taskID: string) {
+  const task = tasks.value.find((item) => String(item.id ?? '') === taskID)
+  if (!task) return
+  await retryTask(task)
 }
 
 async function resolveCheckpointOption(checkpointId: string, optionId: string) {
@@ -1168,25 +1057,6 @@ async function copyTextToClipboard(value: string) {
 
       <div class="flex items-center gap-2">
         <Button
-          v-if="inspector"
-          variant="outline"
-          size="sm"
-          class="h-8 gap-1.5 border-rose-500/30 px-2.5 text-xs text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 disabled:border-border disabled:text-muted-foreground"
-          :disabled="!canStopRun || stoppingRun"
-          :title="$t('orchestration.stopRun')"
-          @click="stopCurrentRun"
-        >
-          <LoaderCircle
-            v-if="stoppingRun"
-            class="size-3.5 animate-spin"
-          />
-          <Square
-            v-else
-            class="size-3.5"
-          />
-          <span>{{ $t('orchestration.stopRun') }}</span>
-        </Button>
-        <Button
           variant="outline"
           size="icon"
           class="size-8"
@@ -1267,48 +1137,74 @@ async function copyTextToClipboard(value: string) {
                 class="h-8 text-xs"
               />
 
-              <button
+              <template
                 v-for="task in filteredTasks"
-                :id="`orchestration-task-${task.id}`"
                 :key="task.id"
-                type="button"
-                class="w-full rounded-lg px-2.5 py-2 text-left shadow-[0_0.6px_0.7px_hsl(var(--foreground)/0.04),0_1.8px_2.2px_-0.5px_hsl(var(--foreground)/0.05),0_5px_8px_-1px_hsl(var(--foreground)/0.06),0_14px_24px_-2px_hsl(var(--foreground)/0.07)] transition-colors hover:bg-muted/40 hover:shadow-[0_0.7px_0.8px_hsl(var(--foreground)/0.05),0_2.4px_3px_-0.5px_hsl(var(--foreground)/0.06),0_7px_11px_-1px_hsl(var(--foreground)/0.07),0_18px_32px_-2px_hsl(var(--foreground)/0.09)]"
-                :class="[
-                  task.id === selectedTaskId ? 'border-primary/30 bg-primary/8 shadow-[0_1px_2px_hsl(var(--foreground)/0.06),0_4px_10px_-3px_hsl(var(--primary)/0.22),0_14px_28px_-10px_hsl(var(--primary)/0.28)]' : statusMeta(task.status).task,
-                  rootHasChildren && task.id === rootTaskId && task.id !== selectedTaskId ? 'bg-muted/35' : '',
-                ]"
-                @click="selectTaskFromList(task)"
               >
-                <div class="flex items-start gap-2">
-                  <component
-                    :is="statusMeta(task.status).icon"
-                    class="mt-0.5 size-3.5 shrink-0"
-                    :class="task.status === 'running' || task.status === 'dispatching' || task.status === 'verifying' ? 'animate-spin text-sky-600' : ''"
-                  />
-                  <div class="min-w-0 flex-1">
-                    <p class="line-clamp-2 text-xs font-medium leading-normal">
-                      {{ compactTaskTitle(task.goal, task.id) }}
-                    </p>
-                    <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                      <span class="inline-flex items-center gap-1">
-                        <span
-                          class="size-1.5 rounded-full"
-                          :class="statusMeta(task.status).dot"
-                        />
-                        {{ statusMeta(task.status).label }}
-                      </span>
-                      <span v-if="rootHasChildren && task.id === rootTaskId">L0 / {{ $t('orchestration.stageRootGoal') }}</span>
-                      <span v-else>L{{ taskLevelMap.get(task.id) ?? 0 }}</span>
+                <button
+                  :id="`orchestration-task-${task.id}`"
+                  type="button"
+                  class="w-full rounded-lg px-2.5 py-2 text-left shadow-[0_0.6px_0.7px_hsl(var(--foreground)/0.04),0_1.8px_2.2px_-0.5px_hsl(var(--foreground)/0.05),0_5px_8px_-1px_hsl(var(--foreground)/0.06),0_14px_24px_-2px_hsl(var(--foreground)/0.07)] transition-colors hover:bg-muted/40 hover:shadow-[0_0.7px_0.8px_hsl(var(--foreground)/0.05),0_2.4px_3px_-0.5px_hsl(var(--foreground)/0.06),0_7px_11px_-1px_hsl(var(--foreground)/0.07),0_18px_32px_-2px_hsl(var(--foreground)/0.09)]"
+                  :class="[
+                    task.id === selectedTaskId ? 'border-primary/30 bg-primary/8 shadow-[0_1px_2px_hsl(var(--foreground)/0.06),0_4px_10px_-3px_hsl(var(--primary)/0.22),0_14px_28px_-10px_hsl(var(--primary)/0.28)]' : statusMeta(task.status).task,
+                    rootHasChildren && task.id === rootTaskId && task.id !== selectedTaskId ? 'bg-muted/35' : '',
+                  ]"
+                  @click="selectTaskFromList(task)"
+                >
+                  <div class="flex items-start gap-2">
+                    <component
+                      :is="statusMeta(task.status).icon"
+                      class="mt-0.5 size-3.5 shrink-0"
+                      :class="task.status === 'running' || task.status === 'dispatching' || task.status === 'verifying' ? 'animate-spin text-sky-600' : ''"
+                    />
+                    <div class="min-w-0 flex-1">
+                      <p class="line-clamp-2 text-xs font-medium leading-normal">
+                        {{ compactTaskTitle(task.goal, task.id) }}
+                      </p>
+                      <div class="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                        <span class="inline-flex items-center gap-1">
+                          <span
+                            class="size-1.5 rounded-full"
+                            :class="statusMeta(task.status).dot"
+                          />
+                          {{ statusMeta(task.status).label }}
+                        </span>
+                        <span v-if="rootHasChildren && task.id === rootTaskId">L0 / {{ $t('orchestration.stageRootGoal') }}</span>
+                        <span v-else>L{{ taskLevelMap.get(task.id) ?? 0 }}</span>
+                      </div>
+                      <p
+                        v-if="rootHasChildren && task.id === rootTaskId"
+                        class="mt-1 text-[11px] text-muted-foreground"
+                      >
+                        {{ $t('orchestration.rootTaskEntryHint') }}
+                      </p>
                     </div>
-                    <p
-                      v-if="rootHasChildren && task.id === rootTaskId"
-                      class="mt-1 text-[11px] text-muted-foreground"
-                    >
-                      {{ $t('orchestration.rootTaskEntryHint') }}
-                    </p>
                   </div>
+                </button>
+                <div
+                  v-if="canStopTaskCard(task)"
+                  class="-mt-1 flex justify-end gap-1 pr-1"
+                >
+                  <Button
+                    v-if="canStopTaskCard(task)"
+                    variant="ghost"
+                    size="icon"
+                    class="size-7 text-muted-foreground hover:text-rose-600"
+                    :disabled="stoppingTaskId === task.id"
+                    :title="$t('orchestration.stopTask')"
+                    @click="stopTask(task)"
+                  >
+                    <LoaderCircle
+                      v-if="stoppingTaskId === task.id"
+                      class="size-3.5 animate-spin"
+                    />
+                    <Square
+                      v-else
+                      class="size-3.5"
+                    />
+                  </Button>
                 </div>
-              </button>
+              </template>
             </div>
           </ScrollArea>
         </aside>
@@ -1353,8 +1249,11 @@ async function copyTextToClipboard(value: string) {
             :inspector="inspector"
             :selected-task-id="selectedTaskId"
             :inspector-open="inspectorOpen"
+            :retryable-task-ids="retryableTaskIds"
+            :retrying-task-id="retryingTaskId"
             @select-task="selectTaskFromDag"
             @open-inspector="inspectorOpen = true"
+            @retry-task="retryTaskById"
           />
 
           <RunFlow
@@ -1362,8 +1261,11 @@ async function copyTextToClipboard(value: string) {
             :inspector="inspector"
             :selected-task-id="selectedTaskId"
             :inspector-open="inspectorOpen"
+            :retryable-task-ids="retryableTaskIds"
+            :retrying-task-id="retryingTaskId"
             @select-task="selectTaskFromDag"
             @open-inspector="inspectorOpen = true"
+            @retry-task="retryTaskById"
           />
         </main>
 
@@ -1560,48 +1462,10 @@ async function copyTextToClipboard(value: string) {
                 </div>
 
                 <template v-else>
-                  <div class="grid grid-cols-2 gap-2 text-[11px]">
-                    <div class="space-y-1">
-                      <p class="text-muted-foreground">
-                        {{ $t('orchestration.envSession') }}
-                      </p>
-                      <div class="h-8 truncate rounded-md border border-border/70 bg-background px-2 py-1.5 font-mono text-[10px]">
-                        {{ selectedTaskEnvInfo.sessionID ? shortId(selectedTaskEnvInfo.sessionID, 18) : '--' }}
-                      </div>
-                    </div>
-                    <div class="space-y-1">
-                      <p class="text-muted-foreground">
-                        {{ $t('orchestration.envBinding') }}
-                      </p>
-                      <div class="h-8 truncate rounded-md border border-border/70 bg-background px-2 py-1.5 font-mono text-[10px]">
-                        {{ selectedTaskEnvInfo.bindingID ? shortId(selectedTaskEnvInfo.bindingID, 18) : '--' }}
-                      </div>
-                    </div>
-                    <div class="space-y-1">
-                      <p class="text-muted-foreground">
-                        {{ $t('orchestration.envLease') }}
-                      </p>
-                      <div class="h-8 truncate rounded-md border border-border/70 bg-background px-2 py-1.5 font-mono text-[10px]">
-                        {{ selectedTaskEnvInfo.leaseEpoch ? $t('orchestration.envLeaseEpoch', { epoch: selectedTaskEnvInfo.leaseEpoch }) : '--' }}
-                      </div>
-                    </div>
-                    <div class="space-y-1">
-                      <p class="text-muted-foreground">
-                        {{ $t('orchestration.envDriftStatus') }}
-                      </p>
-                      <div
-                        class="h-8 rounded-md border px-2 py-1.5 text-[10px]"
-                        :class="envDriftClass(selectedTaskEnvInfo.driftStatus)"
-                      >
-                        {{ envDriftLabel(selectedTaskEnvInfo.driftStatus) }}
-                      </div>
-                    </div>
-                  </div>
-
                   <div class="rounded-lg border border-border/70 bg-background p-3 text-[11px]">
-                    <div class="mb-2 flex items-center justify-between">
+                    <div class="mb-3 flex items-center justify-between">
                       <p class="font-semibold">
-                        {{ $t('orchestration.envBindingDetails') }}
+                        {{ $t('orchestration.env') }}
                       </p>
                       <span class="rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         {{ envKindLabel(selectedTaskEnvInfo.kind) }}
@@ -1609,56 +1473,9 @@ async function copyTextToClipboard(value: string) {
                     </div>
                     <div class="space-y-1 text-muted-foreground">
                       <div class="flex justify-between gap-3">
-                        <span>{{ $t('orchestration.envResource') }}</span>
-                        <span class="truncate font-mono">{{ selectedTaskEnvInfo.resourceName || '--' }}</span>
+                        <span>{{ $t('orchestration.envResourceName') }}</span>
+                        <span class="truncate font-mono">{{ selectedTaskEnvInfo.name || '--' }}</span>
                       </div>
-                      <div class="flex justify-between gap-3">
-                        <span>{{ $t('orchestration.envMode') }}</span>
-                        <span class="truncate">{{ envModeLabel(selectedTaskEnvInfo.mode) }}</span>
-                      </div>
-                      <div class="flex justify-between gap-3">
-                        <span>{{ $t('orchestration.envEffectClass') }}</span>
-                        <span class="truncate">{{ envEffectLabel(selectedTaskEnvInfo.effectClass) }}</span>
-                      </div>
-                      <div class="flex justify-between gap-3">
-                        <span>{{ $t('orchestration.envLeaseToken') }}</span>
-                        <span class="truncate font-mono">{{ selectedTaskEnvInfo.leaseToken ? shortId(selectedTaskEnvInfo.leaseToken, 18) : '--' }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                      <p class="text-[11px] font-semibold">
-                        {{ $t('orchestration.envSnapshots') }}
-                      </p>
-                      <span class="text-[10px] text-muted-foreground tabular-nums">
-                        {{ selectedTaskEnvInfo.snapshots.length }}
-                      </span>
-                    </div>
-                    <div class="space-y-1.5">
-                      <div
-                        v-for="snapshot in selectedTaskEnvInfo.snapshots"
-                        :key="`${snapshot.kind}:${snapshot.id}`"
-                        class="rounded-lg border border-border/70 bg-background p-2 text-[11px]"
-                      >
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="font-mono text-[10px]">{{ shortId(snapshot.id, 18) }}</span>
-                          <span class="rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                            {{ envSnapshotKindLabel(snapshot.kind) }}
-                          </span>
-                        </div>
-                        <div class="mt-1 flex justify-between gap-3 text-[10px] text-muted-foreground">
-                          <span class="truncate">{{ envActionKindLabel(snapshot.actionKind) }}</span>
-                          <span>{{ formatDate(snapshot.createdAt) }}</span>
-                        </div>
-                      </div>
-                      <p
-                        v-if="selectedTaskEnvInfo.snapshots.length === 0"
-                        class="rounded border border-dashed border-border/60 bg-background/60 px-2 py-2 text-[11px] text-muted-foreground"
-                      >
-                        {{ $t('orchestration.noEnvSnapshots') }}
-                      </p>
                     </div>
                   </div>
                 </template>

@@ -20,6 +20,9 @@ export interface TaskFlowNodeData {
   isSelected: boolean
   isRelated: boolean
   hasSelection: boolean
+  canRetry?: boolean
+  isRetrying?: boolean
+  onRetryTask?: (taskID: string) => void
   level: number
   kind: TaskNodeKind
   maxLevel: number
