@@ -21,6 +21,7 @@ DROP TABLE IF EXISTS bot_email_bindings;
 DROP TABLE IF EXISTS email_oauth_tokens;
 DROP TABLE IF EXISTS email_providers;
 DROP TABLE IF EXISTS bots;
+DROP TABLE IF EXISTS browser_contexts;
 DROP TABLE IF EXISTS memory_providers;
 DROP TABLE IF EXISTS model_variants;
 DROP TABLE IF EXISTS models;

@@ -7,6 +7,7 @@
 //   build/icon.icns         multi-resolution macOS fallback bundle icon
 //   build/icon.ico          multi-resolution Windows icon
 //   resources/icon.png      512x512 runtime BrowserWindow.icon / dock.setIcon
+//   resources/tray-icon.png transparent runtime system tray/menu bar icon
 //
 // Run:  pnpm --filter @memohai/desktop icons
 //
@@ -259,6 +260,18 @@ async function renderIconComposerLayer(mark) {
     },
   })
     .composite([{ input: mark, left: markPosition, top: markPosition }])
+    .png()
+    .toBuffer()
+}
+
+async function renderTrayIcon(svg) {
+  const size = 64
+  return sharp(svg, { density: 600 })
+    .resize(size, size, {
+      fit: 'contain',
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .ensureAlpha()
     .png()
     .toBuffer()
 }
@@ -518,10 +531,12 @@ async function main() {
     sharp(master).png().toFile(resolve(BUILD_DIR, 'icon.png')),
     sharp(master).resize(512, 512, { fit: 'contain' }).png()
       .toFile(resolve(RESOURCES_DIR, 'icon.png')),
+    writeFile(resolve(RESOURCES_DIR, 'tray-icon.png'), await renderTrayIcon(svg)),
   ])
   console.log('  -> build/icon.icon (macOS 26 Icon Composer)')
   console.log('  -> build/icon.png (1024)')
   console.log('  -> resources/icon.png (512)')
+  console.log('  -> resources/tray-icon.png (transparent)')
 
   if (process.platform === 'darwin') {
     await buildIcns(master)

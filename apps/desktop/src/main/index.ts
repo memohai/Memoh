@@ -1,8 +1,9 @@
-import { app, dialog, Menu, shell, BrowserWindow, ipcMain, type MenuItemConstructorOptions } from 'electron'
+import { app, dialog, Menu, shell, BrowserWindow, ipcMain, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import { existsSync, renameSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
+import trayIconPng from '../../resources/tray-icon.png?asset'
 import { stopEmbeddedQdrant } from './qdrant'
 import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus, stopManagedServer } from './local-server'
 import {
@@ -65,6 +66,7 @@ type WindowKind = 'chat' | 'settings'
 
 let chatWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
+let appTray: Tray | null = null
 
 // Pending settings-navigate target keyed by webContents id. Set by the
 // `window:open-settings` IPC when the settings window has not finished
@@ -80,15 +82,29 @@ async function stopLocalProcesses(): Promise<void> {
   await stopEmbeddedQdrant()
 }
 
+function hideDesktopSurfacesForQuit(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue
+    window.hide()
+    window.destroy()
+  }
+  appTray?.destroy()
+  appTray = null
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.hide()
+  }
+}
+
 app.on('before-quit', (event) => {
   if (stoppingLocalProcesses) return
   stoppingLocalProcesses = true
   event.preventDefault()
+  hideDesktopSurfacesForQuit()
   void stopLocalProcesses()
     .catch((error) => {
       console.error('failed to stop local desktop processes', error)
     })
-    .finally(() => app.quit())
+    .finally(() => app.exit(0))
 })
 
 app.on('will-quit', () => {
@@ -113,6 +129,45 @@ function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings'): 
     return
   }
   window.loadFile(join(__dirname, `../renderer/${entry}.html`))
+}
+
+function createTrayIcon(): Electron.NativeImage {
+  const image = nativeImage.createFromPath(trayIconPng)
+  if (process.platform === 'darwin') {
+    const trayImage = image.resize({ width: 18, height: 18 })
+    trayImage.setTemplateImage(true)
+    return trayImage
+  }
+  return image.resize({ width: 24, height: 24 })
+}
+
+function revealChatWindow(): void {
+  const window = ensureWindow('chat')
+  focusWindow(window)
+}
+
+function quitFromTray(): void {
+  app.quit()
+}
+
+function createAppTray(): void {
+  if (appTray) return
+
+  appTray = new Tray(createTrayIcon())
+  appTray.setToolTip('Memoh')
+  appTray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: 'Open Memoh',
+      click: revealChatWindow,
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit Memoh',
+      click: quitFromTray,
+    },
+  ]))
+  appTray.on('click', revealChatWindow)
+  appTray.on('double-click', revealChatWindow)
 }
 
 // `electron-vite` emits the preload bundle as `index.mjs` because the
@@ -153,6 +208,11 @@ function createChatWindow(): BrowserWindow {
 
   window.on('ready-to-show', () => {
     window.show()
+  })
+  window.on('close', (event) => {
+    if (stoppingLocalProcesses) return
+    event.preventDefault()
+    window.hide()
   })
   window.on('closed', () => {
     chatWindow = null
@@ -427,6 +487,8 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  createAppTray()
+
   ipcMain.handle('window:open-settings', (_event, rawTarget: unknown) => {
     const window = ensureWindow('settings')
     focusWindow(window)
@@ -476,9 +538,7 @@ app.whenReady().then(async () => {
   chatWindow = createChatWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      chatWindow = createChatWindow()
-    }
+    revealChatWindow()
   })
 
   await rebuildAppMenu()
@@ -486,5 +546,6 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (stoppingLocalProcesses) return
   if (process.platform !== 'darwin') app.quit()
 })

@@ -202,6 +202,7 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -219,19 +220,10 @@ const { data: bot } = useQuery({
   enabled: () => !!botId.value,
 })
 
-function workspaceBackendFromMetadata(metadata: unknown): string {
-  if (!metadata || typeof metadata !== 'object') return ''
-  const workspace = (metadata as Record<string, unknown>).workspace
-  if (!workspace || typeof workspace !== 'object') return ''
-  const backend = (workspace as Record<string, unknown>).backend
-  return typeof backend === 'string' ? backend.trim().toLowerCase() : ''
-}
-
 const containerInfo = ref<BotContainerInfo | null>(null)
 
 const isLocalWorkspace = computed(() =>
-  workspaceBackendFromMetadata(bot.value?.metadata) === 'local'
-  || containerInfo.value?.workspace_backend === 'local',
+  isLocalWorkspaceBot(bot.value?.metadata, containerInfo.value?.workspace_backend),
 )
 
 const tabList = computed(() => {
@@ -256,7 +248,7 @@ const tabList = computed(() => {
     { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
   ]
   if (isLocalWorkspace.value) {
-    return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network')
+    return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network' && tab.value !== 'desktop')
   }
   return tabs
 })

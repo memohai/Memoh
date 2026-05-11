@@ -49,6 +49,7 @@
         <TerminalSquare class="size-4" />
       </button>
       <button
+        v-if="!isLocalWorkspace"
         type="button"
         class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
         :title="t('chat.tabBarToolkit.openDisplay')"
@@ -100,6 +101,7 @@ import {
 } from '@memohai/ui'
 import { useWorkspaceTabsStore, type WorkspaceTab } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
+import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
@@ -139,7 +141,14 @@ watch(
 )
 
 const chatStore = useChatStore()
-const { sessions } = storeToRefs(chatStore)
+const { bots, currentBotId, sessions } = storeToRefs(chatStore)
+
+const currentBot = computed(() =>
+  bots.value.find(bot => bot.id === currentBotId.value) ?? null,
+)
+const isLocalWorkspace = computed(() =>
+  isLocalWorkspaceBot(currentBot.value?.metadata),
+)
 
 const sessionTitleById = computed<Record<string, string>>(() => {
   const out: Record<string, string> = {}
