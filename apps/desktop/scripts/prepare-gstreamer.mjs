@@ -129,28 +129,79 @@ function assetURL(spec) {
   return `${base}/${spec.asset}`
 }
 
-async function downloadAsset(url, archivePath) {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'memoh-desktop-gstreamer-preparer',
-    },
-  })
-  if (!response.ok || !response.body) {
-    throw new Error(`Failed to download ${url}: HTTP ${response.status}`)
+function downloadAttempts() {
+  const raw = Number.parseInt(process.env.GSTREAMER_DOWNLOAD_ATTEMPTS || '4', 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : 4
+}
+
+function retryDelayMs(attempt) {
+  return Math.min(1000 * 2 ** (attempt - 1), 8000)
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function formatDownloadError(error) {
+  if (error instanceof Error) {
+    const cause = error.cause instanceof Error ? `: ${error.cause.message}` : ''
+    return `${error.message}${cause}`
   }
-  await pipeline(response.body, createWriteStream(archivePath))
+  return String(error)
+}
+
+async function downloadAsset(url, archivePath) {
+  let lastError
+  const attempts = downloadAttempts()
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      rmSync(archivePath, { force: true })
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'memoh-desktop-gstreamer-preparer',
+        },
+      })
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      await pipeline(response.body, createWriteStream(archivePath))
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts) {
+        break
+      }
+      console.warn(`GStreamer download failed (${attempt}/${attempts}): ${formatDownloadError(error)}. Retrying...`)
+      await sleep(retryDelayMs(attempt))
+    }
+  }
+  throw new Error(`Failed to download ${url}: ${formatDownloadError(lastError)}`)
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'memoh-desktop-gstreamer-preparer',
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to download ${url}: HTTP ${response.status}`)
+  let lastError
+  const attempts = downloadAttempts()
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'memoh-desktop-gstreamer-preparer',
+        },
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      return response.text()
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts) {
+        break
+      }
+      console.warn(`GStreamer checksum download failed (${attempt}/${attempts}): ${formatDownloadError(error)}. Retrying...`)
+      await sleep(retryDelayMs(attempt))
+    }
   }
-  return response.text()
+  throw new Error(`Failed to download ${url}: ${formatDownloadError(lastError)}`)
 }
 
 async function verifyChecksum(url, archivePath) {
