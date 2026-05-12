@@ -669,15 +669,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
 	}
 
-	runtimeByName := make(map[string]ctr.SnapshotInfo, len(data.RuntimeSnapshots))
-	for _, info := range data.RuntimeSnapshots {
-		name := strings.TrimSpace(info.Name)
-		if name == "" {
-			continue
-		}
-		runtimeByName[name] = info
-	}
-	lineage, ok := snapshotLineage(snapshotKey, data.RuntimeSnapshots)
+	resp, ok := buildSnapshotListResponse(data)
 	if !ok {
 		h.logger.Warn("container snapshot chain root not found",
 			slog.String("container_id", data.ContainerID),
@@ -686,81 +678,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot chain not found")
 	}
-
-	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
-	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
-	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *workspace.ManagedSnapshotMeta) {
-		source := fallbackSource
-		managed := false
-		var version *int
-		displayName := ""
-		if meta != nil {
-			if meta.Source != "" {
-				source = meta.Source
-			}
-			managed = true
-			version = meta.Version
-			displayName = strings.TrimSpace(meta.DisplayName)
-		}
-		name := displayName
-		if name == "" {
-			if version != nil {
-				name = fmt.Sprintf("Version %d", *version)
-			} else {
-				name = runtimeInfo.Name
-			}
-		}
-		items = append(items, SnapshotInfo{
-			Snapshotter: data.Snapshotter,
-			Name:        name,
-			DisplayName: displayName,
-			RuntimeName: runtimeInfo.Name,
-			Parent:      runtimeInfo.Parent,
-			Kind:        runtimeInfo.Kind,
-			CreatedAt:   runtimeInfo.Created,
-			UpdatedAt:   runtimeInfo.Updated,
-			Labels:      runtimeInfo.Labels,
-			Source:      source,
-			Managed:     managed,
-			Version:     version,
-		})
-		seen[strings.TrimSpace(runtimeInfo.Name)] = struct{}{}
-	}
-
-	for _, runtimeInfo := range lineage {
-		name := strings.TrimSpace(runtimeInfo.Name)
-		if meta, hasMeta := data.ManagedMeta[name]; hasMeta {
-			appendRuntime(runtimeInfo, "image_layer", &meta)
-			continue
-		}
-		appendRuntime(runtimeInfo, "image_layer", nil)
-	}
-
-	for name, meta := range data.ManagedMeta {
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		runtimeInfo, exists := runtimeByName[name]
-		if !exists {
-			h.logger.Warn("managed snapshot not found in runtime",
-				slog.String("container_id", data.ContainerID),
-				slog.String("snapshot_name", name),
-				slog.String("snapshotter", data.Snapshotter),
-			)
-			continue
-		}
-		appendRuntime(runtimeInfo, "managed", &meta)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
-			return items[i].Name < items[j].Name
-		}
-		return items[i].CreatedAt.Before(items[j].CreatedAt)
-	})
-	return c.JSON(http.StatusOK, ListSnapshotsResponse{
-		Snapshotter: data.Snapshotter,
-		Snapshots:   items,
-	})
+	return c.JSON(http.StatusOK, resp)
 }
 
 // RollbackSnapshot godoc
@@ -919,6 +837,150 @@ func toContainerStorageMetricsResponse(metrics *workspace.ContainerStorageMetric
 		Path:      metrics.Path,
 		UsedBytes: metrics.UsedBytes,
 	}
+}
+
+func buildSnapshotListResponse(data *workspace.BotSnapshotData) (ListSnapshotsResponse, bool) {
+	if data == nil {
+		return ListSnapshotsResponse{}, false
+	}
+
+	snapshotter := strings.TrimSpace(data.Snapshotter)
+	runtimeByName := make(map[string]ctr.SnapshotInfo, len(data.RuntimeSnapshots))
+	for _, info := range data.RuntimeSnapshots {
+		name := strings.TrimSpace(info.Name)
+		if name == "" {
+			continue
+		}
+		runtimeByName[name] = info
+	}
+
+	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
+	lineage, ok := snapshotLineage(snapshotKey, data.RuntimeSnapshots)
+	if !ok {
+		if snapshotLineageRootRequired(snapshotter) {
+			return ListSnapshotsResponse{}, false
+		}
+		lineage = nil
+	}
+
+	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
+	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *workspace.ManagedSnapshotMeta) {
+		source := fallbackSource
+		managed := false
+		var version *int
+		displayName := ""
+		itemSnapshotter := snapshotter
+		if meta != nil {
+			if metaSource := strings.TrimSpace(meta.Source); metaSource != "" {
+				source = metaSource
+			}
+			if metaSnapshotter := strings.TrimSpace(meta.Snapshotter); metaSnapshotter != "" {
+				itemSnapshotter = metaSnapshotter
+			}
+			managed = true
+			version = meta.Version
+			displayName = strings.TrimSpace(meta.DisplayName)
+		}
+		if strings.EqualFold(runtimeInfo.Kind, "archive") || hasArchiveSnapshotPrefix(runtimeInfo.Name) {
+			itemSnapshotter = "archive"
+		}
+
+		name := displayName
+		if name == "" {
+			if version != nil {
+				name = fmt.Sprintf("Version %d", *version)
+			} else {
+				name = runtimeInfo.Name
+			}
+		}
+		items = append(items, SnapshotInfo{
+			Snapshotter: itemSnapshotter,
+			Name:        name,
+			DisplayName: displayName,
+			RuntimeName: runtimeInfo.Name,
+			Parent:      runtimeInfo.Parent,
+			Kind:        runtimeInfo.Kind,
+			CreatedAt:   runtimeInfo.Created,
+			UpdatedAt:   runtimeInfo.Updated,
+			Labels:      runtimeInfo.Labels,
+			Source:      source,
+			Managed:     managed,
+			Version:     version,
+		})
+		seen[strings.TrimSpace(runtimeInfo.Name)] = struct{}{}
+	}
+
+	for _, runtimeInfo := range lineage {
+		name := strings.TrimSpace(runtimeInfo.Name)
+		if meta, hasMeta := data.ManagedMeta[name]; hasMeta {
+			appendRuntime(runtimeInfo, "image_layer", &meta)
+			continue
+		}
+		appendRuntime(runtimeInfo, "image_layer", nil)
+	}
+
+	for name, meta := range data.ManagedMeta {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		runtimeInfo, exists := runtimeByName[name]
+		if !exists {
+			var syntheticOK bool
+			runtimeInfo, syntheticOK = managedArchiveRuntimeInfo(name, meta)
+			if !syntheticOK {
+				continue
+			}
+		}
+		appendRuntime(runtimeInfo, "managed", &meta)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].Name < items[j].Name
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+
+	return ListSnapshotsResponse{
+		Snapshotter: snapshotter,
+		Snapshots:   items,
+	}, true
+}
+
+func snapshotLineageRootRequired(snapshotter string) bool {
+	switch strings.ToLower(strings.TrimSpace(snapshotter)) {
+	case "archive", "docker", "local":
+		return false
+	default:
+		return true
+	}
+}
+
+func managedArchiveRuntimeInfo(name string, meta workspace.ManagedSnapshotMeta) (ctr.SnapshotInfo, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" || !managedSnapshotIsArchive(name, meta) {
+		return ctr.SnapshotInfo{}, false
+	}
+	return ctr.SnapshotInfo{
+		Name:    name,
+		Parent:  strings.TrimSpace(meta.ParentRuntimeSnapshotName),
+		Kind:    "archive",
+		Created: meta.CreatedAt,
+		Updated: meta.CreatedAt,
+	}, true
+}
+
+func managedSnapshotIsArchive(name string, meta workspace.ManagedSnapshotMeta) bool {
+	return strings.EqualFold(strings.TrimSpace(meta.Snapshotter), "archive") || hasArchiveSnapshotPrefix(name)
+}
+
+func hasArchiveSnapshotPrefix(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), "archive:")
 }
 
 func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, bool) {

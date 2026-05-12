@@ -46,9 +46,12 @@ type SnapshotCreateInfo struct {
 }
 
 type ManagedSnapshotMeta struct {
-	Source      string
-	Version     *int
-	DisplayName string
+	Source                    string
+	Version                   *int
+	DisplayName               string
+	ParentRuntimeSnapshotName string
+	Snapshotter               string
+	CreatedAt                 time.Time
 }
 
 type BotSnapshotData struct {
@@ -248,8 +251,13 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 				continue
 			}
 			meta := ManagedSnapshotMeta{
-				Source:      strings.TrimSpace(row.Source),
-				DisplayName: strings.TrimSpace(row.DisplayName.String),
+				Source:                    strings.TrimSpace(row.Source),
+				DisplayName:               strings.TrimSpace(row.DisplayName.String),
+				ParentRuntimeSnapshotName: strings.TrimSpace(row.ParentRuntimeSnapshotName.String),
+				Snapshotter:               strings.TrimSpace(row.Snapshotter),
+			}
+			if row.CreatedAt.Valid {
+				meta.CreatedAt = row.CreatedAt.Time
 			}
 			if row.Version.Valid {
 				v := int(row.Version.Int32)
