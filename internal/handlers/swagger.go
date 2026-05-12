@@ -6,10 +6,13 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
-	"os"
 	"sync"
 
 	"github.com/labstack/echo/v4"
+	"github.com/swaggo/swag"
+
+	// Register the generated swagger document for swag.ReadDoc.
+	_ "github.com/memohai/memoh/spec"
 )
 
 //go:generate go run github.com/swaggo/swag/cmd/swag@latest init -g swagger.go -o ../../spec --parseDependency --parseInternal
@@ -36,7 +39,9 @@ func (h *SwaggerHandler) Register(e *echo.Echo) {
 
 func (*SwaggerHandler) Spec(c echo.Context) error {
 	swaggerOnce.Do(func() {
-		swaggerSpec, swaggerErr = os.ReadFile("spec/swagger.json")
+		var doc string
+		doc, swaggerErr = swag.ReadDoc()
+		swaggerSpec = []byte(doc)
 	})
 	if swaggerErr != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, swaggerErr.Error())
