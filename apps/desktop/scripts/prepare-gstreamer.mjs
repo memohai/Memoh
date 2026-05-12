@@ -71,7 +71,7 @@ function currentTarget() {
   if (process.platform === 'darwin') {
     return 'darwin-universal'
   }
-  if (process.platform === 'win32' && process.arch === 'x64') {
+  if (process.platform === 'win32' && process.arch === 'x64' && process.env.GSTREAMER_ENABLE_WINDOWS_BUNDLE) {
     return 'win32-x64'
   }
   return null
