@@ -12,6 +12,7 @@ dist
 !build/**
 resources/config/
 resources/cli/
+resources/gstreamer/
 resources/providers/
 resources/qdrant/
 resources/runtime/

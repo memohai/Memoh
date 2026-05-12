@@ -11,6 +11,7 @@ import {
   writeManagedPid,
   type ManagedPid,
 } from './daemon'
+import { bundledGStreamerEnv } from './gstreamer'
 import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -338,10 +339,7 @@ function spawnServer(command: ServerCommand): ChildProcess {
     cwd: command.cwd,
     detached: true,
     stdio: 'ignore',
-    env: {
-      ...process.env,
-      CONFIG_PATH: command.configPath,
-    },
+    env: serverEnv(command),
   })
   child.unref()
   child.once('error', (error) => {
@@ -393,13 +391,18 @@ function runServerCommand(
   const result = spawnSync(command.command, serverArgs, {
     cwd: command.cwd,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      CONFIG_PATH: command.configPath,
-    },
+    env: serverEnv(command),
   })
   appendLog(`$ ${command.command} ${serverArgs.join(' ')}\nstatus=${String(result.status)} error=${result.error?.message ?? ''}\nstdout:\n${result.stdout ?? ''}\nstderr:\n${result.stderr ?? ''}`)
   return result
+}
+
+function serverEnv(command: { configPath: string }): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...bundledGStreamerEnv(),
+    CONFIG_PATH: command.configPath,
+  }
 }
 
 function formatCommandFailure(result: ReturnType<typeof spawnSync>): string {

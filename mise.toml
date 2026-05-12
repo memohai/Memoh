@@ -299,6 +299,21 @@ description = "Download Qdrant binaries for the current release platform"
 dir = "{{config_root}}/apps/desktop"
 run = "pnpm run prepare:qdrant:release-platform"
 
+[tasks."desktop:gstreamer:prepare"]
+description = "Download the GStreamer runtime used by the Electron desktop app"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:gstreamer"
+
+[tasks."desktop:gstreamer:prepare:all"]
+description = "Download all supported GStreamer runtimes for desktop packaging"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:gstreamer:all"
+
+[tasks."desktop:gstreamer:prepare:release-platform"]
+description = "Download GStreamer runtimes for the current release platform"
+dir = "{{config_root}}/apps/desktop"
+run = "pnpm run prepare:gstreamer:release-platform"
+
 [tasks."desktop:build"]
 description = "Build Electron desktop app for release (electron-builder)"
 dir = "{{config_root}}/apps/desktop"

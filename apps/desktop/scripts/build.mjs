@@ -26,9 +26,20 @@ const marker = process.argv.indexOf('--')
 const rawTarget = process.argv[2] && process.argv[2] !== '--' ? process.argv[2] : 'current'
 const builderArgs = marker >= 0 ? process.argv.slice(marker + 1) : process.argv.slice(3)
 const qdrantTarget = rawTarget === 'current' ? `${process.platform}-${process.arch}` : rawTarget
+const gstreamerTarget = resolveGStreamerTarget(qdrantTarget)
 const macToolchainEnv = process.platform === 'darwin' && xcodeDeveloperDir
   ? { DEVELOPER_DIR: xcodeDeveloperDir }
   : {}
+
+function resolveGStreamerTarget(target) {
+  if (target.startsWith('darwin-')) {
+    return 'darwin-universal'
+  }
+  if (target === 'win32-x64') {
+    return 'win32-x64'
+  }
+  return '__none__'
+}
 
 function quoteWindowsArg(value) {
   if (/^[A-Za-z0-9_/:=.,+\-]+$/.test(value)) {
@@ -57,6 +68,11 @@ function run(command, args, extraEnv = {}) {
 }
 
 run(process.execPath, ['scripts/prepare-qdrant.mjs', `--targets=${qdrantTarget}`])
+if (gstreamerTarget !== '__none__') {
+  run(process.execPath, ['scripts/prepare-gstreamer.mjs', `--targets=${gstreamerTarget}`])
+} else {
+  run(process.execPath, ['scripts/prepare-gstreamer.mjs', '--targets=none'])
+}
 runPnpm(['run', 'prepare:local-server'], {
   MEMOH_DESKTOP_BUNDLE_TARGET: qdrantTarget,
 })
@@ -64,4 +80,5 @@ runPnpm(['exec', 'electron-vite', 'build'])
 runPnpm(['exec', 'electron-builder', ...builderArgs], {
   ...macToolchainEnv,
   MEMOH_DESKTOP_QDRANT_TARGET: qdrantTarget,
+  MEMOH_DESKTOP_GSTREAMER_TARGET: gstreamerTarget,
 })

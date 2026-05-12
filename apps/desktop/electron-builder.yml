@@ -28,6 +28,10 @@ extraResources:
     to: qdrant
     filter:
       - ${env.MEMOH_DESKTOP_QDRANT_TARGET}/**/*
+  - from: resources/gstreamer
+    to: gstreamer
+    filter:
+      - ${env.MEMOH_DESKTOP_GSTREAMER_TARGET}/**/*
 mac:
   category: public.app-category.productivity
   target:
