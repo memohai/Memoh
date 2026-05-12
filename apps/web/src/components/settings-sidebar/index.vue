@@ -110,7 +110,9 @@ function isItemActive(name: string): boolean {
   return route.name === name
 }
 
-const allNavItems: { title: string; name: string; icon: Component }[] = [
+type NavItem = { title: string; name: string; icon: Component }
+
+const allNavItems = computed<NavItem[]>(() => [
   { title: t('sidebar.bots'), name: 'bots', icon: Bot },
   { title: t('sidebar.providers'), name: 'providers', icon: Boxes },
   { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
@@ -123,11 +125,11 @@ const allNavItems: { title: string; name: string; icon: Component }[] = [
   { title: t('sidebar.appearance'), name: 'appearance', icon: Palette },
   { title: t('sidebar.profile'), name: 'profile', icon: User },
   { title: t('sidebar.about'), name: 'about', icon: Info },
-]
+])
 
 const navItems = computed(() =>
   props.excludeItems.length > 0
-    ? allNavItems.filter(item => !props.excludeItems.includes(item.name))
-    : allNavItems,
+    ? allNavItems.value.filter(item => !props.excludeItems.includes(item.name))
+    : allNavItems.value,
 )
 </script>

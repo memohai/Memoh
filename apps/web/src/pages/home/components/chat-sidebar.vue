@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onBeforeUnmount, nextTick, type Component } from 'vue'
+import { ref, computed, onBeforeUnmount, nextTick, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
@@ -135,18 +135,18 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 
-const activityTabs: ActivityTab[] = [
+const activityTabs = computed<ActivityTab[]>(() => [
   { id: 'sessions', label: t('chat.activityTabSessions'), icon: MessageSquare },
   { id: 'files', label: t('chat.activityTabFiles'), icon: Folder },
   { id: 'skills', label: t('chat.activityTabSkills'), icon: Sparkles },
   { id: 'mcp', label: t('chat.activityTabMcp'), icon: Plug },
   { id: 'schedule', label: t('chat.activityTabSchedule'), icon: CalendarClock },
-]
+])
 
 const activeTab = useLocalStorage<ActivityTabId>('chat-sidebar-active-tab', 'sessions')
 
 // Guard against stale persisted value (e.g. legacy 'terminal' tab).
-if (!activityTabs.some((t) => t.id === activeTab.value)) {
+if (!activityTabs.value.some((t) => t.id === activeTab.value)) {
   activeTab.value = 'sessions'
 }
 
