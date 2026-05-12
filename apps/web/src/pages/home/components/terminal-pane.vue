@@ -31,13 +31,13 @@ import { useI18n } from 'vue-i18n'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SerializeAddon } from '@xterm/addon-serialize'
-import { client } from '@memohai/sdk/client'
 import { Button } from '@memohai/ui'
 import {
   readTerminalSnapshot,
   terminalCacheKey,
   writeTerminalSnapshot,
 } from '@/composables/useTerminalCache'
+import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
 import { useSettingsStore } from '@/store/settings'
 import '@xterm/xterm/css/xterm.css'
 
@@ -103,27 +103,11 @@ function fitTerminal() {
 }
 
 function resolveTerminalWsUrl(cols: number, rows: number): string {
-  const baseUrl = String(client.getConfig().baseUrl || '').trim()
-  const token = localStorage.getItem('token') ?? ''
-  const path = `/bots/${encodeURIComponent(props.botId)}/container/terminal/ws`
-  const query = `?token=${encodeURIComponent(token)}&cols=${cols}&rows=${rows}`
-
-  if (!baseUrl || baseUrl.startsWith('/')) {
-    const loc = window.location
-    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = baseUrl || '/api'
-    return `${proto}//${loc.host}${base.replace(/\/+$/, '')}${path}${query}`
-  }
-
-  try {
-    const url = new URL(path, baseUrl)
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-    return url.toString() + query
-  } catch {
-    const loc = window.location
-    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${loc.host}/api${path}${query}`
-  }
+  return sdkWebSocketUrl({
+    url: '/bots/{bot_id}/container/terminal/ws',
+    path: { bot_id: props.botId },
+    query: { ...sdkAuthQuery(), cols, rows },
+  })
 }
 
 function closeWs() {

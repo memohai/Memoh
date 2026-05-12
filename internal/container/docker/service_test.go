@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
+	dockerimage "github.com/docker/docker/api/types/image"
 
 	containerapi "github.com/memohai/memoh/internal/container"
 )
@@ -59,6 +60,65 @@ func TestContainerInfoKeepsActiveStorageRefAsContainerID(t *testing.T) {
 	}
 	if info.Labels[containerapi.StorageKeyLabel] != "workspace-active-1" {
 		t.Fatalf("storage label = %q, want workspace-active-1", info.Labels[containerapi.StorageKeyLabel])
+	}
+}
+
+func TestActiveSnapshotFromContainer(t *testing.T) {
+	t.Parallel()
+
+	info := containerapi.ContainerInfo{
+		StorageRef: containerapi.StorageRef{Driver: "docker", Key: "container-id", Kind: "container"},
+		Labels: map[string]string{
+			containerapi.StorageKeyLabel: "snapshot-parent",
+		},
+	}
+	snapshot, ok := activeSnapshotFromContainer(info)
+	if !ok {
+		t.Fatal("activeSnapshotFromContainer() ok = false, want true")
+	}
+	if snapshot.Name != "container-id" {
+		t.Fatalf("snapshot.Name = %q, want container-id", snapshot.Name)
+	}
+	if snapshot.Parent != "snapshot-parent" {
+		t.Fatalf("snapshot.Parent = %q, want snapshot-parent", snapshot.Parent)
+	}
+	if snapshot.Kind != "active" {
+		t.Fatalf("snapshot.Kind = %q, want active", snapshot.Kind)
+	}
+}
+
+func TestActiveSnapshotFromContainerSkipsEmptyStorageKey(t *testing.T) {
+	t.Parallel()
+
+	_, ok := activeSnapshotFromContainer(containerapi.ContainerInfo{})
+	if ok {
+		t.Fatal("activeSnapshotFromContainer() ok = true, want false")
+	}
+}
+
+func TestAppendImageSnapshotsIncludesPreparedTag(t *testing.T) {
+	t.Parallel()
+
+	out := appendImageSnapshots(nil, dockerimage.Summary{
+		Created: 123,
+		Labels: map[string]string{
+			containerapi.StorageKeyLabel: "committed-snapshot",
+			snapshotParentLabel:          "previous-snapshot",
+		},
+		RepoTags: []string{
+			dockerSnapshotImageRef("committed-snapshot"),
+			dockerSnapshotImageRef("prepared-active"),
+			"debian:bookworm-slim",
+		},
+	})
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2", len(out))
+	}
+	if out[0].Name != "committed-snapshot" || out[0].Parent != "previous-snapshot" {
+		t.Fatalf("committed snapshot = %#v", out[0])
+	}
+	if out[1].Name != "prepared-active" || out[1].Parent != "committed-snapshot" {
+		t.Fatalf("prepared snapshot = %#v", out[1])
 	}
 }
 

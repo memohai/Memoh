@@ -134,8 +134,9 @@ import { ref, computed, onUnmounted } from 'vue'
 import { Button, Spinner } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { client } from '@memohai/sdk/client'
 import QRCode from 'qrcode'
+import { client } from '@memohai/sdk/client'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{
   botId: string
@@ -148,6 +149,17 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 type QRState = 'idle' | 'showing' | 'success' | 'error'
+
+interface WeixinQrStartResponse {
+  qr_code_url?: string
+  qr_code?: string
+  message?: string
+}
+
+interface WeixinQrPollResponse {
+  status?: string
+  message?: string
+}
 
 const qrState = ref<QRState>('idle')
 const qrCode = ref('')
@@ -179,22 +191,12 @@ async function startLogin() {
   qrImageDataUrl.value = ''
 
   try {
-    const baseUrl = client.getConfig().baseUrl || ''
-    const resp = await fetch(`${baseUrl}/bots/${encodeURIComponent(props.botId)}/channel/weixin/qr/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-      },
-      body: JSON.stringify({}),
+    const { data } = await client.post<{ 200: WeixinQrStartResponse }, unknown, true>({
+      url: '/bots/{bot_id}/channel/weixin/qr/start',
+      path: { bot_id: props.botId },
+      body: {},
+      throwOnError: true,
     })
-
-    if (!resp.ok) {
-      const body = await resp.text()
-      throw new Error(body || `HTTP ${resp.status}`)
-    }
-
-    const data = await resp.json() as { qr_code_url: string; qr_code: string; message: string }
     const qrContent = data.qr_code_url || data.qr_code || ''
     if (!qrContent) {
       throw new Error('No QR code data returned')
@@ -206,7 +208,7 @@ async function startLogin() {
 
     startPolling()
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err)
+    errorMessage.value = resolveApiErrorMessage(err, err instanceof Error ? err.message : String(err))
     qrState.value = 'error'
   } finally {
     isStarting.value = false
@@ -222,25 +224,15 @@ async function pollOnce() {
   if (aborted || qrState.value !== 'showing') return
 
   try {
-    const baseUrl = client.getConfig().baseUrl || ''
-    const resp = await fetch(`${baseUrl}/bots/${encodeURIComponent(props.botId)}/channel/weixin/qr/poll`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-      },
-      body: JSON.stringify({
+    const { data } = await client.post<{ 200: WeixinQrPollResponse }, unknown, true>({
+      url: '/bots/{bot_id}/channel/weixin/qr/poll',
+      path: { bot_id: props.botId },
+      body: {
         qr_code: qrCode.value,
-      }),
+      },
+      throwOnError: true,
     })
-
-    if (!resp.ok) {
-      const body = await resp.text()
-      throw new Error(body || `HTTP ${resp.status}`)
-    }
-
-    const data = await resp.json() as { status: string; message: string }
-    pollStatus.value = data.status
+    pollStatus.value = data.status ?? ''
 
     switch (data.status) {
       case 'confirmed':

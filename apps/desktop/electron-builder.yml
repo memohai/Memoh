@@ -5,14 +5,18 @@ directories:
   buildResources: build
   output: dist
 files:
+  - out/**/*
+  - package.json
+  - resources/icon.png
+  - resources/tray-icon.png
   - "!**/.vscode/*"
   - "!src/*"
+  - "!scripts/*"
+  - "!AGENTS.md"
   - "!electron.vite.config.{js,ts,mjs,cjs}"
   - "!{.eslintrc.cjs,.eslintignore,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
-asarUnpack:
-  - resources/**
 extraResources:
   - from: resources/server
     to: server

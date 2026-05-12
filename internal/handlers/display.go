@@ -497,6 +497,7 @@ is_alpine() {
   esac
 }
 RFB_PORT=5999
+XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"
 X_SOCKET=/tmp/.X11-unix/X99
 X_LOCK=/tmp/.X99-lock
 xvnc_pids() {
@@ -644,7 +645,7 @@ if ! display_socket_ready; then
   if ! display_socket_ready; then
     stop_xvnc
     cleanup_stale_display
-    nohup "$XVNC" :99 -geometry 1280x800 -depth 24 -SecurityTypes None -localhost -rfbport "$RFB_PORT" >/tmp/memoh-xvnc.log 2>&1 &
+    nohup "$XVNC" :99 -geometry "$XVNC_GEOMETRY" -depth 24 -SecurityTypes None -localhost -rfbport "$RFB_PORT" >/tmp/memoh-xvnc.log 2>&1 &
     wait_i=0
     while [ "$wait_i" -lt 25 ]; do
       display_socket_ready && break

@@ -9,6 +9,40 @@ export interface SetupApiClientOptions {
   onUnauthorized?: () => void
 }
 
+interface SdkUrlOptions {
+  url: string
+  path?: Record<string, unknown>
+  query?: Record<string, unknown>
+}
+
+export function sdkAuthQuery(): { token?: string } {
+  try {
+    if (typeof localStorage === 'undefined') return {}
+    const token = localStorage.getItem('token')?.trim()
+    return token ? { token } : {}
+  } catch {
+    return {}
+  }
+}
+
+export function sdkApiUrl(options: SdkUrlOptions): string {
+  return client.buildUrl({
+    ...client.getConfig(),
+    ...options,
+  })
+}
+
+function browserOrigin(): string {
+  const { protocol, host, origin } = window.location
+  return origin || `${protocol}//${host}`
+}
+
+export function sdkWebSocketUrl(options: SdkUrlOptions): string {
+  const url = new URL(sdkApiUrl(options), browserOrigin())
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 /**
  * Configure the SDK client with base URL, auth interceptor, and 401 handling.
  * Call this once at app startup (main.ts).

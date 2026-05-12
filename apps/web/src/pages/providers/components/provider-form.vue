@@ -346,8 +346,19 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
-import { postProvidersByIdTest } from '@memohai/sdk'
-import type { ProvidersGetResponse, ProvidersTestResponse } from '@memohai/sdk'
+import {
+  deleteProvidersByIdOauthToken,
+  getProvidersByIdOauthAuthorize,
+  getProvidersByIdOauthStatus,
+  postProvidersByIdOauthPoll,
+  postProvidersByIdTest,
+} from '@memohai/sdk'
+import type {
+  ProvidersGetResponse,
+  ProvidersOAuthAuthorizeResponse,
+  ProvidersOAuthStatus,
+  ProvidersTestResponse,
+} from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 
@@ -355,36 +366,6 @@ const { t } = useI18n()
 const { copyText } = useClipboard()
 
 type ProviderWithAuth = Partial<ProvidersGetResponse>
-
-type ProviderOAuthStatus = {
-  configured: boolean
-  mode?: string
-  has_token: boolean
-  expired: boolean
-  callback_url?: string
-  expires_at?: string
-  account?: {
-    label?: string
-    login?: string
-    name?: string
-    email?: string
-    avatar_url?: string
-    profile_url?: string
-  }
-  device?: {
-    pending: boolean
-    user_code?: string
-    verification_uri?: string
-    expires_at?: string
-    interval_seconds?: number
-  }
-}
-
-type ProviderOAuthAuthorizeResponse = {
-  mode?: string
-  auth_url?: string
-  device?: ProviderOAuthStatus['device']
-}
 
 function getStoredSecret(config: Record<string, unknown> | undefined) {
   if (!config) return ''
@@ -420,12 +401,11 @@ const emit = defineEmits<{
 const testLoading = ref(false)
 const testResult = ref<ProvidersTestResponse | null>(null)
 const testError = ref('')
-const oauthStatus = ref<ProviderOAuthStatus | null>(null)
+const oauthStatus = ref<ProvidersOAuthStatus | null>(null)
 const oauthStatusLoading = ref(false)
 const authorizeLoading = ref(false)
 const revokeLoading = ref(false)
 const pollTimer = ref<number | null>(null)
-const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
 
 async function runTest() {
   if (!props.provider?.id) return
@@ -579,11 +559,6 @@ const editProvider = form.handleSubmit(async (value) => {
 
 const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
 
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
 function clearPollTimer() {
   if (pollTimer.value !== null) {
     window.clearTimeout(pollTimer.value)
@@ -595,11 +570,11 @@ async function fetchOAuthStatus() {
   if (!props.provider?.id) return
   oauthStatusLoading.value = true
   try {
-    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/status`, {
-      headers: authHeaders(),
+    const { data } = await getProvidersByIdOauthStatus({
+      path: { id: props.provider.id },
+      throwOnError: true,
     })
-    if (!response.ok) throw new Error(t('provider.oauth.statusFailed'))
-    oauthStatus.value = await response.json() as ProviderOAuthStatus
+    oauthStatus.value = data ?? null
   } catch (error) {
     oauthStatus.value = null
     console.error('failed to load provider oauth status', error)
@@ -611,12 +586,12 @@ async function fetchOAuthStatus() {
 async function pollOAuthAuthorization(notifyOnSuccess = false) {
   if (!props.provider?.id || form.values.client_type !== 'github-copilot') return
   try {
-    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/poll`, {
-      method: 'POST',
-      headers: authHeaders(),
+    const { data } = await postProvidersByIdOauthPoll({
+      path: { id: props.provider.id },
+      throwOnError: true,
     })
-    if (!response.ok) throw new Error(t('provider.oauth.authorizeFailed'))
-    const nextStatus = await response.json() as ProviderOAuthStatus
+    if (!data) throw new Error(t('provider.oauth.authorizeFailed'))
+    const nextStatus = data
     const becameAuthorized = !oauthStatus.value?.has_token && Boolean(nextStatus.has_token)
     oauthStatus.value = nextStatus
     if (notifyOnSuccess && becameAuthorized) {
@@ -650,24 +625,25 @@ async function handleAuthorize() {
   if (!props.provider?.id) return
   authorizeLoading.value = true
   try {
-    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/authorize`, {
-      headers: authHeaders(),
+    const { data } = await getProvidersByIdOauthAuthorize({
+      path: { id: props.provider.id },
+      throwOnError: true,
     })
-    if (!response.ok) throw new Error(t('provider.oauth.authorizeFailed'))
-    const data = await response.json() as ProviderOAuthAuthorizeResponse
-    if (data.mode === 'device') {
+    if (!data) throw new Error(t('provider.oauth.authorizeFailed'))
+    const result = data as ProvidersOAuthAuthorizeResponse
+    if (result.mode === 'device') {
       oauthStatus.value = {
         configured: true,
         mode: 'device',
         has_token: false,
         expired: false,
         callback_url: '',
-        device: data.device,
+        device: result.device,
       }
       return
     }
-    if (!data.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
-    const popup = window.open(data.auth_url, 'provider-oauth', 'width=600,height=720')
+    if (!result.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
+    const popup = window.open(result.auth_url, 'provider-oauth', 'width=600,height=720')
     const listener = async (event: MessageEvent) => {
       if (event.data?.type !== 'memoh-provider-oauth-success') return
       window.removeEventListener('message', listener)
@@ -713,11 +689,10 @@ async function handleRevoke() {
   clearPollTimer()
   revokeLoading.value = true
   try {
-    const response = await fetch(`${apiBase}/providers/${props.provider.id}/oauth/token`, {
-      method: 'DELETE',
-      headers: authHeaders(),
+    await deleteProvidersByIdOauthToken({
+      path: { id: props.provider.id },
+      throwOnError: true,
     })
-    if (!response.ok) throw new Error(t('provider.oauth.revokeFailed'))
     toast.success(t('provider.oauth.revokeSuccess'))
     await fetchOAuthStatus()
   } catch (error) {

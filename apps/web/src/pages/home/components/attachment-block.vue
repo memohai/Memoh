@@ -6,7 +6,7 @@
     >
       <!-- Image / video thumbnail -->
       <button
-        v-if="isImage(att) || isVideo(att)"
+        v-if="(isImage(att) || isVideo(att)) && getUrl(att)"
         type="button"
         class="inline-flex max-w-64 max-h-72 rounded-lg overflow-hidden hover:ring-2 ring-primary/40 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
         @click="handleMediaClick(att)"

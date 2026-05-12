@@ -12,6 +12,7 @@ import {
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import MonacoEditor from '@/components/monaco-editor/index.vue'
+import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { isTextFile, isImageFile } from './utils'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
@@ -99,8 +100,11 @@ async function handleSave() {
 }
 
 function handleDownload() {
-  const token = localStorage.getItem('token') ?? ''
-  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(filePath.value)}&token=${encodeURIComponent(token)}`
+  const url = sdkApiUrl({
+    url: '/bots/{bot_id}/container/fs/download',
+    path: { bot_id: props.botId },
+    query: { path: filePath.value, ...sdkAuthQuery() },
+  })
   const a = document.createElement('a')
   a.href = url
   a.download = filename.value

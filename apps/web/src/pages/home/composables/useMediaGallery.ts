@@ -1,4 +1,5 @@
 import { computed, ref, type Ref } from 'vue'
+import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { useChatStore } from '@/store/chat-list'
 import type { ChatMessage } from '@/store/chat-list'
 import type { MediaGalleryItem } from '../components/media-gallery-lightbox.vue'
@@ -36,8 +37,11 @@ function resolveAssetApiUrl(att: Record<string, unknown>): string {
   if (!contentHash) return ''
   const botId = resolveBotId(att)
   if (!botId) return ''
-  const token = localStorage.getItem('token') || ''
-  return `/api/bots/${botId}/media/${contentHash}?token=${encodeURIComponent(token)}`
+  return sdkApiUrl({
+    url: '/bots/{bot_id}/media/{content_hash}',
+    path: { bot_id: botId, content_hash: contentHash },
+    query: sdkAuthQuery(),
+  })
 }
 
 function resolveUrl(att: Record<string, unknown>): string {

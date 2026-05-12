@@ -1,4 +1,4 @@
-import { client } from '@memohai/sdk/client'
+import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
 import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
 export interface WSClientMessage {
@@ -25,25 +25,11 @@ export interface ChatWebSocket {
 }
 
 function resolveWebSocketUrl(botId: string): string {
-  const baseUrl = String(client.getConfig().baseUrl || '').trim()
-  const path = `/bots/${encodeURIComponent(botId)}/web/ws`
-
-  if (!baseUrl || baseUrl.startsWith('/')) {
-    const loc = window.location
-    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = baseUrl || '/api'
-    return `${proto}//${loc.host}${base.replace(/\/+$/, '')}${path}`
-  }
-
-  try {
-    const url = new URL(path, baseUrl)
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-    return url.toString()
-  } catch {
-    const loc = window.location
-    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${loc.host}/api${path}`
-  }
+  return sdkWebSocketUrl({
+    url: '/bots/{bot_id}/web/ws',
+    path: { bot_id: botId },
+    query: sdkAuthQuery(),
+  })
 }
 
 export function connectWebSocket(
@@ -54,8 +40,7 @@ export function connectWebSocket(
   if (!id) throw new Error('bot id is required')
 
   const wsUrl = resolveWebSocketUrl(id)
-  const token = localStorage.getItem('token') ?? ''
-  const url = token ? `${wsUrl}?token=${encodeURIComponent(token)}` : wsUrl
+  const url = wsUrl
 
   let ws: WebSocket | null = null
   let isConnected = false

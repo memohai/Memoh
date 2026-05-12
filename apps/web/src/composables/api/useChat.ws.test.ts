@@ -71,4 +71,15 @@ describe('useChat.ws', () => {
       session_id: 'session-1',
     })
   })
+
+  it('uses the configured absolute API base URL', () => {
+    client.setConfig({ baseUrl: 'http://127.0.0.1:18731' })
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => 'token with spaces'),
+    })
+
+    connectWebSocket('bot 1', vi.fn())
+
+    expect(MockWebSocket.instances[0]?.url).toBe('ws://127.0.0.1:18731/bots/bot%201/web/ws?token=token%20with%20spaces')
+  })
 })

@@ -238,6 +238,13 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 	if err != nil && !errors.Is(err, ctr.ErrNotSupported) {
 		return nil, err
 	}
+	runtimeNames := make(map[string]struct{}, len(runtimeSnapshots))
+	for _, info := range runtimeSnapshots {
+		name := strings.TrimSpace(info.Name)
+		if name != "" {
+			runtimeNames[name] = struct{}{}
+		}
+	}
 
 	managedMeta := make(map[string]ManagedSnapshotMeta)
 	if m.queries != nil {
@@ -256,14 +263,26 @@ func (m *Manager) ListBotSnapshotData(ctx context.Context, botID string) (*BotSn
 				ParentRuntimeSnapshotName: strings.TrimSpace(row.ParentRuntimeSnapshotName.String),
 				Snapshotter:               strings.TrimSpace(row.Snapshotter),
 			}
-			if row.CreatedAt.Valid {
-				meta.CreatedAt = row.CreatedAt.Time
-			}
 			if row.Version.Valid {
 				v := int(row.Version.Int32)
 				meta.Version = &v
 			}
+			if row.CreatedAt.Valid {
+				meta.CreatedAt = row.CreatedAt.Time
+			}
 			managedMeta[name] = meta
+			if strings.EqualFold(meta.Snapshotter, "archive") {
+				if _, exists := runtimeNames[name]; !exists {
+					runtimeSnapshots = append(runtimeSnapshots, ctr.SnapshotInfo{
+						Name:    name,
+						Parent:  meta.ParentRuntimeSnapshotName,
+						Kind:    "archive",
+						Created: meta.CreatedAt,
+						Updated: meta.CreatedAt,
+					})
+					runtimeNames[name] = struct{}{}
+				}
+			}
 		}
 	}
 

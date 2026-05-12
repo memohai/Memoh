@@ -1,9 +1,32 @@
 import { ref } from 'vue'
-import { describe, expect, it } from 'vitest'
-import { useMediaGallery } from './useMediaGallery'
+import { client } from '@memohai/sdk/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolveUrl, useMediaGallery } from './useMediaGallery'
 import type { ChatMessage } from '@/store/chat-list'
 
+function stubLocalStorage() {
+  const store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => store.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, value)
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key)
+    }),
+    clear: vi.fn(() => {
+      store.clear()
+    }),
+  })
+}
+
 describe('useMediaGallery', () => {
+  beforeEach(() => {
+    stubLocalStorage()
+    client.setConfig({ baseUrl: '/api' })
+    localStorage.clear()
+  })
+
   it('skips background task system turns when collecting media', () => {
     const messages = ref<ChatMessage[]>([
       {
@@ -47,5 +70,16 @@ describe('useMediaGallery', () => {
         name: undefined,
       },
     ])
+  })
+
+  it('uses the SDK base URL for stored media assets', () => {
+    client.setConfig({ baseUrl: 'http://127.0.0.1:18731' })
+    localStorage.setItem('token', 'token with spaces')
+
+    expect(resolveUrl({
+      type: 'image',
+      bot_id: 'bot 1',
+      content_hash: 'sha256:asset/1',
+    })).toBe('http://127.0.0.1:18731/bots/bot%201/media/sha256%3Aasset%2F1?token=token%20with%20spaces')
   })
 })

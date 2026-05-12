@@ -209,6 +209,7 @@ import {
 } from '@memohai/sdk'
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
 import { pathSegments, joinPath } from '@/components/file-manager/utils'
 import FileList from '@/components/file-manager/file-list.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -406,8 +407,11 @@ async function handleDelete() {
 }
 
 function handleDownload(entry: HandlersFsFileInfo) {
-  const token = localStorage.getItem('token') ?? ''
-  const url = `/api/bots/${props.botId}/container/fs/download?path=${encodeURIComponent(entry.path ?? '')}&token=${encodeURIComponent(token)}`
+  const url = sdkApiUrl({
+    url: '/bots/{bot_id}/container/fs/download',
+    path: { bot_id: props.botId },
+    query: { path: entry.path ?? '', ...sdkAuthQuery() },
+  })
   const a = document.createElement('a')
   a.href = url
   a.download = entry.name ?? 'file'

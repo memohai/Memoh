@@ -45,13 +45,14 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
 
 export default defineConfig(({ command }) => {
   const { port, host, baseUrl } = resolveProxyTarget(command)
+  const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
 
   return {
     main: {
-      plugins: [externalizeDepsPlugin()],
+      plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
     },
     preload: {
-      plugins: [externalizeDepsPlugin()],
+      plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
     },
     renderer: {
       root: resolve(__dirname, 'src/renderer'),

@@ -231,12 +231,13 @@ import { computed, inject, reactive, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechProvidersByIdImportModels, putProvidersById } from '@memohai/sdk'
+import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechModelsByIdTest, postSpeechProvidersByIdImportModels, putProvidersById, putSpeechModelsById } from '@memohai/sdk'
 import type { TtsSpeechModelResponse, TtsSpeechProviderResponse } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import SettingsShell from '@/components/settings-shell/index.vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface SpeechFieldSchema {
   key: string
@@ -426,20 +427,14 @@ async function handleSaveModel(modelId: string, config: Record<string, unknown>)
   const model = providerModels.value.find(item => item.id === modelId)
   if (!model) return
   try {
-    const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`${apiBase}/speech-models/${modelId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
+    await putSpeechModelsById({
+      path: { id: modelId },
+      body: {
         name: model.name ?? model.model_id,
         config,
-      }),
+      },
+      throwOnError: true,
     })
-    if (!resp.ok) throw new Error(await resp.text())
     toast.success(t('speech.saveSuccess'))
     queryCache.invalidateQueries({ key: ['speech-provider-models', curProviderId.value] })
     queryCache.invalidateQueries({ key: ['speech-models'] })
@@ -471,27 +466,17 @@ async function handleImportModels() {
 }
 
 async function handleTestModel(modelId: string, text: string, config: Record<string, unknown>) {
-  const apiBase = import.meta.env.VITE_API_URL?.trim() || '/api'
-  const token = localStorage.getItem('token')
-  const resp = await fetch(`${apiBase}/speech-models/${modelId}/test`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ text, config }),
-  })
-  if (!resp.ok) {
-    const errBody = await resp.text()
-    let msg: string
-    try {
-      msg = JSON.parse(errBody)?.message ?? errBody
-    } catch {
-      msg = errBody
-    }
-    throw new Error(msg)
+  try {
+    const { data } = await postSpeechModelsByIdTest({
+      path: { id: modelId },
+      body: { text, config },
+      parseAs: 'blob',
+      throwOnError: true,
+    })
+    return data as Blob
+  } catch (error) {
+    throw new Error(resolveApiErrorMessage(error, t('speech.test.failed')))
   }
-  return resp.blob()
 }
 
 function sanitizeConfig(input: Record<string, unknown>) {

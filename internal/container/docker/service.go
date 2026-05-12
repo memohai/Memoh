@@ -405,20 +405,78 @@ func (s *Service) ListSnapshots(ctx context.Context, req containerapi.ListSnapsh
 	}
 	out := make([]containerapi.SnapshotInfo, 0, len(images))
 	for _, img := range images {
-		name := strings.TrimSpace(img.Labels[containerapi.StorageKeyLabel])
-		if name == "" {
-			continue
+		out = appendImageSnapshots(out, img)
+	}
+	containers, err := s.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, mapDockerErr(err)
+	}
+	for _, item := range containers {
+		info := containerInfoFromSummary(item)
+		if snapshot, ok := activeSnapshotFromContainer(info); ok {
+			out = append(out, snapshot)
 		}
+	}
+	return out, nil
+}
+
+func appendImageSnapshots(out []containerapi.SnapshotInfo, img image.Summary) []containerapi.SnapshotInfo {
+	name := strings.TrimSpace(img.Labels[containerapi.StorageKeyLabel])
+	created := time.Unix(img.Created, 0)
+	labels := cloneLabels(img.Labels)
+	if name != "" {
 		out = append(out, containerapi.SnapshotInfo{
 			Name:    name,
 			Parent:  strings.TrimSpace(img.Labels[snapshotParentLabel]),
 			Kind:    "committed",
-			Created: time.Unix(img.Created, 0),
-			Updated: time.Unix(img.Created, 0),
-			Labels:  cloneLabels(img.Labels),
+			Created: created,
+			Updated: created,
+			Labels:  labels,
 		})
 	}
-	return out, nil
+	for _, tag := range img.RepoTags {
+		tagName, ok := snapshotNameFromImageRef(tag)
+		if !ok || tagName == "" || tagName == name {
+			continue
+		}
+		out = append(out, containerapi.SnapshotInfo{
+			Name:    tagName,
+			Parent:  name,
+			Kind:    "committed",
+			Created: created,
+			Updated: created,
+			Labels:  labels,
+		})
+	}
+	return out
+}
+
+func snapshotNameFromImageRef(ref string) (string, bool) {
+	name := strings.TrimSpace(ref)
+	prefix := snapshotImageRepository + ":"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(name, prefix)), true
+}
+
+func activeSnapshotFromContainer(info containerapi.ContainerInfo) (containerapi.SnapshotInfo, bool) {
+	name := strings.TrimSpace(info.StorageRef.Key)
+	if name == "" {
+		return containerapi.SnapshotInfo{}, false
+	}
+	parent := strings.TrimSpace(info.Labels[containerapi.StorageKeyLabel])
+	if parent == name {
+		parent = ""
+	}
+	return containerapi.SnapshotInfo{
+		Name:    name,
+		Parent:  parent,
+		Kind:    "active",
+		Created: info.CreatedAt,
+		Updated: info.UpdatedAt,
+		Labels:  cloneLabels(info.Labels),
+	}, true
 }
 
 func (s *Service) PrepareSnapshot(ctx context.Context, req containerapi.PrepareSnapshotRequest) error {

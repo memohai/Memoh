@@ -353,6 +353,8 @@ const BITRATE_CHART_WIDTH = 320
 const BITRATE_CHART_HEIGHT = 58
 const BITRATE_CHART_PADDING = 4
 const BITRATE_CHART_GRID = [14, 30, 46]
+const FALLBACK_DISPLAY_WIDTH = 1280
+const FALLBACK_DISPLAY_HEIGHT = 960
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
@@ -789,8 +791,8 @@ function resolveVideoPoint(event: MouseEvent | WheelEvent): { x: number; y: numb
   const video = videoRef.value
   if (!video) return null
   const rect = video.getBoundingClientRect()
-  const sourceWidth = video.videoWidth || 1280
-  const sourceHeight = video.videoHeight || 800
+  const sourceWidth = video.videoWidth || FALLBACK_DISPLAY_WIDTH
+  const sourceHeight = video.videoHeight || FALLBACK_DISPLAY_HEIGHT
   const scale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight)
   const width = sourceWidth * scale
   const height = sourceHeight * scale

@@ -18,6 +18,20 @@ const goArch = bundleArch === 'x64' ? 'amd64' : bundleArch
 
 const serverName = bundlePlatform === 'win32' ? 'memoh-server.exe' : 'memoh-server'
 const cliName = bundlePlatform === 'win32' ? 'memoh.exe' : 'memoh'
+const goBuildFlags = process.env.MEMOH_DESKTOP_KEEP_GO_SYMBOLS
+  ? ['build', '-trimpath']
+  : ['build', '-trimpath', '-ldflags=-s -w']
+
+function goBuild(outputPath, packagePath, env) {
+  execFileSync('go', [...goBuildFlags, '-o', outputPath, packagePath], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ...env,
+    },
+  })
+}
 
 rmSync(serverDir, { recursive: true, force: true })
 rmSync(cliDir, { recursive: true, force: true })
@@ -29,37 +43,22 @@ mkdirSync(runtimeDir, { recursive: true })
 mkdirSync(configDir, { recursive: true })
 mkdirSync(providersDir, { recursive: true })
 
-execFileSync('go', ['build', '-o', resolve(serverDir, serverName), './cmd/agent'], {
-  cwd: repoRoot,
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    GOOS: bundlePlatform === 'win32' ? 'windows' : bundlePlatform,
-    GOARCH: goArch,
-  },
+goBuild(resolve(serverDir, serverName), './cmd/agent', {
+  GOOS: bundlePlatform === 'win32' ? 'windows' : bundlePlatform,
+  GOARCH: goArch,
 })
 
 // CLI binary ships next to the server inside the app bundle. CLI uses
 // os.Executable() to locate its own dir then walks up to find the
 // sibling server binary — see internal/tui/local/paths.go.
-execFileSync('go', ['build', '-o', resolve(cliDir, cliName), './cmd/memoh'], {
-  cwd: repoRoot,
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    GOOS: bundlePlatform === 'win32' ? 'windows' : bundlePlatform,
-    GOARCH: goArch,
-  },
+goBuild(resolve(cliDir, cliName), './cmd/memoh', {
+  GOOS: bundlePlatform === 'win32' ? 'windows' : bundlePlatform,
+  GOARCH: goArch,
 })
 
-execFileSync('go', ['build', '-o', resolve(runtimeDir, 'bridge'), './cmd/bridge'], {
-  cwd: repoRoot,
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    GOOS: 'linux',
-    GOARCH: goArch,
-  },
+goBuild(resolve(runtimeDir, 'bridge'), './cmd/bridge', {
+  GOOS: 'linux',
+  GOARCH: goArch,
 })
 cpSync(resolve(repoRoot, 'cmd', 'bridge', 'template'), resolve(runtimeDir, 'templates'), { recursive: true })
 

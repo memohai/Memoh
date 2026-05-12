@@ -665,9 +665,6 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	}
 
 	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
-	if snapshotKey == "" {
-		return echo.NewHTTPError(http.StatusInternalServerError, "container snapshot key is empty")
-	}
 
 	resp, ok := buildSnapshotListResponse(data)
 	if !ok {

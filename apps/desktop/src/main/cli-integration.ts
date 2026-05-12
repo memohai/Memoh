@@ -101,12 +101,16 @@ export function writeCliPrefs(prefs: CliPrefs): void {
   }
 }
 
-async function whichMemoh(): Promise<string | null> {
+async function installedCliPath(): Promise<string | null> {
+  const target = installTarget()
+  if (target.symlinkPath && existsSync(target.symlinkPath)) {
+    return target.symlinkPath
+  }
+
   const cmd = process.platform === 'win32' ? 'where' : 'which'
   try {
     const { stdout } = await execFileAsync(cmd, ['memoh'])
-    const first = stdout.split(/\r?\n/).map(line => line.trim()).find(line => line !== '')
-    return first ?? null
+    return stdout.split(/\r?\n/).map(line => line.trim()).find(line => line !== '') ?? null
   } catch {
     return null
   }
@@ -114,7 +118,7 @@ async function whichMemoh(): Promise<string | null> {
 
 export async function detectCliState(): Promise<CliStatus> {
   const source = bundledCliPath()
-  const located = await whichMemoh()
+  const located = await installedCliPath()
   if (!located) {
     return { state: 'not-installed', source, target: null }
   }

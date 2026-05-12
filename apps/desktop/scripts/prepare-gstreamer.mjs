@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, cpSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -29,11 +29,9 @@ const displayPluginNames = new Set([
   'libgstx264.dylib',
   'libgstvideoparsersbad.dylib',
   'libgstrtp.dylib',
-  'libgstrtpmanager.dylib',
   'libgstudp.dylib',
   'libgstvpx.dylib',
   'libgstjpeg.dylib',
-  'libgsttypefindfunctions.dylib',
   'gstcoreelements.dll',
   'gstvideoconvertscale.dll',
   'gstvideorate.dll',
@@ -41,12 +39,35 @@ const displayPluginNames = new Set([
   'gstx264.dll',
   'gstvideoparsersbad.dll',
   'gstrtp.dll',
-  'gstrtpmanager.dll',
   'gstudp.dll',
   'gstvpx.dll',
   'gstjpeg.dll',
-  'gsttypefindfunctions.dll',
 ])
+const displayInspectionElements = [
+  'rfbsrc',
+  'videoconvert',
+  'videoscale',
+  'videorate',
+  'queue',
+  'capsfilter',
+  'x264enc',
+  'h264parse',
+  'rtph264pay',
+  'udpsink',
+  'vp8enc',
+  'rtpvp8pay',
+  'jpegenc',
+  'filesink',
+]
+
+const runtimeProfile = `display-${createHash('sha256')
+  .update(JSON.stringify({
+    packages: [...macOSRuntimePackages].sort(),
+    plugins: [...displayPluginNames].sort(),
+    elements: [...displayInspectionElements].sort(),
+  }))
+  .digest('hex')
+  .slice(0, 10)}`
 
 const targetSpecs = {
   'darwin-universal': {
@@ -110,6 +131,10 @@ function versionPath(targetDir) {
   return resolve(targetDir, 'VERSION')
 }
 
+function versionMarker() {
+  return `${gstreamerVersion}\nprofile=${runtimeProfile}\n`
+}
+
 function isPrepared(target, spec) {
   const targetDir = resolve(gstreamerRoot, target)
   const binaryPath = resolve(targetDir, spec.binary)
@@ -118,10 +143,22 @@ function isPrepared(target, spec) {
     return false
   }
   try {
-    return readFileSync(markerPath, 'utf8').trim() === gstreamerVersion
+    return readFileSync(markerPath, 'utf8') === versionMarker()
   } catch {
     return false
   }
+}
+
+function preparedVersion(targetDir) {
+  try {
+    return readFileSync(versionPath(targetDir), 'utf8').split(/\r?\n/, 1)[0].trim()
+  } catch {
+    return null
+  }
+}
+
+function canReuseExistingRuntime(targetDir, spec) {
+  return existsSync(resolve(targetDir, spec.binary)) && preparedVersion(targetDir) === gstreamerVersion
 }
 
 function assetURL(spec) {
@@ -262,6 +299,190 @@ function pruneDisplayPlugins(targetDir) {
   }
 }
 
+function dependencyName(line, targetDir) {
+  const match = line.trim().match(/^(\S+)\s/)
+  if (!match) {
+    return null
+  }
+  const dependency = match[1]
+  if (dependency.startsWith('/usr/lib/') || dependency.startsWith('/System/Library/')) {
+    return null
+  }
+  if (
+    dependency.startsWith('@rpath/')
+    || dependency.startsWith('@loader_path/')
+    || dependency.startsWith('@executable_path/')
+    || dependency.startsWith(targetDir)
+  ) {
+    return basename(dependency)
+  }
+  return null
+}
+
+function syncDarwinSymlinkClosure(libDir, neededLibraries) {
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const entry of readdirSync(libDir)) {
+      const entryPath = resolve(libDir, entry)
+      let stat
+      try {
+        stat = lstatSync(entryPath)
+      } catch {
+        continue
+      }
+      if (!stat.isSymbolicLink()) {
+        continue
+      }
+      const targetName = basename(resolve(dirname(entryPath), readlinkSync(entryPath)))
+      if (neededLibraries.has(entry) && !neededLibraries.has(targetName)) {
+        neededLibraries.add(targetName)
+        changed = true
+      }
+      if (neededLibraries.has(targetName) && !neededLibraries.has(entry)) {
+        neededLibraries.add(entry)
+        changed = true
+      }
+    }
+  }
+}
+
+function collectDarwinLibraryDependencies(targetDir, seedPaths) {
+  const libDir = resolve(targetDir, 'lib')
+  const neededLibraries = new Set()
+  const queue = seedPaths.filter(existsSync)
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const binaryPath = queue[index]
+    const output = execFileSync('otool', ['-L', binaryPath], { encoding: 'utf8' })
+    for (const line of output.split(/\r?\n/).slice(1)) {
+      const name = dependencyName(line, targetDir)
+      if (!name || neededLibraries.has(name)) {
+        continue
+      }
+      const libraryPath = resolve(libDir, name)
+      if (!existsSync(libraryPath)) {
+        continue
+      }
+      neededLibraries.add(name)
+      queue.push(libraryPath)
+    }
+  }
+
+  syncDarwinSymlinkClosure(libDir, neededLibraries)
+  return neededLibraries
+}
+
+function pruneDarwinLibraries(targetDir, spec) {
+  if (process.env.GSTREAMER_KEEP_ALL_LIBS) {
+    return
+  }
+  if (process.platform !== 'darwin') {
+    return
+  }
+
+  const libDir = resolve(targetDir, 'lib')
+  const pluginDir = resolve(libDir, 'gstreamer-1.0')
+  const seedPaths = [
+    resolve(targetDir, spec.binary),
+    resolve(targetDir, spec.inspect),
+    resolve(targetDir, spec.scanner),
+  ]
+  if (existsSync(pluginDir)) {
+    for (const pluginName of readdirSync(pluginDir)) {
+      if (pluginName.endsWith('.dylib')) {
+        seedPaths.push(resolve(pluginDir, pluginName))
+      }
+    }
+  }
+
+  const neededLibraries = collectDarwinLibraryDependencies(targetDir, seedPaths)
+  for (const entry of readdirSync(libDir)) {
+    if (entry === 'gstreamer-1.0') {
+      continue
+    }
+    const entryPath = resolve(libDir, entry)
+    if (entry.endsWith('.dylib')) {
+      if (!neededLibraries.has(entry)) {
+        rmSync(entryPath, { force: true })
+      }
+      continue
+    }
+    rmSync(entryPath, { recursive: true, force: true })
+  }
+}
+
+function pruneRuntimeLayout(targetDir, spec) {
+  if (process.env.GSTREAMER_KEEP_FULL_LAYOUT) {
+    return
+  }
+
+  const topLevelKeeps = new Set(['bin', 'lib', 'libexec', 'VERSION'])
+  for (const entry of readdirSync(targetDir)) {
+    if (!topLevelKeeps.has(entry)) {
+      rmSync(resolve(targetDir, entry), { recursive: true, force: true })
+    }
+  }
+
+  const binDir = resolve(targetDir, 'bin')
+  const binKeeps = new Set([basename(spec.binary), basename(spec.inspect)])
+  if (existsSync(binDir)) {
+    for (const entry of readdirSync(binDir)) {
+      const isRuntimeLibrary = process.platform === 'win32' && entry.toLowerCase().endsWith('.dll')
+      if (!binKeeps.has(entry) && !isRuntimeLibrary) {
+        rmSync(resolve(binDir, entry), { recursive: true, force: true })
+      }
+    }
+  }
+
+  const scannerDir = dirname(resolve(targetDir, spec.scanner))
+  const scannerKeeps = new Set([basename(spec.scanner)])
+  if (existsSync(scannerDir)) {
+    for (const entry of readdirSync(scannerDir)) {
+      if (!scannerKeeps.has(entry)) {
+        rmSync(resolve(scannerDir, entry), { recursive: true, force: true })
+      }
+    }
+  }
+}
+
+function collectStripCandidates(rootDir) {
+  const candidates = []
+  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+    const entryPath = resolve(rootDir, entry.name)
+    if (entry.isDirectory()) {
+      candidates.push(...collectStripCandidates(entryPath))
+      continue
+    }
+    if (!entry.isFile()) {
+      continue
+    }
+    const stat = lstatSync(entryPath)
+    if (entry.name.endsWith('.dylib') || (stat.mode & 0o111) !== 0) {
+      candidates.push(entryPath)
+    }
+  }
+  return candidates
+}
+
+function stripDarwinBinaries(targetDir) {
+  if (process.env.GSTREAMER_KEEP_SYMBOLS || process.platform !== 'darwin') {
+    return
+  }
+  const candidates = collectStripCandidates(targetDir)
+  const chunkSize = 50
+  for (let index = 0; index < candidates.length; index += chunkSize) {
+    execFileSync('strip', ['-x', ...candidates.slice(index, index + chunkSize)], { stdio: 'ignore' })
+  }
+}
+
+function pruneDisplayRuntime(targetDir, spec) {
+  pruneDisplayPlugins(targetDir)
+  pruneDarwinLibraries(targetDir, spec)
+  pruneRuntimeLayout(targetDir, spec)
+  stripDarwinBinaries(targetDir)
+}
+
 function findFile(root, fileName) {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const child = resolve(root, entry.name)
@@ -319,10 +540,10 @@ function validateRuntime(targetDir, spec) {
   }
   const inspectPath = resolve(targetDir, spec.inspect)
   if (!existsSync(inspectPath)) {
-    return
+    throw new Error(`Prepared GStreamer inspector not found: ${inspectPath}`)
   }
-  for (const plugin of ['x264enc', 'rfbsrc']) {
-    execFileSync(inspectPath, [plugin], {
+  for (const element of displayInspectionElements) {
+    execFileSync(inspectPath, [element], {
       stdio: 'ignore',
       env: runtimeEnv(targetDir, spec),
     })
@@ -336,6 +557,17 @@ async function prepareTarget(target) {
   if (!process.env.GSTREAMER_FORCE_DOWNLOAD && isPrepared(target, spec)) {
     console.log(`GStreamer ${gstreamerVersion} already prepared for ${target}`)
     return
+  }
+  if (!process.env.GSTREAMER_FORCE_DOWNLOAD && canReuseExistingRuntime(targetDir, spec)) {
+    try {
+      console.log(`Minimizing existing GStreamer ${gstreamerVersion} runtime for ${target}`)
+      pruneDisplayRuntime(targetDir, spec)
+      validateRuntime(targetDir, spec)
+      writeFileSync(versionPath(targetDir), versionMarker(), 'utf8')
+      return
+    } catch (error) {
+      console.warn(`Existing GStreamer runtime could not be minimized: ${formatDownloadError(error)}. Redownloading...`)
+    }
   }
 
   mkdirSync(gstreamerRoot, { recursive: true })
@@ -353,9 +585,9 @@ async function prepareTarget(target) {
     throw new Error(`Unsupported GStreamer package kind: ${spec.kind}`)
   }
 
-  pruneDisplayPlugins(targetDir)
+  pruneDisplayRuntime(targetDir, spec)
   validateRuntime(targetDir, spec)
-  writeFileSync(versionPath(targetDir), `${gstreamerVersion}\n`, 'utf8')
+  writeFileSync(versionPath(targetDir), versionMarker(), 'utf8')
   rmSync(archivePath, { force: true })
   console.log(`Prepared GStreamer for ${target} in ${targetDir}`)
 }

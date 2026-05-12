@@ -17,6 +17,7 @@ import (
 const (
 	displayEnabledEnv     = "MEMOH_DISPLAY_ENABLED"
 	displayRFBTCPAddrEnv  = "MEMOH_DISPLAY_RFB_TCP_ADDR"
+	displayGeometryEnv    = "MEMOH_DISPLAY_GEOMETRY"
 	displayBrowserURLEnv  = "MEMOH_DISPLAY_BROWSER_URL"
 	displayBrowserCDPPort = "9222"
 	displayBrowserProfile = "/tmp/memoh-display-browser"
@@ -28,7 +29,7 @@ const (
 	systemXkbcompPath     = "/usr/bin/xkbcomp"
 	x11SocketDir          = "/tmp/.X11-unix"
 	xvncDisplay           = ":99"
-	xvncGeometry          = "1280x800"
+	defaultXvncGeometry   = "1280x960"
 	xvncSocketPath        = x11SocketDir + "/X99"
 	xvncLockPath          = "/tmp/.X99-lock"
 	defaultRFBTCPAddr     = "127.0.0.1:5999"
@@ -72,6 +73,7 @@ func superviseXvnc(ctx context.Context) {
 		}
 		ensureDisplayRuntimeLinks(ctx, resolveDisplayCommand(toolkitXkbcompPath, "/usr/bin/xkbcomp", "/usr/local/bin/xkbcomp", "xkbcomp"))
 		rfbTCPAddr := displayRFBTCPAddr()
+		geometry := displayGeometry()
 		prepareX11SocketDir(ctx)
 		if displayTCPReady(ctx, rfbTCPAddr) {
 			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
@@ -88,7 +90,7 @@ func superviseXvnc(ctx context.Context) {
 		prepareDisplaySockets(ctx)
 		cmd := exec.CommandContext(ctx, xvncPath, //nolint:gosec // path is a fixed runtime bundle executable
 			xvncDisplay,
-			"-geometry", xvncGeometry,
+			"-geometry", geometry,
 			"-depth", "24",
 			"-SecurityTypes", "None",
 			"-localhost",
@@ -183,6 +185,14 @@ func displayRFBTCPAddr() string {
 		return defaultRFBTCPAddr
 	}
 	return addr
+}
+
+func displayGeometry() string {
+	geometry := strings.TrimSpace(os.Getenv(displayGeometryEnv))
+	if geometry == "" {
+		return defaultXvncGeometry
+	}
+	return geometry
 }
 
 func displayRFBTCPPort(addr string) string {
