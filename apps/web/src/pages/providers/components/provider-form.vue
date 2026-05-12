@@ -405,7 +405,10 @@ const oauthStatus = ref<ProvidersOAuthStatus | null>(null)
 const oauthStatusLoading = ref(false)
 const authorizeLoading = ref(false)
 const revokeLoading = ref(false)
-const pollTimer = ref<number | null>(null)
+const devicePollTimer = ref<number | null>(null)
+const webPollTimer = ref<number | null>(null)
+const webOAuthPollIntervalMs = 2000
+const webOAuthPollTimeoutMs = 5 * 60 * 1000
 
 async function runTest() {
   if (!props.provider?.id) return
@@ -559,25 +562,40 @@ const editProvider = form.handleSubmit(async (value) => {
 
 const oauthExpired = computed(() => Boolean(oauthStatus.value?.has_token && oauthStatus.value?.expired))
 
-function clearPollTimer() {
-  if (pollTimer.value !== null) {
-    window.clearTimeout(pollTimer.value)
-    pollTimer.value = null
+function clearDevicePollTimer() {
+  if (devicePollTimer.value !== null) {
+    window.clearTimeout(devicePollTimer.value)
+    devicePollTimer.value = null
   }
 }
 
-async function fetchOAuthStatus() {
-  if (!props.provider?.id) return
+function clearWebPollTimer() {
+  if (webPollTimer.value !== null) {
+    window.clearTimeout(webPollTimer.value)
+    webPollTimer.value = null
+  }
+}
+
+function clearPollTimers() {
+  clearDevicePollTimer()
+  clearWebPollTimer()
+}
+
+async function fetchOAuthStatus(): Promise<ProvidersOAuthStatus | null> {
+  if (!props.provider?.id) return null
   oauthStatusLoading.value = true
   try {
     const { data } = await getProvidersByIdOauthStatus({
       path: { id: props.provider.id },
       throwOnError: true,
     })
-    oauthStatus.value = data ?? null
+    const nextStatus = data ?? null
+    oauthStatus.value = nextStatus
+    return nextStatus
   } catch (error) {
     oauthStatus.value = null
     console.error('failed to load provider oauth status', error)
+    return null
   } finally {
     oauthStatusLoading.value = false
   }
@@ -598,13 +616,13 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
       toast.success(t('provider.oauth.authorizeSuccess'))
     }
   } catch (error) {
-    clearPollTimer()
+    clearDevicePollTimer()
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
   }
 }
 
 watch(oauthStatus, (status) => {
-  clearPollTimer()
+  clearDevicePollTimer()
   if (form.values.client_type !== 'github-copilot') {
     return
   }
@@ -612,14 +630,32 @@ watch(oauthStatus, (status) => {
     return
   }
   const intervalSeconds = Math.max(status.device.interval_seconds ?? 5, 1)
-  pollTimer.value = window.setTimeout(() => {
+  devicePollTimer.value = window.setTimeout(() => {
     void pollOAuthAuthorization(true)
   }, intervalSeconds * 1000)
 })
 
 onBeforeUnmount(() => {
-  clearPollTimer()
+  clearPollTimers()
 })
+
+function scheduleWebOAuthStatusPoll(startedAt: number, onAuthorized: () => Promise<void>) {
+  clearWebPollTimer()
+  webPollTimer.value = window.setTimeout(() => {
+    void (async () => {
+      const status = await fetchOAuthStatus()
+      if (status?.has_token && !status.expired) {
+        await onAuthorized()
+        return
+      }
+      if (Date.now() - startedAt >= webOAuthPollTimeoutMs) {
+        authorizeLoading.value = false
+        return
+      }
+      scheduleWebOAuthStatusPoll(startedAt, onAuthorized)
+    })()
+  }, webOAuthPollIntervalMs)
+}
 
 async function handleAuthorize() {
   if (!props.provider?.id) return
@@ -640,21 +676,31 @@ async function handleAuthorize() {
         callback_url: '',
         device: result.device,
       }
+      authorizeLoading.value = false
       return
     }
     if (!result.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(result.auth_url, 'provider-oauth', 'width=600,height=720')
-    const listener = async (event: MessageEvent) => {
-      if (event.data?.type !== 'memoh-provider-oauth-success') return
+    let completed = false
+    const completeAuthorization = async () => {
+      if (completed) return
+      completed = true
+      clearWebPollTimer()
       window.removeEventListener('message', listener)
       popup?.close()
       toast.success(t('provider.oauth.authorizeSuccess'))
       await fetchOAuthStatus()
+      authorizeLoading.value = false
+    }
+    const listener = async (event: MessageEvent) => {
+      if (event.data?.type !== 'memoh-provider-oauth-success') return
+      await completeAuthorization()
     }
     window.addEventListener('message', listener)
+    scheduleWebOAuthStatusPoll(Date.now(), completeAuthorization)
   } catch (error) {
+    clearWebPollTimer()
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
-  } finally {
     authorizeLoading.value = false
   }
 }
@@ -686,7 +732,7 @@ async function handleCopyDeviceCode() {
 
 async function handleRevoke() {
   if (!props.provider?.id) return
-  clearPollTimer()
+  clearPollTimers()
   revokeLoading.value = true
   try {
     await deleteProvidersByIdOauthToken({

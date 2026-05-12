@@ -5,7 +5,15 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
 import { stopEmbeddedQdrant } from './qdrant'
-import { defaultWorkspacePath, ensureLocalServer, getDesktopAuthToken, getLocalServerStatus, stopManagedServer } from './local-server'
+import {
+  defaultWorkspacePath,
+  ensureLocalServer,
+  ensureProviderOAuthCallbackProxy,
+  getDesktopAuthToken,
+  getLocalServerStatus,
+  stopManagedServer,
+  stopProviderOAuthCallbackProxy,
+} from './local-server'
 import {
   detectCliState,
   installCli,
@@ -78,6 +86,7 @@ const pendingSettingsNavigate = new Map<number, string>()
 let stoppingLocalProcesses = false
 
 async function stopLocalProcesses(): Promise<void> {
+  await stopProviderOAuthCallbackProxy()
   await stopManagedServer()
   await stopEmbeddedQdrant()
 }
@@ -478,6 +487,7 @@ async function rebuildAppMenu(): Promise<void> {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('ai.memoh.desktop')
   await ensureLocalServer()
+  await ensureProviderOAuthCallbackProxy()
 
   if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)

@@ -1,6 +1,7 @@
 import { app, dialog } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer, request, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { ensureEmbeddedQdrant, getEmbeddedQdrantStatus } from './qdrant'
 import {
@@ -16,12 +17,14 @@ import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
 export const LOCAL_SERVER_PORT = 18731
 export const LOCAL_SERVER_BASE_URL = `http://127.0.0.1:${LOCAL_SERVER_PORT}`
+const PROVIDER_OAUTH_CALLBACK_PORT = 1455
 
 let startedProcess: ChildProcess | null = null
 let serverReady = false
 let serverError: string | null = null
 let desktopAuthToken: string | null = null
 let preparedServerCommand: ServerCommand | null = null
+let providerOAuthCallbackProxies: Server[] = []
 
 export interface LocalServerStatus {
   baseUrl: string
@@ -122,6 +125,82 @@ function pidPath(): string {
 
 function appendLog(message: string): void {
   appendLineLog(logPath(), message)
+}
+
+function proxyProviderOAuthCallback(req: IncomingMessage, res: ServerResponse): void {
+  const target = new URL(req.url ?? '/', LOCAL_SERVER_BASE_URL)
+  const headers = { ...req.headers }
+  delete headers.host
+  delete headers.connection
+
+  const upstream = request({
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port,
+    method: req.method,
+    path: `${target.pathname}${target.search}`,
+    headers,
+  }, (upstreamRes) => {
+    res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
+    upstreamRes.pipe(res)
+  })
+
+  upstream.once('error', (error) => {
+    appendLog(`provider oauth callback proxy error: ${error.message}`)
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+    }
+    res.end('Memoh local server is not available')
+  })
+
+  req.pipe(upstream)
+}
+
+function listen(server: Server, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(PROVIDER_OAUTH_CALLBACK_PORT, host, () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  })
+}
+
+export async function ensureProviderOAuthCallbackProxy(): Promise<void> {
+  if (providerOAuthCallbackProxies.length > 0) {
+    return
+  }
+
+  for (const host of ['127.0.0.1', '::1']) {
+    const server = createServer(proxyProviderOAuthCallback)
+    try {
+      await listen(server, host)
+      providerOAuthCallbackProxies.push(server)
+      appendLog(`provider oauth callback proxy listening on ${host}:${PROVIDER_OAUTH_CALLBACK_PORT}`)
+    } catch (error) {
+      appendLog(`provider oauth callback proxy failed on ${host}:${PROVIDER_OAUTH_CALLBACK_PORT}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+}
+
+export async function stopProviderOAuthCallbackProxy(): Promise<void> {
+  const proxies = providerOAuthCallbackProxies
+  providerOAuthCallbackProxies = []
+  await Promise.all(proxies.map(server => closeServer(server).catch((error: unknown) => {
+    appendLog(`provider oauth callback proxy close failed: ${error instanceof Error ? error.message : String(error)}`)
+  })))
 }
 
 function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: string | undefined, providersDir: string): string {
