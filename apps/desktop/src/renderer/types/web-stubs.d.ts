@@ -17,8 +17,10 @@ declare module '@memohai/web/router' {
 
 declare module '@memohai/web/i18n' {
   import type { I18n } from 'vue-i18n'
+  import type { ComputedRef } from 'vue'
   const i18n: I18n
   export default i18n
+  export function i18nRef(key: string): ComputedRef<string>
 }
 
 declare module '@memohai/web/api-client' {

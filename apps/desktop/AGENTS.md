@@ -138,10 +138,24 @@ typecheck.
 real `exports` field. So bundle behaviour is unchanged; only `vue-tsc`
 follows the stubs.
 
+The typecheck import graph must still mirror the runtime import graph. When
+desktop reuses workspace package exports, source files must import through
+the same public module specifiers that Vite bundles at runtime, and the
+renderer stubs must model that same surface. Do not paper over `vue-tsc`
+errors by swapping imports to aliases or private source paths unless both
+Vite and `tsconfig.web.json` intentionally resolve that specifier to the
+same module. A resolver mismatch can make one pipeline pass while the other
+fails, or make typecheck validate a different module than the one packaged
+at runtime.
+
 When you add a new `@memohai/web/*` import in the desktop renderer, add a
 matching `declare module` to `web-stubs.d.ts`. The wildcard
 `declare module '@memohai/web/*.vue'` already covers any `.vue` SFC reached
 through the wildcard `./*` export.
+
+When you import a new component directly from `@memohai/ui`, add that
+component to `ui-stubs.d.ts` as well. The package may export it correctly,
+but desktop's renderer typecheck only sees the stubbed surface.
 
 ## Multi-Window Lifecycle
 
@@ -552,6 +566,14 @@ list to check.
 - **Update both `tsconfig.web.json` paths and `web-stubs.d.ts`** when adding
   a new `@memohai/web/foo` import. Forgetting the stub yields
   `TS2307: Cannot find module` even though the bundle works.
+- **Keep typecheck resolution and runtime resolution isomorphic.** Desktop
+  renderer code must import reused workspace modules through the same public
+  specifiers that Vite bundles at runtime, then model that surface in the
+  stubs. Do not mix in alternate aliases or private source paths unless both
+  Vite and `tsconfig.web.json` intentionally resolve them to the same target.
+- **Update `ui-stubs.d.ts` for direct `@memohai/ui` imports.** A component
+  exported by the real UI package still needs to exist in the desktop stub
+  if desktop imports it directly.
 - **Run `pnpm --filter @memohai/desktop typecheck` after every renderer
   change.** It's fast (only types desktop's own code thanks to the stubs)
   and catches the common drift cases (missing stub, wrong store/component

@@ -22,6 +22,12 @@ declare module '@memohai/ui' {
   export const AvatarFallback: LooseComponent
   export const AvatarImage: LooseComponent
   export const Badge: LooseComponent
+  export const Breadcrumb: LooseComponent
+  export const BreadcrumbItem: LooseComponent
+  export const BreadcrumbLink: LooseComponent
+  export const BreadcrumbList: LooseComponent
+  export const BreadcrumbPage: LooseComponent
+  export const BreadcrumbSeparator: LooseComponent
   export const Button: LooseComponent
   export const Card: LooseComponent
   export const CardHeader: LooseComponent

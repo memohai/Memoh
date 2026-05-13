@@ -7,7 +7,7 @@
 // children — adding a new settings page to web means adding an entry here.
 
 import type { Component } from 'vue'
-import { i18nRef } from '@/i18n'
+import { i18nRef } from '@memohai/web/i18n'
 
 export interface SettingsRouteSpec {
   name?: string
@@ -27,18 +27,18 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
       {
         name: 'bots',
         path: '',
-        loader: () => import('@/pages/bots/index.vue'),
+        loader: () => import('@memohai/web/pages/bots/index.vue'),
       },
       {
         name: 'bot-new',
         path: 'new',
-        loader: () => import('@/pages/bots/new.vue'),
+        loader: () => import('@memohai/web/pages/bots/new.vue'),
         meta: { breadcrumb: i18nRef('bots.createBot') }
       },
       {
         name: 'bot-detail',
         path: ':botId',
-        loader: () => import('@/pages/bots/detail.vue'),
+        loader: () => import('@memohai/web/pages/bots/detail.vue'),
         meta: { breadcrumb: (route: { params: { botId?: string } }) => route.params.botId }
       },
     ]
@@ -46,73 +46,73 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
   {
     name: 'providers',
     path: '/settings/providers',
-    loader: () => import('@/pages/providers/index.vue'),
+    loader: () => import('@memohai/web/pages/providers/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.providers') }
   },
   {
     name: 'web-search',
     path: '/settings/web-search',
-    loader: () => import('@/pages/web-search/index.vue'),
+    loader: () => import('@memohai/web/pages/web-search/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.webSearch') }
   },
   {
     name: 'memory',
     path: '/settings/memory',
-    loader: () => import('@/pages/memory/index.vue'),
+    loader: () => import('@memohai/web/pages/memory/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.memory') }
   },
   {
     name: 'speech',
     path: '/settings/speech',
-    loader: () => import('@/pages/speech/index.vue'),
+    loader: () => import('@memohai/web/pages/speech/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.speech') }
   },
   {
     name: 'transcription',
     path: '/settings/transcription',
-    loader: () => import('@/pages/transcription/index.vue'),
+    loader: () => import('@memohai/web/pages/transcription/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.transcription') }
   },
   {
     name: 'email',
     path: '/settings/email',
-    loader: () => import('@/pages/email/index.vue'),
+    loader: () => import('@memohai/web/pages/email/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.email') }
   },
   {
     name: 'usage',
     path: '/settings/usage',
-    loader: () => import('@/pages/usage/index.vue'),
+    loader: () => import('@memohai/web/pages/usage/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.usage') }
   },
   {
     name: 'appearance',
     path: '/settings/appearance',
-    loader: () => import('@/pages/appearance/index.vue'),
+    loader: () => import('@memohai/web/pages/appearance/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.appearance') }
   },
   {
     name: 'profile',
     path: '/settings/profile',
-    loader: () => import('@/pages/profile/index.vue'),
+    loader: () => import('@memohai/web/pages/profile/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.profile') }
   },
   {
     name: 'platform',
     path: '/settings/platform',
-    loader: () => import('@/pages/platform/index.vue'),
+    loader: () => import('@memohai/web/pages/platform/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.platform') }
   },
   {
     name: 'supermarket',
     path: '/settings/supermarket',
-    loader: () => import('@/pages/supermarket/index.vue'),
+    loader: () => import('@memohai/web/pages/supermarket/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.supermarket') }
   },
   {
     name: 'about',
     path: '/settings/about',
-    loader: () => import('@/pages/about/index.vue'),
+    loader: () => import('@memohai/web/pages/about/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.about') }
   },
 ]

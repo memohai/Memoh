@@ -1,4 +1,5 @@
-import { createRouter, createMemoryHistory, type RouteRecordRaw } from 'vue-router'
+import { h } from 'vue'
+import { createRouter, createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH, type SettingsRouteSpec } from '../shared/settings-routes'
 
 // Settings-window router. Mirrors the path layout under `/settings/*` from
@@ -8,13 +9,17 @@ import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH, type SettingsRouteSpec } f
 // into `/settings/bots` (or whatever path the chat window asks for via the
 // `settings:navigate` IPC).
 
-const mapSpecToRoute = (spec: SettingsRouteSpec): RouteRecordRaw => ({
-  name: spec.name,
-  path: spec.path,
-  component: spec.loader,
-  meta: spec.meta,
-  children: spec.children?.map(mapSpecToRoute),
-})
+const mapSpecToRoute = (spec: SettingsRouteSpec): RouteRecordRaw => {
+  const route = {
+    path: spec.path,
+    component: spec.loader ?? { render: () => h(RouterView) },
+    ...(spec.name ? { name: spec.name } : {}),
+    ...(spec.meta ? { meta: spec.meta } : {}),
+    ...(spec.children ? { children: spec.children.map(mapSpecToRoute) } : {}),
+  } satisfies RouteRecordRaw
+
+  return route
+}
 
 const realRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSpecToRoute)
 

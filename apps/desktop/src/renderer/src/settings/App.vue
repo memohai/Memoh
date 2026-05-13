@@ -56,7 +56,8 @@ const breadcrumbs = computed(() => {
     }
   }
   if (items.length > 0) {
-    items[items.length - 1].isLast = true
+    const lastItem = items[items.length - 1]
+    if (lastItem) lastItem.isLast = true
   }
   return items
 })
