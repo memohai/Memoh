@@ -1,133 +1,209 @@
 <template>
-  <section class=" mx-auto absolute inset-0  flex flex-col">
-    <!-- Header -->
-    <div class="flex p-4 items-center gap-4">
-      <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden">
-        <Avatar class="size-16 rounded-full">
-          <AvatarImage
-            v-if="bot?.avatar_url"
-            :src="bot.avatar_url"
-            :alt="bot.display_name"
-          />
-          <AvatarFallback class="text-xl">
-            {{ avatarFallback }}
-          </AvatarFallback>
-        </Avatar>
-        <button
-          type="button"
-          class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-          :title="$t('common.edit')"
-          :aria-label="$t('common.edit')"
-          :disabled="!bot || botLifecyclePending"
-          @click="handleEditAvatar"
-        >
-          <SquarePen
-            class="size-6 text-white"
-          />
-        </button>
-      </div>
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <template v-if="isEditingBotName && bot">
-            <Input
-              v-model="botNameDraft"
-              class="h-9 max-w-xl"
-              :placeholder="$t('bots.displayNamePlaceholder')"
-              :disabled="isSavingBotName"
-              @keydown.enter.prevent="handleConfirmBotName"
-              @keydown.esc.prevent="handleCancelBotName"
-            />
-            <LoadingButton
-              size="sm"
-              :loading="isSavingBotName"
-              :disabled="!canConfirmBotName"
-              @click="handleConfirmBotName"
-            >
-              {{ $t('common.confirm') }}
-            </LoadingButton>
-            <Button
-              variant="ghost"
-              size="sm"
-              :disabled="isSavingBotName"
-              @click="handleCancelBotName"
-            >
-              {{ $t('common.cancel') }}
-            </Button>
-          </template>
-          <template v-else>
-            <h2 class="truncate text-sm font-medium">
-              {{ botNameDraft.trim() || bot?.display_name || botId }}
-            </h2>
-            <Button
-              v-if="bot"
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="size-7 p-0"
-              :disabled="botLifecyclePending"
-              :title="$t('common.edit')"
-              :aria-label="$t('common.edit')"
-              @click="handleStartEditBotName"
-            >
-              <SquarePen
-                class="size-3.5"
-              />
-            </Button>
-          </template>
-        </div>
-        <div class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-          <Badge
-            v-if="bot"
-            :variant="statusVariant"
-            class="text-xs"
-            :title="hasIssue ? issueTitle : undefined"
-          >
-            <LoaderCircle
-              v-if="bot.status === 'creating' || bot.status === 'deleting'"
-              class="mr-1 size-3 animate-spin"
-            />
-            {{ statusLabel }}
-          </Badge>
-          <span v-if="bot?.type">{{ botTypeLabel }}</span>
-        </div>
-      </div>
-    </div>
-    <Separator />
+  <section class="mx-auto absolute inset-0 flex flex-col bg-background">
     <div class="flex-1 relative">
       <MasterDetailSidebarLayout
         class="[&_td:last-child]:w-45"
       >
-        <template #sidebar-content>
-          <SidebarMenu
-            v-for="tab in tabList"
-            :key="tab.value"
-          >
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                as-child
-                class="justify-start py-5! px-4"
-              >
-                <Toggle
-                  :class="`py-4 border border-transparent ${activeTab === tab.value ? 'border-inherit' : ''}`"
-                  :model-value="isActive(tab.value as string).value"
-                  @update:model-value="(isSelect: boolean) => {
-                    if (isSelect) {
-                      activeTab = tab.value
-                    }
-                  }"
+        <template #sidebar-header>
+          <!-- Bot Identity Header -->
+          <div class="p-4 pb-3 flex flex-col">
+            <div class="flex items-center gap-3">
+              <!-- Avatar -->
+              <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
+                <Avatar class="size-12 rounded-full">
+                  <AvatarImage
+                    v-if="bot?.avatar_url"
+                    :src="bot.avatar_url"
+                    :alt="bot.display_name"
+                  />
+                  <AvatarFallback class="text-lg">
+                    {{ avatarFallback }}
+                  </AvatarFallback>
+                </Avatar>
+                <!-- Edit Overlay -->
+                <button
+                  type="button"
+                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                  :title="$t('common.edit')"
+                  :aria-label="$t('common.edit')"
+                  :disabled="!bot || botLifecyclePending"
+                  @click="handleEditAvatar"
                 >
-                  {{ $t(tab.label) }}
-                </Toggle>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+                  <SquarePen class="size-4 text-white" />
+                </button>
+              </div>
+              
+              <!-- Info Block -->
+              <div class="min-w-0 flex-1 flex flex-col justify-center">
+                <div class="group/name flex items-center gap-1 relative min-w-0">
+                  <template v-if="isEditingBotName && bot">
+                    <Input
+                      ref="editNameInputRef"
+                      v-model="botNameDraft"
+                      class="h-7 w-full text-xs px-2 pr-6 shadow-none"
+                      :placeholder="$t('bots.displayNamePlaceholder')"
+                      :disabled="isSavingBotName"
+                      @keydown.enter.prevent="handleConfirmBotName"
+                      @keydown.esc.prevent="handleCancelBotName"
+                      @blur="handleConfirmBotName"
+                    />
+                    <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
+                      <Check class="size-3" />
+                    </div>
+                  </template>
+                  <template v-else>
+                    <h2 class="truncate text-sm font-semibold text-foreground">
+                      {{ botNameDraft.trim() || bot?.display_name || botId }}
+                    </h2>
+                    <button
+                      v-if="bot"
+                      type="button"
+                      class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                      :disabled="botLifecyclePending"
+                      @click="handleStartEditBotName"
+                    >
+                      <SquarePen class="size-3 text-muted-foreground" />
+                    </button>
+                  </template>
+                </div>
+                
+                <!-- Status Badge (Flat Industrial Style) -->
+                <div class="mt-0.5">
+                  <div
+                    v-if="bot"
+                    class="inline-flex items-center h-5 bg-[#27272a] rounded-full px-2 gap-1.5"
+                    :title="hasIssue ? issueTitle : undefined"
+                  >
+                    <LoaderCircle
+                      v-if="bot.status === 'creating' || bot.status === 'deleting'"
+                      class="size-2.5 animate-spin text-[#d0d0d4]"
+                    />
+                    <div
+                      v-else
+                      class="size-1.5 rounded-full"
+                      :class="statusVariant === 'destructive' ? 'bg-destructive' : 'bg-success'"
+                    />
+                    <span class="text-[10px] font-medium text-[#d0d0d4]">{{ statusLabel }}</span>
+                  </div>
+                  <span
+                    v-if="bot?.type"
+                    class="text-[10px] text-muted-foreground ml-1.5"
+                  >{{ botTypeLabel }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Search Input -->
+            <div class="mt-4 relative">
+              <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+              <Input
+                v-model="searchQuery"
+                type="text"
+                class="pl-8 h-8 text-xs bg-transparent shadow-none focus-visible:ring-0"
+                :placeholder="$t('common.search')"
+              />
+              <button
+                v-if="searchQuery"
+                type="button"
+                class="absolute right-2 top-1/2 -translate-y-1/2 size-4 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground shrink-0"
+                @click="searchQuery = ''"
+              >
+                <X class="size-2.5" />
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <template #sidebar-content>
+          <!-- Search Results View -->
+          <div
+            v-if="searchQuery"
+            class="flex flex-col gap-1"
+          >
+            <div
+              v-if="searchResults.length === 0"
+              class="px-3 py-4 text-xs text-muted-foreground text-center"
+            >
+              {{ $t('common.noData') }}
+            </div>
+            <SidebarMenu
+              v-else
+              class="m-0 p-0 gap-1"
+            >
+              <SidebarMenuItem
+                v-for="(result, idx) in searchResults"
+                :key="idx"
+              >
+                <SidebarMenuButton
+                  as-child
+                  class="justify-start py-0! px-0 h-11 before:hidden"
+                >
+                  <button
+                    class="w-full flex flex-col items-start justify-center py-2 px-3 text-left border border-transparent transition-colors hover:bg-accent hover:text-accent-foreground rounded-md group/result"
+                    @click="() => { activeTab = result.tab; searchQuery = '' }"
+                  >
+                    <span class="text-xs font-medium text-foreground group-hover/result:text-accent-foreground">{{ result.translatedTitle }}</span>
+                    <span class="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 group-hover/result:text-accent-foreground/70">
+                      <component
+                        :is="tabList.find(t => t.value === result.tab)?.icon"
+                        class="size-3 opacity-70"
+                      />
+                      {{ $t(`bots.tabs.${result.tab}`) }}
+                    </span>
+                  </button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </div>
+
+          <!-- Normal Grouped View -->
+          <template v-else>
+            <div
+              v-for="(group, idx) in groupedTabs"
+              :key="group.key"
+              :class="idx > 0 ? 'mt-4' : ''"
+              class="flex flex-col gap-0.5"
+            >
+              <SidebarMenu
+                v-for="tab in group.items"
+                :key="tab.value"
+                class="m-0 p-0"
+              >
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    as-child
+                    :is-active="activeTab === tab.value"
+                    class="justify-start py-0! px-0 h-10 before:hidden"
+                  >
+                    <Toggle
+                      class="w-full justify-start h-10 px-3 text-xs font-medium border-0 bg-transparent! transition-colors gap-3"
+                      :model-value="isActive(tab.value).value"
+                      @update:model-value="(isSelect: boolean) => {
+                        if (isSelect) {
+                          activeTab = tab.value
+                        }
+                      }"
+                    >
+                      <component
+                        :is="tab.icon"
+                        v-if="tab.icon"
+                        class="size-4 shrink-0"
+                      />
+                      <span class="truncate">{{ $t(tab.label) }}</span>
+                    </Toggle>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </div>
+          </template>
         </template>
 
         <template #sidebar-footer />
 
         <template #detail>
-          <div class="absolute inset-0 overflow-y-auto">
-            <div class="p-4">
+          <div class="absolute inset-0 overflow-y-auto bg-background">
+            <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
+            <div class="px-6 pt-4 pb-12 max-w-4xl mx-auto">
               <KeepAlive>
                 <component
                   :is="activeComponent?.component"
@@ -150,20 +226,15 @@
 
 <script setup lang="ts">
 import {
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
-  Badge,
-  Button,
-  Input,
-  Separator,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  Toggle
+  Avatar, AvatarImage, AvatarFallback, Input,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, Toggle
 } from '@memohai/ui'
-import { SquarePen, LoaderCircle } from 'lucide-vue-next'
-import { computed, ref, watch, onMounted, toValue } from 'vue'
+import {
+  SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
+  BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
+  Monitor, Globe
+} from 'lucide-vue-next'
+import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -180,7 +251,7 @@ import type {
   HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
-import LoadingButton from '@/components/loading-button/index.vue'
+
 import BotSettings from './components/bot-settings.vue'
 import BotToolApproval from './components/bot-tool-approval.vue'
 import BotDesktop from './components/bot-desktop.vue'
@@ -209,7 +280,10 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 
 const route = useRoute()
 const { t } = useI18n()
-const botId = computed(() => route.params.botId as string)
+const botId = computed(() => {
+  const id = route.params.botId
+  return typeof id === 'string' ? id : ''
+})
 
 const { data: bot } = useQuery({
   key: () => ['bot', botId.value],
@@ -229,23 +303,21 @@ const isLocalWorkspace = computed(() =>
 const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
-    {
-      value: 'overview', label: 'bots.tabs.overview', component: BotOverview, params: {}
-    },
-    { value: 'general', label: 'bots.tabs.general', component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'desktop', label: 'bots.tabs.desktop', component: BotDesktop, params: { 'bot-id': bot_id } },
-    { value: 'container', label: 'bots.tabs.container', component: BotContainer, params: {} },
-    { value: 'network', label: 'bots.tabs.network', component: BotNetwork, params: { 'bot-id': bot_id } },
-    { value: 'memory', label: 'bots.tabs.memory', component: BotMemory, params: { 'bot-id': bot_id } },
-    { value: 'channels', label: 'bots.tabs.channels', component: BotChannels, params: { 'bot-id': bot_id } },
-    { value: 'access', label: 'bots.tabs.access', component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'tool-approval', label: 'bots.tabs.toolApproval', component: BotToolApproval, params: { 'bot-id': bot_id } },
-    { value: 'email', label: 'bots.tabs.email', component: BotEmail, params: { 'bot-id': bot_id } },
-    { value: 'mcp', label: 'bots.tabs.mcp', component: BotMcp, params: { 'bot-id': bot_id } },
-    { value: 'heartbeat', label: 'bots.tabs.heartbeat', component: BotHeartbeat, params: { 'bot-id': bot_id } },
-    { value: 'compaction', label: 'bots.tabs.compaction', component: BotCompaction, params: { 'bot-id': bot_id } },
-    { value: 'schedule', label: 'bots.tabs.schedule', component: BotSchedule, params: { 'bot-id': bot_id } },
-    { value: 'skills', label: 'bots.tabs.skills', component: BotSkills, params: { 'bot-id': bot_id } },
+    { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
+    { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id } },
+    { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {} },
+    { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id } },
+    { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
+    { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
+    { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
+    { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
+    { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
+    { value: 'heartbeat', label: 'bots.tabs.heartbeat', icon: HeartPulse, component: BotHeartbeat, params: { 'bot-id': bot_id } },
+    { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
+    { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
+    { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
   ]
   if (isLocalWorkspace.value) {
     return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network' && tab.value !== 'desktop')
@@ -253,6 +325,58 @@ const tabList = computed(() => {
   return tabs
 })
 
+const searchQuery = ref('')
+
+const searchIndex = computed(() => {
+  return [
+    { tab: 'general', key: 'bots.settings.blocks.global', keywords: ['name', 'avatar', 'description', 'timezone'] },
+    { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['language', 'chat model', 'reasoning'] },
+    { tab: 'general', key: 'bots.settings.blocks.context', keywords: ['browser', 'search', 'provider'] },
+    { tab: 'general', key: 'bots.settings.blocks.multimedia', keywords: ['image', 'tts', 'transcription'] },
+    { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
+    { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
+    { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
+    { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'qdrant', 'embed'] },
+    { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
+    { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
+    { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
+    { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
+    { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'plugins'] },
+    { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },
+    { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
+    { tab: 'schedule', key: 'bots.schedule.title', keywords: ['cron', 'jobs', 'tasks', 'automation'] },
+    { tab: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
+  ].map(item => ({
+    ...item,
+    translatedTitle: t(item.key)
+  }))
+})
+
+const searchResults = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim()
+  if (!query) return []
+  
+  return searchIndex.value.filter(item => {
+    return item.translatedTitle.toLowerCase().includes(query) || 
+           item.keywords.some(k => k.toLowerCase().includes(query)) ||
+           t(`bots.tabs.${item.tab}`).toLowerCase().includes(query) ||
+           item.tab.toLowerCase().includes(query)
+  })
+})
+
+const groupedTabs = computed(() => {
+  const coreKeys = ['overview', 'general', 'channels']
+  const capabilityKeys = ['skills', 'tool-approval', 'mcp', 'memory']
+  const runtimeKeys = ['desktop', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
+  const securityKeys = ['access', 'email']
+
+  return [
+    { key: 'core', items: tabList.value.filter(t => coreKeys.includes(t.value)) },
+    { key: 'capabilities', items: tabList.value.filter(t => capabilityKeys.includes(t.value)) },
+    { key: 'runtime', items: tabList.value.filter(t => runtimeKeys.includes(t.value)) },
+    { key: 'security', items: tabList.value.filter(t => securityKeys.includes(t.value)) },
+  ].filter(g => g.items.length > 0)
+})
 
 const isActive = (name: string) => computed(() => {
   return activeTab.value === name
@@ -266,8 +390,6 @@ const capabilitiesStore = useCapabilitiesStore()
 onMounted(() => {
   void capabilitiesStore.load()
 })
-
-
 
 const queryCache = useQueryCache()
 const { mutateAsync: updateBot, isLoading: updateBotLoading } = useMutation({
@@ -288,6 +410,7 @@ async function fetchChecks(id: string): Promise<BotCheck[]> {
 
 const isEditingBotName = ref(false)
 const botNameDraft = ref('')
+const editNameInputRef = ref<InstanceType<typeof Input> | null>(null)
 
 // Replace breadcrumb bot id with display name when available.
 watch(bot, (val) => {
@@ -376,8 +499,6 @@ watch([activeTab, botId], ([tab]) => {
   }
 }, { immediate: true })
 
-
-
 function resolveErrorMessage(error: unknown, fallback: string): string {
   return resolveApiErrorMessage(error, fallback)
 }
@@ -391,6 +512,13 @@ function handleStartEditBotName() {
   if (!bot.value) return
   isEditingBotName.value = true
   botNameDraft.value = bot.value.display_name || ''
+  nextTick(() => {
+    const el = editNameInputRef.value?.$el
+    if (el) {
+      const input = el instanceof HTMLInputElement ? el : el.querySelector('input')
+      if (input) input.focus()
+    }
+  })
 }
 
 function handleCancelBotName() {
@@ -416,7 +544,6 @@ async function handleConfirmBotName() {
     toast.error(resolveErrorMessage(error, t('bots.renameFailed')))
   }
 }
-
 
 async function loadChecks(showToast: boolean) {
   checksLoading.value = true
@@ -476,5 +603,4 @@ async function loadSnapshots() {
     snapshotsLoading.value = false
   }
 }
-
 </script>

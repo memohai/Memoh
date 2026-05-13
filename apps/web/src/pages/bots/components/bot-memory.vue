@@ -1,66 +1,203 @@
 <template>
-  <div class="flex gap-6 h-full absolute inset-0 p-4 mx-auto">
+  <div class="flex gap-6 h-full absolute inset-0 px-4 pt-4 pb-6 w-full max-w-4xl mx-auto">
     <!-- Left: File list -->
-    <div class="w-64 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full">
-      <div class="p-3 border-b space-y-3 shrink-0">
+    <div class="w-60 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full bg-background shadow-sm">
+      <div class="p-3 pb-2 border-b space-y-3 shrink-0">
         <div class="flex items-center justify-between">
           <h4 class="text-xs font-medium">
             {{ $t('bots.memory.files') }}
           </h4>
           <div class="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              class="size-8 p-0"
-              :disabled="loading || compactLoading || memories.length === 0"
-              :title="$t('bots.memory.compact')"
-              :aria-label="$t('bots.memory.compact')"
-              @click="openCompactDialog"
-            >
-              <Brain
-                class="size-3.5 text-primary"
-              />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              class="size-8 p-0"
-              :disabled="loading"
-              :aria-label="$t('common.refresh')"
-              @click="loadMemories"
-            >
-              <RefreshCw
-                :class="{ 'animate-spin': loading }"
-                class="size-3.5"
-              />
-            </Button>
+            <Popover v-model:open="compactPopoverOpen">
+              <PopoverAnchor as-child>
+                <div class="inline-block">
+                  <TooltipProvider>
+                    <Tooltip
+                      :delay-duration="300"
+                      :open="compactPopoverOpen ? false : undefined"
+                    >
+                      <TooltipTrigger as-child>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          class="size-8 p-0 hover:bg-muted/50 group"
+                          :disabled="loading || compactLoading || memories.length === 0"
+                          :aria-label="$t('bots.memory.compact')"
+                          @click="openCompactDialog"
+                        >
+                          <Brain class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="bottom"
+                        align="center"
+                      >
+                        <p class="text-[11px]">
+                          {{ $t('bots.memory.compact') }}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </PopoverAnchor>
+
+              <PopoverContent
+                side="bottom"
+                align="start"
+                class="w-72 p-3 flex flex-col gap-3 shadow-md"
+                :side-offset="4"
+              >
+                <div class="space-y-1">
+                  <h4 class="text-xs font-semibold text-foreground leading-none">
+                    {{ $t('bots.memory.compact') }}
+                  </h4>
+                  <p class="text-[10px] text-muted-foreground leading-snug">
+                    {{ $t('bots.memory.compactConfirm') }}
+                  </p>
+                </div>
+
+                <div class="space-y-1.5">
+                  <Label class="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">{{ $t('bots.memory.compactRatio') }}</Label>
+                  <RadioGroup
+                    v-model="compactRatio"
+                    class="grid grid-cols-1 gap-1"
+                  >
+                    <Label
+                      class="flex items-center gap-2.5 p-1.5 rounded-md border cursor-pointer hover:bg-muted/40 transition-colors"
+                      :class="{ 'bg-muted/50 border-foreground/40': compactRatio === '0.8' }"
+                    >
+                      <RadioGroupItem
+                        value="0.8"
+                        class="size-3"
+                      />
+                      <Zap class="size-3.5 text-muted-foreground shrink-0" />
+                      <div class="min-w-0">
+                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioLight') }}</p>
+                      </div>
+                    </Label>
+                    <Label
+                      class="flex items-center gap-2.5 p-1.5 rounded-md border cursor-pointer hover:bg-muted/40 transition-colors"
+                      :class="{ 'bg-muted/50 border-foreground/40': compactRatio === '0.5' }"
+                    >
+                      <RadioGroupItem
+                        value="0.5"
+                        class="size-3"
+                      />
+                      <BrainCircuit class="size-3.5 text-muted-foreground shrink-0" />
+                      <div class="min-w-0">
+                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioMedium') }}</p>
+                      </div>
+                    </Label>
+                    <Label
+                      class="flex items-center gap-2.5 p-1.5 rounded-md border cursor-pointer hover:bg-muted/40 transition-colors"
+                      :class="{ 'bg-muted/50 border-foreground/40': compactRatio === '0.3' }"
+                    >
+                      <RadioGroupItem
+                        value="0.3"
+                        class="size-3"
+                      />
+                      <Brain class="size-3.5 text-muted-foreground shrink-0" />
+                      <div class="min-w-0">
+                        <p class="text-[10px] font-medium text-foreground leading-none">{{ $t('bots.memory.compactRatioAggressive') }}</p>
+                      </div>
+                    </Label>
+                  </RadioGroup>
+                </div>
+
+                <div class="space-y-1.5">
+                  <Label class="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    {{ $t('bots.memory.compactDecayDate') }}
+                    <span class="text-muted-foreground/60 normal-case tracking-normal">({{ $t('common.optional') }})</span>
+                  </Label>
+                  <Input
+                    v-model="compactDecayDate"
+                    type="date"
+                    class="w-full h-7 text-[10px] px-2 shadow-none border-border"
+                  />
+                  <p
+                    v-if="compactDecayDays > 0"
+                    class="text-[9px] text-muted-foreground"
+                  >
+                    Calculated: {{ compactDecayDays }} days old
+                  </p>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-2 mt-1 border-t">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 text-[10px] font-medium px-2 shadow-none"
+                    @click="compactPopoverOpen = false"
+                  >
+                    {{ $t('common.cancel') }}
+                  </Button>
+                  <Button
+                    size="sm"
+                    class="h-6 text-[10px] font-medium px-3 shadow-none"
+                    :disabled="compactLoading"
+                    @click="handleCompact"
+                  >
+                    <Spinner
+                      v-if="compactLoading"
+                      class="mr-1 size-2.5"
+                    />
+                    {{ $t('common.confirm') }}
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <TooltipProvider>
+              <Tooltip :delay-duration="300">
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    class="size-8 p-0 hover:bg-muted/50 group"
+                    :disabled="loading"
+                    :aria-label="$t('common.refresh')"
+                    @click="loadMemories"
+                  >
+                    <RefreshCw
+                      :class="{ 'animate-spin': loading }"
+                      class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors"
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="bottom"
+                  align="center"
+                >
+                  <p class="text-[11px]">
+                    {{ $t('common.refresh') }}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
         <div class="relative">
-          <Search
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground"
-          />
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
           <Input
             v-model="searchQuery"
             :placeholder="$t('bots.memory.searchPlaceholder')"
-            class="pl-8 h-8 text-xs"
+            class="pl-8 h-8 text-xs bg-transparent shadow-none"
           />
         </div>
       </div>
 
-      <ScrollArea class="flex-1 min-h-0 ">
-        <div class="p-2 space-y-1">
-          <div
-            v-if="loading && memories.length === 0"
-            class="p-4 text-center"
-          >
-            <Spinner class="mx-auto" />
-          </div>
+      <ScrollArea class="flex-1 min-h-0">
+        <div class="p-2 space-y-0.5">
+          <template v-if="loading && memories.length === 0">
+            <Skeleton class="h-10 w-full rounded-md" />
+            <Skeleton class="h-10 w-full rounded-md" />
+            <Skeleton class="h-10 w-full rounded-md" />
+          </template>
           <div
             v-else-if="filteredMemories.length === 0"
-            class="p-4 text-center text-xs text-muted-foreground"
+            class="p-4 text-center text-[11px] text-muted-foreground"
           >
             {{ $t('bots.memory.empty') }}
           </div>
@@ -68,108 +205,148 @@
             v-for="item in filteredMemories"
             :key="item.id"
             type="button"
-            class="w-full text-left px-3 py-2 rounded-md text-xs transition-colors hover:bg-accent group relative"
-            :class="{ 'bg-accent font-medium text-primary': selectedId === item.id }"
+            class="w-full text-left px-3 py-1.5 rounded-md text-xs transition-colors hover:bg-accent/40 group relative"
+            :class="{ 'bg-accent/40 font-medium text-foreground': selectedId === item.id, 'text-muted-foreground': selectedId !== item.id }"
             :aria-label="`Open memory ${formatDate(item.created_at)}`"
             @click="selectMemory(item)"
           >
             <div class="flex items-center gap-2">
-              <FileText
-                class="size-3 shrink-0 opacity-70"
-              />
-              <span class="truncate pr-4">{{ formatDate(item.created_at) }}</span>
+              <FileText class="size-3 shrink-0 opacity-70" />
+              <span class="truncate pr-4 flex-1">{{ formatDate(item.created_at) }}</span>
+              <span
+                v-if="isDirty && selectedId === item.id"
+                class="text-foreground shrink-0 text-xs font-bold leading-none select-none"
+              >*</span>
             </div>
-            <div class="mt-1 text-[10px] text-muted-foreground truncate opacity-70 group-hover:opacity-100">
+            <div
+              class="mt-0.5 text-[10px] truncate opacity-70 group-hover:opacity-100"
+              :class="{ 'text-muted-foreground': selectedId !== item.id, 'text-foreground/70': selectedId === item.id }"
+            >
               {{ item.memory.length > 60 ? item.memory.slice(0, 60) + '...' : item.memory }}
             </div>
           </button>
         </div>
       </ScrollArea>
 
-      <div class="p-2 border-t mt-auto">
-        <Button
-          variant="outline"
-          size="sm"
-          class="w-full h-8 text-xs"
+      <div class="border-t p-2 bg-background shrink-0">
+        <button
+          class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer hover:bg-accent bg-transparent rounded-lg gap-1.5 px-3 w-full h-8 text-xs text-muted-foreground hover:text-foreground"
+          type="button"
           @click="openNewMemoryDialog"
         >
-          <Plus
-            class="mr-2 size-3"
-          />
+          <Plus class="mr-2 size-3" />
           {{ $t('bots.memory.newMemory') }}
-        </Button>
+        </button>
       </div>
     </div>
 
     <!-- Right: Editor/Preview -->
-    <div class="flex-1 flex flex-col border rounded-lg overflow-hidden ">
+    <div class="flex-1 flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
       <template v-if="selectedMemory">
-        <div class="flex-1 flex flex-col min-h-0">
-          <div class="p-3 border-b flex items-center justify-between bg-muted/30 shrink-0">
-            <div class="flex items-center gap-3 min-w-0">
-              <FileText
-                class="size-4 text-muted-foreground shrink-0"
-              />
-              <div class="min-w-0">
-                <h4 class="text-xs font-medium truncate">
-                  {{ formatDate(selectedMemory.created_at) }}
-                </h4>
-                <div class="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-0.5">
-                  <span class="font-mono">ID: {{ selectedMemory.id }}</span>
-                  <button
-                    type="button"
-                    class="hover:text-foreground transition-colors"
-                    :title="$t('common.copy')"
-                    :aria-label="$t('common.copy')"
-                    @click="copyToClipboard(selectedMemory.id)"
+        <!-- L4 Header -->
+        <div class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-10 p-4 shrink-0 flex items-start justify-between">
+          <div class="flex items-start gap-3 min-w-0">
+            <FileText class="size-4 text-muted-foreground shrink-0 mt-0.5" />
+            <div class="min-w-0 space-y-0.5">
+              <h4 class="text-xs font-medium text-foreground truncate">
+                {{ formatDate(selectedMemory.created_at) }}
+              </h4>
+              <TooltipProvider>
+                <Tooltip :delay-duration="300">
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm -ml-1 px-1"
+                      @click="copyToClipboard(selectedMemory.id)"
+                    >
+                      <span class="truncate">ID: {{ selectedMemory.id }}</span>
+                      <Copy class="size-2.5 shrink-0" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    align="start"
                   >
-                    <Copy
-                      class="size-2.5"
-                    />
-                  </button>
+                    <p class="text-[11px]">
+                      Click to copy
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </div>
+          <div class="flex items-center shrink-0 gap-3">
+            <Transition name="fade">
+              <div
+                v-if="isDirty"
+                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+              >
+                <div class="size-1 rounded-full bg-muted-foreground/40" />
+                <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+                  Unsaved
+                </span>
+              </div>
+            </Transition>
+
+            <Button
+              size="sm"
+              class="h-8 px-4 text-xs font-medium shadow-none min-w-24"
+              :disabled="actionLoading || !isDirty"
+              @click="handleSave"
+            >
+              <Spinner
+                v-if="actionLoading"
+                class="mr-1.5 size-3"
+              />
+              {{ $t('common.save') }}
+            </Button>
+          </div>
+        </div>
+
+        <div class="flex-1 flex flex-col min-h-0 overflow-y-auto">
+          <!-- Box-in-Box Editor -->
+          <div class="p-4 flex-1 flex flex-col min-h-0">
+            <Card class="flex-1 overflow-hidden focus-within:border-foreground/50 transition-colors shadow-none bg-background border min-h-[300px]">
+              <CardContent class="p-0 h-full relative">
+                <Textarea
+                  v-model="editContent"
+                  class="absolute inset-0 w-full h-full resize-none border-0 rounded-none focus-visible:ring-0 font-mono text-xs p-4 bg-transparent"
+                  placeholder="Write your memory content here (Markdown)..."
+                />
+              </CardContent>
+            </Card>
+
+            <!-- Danger Zone -->
+            <div class="pt-8 mt-auto">
+              <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div class="space-y-0.5">
+                    <h4 class="text-xs font-medium text-destructive">
+                      Danger Zone
+                    </h4>
+                    <p class="text-[11px] text-muted-foreground">
+                      Deleting this memory cannot be undone. Proceed with caution.
+                    </p>
+                  </div>
+                  <div class="flex justify-end shrink-0">
+                    <ConfirmPopover
+                      :message="$t('bots.memory.deleteConfirm')"
+                      @confirm="handleDelete"
+                    >
+                      <template #trigger>
+                        <Button
+                          variant="destructive"
+                          class="h-8 text-xs font-medium shadow-none min-w-28"
+                          :disabled="actionLoading"
+                        >
+                          {{ $t('common.delete') }}
+                        </Button>
+                      </template>
+                    </ConfirmPopover>
+                  </div>
                 </div>
               </div>
             </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <ConfirmPopover
-                :message="$t('bots.memory.deleteConfirm')"
-                @confirm="handleDelete"
-              >
-                <template #trigger>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    type="button"
-                    class="size-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                    :disabled="actionLoading"
-                    :aria-label="$t('common.delete')"
-                  >
-                    <Trash2
-                      class="size-3.5"
-                    />
-                  </Button>
-                </template>
-              </ConfirmPopover>
-              <Button
-                size="sm"
-                class="h-8 px-3 text-xs"
-                :disabled="actionLoading || !isDirty"
-                @click="handleSave"
-              >
-                <Spinner
-                  v-if="actionLoading"
-                  class="mr-1.5 size-3"
-                />
-                {{ $t('common.save') }}
-              </Button>
-            </div>
-          </div>
-          <div class="flex-1 relative">
-            <Textarea
-              v-model="editContent"
-              class="absolute inset-0 resize-none border-0 rounded-none focus-visible:ring-0 font-mono text-xs p-4 h-full"
-              placeholder="Write your memory content here (Markdown)..."
-            />
           </div>
         </div>
 
@@ -178,14 +355,14 @@
           v-if="showChartSection"
           class="h-60 border-t flex flex-col bg-muted/5 shrink-0"
         >
-          <div class="px-3 py-1.5 border-b bg-muted/10 flex items-center justify-between shrink-0">
+          <div class="px-4 py-2 border-b bg-muted/10 flex items-center justify-between shrink-0">
             <h5 class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
               Vector Manifold
             </h5>
           </div>
-          <div class="flex-1 flex min-h-0 divide-x overflow-hidden">
+          <div class="flex-1 flex min-h-0 overflow-hidden">
             <!-- Sparse: Top K Buckets -->
-            <div class="flex-1 flex flex-col p-3 min-w-0">
+            <div class="flex-1 flex flex-col p-4 min-w-0">
               <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
                 {{ chartLeftTitle }}
               </p>
@@ -196,8 +373,13 @@
               />
             </div>
 
+            <Separator
+              orientation="vertical"
+              class="opacity-30 h-auto"
+            />
+
             <!-- Sparse/Dense secondary chart -->
-            <div class="flex-1 flex flex-col p-3 min-w-0">
+            <div class="flex-1 flex flex-col p-4 min-w-0">
               <p class="text-[9px] font-semibold text-muted-foreground/60 mb-2 uppercase shrink-0">
                 {{ chartRightTitle }}
               </p>
@@ -210,116 +392,153 @@
           </div>
         </div>
       </template>
-      <div
+
+      <!-- Empty State -->
+      <Empty
         v-else
-        class="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center"
+        class="flex-1 flex flex-col items-center justify-center p-8 bg-muted/5"
       >
-        <div class="size-12 rounded-full bg-muted flex items-center justify-center mb-4">
-          <Brain
-            class="size-6 opacity-20"
-          />
-        </div>
-        <h3 class="text-xs font-medium text-foreground">
+        <EmptyMedia>
+          <Brain class="size-6 text-muted-foreground opacity-50" />
+        </EmptyMedia>
+        <EmptyTitle class="text-xs font-medium mt-4">
           {{ $t('bots.memory.title') }}
-        </h3>
-        <p class="text-xs mt-1 max-w-60">
+        </EmptyTitle>
+        <EmptyDescription class="text-[11px] mt-1.5 max-w-xs text-center text-muted-foreground">
           Select a file from the sidebar to view or edit, or create a new one to persist long-term information for your bot.
-        </p>
+        </EmptyDescription>
         <Button
           variant="outline"
           size="sm"
-          class="mt-6"
+          class="mt-6 h-8 text-xs font-medium shadow-none"
           @click="openNewMemoryDialog"
         >
           {{ $t('bots.memory.newMemory') }}
         </Button>
-      </div>
+      </Empty>
     </div>
 
     <!-- New Memory Dialog -->
     <Dialog v-model:open="newMemoryDialogOpen">
-      <DialogContent class="sm:max-w-2xl max-h-[80vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>{{ $t('bots.memory.newMemory') }}</DialogTitle>
-        </DialogHeader>
+      <DialogContent class="sm:max-w-4xl max-h-[85vh] p-0 flex flex-col gap-0 overflow-hidden bg-background">
+        <div class="px-5 py-4 border-b shrink-0 flex items-center justify-between bg-muted/10">
+          <DialogTitle class="text-sm font-medium">
+            {{ $t('bots.memory.newMemory') }}
+          </DialogTitle>
+        </div>
 
-        <div class="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 py-4">
-          <div class="flex items-center gap-4 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              class="text-xs h-8"
-              @click="loadHistory"
-            >
-              <RefreshCw
-                :class="{ 'animate-spin': historyLoading }"
-                class="mr-1.5 size-3"
-              />
-              {{ $t('bots.memory.fromConversation') }}
-            </Button>
-          </div>
-
-          <div
-            v-if="historyLoading"
-            class="h-40 flex items-center justify-center border rounded-md bg-muted/10 shrink-0"
-          >
-            <Spinner />
-          </div>
-          <ScrollArea
-            v-else-if="historyMessages.length > 0"
-            class="h-48 border rounded-md p-2 bg-muted/10 shrink-0"
-          >
-            <div class="space-y-2">
-              <button
-                v-for="(msg, idx) in historyMessages"
-                :key="idx"
-                type="button"
-                class="w-full text-left flex items-start gap-2 p-2 rounded hover:bg-muted/50 transition-colors group cursor-pointer"
-                :aria-pressed="selectedHistoryMessages.includes(msg)"
-                @click="toggleMessageSelection(msg)"
+        <!-- Side-by-Side Container -->
+        <div class="flex-1 flex min-h-0 overflow-hidden">
+          <!-- LEFT: History Selection -->
+          <div class="w-1/2 flex flex-col border-r min-w-0 bg-background">
+            <div class="px-4 h-10 border-b flex items-center justify-between shrink-0">
+              <Label class="text-xs font-medium text-foreground">{{ $t('bots.memory.fromConversation') }}</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-7 px-2 -mr-2 text-xs text-muted-foreground hover:text-foreground shadow-none"
+                @click="loadHistory"
               >
-                <div
-                  class="mt-1 size-4 shrink-0 rounded border border-primary flex items-center justify-center transition-colors"
-                  :class="selectedHistoryMessages.includes(msg) ? 'bg-primary text-primary-foreground' : 'bg-background'"
-                >
-                  <Check
-                    v-if="selectedHistoryMessages.includes(msg)"
-                    class="size-2.5"
-                  />
-                </div>
-                <div class="min-w-0">
-                  <Badge
-                    variant="outline"
-                    class="text-[9px] uppercase px-1 py-0 h-3.5 mb-1"
-                  >
-                    {{ msg.role }}
-                  </Badge>
-                  <p class="text-xs text-foreground wrap-break-word line-clamp-3">
-                    {{ extractMessageText(msg.content) }}
-                  </p>
-                </div>
-              </button>
+                <RefreshCw
+                  :class="{ 'animate-spin': historyLoading }"
+                  class="mr-1.5 size-3"
+                />
+                {{ $t('common.refresh') }}
+              </Button>
             </div>
-          </ScrollArea>
 
-          <div class="space-y-2 flex-1 min-h-0 flex flex-col">
-            <Label class="text-xs font-medium shrink-0">Memory Content</Label>
-            <Textarea
-              v-model="newMemoryContent"
-              class="flex-1 font-mono text-xs resize-none min-h-0"
-              placeholder="Paste content or select from history above..."
-            />
+            <div
+              v-if="historyLoading"
+              class="flex-1 flex items-center justify-center bg-muted/5"
+            >
+              <Spinner />
+            </div>
+            <div
+              v-else-if="historyMessages.length === 0"
+              class="flex-1 flex flex-col items-center justify-center p-8 bg-muted/5"
+            >
+              <div class="border-2 border-dashed border-border/50 rounded-md p-6 flex flex-col items-center justify-center text-center max-w-xs w-full">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.memory.emptyHistory') }}
+                </p>
+              </div>
+            </div>
+            <ScrollArea
+              v-else
+              class="flex-1 min-h-0 bg-muted/5"
+            >
+              <div class="p-3 space-y-2">
+                <button
+                  v-for="(msg, idx) in historyMessages"
+                  :key="idx"
+                  type="button"
+                  class="w-full text-left flex items-start gap-3 p-3 rounded-md border transition-colors group cursor-pointer"
+                  :class="selectedHistoryMessages.includes(msg) ? 'bg-primary/5 border-primary/30' : 'bg-background border-border hover:border-foreground/30'"
+                  @click="toggleMessageSelection(msg)"
+                >
+                  <div
+                    class="mt-0.5 size-4 shrink-0 rounded-sm border flex items-center justify-center transition-colors"
+                    :class="selectedHistoryMessages.includes(msg) ? 'bg-primary border-primary text-primary-foreground' : 'border-input bg-background group-hover:border-foreground/30'"
+                  >
+                    <Check
+                      v-if="selectedHistoryMessages.includes(msg)"
+                      class="size-3"
+                    />
+                  </div>
+                  <div class="min-w-0 space-y-1.5 flex-1">
+                    <Badge
+                      variant="outline"
+                      class="text-[9px] font-medium uppercase px-1.5 py-0 h-4 border-foreground/10 shadow-none"
+                      :class="msg.role === 'user' ? 'bg-muted text-muted-foreground' : 'bg-primary/10 text-primary border-primary/20'"
+                    >
+                      {{ msg.role }}
+                    </Badge>
+                    <p class="text-[11px] text-foreground/90 wrap-break-word line-clamp-4 leading-relaxed font-mono">
+                      {{ extractMessageText(msg.content) }}
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </ScrollArea>
+          </div>
+
+          <!-- RIGHT: Memory Content Editing -->
+          <div class="w-1/2 flex flex-col min-w-0 bg-background">
+            <div class="px-4 h-10 border-b flex items-center justify-between shrink-0">
+              <Label class="flex items-center gap-1 text-xs font-medium text-foreground">
+                Memory Content
+                <span
+                  v-if="newMemoryContent.trim()"
+                  class="text-foreground shrink-0 text-xs font-bold leading-none select-none"
+                >*</span>
+              </Label>
+            </div>
+            <div class="flex-1 flex flex-col min-h-0 p-3 bg-muted/5">
+              <Card class="flex-1 overflow-hidden rounded-md shadow-none bg-background border focus-within:border-foreground/50 transition-colors">
+                <CardContent class="p-0 h-full relative">
+                  <Textarea
+                    v-model="newMemoryContent"
+                    class="absolute inset-0 w-full h-full resize-none border-0 rounded-none focus-visible:ring-0 font-mono text-xs p-3 bg-transparent leading-relaxed"
+                    placeholder="Select from history on the left, or manually write memory content here..."
+                  />
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter class="p-4 border-t bg-muted/10 shrink-0 flex items-center justify-end gap-2">
           <Button
             variant="outline"
+            size="sm"
+            class="h-8 text-xs font-medium shadow-none min-w-20"
             @click="newMemoryDialogOpen = false"
           >
             {{ $t('common.cancel') }}
           </Button>
           <Button
+            size="sm"
+            class="h-8 text-xs font-medium shadow-none min-w-24"
             :disabled="actionLoading || !newMemoryContent.trim()"
             @click="handleCreateMemory"
           >
@@ -332,116 +551,16 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-
-    <!-- Compact Memory Dialog -->
-    <Dialog v-model:open="compactDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ $t('bots.memory.compact') }}</DialogTitle>
-        </DialogHeader>
-
-        <div class="py-4 space-y-6">
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.memory.compactConfirm') }}
-          </p>
-
-          <div class="space-y-3">
-            <Label>{{ $t('bots.memory.compactRatio') }}</Label>
-            <RadioGroup
-              v-model="compactRatio"
-              class="grid grid-cols-1 gap-3"
-            >
-              <Label
-                class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
-                :class="{ 'bg-muted border-primary': compactRatio === '0.8' }"
-              >
-                <RadioGroupItem
-                  value="0.8"
-                  class="mt-1"
-                />
-                <div class="min-w-0">
-                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioLight') }}</p>
-                  <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioLightDesc') }}</p>
-                </div>
-              </Label>
-              <Label
-                class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
-                :class="{ 'bg-muted border-primary': compactRatio === '0.5' }"
-              >
-                <RadioGroupItem
-                  value="0.5"
-                  class="mt-1"
-                />
-                <div class="min-w-0">
-                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioMedium') }}</p>
-                  <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioMediumDesc') }}</p>
-                </div>
-              </Label>
-              <Label
-                class="flex items-start gap-3 p-3 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors"
-                :class="{ 'bg-muted border-primary': compactRatio === '0.3' }"
-              >
-                <RadioGroupItem
-                  value="0.3"
-                  class="mt-1"
-                />
-                <div class="min-w-0">
-                  <p class="text-xs font-medium">{{ $t('bots.memory.compactRatioAggressive') }}</p>
-                  <p class="text-xs text-muted-foreground">{{ $t('bots.memory.compactRatioAggressiveDesc') }}</p>
-                </div>
-              </Label>
-            </RadioGroup>
-          </div>
-
-          <div class="space-y-3">
-            <Label>{{ $t('bots.memory.compactDecayDate') }} ({{ $t('common.optional') }})</Label>
-            <Input
-              v-model="compactDecayDate"
-              type="date"
-              class="w-full"
-            />
-            <p
-              v-if="compactDecayDays > 0"
-              class="text-[10px] text-muted-foreground"
-            >
-              Calculated: {{ compactDecayDays }} days old
-            </p>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            @click="compactDialogOpen = false"
-          >
-            {{ $t('common.cancel') }}
-          </Button>
-          <Button
-            :disabled="compactLoading"
-            @click="handleCompact"
-          >
-            <Spinner
-              v-if="compactLoading"
-              class="mr-1.5 size-3"
-            />
-            {{ $t('common.confirm') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Brain, RefreshCw, Search, FileText, Plus, Copy, Trash2, Check } from 'lucide-vue-next'
+import { Brain, RefreshCw, Search, FileText, Plus, Copy, Check, Zap, BrainCircuit } from 'lucide-vue-next'
 import { computed, ref, onMounted, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
-import {
-  GridComponent,
-  TooltipComponent,
-} from 'echarts/components'
+import { GridComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useColorMode } from '@vueuse/core'
 import {
@@ -452,13 +571,27 @@ import {
   Textarea,
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogFooter,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
   Badge,
   Label,
   RadioGroup,
   RadioGroupItem,
+  Card,
+  CardContent,
+  Tooltip,
+  TooltipProvider,
+  TooltipTrigger,
+  TooltipContent,
+  Empty,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyMedia,
+  Separator,
+  Skeleton
 } from '@memohai/ui'
 import {
   getBotsByBotIdMemory,
@@ -536,15 +669,15 @@ const selectedId = ref<string | null>(null)
 const editContent = ref('')
 const originalContent = ref('')
 
-// New memory dialog
+// State: New Memory Modal configuration
 const newMemoryDialogOpen = ref(false)
 const newMemoryContent = ref('')
 const historyLoading = ref(false)
 const historyMessages = ref<Message[]>([])
 const selectedHistoryMessages = ref<Message[]>([])
 
-// Compact memory dialog
-const compactDialogOpen = ref(false)
+// State: Compact Memory Popover configuration
+const compactPopoverOpen = ref(false)
 const compactRatio = ref('0.5')
 const compactDecayDate = ref('')
 
@@ -1157,9 +1290,13 @@ async function handleDelete() {
 }
 
 function openCompactDialog() {
-  compactRatio.value = '0.5'
-  compactDecayDate.value = ''
-  compactDialogOpen.value = true
+  if (loading.value || compactLoading.value || memories.value.length === 0) return
+
+  if (!compactPopoverOpen.value) {
+    compactRatio.value = '0.5'
+    compactDecayDate.value = ''
+  }
+  compactPopoverOpen.value = !compactPopoverOpen.value
 }
 
 async function handleCompact() {
@@ -1174,7 +1311,7 @@ async function handleCompact() {
       throwOnError: true,
     })
     toast.success(t('bots.memory.compactSuccess'))
-    compactDialogOpen.value = false
+    compactPopoverOpen.value = false
     await loadMemories()
     selectedId.value = null
   } catch (error) {

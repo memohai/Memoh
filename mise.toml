@@ -235,25 +235,40 @@ run = "docker build -f docker/Dockerfile.vnc -t memohai/vnc:debian ."
 
 [tasks.lint]
 description = "Run all linters"
-depends = [
-  "//:lint:go",
-  "//:lint:es",
+env = { CI = "true", MISE_YES = "1" }
+run = [
+  "mise run lint:es",
+  "mise run lint:go",
 ]
 
 [tasks."lint:fix"]
 description = "Run all linters with auto-fix"
-depends = [
-  "//:lint:go:fix",
-  "//:lint:es:fix",
+env = { CI = "true", MISE_YES = "1" }
+run = [
+  "mise run lint:es:fix",
+  "mise run lint:go:fix",
 ]
 
 [tasks."lint:go"]
 description = "Run Go linter"
+depends = ["//:go-install"]
 run = "golangci-lint run ./..."
 
 [tasks."lint:go:fix"]
 description = "Run Go linter with auto-fix"
+depends = ["//:go-install"]
 run = "golangci-lint run --fix ./..."
+
+[tasks."lint:clean"]
+description = "Clear linter caches"
+run = """
+#!/bin/bash
+set -e
+golangci-lint cache clean
+# Clear ESLint cache if it exists (ESLint 9 default is usually no cache unless enabled)
+find . -name ".eslintcache" -delete
+echo '✓ Linter caches cleared'
+"""
 
 [tasks."lint:es"]
 description = "Run ESLint"

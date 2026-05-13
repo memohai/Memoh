@@ -144,3 +144,41 @@
 .markstream-vue .link-node:hover {
   text-decoration-color: var(--color-foreground);
 }
+
+/* Global Harmonious Scrollbar */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--color-border) 70%, transparent) transparent;
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-border) 40%, transparent);
+    border-radius: 10px;
+    transition: background 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--color-border) 80%, transparent);
+  }
+
+  /* Dark mode adjustments if needed */
+  .dark ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-border) 30%, transparent);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--color-border) 60%, transparent);
+  }
+}
+

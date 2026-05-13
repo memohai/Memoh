@@ -1,10 +1,7 @@
 <template>
-  <section class="p-4 mx-auto">
+  <section class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 mx-auto">
     <!-- Header: search + create -->
-    <div class="flex items-center justify-between mb-6 flex-wrap">
-      <h2 class="text-xs font-medium max-md:hidden">
-        {{ $t('bots.title') }}
-      </h2>
+    <div class="flex items-center justify-end mb-6 flex-wrap">
       <div class="flex items-center gap-3">
         <div class="relative">
           <Search

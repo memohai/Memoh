@@ -70,14 +70,16 @@ const openStatus = reactive({ addOpen: false })
         <SidebarMenuItem>
           <SidebarMenuButton
             as-child
-            class="justify-start py-5! px-4"
+            :is-active="curProvider?.id === item.id"
+            class="justify-start py-0! px-0 h-11 before:hidden"
           >
             <Toggle
-              :class="['py-4 border', curProvider?.id === item.id ? 'border-border' : 'border-transparent']"
+              class="w-full justify-start h-11 px-3 border-0 bg-transparent! transition-colors gap-3"
               :model-value="selectProvider(item.name ?? '').value"
               @update:model-value="(isSelect) => { if (isSelect) curProvider = item }"
             >
-              {{ item.name }}
+              <Mail class="size-4 shrink-0" />
+              <span class="truncate text-xs font-medium">{{ item.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>

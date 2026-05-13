@@ -88,6 +88,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+*.bak
 .cache/
 tmp/
 
@@ -109,3 +110,9 @@ data
 _main-ref/
 .toolkit/
 /scripts/vendor
+design-env/
+GEMINI.md
+Design*.md
+design*.md
+detail-design-2.0-docs/
+.gemini/settings.json

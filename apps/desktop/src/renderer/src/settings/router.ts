@@ -1,5 +1,5 @@
 import { createRouter, createMemoryHistory, type RouteRecordRaw } from 'vue-router'
-import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH } from '../shared/settings-routes'
+import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH, type SettingsRouteSpec } from '../shared/settings-routes'
 
 // Settings-window router. Mirrors the path layout under `/settings/*` from
 // @memohai/web's main router so the reused @memohai/web `SettingsSidebar`
@@ -8,11 +8,15 @@ import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH } from '../shared/settings-
 // into `/settings/bots` (or whatever path the chat window asks for via the
 // `settings:navigate` IPC).
 
-const realRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(({ name, path, loader }) => ({
-  name,
-  path,
-  component: loader,
-}))
+const mapSpecToRoute = (spec: SettingsRouteSpec): RouteRecordRaw => ({
+  name: spec.name,
+  path: spec.path,
+  component: spec.loader,
+  meta: spec.meta,
+  children: spec.children?.map(mapSpecToRoute),
+})
+
+const realRoutes: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSpecToRoute)
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: SETTINGS_DEFAULT_PATH },

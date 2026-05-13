@@ -1,275 +1,421 @@
 <template>
-  <div class="space-y-6 mr-4">
-    <!-- Header -->
-    <div class="flex items-center justify-between">
+  <div class="max-w-2xl mx-auto pb-6 space-y-4">
+    <!-- Top Action Bar -->
+    <div class="flex items-center justify-between pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-10 pt-1">
       <div class="flex items-center gap-3">
-        <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted/30 text-muted-foreground shadow-sm">
           <ChannelIcon
             :channel="platformType"
             size="1.5em"
           />
         </span>
-        <div>
-          <h3 class="text-sm font-semibold">
+        <div class="space-y-0.5">
+          <h3 class="text-sm font-semibold text-foreground flex items-center gap-2">
             {{ channelTitle }}
           </h3>
-          <p class="text-xs text-muted-foreground">
+          <p class="text-[11px] text-muted-foreground font-mono">
             {{ platformKeyLine }}
           </p>
         </div>
       </div>
-      <div class="flex items-center gap-2">
+      
+      <!-- Actions: Status + Save -->
+      <div class="flex items-center gap-3 shrink-0">
+        <!-- Dynamic context micro-copy -->
+        <Transition name="fade">
+          <div
+            v-if="dirtyPrompt"
+            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+          >
+            <div class="size-1 rounded-full bg-muted-foreground/40" />
+            <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+              Unsaved
+              <template v-if="dirtyPrompt.type === 'other'">
+                in <a
+                  href="#"
+                  class="underline hover:text-foreground font-medium"
+                  @click.prevent="$emit('switch-tab', dirtyPrompt.channel)"
+                >{{ dirtyPrompt.channelName }}</a>
+              </template>
+            </span>
+          </div>
+        </Transition>
+
         <template v-if="isEditMode">
           <Button
             variant="outline"
             size="sm"
             :disabled="isBusy"
+            class="h-8 text-xs font-medium shadow-none"
             @click="handleToggleDisabled"
           >
             <Spinner
               v-if="action === 'toggle'"
-              class="mr-1.5"
+              class="mr-1.5 size-3"
             />
             {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
           </Button>
-          <ConfirmPopover
-            :message="$t('bots.channels.deleteConfirm')"
-            :loading="action === 'delete'"
-            @confirm="handleDelete"
-          >
-            <template #trigger>
-              <Button
-                variant="destructive"
-                size="sm"
-                :disabled="isBusy"
-              >
-                <Spinner
-                  v-if="action === 'delete'"
-                  class="mr-1.5"
-                />
-                {{ $t('common.delete') }}
-              </Button>
-            </template>
-          </ConfirmPopover>
+          <div
+            class="w-px h-4 bg-border mx-1"
+            aria-hidden="true"
+          />
         </template>
+
+        <Button 
+          size="sm" 
+          :disabled="(!isFormDirty && isEditMode) || isBusy" 
+          class="h-8 text-xs font-medium min-w-24 shadow-none" 
+          @click="handleSave"
+        >
+          <Spinner
+            v-if="action === 'save'"
+            class="mr-1.5 size-3"
+          />
+          {{ $t('bots.settings.save') }}
+        </Button>
       </div>
     </div>
 
+    <!-- WeChat Configuration Area -->
     <div
-      v-if="showWebhookCallback"
-      class="space-y-2"
+      v-if="channelItem.meta.type === 'weixin'"
+      class="pt-2"
     >
-      <h4 class="text-xs font-medium">
-        {{ $t('bots.channels.webhookCallback') }}
-      </h4>
-      <p class="text-xs text-muted-foreground">
-        {{ $t('bots.channels.webhookCallbackHint') }}
-      </p>
-      <template v-if="webhookCallbackUrl">
-        <div class="flex gap-2">
+      <WeixinQrLogin
+        :bot-id="botId"
+        @login-success="handleWeixinLoginSuccess"
+      />
+    </div>
+
+    <!-- Standard Form Body -->
+    <div
+      v-else
+      class="space-y-4"
+    >
+      <!-- Webhook URL (Read-only mode) -->
+      <div
+        v-if="showWebhookCallback"
+        class="rounded-md border border-border bg-background p-4 shadow-none space-y-4"
+      >
+        <div class="space-y-1">
+          <h4 class="text-xs font-medium">
+            {{ $t('bots.channels.webhookCallback') }}
+          </h4>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.channels.webhookCallbackHint') }}
+          </p>
+        </div>
+        <div
+          v-if="webhookCallbackUrl"
+          class="flex gap-2"
+        >
           <Input
             :model-value="webhookCallbackUrl"
             readonly
-            class="font-mono text-xs"
+            class="font-mono text-[11px] h-8 shadow-none"
           />
           <Button
             variant="outline"
             size="sm"
+            class="h-8 text-xs shadow-none"
             @click="copyWebhookCallback"
           >
             {{ $t('common.copy') }}
           </Button>
         </div>
-      </template>
-      <p
-        v-else
-        class="text-xs text-muted-foreground"
-      >
-        {{ $t('bots.channels.webhookCallbackPending') }}
-      </p>
-    </div>
-
-    <!-- WeChat QR Login -->
-    <div v-if="channelItem.meta.type === 'weixin'">
-      <WeixinQrLogin
-        :bot-id="botId"
-        @login-success="handleWeixinLoginSuccess"
-      />
-      <Separator class="mt-4" />
-    </div>
-
-    <Separator v-else />
-
-    <!-- Credentials form (dynamic from config_schema) -->
-    <div class="space-y-4">
-      <h4 class="text-xs font-medium">
-        {{ $t('bots.channels.credentials') }}
-      </h4>
-      <p
-        v-if="showWebhookCallback"
-        class="text-xs text-muted-foreground"
-      >
-        {{ $t('bots.channels.feishuWebhookSecurityHint') }}
-      </p>
-
-      <div class="grid gap-4 md:grid-cols-2">
-        <div
-          v-for="(field, key) in orderedFields"
-          :key="key"
-          class="space-y-2"
-          :class="isWideChannelField(field, String(key)) ? 'md:col-span-2' : ''"
+        <p
+          v-else
+          class="text-[11px] text-muted-foreground italic"
         >
-          <Label :for="field.type === 'bool' || field.type === 'enum' ? undefined : `channel-field-${key}`">
-            {{ field.title || key }}
-            <span
-              v-if="!field.required"
-              class="text-xs text-muted-foreground ml-1"
-            >({{ $t('common.optional') }})</span>
-          </Label>
-          <p
-            v-if="field.description"
-            class="text-xs text-muted-foreground"
-          >
-            {{ field.description }}
-          </p>
+          {{ $t('bots.channels.webhookCallbackPending') }}
+        </p>
+      </div>
 
-          <!-- Secret field -->
-          <div
-            v-if="field.type === 'secret'"
-            class="relative"
+      <!-- Required Core Area (Core Credentials) -->
+      <div
+        v-if="requiredFieldsKeys.length > 0"
+        class="rounded-md border border-border bg-background p-4 shadow-none space-y-4"
+      >
+        <div class="space-y-1">
+          <h4 class="text-xs font-medium">
+            {{ $t('bots.channels.credentials') }}
+          </h4>
+          <p
+            v-if="showWebhookCallback"
+            class="text-[11px] text-muted-foreground text-warning/80"
           >
+            {{ $t('bots.channels.feishuWebhookSecurityHint') }}
+          </p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2 pt-2">
+          <div
+            v-for="key in requiredFieldsKeys"
+            :key="key"
+            class="space-y-1.5"
+            :class="isWideChannelField(orderedFields[key], key) ? 'md:col-span-2' : ''"
+          >
+            <Label
+              :for="`channel-field-${key}`"
+              class="text-xs font-medium"
+            >{{ orderedFields[key].title || key }}</Label>
+            <p
+              v-if="orderedFields[key].description"
+              class="text-[11px] text-muted-foreground leading-tight"
+            >
+              {{ orderedFields[key].description }}
+            </p>
+            
+            <!-- Dynamic Field Render -->
+            <div
+              v-if="orderedFields[key].type === 'secret'"
+              class="relative"
+            >
+              <Input
+                :id="`channel-field-${key}`"
+                :model-value="credentialStringValue(key)"
+                :type="visibleSecrets[key] ? 'text' : 'password'"
+                :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+                class="h-8 text-xs shadow-none pr-8"
+                @update:model-value="(val) => setCredentialStringValue(key, val)"
+              />
+              <button
+                type="button"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                @click="toggleSecret(key)"
+              >
+                <component
+                  :is="visibleSecrets[key] ? EyeOff : Eye"
+                  class="size-3.5"
+                />
+              </button>
+            </div>
+            <Switch
+              v-else-if="orderedFields[key].type === 'bool'"
+              :model-value="!!form.credentials[key]"
+              @update:model-value="(val) => form.credentials[key] = !!val"
+            />
             <Input
+              v-else-if="orderedFields[key].type === 'number'"
+              :id="`channel-field-${key}`"
+              :model-value="credentialNumberValue(key)"
+              type="number"
+              :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+              class="h-8 text-xs shadow-none"
+              @update:model-value="(val) => setCredentialNumberValue(key, val)"
+            />
+            <Select
+              v-else-if="orderedFields[key].type === 'enum' && orderedFields[key].enum"
+              :model-value="String(form.credentials[key] || '')"
+              @update:model-value="(val) => form.credentials[key] = val"
+            >
+              <SelectTrigger class="h-8 text-xs shadow-none">
+                <SelectValue :placeholder="orderedFields[key].title || key" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="opt in orderedFields[key].enum"
+                  :key="opt"
+                  :value="opt"
+                  class="text-xs"
+                >
+                  {{ opt }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Input
+              v-else
               :id="`channel-field-${key}`"
               :model-value="credentialStringValue(key)"
-              :type="visibleSecrets[key] ? 'text' : 'password'"
-              :placeholder="field.example ? String(field.example) : ''"
+              type="text"
+              :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+              class="h-8 text-xs shadow-none"
               @update:model-value="(val) => setCredentialStringValue(key, val)"
             />
+          </div>
+        </div>
+      </div>
+
+      <!-- Advanced Settings Collapsible Area -->
+      <div class="rounded-md border border-border bg-background p-4 shadow-none space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="space-y-1">
+            <h4 class="text-xs font-medium">
+              Advanced Settings
+            </h4>
+            <p class="text-[11px] text-muted-foreground">
+              Optional configuration parameters for this integration.
+            </p>
+          </div>
+          <div class="flex gap-2">
             <button
-              type="button"
-              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              :aria-label="secretToggleLabel(key, field.title || key)"
-              :aria-pressed="!!visibleSecrets[key]"
-              @click="visibleSecrets[key] = !visibleSecrets[key]"
+              :disabled="optionalFieldsKeys.length === 0"
+              class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer hover:bg-accent bg-transparent rounded-lg h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              @click="isAdvancedExpanded = true"
             >
-              <component
-                :is="visibleSecrets[key] ? EyeOff : Eye"
-                class="size-3.5"
-              />
+              Expand All
+            </button>
+            <button
+              :disabled="optionalFieldsKeys.length === 0"
+              class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer hover:bg-accent bg-transparent rounded-lg h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              @click="isAdvancedExpanded = false"
+            >
+              Collapse
             </button>
           </div>
-
-          <!-- Boolean field -->
-          <Switch
-            v-else-if="field.type === 'bool'"
-            :model-value="!!form.credentials[key]"
-            @update:model-value="(val) => form.credentials[key] = !!val"
-          />
-
-          <!-- Number field -->
-          <Input
-            v-else-if="field.type === 'number'"
-            :id="`channel-field-${key}`"
-            :model-value="credentialNumberValue(key)"
-            type="number"
-            :placeholder="field.example ? String(field.example) : ''"
-            @update:model-value="(val) => setCredentialNumberValue(key, val)"
-          />
-
-          <!-- Enum field -->
-          <Select
-            v-else-if="field.type === 'enum' && field.enum"
-            :model-value="String(form.credentials[key] || '')"
-            @update:model-value="(val) => form.credentials[key] = val"
+        </div>
+        
+        <div
+          v-show="isAdvancedExpanded"
+          class="pt-4 border-t border-border/50"
+        >
+          <div
+            v-if="optionalFieldsKeys.length > 0"
+            class="grid gap-4 md:grid-cols-2"
           >
-            <SelectTrigger :aria-label="field.title || key">
-              <SelectValue :placeholder="field.title" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="opt in field.enum"
-                :key="opt"
-                :value="opt"
+            <div
+              v-for="key in optionalFieldsKeys"
+              :key="key"
+              class="space-y-1.5"
+              :class="isWideChannelField(orderedFields[key], key) ? 'md:col-span-2' : ''"
+            >
+              <Label
+                :for="`channel-field-${key}`"
+                class="text-xs font-medium"
+              >{{ orderedFields[key].title || key }}</Label>
+              <p
+                v-if="orderedFields[key].description"
+                class="text-[11px] text-muted-foreground leading-tight"
               >
-                {{ opt }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          <!-- String field (default) -->
-          <Input
+                {{ orderedFields[key].description }}
+              </p>
+                
+              <!-- Dynamic Field Render -->
+              <div
+                v-if="orderedFields[key].type === 'secret'"
+                class="relative"
+              >
+                <Input
+                  :id="`channel-field-${key}`"
+                  :model-value="credentialStringValue(key)"
+                  :type="visibleSecrets[key] ? 'text' : 'password'"
+                  :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+                  class="h-8 text-xs shadow-none pr-8"
+                  @update:model-value="(val) => setCredentialStringValue(key, val)"
+                />
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  @click="toggleSecret(key)"
+                >
+                  <component
+                    :is="visibleSecrets[key] ? EyeOff : Eye"
+                    class="size-3.5"
+                  />
+                </button>
+              </div>
+              <Switch
+                v-else-if="orderedFields[key].type === 'bool'"
+                :model-value="!!form.credentials[key]"
+                @update:model-value="(val) => form.credentials[key] = !!val"
+              />
+              <Input
+                v-else-if="orderedFields[key].type === 'number'"
+                :id="`channel-field-${key}`"
+                :model-value="credentialNumberValue(key)"
+                type="number"
+                :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+                class="h-8 text-xs shadow-none"
+                @update:model-value="(val) => setCredentialNumberValue(key, val)"
+              />
+              <Select
+                v-else-if="orderedFields[key].type === 'enum' && orderedFields[key].enum"
+                :model-value="String(form.credentials[key] || '')"
+                @update:model-value="(val) => form.credentials[key] = val"
+              >
+                <SelectTrigger class="h-8 text-xs shadow-none">
+                  <SelectValue :placeholder="orderedFields[key].title || key" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="opt in orderedFields[key].enum"
+                    :key="opt"
+                    :value="opt"
+                    class="text-xs"
+                  >
+                    {{ opt }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                v-else
+                :id="`channel-field-${key}`"
+                :model-value="credentialStringValue(key)"
+                type="text"
+                :placeholder="orderedFields[key].example ? String(orderedFields[key].example) : ''"
+                class="h-8 text-xs shadow-none"
+                @update:model-value="(val) => setCredentialStringValue(key, val)"
+              />
+            </div>
+          </div>
+          <div
             v-else
-            :id="`channel-field-${key}`"
-            :model-value="credentialStringValue(key)"
-            type="text"
-            :placeholder="field.example ? String(field.example) : ''"
-            @update:model-value="(val) => setCredentialStringValue(key, val)"
-          />
+            class="text-[11px] text-muted-foreground text-center py-2 italic"
+          >
+            No advanced options available for this platform.
+          </div>
         </div>
       </div>
     </div>
 
-    <Separator />
-
-    <div class="flex justify-end gap-2 ">
-      <template v-if="isEditMode">
-        <Button
-          :disabled="isBusy"
-          @click="handleEditSave"
-        >
-          <Spinner
-            v-if="action === 'save'"
-            class="mr-1.5"
-          />
-          {{ $t('common.save') }}
-        </Button>
-      </template>
-      <template v-else>
-        <Button
-          variant="outline"
-          :disabled="isBusy"
-          @click="handleCreateSaveOnly"
-        >
-          <Spinner
-            v-if="action === 'save'"
-            class="mr-1.5"
-          />
-          {{ $t('bots.channels.saveOnly') }}
-        </Button>
-        <Button
-          :disabled="isBusy"
-          @click="handleCreateSaveAndEnable"
-        >
-          <Spinner
-            v-if="action === 'save'"
-            class="mr-1.5"
-          />
-          {{ $t('bots.channels.saveAndEnable') }}
-        </Button>
-      </template>
+    <!-- Stoic Danger Zone -->
+    <div
+      v-if="isEditMode"
+      class="pt-4"
+    >
+      <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="space-y-0.5">
+            <h4 class="text-xs font-medium text-destructive">
+              Danger Zone
+            </h4>
+            <p class="text-[11px] text-muted-foreground">
+              Deleting this connection cannot be undone. Proceed with caution.
+            </p>
+          </div>
+          <div class="flex justify-end shrink-0">
+            <ConfirmPopover
+              :message="$t('bots.channels.deleteConfirm')"
+              :loading="action === 'delete'"
+              @confirm="handleDelete"
+            >
+              <template #trigger>
+                <button 
+                  type="button" 
+                  :disabled="isBusy"
+                  class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-lg gap-1.5 px-3 min-w-28 h-8 text-xs font-medium shadow-none"
+                >
+                  <Spinner
+                    v-if="action === 'delete'"
+                    class="mr-1.5 size-3"
+                  />
+                  {{ $t('common.delete') }}
+                </button>
+              </template>
+            </ConfirmPopover>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import {
-  Button,
-  Input,
-  Label,
-  Separator,
-  Switch,
-  Spinner,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@memohai/ui'
+import { Button, Input, Label, Switch, Spinner, Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@memohai/ui'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import { reactive, watch, computed, ref } from 'vue'
+import { reactive, watch, computed, ref, toRaw } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { useMutation, useQueryCache } from '@pinia/colada'
+import { useMutation } from '@pinia/colada'
 import { putBotsByIdChannelByPlatform, deleteBotsByIdChannelByPlatform, patchBotsByIdChannelByPlatformStatus } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig, ChannelFieldSchema, ChannelUpsertConfigRequest } from '@memohai/sdk'
 import { client } from '@memohai/sdk/client'
@@ -278,7 +424,7 @@ import ChannelIcon from '@/components/channel-icon/index.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 
-interface BotChannelItem {
+export interface BotChannelItem {
   meta: HandlersChannelMeta
   config: ChannelChannelConfig | null
   configured: boolean
@@ -287,63 +433,45 @@ interface BotChannelItem {
 const props = defineProps<{
   botId: string
   channelItem: BotChannelItem
+  allDirtyStates: Record<string, boolean>
 }>()
 
 const emit = defineEmits<{
   saved: []
+  'update:dirty': [isDirty: boolean]
+  'switch-tab': [channel: string]
 }>()
 
 const { t } = useI18n()
 const botIdRef = computed(() => props.botId)
 const platformType = computed(() => String(props.channelItem.meta.type || '').trim())
+const channelTitle = computed(() => channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name))
+const platformKeyLine = computed(() => t('bots.channels.platformKey', { key: platformType.value }))
+// queryCache removed
 
-const channelTitle = computed(() =>
-  channelTypeDisplayName(t, props.channelItem.meta.type, props.channelItem.meta.display_name),
-)
-const platformKeyLine = computed(() =>
-  t('bots.channels.platformKey', { key: platformType.value }),
-)
-const queryCache = useQueryCache()
-const { mutateAsync: upsertChannel, isLoading } = useMutation({
-  mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
-    const { data: result } = await putBotsByIdChannelByPlatform({
-      path: { id: botIdRef.value, platform },
-      body: data,
-      throwOnError: true,
-    })
-    return result
-  },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] }),
-})
-const { mutateAsync: updateChannelStatus, isLoading: isStatusLoading } = useMutation({
-  mutation: async ({ platform, disabled }: { platform: string; disabled: boolean }) => {
-    const { data } = await patchBotsByIdChannelByPlatformStatus({
-      path: { id: botIdRef.value, platform },
-      body: { disabled },
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] }),
-})
 const action = ref<'save' | 'toggle' | 'delete' | ''>('')
-const isBusy = computed(() => isLoading.value || isStatusLoading.value || action.value !== '')
+const isBusy = computed(() => action.value !== '')
 const isEditMode = computed(() => props.channelItem.configured)
 const lastSavedConfigId = ref('')
 
-// ---- Form state ----
+const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
+const initialCredentialsString = ref('')
+const visibleSecrets = reactive<Record<string, boolean>>({})
+const isAdvancedExpanded = ref(false)
 
-const form = reactive<{
-  credentials: Record<string, unknown>
-  disabled: boolean
-}>({
-  credentials: {},
-  disabled: false,
+const { mutateAsync: upsertChannel } = useMutation({
+  mutation: async ({ platform, data }: { platform: string; data: ChannelUpsertConfigRequest }) => {
+    const { data: result } = await putBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform }, body: data, throwOnError: true })
+    return result
+  }
+})
+const { mutateAsync: updateChannelStatus } = useMutation({
+  mutation: async ({ platform, disabled }: { platform: string; disabled: boolean }) => {
+    const { data } = await patchBotsByIdChannelByPlatformStatus({ path: { id: botIdRef.value, platform }, body: { disabled }, throwOnError: true })
+    return data
+  }
 })
 
-const visibleSecrets = reactive<Record<string, boolean>>({})
-
-// Schema fields sorted: required first. Exclude "status"/"disabled" from credential form.
 function isWideChannelField(field: ChannelFieldSchema, key: string): boolean {
   if (field.type === 'secret') return true
   const lower = key.toLowerCase()
@@ -354,105 +482,134 @@ function isWideChannelField(field: ChannelFieldSchema, key: string): boolean {
 
 const orderedFields = computed(() => {
   const fields = props.channelItem.meta.config_schema?.fields ?? {}
-  const hiddenFields = new Set(['status', 'disabled'])
-  const entries = Object.entries(fields).filter(([key]) => !hiddenFields.has(key))
+  const entries = Object.entries(fields).filter(([key]) => key !== 'status' && key !== 'disabled')
   entries.sort(([keyA, a], [keyB, b]) => {
     if (a.required && !b.required) return -1
     if (!a.required && b.required) return 1
     const orderA = a.order ?? Number.MAX_SAFE_INTEGER
     const orderB = b.order ?? Number.MAX_SAFE_INTEGER
-    if (orderA !== orderB) return orderA - orderB
-    return keyA.localeCompare(keyB)
+    return orderA !== orderB ? orderA - orderB : keyA.localeCompare(keyB)
   })
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
 
-const currentInboundMode = computed(() => {
-  const value = form.credentials.inboundMode ?? form.credentials.inbound_mode
-  if (typeof value !== 'string') return ''
-  return value.trim().toLowerCase()
-})
+const requiredFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => orderedFields.value[k].required))
+const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => !orderedFields.value[k].required))
 
-const showWebhookCallback = computed(() => {
-  return supportsWebhookCallback(platformType.value, currentInboundMode.value)
-})
-
+const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
+const showWebhookCallback = computed(() => platformType.value === 'feishu' ? currentInboundMode.value === 'webhook' : platformType.value === 'wechatoa')
 const webhookCallbackUrl = computed(() => {
   if (!showWebhookCallback.value) return ''
   const configId = String(props.channelItem.config?.id || lastSavedConfigId.value || '').trim()
-  if (!configId) return ''
-  return buildWebhookCallbackUrl(configId)
+  return configId ? buildWebhookCallbackUrl(configId) : ''
 })
 
 function initForm() {
   const schema = props.channelItem.meta.config_schema?.fields ?? {}
   const existingCredentials = props.channelItem.config?.credentials ?? {}
-
   const creds: Record<string, unknown> = {}
+  
+  let hasPopulatedOptional = false
   for (const [key, field] of Object.entries(schema)) {
-    const existingValue = existingCredentials[key]
-    if (existingValue !== undefined) {
-      creds[key] = existingValue
-      continue
+    if (existingCredentials[key] !== undefined) {
+      creds[key] = existingCredentials[key]
+      if (!field.required && creds[key] && String(creds[key]).trim() !== '') hasPopulatedOptional = true
+    } else {
+      creds[key] = field.type === 'bool' ? undefined : ''
     }
-    if (field.type === 'bool') {
-      creds[key] = undefined
-      continue
-    }
-    creds[key] = ''
   }
   form.credentials = creds
   form.disabled = props.channelItem.config?.disabled ?? false
   lastSavedConfigId.value = String(props.channelItem.config?.id || '').trim()
+  initialCredentialsString.value = JSON.stringify(creds)
+  
+  // Smart expansion of Advanced Settings
+  isAdvancedExpanded.value = hasPopulatedOptional
+  emit('update:dirty', false)
 }
 
-watch(
-  () => props.channelItem,
-  () => initForm(),
-  { immediate: true },
-)
+watch(() => props.channelItem, initForm, { immediate: true })
+
+const isFormDirty = computed(() => JSON.stringify(toRaw(form.credentials)) !== initialCredentialsString.value)
+watch(isFormDirty, (val) => emit('update:dirty', val))
+
+const dirtyPrompt = computed(() => {
+  if (isFormDirty.value) return { type: 'current', channel: platformType.value, channelName: channelTitle.value }
+  const otherDirty = Object.keys(props.allDirtyStates).find(k => props.allDirtyStates[k] && k !== platformType.value)
+  if (otherDirty) return { type: 'other', channel: otherDirty, channelName: channelTypeDisplayName(t, otherDirty, otherDirty) }
+  return null
+})
 
 function validateRequired(): boolean {
-  const schema = props.channelItem.meta.config_schema?.fields ?? {}
-  for (const [key, field] of Object.entries(schema)) {
-    if (field.required) {
-      const val = form.credentials[key]
-      if (!val || (typeof val === 'string' && val.trim() === '')) {
-        toast.error(t('bots.channels.requiredField', { field: field.title || key }))
-        return false
-      }
+  for (const key of requiredFieldsKeys.value) {
+    const val = form.credentials[key]
+    if (!val || (typeof val === 'string' && val.trim() === '')) {
+      toast.error(t('bots.channels.requiredField', { field: orderedFields.value[key].title || key }))
+      return false
+    }
+  }
+  if (platformType.value === 'feishu' && currentInboundMode.value === 'webhook') {
+    if (!String(form.credentials.encryptKey || form.credentials.encrypt_key || '').trim() && !String(form.credentials.verificationToken || form.credentials.verification_token || '').trim()) {
+      toast.error(t('bots.channels.feishuWebhookSecretRequired'))
+      return false
     }
   }
   return true
 }
 
-function validateFeishuWebhookSecrets(): boolean {
-  if (props.channelItem.meta.type !== 'feishu' || currentInboundMode.value !== 'webhook') {
-    return true
+async function handleSave() {
+  if (!validateRequired()) return
+  action.value = 'save'
+  try {
+    const cleanCreds = Object.fromEntries(Object.entries(form.credentials).filter(([k, v]) => k !== 'status' && k !== 'disabled' && v !== '' && v !== undefined && v !== null))
+    const result = await upsertChannel({ platform: platformType.value, data: { credentials: cleanCreds, disabled: form.disabled } })
+    lastSavedConfigId.value = String(result?.id || lastSavedConfigId.value || '').trim()
+    initialCredentialsString.value = JSON.stringify(toRaw(form.credentials))
+    toast.success(t('bots.channels.saveSuccess'))
+    emit('update:dirty', false)
+    emit('saved')
+  } catch (err) {
+    toast.error(err.message ? `${t('bots.channels.saveFailed')}: ${err.message}` : t('bots.channels.saveFailed'))
+  } finally {
+    action.value = ''
   }
-  const encryptKey = String(form.credentials.encryptKey ?? form.credentials.encrypt_key ?? '').trim()
-  const verificationToken = String(form.credentials.verificationToken ?? form.credentials.verification_token ?? '').trim()
-  if (encryptKey !== '' || verificationToken !== '') {
-    return true
-  }
-  toast.error(t('bots.channels.feishuWebhookSecretRequired'))
-  return false
 }
 
-function buildCredentials(): Record<string, unknown> {
-  const credentials: Record<string, unknown> = {}
-  for (const [key, val] of Object.entries(form.credentials)) {
-    if (key === 'status' || key === 'disabled') continue
-    if (val === '' || val === undefined || val === null) continue
-    credentials[key] = val
+async function handleToggleDisabled() {
+  action.value = 'toggle'
+  try {
+    const result = await updateChannelStatus({ platform: platformType.value, disabled: !form.disabled })
+    form.disabled = !!result?.disabled
+    toast.success(t('bots.channels.saveSuccess'))
+    emit('saved')
+  } catch (err) {
+    toast.error(err.message ? `${t('bots.channels.saveFailed')}: ${err.message}` : t('bots.channels.saveFailed'))
+  } finally {
+    action.value = ''
   }
-  return credentials
 }
 
-function credentialStringValue(key: string): string | number | undefined {
+async function handleDelete() {
+  action.value = 'delete'
+  try {
+    await deleteBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: platformType.value }, throwOnError: true })
+    lastSavedConfigId.value = ''
+    toast.success(t('bots.channels.deleteSuccess'))
+    emit('saved')
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : ''
+    toast.error(detail ? `${t('bots.channels.deleteFailed')}: ${detail}` : t('bots.channels.deleteFailed'))
+  } finally {
+    action.value = ''
+  }
+}
+
+function toggleSecret(key: string) { visibleSecrets[key] = !visibleSecrets[key] }
+
+function credentialStringValue(key: string): string | undefined {
   const value = form.credentials[key]
   if (typeof value === 'string' || typeof value === 'number') {
-    return value
+    return String(value)
   }
   return undefined
 }
@@ -478,162 +635,25 @@ function setCredentialNumberValue(key: string, value: string | number) {
   form.credentials[key] = Number.isNaN(numericValue) ? '' : numericValue
 }
 
-function secretToggleLabel(key: string, label: string): string {
-  return visibleSecrets[key]
-    ? t('bots.channels.hideSecretField', { field: label })
-    : t('bots.channels.showSecretField', { field: label })
-}
-
-async function saveChannel(disabled: boolean, nextAction: 'save' | 'toggle') {
-  if (!validateRequired()) return
-  if (!validateFeishuWebhookSecrets()) return
-  action.value = nextAction
-  try {
-    const result = await upsertChannel({
-      platform: platformType.value,
-      data: {
-        credentials: buildCredentials(),
-        disabled,
-      },
-    })
-    lastSavedConfigId.value = String(result?.id || lastSavedConfigId.value || '').trim()
-    form.disabled = disabled
-    toast.success(t('bots.channels.saveSuccess'))
-    emit('saved')
-  } catch (err) {
-    let detail = ''
-    if (err instanceof Error) {
-      detail = err.message
-    }
-    toast.error(detail ? `${t('bots.channels.saveFailed')}: ${detail}` : t('bots.channels.saveFailed'))
-  } finally {
-    action.value = ''
-  }
-}
-
-async function handleCreateSaveOnly() {
-  await saveChannel(true, 'save')
-}
-
-async function handleCreateSaveAndEnable() {
-  await saveChannel(false, 'save')
-}
-
-async function handleEditSave() {
-  await saveChannel(form.disabled, 'save')
-}
-
-async function handleToggleDisabled() {
-  try {
-    const nextDisabled = !form.disabled
-    if (!nextDisabled && !validateFeishuWebhookSecrets()) return
-    action.value = 'toggle'
-    const result = await updateChannelStatus({
-      platform: platformType.value,
-      disabled: nextDisabled,
-    })
-    form.disabled = !!result?.disabled
-    toast.success(t('bots.channels.saveSuccess'))
-    emit('saved')
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : ''
-    toast.error(detail ? `${t('bots.channels.saveFailed')}: ${detail}` : t('bots.channels.saveFailed'))
-  } finally {
-    action.value = ''
-  }
-}
-
-async function handleDelete() {
-  action.value = 'delete'
-  try {
-    await deleteBotsByIdChannelByPlatform({
-      path: { id: botIdRef.value, platform: platformType.value },
-      throwOnError: true,
-    })
-    lastSavedConfigId.value = ''
-    toast.success(t('bots.channels.deleteSuccess'))
-    emit('saved')
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : ''
-    toast.error(detail ? `${t('bots.channels.deleteFailed')}: ${detail}` : t('bots.channels.deleteFailed'))
-  } finally {
-    action.value = ''
-  }
-}
-
 function buildWebhookCallbackUrl(configId: string): string {
-  const normalizedBase = resolveWebhookCallbackBaseUrl()
-  if (!normalizedBase) return ''
-  if (typeof window !== 'undefined') {
-    const baseUrl = new URL(normalizedBase, window.location.origin)
-    baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
-    baseUrl.search = ''
-    baseUrl.hash = ''
-    return baseUrl.toString()
-  }
-  const base = normalizedBase.replace(/\/+$/, '')
+  const base = (import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() || import.meta.env.VITE_API_PUBLIC_URL?.trim() || client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || (typeof window !== 'undefined' ? new URL(window.location.origin).toString() : '')).replace(/\/+$/, '')
   return `${base}/channels/${encodeURIComponent(platformType.value)}/webhook/${encodeURIComponent(configId)}`
 }
 
-function resolveWebhookCallbackBaseUrl(): string {
-  const explicitRaw = String(
-    import.meta.env.VITE_WEBHOOK_PUBLIC_BASE_URL?.trim() ||
-    import.meta.env.VITE_API_PUBLIC_URL?.trim() ||
-    '',
-  ).trim()
-  if (isAbsoluteHttpUrl(explicitRaw)) {
-    return explicitRaw
-  }
-
-  const apiBase = String(client.getConfig().baseUrl || import.meta.env.VITE_API_URL?.trim() || '').trim()
-  if (isAbsoluteHttpUrl(apiBase)) {
-    return apiBase
-  }
-
-  if (typeof window === 'undefined') {
-    return ''
-  }
-  const fallbackApiPort = String(import.meta.env.VITE_API_PORT || '8080').trim()
-  const fallback = new URL(window.location.origin)
-  if (fallbackApiPort) {
-    fallback.port = fallbackApiPort
-  }
-  fallback.search = ''
-  fallback.hash = ''
-  return fallback.toString().replace(/\/+$/, '')
-}
-
-function isAbsoluteHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value)
-}
-
-function supportsWebhookCallback(channelType: string, inboundMode: string): boolean {
-  if (channelType === 'feishu') {
-    return inboundMode === 'webhook'
-  }
-  if (channelType === 'wechatoa') {
-    return true
-  }
-  return false
-}
-
-function handleWeixinLoginSuccess() {
-  queryCache.invalidateQueries({ key: ['bot-channels', botIdRef.value] })
-  emit('saved')
-}
-
 async function copyWebhookCallback() {
-  if (!webhookCallbackUrl.value) return
-  try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      await navigator.clipboard.writeText(webhookCallbackUrl.value)
-      toast.success(t('common.copied'))
-      return
-    }
+  if (webhookCallbackUrl.value && typeof navigator !== 'undefined' && navigator.clipboard) {
+    await navigator.clipboard.writeText(webhookCallbackUrl.value)
+    toast.success(t('common.copied'))
+  } else {
     toast.error(t('bots.channels.copyFailed'))
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : ''
-    toast.error(detail ? `${t('bots.channels.copyFailed')}: ${detail}` : t('bots.channels.copyFailed'))
   }
 }
+
+function handleWeixinLoginSuccess() { emit('saved') }
 </script>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>
+

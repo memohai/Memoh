@@ -1,276 +1,5 @@
-<template>
-  <SettingsShell
-    width="wide"
-    class="space-y-6"
-  >
-    <!-- Settings -->
-    <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <Label>{{ $t('bots.settings.compactionEnabled') }}</Label>
-          <p class="text-xs text-muted-foreground mt-0.5">
-            {{ $t('bots.settings.compactionDescription') }}
-          </p>
-        </div>
-        <Switch
-          :model-value="settingsForm.compaction_enabled"
-          @update:model-value="(val) => settingsForm.compaction_enabled = !!val"
-        />
-      </div>
-      <div
-        v-if="settingsForm.compaction_enabled"
-        class="grid gap-4 md:grid-cols-2"
-      >
-        <div class="space-y-2">
-          <Label>{{ $t('bots.settings.compactionThreshold') }}</Label>
-          <Input
-            v-model.number="settingsForm.compaction_threshold"
-            type="number"
-            :min="1"
-            :placeholder="'100000'"
-            :aria-label="$t('bots.settings.compactionThreshold')"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label>{{ $t('bots.settings.compactionRatio') }}</Label>
-          <p class="text-xs text-muted-foreground mt-0.5">
-            {{ $t('bots.settings.compactionRatioDescription') }}
-          </p>
-          <div class="flex items-center gap-3">
-            <Slider
-              :model-value="[settingsForm.compaction_ratio]"
-              :min="1"
-              :max="100"
-              :step="1"
-              class="flex-1"
-              @update:model-value="(val) => settingsForm.compaction_ratio = val[0]"
-            />
-            <span class="text-sm text-muted-foreground w-10 text-right tabular-nums">{{ settingsForm.compaction_ratio }}%</span>
-          </div>
-        </div>
-        <div class="space-y-2 md:col-span-2">
-          <Label>{{ $t('bots.settings.compactionModel') }}</Label>
-          <p class="text-xs text-muted-foreground mt-0.5">
-            {{ $t('bots.settings.compactionModelDescription') }}
-          </p>
-          <ModelSelect
-            v-model="settingsForm.compaction_model_id"
-            :models="models"
-            :providers="providers"
-            model-type="chat"
-            :placeholder="$t('bots.settings.compactionModelPlaceholder')"
-          />
-        </div>
-      </div>
-      <div class="flex justify-end">
-        <Button
-          size="sm"
-          :disabled="!settingsChanged || isSaving"
-          @click="handleSaveSettings"
-        >
-          <Spinner
-            v-if="isSaving"
-            class="mr-2 size-4"
-          />
-          {{ $t('bots.settings.save') }}
-        </Button>
-      </div>
-    </div>
-
-    <Separator />
-
-    <!-- Logs header -->
-    <div class="flex items-center justify-between">
-      <h3 class="text-sm font-medium">
-        {{ $t('bots.compaction.title') }}
-      </h3>
-      <div class="flex items-center gap-2">
-        <NativeSelect
-          v-model="statusFilter"
-          class="h-9 w-28 text-xs"
-        >
-          <option value="">
-            {{ $t('bots.compaction.filterAll') }}
-          </option>
-          <option value="ok">
-            {{ $t('bots.compaction.statusOk') }}
-          </option>
-          <option value="pending">
-            {{ $t('bots.compaction.statusPending') }}
-          </option>
-          <option value="error">
-            {{ $t('bots.compaction.statusError') }}
-          </option>
-        </NativeSelect>
-        <ConfirmPopover
-          v-if="logs.length > 0"
-          :message="$t('bots.compaction.clearConfirm')"
-          :loading="isClearing"
-          :confirm-text="$t('bots.compaction.clearLogs')"
-          @confirm="handleClear"
-        >
-          <template #trigger>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="isClearing"
-            >
-              {{ $t('bots.compaction.clearLogs') }}
-            </Button>
-          </template>
-        </ConfirmPopover>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="isLoading"
-          @click="handleRefresh"
-        >
-          <Spinner
-            v-if="isLoading"
-            class="mr-2 size-4"
-          />
-          {{ $t('common.refresh') }}
-        </Button>
-      </div>
-    </div>
-
-    <!-- Loading -->
-    <div
-      v-if="isLoading && logs.length === 0"
-      class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-    >
-      <Spinner class="mr-2" />
-      {{ $t('common.loading') }}
-    </div>
-
-    <!-- Empty -->
-    <div
-      v-else-if="!isLoading && filteredLogs.length === 0"
-      class="flex flex-col items-center justify-center py-12 text-center"
-    >
-      <div class="rounded-full bg-muted p-3 mb-4">
-        <Minimize2
-          class="size-6 text-muted-foreground"
-        />
-      </div>
-      <p class="text-xs text-muted-foreground">
-        {{ $t('bots.compaction.empty') }}
-      </p>
-    </div>
-
-    <!-- Logs -->
-    <template v-else>
-      <div class="rounded-md border">
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="border-b bg-muted/50">
-              <th class="px-4 py-2 text-left font-medium">
-                {{ $t('bots.compaction.status') }}
-              </th>
-              <th class="px-4 py-2 text-left font-medium">
-                {{ $t('bots.compaction.time') }}
-              </th>
-              <th class="px-4 py-2 text-left font-medium">
-                {{ $t('bots.compaction.duration') }}
-              </th>
-              <th class="px-4 py-2 text-left font-medium">
-                {{ $t('bots.compaction.error') }}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="log in filteredLogs"
-              :key="log.id"
-              class="border-b last:border-0 hover:bg-muted/30 cursor-pointer"
-              @click="toggleExpand(log.id)"
-            >
-              <td class="px-4 py-2">
-                <Badge :variant="statusVariant(log.status)">
-                  {{ statusLabel(log.status) }}
-                </Badge>
-              </td>
-              <td class="px-4 py-2 text-muted-foreground">
-                {{ formatDateTime(log.started_at) }}
-              </td>
-              <td class="px-4 py-2 text-muted-foreground">
-                {{ formatDuration(log.started_at, log.completed_at) }}
-              </td>
-              <td class="px-4 py-2">
-                <span
-                  v-if="log.error_message"
-                  class="text-destructive"
-                >{{ log.error_message }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Expanded detail -->
-      <div
-        v-for="log in filteredLogs.filter(l => l.id && expandedIds.has(l.id))"
-        :key="'detail-' + log.id"
-        class="rounded-md border bg-muted/20 p-4 text-xs whitespace-pre-wrap wrap-break-word"
-      >
-        <p
-          v-if="log.error_message"
-          class="text-destructive"
-        >
-          {{ log.error_message }}
-        </p>
-        <p
-          v-if="log.usage"
-          class="text-muted-foreground mt-2 text-xs"
-        >
-          Usage: {{ JSON.stringify(log.usage) }}
-        </p>
-      </div>
-
-      <!-- Pagination -->
-      <div
-        v-if="totalPages > 1"
-        class="flex items-center justify-between pt-2"
-      >
-        <span class="text-xs text-muted-foreground whitespace-nowrap">
-          {{ paginationSummary }}
-        </span>
-        <Pagination
-          :total="totalCount"
-          :items-per-page="PAGE_SIZE"
-          :sibling-count="1"
-          :page="currentPage"
-          show-edges
-          @update:page="currentPage = $event"
-        >
-          <PaginationContent v-slot="{ items }">
-            <PaginationFirst />
-            <PaginationPrevious />
-            <template
-              v-for="(item, index) in items"
-              :key="index"
-            >
-              <PaginationEllipsis
-                v-if="item.type === 'ellipsis'"
-                :index="index"
-              />
-              <PaginationItem
-                v-else
-                :value="item.value"
-                :is-active="item.value === currentPage"
-              />
-            </template>
-            <PaginationNext />
-            <PaginationLast />
-          </PaginationContent>
-        </Pagination>
-      </div>
-    </template>
-  </SettingsShell>
-</template>
-
 <script setup lang="ts">
-import { Minimize2 } from 'lucide-vue-next'
+import { Minimize2, RefreshCw, History } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -281,7 +10,6 @@ import {
   PaginationNext, PaginationPrevious,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import SettingsShell from '@/components/settings-shell/index.vue'
 import ModelSelect from './model-select.vue'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
@@ -483,3 +211,357 @@ onMounted(() => {
   fetchLogs()
 })
 </script>
+
+<template>
+  <div class="max-w-2xl mx-auto pb-6 space-y-5">
+    <!-- Sovereign Header -->
+    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between gap-4">
+      <div class="space-y-1">
+        <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+          {{ $t('bots.compaction.title') }}
+        </h2>
+        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
+          {{ $t('bots.settings.compactionDescription') }}
+        </p>
+      </div>
+      <div class="flex shrink-0 flex-wrap justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="isLoading"
+          class="shadow-none"
+          @click="handleRefresh"
+        >
+          <Spinner
+            v-if="isLoading"
+            class="mr-1.5 size-3.5"
+          />
+          <RefreshCw
+            v-else
+            class="mr-1.5 size-3.5 text-muted-foreground"
+          />
+          {{ $t('common.refresh') }}
+        </Button>
+      </div>
+    </header>
+
+    <!-- Settings Bento -->
+    <div class="rounded-md border border-border/60 bg-background overflow-hidden shadow-none">
+      <div class="p-4 space-y-4">
+        <div class="flex items-center justify-between gap-4">
+          <div class="space-y-0.5">
+            <Label class="text-xs font-medium">{{ $t('bots.settings.compactionEnabled') }}</Label>
+            <p class="text-[11px] text-muted-foreground leading-snug">
+              {{ $t('bots.settings.compactionDescription') }}
+            </p>
+          </div>
+          <Switch
+            :model-value="settingsForm.compaction_enabled"
+            class="scale-90"
+            @update:model-value="(val) => settingsForm.compaction_enabled = !!val"
+          />
+        </div>
+
+        <template v-if="settingsForm.compaction_enabled">
+          <Separator class="bg-border/40" />
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium">{{ $t('bots.settings.compactionThreshold') }}</Label>
+              <Input
+                v-model.number="settingsForm.compaction_threshold"
+                type="number"
+                :min="1"
+                :placeholder="'100000'"
+                class="h-8 text-xs bg-transparent border-border/60 shadow-none font-mono"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium">{{ $t('bots.settings.compactionRatio') }}</Label>
+              <p class="text-[11px] text-muted-foreground leading-snug">
+                {{ $t('bots.settings.compactionRatioDescription') }}
+              </p>
+              <div class="flex items-center gap-3 pt-1">
+                <Slider
+                  :model-value="[settingsForm.compaction_ratio]"
+                  :min="1"
+                  :max="100"
+                  :step="1"
+                  class="flex-1"
+                  @update:model-value="(val) => settingsForm.compaction_ratio = val[0]"
+                />
+                <span class="text-[11px] text-muted-foreground w-8 text-right tabular-nums font-mono">{{ settingsForm.compaction_ratio }}%</span>
+              </div>
+            </div>
+            <div class="space-y-1.5 sm:col-span-2">
+              <Label class="text-xs font-medium">{{ $t('bots.settings.compactionModel') }}</Label>
+              <p class="text-[11px] text-muted-foreground leading-snug">
+                {{ $t('bots.settings.compactionModelDescription') }}
+              </p>
+              <ModelSelect
+                v-model="settingsForm.compaction_model_id"
+                :models="models"
+                :providers="providers"
+                model-type="chat"
+                :placeholder="$t('bots.settings.compactionModelPlaceholder')"
+                class="mt-1"
+              />
+            </div>
+          </div>
+        </template>
+
+        <Separator class="bg-border/40" />
+
+        <div class="flex justify-end">
+          <Button
+            size="sm"
+            :disabled="!settingsChanged || isSaving"
+            class="h-8 text-xs font-medium px-4 shadow-none"
+            @click="handleSaveSettings"
+          >
+            <Spinner
+              v-if="isSaving"
+              class="mr-1.5"
+            />
+            {{ $t('bots.settings.save') }}
+          </Button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Bento -->
+    <div class="space-y-4">
+      <div class="rounded-md border border-border/60 bg-background overflow-hidden shadow-none">
+        <div class="p-4 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+                <History class="size-3.5 text-muted-foreground" />
+                {{ $t('bots.compaction.title') }}
+              </h4>
+              <p class="text-[11px] text-muted-foreground leading-snug">
+                {{ $t('bots.settings.compactionDescription') }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0 sm:justify-end">
+              <NativeSelect
+                v-model="statusFilter"
+                class="h-8 w-28 text-[11px] bg-transparent border-border/60 shadow-none"
+              >
+                <option value="">
+                  {{ $t('bots.compaction.filterAll') }}
+                </option>
+                <option value="ok">
+                  {{ $t('bots.compaction.statusOk') }}
+                </option>
+                <option value="pending">
+                  {{ $t('bots.compaction.statusPending') }}
+                </option>
+                <option value="error">
+                  {{ $t('bots.compaction.statusError') }}
+                </option>
+              </NativeSelect>
+            </div>
+          </div>
+        </div>
+
+        <Separator class="bg-border/40" />
+
+        <!-- Loading -->
+        <div
+          v-if="isLoading && logs.length === 0"
+          class="flex items-center justify-center py-12 text-[11px] text-muted-foreground"
+        >
+          <Spinner class="mr-2" />
+          {{ $t('common.loading') }}
+        </div>
+
+        <!-- Empty -->
+        <div
+          v-else-if="!isLoading && filteredLogs.length === 0"
+          class="flex flex-col items-center justify-center py-12 text-center"
+        >
+          <div class="size-10 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+            <Minimize2 class="size-5 text-muted-foreground" />
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.compaction.empty') }}
+          </p>
+        </div>
+
+        <!-- Logs Table -->
+        <template v-else>
+          <div class="overflow-x-auto">
+            <table class="w-full text-[11px]">
+              <thead>
+                <tr class="bg-muted/40 border-b border-border/50">
+                  <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                    {{ $t('bots.compaction.status') }}
+                  </th>
+                  <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                    {{ $t('bots.compaction.time') }}
+                  </th>
+                  <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                    {{ $t('bots.compaction.duration') }}
+                  </th>
+                  <th class="px-4 py-2.5 text-left font-medium text-muted-foreground">
+                    {{ $t('bots.compaction.error') }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border/40">
+                <template
+                  v-for="log in filteredLogs"
+                  :key="log.id"
+                >
+                  <tr
+                    class="hover:bg-muted/30 transition-colors cursor-pointer group"
+                    @click="toggleExpand(log.id)"
+                  >
+                    <td class="px-4 py-3">
+                      <Badge
+                        :variant="statusVariant(log.status)"
+                        class="h-5 text-[10px] px-1.5 font-mono shadow-none"
+                      >
+                        {{ statusLabel(log.status) }}
+                      </Badge>
+                    </td>
+                    <td class="px-4 py-3 text-muted-foreground font-mono">
+                      {{ formatDateTime(log.started_at) }}
+                    </td>
+                    <td class="px-4 py-3 text-muted-foreground font-mono">
+                      {{ formatDuration(log.started_at, log.completed_at) }}
+                    </td>
+                    <td class="px-4 py-3">
+                      <span
+                        v-if="log.error_message"
+                        class="text-destructive truncate max-w-[200px] block"
+                      >{{ log.error_message }}</span>
+                      <span
+                        v-else
+                        class="text-muted-foreground/40"
+                      >—</span>
+                    </td>
+                  </tr>
+                  <!-- Expanded detail -->
+                  <tr
+                    v-if="log.id && expandedIds.has(log.id)"
+                    class="bg-muted/5 border-t border-border/40"
+                  >
+                    <td
+                      colspan="4"
+                      class="px-4 py-4"
+                    >
+                      <div class="space-y-3">
+                        <div
+                          v-if="log.error_message"
+                          class="rounded-md bg-destructive/5 border border-destructive/10 p-3"
+                        >
+                          <p class="text-destructive font-mono text-[10px] whitespace-pre-wrap">
+                            {{ log.error_message }}
+                          </p>
+                        </div>
+                        <div
+                          v-if="log.usage"
+                          class="space-y-1"
+                        >
+                          <span class="text-[9px] uppercase tracking-wider font-bold text-muted-foreground/60">Usage</span>
+                          <div class="rounded-md bg-muted/20 border border-border/40 p-3 font-mono text-[10px] text-muted-foreground whitespace-pre-wrap">
+                            {{ JSON.stringify(log.usage, null, 2) }}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <div
+            v-if="totalPages > 1"
+            class="flex items-center justify-between p-4 border-t border-border/40"
+          >
+            <span class="text-[10px] text-muted-foreground font-mono">
+              {{ paginationSummary }}
+            </span>
+            <Pagination
+              :total="totalCount"
+              :items-per-page="PAGE_SIZE"
+              :sibling-count="1"
+              :page="currentPage"
+              show-edges
+              @update:page="currentPage = $event"
+            >
+              <PaginationContent v-slot="{ items }">
+                <PaginationFirst class="h-7 w-7" />
+                <PaginationPrevious class="h-7 w-7" />
+                <template
+                  v-for="(item, index) in items"
+                  :key="index"
+                >
+                  <PaginationEllipsis
+                    v-if="item.type === 'ellipsis'"
+                    :index="index"
+                    class="h-7 w-7"
+                  />
+                  <PaginationItem
+                    v-else
+                    :value="item.value"
+                    :is-active="item.value === currentPage"
+                    class="h-7 w-7 text-[11px]"
+                  />
+                </template>
+                <PaginationNext class="h-7 w-7" />
+                <PaginationLast class="h-7 w-7" />
+              </PaginationContent>
+            </Pagination>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div
+      v-if="logs.length > 0"
+      class="pt-4"
+    >
+      <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="space-y-0.5">
+            <h4 class="text-xs font-medium text-destructive">
+              {{ $t('common.dangerZone') }}
+            </h4>
+            <p class="text-[11px] text-muted-foreground">
+              Permanently delete all compaction history logs.
+            </p>
+          </div>
+          <div class="flex justify-end shrink-0">
+            <ConfirmPopover
+              :message="$t('bots.compaction.clearConfirm')"
+              :loading="isClearing"
+              :confirm-text="$t('bots.compaction.clearLogs')"
+              @confirm="handleClear"
+            >
+              <template #trigger>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  :disabled="isClearing"
+                  class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-lg gap-1.5 px-3 min-w-28 h-8 text-xs font-medium shadow-none"
+                >
+                  <Spinner
+                    v-if="isClearing"
+                    class="mr-1.5"
+                  />
+                  {{ $t('bots.compaction.clearLogs') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>

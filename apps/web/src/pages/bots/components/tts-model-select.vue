@@ -14,7 +14,7 @@
         role="combobox"
         :aria-expanded="open"
         :aria-label="placeholder || 'Select TTS model'"
-        class="w-full justify-between font-normal"
+        class="w-full justify-between font-normal text-xs shadow-none h-9"
       >
         <span class="flex min-w-0 items-center gap-2 truncate">
           <Volume2
@@ -34,7 +34,7 @@
 
     <template #option-icon="{ option }">
       <Volume2
-        v-if="option.value"
+        v-if="option.value && showIcons"
         class="size-3.5 shrink-0 text-muted-foreground"
       />
     </template>
@@ -77,6 +77,7 @@ const props = defineProps<{
   models: TtsModelOption[]
   providers: TtsProviderOption[]
   placeholder?: string
+  showIcons?: boolean
 }>()
 const { t } = useI18n()
 

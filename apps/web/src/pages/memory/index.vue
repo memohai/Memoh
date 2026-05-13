@@ -63,17 +63,18 @@ const openStatus = reactive({ addOpen: false })
         <SidebarMenuItem>
           <SidebarMenuButton
             as-child
-            class="justify-start py-5! px-4"
+            :is-active="selectProvider(item.name).value"
+            class="justify-start py-0! px-0 h-11 before:hidden"
           >
             <Toggle
-              :class="`py-4 border border-transparent ${curProvider?.id === item.id ? 'border-inherit' : ''}`"
+              class="w-full justify-start h-11 px-3 border-0 bg-transparent! transition-colors gap-3"
               :model-value="selectProvider(item.name).value"
               @update:model-value="(isSelect) => { if (isSelect) curProvider = item }"
             >
               <Brain
-                class="mr-2 size-4 text-primary"
+                class="size-4 shrink-0"
               />
-              {{ item.name }}
+              <span class="truncate text-xs font-medium">{{ item.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="mx-auto w-full p-4 md:p-6"
+    class="mx-auto w-full px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12"
     :class="widthClass"
   >
     <slot />

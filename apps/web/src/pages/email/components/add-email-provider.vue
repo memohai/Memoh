@@ -11,11 +11,11 @@
     >
       <template #trigger>
         <Button
-          class="w-full shadow-none! text-muted-foreground mb-4"
+          class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
           <Plus
-            class="mr-1"
+            class="mr-1 size-4"
           /> {{ $t('email.add') }}
         </Button>
       </template>

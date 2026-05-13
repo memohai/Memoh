@@ -1,14 +1,12 @@
 <template>
-  <section>
-    <MainLayout>
-      <template #sidebar>
-        <SideBar />
-      </template>
-      <template #main>
-        <MainContainer />
-      </template>
-    </MainLayout>
-  </section>
+  <MainLayout>
+    <template #sidebar>
+      <SideBar />
+    </template>
+    <template #main>
+      <MainContainer />
+    </template>
+  </MainLayout>
 </template>
 
 <script setup lang="ts">

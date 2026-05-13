@@ -1,9 +1,5 @@
 <template>
-  <section class="p-4 mx-auto max-w-2xl">
-    <h2 class="text-lg font-semibold mb-6">
-      {{ $t('bots.createBot') }}
-    </h2>
-
+  <section class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 mx-auto max-w-2xl">
     <form @submit.prevent="handleSubmit">
       <!-- Basic Info -->
       <div>

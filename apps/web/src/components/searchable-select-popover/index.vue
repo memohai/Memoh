@@ -109,7 +109,7 @@
               >
                 <span
                   v-if="option.description"
-                  class="ml-auto text-xs text-muted-foreground truncate max-w-[50%] text-right"
+                  class="ml-auto text-xs text-muted-foreground truncate max-w-[80%] text-right"
                   :title="option.description"
                 >
                   {{ option.description }}

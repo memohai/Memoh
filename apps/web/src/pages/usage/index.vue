@@ -1,9 +1,6 @@
 <template>
-  <div class="p-6 max-w-7xl mx-auto space-y-6">
-    <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-semibold tracking-tight">
-        {{ $t('usage.title') }}
-      </h1>
+  <div class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 max-w-7xl mx-auto space-y-6">
+    <div class="flex items-center justify-end">
       <Button
         variant="outline"
         size="sm"

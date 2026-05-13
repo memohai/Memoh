@@ -94,13 +94,11 @@ const openStatus = reactive({
         <SidebarMenuItem>
           <SidebarMenuButton
             as-child
-            class="justify-start py-5! px-4"
+            :is-active="selectProvider(providerItem.id ?? '').value"
+            class="justify-start py-0! px-0 h-11 before:hidden"
           >
             <Toggle
-              :class="[
-                'py-4 border',
-                curProvider?.id === providerItem.id ? 'border-border' : 'border-transparent',
-              ]"
+              class="w-full justify-start h-11 px-3 border-0 bg-transparent! transition-colors gap-3"
               :model-value="selectProvider(providerItem.id ?? '').value"
               @update:model-value="(isSelect) => {
                 if (isSelect) {
@@ -109,15 +107,15 @@ const openStatus = reactive({
               }"
             >
               <span class="relative shrink-0">
-                <span class="flex size-7 items-center justify-center rounded-full bg-muted">
+                <span class="flex size-6 items-center justify-center rounded-full bg-muted">
                   <ProviderIcon
                     v-if="providerItem.icon"
                     :icon="providerItem.icon"
-                    size="1.25em"
+                    size="1em"
                   />
                   <span
                     v-else
-                    class="text-xs font-medium text-muted-foreground"
+                    class="text-[10px] font-medium text-muted-foreground"
                   >
                     {{ getInitials(providerItem.name) }}
                   </span>
@@ -128,7 +126,7 @@ const openStatus = reactive({
                   variant="success"
                 />
               </span>
-              <span class="truncate">{{ providerItem.name }}</span>
+              <span class="truncate text-xs font-medium">{{ providerItem.name }}</span>
             </Toggle>
           </SidebarMenuButton>
         </SidebarMenuItem>

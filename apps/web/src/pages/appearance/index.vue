@@ -1,5 +1,5 @@
 <template>
-  <section class="max-w-7xl mx-auto p-4 pb-12">
+  <section class="max-w-7xl mx-auto px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12">
     <div class="max-w-3xl mx-auto space-y-6">
       <div>
         <h1 class="text-lg font-semibold">

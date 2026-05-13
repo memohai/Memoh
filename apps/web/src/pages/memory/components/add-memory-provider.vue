@@ -3,10 +3,10 @@
     <DialogTrigger as-child>
       <Button
         variant="outline"
-        class="w-full mb-4 text-muted-foreground"
+        class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
       >
         <Plus
-          class="mr-2"
+          class="mr-1 size-4"
         />
         {{ $t('memory.add') }}
       </Button>

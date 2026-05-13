@@ -14,13 +14,13 @@
         class="p-0 border-0"
       >
         <button
-          class="h-[53px] flex items-center gap-2.5 px-3.5 w-full border-b border-border text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+          class="h-10 flex items-center gap-2.5 px-4 w-full text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
           @click="router.push(backToChatRoute)"
         >
           <ChevronLeft
             class="size-3 shrink-0"
           />
-          <span class="text-xs font-semibold group-data-[collapsible=icon]:hidden">
+          <span class="text-xs font-semibold inline-flex items-center leading-none group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.settings') }}
           </span>
         </button>

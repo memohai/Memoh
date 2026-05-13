@@ -14,7 +14,7 @@ const props = withDefaults(defineProps<PrimitiveProps & { class?: HTMLAttributes
     data-slot="breadcrumb-link"
     :as="as"
     :as-child="asChild"
-    :class="cn('hover:text-foreground transition-colors text-muted-foreground', props.class)"
+    :class="cn('hover:text-foreground transition-colors text-muted-foreground inline-flex items-center leading-none [&>*]:leading-none', props.class)"
   >
     <slot />
   </Primitive>

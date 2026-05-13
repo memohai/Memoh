@@ -1,5 +1,5 @@
 <template>
-  <section class="flex h-dvh overflow-hidden">
+  <section class="flex w-full h-dvh overflow-hidden">
     <sidebar-provider
       v-model:open="isOpen"
       class="min-h-0 h-full"

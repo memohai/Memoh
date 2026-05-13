@@ -66,26 +66,62 @@
     <!-- daily -->
     <div
       v-else-if="state.mode === 'daily'"
-      class="space-y-3"
+      class="space-y-4"
     >
-      <div class="space-y-2">
-        <Label>{{ $t('bots.schedule.form.hours') }}</Label>
-        <p class="text-xs text-muted-foreground">
-          {{ $t('bots.schedule.form.hoursHint') }}
-        </p>
-        <div class="grid grid-cols-8 gap-1.5">
-          <button
-            v-for="h in 24"
-            :key="h - 1"
-            type="button"
-            class="h-8 rounded-md border text-xs font-mono transition-colors"
-            :class="state.hours.includes(h - 1)
-              ? 'bg-primary text-primary-foreground border-primary'
-              : 'bg-background hover:bg-accent'"
-            @click="toggleHour(h - 1)"
-          >
-            {{ pad2(h - 1) }}
-          </button>
+      <div class="space-y-3">
+        <div class="space-y-1.5">
+          <Label>{{ $t('bots.schedule.form.hours') }}</Label>
+          <p class="text-xs text-muted-foreground">
+            {{ $t('bots.schedule.form.hoursHint') }}
+          </p>
+        </div>
+
+        <!-- AM Row -->
+        <div class="space-y-2">
+          <div class="flex items-center gap-1.5 text-muted-foreground">
+            <Sun class="size-3.5" />
+            <h3 class="text-[10px] font-semibold uppercase tracking-wider">
+              AM
+            </h3>
+          </div>
+          <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+            <button
+              v-for="h in 12"
+              :key="h - 1"
+              type="button"
+              class="h-8 rounded-md border text-[11px] font-mono transition-colors"
+              :class="state.hours.includes(h - 1)
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background hover:bg-accent'"
+              @click="toggleHour(h - 1)"
+            >
+              {{ pad2(h - 1) }}
+            </button>
+          </div>
+        </div>
+
+        <!-- PM Row -->
+        <div class="space-y-2">
+          <div class="flex items-center gap-1.5 text-muted-foreground">
+            <Moon class="size-3.5" />
+            <h3 class="text-[10px] font-semibold uppercase tracking-wider">
+              PM
+            </h3>
+          </div>
+          <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+            <button
+              v-for="h in 12"
+              :key="h + 11"
+              type="button"
+              class="h-8 rounded-md border text-[11px] font-mono transition-colors"
+              :class="state.hours.includes(h + 11)
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background hover:bg-accent'"
+              @click="toggleHour(h + 11)"
+            >
+              {{ pad2(h + 11) }}
+            </button>
+          </div>
         </div>
       </div>
       <div class="space-y-2">
@@ -314,6 +350,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Sun, Moon } from 'lucide-vue-next'
 import { Input, Label, NativeSelect } from '@memohai/ui'
 import {
   describeCron,

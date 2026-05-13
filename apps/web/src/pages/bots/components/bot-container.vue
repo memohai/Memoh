@@ -4,7 +4,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
-import { ChevronRight } from 'lucide-vue-next'
+import { RefreshCw, Play, Square, Box, Database, Settings, History } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
@@ -28,7 +28,7 @@ import {
   type ContainerCreateLayerStatus,
   type ContainerCreateStreamEvent,
 } from '@/composables/api/useContainerStream'
-import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
+import { Button, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
 import ContainerMetricsPanel from './container-metrics-panel.vue'
@@ -66,7 +66,6 @@ const createImagePrefilled = ref(false)
 const createGPUEnabled = ref(false)
 const createGPUDevices = ref('')
 const createGPUPrefilled = ref(false)
-const createAdvancedOpen = ref(false)
 const newSnapshotName = ref('')
 const importInputRef = ref<HTMLInputElement | null>(null)
 
@@ -271,6 +270,14 @@ const displayedContainerImage = computed(() => shortenImageRef(containerInfo.val
 const displayedCDIDevices = computed(() => containerInfo.value?.cdi_devices ?? [])
 
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
+
+const containerStatusColorClass = computed(() => {
+  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
+  if (status === 'running') return 'bg-success'
+  if (status === 'created') return 'bg-primary'
+  if (status === 'stopped' || status === 'exited') return 'bg-muted-foreground'
+  return 'bg-muted-foreground'
+})
 
 function applyCreateContainerEvent(event: ContainerCreateStreamEvent): boolean {
   switch (event.type) {
@@ -551,10 +558,6 @@ const containerTaskText = computed(() => {
   return info.task_running ? t('bots.container.taskRunning') : t('bots.container.taskStopped')
 })
 
-const preservedDataText = computed(() => hasPreservedData.value
-  ? t('bots.container.preservedDataAvailableShort')
-  : t('bots.container.preservedDataEmpty'))
-
 function formatDate(value: string | undefined): string {
   return formatDateTime(value, { fallback: '-' })
 }
@@ -660,7 +663,6 @@ watch(containerMissing, (missing) => {
   if (!missing) {
     createImagePrefilled.value = false
     createGPUPrefilled.value = false
-    createAdvancedOpen.value = false
   }
 })
 
@@ -689,13 +691,27 @@ watch([activeTab, botId], ([tab]) => {
 </script>
 
 <template>
-  <div class="mx-auto space-y-5">
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0 space-y-1">
-        <h3 class="text-sm font-semibold">
+  <div class="max-w-2xl mx-auto pb-6 space-y-5">
+    <!-- Sovereign Header -->
+    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between gap-4">
+      <div class="space-y-1">
+        <h2 class="text-sm font-semibold text-foreground flex items-center gap-2">
+          <span
+            v-if="containerInfo"
+            class="relative flex items-center justify-center size-2.5"
+          >
+            <span
+              class="absolute inline-flex h-full w-full rounded-full opacity-20"
+              :class="containerStatusColorClass"
+            />
+            <span
+              class="relative inline-flex rounded-full size-2"
+              :class="containerStatusColorClass"
+            />
+          </span>
           {{ $t('bots.container.title') }}
-        </h3>
-        <p class="text-xs text-muted-foreground">
+        </h2>
+        <p class="text-[11px] leading-snug text-muted-foreground max-w-md">
           {{ $t('bots.container.subtitle') }}
         </p>
       </div>
@@ -704,11 +720,16 @@ watch([activeTab, botId], ([tab]) => {
           variant="outline"
           size="sm"
           :disabled="containerBusy"
+          class="shadow-none"
           @click="handleRefreshContainer"
         >
           <Spinner
             v-if="containerLoading || containerAction === 'refresh'"
-            class="mr-1.5"
+            class="mr-1.5 size-3.5"
+          />
+          <RefreshCw
+            v-else
+            class="mr-1.5 size-3.5 text-muted-foreground"
           />
           {{ $t('common.refresh') }}
         </Button>
@@ -717,24 +738,35 @@ watch([activeTab, botId], ([tab]) => {
           variant="secondary"
           size="sm"
           :disabled="containerBusy || botLifecyclePending"
+          class="shadow-none"
           @click="isContainerTaskRunning ? handleStopContainer() : handleStartContainer()"
         >
           <Spinner
             v-if="containerAction === 'start' || containerAction === 'stop'"
             class="mr-1.5"
           />
+          <Square
+            v-else-if="isContainerTaskRunning"
+            class="mr-1.5 size-3.5"
+          />
+          <Play
+            v-else
+            class="mr-1.5 size-3.5"
+          />
           {{ isContainerTaskRunning ? $t('bots.container.actions.stop') : $t('bots.container.actions.start') }}
         </Button>
       </div>
-    </div>
+    </header>
 
+    <!-- Bot Not Ready -->
     <div
       v-if="botLifecyclePending"
-      class="rounded-md border border-warning-border bg-warning-soft p-3 text-xs text-warning-foreground"
+      class="rounded-md border border-warning-border bg-warning-soft p-3 text-xs text-warning-foreground shadow-none"
     >
       {{ $t('bots.container.botNotReady') }}
     </div>
 
+    <!-- Loading -->
     <div
       v-if="containerLoading && !containerInfo && !containerMissing"
       class="flex items-center gap-2 text-xs text-muted-foreground"
@@ -743,112 +775,101 @@ watch([activeTab, botId], ([tab]) => {
       <span>{{ $t('common.loading') }}</span>
     </div>
 
+    <!-- Empty State (Create) -->
     <div
       v-else-if="containerMissing"
-      class="space-y-4 rounded-md border p-4"
+      class="space-y-6"
     >
-      <p class="text-xs text-muted-foreground">
-        {{ $t('bots.container.empty') }}
-      </p>
-
-      <div class="rounded-md border p-4 space-y-4">
-        <div class="space-y-1">
-          <p class="text-xs font-medium">
-            {{ $t('bots.container.actions.create') }}
-          </p>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.container.createHint') }}
-          </p>
+      <div class="flex flex-col items-center justify-center py-10 border border-border/40 border-dashed rounded-lg bg-muted/5">
+        <div class="size-10 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+          <Box class="size-5 text-muted-foreground" />
         </div>
+        <p class="text-sm font-medium text-foreground mb-1">
+          {{ $t('bots.container.empty') }}
+        </p>
+        <p class="text-[11px] text-muted-foreground text-center max-w-sm">
+          {{ $t('bots.container.createHint') }}
+        </p>
+      </div>
 
-        <div class="flex items-start justify-between gap-4 rounded-md border p-3">
-          <div class="space-y-1">
-            <Label>{{ $t('bots.container.createRestoreDataLabel') }}</Label>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.container.createRestoreDataDescription') }}
-            </p>
+      <div class="space-y-4">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <!-- Restore Data Switch -->
+          <div class="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background p-3 shadow-none">
+            <div class="space-y-1">
+              <Label class="text-xs font-medium">{{ $t('bots.container.createRestoreDataLabel') }}</Label>
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.createRestoreDataDescription') }}
+              </p>
+            </div>
+            <Switch
+              :model-value="createRestoreData"
+              :disabled="containerBusy || botLifecyclePending"
+              @update:model-value="(value) => createRestoreData = !!value"
+            />
           </div>
-          <Switch
-            :model-value="createRestoreData"
-            :disabled="containerBusy || botLifecyclePending"
-            @update:model-value="(value) => createRestoreData = !!value"
-          />
+
+          <!-- GPU Switch -->
+          <div class="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background p-3 shadow-none">
+            <div class="space-y-1">
+              <Label class="text-xs font-medium">{{ $t('bots.container.createGpuLabel') }}</Label>
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.createGpuDescription') }}
+              </p>
+            </div>
+            <Switch
+              :model-value="createGPUEnabled"
+              :disabled="containerBusy || botLifecyclePending"
+              @update:model-value="(value) => createGPUEnabled = !!value"
+            />
+          </div>
         </div>
 
-        <div class="space-y-2">
-          <Label>{{ $t('bots.container.createImageLabel') }}</Label>
+        <!-- Image Input -->
+        <div class="space-y-1.5">
+          <Label class="text-xs font-medium">{{ $t('bots.container.createImageLabel') }}</Label>
           <Input
             v-model="createImage"
             placeholder="debian:bookworm-slim"
             :disabled="containerBusy || botLifecyclePending"
-            class="font-mono"
+            class="font-mono text-xs h-8 shadow-none bg-background border-border/60"
           />
-          <p class="text-xs text-muted-foreground">
+          <p class="text-[11px] text-muted-foreground">
             {{ $t('bots.container.createImageDescription') }}
           </p>
         </div>
 
-        <Collapsible v-model:open="createAdvancedOpen">
-          <div class="rounded-md border">
-            <CollapsibleTrigger class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40">
-              <div class="space-y-1">
-                <p class="text-xs font-medium">
-                  {{ $t('bots.container.createAdvancedTitle') }}
-                </p>
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('bots.container.createAdvancedDescription') }}
-                </p>
-              </div>
-              <ChevronRight
-                class="size-4 shrink-0 text-muted-foreground transition-transform"
-                :class="{ 'rotate-90': createAdvancedOpen }"
-              />
-            </CollapsibleTrigger>
+        <!-- GPU Devices Input -->
+        <div
+          v-if="createGPUEnabled"
+          class="space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <Label class="text-xs font-medium">{{ $t('bots.container.createGpuDevicesLabel') }}</Label>
+          <Textarea
+            v-model="createGPUDevices"
+            :placeholder="$t('bots.container.createGpuDevicesPlaceholder')"
+            :disabled="containerBusy || botLifecyclePending"
+            class="min-h-20 font-mono text-xs shadow-none bg-background border-border/60"
+          />
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.container.createGpuDevicesDescription') }}
+          </p>
+        </div>
 
-            <CollapsibleContent>
-              <div class="space-y-4 border-t px-3 py-3">
-                <div class="flex items-start justify-between gap-4 rounded-md border p-3">
-                  <div class="space-y-1">
-                    <Label>{{ $t('bots.container.createGpuLabel') }}</Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ $t('bots.container.createGpuDescription') }}
-                    </p>
-                  </div>
-                  <Switch
-                    :model-value="createGPUEnabled"
-                    :disabled="containerBusy || botLifecyclePending"
-                    @update:model-value="(value) => createGPUEnabled = !!value"
-                  />
-                </div>
-
-                <div
-                  v-if="createGPUEnabled"
-                  class="space-y-2"
-                >
-                  <Label>{{ $t('bots.container.createGpuDevicesLabel') }}</Label>
-                  <Textarea
-                    v-model="createGPUDevices"
-                    :placeholder="$t('bots.container.createGpuDevicesPlaceholder')"
-                    :disabled="containerBusy || botLifecyclePending"
-                    class="min-h-24 font-mono text-xs"
-                  />
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.container.createGpuDevicesDescription') }}
-                  </p>
-                </div>
-              </div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
-
-        <div class="flex justify-end">
+        <div class="flex justify-end pt-2">
           <Button
             :disabled="containerBusy || botLifecyclePending"
+            size="sm"
+            class="h-8 text-xs font-medium shadow-none"
             @click="handleCreateContainer"
           >
             <Spinner
               v-if="containerAction === 'create'"
-              class="mr-1.5"
+              class="mr-1.5 size-3.5"
+            />
+            <Play
+              v-else
+              class="mr-1.5 size-3.5"
             />
             {{ $t('bots.container.actions.create') }}
           </Button>
@@ -856,7 +877,7 @@ watch([activeTab, botId], ([tab]) => {
 
         <div
           v-if="createProgress && (containerAction === 'create')"
-          class="space-y-2"
+          class="space-y-2 mt-4"
         >
           <ContainerCreateProgress
             :phase="createProgress.phase"
@@ -867,21 +888,23 @@ watch([activeTab, botId], ([tab]) => {
       </div>
     </div>
 
+    <!-- Active Container -->
     <div
       v-else-if="containerInfo"
-      class="space-y-5"
+      class="space-y-6"
     >
+      <!-- Legacy Warning -->
       <div
         v-if="isLegacy"
-        class="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-soft p-3"
+        class="flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-soft p-3 shadow-none"
       >
-        <p class="text-xs text-warning-foreground">
+        <p class="text-[11px] text-warning-foreground">
           {{ $t('bots.container.legacyWarning') }}
         </p>
         <Button
           variant="outline"
           size="sm"
-          class="shrink-0"
+          class="shrink-0 h-7 text-[10px] shadow-none"
           :disabled="containerBusy || botLifecyclePending"
           @click="handleRecreateContainer"
         >
@@ -892,10 +915,9 @@ watch([activeTab, botId], ([tab]) => {
           {{ $t('bots.container.legacyRecreate') }}
         </Button>
       </div>
-
       <div
         v-if="createProgress && containerAction === 'recreate'"
-        class="space-y-2 rounded-md border p-3"
+        class="space-y-2 rounded-md border border-border/60 p-3 shadow-none"
       >
         <ContainerCreateProgress
           :phase="createProgress.phase"
@@ -904,92 +926,66 @@ watch([activeTab, botId], ([tab]) => {
         />
       </div>
 
-      <div class="rounded-md border p-4">
-        <dl class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.id') }}
-            </dt>
-            <dd class="break-all font-mono">
-              {{ containerInfo.container_id }}
-            </dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.status') }}
-            </dt>
-            <dd>{{ containerStatusText }}</dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.task') }}
-            </dt>
-            <dd>{{ containerTaskText }}</dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.namespace') }}
-            </dt>
-            <dd>{{ containerInfo.namespace }}</dd>
-          </div>
-          <div class="space-y-1 sm:col-span-2">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.image') }}
-            </dt>
-            <dd class="break-all">
-              {{ displayedContainerImage }}
-            </dd>
-          </div>
-          <div class="space-y-1 sm:col-span-2">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.cdiDevices') }}
-            </dt>
-            <dd
-              v-if="displayedCDIDevices.length === 0"
-              class="text-muted-foreground"
-            >
-              {{ $t('bots.container.cdiDevicesEmpty') }}
-            </dd>
-            <dd
-              v-else
-              class="space-y-1 font-mono text-xs"
-            >
+      <!-- Identity Badges (L3 Meta) -->
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/40">
+          ID: {{ containerInfo.container_id }}
+        </span>
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-mono font-medium text-muted-foreground border border-border/40">
+          IMG: {{ displayedContainerImage }}
+        </span>
+        <span class="inline-flex items-center rounded bg-muted/20 px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/40">
+          TASK: {{ containerTaskText }}
+        </span>
+      </div>
+
+      <div class="grid grid-cols-12 gap-4">
+        <!-- Static Metadata Bento -->
+        <div class="col-span-12 rounded-md border border-border/60 bg-muted/5 p-4 shadow-none">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-[11px]">
+            <div class="space-y-1">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.status') }}</span>
+              <span class="font-medium text-foreground">{{ containerStatusText }}</span>
+            </div>
+            <div class="space-y-1">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.namespace') }}</span>
+              <span class="font-mono text-foreground">{{ containerInfo.namespace }}</span>
+            </div>
+            <div class="space-y-1">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.createdAt') }}</span>
+              <span class="text-foreground">{{ formatDate(containerInfo.created_at) }}</span>
+            </div>
+            <div class="space-y-1">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.updatedAt') }}</span>
+              <span class="text-foreground">{{ formatDate(containerInfo.updated_at) }}</span>
+            </div>
+            <div class="space-y-1 sm:col-span-2">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.containerPath') }}</span>
+              <span class="font-mono text-foreground break-all">{{ containerInfo.container_path }}</span>
+            </div>
+            <div class="space-y-1 sm:col-span-2">
+              <span class="text-muted-foreground block">{{ $t('bots.container.fields.cdiDevices') }}</span>
               <div
-                v-for="device in displayedCDIDevices"
-                :key="device"
-                class="break-all"
+                v-if="displayedCDIDevices.length === 0"
+                class="text-muted-foreground"
               >
-                {{ device }}
+                {{ $t('bots.container.cdiDevicesEmpty') }}
               </div>
-            </dd>
+              <div
+                v-else
+                class="space-y-0.5 font-mono"
+              >
+                <div
+                  v-for="device in displayedCDIDevices"
+                  :key="device"
+                  class="break-all text-foreground"
+                >
+                  {{ device }}
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="space-y-1 sm:col-span-2">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.containerPath') }}
-            </dt>
-            <dd class="break-all">
-              {{ containerInfo.container_path }}
-            </dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.preservedData') }}
-            </dt>
-            <dd>{{ preservedDataText }}</dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.createdAt') }}
-            </dt>
-            <dd>{{ formatDate(containerInfo.created_at) }}</dd>
-          </div>
-          <div class="space-y-1">
-            <dt class="text-muted-foreground">
-              {{ $t('bots.container.fields.updatedAt') }}
-            </dt>
-            <dd>{{ formatDate(containerInfo.updated_at) }}</dd>
-          </div>
-        </dl>
+        </div>
       </div>
 
       <ContainerMetricsPanel
@@ -997,71 +993,111 @@ watch([activeTab, botId], ([tab]) => {
         :loading="metricsLoading"
         :metrics="containerMetrics"
       />
-
-      <div class="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+      <div class="rounded-md border border-border/50 bg-background px-3 py-2 text-[11px] text-muted-foreground shadow-none">
         {{ $t('bots.container.gpuRecreateHint') }}
       </div>
 
-      <div class="space-y-4 rounded-md border p-4">
-        <div class="space-y-1">
-          <h4 class="text-xs font-medium">
-            {{ $t('bots.container.dataTitle') }}
-          </h4>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.container.dataSubtitle') }}
-          </p>
-        </div>
+      <!-- Data Operations -->
+      <div class="space-y-4">
+        <div class="rounded-md border border-border/60 bg-background overflow-hidden shadow-none">
+          <div class="p-4 space-y-4">
+            <!-- Data Pipeline Group -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="space-y-0.5">
+                <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+                  <Database class="size-3.5 text-muted-foreground" />
+                  {{ $t('bots.container.dataTitle') }}
+                </h4>
+                <p class="text-[11px] text-muted-foreground leading-snug">
+                  {{ $t('bots.container.dataSubtitle') }}
+                </p>
+                <div
+                  v-if="hasPreservedData"
+                  class="mt-2 inline-flex items-center rounded bg-primary/10 px-2 py-0.5 text-[10px] text-primary"
+                >
+                  {{ $t('bots.container.preservedDataAvailable') }}
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0 sm:justify-end">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  :disabled="containerBusy || botLifecyclePending"
+                  class="h-8 text-xs shadow-none font-medium border border-border"
+                  @click="handleExportData"
+                >
+                  {{ $t('bots.container.actions.exportData') }}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  :disabled="containerBusy || botLifecyclePending"
+                  class="h-8 text-xs shadow-none font-medium border border-border"
+                  @click="triggerImportData"
+                >
+                  {{ $t('bots.container.actions.importData') }}
+                </Button>
+                <ConfirmPopover
+                  :message="$t('bots.container.restoreConfirm')"
+                  :loading="containerAction === 'restore'"
+                  @confirm="handleRestorePreservedData"
+                >
+                  <template #trigger>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      :disabled="containerBusy || botLifecyclePending || !hasPreservedData"
+                      class="h-8 text-xs shadow-none font-medium border border-border"
+                    >
+                      <Spinner
+                        v-if="containerAction === 'restore'"
+                        class="mr-1.5"
+                      />
+                      {{ $t('bots.container.actions.restoreData') }}
+                    </Button>
+                  </template>
+                </ConfirmPopover>
+              </div>
+            </div>
 
-        <div
-          v-if="hasPreservedData"
-          class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
-        >
-          {{ $t('bots.container.preservedDataAvailable') }}
-        </div>
+            <Separator class="bg-border/40" />
 
-        <div class="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            :disabled="containerBusy || botLifecyclePending"
-            @click="handleExportData"
-          >
-            <Spinner
-              v-if="containerAction === 'export'"
-              class="mr-1.5"
-            />
-            {{ $t('bots.container.actions.exportData') }}
-          </Button>
-          <Button
-            variant="outline"
-            :disabled="containerBusy || botLifecyclePending"
-            @click="triggerImportData"
-          >
-            <Spinner
-              v-if="containerAction === 'import'"
-              class="mr-1.5"
-            />
-            {{ $t('bots.container.actions.importData') }}
-          </Button>
-          <ConfirmPopover
-            :message="$t('bots.container.restoreConfirm')"
-            :loading="containerAction === 'restore'"
-            @confirm="handleRestorePreservedData"
-          >
-            <template #trigger>
-              <Button
-                variant="outline"
-                :disabled="containerBusy || botLifecyclePending || !hasPreservedData"
-              >
-                <Spinner
-                  v-if="containerAction === 'restore'"
-                  class="mr-1.5"
-                />
-                {{ $t('bots.container.actions.restoreData') }}
-              </Button>
-            </template>
-          </ConfirmPopover>
+            <!-- Lifecycle Group -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="space-y-0.5">
+                <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+                  <Settings class="size-3.5 text-muted-foreground" />
+                  {{ $t('bots.container.lifecycleTitle') }}
+                </h4>
+                <p class="text-[11px] text-muted-foreground leading-snug">
+                  {{ $t('bots.container.deleteSubtitle') }}
+                </p>
+              </div>
+              <div class="flex justify-end shrink-0">
+                <ConfirmPopover
+                  :message="$t('bots.container.deletePreserveConfirm')"
+                  :loading="containerAction === 'delete-preserve'"
+                  @confirm="handleDeleteContainer(true)"
+                >
+                  <template #trigger>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      :disabled="containerBusy || botLifecyclePending"
+                      class="h-8 text-xs shadow-none font-medium border border-border"
+                    >
+                      <Spinner
+                        v-if="containerAction === 'delete-preserve'"
+                        class="mr-1.5"
+                      />
+                      {{ $t('bots.container.actions.deletePreserve') }}
+                    </Button>
+                  </template>
+                </ConfirmPopover>
+              </div>
+            </div>
+          </div>
         </div>
-
         <input
           ref="importInputRef"
           type="file"
@@ -1069,160 +1105,143 @@ watch([activeTab, botId], ([tab]) => {
           class="hidden"
           @change="handleImportData"
         >
-        <Separator />
-        <div class="space-y-3">
-          <div class="space-y-1">
-            <h4 class="text-xs font-medium text-destructive">
-              {{ $t('bots.container.deleteTitle') }}
-            </h4>
-            <p class="text-xs text-muted-foreground">
-              {{ $t('bots.container.deleteSubtitle') }}
-            </p>
-          </div>
+      </div>
 
-          <div class="flex flex-wrap gap-2">
-            <ConfirmPopover
-              :message="$t('bots.container.deletePreserveConfirm')"
-              :loading="containerAction === 'delete-preserve'"
-              @confirm="handleDeleteContainer(true)"
-            >
-              <template #trigger>
-                <Button
-                  variant="outline"
-                  :disabled="containerBusy || botLifecyclePending"
-                >
-                  <Spinner
-                    v-if="containerAction === 'delete-preserve'"
-                    class="mr-1.5"
-                  />
-                  {{ $t('bots.container.actions.deletePreserve') }}
-                </Button>
-              </template>
-            </ConfirmPopover>
-
-            <ConfirmPopover
-              :message="$t('bots.container.deleteConfirm')"
-              :loading="containerAction === 'delete'"
-              @confirm="handleDeleteContainer(false)"
-            >
-              <template #trigger>
-                <Button
-                  variant="destructive"
-                  :disabled="containerBusy || botLifecyclePending"
-                >
-                  <Spinner
-                    v-if="containerAction === 'delete'"
-                    class="mr-1.5"
-                  />
-                  {{ $t('bots.container.actions.delete') }}
-                </Button>
-              </template>
-            </ConfirmPopover>
+      <!-- Danger Zone - Exact replica from ?tab=channels -->
+      <div class="pt-4">
+        <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="space-y-0.5">
+              <h4 class="text-xs font-medium text-destructive">
+                {{ $t('common.dangerZone') }}
+              </h4>
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.deleteZoneDesc') }}
+              </p>
+            </div>
+            <div class="flex justify-end shrink-0">
+              <ConfirmPopover
+                :message="$t('bots.container.deleteConfirm')"
+                :loading="containerAction === 'delete'"
+                @confirm="handleDeleteContainer(false)"
+              >
+                <template #trigger>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    :disabled="containerBusy || botLifecyclePending"
+                    class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-lg gap-1.5 px-3 min-w-28 h-8 text-xs font-medium shadow-none"
+                  >
+                    <Spinner
+                      v-if="containerAction === 'delete'"
+                      class="mr-1.5"
+                    />
+                    {{ $t('bots.container.actions.delete') }}
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
           </div>
         </div>
       </div>
 
-      <Separator v-if="capabilitiesStore.snapshotSupported" />
+      <Separator
+        v-if="capabilitiesStore.snapshotSupported"
+        class="bg-border/50"
+      />
 
+      <!-- Snapshots -->
       <div
         v-if="capabilitiesStore.snapshotSupported"
-        class="space-y-3"
+        class="space-y-4"
       >
-        <div class="space-y-2">
-          <div class="flex flex-col gap-2 sm:flex-row">
-            <Input
-              v-model="newSnapshotName"
-              :placeholder="$t('bots.container.snapshotNamePlaceholder')"
-              :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-              class="sm:max-w-72"
-            />
-            <Button
-              :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
-              @click="handleCreateSnapshot"
-            >
-              <Spinner
-                v-if="containerAction === 'snapshot'"
-                class="mr-1.5"
-              />
-              {{ $t('bots.container.actions.snapshot') }}
-            </Button>
+        <div class="rounded-md border border-border/60 bg-background overflow-hidden shadow-none">
+          <!-- Snapshot Management Row -->
+          <div class="p-4 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="space-y-0.5">
+                <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+                  <History class="size-3.5 text-muted-foreground" />
+                  {{ $t('bots.container.snapshotTitle') }}
+                </h4>
+                <p class="text-[11px] text-muted-foreground leading-snug">
+                  {{ $t('bots.container.snapshotSubtitle') }}
+                </p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0 sm:justify-end flex-1 max-w-md">
+                <Input
+                  v-model="newSnapshotName"
+                  :placeholder="$t('bots.container.snapshotNamePlaceholder')"
+                  :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+                  class="flex-1 h-8 text-xs shadow-none border-border/60 bg-transparent"
+                />
+                <Button
+                  size="sm"
+                  :disabled="containerBusy || snapshotsLoading || botLifecyclePending"
+                  class="min-w-28 h-8 text-xs shadow-none font-medium border border-border bg-accent text-foreground hover:bg-accent/80 transition-colors"
+                  @click="handleCreateSnapshot"
+                >
+                  <Spinner
+                    v-if="containerAction === 'snapshot'"
+                    class="mr-1.5"
+                  />
+                  {{ $t('bots.container.actions.snapshot') }}
+                </Button>
+              </div>
+            </div>
+            <p class="text-[10px] text-muted-foreground/60 leading-none">
+              {{ $t('bots.container.snapshotNameHint') }}
+            </p>
           </div>
-          <p class="text-xs text-muted-foreground">
-            {{ $t('bots.container.snapshotNameHint') }}
-          </p>
-        </div>
 
-        <div
-          v-if="snapshotsLoading"
-          class="flex items-center gap-2 text-xs text-muted-foreground"
-        >
-          <Spinner />
-          <span>{{ $t('common.loading') }}</span>
-        </div>
-        <div
-          v-else-if="sortedSnapshots.length === 0"
-          class="text-xs text-muted-foreground"
-        >
-          {{ $t('bots.container.snapshotEmpty') }}
-        </div>
-        <div
-          v-else
-          class="space-y-3"
-        >
-          <div class="space-y-3 md:hidden">
+          <Separator class="bg-border/40" />
+
+          <!-- List Section -->
+          <div
+            v-if="snapshotsLoading"
+            class="flex items-center gap-2 text-xs text-muted-foreground p-4"
+          >
+            <Spinner /> <span>{{ $t('common.loading') }}</span>
+          </div>
+          <div
+            v-else-if="sortedSnapshots.length === 0"
+            class="text-[11px] text-muted-foreground py-8 text-center border-dashed border-t border-border/20"
+          >
+            {{ $t('bots.container.snapshotEmpty') }}
+          </div>
+          <div
+            v-else
+            class="divide-y divide-border/40"
+          >
             <div
               v-for="item in sortedSnapshots"
               :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"
-              class="rounded-md border p-4 space-y-4"
+              class="flex flex-col sm:flex-row sm:items-center justify-between p-3 gap-3 transition-colors hover:bg-muted/20 group"
             >
-              <div class="space-y-1">
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('bots.container.snapshotColumns.name') }}
-                </p>
-                <div class="break-all font-medium">
-                  {{ snapshotDisplayName(item) }}
-                </div>
-                <div
-                  v-if="snapshotRuntimeName(item)"
-                  class="break-all font-mono text-xs text-muted-foreground"
-                >
-                  {{ snapshotRuntimeName(item) }}
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div class="space-y-1">
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.container.snapshotColumns.version') }}
-                  </p>
-                  <div>{{ snapshotVersionText(item) }}</div>
-                </div>
-                <div class="space-y-1">
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.container.snapshotColumns.source') }}
-                  </p>
-                  <div>{{ snapshotSourceText(item) }}</div>
-                </div>
-                <div class="space-y-1">
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.container.snapshotColumns.parent') }}
-                  </p>
-                  <div class="break-all">
-                    {{ item.parent || '-' }}
+              <div class="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-4 items-center">
+                <div class="sm:col-span-4 min-w-0">
+                  <div class="truncate text-xs font-medium text-foreground">
+                    {{ snapshotDisplayName(item) }}
+                  </div>
+                  <div
+                    v-if="snapshotRuntimeName(item)"
+                    class="truncate text-[10px] font-mono text-muted-foreground"
+                  >
+                    {{ snapshotRuntimeName(item) }}
                   </div>
                 </div>
-                <div class="space-y-1">
-                  <p class="text-xs text-muted-foreground">
-                    {{ $t('bots.container.snapshotColumns.createdAt') }}
-                  </p>
-                  <div>{{ formatDate(item.created_at) }}</div>
+                <div class="sm:col-span-2 text-[11px] text-muted-foreground">
+                  <span class="inline-flex px-1.5 py-0.5 rounded bg-muted/40 border border-border/40">{{ snapshotVersionText(item) }}</span>
+                </div>
+                <div class="sm:col-span-2 text-[11px] text-muted-foreground">
+                  {{ snapshotSourceText(item) }}
+                </div>
+                <div class="sm:col-span-4 text-[11px] text-muted-foreground truncate">
+                  {{ formatDate(item.created_at) }}
                 </div>
               </div>
 
-              <div class="space-y-1">
-                <p class="text-xs text-muted-foreground">
-                  {{ $t('bots.container.snapshotColumns.actions') }}
-                </p>
+              <div class="shrink-0 flex items-center justify-end">
                 <ConfirmPopover
                   v-if="canRollbackSnapshot(item)"
                   :message="$t('bots.container.rollbackConfirm')"
@@ -1231,10 +1250,10 @@ watch([activeTab, botId], ([tab]) => {
                 >
                   <template #trigger>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      class="w-full"
                       :disabled="containerBusy || botLifecyclePending"
+                      class="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary hover:bg-primary/10 shadow-none transition-colors"
                     >
                       <Spinner
                         v-if="containerAction === 'rollback' && rollbackVersion === item.version"
@@ -1244,102 +1263,8 @@ watch([activeTab, botId], ([tab]) => {
                     </Button>
                   </template>
                 </ConfirmPopover>
-                <div
-                  v-else
-                  class="text-xs text-muted-foreground"
-                >
-                  -
-                </div>
               </div>
             </div>
-          </div>
-
-          <div class="hidden overflow-x-auto rounded-md border md:block">
-            <table class="w-full text-xs">
-              <thead class="bg-muted/50 text-left">
-                <tr>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.name') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.version') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.source') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.parent') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.createdAt') }}
-                  </th>
-                  <th class="px-3 py-2 font-medium">
-                    {{ $t('bots.container.snapshotColumns.actions') }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="item in sortedSnapshots"
-                  :key="`${item.snapshotter}:${item.runtime_snapshot_name || item.name}`"
-                  class="border-t align-top"
-                >
-                  <td class="px-3 py-2">
-                    <div class="space-y-1">
-                      <div class="break-all font-medium">
-                        {{ snapshotDisplayName(item) }}
-                      </div>
-                      <div
-                        v-if="snapshotRuntimeName(item)"
-                        class="break-all font-mono text-xs text-muted-foreground"
-                      >
-                        {{ snapshotRuntimeName(item) }}
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-3 py-2">
-                    {{ snapshotVersionText(item) }}
-                  </td>
-                  <td class="px-3 py-2">
-                    {{ snapshotSourceText(item) }}
-                  </td>
-                  <td class="px-3 py-2 break-all">
-                    {{ item.parent || '-' }}
-                  </td>
-                  <td class="px-3 py-2">
-                    {{ formatDate(item.created_at) }}
-                  </td>
-                  <td class="px-3 py-2">
-                    <ConfirmPopover
-                      v-if="canRollbackSnapshot(item)"
-                      :message="$t('bots.container.rollbackConfirm')"
-                      :loading="containerAction === 'rollback' && rollbackVersion === item.version"
-                      @confirm="handleRollbackSnapshot(item)"
-                    >
-                      <template #trigger>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          :disabled="containerBusy || botLifecyclePending"
-                        >
-                          <Spinner
-                            v-if="containerAction === 'rollback' && rollbackVersion === item.version"
-                            class="mr-1.5"
-                          />
-                          {{ $t('bots.container.actions.rollback') }}
-                        </Button>
-                      </template>
-                    </ConfirmPopover>
-                    <span
-                      v-else
-                      class="text-muted-foreground"
-                    >
-                      -
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       </div>
