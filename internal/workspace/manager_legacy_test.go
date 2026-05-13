@@ -29,15 +29,25 @@ type legacyRouteTestService struct {
 
 	getContainerBeforeCreateErr error
 	getImageErr                 error
+	getImageErrs                map[string]error
 	pullErr                     error
+	pullErrs                    map[string]error
 	pullCalls                   int
+	pullRefs                    []string
 	getImageCalls               int
+	getImageRefs                []string
 	setupNetworkResults         []ctr.NetworkResult
 	setupNetworkErrs            []error
 }
 
 func (s *legacyRouteTestService) PullImage(_ context.Context, ref string, _ *ctr.PullImageOptions) (ctr.ImageInfo, error) {
 	s.pullCalls++
+	s.pullRefs = append(s.pullRefs, ref)
+	if s.pullErrs != nil {
+		if err, ok := s.pullErrs[ref]; ok {
+			return ctr.ImageInfo{}, err
+		}
+	}
 	if s.pullErr != nil {
 		return ctr.ImageInfo{}, s.pullErr
 	}
@@ -46,6 +56,12 @@ func (s *legacyRouteTestService) PullImage(_ context.Context, ref string, _ *ctr
 
 func (s *legacyRouteTestService) GetImage(_ context.Context, ref string) (ctr.ImageInfo, error) {
 	s.getImageCalls++
+	s.getImageRefs = append(s.getImageRefs, ref)
+	if s.getImageErrs != nil {
+		if err, ok := s.getImageErrs[ref]; ok {
+			return ctr.ImageInfo{}, err
+		}
+	}
 	if s.getImageErr != nil {
 		return ctr.ImageInfo{}, s.getImageErr
 	}

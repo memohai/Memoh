@@ -31,6 +31,8 @@ const (
 	DefaultQdrantCollection = "memory"
 	DefaultRuntimeDir       = "/opt/memoh/runtime"
 	DefaultBaseImage        = "debian:bookworm-slim"
+	DefaultVNCImage         = "memohai/vnc:debian"
+	DefaultVNCMirrorImage   = "memoh.cn/memohai/vnc:debian"
 	DefaultTimezone         = "UTC"
 
 	ImagePullPolicyIfNotPresent = "if_not_present"
@@ -252,6 +254,10 @@ func homeDirOrDot() string {
 
 // NormalizeImageRef ensures an image reference is fully qualified for containerd.
 func NormalizeImageRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
 	firstSlash := strings.Index(ref, "/")
 	if firstSlash == -1 {
 		return "docker.io/library/" + ref
@@ -261,6 +267,17 @@ func NormalizeImageRef(ref string) string {
 		return ref
 	}
 	return "docker.io/" + ref
+}
+
+func WorkspaceImagePullCandidates(ref string) []string {
+	normalized := NormalizeImageRef(ref)
+	if normalized == "" {
+		return nil
+	}
+	if normalized == NormalizeImageRef(DefaultVNCImage) {
+		return []string{normalized, DefaultVNCMirrorImage}
+	}
+	return []string{normalized}
 }
 
 type PostgresConfig struct {

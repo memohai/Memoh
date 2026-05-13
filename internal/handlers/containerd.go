@@ -357,6 +357,9 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 			sendError("image preparation failed: " + pullErr.Error())
 			return nil
 		}
+		if strings.TrimSpace(prepareResult.ImageRef) != "" {
+			image = prepareResult.ImageRef
+		}
 		switch prepareResult.Mode {
 		case workspace.ImagePrepareSkipped:
 			send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})

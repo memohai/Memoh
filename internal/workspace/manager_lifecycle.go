@@ -343,15 +343,19 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 		return err
 	}
 	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
-		if _, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
+		result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
 			Unpack:        true,
 			StorageDriver: m.cfg.Snapshotter,
-		}); err != nil {
+		})
+		if err != nil {
 			m.logger.Error("setup bot container: prepare image failed",
 				slog.String("bot_id", botID),
 				slog.String("image", image),
 				slog.Any("error", err))
 			return err
+		}
+		if strings.TrimSpace(result.ImageRef) != "" {
+			image = result.ImageRef
 		}
 	} else {
 		image = "local"

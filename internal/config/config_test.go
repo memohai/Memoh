@@ -240,3 +240,23 @@ func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
 		t.Fatalf("invalid policy = %q", got)
 	}
 }
+
+func TestWorkspaceImagePullCandidatesAddsVNCMirror(t *testing.T) {
+	got := WorkspaceImagePullCandidates("memohai/vnc:debian")
+	want := []string{"docker.io/memohai/vnc:debian", "memoh.cn/memohai/vnc:debian"}
+	if len(got) != len(want) {
+		t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestWorkspaceImagePullCandidatesDoesNotMirrorCustomImages(t *testing.T) {
+	got := WorkspaceImagePullCandidates("debian:bookworm-slim")
+	if len(got) != 1 || got[0] != "docker.io/library/debian:bookworm-slim" {
+		t.Fatalf("unexpected candidates: %v", got)
+	}
+}

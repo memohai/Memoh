@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/memohai/memoh/internal/config"
@@ -109,5 +111,81 @@ func TestPrepareImageForCreatePullsThroughRuntimeRouter(t *testing.T) {
 	}
 	if svc.getImageCalls != 1 || svc.pullCalls != 1 {
 		t.Fatalf("unexpected calls: get=%d pull=%d", svc.getImageCalls, svc.pullCalls)
+	}
+}
+
+func TestPrepareImageForCreateFallsBackToVNCMirror(t *testing.T) {
+	primary := "docker.io/memohai/vnc:debian"
+	fallback := "memoh.cn/memohai/vnc:debian"
+	svc := &legacyRouteTestService{
+		getImageErr: ctr.ErrNotFound,
+		pullErrs: map[string]error{
+			primary: ctr.ErrRuntime,
+		},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
+	})
+
+	result, err := m.PrepareImageForCreate(context.Background(), "memohai/vnc:debian", nil)
+	if err != nil {
+		t.Fatalf("PrepareImageForCreate returned error: %v", err)
+	}
+	if result.Mode != ImagePreparePulled {
+		t.Fatalf("expected pulled, got %s", result.Mode)
+	}
+	if result.ImageRef != fallback {
+		t.Fatalf("expected fallback image %q, got %q", fallback, result.ImageRef)
+	}
+	if got := strings.Join(svc.pullRefs, ","); got != primary+","+fallback {
+		t.Fatalf("pull refs = %q, want %q", got, primary+","+fallback)
+	}
+}
+
+func TestPrepareImageForCreateSkipsExistingVNCMirror(t *testing.T) {
+	primary := "docker.io/memohai/vnc:debian"
+	fallback := "memoh.cn/memohai/vnc:debian"
+	svc := &legacyRouteTestService{
+		getImageErrs: map[string]error{
+			primary: ctr.ErrNotFound,
+		},
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
+	})
+
+	result, err := m.PrepareImageForCreate(context.Background(), "memohai/vnc:debian", nil)
+	if err != nil {
+		t.Fatalf("PrepareImageForCreate returned error: %v", err)
+	}
+	if result.Mode != ImagePrepareSkipped {
+		t.Fatalf("expected skipped, got %s", result.Mode)
+	}
+	if result.ImageRef != fallback {
+		t.Fatalf("expected fallback image %q, got %q", fallback, result.ImageRef)
+	}
+	if svc.pullCalls != 0 {
+		t.Fatalf("expected no pull calls, got %d", svc.pullCalls)
+	}
+	if got := strings.Join(svc.getImageRefs, ","); got != primary+","+fallback {
+		t.Fatalf("get refs = %q, want %q", got, primary+","+fallback)
+	}
+}
+
+func TestPrepareImageForCreateDoesNotFallbackForCustomImages(t *testing.T) {
+	svc := &legacyRouteTestService{
+		getImageErr: ctr.ErrNotFound,
+		pullErr:     ctr.ErrRuntime,
+	}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{
+		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
+	})
+
+	_, err := m.PrepareImageForCreate(context.Background(), "debian:bookworm-slim", nil)
+	if !errors.Is(err, ctr.ErrRuntime) {
+		t.Fatalf("expected runtime error, got %v", err)
+	}
+	if svc.pullCalls != 1 {
+		t.Fatalf("expected one pull call, got %d", svc.pullCalls)
 	}
 }
