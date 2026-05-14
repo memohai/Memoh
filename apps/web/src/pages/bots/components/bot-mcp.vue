@@ -1588,9 +1588,26 @@ function applyPendingDraft() {
   if (!entry) return
   removeDraft()
   const isStdio = entry.transport === 'stdio'
+  const env: Record<string, string> = {}
+  for (const e of entry.env ?? []) {
+    if (e.key) env[e.key] = e.defaultValue ?? ''
+  }
+  const headers: Record<string, string> = {}
+  for (const h of entry.headers ?? []) {
+    if (h.key) headers[h.key] = h.defaultValue ?? ''
+  }
+  const config: Record<string, unknown> = {}
+  if (isStdio) {
+    if (entry.command) config.command = entry.command
+    if (entry.args?.length) config.args = entry.args
+    if (Object.keys(env).length) config.env = env
+  } else {
+    if (entry.url) config.url = entry.url
+    if (Object.keys(headers).length) config.headers = headers
+  }
   const draft: McpItem = {
     id: DRAFT_ID, name: entry.name ?? '', type: isStdio ? 'stdio' : (entry.transport === 'sse' ? 'sse' : 'http'),
-    config: {}, is_active: true, status: 'unknown', tools_cache: [], last_probed_at: null, status_message: '', auth_type: 'none'
+    config, is_active: true, status: 'unknown', tools_cache: [], last_probed_at: null, status_message: '', auth_type: 'none'
   }
   items.value = [draft, ...items.value]
   selectItem(draft)
