@@ -392,15 +392,63 @@ EOF
   write_display_musl_wrapper xterm
 }
 
+display_bundle_installed() {
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xsetroot" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/twm" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xterm" ] || return 1
+
+  write_display_wrappers
+  "$DISPLAY_OUTDIR/bin/Xvnc" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xkbcomp" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xsetroot" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/twm" -V >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xterm" -version >/dev/null 2>&1 || return 1
+}
+
+remove_display_bundle() {
+  [ -e "$DISPLAY_OUTDIR" ] || return
+
+  if rm -rf "$DISPLAY_OUTDIR" 2>/dev/null; then
+    return
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "ERROR: failed to remove existing display runtime at $DISPLAY_OUTDIR" >&2
+    echo "       The directory may contain files owned by a Docker-mapped user." >&2
+    exit 1
+  fi
+
+  display_parent="$(dirname "$DISPLAY_OUTDIR")"
+  display_base="$(basename "$DISPLAY_OUTDIR")"
+  case "$display_base" in
+    ""|"."|".."|*/*)
+      echo "ERROR: refusing to remove unsafe display path: $DISPLAY_OUTDIR" >&2
+      exit 1
+      ;;
+  esac
+
+  mkdir -p "$display_parent"
+  display_parent_abs="$(cd "$display_parent" && pwd)"
+  if ! docker run --rm \
+    -v "$display_parent_abs:/out" \
+    "alpine:${ALPINE_VERSION}" \
+    sh -eu -c 'rm -rf "/out/$1"' \
+    sh "$display_base"; then
+    echo "ERROR: failed to remove existing display runtime at $DISPLAY_OUTDIR with docker" >&2
+    exit 1
+  fi
+}
+
 install_display_bundle() {
   mkdir -p "$DISPLAY_OUTDIR"
-	if [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xsetroot" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/twm" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xterm" ]; then
-		write_display_wrappers
+  if display_bundle_installed; then
     echo "Display bundle already installed to $DISPLAY_OUTDIR; skipping download."
     return
   fi
 
-  rm -rf "$DISPLAY_OUTDIR"
+  remove_display_bundle
   mkdir -p "$DISPLAY_OUTDIR/bin"
 
   echo "Installing display runtime from Alpine packages (${APK_ARCH})..."
@@ -421,20 +469,20 @@ install_display_bundle() {
       xterm
   elif command -v docker >/dev/null 2>&1; then
     display_abs="$(cd "$DISPLAY_OUTDIR" && pwd)"
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
     docker run --rm \
       -v "$display_abs:/out" \
       "alpine:${ALPINE_VERSION}" \
-      sh -eu -c 'apk add --root /out/root --initdb --no-cache --no-scripts --allow-untrusted --repository "$1" --repository "$2" tigervnc xkeyboard-config font-misc-misc xsetroot twm xterm' \
-      sh "$ALPINE_MAIN_REPO" "$ALPINE_COMMUNITY_REPO"
+      sh -eu -c 'apk add --root /out/root --initdb --no-cache --no-scripts --allow-untrusted --repository "$1" --repository "$2" tigervnc xkeyboard-config font-misc-misc xsetroot twm xterm; chown -R "$3:$4" /out/bin /out/root' \
+      sh "$ALPINE_MAIN_REPO" "$ALPINE_COMMUNITY_REPO" "$host_uid" "$host_gid"
   else
     echo "ERROR: installing the display runtime requires apk or docker." >&2
     exit 1
   fi
 
-	write_display_wrappers
-
-  if [ ! -x "$DISPLAY_OUTDIR/bin/Xvnc" ]; then
-    echo "ERROR: display bundle does not contain executable bin/Xvnc" >&2
+  if ! display_bundle_installed; then
+    echo "ERROR: display bundle check failed after installation" >&2
     exit 1
   fi
 
