@@ -84,7 +84,7 @@ const targetSpecs = {
     binary: 'bin/gst-launch-1.0.exe',
     inspect: 'bin/gst-inspect-1.0.exe',
     scanner: 'libexec/gstreamer-1.0/gst-plugin-scanner.exe',
-    kind: 'windows-nsis',
+    kind: 'windows-inno',
     officialPath: `windows/${gstreamerVersion}/msvc`,
   },
 }
@@ -672,7 +672,18 @@ function findFile(root, fileName) {
   return null
 }
 
-function extractWindowsInstaller(archivePath, targetDir, spec) {
+function windowsInnoInstallerArgs(stagingDir) {
+  return [
+    '/VERYSILENT',
+    '/SUPPRESSMSGBOXES',
+    '/NORESTART',
+    '/SP-',
+    '/NOICONS',
+    `/DIR=${stagingDir}`,
+  ]
+}
+
+function extractWindowsInnoInstaller(archivePath, targetDir, spec) {
   if (process.platform !== 'win32') {
     throw new Error('Preparing the Windows GStreamer runtime requires running the official installer on Windows.')
   }
@@ -680,7 +691,7 @@ function extractWindowsInstaller(archivePath, targetDir, spec) {
   const stagingDir = resolve(tmpdir(), `memoh-gstreamer-runtime-${Date.now()}`)
   rmSync(stagingDir, { recursive: true, force: true })
   mkdirSync(stagingDir, { recursive: true })
-  execFileSync(archivePath, ['/S', `/D=${stagingDir}`], { stdio: 'inherit' })
+  execFileSync(archivePath, windowsInnoInstallerArgs(stagingDir), { stdio: 'inherit' })
 
   const binary = findFile(stagingDir, basename(spec.binary))
   if (!binary) {
@@ -752,8 +763,8 @@ async function prepareTarget(target) {
 
   if (spec.kind === 'macos-pkg') {
     extractMacOSPackage(archivePath, targetDir)
-  } else if (spec.kind === 'windows-nsis') {
-    extractWindowsInstaller(archivePath, targetDir, spec)
+  } else if (spec.kind === 'windows-inno') {
+    extractWindowsInnoInstaller(archivePath, targetDir, spec)
   } else {
     throw new Error(`Unsupported GStreamer package kind: ${spec.kind}`)
   }
