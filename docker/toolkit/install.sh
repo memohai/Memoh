@@ -392,10 +392,24 @@ EOF
   write_display_musl_wrapper xterm
 }
 
+display_bundle_installed() {
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xsetroot" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/twm" ] || return 1
+  [ -x "$DISPLAY_OUTDIR/root/usr/bin/xterm" ] || return 1
+
+  write_display_wrappers
+  "$DISPLAY_OUTDIR/bin/Xvnc" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xkbcomp" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xsetroot" -version >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/twm" -V >/dev/null 2>&1 || return 1
+  "$DISPLAY_OUTDIR/bin/xterm" -version >/dev/null 2>&1 || return 1
+}
+
 install_display_bundle() {
   mkdir -p "$DISPLAY_OUTDIR"
-	if [ -x "$DISPLAY_OUTDIR/root/usr/bin/Xvnc" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xkbcomp" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xsetroot" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/twm" ] && [ -x "$DISPLAY_OUTDIR/root/usr/bin/xterm" ]; then
-		write_display_wrappers
+  if display_bundle_installed; then
     echo "Display bundle already installed to $DISPLAY_OUTDIR; skipping download."
     return
   fi
@@ -431,10 +445,8 @@ install_display_bundle() {
     exit 1
   fi
 
-	write_display_wrappers
-
-  if [ ! -x "$DISPLAY_OUTDIR/bin/Xvnc" ]; then
-    echo "ERROR: display bundle does not contain executable bin/Xvnc" >&2
+  if ! display_bundle_installed; then
+    echo "ERROR: display bundle check failed after installation" >&2
     exit 1
   fi
 
