@@ -35,7 +35,7 @@ function resolveGStreamerTarget(target) {
   if (target.startsWith('darwin-')) {
     return 'darwin-universal'
   }
-  if (target === 'win32-x64' && process.env.GSTREAMER_ENABLE_WINDOWS_BUNDLE) {
+  if (target === 'win32-x64') {
     return 'win32-x64'
   }
   return '__none__'

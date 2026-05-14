@@ -400,6 +400,10 @@ Ports / hosts during dev come from the same `config.toml` the rest of the
 stack reads (via `@memohai/config`). The repo-level `mise run desktop:dev`
 task is the recommended entrypoint when contributing.
 
+Packaged macOS and Windows x64 builds prepare and include the display
+GStreamer runtime under `Resources/gstreamer`. Linux builds currently rely on
+system GStreamer when available.
+
 ## Bundled CLI
 
 The Memoh CLI (Go, source at `cmd/memoh/`) ships inside the desktop

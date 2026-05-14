@@ -62,6 +62,7 @@ const displayInspectionElements = [
 
 const runtimeProfile = `display-${createHash('sha256')
   .update(JSON.stringify({
+    layout: 2,
     packages: [...macOSRuntimePackages].sort(),
     plugins: [...displayPluginNames].sort(),
     elements: [...displayInspectionElements].sort(),
@@ -92,7 +93,7 @@ function currentTarget() {
   if (process.platform === 'darwin') {
     return 'darwin-universal'
   }
-  if (process.platform === 'win32' && process.arch === 'x64' && process.env.GSTREAMER_ENABLE_WINDOWS_BUNDLE) {
+  if (process.platform === 'win32' && process.arch === 'x64') {
     return 'win32-x64'
   }
   return null
@@ -347,6 +348,23 @@ function syncDarwinSymlinkClosure(libDir, neededLibraries) {
   }
 }
 
+function displayRuntimeSeedPaths(targetDir, spec, pluginExtension) {
+  const pluginDir = resolve(targetDir, 'lib', 'gstreamer-1.0')
+  const seedPaths = [
+    resolve(targetDir, spec.binary),
+    resolve(targetDir, spec.inspect),
+    resolve(targetDir, spec.scanner),
+  ]
+  if (existsSync(pluginDir)) {
+    for (const pluginName of readdirSync(pluginDir)) {
+      if (pluginName.endsWith(pluginExtension)) {
+        seedPaths.push(resolve(pluginDir, pluginName))
+      }
+    }
+  }
+  return seedPaths
+}
+
 function collectDarwinLibraryDependencies(targetDir, seedPaths) {
   const libDir = resolve(targetDir, 'lib')
   const neededLibraries = new Set()
@@ -382,20 +400,7 @@ function pruneDarwinLibraries(targetDir, spec) {
   }
 
   const libDir = resolve(targetDir, 'lib')
-  const pluginDir = resolve(libDir, 'gstreamer-1.0')
-  const seedPaths = [
-    resolve(targetDir, spec.binary),
-    resolve(targetDir, spec.inspect),
-    resolve(targetDir, spec.scanner),
-  ]
-  if (existsSync(pluginDir)) {
-    for (const pluginName of readdirSync(pluginDir)) {
-      if (pluginName.endsWith('.dylib')) {
-        seedPaths.push(resolve(pluginDir, pluginName))
-      }
-    }
-  }
-
+  const seedPaths = displayRuntimeSeedPaths(targetDir, spec, '.dylib')
   const neededLibraries = collectDarwinLibraryDependencies(targetDir, seedPaths)
   for (const entry of readdirSync(libDir)) {
     if (entry === 'gstreamer-1.0') {
@@ -409,6 +414,173 @@ function pruneDarwinLibraries(targetDir, spec) {
       continue
     }
     rmSync(entryPath, { recursive: true, force: true })
+  }
+}
+
+function readCString(buffer, offset) {
+  if (offset < 0 || offset >= buffer.length) {
+    return null
+  }
+  let end = offset
+  while (end < buffer.length && buffer[end] !== 0) {
+    end += 1
+  }
+  return buffer.subarray(offset, end).toString('ascii')
+}
+
+function parsePEImage(buffer) {
+  if (buffer.length < 0x40 || buffer.toString('ascii', 0, 2) !== 'MZ') {
+    return null
+  }
+  const peOffset = buffer.readUInt32LE(0x3c)
+  if (peOffset + 24 > buffer.length || buffer.readUInt32LE(peOffset) !== 0x00004550) {
+    return null
+  }
+
+  const sectionCount = buffer.readUInt16LE(peOffset + 6)
+  const optionalHeaderSize = buffer.readUInt16LE(peOffset + 20)
+  const optionalHeaderOffset = peOffset + 24
+  if (optionalHeaderOffset + optionalHeaderSize > buffer.length) {
+    return null
+  }
+
+  const optionalMagic = buffer.readUInt16LE(optionalHeaderOffset)
+  const dataDirectoryOffset = optionalHeaderOffset + (
+    optionalMagic === 0x20b ? 112 : optionalMagic === 0x10b ? 96 : 0
+  )
+  if (dataDirectoryOffset === optionalHeaderOffset || dataDirectoryOffset + 14 * 8 > buffer.length) {
+    return null
+  }
+
+  const sectionTableOffset = optionalHeaderOffset + optionalHeaderSize
+  const sections = []
+  for (let index = 0; index < sectionCount; index += 1) {
+    const sectionOffset = sectionTableOffset + index * 40
+    if (sectionOffset + 40 > buffer.length) {
+      break
+    }
+    sections.push({
+      virtualSize: buffer.readUInt32LE(sectionOffset + 8),
+      virtualAddress: buffer.readUInt32LE(sectionOffset + 12),
+      rawSize: buffer.readUInt32LE(sectionOffset + 16),
+      rawOffset: buffer.readUInt32LE(sectionOffset + 20),
+    })
+  }
+
+  return {
+    dataDirectoryOffset,
+    rvaToOffset(rva) {
+      for (const section of sections) {
+        const size = Math.max(section.virtualSize, section.rawSize)
+        if (rva >= section.virtualAddress && rva < section.virtualAddress + size) {
+          const offset = section.rawOffset + rva - section.virtualAddress
+          return offset >= 0 && offset < buffer.length ? offset : null
+        }
+      }
+      return rva >= 0 && rva < buffer.length ? rva : null
+    },
+  }
+}
+
+function descriptorIsEmpty(buffer, offset, size) {
+  for (let index = 0; index < size; index += 4) {
+    if (buffer.readUInt32LE(offset + index) !== 0) {
+      return false
+    }
+  }
+  return true
+}
+
+function collectPEImportNames(filePath) {
+  const buffer = readFileSync(filePath)
+  const image = parsePEImage(buffer)
+  if (!image) {
+    return []
+  }
+
+  const names = new Set()
+  const readDirectory = (directoryIndex, descriptorSize, nameRvaOffset) => {
+    const directoryOffset = image.dataDirectoryOffset + directoryIndex * 8
+    const rva = buffer.readUInt32LE(directoryOffset)
+    const size = buffer.readUInt32LE(directoryOffset + 4)
+    if (!rva || !size) {
+      return
+    }
+
+    let descriptorOffset = image.rvaToOffset(rva)
+    if (descriptorOffset === null) {
+      return
+    }
+    const descriptorEnd = Math.min(buffer.length, descriptorOffset + size)
+    while (descriptorOffset + descriptorSize <= descriptorEnd) {
+      if (descriptorIsEmpty(buffer, descriptorOffset, descriptorSize)) {
+        break
+      }
+      const nameRva = buffer.readUInt32LE(descriptorOffset + nameRvaOffset)
+      const nameOffset = image.rvaToOffset(nameRva)
+      const name = nameOffset === null ? null : readCString(buffer, nameOffset)
+      if (name) {
+        names.add(name)
+      }
+      descriptorOffset += descriptorSize
+    }
+  }
+
+  readDirectory(1, 20, 12)
+  readDirectory(13, 32, 4)
+  return [...names]
+}
+
+function collectWindowsLibraryDependencies(targetDir, seedPaths) {
+  const binDir = resolve(targetDir, 'bin')
+  const availableLibraries = new Map()
+  for (const entry of readdirSync(binDir)) {
+    if (entry.toLowerCase().endsWith('.dll')) {
+      availableLibraries.set(entry.toLowerCase(), entry)
+    }
+  }
+
+  const neededLibraries = new Set()
+  const queue = seedPaths.filter(existsSync)
+  for (let index = 0; index < queue.length; index += 1) {
+    const binaryPath = queue[index]
+    let imports
+    try {
+      imports = collectPEImportNames(binaryPath)
+    } catch (error) {
+      console.warn(
+        `Could not inspect Windows GStreamer dependencies for ${basename(binaryPath)}: ${formatDownloadError(error)}`,
+      )
+      continue
+    }
+    for (const dependency of imports) {
+      const libraryName = availableLibraries.get(dependency.toLowerCase())
+      if (!libraryName || neededLibraries.has(libraryName)) {
+        continue
+      }
+      neededLibraries.add(libraryName)
+      queue.push(resolve(binDir, libraryName))
+    }
+  }
+  return neededLibraries
+}
+
+function pruneWindowsLibraries(targetDir, spec) {
+  if (process.env.GSTREAMER_KEEP_ALL_LIBS || process.platform !== 'win32') {
+    return
+  }
+
+  const binDir = resolve(targetDir, 'bin')
+  if (!existsSync(binDir)) {
+    return
+  }
+
+  const seedPaths = displayRuntimeSeedPaths(targetDir, spec, '.dll')
+  const neededLibraries = collectWindowsLibraryDependencies(targetDir, seedPaths)
+  for (const entry of readdirSync(binDir)) {
+    if (entry.toLowerCase().endsWith('.dll') && !neededLibraries.has(entry)) {
+      rmSync(resolve(binDir, entry), { force: true })
+    }
   }
 }
 
@@ -479,6 +651,7 @@ function stripDarwinBinaries(targetDir) {
 function pruneDisplayRuntime(targetDir, spec) {
   pruneDisplayPlugins(targetDir)
   pruneDarwinLibraries(targetDir, spec)
+  pruneWindowsLibraries(targetDir, spec)
   pruneRuntimeLayout(targetDir, spec)
   stripDarwinBinaries(targetDir)
 }

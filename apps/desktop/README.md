@@ -39,6 +39,10 @@ pnpm --filter @memohai/desktop build:dir       # unpacked app dir (CI smoke test
 
 Output goes to `apps/desktop/dist/`.
 
+Packaged macOS and Windows x64 builds include the display GStreamer runtime used
+by the local server. Linux builds continue to use system GStreamer when
+available.
+
 ## Icons
 
 All app icons are generated from `apps/web/public/logo.svg` (the brand mark) by
