@@ -138,6 +138,13 @@ jobs:
           cache: true
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+      - name: Cache desktop GStreamer runtime
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/resources/gstreamer
+          key: ${{ runner.os }}-desktop-gstreamer-${{ hashFiles('apps/desktop/scripts/prepare-gstreamer.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-desktop-gstreamer-
       - name: Require macOS signing and notarization secrets
         if: ${{ startsWith(matrix.platform, 'macos-') }}
         shell: bash

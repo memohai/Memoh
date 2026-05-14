@@ -66,6 +66,14 @@ jobs:
       - name: Typecheck desktop
         run: pnpm --filter @memohai/desktop typecheck
 
+      - name: Cache desktop GStreamer runtime
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/resources/gstreamer
+          key: ${{ runner.os }}-desktop-gstreamer-${{ hashFiles('apps/desktop/scripts/prepare-gstreamer.mjs') }}
+          restore-keys: |
+            ${{ runner.os }}-desktop-gstreamer-
+
       - name: Prepare macOS code signing
         id: mac-signing
         if: ${{ startsWith(matrix.platform, 'macos-') && github.event_name != 'pull_request' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' }}
