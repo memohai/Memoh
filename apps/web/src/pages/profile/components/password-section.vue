@@ -1,61 +1,98 @@
 <template>
-  <section>
-    <h2 class="mb-2 flex items-center text-xs font-medium">
-      <Settings
-        class="mr-2 size-3.5"
-      />
-      {{ $t('settings.changePassword') }}
-    </h2>
-    <Separator />
-    <div class="mt-4 space-y-4">
-      <div class="space-y-2">
-        <Label for="settings-current-password">{{ $t('settings.currentPassword') }}</Label>
+  <div class="rounded-md border bg-background shadow-sm mt-6">
+    <div class="p-4 md:p-6 pb-4">
+      <h2 class="text-sm font-medium">
+        {{ $t('settings.changePassword') }}
+      </h2>
+      <p class="text-xs text-muted-foreground mt-1">
+        Update your credentials to keep your account secure.
+      </p>
+    </div>
+
+    <div class="p-4 md:p-6 space-y-5">
+      <!-- Current Password -->
+      <div class="flex items-center justify-between">
+        <div class="pr-4 shrink-0">
+          <Label
+            for="settings-current-password"
+            class="text-[11px] font-medium text-muted-foreground"
+          >{{ $t('settings.currentPassword') }}</Label>
+        </div>
         <Input
           id="settings-current-password"
           :model-value="currentPassword"
           type="password"
           :aria-label="$t('settings.currentPassword')"
+          class="h-9 w-full max-w-[240px] md:max-w-xs bg-background/50 border-border/50 shadow-none transition-colors focus-visible:ring-ring/30"
           @update:model-value="onCurrentPasswordChange"
         />
       </div>
-      <div class="space-y-2">
-        <Label for="settings-new-password">{{ $t('settings.newPassword') }}</Label>
+
+      <!-- New Password -->
+      <div class="flex items-center justify-between">
+        <div class="pr-4 shrink-0">
+          <Label
+            for="settings-new-password"
+            class="text-[11px] font-medium text-muted-foreground"
+          >{{ $t('settings.newPassword') }}</Label>
+        </div>
         <Input
           id="settings-new-password"
           :model-value="newPassword"
           type="password"
           :aria-label="$t('settings.newPassword')"
+          :class="[
+            'h-9 w-full max-w-[240px] md:max-w-xs bg-background/50 border-border/50 shadow-none transition-colors',
+            isMismatch ? 'border-destructive focus-visible:ring-destructive/30' : 'focus-visible:ring-ring/30'
+          ]"
           @update:model-value="onNewPasswordChange"
         />
       </div>
-      <div class="space-y-2">
-        <Label for="settings-confirm-password">{{ $t('settings.confirmPassword') }}</Label>
+
+      <!-- Confirm Password -->
+      <div class="flex items-center justify-between">
+        <div class="pr-4 shrink-0">
+          <Label
+            for="settings-confirm-password"
+            class="text-[11px] font-medium text-muted-foreground"
+          >{{ $t('settings.confirmPassword') }}</Label>
+        </div>
         <Input
           id="settings-confirm-password"
           :model-value="confirmPassword"
           type="password"
           :aria-label="$t('settings.confirmPassword')"
+          :class="[
+            'h-9 w-full max-w-[240px] md:max-w-xs bg-background/50 border-border/50 shadow-none transition-colors',
+            isMismatch ? 'border-destructive focus-visible:ring-destructive/30' : 'focus-visible:ring-ring/30'
+          ]"
           @update:model-value="onConfirmPasswordChange"
         />
       </div>
-      <div class="flex justify-end">
-        <Button
-          :disabled="saving || loading"
-          @click="emit('updatePassword')"
-        >
-          <Spinner v-if="saving" />
-          {{ $t('settings.updatePassword') }}
-        </Button>
-      </div>
     </div>
-  </section>
+    
+    <!-- Action Anchor -->
+    <div class="flex items-center justify-end p-4 md:px-6 bg-muted/10">
+      <Button
+        size="sm"
+        :disabled="saving || loading || !hasInput || isMismatch"
+        @click="emit('updatePassword')"
+      >
+        <Spinner
+          v-if="saving"
+          class="mr-2 size-3.5"
+        />
+        {{ $t('settings.updatePassword') }}
+      </Button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { Button, Input, Label, Separator, Spinner } from '@memohai/ui'
-import { Settings } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { Button, Input, Label, Spinner } from '@memohai/ui'
 
-defineProps<{
+const props = defineProps<{
   currentPassword: string
   newPassword: string
   confirmPassword: string
@@ -69,6 +106,16 @@ const emit = defineEmits<{
   'update:confirmPassword': [value: string]
   updatePassword: []
 }>()
+
+const hasInput = computed(() => {
+  return props.currentPassword.length > 0 && props.newPassword.length > 0 && props.confirmPassword.length > 0
+})
+
+const isMismatch = computed(() => {
+  return props.newPassword.length > 0 && 
+         props.confirmPassword.length > 0 && 
+         props.newPassword !== props.confirmPassword
+})
 
 function onCurrentPasswordChange(value: string | number) {
   emit('update:currentPassword', String(value))
