@@ -441,6 +441,7 @@ function spawnServer(command: ServerCommand): ChildProcess {
     cwd: command.cwd,
     detached: true,
     stdio: 'ignore',
+    windowsHide: process.platform === 'win32',
     env: serverEnv(command),
   })
   child.unref()
@@ -493,6 +494,7 @@ function runServerCommand(
   const result = spawnSync(command.command, serverArgs, {
     cwd: command.cwd,
     encoding: 'utf8',
+    windowsHide: process.platform === 'win32',
     env: serverEnv(command),
   })
   appendLog(`$ ${command.command} ${serverArgs.join(' ')}\nstatus=${String(result.status)} error=${result.error?.message ?? ''}\nstdout:\n${result.stdout ?? ''}\nstderr:\n${result.stderr ?? ''}`)

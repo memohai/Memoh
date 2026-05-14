@@ -251,6 +251,7 @@ async function spawnQdrant(binaryPath: string, ports: QdrantPorts, releaseReserv
         cwd: qdrantRootPath(),
         detached: true,
         stdio: ['ignore', logFd, logFd],
+        windowsHide: process.platform === 'win32',
         env: {
           ...process.env,
           QDRANT__TELEMETRY_DISABLED: 'true',

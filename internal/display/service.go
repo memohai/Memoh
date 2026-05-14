@@ -318,6 +318,7 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 
 	proxyPort := proxy.Addr().(*net.TCPAddr).Port
 	cmd := exec.CommandContext(runCtx, gstLaunch, gstreamerScreenshotArgs(proxyPort, outputPath)...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
+	hideCommandWindow(cmd)
 	cmd.Stdout = processLogWriter{logger: s.logger, botID: botID}
 	cmd.Stderr = processLogWriter{logger: s.logger, botID: botID}
 	if err := cmd.Run(); err != nil {
@@ -524,6 +525,7 @@ func (s *session) start(ctx context.Context) error {
 	rtpPort := udp.LocalAddr().(*net.UDPAddr).Port
 	args := gstreamerArgs(s.codec, proxyPort, rtpPort)
 	cmd := exec.CommandContext(runCtx, s.gstLaunch, args...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
+	hideCommandWindow(cmd)
 	cmd.Stdout = processLogWriter{logger: s.service.logger, botID: s.botID}
 	cmd.Stderr = processLogWriter{logger: s.service.logger, botID: s.botID}
 	if err := cmd.Start(); err != nil {
