@@ -1236,12 +1236,22 @@ func resolveExecutable(candidate string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		if !isUsableExecutable(info, runtime.GOOS) {
 			return "", fmt.Errorf("%s is not executable", cleanPath)
 		}
 		return cleanPath, nil
 	}
 	return exec.LookPath(candidate)
+}
+
+func isUsableExecutable(info os.FileInfo, goos string) bool {
+	if info.IsDir() {
+		return false
+	}
+	if goos == "windows" {
+		return true
+	}
+	return info.Mode().Perm()&0o111 != 0
 }
 
 func isSocketReady(ctx context.Context, path string) bool {

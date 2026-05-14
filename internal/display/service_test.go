@@ -237,6 +237,32 @@ func TestNegotiateCodecNoMatch(t *testing.T) {
 	}
 }
 
+func TestIsUsableExecutableAllowsWindowsFilesWithoutExecuteBits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gst-launch-1.0.exe")
+	if err := os.WriteFile(path, []byte("fake exe"), 0o600); err != nil {
+		t.Fatalf("write test executable: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test executable: %v", err)
+	}
+	if !isUsableExecutable(info, "windows") {
+		t.Fatal("Windows absolute executable paths must not require Unix execute bits")
+	}
+	if isUsableExecutable(info, "linux") {
+		t.Fatal("non-Windows executable paths must still require Unix execute bits")
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat temp dir: %v", err)
+	}
+	if isUsableExecutable(dirInfo, "windows") {
+		t.Fatal("directories must not be treated as Windows executables")
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

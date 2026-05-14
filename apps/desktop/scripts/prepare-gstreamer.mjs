@@ -62,7 +62,7 @@ const displayInspectionElements = [
 
 const runtimeProfile = `display-${createHash('sha256')
   .update(JSON.stringify({
-    layout: 2,
+    layout: 3,
     packages: [...macOSRuntimePackages].sort(),
     plugins: [...displayPluginNames].sort(),
     elements: [...displayInspectionElements].sort(),
@@ -582,6 +582,42 @@ function pruneWindowsLibraries(targetDir, spec) {
       rmSync(resolve(binDir, entry), { force: true })
     }
   }
+  pruneWindowsLibDirectory(targetDir)
+}
+
+function isDisplayPlugin(pluginName) {
+  return displayPluginNames.has(pluginName) || displayPluginNames.has(pluginName.toLowerCase())
+}
+
+function pruneWindowsPluginDirectory(pluginDir) {
+  if (!existsSync(pluginDir)) {
+    return
+  }
+  for (const entry of readdirSync(pluginDir, { withFileTypes: true })) {
+    const entryPath = resolve(pluginDir, entry.name)
+    if (!entry.isFile()) {
+      rmSync(entryPath, { recursive: true, force: true })
+      continue
+    }
+    if (!entry.name.toLowerCase().endsWith('.dll') || !isDisplayPlugin(entry.name)) {
+      rmSync(entryPath, { force: true })
+    }
+  }
+}
+
+function pruneWindowsLibDirectory(targetDir) {
+  const libDir = resolve(targetDir, 'lib')
+  if (!existsSync(libDir)) {
+    return
+  }
+
+  const pluginDirName = 'gstreamer-1.0'
+  for (const entry of readdirSync(libDir)) {
+    if (entry !== pluginDirName) {
+      rmSync(resolve(libDir, entry), { recursive: true, force: true })
+    }
+  }
+  pruneWindowsPluginDirectory(resolve(libDir, pluginDirName))
 }
 
 function pruneRuntimeLayout(targetDir, spec) {
