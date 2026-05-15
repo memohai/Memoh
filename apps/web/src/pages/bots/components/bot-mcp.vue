@@ -1,16 +1,20 @@
 <template>
   <div
-    class="flex gap-6 h-full absolute inset-0 px-4 pt-4 pb-6 w-full max-w-4xl mx-auto font-sans"
+    class="flex flex-col lg:flex-row gap-4 h-full absolute inset-0 px-4 pt-4 pb-6 w-full max-w-6xl mx-auto font-sans"
     :style="{ fontFamily: 'system-ui, -apple-system, sans-serif' }"
   >
     <!-- Left: Server List (L3 Rail) -->
     <div 
-      class="shrink-0 flex flex-col border border-border rounded-lg overflow-hidden max-h-full bg-background shadow-sm transition-all duration-300"
-      :class="isMobileCollapsed ? 'w-12 items-center' : 'w-60'"
+      class="shrink-0 flex flex-col border border-border rounded-lg overflow-hidden bg-background shadow-sm transition-all duration-300"
+      :class="[
+        isMobileCollapsed 
+          ? 'w-full h-12 lg:w-12 lg:h-full lg:items-center' 
+          : 'w-full h-48 lg:w-52 lg:h-full'
+      ]"
     >
       <div
         class="p-3 pb-2 border-b border-border/50 space-y-3 shrink-0 w-full"
-        :class="{'px-1': isMobileCollapsed}"
+        :class="{'lg:px-1': isMobileCollapsed}"
       >
         <div class="flex items-center justify-between">
           <h4
@@ -21,12 +25,12 @@
           </h4>
           <div
             class="flex items-center gap-1"
-            :class="{'flex-col': isMobileCollapsed}"
+            :class="{'lg:flex-col': isMobileCollapsed}"
           >
             <Button
               variant="ghost"
               size="icon-sm"
-              class="size-7 text-muted-foreground hover:text-foreground"
+              class="size-7 text-muted-foreground hover:text-foreground lg:hidden"
               :title="$t('mcp.addNew')"
               @click="handleAddNewDraft"
             >
@@ -44,7 +48,7 @@
             <Button
               variant="ghost"
               size="icon-sm"
-              class="size-7 md:hidden"
+              class="size-7"
               @click="isMobileCollapsed = !isMobileCollapsed"
             >
               <Menu class="size-4" />
@@ -68,12 +72,18 @@
         ref="sidebarScrollRef"
         class="flex-1 min-h-0 bg-muted/5 w-full"
       >
-        <section class="p-2 space-y-0.5">
+        <section class="p-2 space-y-0.5 h-full flex flex-col">
           <div
             v-if="loading && items.length === 0"
             class="flex justify-center p-4"
           >
             <Spinner class="size-4 text-muted-foreground" />
+          </div>
+          <div
+            v-else-if="filteredItems.length === 0"
+            class="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-muted-foreground"
+          >
+            {{ $t('mcp.emptyTitle') }}
           </div>
           <button 
             v-for="item in filteredItems" 
@@ -106,6 +116,18 @@
           </button>
         </section>
       </ScrollArea>
+      
+      <!-- Footer Add Button -->
+      <div class="border-t p-2 bg-background shrink-0 hidden lg:block">
+        <button
+          class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer hover:bg-accent bg-transparent rounded-lg gap-1.5 px-3 w-full h-8 text-xs text-muted-foreground hover:text-foreground"
+          type="button"
+          @click="handleAddNewDraft"
+        >
+          <Plus class="mr-2 size-3" />
+          {{ $t('mcp.addNew') }}
+        </button>
+      </div>
     </div>
 
     <!-- Right: Workspace (L4) -->
@@ -142,11 +164,11 @@
               </div>
             </div>
           </div>
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
             <p class="min-w-0 truncate text-[11px] text-muted-foreground font-mono leading-none">
               {{ $t('mcp.lastProbed') }}: {{ formatDate(selectedItem.last_probed_at) || $t('mcp.statusUnknown') }}
             </p>
-            <div class="flex items-center gap-3 shrink-0">
+            <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
               <!-- Dynamic context micro-copy -->
               <Transition name="fade">
                 <div
@@ -185,7 +207,7 @@
                 </template>
               </button>
               <div
-                class="w-px h-4 bg-border mx-1"
+                class="w-px h-4 bg-border mx-1 hidden sm:block"
                 aria-hidden="true"
               />
               <ConfirmPopover
@@ -228,7 +250,7 @@
         </div>
 
         <ScrollArea class="flex-1 min-h-0 bg-muted/5">
-          <section class="max-w-2xl mx-auto p-4 pb-12 space-y-4">
+          <section class="max-w-3xl mx-auto p-4 pb-12 space-y-4">
             <!-- Tier 1 Error Contextual Helper (Sync Error) -->
             <div
               v-if="tier1Error"
@@ -308,10 +330,10 @@
                 </div>
                 <div class="space-y-1.5 flex flex-col">
                   <label class="flex items-center gap-2 select-none text-xs font-medium">{{ $t('mcp.transportType') }}</label>
-                  <div class="flex bg-muted/50 p-1 rounded-lg h-9 border border-border/50 gap-1">
+                  <div class="flex flex-wrap bg-muted/50 p-1 rounded-lg min-h-9 border border-border/50 gap-1">
                     <button
                       type="button"
-                      class="flex-1 text-xs font-medium rounded-md transition-all duration-200 flex items-center justify-center gap-1.5"
+                      class="flex-1 min-w-[100px] text-xs font-medium rounded-md transition-all duration-200 flex items-center justify-center gap-1.5 py-1"
                       :class="connectionType === 'stdio' ? 'bg-background shadow-sm text-foreground ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground hover:bg-muted/80'"
                       @click="connectionType = 'stdio'"
                     >
@@ -323,7 +345,7 @@
                     </button>
                     <button
                       type="button"
-                      class="flex-1 text-xs font-medium rounded-md transition-all duration-200 flex items-center justify-center gap-1.5"
+                      class="flex-1 min-w-[100px] text-xs font-medium rounded-md transition-all duration-200 flex items-center justify-center gap-1.5 py-1"
                       :class="connectionType === 'remote' ? 'bg-background shadow-sm text-foreground ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground hover:bg-muted/80'"
                       @click="connectionType = 'remote'"
                     >
@@ -638,7 +660,7 @@
                   v-for="tool in displayTools.slice(0, 5)"
                   :key="tool.name"
                   variant="secondary"
-                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-[140px] truncate block"
+                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-[140px] truncate"
                   :title="tool.description"
                 >
                   {{ tool.name }}
