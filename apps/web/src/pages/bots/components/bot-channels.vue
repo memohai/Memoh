@@ -1,12 +1,55 @@
 <template>
-  <div class="flex gap-6 absolute inset-0 max-w-4xl mx-auto px-4 pt-4 pb-6 w-full">
+  <div class="flex flex-col lg:flex-row gap-4 absolute inset-0 max-w-4xl mx-auto px-4 pt-4 pb-6 w-full">
     <!-- L3: Silent Hub Rail -->
-    <div class="h-full flex-col border rounded-lg overflow-hidden flex sticky top-0 bg-background/50">
-      <ScrollArea class="w-60 flex-1 flex flex-col">
+    <div class="shrink-0 w-full h-48 lg:w-52 lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
+      <div class="p-3 pb-2 border-b border-border/50 flex items-center justify-between shrink-0">
+        <h4 class="text-xs font-medium">
+          {{ $t('bots.channels.title') }}
+        </h4>
+        <Popover v-model:open="addPopoverOpen">
+          <PopoverTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="size-7 text-muted-foreground hover:text-foreground lg:hidden"
+              :disabled="unconfiguredChannels.length === 0 && !isLoading"
+            >
+              <Plus class="size-3.5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            class="w-56 p-1 shadow-md"
+            align="start"
+          >
+            <div
+              v-if="unconfiguredChannels.length === 0"
+              class="px-3 py-2 text-[11px] text-muted-foreground text-center"
+            >
+              {{ $t('bots.channels.noAvailableTypes') }}
+            </div>
+            <button
+              v-for="item in unconfiguredChannels"
+              :key="item.meta.type"
+              type="button"
+              class="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+              @click="addChannel(item.meta.type ?? '')"
+            >
+              <span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <ChannelIcon
+                  :channel="item.meta.type ?? ''"
+                  size="1em"
+                />
+              </span>
+              <span>{{ channelTitle(item.meta) }}</span>
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <ScrollArea class="flex-1 flex flex-col h-full">
         <!-- Skeleton Loading -->
         <div
           v-if="isLoading && configuredChannels.length === 0"
-          class="p-2 space-y-2"
+          class="p-2 space-y-2 h-full flex flex-col"
         >
           <Skeleton class="h-10 w-full rounded-md" />
           <Skeleton class="h-10 w-full rounded-md" />
@@ -16,7 +59,7 @@
         <!-- Empty -->
         <div
           v-else-if="configuredChannels.length === 0"
-          class="flex flex-col items-center justify-center h-full p-4 text-center"
+          class="flex-1 flex flex-col items-center justify-center p-4 text-center"
         >
           <p class="text-xs text-muted-foreground">
             {{ $t('bots.channels.emptyTitle') }}
@@ -72,7 +115,7 @@
       </ScrollArea>
       
       <!-- Add Platform Trigger -->
-      <div class="border-t p-2 bg-background">
+      <div class="border-t p-2 bg-background hidden lg:block">
         <Popover v-model:open="addPopoverOpen">
           <PopoverTrigger as-child>
             <Button
