@@ -2,8 +2,11 @@
   <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full absolute inset-0 px-6 pt-4 pb-6 w-full">
     <!-- L3: Silent Hub Rail -->
     <div class="w-full h-48 shrink-0 lg:flex-[0.5] lg:min-w-[230px] lg:max-w-[260px] lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
-      <div class="p-3 pb-2 border-b border-border/50 flex items-center justify-end shrink-0">
-        <Popover v-model:open="mobileAddPopoverOpen">
+      <div class="p-3 pb-2 border-b border-border/50 flex items-center justify-between shrink-0">
+        <h4 class="text-xs font-medium">
+          {{ $t('bots.channels.title') }}
+        </h4>
+        <Popover v-model:open="addPopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -46,7 +49,7 @@
         <!-- Skeleton Loading -->
         <div
           v-if="isLoading && configuredChannels.length === 0"
-          class="h-full p-2 space-y-2 flex flex-col"
+          class="p-2 space-y-2 h-full flex flex-col"
         >
           <Skeleton class="h-10 w-full rounded-md" />
           <Skeleton class="h-10 w-full rounded-md" />
@@ -56,7 +59,7 @@
         <!-- Empty -->
         <div
           v-else-if="configuredChannels.length === 0"
-          class="h-full flex-1 flex flex-col items-center justify-center p-4 text-center"
+          class="flex-1 flex flex-col items-center justify-center p-4 text-center"
         >
           <p class="text-xs text-muted-foreground">
             {{ $t('bots.channels.emptyTitle') }}
@@ -113,7 +116,7 @@
       
       <!-- Add Platform Trigger -->
       <div class="border-t p-2 bg-background hidden lg:block">
-        <Popover v-model:open="desktopAddPopoverOpen">
+        <Popover v-model:open="addPopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -156,7 +159,7 @@
     </div>
 
     <!-- L4: Right Workspace -->
-    <div class="flex-1 min-w-0">
+    <div class="flex-1 min-w-0 pr-4">
       <ScrollArea class="h-full">
         <div
           v-if="!selectedType || !selectedItem"
@@ -241,7 +244,7 @@ const { data: channels, isLoading, refetch } = useQuery({
 })
 
 const selectedType = ref<string | null>(null)
-const desktopAddPopoverOpen = ref(false)
+const addPopoverOpen = ref(false)
 
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
 const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
@@ -258,10 +261,9 @@ watch(configuredChannels, (list) => {
 }, { immediate: true })
 
 function addChannel(type: string) {
-  desktopAddPopoverOpen.value = false
+  addPopoverOpen.value = false
   selectedType.value = type
 }
-
 
 function updateDirtyState(type: string, isDirty: boolean) {
   dirtyStates.value[type] = isDirty

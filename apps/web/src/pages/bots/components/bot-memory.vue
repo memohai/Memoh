@@ -251,66 +251,54 @@
     <!-- Right: Editor/Preview -->
     <div class="flex-1 flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
       <template v-if="selectedMemory">
-        <!-- Sovereign Header -->
-        <div class="pb-3 border-b border-border/50 bg-background p-3 flex flex-col gap-4">
-          <!-- Level 1: Identity & ID -->
-          <div class="flex items-start justify-between gap-4 min-w-0">
-            <div class="flex items-center gap-2.5 min-w-0 flex-1">
-              <span class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground shadow-none">
-                <FileText class="size-3.5" />
-              </span>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-1.5 mb-1">
-                  <h4 class="truncate text-sm font-semibold text-foreground leading-none">
-                    {{ formatDate(selectedMemory.created_at) }}
-                  </h4>
-                </div>
-                <div class="flex items-center gap-2 opacity-60">
-                  <TooltipProvider>
-                    <Tooltip :delay-duration="300">
-                      <TooltipTrigger as-child>
-                        <button
-                          type="button"
-                          class="flex items-center gap-1.5 text-[9px] text-muted-foreground hover:text-foreground font-mono transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm -ml-0.5 px-0.5"
-                          @click="copyToClipboard(selectedMemory.id)"
-                        >
-                          <span class="truncate">ID: {{ selectedMemory.id }}</span>
-                          <Copy class="size-2.5 shrink-0" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="bottom"
-                        align="start"
-                      >
-                        <p class="text-[11px]">
-                          {{ $t('common.copy') }}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              </div>
+        <!-- L4 Header -->
+        <div class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-10 p-4 shrink-0 flex items-start justify-between">
+          <div class="flex items-start gap-3 min-w-0">
+            <FileText class="size-4 text-muted-foreground shrink-0 mt-0.5" />
+            <div class="min-w-0 space-y-0.5">
+              <h4 class="text-xs font-medium text-foreground truncate">
+                {{ formatDate(selectedMemory.created_at) }}
+              </h4>
+              <TooltipProvider>
+                <Tooltip :delay-duration="300">
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground font-mono transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm -ml-1 px-1"
+                      @click="copyToClipboard(selectedMemory.id)"
+                    >
+                      <span class="truncate">ID: {{ selectedMemory.id }}</span>
+                      <Copy class="size-2.5 shrink-0" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    align="start"
+                  >
+                    <p class="text-[11px]">
+                      Click to copy
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
-
-            <!-- Top-right: Unsaved indicator -->
+          </div>
+          <div class="flex items-center shrink-0 gap-3">
             <Transition name="fade">
               <div
                 v-if="isDirty"
-                class="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/40 border border-border/50 shrink-0"
+                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
               >
                 <div class="size-1 rounded-full bg-muted-foreground/40" />
-                <span class="text-[9px] text-muted-foreground font-medium">
+                <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
                   Unsaved
                 </span>
               </div>
             </Transition>
-          </div>
 
-          <!-- Level 2: Actions (Waterfall) -->
-          <div class="flex items-center justify-end gap-1.5">
             <Button
               size="sm"
-              class="h-7 px-3 text-[10px] font-medium shadow-none min-w-[80px]"
+              class="h-8 px-4 text-xs font-medium shadow-none min-w-24"
               :disabled="actionLoading || !isDirty"
               @click="handleSave"
             >
