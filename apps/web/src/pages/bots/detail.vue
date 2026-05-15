@@ -1,5 +1,5 @@
 <template>
-  <section class="mx-auto absolute inset-0 flex flex-col bg-background">
+  <section class="absolute inset-0 flex flex-col bg-background">
     <div class="flex-1 relative">
       <MasterDetailSidebarLayout
         class="[&_td:last-child]:w-45"
@@ -189,7 +189,7 @@
                         v-if="tab.icon"
                         class="size-4 shrink-0"
                       />
-                      <span class="truncate">{{ $t(tab.label) }}</span>
+                      <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
                     </Toggle>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -203,7 +203,7 @@
         <template #detail>
           <div class="absolute inset-0 overflow-y-auto bg-background">
             <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
-            <div class="px-6 pt-4 pb-12 max-w-4xl mx-auto">
+            <div class="px-6 pt-4 pb-12">
               <KeepAlive>
                 <component
                   :is="activeComponent?.component"

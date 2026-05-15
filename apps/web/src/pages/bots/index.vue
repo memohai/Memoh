@@ -1,5 +1,5 @@
 <template>
-  <section class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 mx-auto">
+  <section class="px-4 pt-2 pb-10 lg:px-6 md:pt-4 md:pb-12">
     <!-- Header: search + create -->
     <div class="flex items-center justify-end mb-6 flex-wrap">
       <div class="flex items-center gap-3">

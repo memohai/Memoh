@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-4">
+  <div class="pb-6 space-y-4">
     <!-- Sovereign Header -->
     <div class="flex items-center justify-between pb-4 border-b border-border/50">
       <div class="space-y-1">
@@ -697,10 +697,10 @@
       <DialogContent class="sm:max-w-3xl max-h-[calc(100vh - 2rem)] sm:h-[70vh] flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader class="shrink-0 p-4 border-b border-border/50 bg-background">
           <DialogTitle class="text-sm font-semibold">
-            Edit Raw SD-WAN Configuration
+            {{ $t('mcp.editValue') }}
           </DialogTitle>
           <DialogDescription class="text-[11px] leading-snug">
-            Advanced configuration via raw JSON. Modifications will reflect in the visual form.
+            {{ $t('mcp.editLongTextHint') }}
           </DialogDescription>
         </DialogHeader>
         

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex flex-col lg:flex-row gap-4 h-full absolute inset-0 px-4 pt-4 pb-6 w-full max-w-6xl mx-auto font-sans"
+    class="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full absolute inset-0 px-6 pt-4 pb-6 w-full font-sans"
     :style="{ fontFamily: 'system-ui, -apple-system, sans-serif' }"
   >
     <!-- Left: Server List (L3 Rail) -->
@@ -9,7 +9,7 @@
       :class="[
         isMobileCollapsed 
           ? 'w-full h-12 lg:w-12 lg:h-full lg:items-center' 
-          : 'w-full h-48 lg:w-52 lg:h-full'
+          : 'w-full h-48 lg:flex-[0.5] lg:min-w-[230px] lg:max-w-[260px] lg:h-full'
       ]"
     >
       <div
@@ -131,9 +131,7 @@
     </div>
 
     <!-- Right: Workspace (L4) -->
-    <div 
-      class="relative flex-1 flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm"
-    >
+    <div class="flex-1 flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm relative">
       <!-- Blink Overlay (Avoids child z-index clipping) -->
       <div 
         class="pointer-events-none absolute inset-0 z-50 rounded-lg transition-opacity duration-500"
@@ -143,114 +141,122 @@
       
       <!-- Normal Workspace -->
       <template v-if="selectedItem">
-        <!-- Sovereign Header -->
-        <div class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-10 p-4 shrink-0 space-y-3">
-          <div class="flex min-w-0 items-center gap-3">
-            <span class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground shadow-sm">
-              <Plug class="size-4" />
-            </span>
-            <div class="min-w-0 flex-1 space-y-1">
-              <div class="flex min-w-0 items-center gap-2">
-                <h3
-                  class="min-w-0 truncate text-sm font-semibold text-foreground"
-                  :title="formData.name || (selectedItem.id === DRAFT_ID ? $t('mcp.unnamedServer') : selectedItem.name)"
-                >
-                  {{ formData.name || (selectedItem.id === DRAFT_ID ? $t('mcp.unnamedServer') : selectedItem.name) }}
-                </h3>
-                <span
-                  class="size-2 rounded-full shrink-0 transition-colors"
-                  :class="statusDotClass(selectedItem)"
-                />
+        <ScrollArea class="flex-1 min-h-0 bg-muted/5">
+          <!-- Sovereign Header (Now part of scrolling area) -->
+          <div class="pb-3 border-b border-border/50 bg-background p-3 flex flex-col gap-4">
+            <!-- Level 1: Identity & Primary Info -->
+            <div class="flex items-start justify-between gap-4 min-w-0">
+              <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <span class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground shadow-none">
+                  <Plug class="size-3.5" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <h3
+                      class="truncate text-sm font-semibold text-foreground leading-none"
+                      :title="formData.name || (selectedItem.id === DRAFT_ID ? $t('mcp.unnamedServer') : selectedItem.name)"
+                    >
+                      {{ formData.name || (selectedItem.id === DRAFT_ID ? $t('mcp.unnamedServer') : selectedItem.name) }}
+                    </h3>
+                    <span
+                      class="size-1.5 rounded-full shrink-0 transition-colors"
+                      :class="statusDotClass(selectedItem)"
+                    />
+                  </div>
+                  <div class="flex items-center gap-2 opacity-60">
+                    <p class="truncate text-[9px] text-muted-foreground font-mono leading-none">
+                      {{ $t('mcp.lastProbed') }}: {{ formatDate(selectedItem.last_probed_at) || $t('mcp.statusUnknown') }}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-            <p class="min-w-0 truncate text-[11px] text-muted-foreground font-mono leading-none">
-              {{ $t('mcp.lastProbed') }}: {{ formatDate(selectedItem.last_probed_at) || $t('mcp.statusUnknown') }}
-            </p>
-            <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-              <!-- Dynamic context micro-copy -->
+
+              <!-- Top-right: Quick Status/Dirty indicator -->
               <Transition name="fade">
                 <div
                   v-if="selectedItem && isItemDirty(selectedItem)"
-                  class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+                  class="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/40 border border-border/50 shrink-0"
                 >
                   <div class="size-1 rounded-full bg-muted-foreground/40" />
-                  <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+                  <span class="text-[9px] text-muted-foreground font-medium">
                     {{ $t('mcp.unsaved') }}
                   </span>
                 </div>
               </Transition>
+            </div>
 
-              <button 
-                v-if="selectedItem.id"
-                type="button"
-                class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-lg gap-1.5 px-3 h-8 text-xs font-medium shadow-none"
-                @click="handleExportSingle"
-              >
-                <Download class="size-3.5" /> {{ $t('common.export') }}
-              </button>
-              <button 
-                v-if="selectedItem"
-                type="button"
-                :disabled="saveState === 'syncing' || !canProbe"
-                class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-lg gap-1.5 px-3 h-8 text-xs font-medium shadow-none group relative"
-                @click="handleProbeInterruption"
-              >
-                <template v-if="saveState === 'verifying'">
-                  <X class="size-3.5 hidden group-hover:block text-destructive" />
-                  <RefreshCw class="size-3.5 animate-spin group-hover:hidden" />
-                  <span class="group-hover:text-destructive">{{ $t('mcp.verifyingCancel') }}</span>
-                </template>
-                <template v-else>
-                  <RefreshCw class="size-3.5" /> {{ $t('mcp.probe') }}
-                </template>
-              </button>
-              <div
-                class="w-px h-4 bg-border mx-1 hidden sm:block"
-                aria-hidden="true"
-              />
-              <ConfirmPopover
-                v-if="isDraft"
-                :message="$t('mcp.discardDraftConfirm')"
-                @confirm="removeDraft"
-              >
-                <template #trigger>
-                  <button 
-                    type="button"
-                    class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-lg gap-1.5 px-3 h-8 text-xs font-medium shadow-none"
-                  >
-                    {{ $t('mcp.discard') }}
-                  </button>
-                </template>
-              </ConfirmPopover>
-              <button 
-                type="button"
-                :disabled="saveState === 'syncing' || saveState === 'verifying'"
-                class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer rounded-lg gap-1.5 px-3 h-8 text-xs font-medium min-w-24 shadow-none"
-                :class="saveBtnClass"
-                @click="handleSave"
-              >
-                <Loader2
-                  v-if="saveState === 'syncing'"
-                  class="size-3.5 animate-spin"
-                />
-                <Check
-                  v-else-if="saveState === 'connected'"
-                  class="size-3.5"
-                />
-                <Save
-                  v-else
-                  class="size-3.5"
-                />
-                {{ saveBtnText }}
-              </button>
+            <!-- Level 2: Action Buttons (Waterfall) -->
+            <div class="flex items-center justify-between gap-1.5 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <button 
+                  v-if="selectedItem.id"
+                  type="button"
+                  class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-md gap-1 px-2 h-7 text-[10px] font-medium shadow-none"
+                  @click="handleExportSingle"
+                >
+                  <Download class="size-3" />
+                  <span class="hidden xl:inline">{{ $t('common.export') }}</span>
+                </button>
+                <button 
+                  v-if="selectedItem"
+                  type="button"
+                  :disabled="saveState === 'syncing' || !canProbe"
+                  class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-md gap-1 px-2 h-7 text-[10px] font-medium shadow-none group relative"
+                  @click="handleProbeInterruption"
+                >
+                  <template v-if="saveState === 'verifying'">
+                    <X class="size-3 hidden group-hover:block text-destructive" />
+                    <RefreshCw class="size-3 animate-spin group-hover:hidden" />
+                    <span class="group-hover:text-destructive hidden xl:inline">{{ $t('mcp.verifyingCancel') }}</span>
+                  </template>
+                  <template v-else>
+                    <RefreshCw class="size-3" />
+                    <span class="hidden xl:inline">{{ $t('mcp.probe') }}</span>
+                  </template>
+                </button>
+              </div>
+
+              <div class="flex items-center gap-1.5 ml-auto">
+                <ConfirmPopover
+                  v-if="isDraft"
+                  :message="$t('mcp.discardDraftConfirm')"
+                  @confirm="removeDraft"
+                >
+                  <template #trigger>
+                    <button 
+                      type="button"
+                      class="inline-flex items-center justify-center whitespace-nowrap transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer border border-border bg-background hover:bg-accent rounded-md px-2 h-7 text-[10px] font-medium shadow-none"
+                    >
+                      {{ $t('mcp.discard') }}
+                    </button>
+                  </template>
+                </ConfirmPopover>
+                <button 
+                  type="button"
+                  :disabled="saveState === 'syncing' || saveState === 'verifying'"
+                  class="inline-flex items-center justify-center whitespace-nowrap transition-all disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer rounded-md gap-1 px-2.5 h-7 text-[10px] font-medium min-w-[80px] shadow-none"
+                  :class="saveBtnClass"
+                  @click="handleSave"
+                >
+                  <Loader2
+                    v-if="saveState === 'syncing'"
+                    class="size-3 animate-spin"
+                  />
+                  <Check
+                    v-else-if="saveState === 'connected'"
+                    class="size-3"
+                  />
+                  <Save
+                    v-else
+                    class="size-3"
+                  />
+                  {{ saveBtnText }}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <ScrollArea class="flex-1 min-h-0 bg-muted/5">
-          <section class="max-w-3xl mx-auto p-4 pb-12 space-y-4">
+          <section class="p-4 pb-12 space-y-4">
             <!-- Tier 1 Error Contextual Helper (Sync Error) -->
             <div
               v-if="tier1Error"
@@ -629,50 +635,122 @@
               </div>
             </div>
 
-            <!-- Discovered Tools Summary -->
+            <!-- Discovered Tools Inline Box -->
             <div
               v-if="selectedItem.id && selectedItem.status === 'connected'"
-              class="rounded-md border border-border bg-background p-4 shadow-none space-y-3"
+              class="rounded-md border border-border bg-background p-4 shadow-none flex flex-col gap-4"
             >
-              <div class="flex items-center justify-between border-b border-border/50 pb-2">
-                <h4 class="text-xs font-medium flex items-center gap-2">
-                  <Wrench class="size-3 text-muted-foreground" /> {{ $t('mcp.discoveredTools') }}
-                </h4>
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all outline-none cursor-pointer hover:underline text-[10px] text-muted-foreground hover:text-foreground"
-                  @click="openToolsModal"
+              <div class="flex items-center justify-between border-b border-border/50 pb-3 shrink-0">
+                <div class="space-y-1">
+                  <h4 class="text-xs font-medium flex items-center gap-2 text-foreground">
+                    <Wrench class="size-3 text-muted-foreground" /> {{ $t('mcp.discoveredTools') }} ({{ displayTools.length }})
+                  </h4>
+                  <p class="text-[11px] text-muted-foreground">
+                    {{ $t('mcp.discoveredToolsHint', 'Tools exposed by this MCP server.') }}
+                  </p>
+                </div>
+                <!-- Inline Search -->
+                <div
+                  v-if="displayTools.length > 0"
+                  class="relative w-48 shrink-0"
                 >
-                  {{ $t('common.viewAll') }} ({{ displayTools.length }})
-                </button>
+                  <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                  <input
+                    v-model="toolsSearchText"
+                    class="w-full min-w-0 rounded-md border border-border bg-background px-3 py-1.5 text-foreground placeholder:text-muted-foreground transition-all outline-none focus:border-ring focus:ring-1 h-7 text-[11px] shadow-none pl-7"
+                    :placeholder="$t('mcp.searchTools')"
+                  >
+                </div>
               </div>
+
+              <!-- Tools List -->
               <div
                 v-if="displayTools.length === 0"
-                class="text-[11px] text-muted-foreground py-1"
+                class="text-[11px] text-muted-foreground py-6 text-center bg-muted/5 rounded-md border border-border/50"
               >
                 {{ $t('mcp.noToolsExposed') }}
               </div>
               <div
-                v-else
-                class="flex flex-wrap gap-1.5"
+                v-else-if="paginatedTools.length === 0"
+                class="text-[11px] text-muted-foreground py-6 text-center bg-muted/5 rounded-md border border-border/50"
               >
-                <Badge
-                  v-for="tool in displayTools.slice(0, 5)"
+                {{ $t('mcp.noToolsMatch') }}
+              </div>
+              <div
+                v-else
+                class="space-y-2"
+              >
+                <div
+                  v-for="tool in paginatedTools"
                   :key="tool.name"
-                  variant="secondary"
-                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-[140px] truncate"
-                  :title="tool.description"
+                  class="p-3 rounded-md border border-border/60 bg-background hover:border-border transition-colors shadow-none flex flex-col gap-1.5"
                 >
-                  {{ tool.name }}
-                </Badge>
-                <button
-                  v-if="displayTools.length > 5"
-                  type="button"
-                  class="text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors ml-1"
-                  @click="openToolsModal"
-                >
-                  +{{ displayTools.length - 5 }} {{ $t('mcp.more') }}
-                </button>
+                  <h5 class="text-xs font-medium font-mono text-foreground">
+                    {{ tool.name }}
+                  </h5>
+                  <p class="text-[11px] text-muted-foreground leading-snug">
+                    {{ tool.description || $t('mcp.noDescription') }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Advanced Pagination Controls -->
+              <div
+                v-if="toolsTotalPages > 1"
+                class="flex items-center justify-between border-t border-border/50 pt-3"
+              >
+                <div class="text-[10px] text-muted-foreground">
+                  {{ $t('common.showing') }} {{ (toolsCurrentPage - 1) * toolsPerPage + 1 }}-{{ Math.min(toolsCurrentPage * toolsPerPage, filteredTools.length) }} {{ $t('common.of') }} {{ filteredTools.length }}
+                </div>
+                <div class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center size-7 rounded border border-transparent hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:hover:bg-transparent"
+                    :disabled="toolsCurrentPage === 1"
+                    @click="toolsCurrentPage--"
+                  >
+                    <ChevronLeft class="size-3.5" />
+                  </button>
+
+                  <template
+                    v-for="(page, idx) in toolsVisiblePages"
+                    :key="idx"
+                  >
+                    <span
+                      v-if="page === '...'"
+                      class="inline-flex items-center justify-center size-7 text-muted-foreground"
+                    >
+                      <MoreHorizontal class="size-3" />
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      class="inline-flex items-center justify-center size-7 rounded text-[11px] font-medium transition-colors"
+                      :class="page === toolsCurrentPage ? 'border border-border bg-accent/40 text-foreground' : 'border border-transparent hover:bg-muted text-muted-foreground hover:text-foreground'"
+                      @click="toolsCurrentPage = Number(page)"
+                    >
+                      {{ page }}
+                    </button>
+                  </template>
+
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center size-7 rounded border border-transparent hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:hover:bg-transparent"
+                    :disabled="toolsCurrentPage === toolsTotalPages"
+                    @click="toolsCurrentPage++"
+                  >
+                    <ChevronRight class="size-3.5" />
+                  </button>
+
+                  <div class="flex items-center gap-1 ml-2">
+                    <span class="text-[10px] text-muted-foreground">{{ $t('common.goto') }}</span>
+                    <input
+                      v-model="toolsJumpPage"
+                      class="w-10 h-7 rounded border border-border bg-transparent px-1.5 text-center text-[10px] text-foreground outline-none focus:border-ring focus:ring-1 transition-all"
+                      @keyup.enter="handleToolsJump"
+                    >
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -828,60 +906,6 @@
     </DialogContent>
   </Dialog>
 
-  <!-- Complete Tools List Modal -->
-  <Dialog v-model:open="showToolsModal">
-    <DialogContent
-      :show-close-button="false"
-      class="sm:max-w-3xl p-0 overflow-hidden border border-border shadow-2xl h-[80vh] flex flex-col bg-background"
-    >
-      <div class="px-5 py-4 border-b border-border/50 bg-muted/10 flex justify-between items-center shrink-0">
-        <h2 class="text-sm font-medium text-foreground">
-          {{ $t('mcp.allTools') }}
-        </h2>
-        <DialogClose as-child>
-          <button
-            type="button"
-            class="inline-flex items-center justify-center size-7 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X class="size-4" />
-          </button>
-        </DialogClose>
-      </div>
-      <div class="p-4 border-b border-border/50 bg-background shrink-0">
-        <div class="relative">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <input
-            v-model="toolsSearchText"
-            class="w-full min-w-0 rounded-lg border border-border bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground transition-all outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 h-9 text-xs shadow-none pl-9"
-            :placeholder="$t('mcp.searchTools')"
-          >
-        </div>
-      </div>
-      <ScrollArea class="flex-1 bg-muted/5 p-4">
-        <section class="space-y-3 max-w-3xl mx-auto pb-8">
-          <div
-            v-for="tool in filteredTools"
-            :key="tool.name"
-            class="p-4 rounded-md border border-border bg-background shadow-none space-y-2"
-          >
-            <h4 class="text-xs font-medium font-mono text-foreground">
-              {{ tool.name }}
-            </h4>
-            <p class="text-[11px] text-muted-foreground leading-relaxed">
-              {{ tool.description || $t('mcp.noDescription') }}
-            </p>
-          </div>
-          <div
-            v-if="filteredTools.length === 0"
-            class="text-xs text-muted-foreground text-center py-12"
-          >
-            {{ $t('mcp.noToolsMatch') }}
-          </div>
-        </section>
-      </ScrollArea>
-    </DialogContent>
-  </Dialog>
-
   <!-- Diagnostics Raw Log Popover (Tier 2 Error) -->
   <Dialog v-model:open="showRawLog">
     <DialogContent
@@ -1002,7 +1026,7 @@
 <script setup lang="ts">
 import { 
   Search, Plus, RefreshCw, Lock, Copy, KeyRound, Wrench, Plug, Check, AlertCircle, ZapOff, 
-  Maximize2, Eye, EyeOff, Loader2, Save, X, Download, Menu
+  Maximize2, Eye, EyeOff, Loader2, Save, X, Download, Menu, ChevronLeft, ChevronRight, MoreHorizontal
 } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1083,8 +1107,14 @@ const isOAuthSpotlight = computed(() => {
 })
 
 const showRawLog = ref(false)
-const showToolsModal = ref(false)
 const toolsSearchText = ref('')
+const toolsCurrentPage = ref(1)
+const toolsPerPage = 10
+const toolsJumpPage = ref('')
+
+watch(toolsSearchText, () => {
+  toolsCurrentPage.value = 1
+})
 
 // Modal Editor
 const showModalEditor = ref(false)
@@ -1138,6 +1168,38 @@ const filteredTools = computed(() => {
   const kw = toolsSearchText.value.toLowerCase()
   return displayTools.value.filter(t => (t.name || '').toLowerCase().includes(kw) || (t.description || '').toLowerCase().includes(kw))
 })
+
+const paginatedTools = computed(() => {
+  const start = (toolsCurrentPage.value - 1) * toolsPerPage
+  return filteredTools.value.slice(start, start + toolsPerPage)
+})
+
+const toolsTotalPages = computed(() => Math.ceil(filteredTools.value.length / toolsPerPage))
+
+const toolsVisiblePages = computed(() => {
+  const total = toolsTotalPages.value
+  const current = toolsCurrentPage.value
+  
+  if (total <= 5) {
+    return Array.from({ length: total }, (_, i) => i + 1)
+  }
+  
+  if (current <= 3) {
+    return [1, 2, 3, 4, '...', total]
+  } else if (current >= total - 2) {
+    return [1, '...', total - 3, total - 2, total - 1, total]
+  } else {
+    return [1, '...', current - 1, current, current + 1, '...', total]
+  }
+})
+
+function handleToolsJump() {
+  const p = parseInt(toolsJumpPage.value, 10)
+  if (!isNaN(p) && p >= 1 && p <= toolsTotalPages.value) {
+    toolsCurrentPage.value = p
+  }
+  toolsJumpPage.value = ''
+}
 
 const saveBtnText = computed(() => {
   if (saveState.value === 'syncing') return t('mcp.syncing')
@@ -1196,11 +1258,6 @@ function openModalEditor(title: string, currentVal: string, callback: (v: string
 function confirmModalEditor() {
   if (modalEditorCallback) modalEditorCallback(modalEditorValue.value)
   showModalEditor.value = false
-}
-
-function openToolsModal() {
-  toolsSearchText.value = ''
-  showToolsModal.value = true
 }
 
 // Data Mapping Utilities
@@ -1385,6 +1442,7 @@ async function loadList() {
       ...item as unknown as McpItem, status: (item.status as string) ?? 'unknown', tools_cache: (item.tools_cache as McpToolDescriptor[]) ?? [],
       last_probed_at: (item.last_probed_at as string) ?? null, status_message: (item.status_message as string) ?? '', auth_type: (item.auth_type as string) ?? 'none'
     }))
+
     const draft = items.value.find((i) => i.id === DRAFT_ID)
     items.value = draft ? [draft, ...serverItems] : serverItems
 
