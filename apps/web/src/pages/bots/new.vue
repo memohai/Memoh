@@ -1,5 +1,5 @@
 <template>
-  <section class="px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 mx-auto max-w-2xl">
+  <section class="px-4 pt-2 pb-10 lg:px-6 md:pt-4 md:pb-12 max-w-2xl">
     <form @submit.prevent="handleSubmit">
       <!-- Basic Info -->
       <div>

@@ -1,13 +1,21 @@
 <template>
-  <div class="flex gap-6 h-full absolute inset-0 px-4 pt-4 pb-6 w-full max-w-4xl mx-auto">
+  <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full absolute inset-0 px-6 pt-4 pb-4 w-full">
     <!-- Left: File list -->
-    <div class="w-60 shrink-0 flex flex-col border rounded-lg overflow-hidden max-h-full bg-background shadow-sm">
+    <div class="w-full h-48 shrink-0 lg:flex-[0.5] lg:min-w-[230px] lg:max-w-[260px] lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
       <div class="p-3 pb-2 border-b space-y-3 shrink-0">
         <div class="flex items-center justify-between">
           <h4 class="text-xs font-medium">
             {{ $t('bots.memory.files') }}
           </h4>
           <div class="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="size-7 text-muted-foreground hover:text-foreground lg:hidden"
+              @click="openNewMemoryDialog"
+            >
+              <Plus class="size-3.5" />
+            </Button>
             <Popover v-model:open="compactPopoverOpen">
               <PopoverAnchor as-child>
                 <div class="inline-block">
@@ -189,7 +197,7 @@
       </div>
 
       <ScrollArea class="flex-1 min-h-0">
-        <div class="p-2 space-y-0.5">
+        <div class="p-2 space-y-0.5 h-full flex flex-col">
           <template v-if="loading && memories.length === 0">
             <Skeleton class="h-10 w-full rounded-md" />
             <Skeleton class="h-10 w-full rounded-md" />
@@ -197,7 +205,7 @@
           </template>
           <div
             v-else-if="filteredMemories.length === 0"
-            class="p-4 text-center text-[11px] text-muted-foreground"
+            class="flex-1 flex items-center justify-center p-4 text-center text-[11px] text-muted-foreground"
           >
             {{ $t('bots.memory.empty') }}
           </div>
@@ -228,7 +236,7 @@
         </div>
       </ScrollArea>
 
-      <div class="border-t p-2 bg-background shrink-0">
+      <div class="border-t p-2 bg-background shrink-0 hidden lg:block">
         <button
           class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none outline-none focus-visible:ring-2 focus-visible:ring-ring/30 cursor-pointer hover:bg-accent bg-transparent rounded-lg gap-1.5 px-3 w-full h-8 text-xs text-muted-foreground hover:text-foreground"
           type="button"

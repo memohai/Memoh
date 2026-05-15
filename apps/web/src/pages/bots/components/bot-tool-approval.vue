@@ -51,16 +51,35 @@
       </div>
 
       <!-- Metrics Grid -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <!-- Status Card -->
         <div
           class="rounded-md border bg-background/70 p-3 flex flex-col justify-between transition-all duration-200"
           :class="{ 'border-success/20 bg-success/5': form.tool_approval_config.enabled }"
         >
-          <div class="space-y-2">
-            <div class="flex items-center justify-between">
+          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
+            <div class="space-y-1">
               <p class="text-xs text-muted-foreground">
                 {{ $t('common.status') }}
+              </p>
+              <div class="flex items-center gap-2">
+                <ShieldCheck
+                  v-if="form.tool_approval_config.enabled"
+                  class="w-4 h-4 shrink-0 text-success"
+                />
+                <ShieldOff
+                  v-else
+                  class="w-4 h-4 shrink-0 text-muted-foreground"
+                />
+                <p class="text-lg xl:text-2xl font-semibold leading-none">
+                  {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.hardened') : $t('common.inactive') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <p class="xl:hidden text-[11px] text-muted-foreground text-right max-w-[150px] leading-tight">
+                {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.description') : $t('bots.toolApproval.warnings.disabled') }}
               </p>
               <Switch
                 :model-value="form.tool_approval_config.enabled"
@@ -68,21 +87,8 @@
                 @update:model-value="(val) => form.tool_approval_config.enabled = !!val"
               />
             </div>
-            <div class="flex items-center gap-2 mt-2">
-              <ShieldCheck
-                v-if="form.tool_approval_config.enabled"
-                class="w-5 h-5 shrink-0 text-success"
-              />
-              <ShieldOff
-                v-else
-                class="w-5 h-5 shrink-0 text-muted-foreground"
-              />
-              <p class="text-2xl font-semibold">
-                {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.hardened') : $t('common.inactive') }}
-              </p>
-            </div>
           </div>
-          <div class="mt-3 min-h-[32px] flex items-center">
+          <div class="hidden xl:flex mt-3 min-h-[32px] items-center">
             <p class="text-[11px] leading-4 text-muted-foreground">
               {{ form.tool_approval_config.enabled ? $t('bots.toolApproval.posture.description') : $t('bots.toolApproval.warnings.disabled') }}
             </p>
@@ -91,16 +97,16 @@
 
         <!-- Active Tools Card -->
         <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
-          <div class="space-y-2">
+          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.toolApproval.metrics.activeRules') }}
             </p>
-            <div class="mt-2">
-              <span class="text-2xl font-semibold">{{ activeToolsCount }}</span>
-              <span class="text-xs font-medium text-muted-foreground ml-1">/ {{ approvalTools.length }}</span>
+            <div class="flex items-baseline gap-1">
+              <span class="text-lg xl:text-2xl font-semibold">{{ activeToolsCount }}</span>
+              <span class="text-xs font-medium text-muted-foreground">/ {{ approvalTools.length }}</span>
             </div>
           </div>
-          <div class="mt-3 min-h-[32px] flex items-center">
+          <div class="mt-1 xl:mt-3 xl:min-h-[32px] flex items-center">
             <p class="text-[11px] leading-4 text-muted-foreground">
               {{ $t('bots.toolApproval.metrics.totalDefined') }}
             </p>
@@ -109,15 +115,15 @@
 
         <!-- Rules Count Card -->
         <div class="rounded-md border bg-background/70 p-3 flex flex-col justify-between">
-          <div class="space-y-2">
+          <div class="flex xl:flex-col items-center xl:items-stretch justify-between gap-3">
             <p class="text-xs text-muted-foreground">
               {{ $t('bots.toolApproval.metrics.totalDefined') }}
             </p>
-            <div class="mt-2">
-              <span class="text-2xl font-semibold">{{ totalRulesCount }}</span>
+            <div class="mt-0 xl:mt-2">
+              <span class="text-lg xl:text-2xl font-semibold">{{ totalRulesCount }}</span>
             </div>
           </div>
-          <div class="mt-3 min-h-[32px] flex items-center">
+          <div class="mt-1 xl:mt-3 xl:min-h-[32px] flex items-center">
             <p class="text-[11px] leading-4 text-muted-foreground">
               {{ $t('bots.toolApproval.metrics.blockedCount') }} & Bypasses
             </p>

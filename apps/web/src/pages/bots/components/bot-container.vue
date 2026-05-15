@@ -691,7 +691,7 @@ watch([activeTab, botId], ([tab]) => {
 </script>
 
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
+  <div class="pb-6 space-y-5">
     <!-- Sovereign Header -->
     <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between gap-4">
       <div class="space-y-1">

@@ -1,34 +1,36 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-4">
-    <!-- Top Action Bar -->
-    <div class="flex items-center justify-between pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-10 pt-1">
-      <div class="flex items-center gap-3">
-        <span class="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-muted/30 text-muted-foreground shadow-sm">
-          <ChannelIcon
-            :channel="platformType"
-            size="1.5em"
-          />
-        </span>
-        <div class="space-y-0.5">
-          <h3 class="text-sm font-semibold text-foreground flex items-center gap-2">
-            {{ channelTitle }}
-          </h3>
-          <p class="text-[11px] text-muted-foreground font-mono">
-            {{ platformKeyLine }}
-          </p>
+  <div class="pb-6 space-y-4">
+    <!-- Sovereign Header -->
+    <div class="pb-3 border-b border-border/50 bg-background pt-1 flex flex-col gap-4">
+      <!-- Level 1: Identity & Key Line -->
+      <div class="flex items-start justify-between gap-4 min-w-0">
+        <div class="flex items-center gap-2.5 min-w-0 flex-1">
+          <span class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground shadow-none">
+            <ChannelIcon
+              :channel="platformType"
+              size="1.25em"
+            />
+          </span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <h3 class="truncate text-sm font-semibold text-foreground leading-none">
+                {{ channelTitle }}
+              </h3>
+            </div>
+            <p class="truncate text-[9px] text-muted-foreground font-mono leading-none opacity-60">
+              {{ platformKeyLine }}
+            </p>
+          </div>
         </div>
-      </div>
-      
-      <!-- Actions: Status + Save -->
-      <div class="flex items-center gap-3 shrink-0">
-        <!-- Dynamic context micro-copy -->
+        
+        <!-- Top-right: Unsaved indicator -->
         <Transition name="fade">
           <div
             v-if="dirtyPrompt"
-            class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
+            class="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/40 border border-border/50 shrink-0"
           >
             <div class="size-1 rounded-full bg-muted-foreground/40" />
-            <span class="text-[10px] text-muted-foreground font-medium whitespace-nowrap">
+            <span class="text-[9px] text-muted-foreground font-medium">
               Unsaved
               <template v-if="dirtyPrompt.type === 'other'">
                 in <a
@@ -40,13 +42,16 @@
             </span>
           </div>
         </Transition>
+      </div>
 
+      <!-- Level 2: Actions (Waterfall) -->
+      <div class="flex items-center justify-end gap-1.5 flex-wrap">
         <template v-if="isEditMode">
           <Button
             variant="outline"
             size="sm"
             :disabled="isBusy"
-            class="h-8 text-xs font-medium shadow-none"
+            class="h-7 text-[10px] font-medium shadow-none px-2.5"
             @click="handleToggleDisabled"
           >
             <Spinner
@@ -56,7 +61,7 @@
             {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
           </Button>
           <div
-            class="w-px h-4 bg-border mx-1"
+            class="w-px h-3 bg-border mx-0.5"
             aria-hidden="true"
           />
         </template>
@@ -64,7 +69,7 @@
         <Button 
           size="sm" 
           :disabled="(!isFormDirty && isEditMode) || isBusy" 
-          class="h-8 text-xs font-medium min-w-24 shadow-none" 
+          class="h-7 text-[10px] font-medium min-w-[80px] shadow-none px-3" 
           @click="handleSave"
         >
           <Spinner

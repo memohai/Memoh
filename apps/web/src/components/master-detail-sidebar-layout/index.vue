@@ -4,7 +4,7 @@
     :default-open="true"
   >
     <Sidebar
-      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-60! border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
+      class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-fit! min-w-48 lg:min-w-52 xl:min-w-60 max-w-72 border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
     >
       <SidebarContent class="overflow-hidden p-2 pb-4 pt-4 h-full flex flex-col">
         <div class="border border-border/60 bg-muted/10 rounded-lg flex-1 flex flex-col overflow-hidden min-h-0">
