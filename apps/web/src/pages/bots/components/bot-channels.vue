@@ -1,12 +1,12 @@
 <template>
-  <div class="flex flex-col lg:flex-row gap-4 absolute inset-0 max-w-4xl mx-auto px-4 pt-4 pb-6 w-full">
+  <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 absolute inset-0 px-4 md:px-6 pt-4 pb-6 w-full">
     <!-- L3: Silent Hub Rail -->
-    <div class="shrink-0 w-full h-48 lg:w-52 lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
+    <div class="shrink-0 w-full h-48 lg:w-44 xl:w-52 lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
       <div class="p-3 pb-2 border-b border-border/50 flex items-center justify-between shrink-0">
         <h4 class="text-xs font-medium">
           {{ $t('bots.channels.title') }}
         </h4>
-        <Popover v-model:open="addPopoverOpen">
+        <Popover v-model:open="mobileAddPopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -116,7 +116,7 @@
       
       <!-- Add Platform Trigger -->
       <div class="border-t p-2 bg-background hidden lg:block">
-        <Popover v-model:open="addPopoverOpen">
+        <Popover v-model:open="desktopAddPopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -159,7 +159,7 @@
     </div>
 
     <!-- L4: Right Workspace -->
-    <div class="flex-1 min-w-0 pr-4">
+    <div class="flex-1 min-w-0">
       <ScrollArea class="h-full">
         <div
           v-if="!selectedType || !selectedItem"
@@ -244,7 +244,8 @@ const { data: channels, isLoading, refetch } = useQuery({
 })
 
 const selectedType = ref<string | null>(null)
-const addPopoverOpen = ref(false)
+const mobileAddPopoverOpen = ref(false)
+const desktopAddPopoverOpen = ref(false)
 
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
 const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
@@ -261,9 +262,11 @@ watch(configuredChannels, (list) => {
 }, { immediate: true })
 
 function addChannel(type: string) {
-  addPopoverOpen.value = false
+  mobileAddPopoverOpen.value = false
+  desktopAddPopoverOpen.value = false
   selectedType.value = type
 }
+
 
 function updateDirtyState(type: string, isDirty: boolean) {
   dirtyStates.value[type] = isDirty
