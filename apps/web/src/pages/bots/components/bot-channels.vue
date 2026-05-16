@@ -6,7 +6,7 @@
         <h4 class="text-xs font-medium">
           {{ $t('bots.channels.title') }}
         </h4>
-        <Popover v-model:open="addPopoverOpen">
+        <Popover v-model:open="addMobilePopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -19,7 +19,7 @@
           </PopoverTrigger>
           <PopoverContent
             class="w-56 p-1 shadow-md"
-            align="start"
+            align="center"
           >
             <div
               v-if="unconfiguredChannels.length === 0"
@@ -116,7 +116,7 @@
       
       <!-- Add Platform Trigger -->
       <div class="border-t p-2 bg-background hidden lg:block">
-        <Popover v-model:open="addPopoverOpen">
+        <Popover v-model:open="addDesktopPopoverOpen">
           <PopoverTrigger as-child>
             <Button
               variant="ghost"
@@ -130,7 +130,7 @@
           </PopoverTrigger>
           <PopoverContent
             class="w-56 p-1 shadow-md"
-            align="start"
+            align="center"
           >
             <div
               v-if="unconfiguredChannels.length === 0"
@@ -244,7 +244,8 @@ const { data: channels, isLoading, refetch } = useQuery({
 })
 
 const selectedType = ref<string | null>(null)
-const addPopoverOpen = ref(false)
+const addDesktopPopoverOpen = ref(false)
+const addMobilePopoverOpen = ref(false)
 
 const allChannels = computed<BotChannelItem[]>(() => channels.value ?? [])
 const configuredChannels = computed(() => allChannels.value.filter((c) => c.configured))
@@ -261,7 +262,8 @@ watch(configuredChannels, (list) => {
 }, { immediate: true })
 
 function addChannel(type: string) {
-  addPopoverOpen.value = false
+  addDesktopPopoverOpen.value = false
+  addMobilePopoverOpen.value = false
   selectedType.value = type
 }
 

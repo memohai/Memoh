@@ -1,5 +1,5 @@
 <template>
-  <div class="pb-12 space-y-5">
+  <div class="max-w-2xl mx-auto pb-6 space-y-5">
     <!-- Top Action Bar -->
     <div class="flex items-start justify-between pb-4 border-b border-border/50">
       <div class="space-y-1">

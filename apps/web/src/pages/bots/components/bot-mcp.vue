@@ -1,32 +1,13 @@
 <template>
-  <div
-    class="flex flex-col lg:flex-row gap-4 h-full absolute inset-0 px-6 pt-4 pb-4 w-full max-w-6xl mx-auto font-sans"
-    :style="{ fontFamily: 'system-ui, -apple-system, sans-serif' }"
-  >
+  <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full absolute inset-0 px-6 pt-4 pb-4 w-full">
     <!-- Left: Server List (L3 Rail) -->
-    <div 
-      class="shrink-0 flex flex-col border border-border rounded-lg overflow-hidden bg-background shadow-sm transition-all duration-300"
-      :class="[
-        isMobileCollapsed 
-          ? 'w-full h-12 lg:w-12 lg:h-full lg:items-center' 
-          : 'w-full h-48 lg:w-52 lg:h-full'
-      ]"
-    >
-      <div
-        class="p-3 pb-2 border-b border-border/50 space-y-3 shrink-0 w-full"
-        :class="{'lg:px-1': isMobileCollapsed}"
-      >
+    <div class="w-full h-48 shrink-0 lg:flex-[0.5] lg:min-w-[230px] lg:max-w-[260px] lg:h-full flex flex-col border rounded-lg overflow-hidden bg-background shadow-sm">
+      <div class="p-3 pb-2 border-b border-border/50 space-y-3 shrink-0 w-full">
         <div class="flex items-center justify-between">
-          <h4
-            v-if="!isMobileCollapsed"
-            class="text-xs font-medium"
-          >
+          <h4 class="text-xs font-medium">
             {{ $t('mcp.servers') }}
           </h4>
-          <div
-            class="flex items-center gap-1"
-            :class="{'lg:flex-col': isMobileCollapsed}"
-          >
+          <div class="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -45,20 +26,9 @@
             >
               <Download class="size-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="size-7"
-              @click="isMobileCollapsed = !isMobileCollapsed"
-            >
-              <Menu class="size-4" />
-            </Button>
           </div>
         </div>
-        <div
-          v-if="!isMobileCollapsed"
-          class="relative"
-        >
+        <div class="relative">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
           <input 
             v-model="searchText"
@@ -98,10 +68,7 @@
               class="size-2 rounded-full shrink-0 transition-colors"
               :class="statusDotClass(item)"
             />
-            <span
-              v-if="!isMobileCollapsed"
-              class="truncate flex-1"
-            >
+            <span class="truncate flex-1">
               {{ item.name || (item.id === DRAFT_ID ? $t('mcp.unnamedServer') : $t('mcp.untitled')) }}
               <span
                 v-if="!item.id"
@@ -109,7 +76,7 @@
               > ({{ $t('mcp.draft') }})</span>
             </span>
             <span
-              v-if="!isMobileCollapsed && isItemDirty(item)"
+              v-if="isItemDirty(item)"
               class="size-1.5 rounded-full bg-muted-foreground shrink-0"
               :title="$t('mcp.unsavedChangesTitle')"
             />
@@ -1002,7 +969,7 @@
 <script setup lang="ts">
 import { 
   Search, Plus, RefreshCw, Lock, Copy, KeyRound, Wrench, Plug, Check, AlertCircle, ZapOff, 
-  Maximize2, Eye, EyeOff, Loader2, Save, X, Download, Menu
+  Maximize2, Eye, EyeOff, Loader2, Save, X, Download
 } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1055,8 +1022,6 @@ const items = ref<McpItem[]>([])
 const selectedItem = ref<McpItem | null>(null)
 const selectedMcpId = useSyncedQueryParam('mcpId', '')
 const searchText = ref('')
-
-const isMobileCollapsed = ref(false)
 
 const isBlinking = ref(false)
 const blinkKey = ref(0)
