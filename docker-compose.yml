@@ -69,6 +69,8 @@ services:
   web:
     image: memohai/web:latest
     container_name: memoh-web
+    environment:
+      MEMOH_SERVER_UPSTREAM: ${MEMOH_SERVER_UPSTREAM:-server:8080}
     ports:
       - "8082:8082"
     depends_on:

@@ -24,7 +24,9 @@ FROM nginx:alpine
 
 COPY --from=builder /build/apps/web/dist /usr/share/nginx/html
 
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+ENV MEMOH_SERVER_UPSTREAM=server:8080
+
+COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 8082
 

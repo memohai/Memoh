@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (for containerized dev environment)
-- [mise](https://mise.jdx.dev/) (task runner & toolchain manager)
+- [Docker](https://docs.docker.com/get-docker/) for the containerized dev environment
+- [mise](https://mise.jdx.dev/) for toolchain and task management
 
 ### Install mise
 
@@ -20,67 +20,112 @@ winget install jdx.mise
 ## Quick Start
 
 ```bash
-mise install       # Install toolchains (Go, Node, Bun, pnpm, sqlc)
-./docker/toolkit/install.sh  # Install toolkit used by the nested workspace runtime
-mise run setup     # Install deps and prepare local tooling
-mise run dev       # Start full containerized dev environment
+mise install       # Install toolchains (Go, Node, pnpm, sqlc, golangci-lint)
+mise run setup     # Install dependencies and local workspace tooling
+mise run dev       # Start the full containerized dev environment
 ```
 
-That's it. `dev` launches everything in Docker containers:
-1. PostgreSQL + Qdrant (infrastructure)
-2. Database migrations (auto-run on startup)
-3. Go server with containerd (hot-reload via `go run`)
-4. Agent Gateway (Bun, hot-reload)
-5. Web frontend (Vite, hot-reload)
+`mise run dev` launches the development stack in Docker:
 
-The dev stack uses `devenv/app.dev.toml` directly and no longer overwrites the repo root `config.toml`.
-Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Agent `18081`, Postgres `15432`, Qdrant `16333`/`16334`, Sparse `18085`.
+1. PostgreSQL + Qdrant infrastructure
+2. Database migrations, run automatically on startup
+3. Go server with the in-process AI agent and containerd workspace backend
+4. Web frontend with Vite hot reload
+
+The dev stack uses `devenv/app.dev.toml` directly and does not overwrite the repo root `config.toml`.
+Default host ports are shifted away from the production compose stack: Web `18082`, API `18080`, Postgres `15432`, Qdrant `16333`/`16334`, Sparse `18085`.
 
 ## Daily Development
 
 ```bash
-mise run dev             # Start all services
-mise run dev:selinux     # Start all services on SELinux hosts
-mise run dev:down        # Stop all services
-mise run dev:down:selinux # Stop SELinux dev environment
-mise run dev:logs        # View logs
-mise run dev:logs:selinux # View logs on SELinux hosts
-mise run dev:restart -- server  # Restart a specific service
-mise run dev:restart:selinux -- server  # Restart a service on SELinux hosts
-mise run bridge:build:selinux  # Rebuild bridge binary on SELinux hosts
+mise run dev                              # Start all services
+mise run dev:minify                       # Start the minified dev stack
+mise run dev:sqlite                       # Start the SQLite dev stack
+mise run dev:selinux                      # Start all services on SELinux hosts
+mise run dev:down                         # Stop the dev stack
+mise run dev:down:sqlite                  # Stop the SQLite dev stack
+mise run dev:logs                         # View dev logs
+mise run dev:logs:sqlite                  # View SQLite dev logs
+mise run dev:restart -- server            # Restart a specific service
+mise run dev:restart:sqlite -- server     # Restart a SQLite dev service
+mise run bridge:build                     # Rebuild the bridge binary in the dev container
 ```
 
 ## More Commands
 
 | Command | Description |
 | ------- | ----------- |
-| `mise run dev` | Start containerized dev environment |
-| `mise run dev:selinux` | Start dev environment with SELinux compose overrides |
-| `mise run dev:down` | Stop dev environment |
-| `mise run dev:down:selinux` | Stop SELinux dev environment |
-| `mise run dev:logs` | View dev logs |
-| `mise run dev:logs:selinux` | View dev logs on SELinux hosts |
-| `mise run dev:restart` | Restart a service (e.g. `-- server`) |
-| `mise run dev:restart:selinux` | Restart a service on SELinux hosts |
-| `mise run bridge:build:selinux` | Rebuild bridge binary in SELinux dev container |
-| `mise run setup` | Install deps and prepare local tooling |
+| `mise run setup` | Install dependencies and prepare local tooling |
+| `mise run dev` | Start the containerized PostgreSQL dev environment |
+| `mise run dev:sqlite` | Start the containerized SQLite dev environment |
+| `mise run dev:down` | Stop the PostgreSQL dev environment |
+| `mise run dev:down:sqlite` | Stop the SQLite dev environment |
+| `mise run dev:logs` | View PostgreSQL dev logs |
+| `mise run dev:logs:sqlite` | View SQLite dev logs |
+| `mise run dev:restart -- server` | Restart a specific dev service |
+| `mise run bridge:build` | Rebuild the workspace bridge binary in the dev container |
 | `mise run db-up` | Run database migrations |
 | `mise run db-down` | Roll back database migrations |
-| `mise run swagger-generate` | Generate Swagger documentation |
-| `mise run sdk-generate` | Generate TypeScript SDK |
-| `mise run sqlc-generate` | Generate SQL code |
+| `mise run swagger-generate` | Generate Swagger/OpenAPI documentation |
+| `mise run sdk-generate` | Generate the TypeScript SDK |
+| `mise run sqlc-generate` | Generate Go SQL code |
+| `mise run lint` | Run Go and TypeScript linters |
 
 ## Project Layout
 
 ```
-conf/       — Configuration templates (app.example.toml, app.docker.toml)
-devenv/     — Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh)
-docker/     — Production Docker build & runtime (Dockerfiles, entrypoints)
-cmd/        — Go application entry points
-internal/   — Go backend core code
-apps/       — Application services (Agent Gateway, etc.)
-  agent/    — Agent Gateway (Bun/Elysia)
-packages/   — Frontend monorepo (web, ui, sdk, config)
-db/         — Database migrations and queries
-scripts/    — Utility scripts
+conf/       - Configuration templates (app.example.toml, app.docker.toml)
+devenv/     - Dev environment (docker-compose, dev Dockerfiles, app.dev.toml, bridge-build.sh)
+docker/     - Production Docker build and runtime (Dockerfiles, entrypoints)
+cmd/        - Go application entry points
+internal/   - Go backend core code
+apps/       - Application services
+  web/      - Vue 3 management UI
+  desktop/  - Electron desktop shell
+packages/   - Frontend monorepo packages (ui, sdk, icons, config)
+db/         - Database migrations and queries
+scripts/    - Utility scripts
+```
+
+## Testing
+
+Run focused tests before opening a pull request:
+
+```bash
+go test ./internal/channel/adapters/dingtalk
+go test ./internal/...
+pnpm test --run
+pnpm --filter @memohai/desktop typecheck
+mise run lint
+```
+
+For frontend-only changes, `pnpm lint` and `pnpm test --run` are usually enough. For desktop changes, also run `pnpm --filter @memohai/desktop typecheck`.
+
+## SQL, API, and SDK Changes
+
+Database changes must keep PostgreSQL and SQLite in sync:
+
+1. Update both `db/postgres/...` and `db/sqlite/...`.
+2. Add the next PostgreSQL incremental migration pair when the schema changes.
+3. Update the canonical baseline migrations for both database backends.
+4. Run `mise run sqlc-generate`.
+
+API handler changes should update the OpenAPI spec and generated SDK:
+
+```bash
+mise run swagger-generate
+mise run sdk-generate
+```
+
+Generated files under `internal/db/**/sqlc/` and `packages/sdk/` should be committed only when they result from the matching SQL or API source changes.
+
+## Windows Notes
+
+The repository supports Windows development, but many `mise` tasks use bash-style scripts. Running them from Git Bash, WSL, or a Docker-backed shell is the smoothest path. Plain PowerShell is still useful for Go package tests and file inspection, but tasks that invoke shell scripts may need a POSIX-compatible shell.
+
+If you have local work in progress that should not be included in a pull request, stage only the intended files:
+
+```bash
+git add docker/nginx.conf docker/Dockerfile.web docker-compose.yml CONTRIBUTING.md
+git add internal/channel/adapters/dingtalk/*_test.go
 ```
