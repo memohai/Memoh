@@ -88,10 +88,15 @@ apps/desktop/
 │
 ├── scripts/
 │   ├── build.mjs                   # Prepares runtime targets, then runs electron-vite/electron-builder
-│   ├── build-icons.mjs             # Regenerates icns / ico / png from apps/web/public/logo.svg
+│   ├── install-icon-tools.mjs      # Installs isolated icon generator dependencies
 │   ├── prepare-local-server.mjs    # Builds server/CLI/bridge and copies config/providers
 │   ├── prepare-qdrant.mjs          # Downloads/prepares Qdrant per release target
 │   └── prepare-gstreamer.mjs       # Downloads/prepares display media runtime where supported
+│
+├── icon-tools/
+│   ├── build-icons.mjs             # Regenerates icns / ico / png from apps/web/public/logo.svg
+│   ├── package.json                # Isolated sharp/png-to-ico dependencies
+│   └── pnpm-lock.yaml              # Lockfile for icon generator dependencies
 │
 ├── resources/
 │   ├── icon.png                    # 512×512 — runtime BrowserWindow.icon + macOS dock.setIcon
@@ -458,8 +463,12 @@ request closes the settings window (see "Settings 401 handling" above).
 
 ## Icon Pipeline
 
-`scripts/build-icons.mjs` rasterizes `apps/web/public/logo.svg` into every
-icon asset the packager needs. Run via:
+Icon assets are checked in under `build/` and `resources/`. The packager and
+runtime consume those files directly, so the default workspace install does not
+need the icon generator's image-processing dependencies. When the logo changes,
+`icon-tools/build-icons.mjs` rasterizes `apps/web/public/logo.svg` into every icon
+asset the packager needs. This installs the generator dependencies in
+`apps/desktop/icon-tools/`:
 
 ```bash
 pnpm --filter @memohai/desktop icons
@@ -628,11 +637,11 @@ auth out-of-band).
 
 ## Native Dependencies
 
-`electron`, `electron-winstaller`, `esbuild`, and `sharp` all require
+`electron`, `electron-winstaller`, and `esbuild` all require
 `postinstall` scripts to be allowed (they install or compile native
 binaries). They are listed in the **root** `pnpm-workspace.yaml` under
 `onlyBuiltDependencies` — if `pnpm install` ever fails with `Error:
-Electron uninstall` or `sharp` missing its prebuilt binary, that's the
+Electron uninstall` or `esbuild` missing its native binary, that's the
 list to check.
 
 ## Development Rules

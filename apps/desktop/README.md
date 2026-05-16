@@ -45,8 +45,12 @@ available.
 
 ## Icons
 
-All app icons are generated from `apps/web/public/logo.svg` (the brand mark) by
-`scripts/build-icons.mjs`. Re-run after the logo changes:
+All app icons are checked in under `build/` and `resources/`. They are generated
+from `apps/web/public/logo.svg` (the brand mark) by `icon-tools/build-icons.mjs`,
+but the generator's image-processing dependencies are not part of the default
+workspace install because normal development and packaging only consume the
+checked-in assets. Re-run the generator after the logo changes; this installs
+the generator dependencies in `apps/desktop/icon-tools/`:
 
 ```bash
 pnpm --filter @memohai/desktop icons
@@ -60,6 +64,7 @@ Outputs:
 | `build/icon.ico` | Windows installer / `.exe` icon (16/24/32/48/64/128/256) |
 | `build/icon.png` | Linux `.deb`/`.rpm`/`.AppImage` icon (1024×1024) |
 | `resources/icon.png` | Runtime `BrowserWindow.icon` + macOS dev `app.dock.setIcon` (512×512); bundled via `asarUnpack` |
+| `resources/tray-icon.png` | Runtime tray/menu bar icon |
 
 `build/icon.icns` requires macOS (`iconutil`); the script skips it on other
 platforms.

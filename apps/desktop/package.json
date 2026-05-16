@@ -32,7 +32,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "icons": "node scripts/build-icons.mjs"
+    "icons": "node scripts/install-icon-tools.mjs && pnpm --dir icon-tools icons"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -60,8 +60,6 @@
     "markstream-vue": "0.0.7-beta.2",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
-    "png-to-ico": "^3.0.1",
-    "sharp": "^0.34.5",
     "typescript": "~5.9.3",
     "vee-validate": "^4.15.1",
     "vite": "^8.0.1",
