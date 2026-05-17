@@ -7,6 +7,7 @@ import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
+  updateSessionTitle as requestUpdateSessionTitle,
   fetchSessions,
   type Bot,
   type SessionSummary,
@@ -1270,6 +1271,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function renameSession(targetSessionId: string, title: string): Promise<SessionSummary> {
+    const sid = targetSessionId.trim()
+    const nextTitle = title.trim()
+    if (!sid) throw new Error('Session not selected')
+    const bid = currentBotId.value ?? ''
+    if (!bid) throw new Error('Bot not selected')
+    const updated = await requestUpdateSessionTitle(bid, sid, nextTitle)
+    const target = sessions.value.find(session => session.id === sid)
+    if (target) {
+      target.title = updated.title ?? nextTitle
+      target.updated_at = updated.updated_at ?? target.updated_at
+    }
+    return updated
+  }
+
   async function sendMessage(text: string, attachments?: ChatAttachment[]): Promise<SendMessageResult> {
     const trimmed = text.trim()
     if ((!trimmed && !attachments?.length) || streaming.value || !currentBotId.value) return { ok: false, stage: 'startup' }
@@ -1459,6 +1475,7 @@ export const useChatStore = defineStore('chat', () => {
     removeSession,
     removeChat: removeSession,
     deleteChat: removeSession,
+    renameSession,
     sendMessage,
     respondToolApproval,
     clearMessages,

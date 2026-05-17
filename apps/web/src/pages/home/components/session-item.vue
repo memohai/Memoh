@@ -75,6 +75,12 @@
             @click.stop
           >
             <DropdownMenuItem
+              @select="$emit('rename', session)"
+            >
+              <Pencil class="mr-2 size-3.5" />
+              {{ t('chat.renameSession') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem
               class="text-destructive focus:text-destructive"
               @select="$emit('delete', session)"
             >
@@ -96,7 +102,7 @@
 
 <script setup lang="ts">
 import { computed, ref, type Component } from 'vue'
-import { HeartPulse, Clock, GitBranch, MessageSquare, MoreHorizontal, Trash2 } from 'lucide-vue-next'
+import { HeartPulse, Clock, GitBranch, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
@@ -117,6 +123,7 @@ const props = defineProps<{
 
 defineEmits<{
   select: [session: SessionSummary]
+  rename: [session: SessionSummary]
   delete: [session: SessionSummary]
 }>()
 
