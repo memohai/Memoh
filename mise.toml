@@ -11,7 +11,7 @@ node = "25"
 # pnpm for workspace management
 pnpm = "10"
 # sqlc for sql management
-sqlc = "latest"
+sqlc = "1.31.1"
 # golangci-lint for Go linting
 "golangci-lint" = "2.10.1"
 
