@@ -13,6 +13,7 @@ import {
   type ManagedPid,
 } from './daemon'
 import { bundledGStreamerEnv } from './gstreamer'
+import { detectDockerHost } from './docker-host'
 import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
 export const LOCAL_SERVER_PORT = 18731
@@ -237,23 +238,6 @@ function toAbsoluteConfigPath(cwd: string, value: string): string {
     return value
   }
   return join(cwd, value)
-}
-
-function detectDockerHost(home: string): string {
-  const envHost = process.env.DOCKER_HOST?.trim()
-  if (envHost) {
-    return envHost
-  }
-  const candidates = [
-    join(home, '.docker', 'run', 'docker.sock'),
-    '/var/run/docker.sock',
-  ]
-  for (const socketPath of candidates) {
-    if (existsSync(socketPath)) {
-      return `unix://${socketPath}`
-    }
-  }
-  return ''
 }
 
 function setDockerHostIfEmpty(contents: string, dockerHost: string): string {
