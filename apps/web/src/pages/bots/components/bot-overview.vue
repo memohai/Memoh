@@ -86,7 +86,7 @@
           </div>
           
           <!-- Segmented Progress Bar -->
-          <div class="mt-3 min-h-[32px] flex items-center w-full">
+          <div class="mt-3 min-h-8 flex items-center w-full">
             <div class="flex gap-1 h-1.5 w-full">
               <div 
                 v-for="(check, index) in checks" 
@@ -153,29 +153,23 @@
           {{ $t('bots.checks.empty') }}
         </p>
       </div>
-
+    
       <!-- Loading State -->
       <div
-        v-else-if="checksLoading && checks.length === 0"
+        v-else-if="checksLoading && checks.length == 0"
         class="space-y-2"
       >
         <div
           v-for="i in 5"
           :key="i"
-          class="rounded-md border transition-opacity opacity-60"
+          class="rounded-md border transition-opacity opacity-60 px-3"
         >
-          <div class="flex w-full items-center justify-between gap-3 px-3 py-2">
-            <div class="flex items-center gap-3 min-w-0 w-full">
-              <div class="w-4 h-4 shrink-0 rounded-full bg-muted/40 animate-pulse" />
-              <div class="min-w-0 space-y-0.5 w-full">
-                <div class="h-3 w-32 rounded bg-muted/40 animate-pulse" />
-              </div>
-            </div>
-            <div class="size-4 shrink-0 rounded-sm bg-muted/40 animate-pulse" />
+          <div class="flex items-center justify-between gap-3  py-2 overflow-hidden rounded-sm">
+            <Skeleton class="h-4 w-full" />
+            <!-- <div class="size-4 shrink-0 rounded-sm bg-muted/40 animate-pulse" /> -->
           </div>
         </div>
       </div>
-
       <!-- Smart Collapsible List -->
       <div
         v-else
@@ -184,13 +178,13 @@
         <Collapsible
           v-for="item in checks"
           :key="item.id"
-          :open="expandedIds.has(item.id)"
+          :open="expandedIds.has(item.id!)"
           class="rounded-md border transition-opacity"
           :class="item.status === 'ok' ? 'opacity-60 hover:opacity-100' : 'opacity-100'"
         >
           <CollapsibleTrigger 
             class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40"
-            @click="toggleItem(item.id)"
+            @click="toggleItem(item.id!)"
           >
             <div class="flex items-center gap-3 min-w-0">
               <component 
@@ -211,7 +205,7 @@
             </div>
             <ChevronRight 
               class="size-4 shrink-0 text-muted-foreground transition-transform duration-200"
-              :class="{ 'rotate-90': expandedIds.has(item.id) }"
+              :class="{ 'rotate-90': expandedIds.has(item.id!) }"
             />
           </CollapsibleTrigger>
           
@@ -242,7 +236,7 @@
             </div>
           </CollapsibleContent>
         </Collapsible>
-      </div>
+      </div>     
     </div>
   </div>
 </template>
@@ -263,7 +257,8 @@ import {
   Spinner, 
   Collapsible, 
   CollapsibleTrigger, 
-  CollapsibleContent 
+  CollapsibleContent,
+  Skeleton
 } from '@memohai/ui'
 import { 
   CheckCircle2, 
@@ -279,7 +274,6 @@ import {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
-
 type BotCheck = BotsBotCheck
 
 const checksLoading = ref(false)

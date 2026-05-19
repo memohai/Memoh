@@ -224,7 +224,7 @@
             <div class="space-y-0.5 flex-1 pr-4">
               <Label class="text-[11px] font-medium text-foreground/70">{{ $t('bots.settings.overlayProviderFieldLabel') }}</Label>
             </div>
-            <div class="shrink-0 flex justify-end min-w-[160px] max-w-[320px] w-full">
+            <div class="shrink-0 flex justify-end min-w-40 max-w-[320px] w-full">
               <OverlayProviderSelect
                 v-model="form.overlay_provider"
                 :providers="overlayProviderMeta"
@@ -296,7 +296,7 @@
                   <!-- Standard Fields (Horizontal) -->
                   <div 
                     v-else
-                    class="flex items-center justify-between gap-6 py-4 border-b border-border/40 last:border-0 min-h-[64px]"
+                    class="flex items-center justify-between gap-6 py-4 border-b border-border/40 last:border-0 min-h-16"
                   >
                     <div class="space-y-0.5 flex-1 pr-4">
                       <Label
@@ -493,7 +493,7 @@
                           </p>
                         </div>
 
-                        <div class="shrink-0 flex justify-end min-w-[160px] max-w-[320px] w-full">
+                        <div class="shrink-0 flex justify-end min-w-40 max-w-[320px] w-full">
                           <!-- Switch for Bool -->
                           <Switch
                             v-if="field.type === 'bool'"

@@ -209,7 +209,7 @@
 
           <!-- Card Body / Result Summary -->
           <div 
-            v-if="!expandedIds.has(log.id)"
+            v-if="!expandedIds.has(log.id!)"
             class="pl-4"
           >
             <p 
@@ -271,8 +271,8 @@
           @update:page="currentPage = $event"
         >
           <PaginationContent v-slot="{ items }">
-            <PaginationFirst class="h-8 w-8" />
-            <PaginationPrevious class="h-8 w-8" />
+            <PaginationFirst class="h-8 " />
+            <PaginationPrevious class="h-8" />
             <template
               v-for="(item, index) in items"
               :key="index"
@@ -285,11 +285,11 @@
                 v-else
                 :value="item.value"
                 :is-active="item.value === currentPage"
-                class="h-8 w-8 text-[11px]"
+                class="h-8 text-[11px]"
               />
             </template>
-            <PaginationNext class="h-8 w-8" />
-            <PaginationLast class="h-8 w-8" />
+            <PaginationNext class="h-8" />
+            <PaginationLast class="h-8" />
           </PaginationContent>
         </Pagination>
       </div>

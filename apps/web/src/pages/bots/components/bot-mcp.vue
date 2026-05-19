@@ -627,7 +627,7 @@
                   v-for="tool in displayTools.slice(0, 5)"
                   :key="tool.name"
                   variant="secondary"
-                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-[140px] truncate"
+                  class="text-[10px] font-mono hover:bg-secondary/80 cursor-default shadow-none border border-border bg-muted max-w-35 truncate"
                   :title="tool.description"
                 >
                   {{ tool.name }}

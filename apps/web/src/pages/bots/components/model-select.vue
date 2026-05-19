@@ -20,7 +20,7 @@
       </Button>
     </PopoverTrigger>
     <PopoverContent
-      class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-[8px]"
+      class="w-[--reka-popover-trigger-width] p-0 shadow-md rounded-xl"
       align="start"
     >
       <ModelOptions

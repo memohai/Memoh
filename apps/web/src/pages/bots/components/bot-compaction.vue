@@ -495,8 +495,8 @@ onMounted(() => {
               @update:page="currentPage = $event"
             >
               <PaginationContent v-slot="{ items }">
-                <PaginationFirst class="h-7 w-7" />
-                <PaginationPrevious class="h-7 w-7" />
+                <PaginationFirst class="h-7" />
+                <PaginationPrevious class="h-7" />
                 <template
                   v-for="(item, index) in items"
                   :key="index"
@@ -504,17 +504,17 @@ onMounted(() => {
                   <PaginationEllipsis
                     v-if="item.type === 'ellipsis'"
                     :index="index"
-                    class="h-7 w-7"
+                    class="h-7"
                   />
                   <PaginationItem
                     v-else
                     :value="item.value"
                     :is-active="item.value === currentPage"
-                    class="h-7 w-7 text-[11px]"
+                    class="h-7  text-[11px]"
                   />
                 </template>
-                <PaginationNext class="h-7 w-7" />
-                <PaginationLast class="h-7 w-7" />
+                <PaginationNext class="h-7" />
+                <PaginationLast class="h-7" />
               </PaginationContent>
             </Pagination>
           </div>

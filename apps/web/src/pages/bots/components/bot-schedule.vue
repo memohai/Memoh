@@ -170,7 +170,7 @@
                   <Textarea
                     id="schedule-command"
                     v-model="form.command"
-                    class="text-xs shadow-none border-border/60 min-h-[60px] bg-transparent font-mono pr-8"
+                    class="text-xs shadow-none border-border/60 min-h-15 bg-transparent font-mono pr-8"
                     :placeholder="$t('bots.schedule.form.commandPlaceholder')"
                     rows="2"
                   />
@@ -334,7 +334,7 @@
           class="bg-background border border-border/60 rounded-md shadow-none flex flex-col overflow-hidden"
         >
           <div class="overflow-x-auto">
-            <table class="w-full text-xs border-collapse min-w-[800px]">
+            <table class="w-full text-xs border-collapse min-w-200">
               <thead>
                 <tr class="border-b border-border/50 bg-muted/40">
                   <th class="px-4 py-2.5 text-left font-semibold text-foreground/80 whitespace-nowrap">
@@ -365,7 +365,7 @@
                   @click="handleEdit(item)"
                 >
                   <!-- Identity -->
-                  <td class="px-4 py-3 align-middle min-w-[200px]">
+                  <td class="px-4 py-3 align-middle min-w-50">
                     <div class="font-medium text-foreground">
                       {{ item.name }}
                     </div>
