@@ -14,6 +14,7 @@
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
           : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground'"
         :title="resolveTitle(tab)"
+        style="margin-top:var(--pos-tab-bar)"
         @click="store.setActive(tab.id)"
       >
         <component
@@ -44,6 +45,7 @@
         class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
         :title="t('chat.tabBarToolkit.newTerminal')"
         :aria-label="t('chat.tabBarToolkit.newTerminal')"
+        
         @click="store.openTerminal()"
       >
         <TerminalSquare class="size-4" />
@@ -114,19 +116,14 @@ const tabRefs = new Map<string, HTMLElement>()
 useResizeObserver(tabsContainerRef, () => {
   const offsetNum = tabsContainerRef.value?.offsetHeight
   const clientNum = tabsContainerRef.value?.clientHeight
-  if (typeof offsetNum !== 'number' || typeof clientNum !== 'number') {
+  if (typeof offsetNum !== 'number' || typeof clientNum !== 'number'|| !tabsContainerRef.value) {
     return
   }
   if (offsetNum === clientNum) {   
-    tabRefs.values().forEach(el => {
-      el.style.marginTop = '0px'
-    })
-   
+    tabsContainerRef.value.style.cssText = '--pos-tab-bar:0px'
   } else {
     const pos = offsetNum - clientNum
-    tabRefs.values().forEach(el => {
-      el.style.marginTop = `${pos}px` 
-    })   
+    tabsContainerRef.value.style.cssText = `--pos-tab-bar:${pos}px`
   }
 })
 
