@@ -45,7 +45,18 @@
                 {{ t('aiDevelopmentEngine.connectionStatus') }}
               </div>
               <div class="mt-2 flex items-center gap-2">
-                <CircleOff class="size-3.5 text-muted-foreground" />
+                <CircleCheck
+                  v-if="status?.status === 'available'"
+                  class="size-3.5 text-success"
+                />
+                <CircleAlert
+                  v-else-if="status?.status === 'unavailable'"
+                  class="size-3.5 text-destructive"
+                />
+                <CircleOff
+                  v-else
+                  class="size-3.5 text-muted-foreground"
+                />
                 <span class="text-sm font-medium">{{ connectionStatusLabel }}</span>
               </div>
             </div>
@@ -65,6 +76,17 @@
               <div class="mt-2 text-sm font-medium">
                 {{ displayName }}
               </div>
+            </div>
+          </div>
+          <div
+            v-if="status?.version || status?.errorSummary"
+            class="mt-3 rounded-md border p-3"
+          >
+            <div class="text-xs text-muted-foreground">
+              {{ status?.version ? 'Codex CLI' : '错误摘要' }}
+            </div>
+            <div class="mt-2 text-sm font-medium break-words">
+              {{ status?.version ? `Codex CLI：${status.version}` : status?.errorSummary }}
             </div>
           </div>
         </CardContent>
@@ -104,7 +126,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleOff, Cpu } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, CircleOff, Cpu } from 'lucide-vue-next'
 import {
   Badge,
   Card,
@@ -120,6 +142,8 @@ interface AIDevelopmentEngineStatus {
   status: string
   authStatus: string
   displayName: string
+  version?: string
+  errorSummary?: string
 }
 
 interface AIDevelopmentEngineCapability {
@@ -142,6 +166,8 @@ const loadError = ref('')
 const disabledLabel = '未启用'
 const enabledLabel = '已启用'
 const notConfiguredLabel = '未配置'
+const detectedLabel = '已检测到'
+const unavailableLabel = '不可用'
 
 const fallbackCapabilities: AIDevelopmentEngineCapability[] = [
   { key: 'read_project', name: '读取项目', enabled: false },
@@ -157,11 +183,17 @@ const displayName = computed(() =>
   ?? t('aiDevelopmentEngine.title'),
 )
 
-const connectionStatusLabel = computed(() =>
-  status.value?.status === 'disabled'
-    ? disabledLabel
-    : (status.value?.status ?? disabledLabel),
-)
+const connectionStatusLabel = computed(() => {
+  switch (status.value?.status) {
+    case 'available':
+      return detectedLabel
+    case 'unavailable':
+      return unavailableLabel
+    case 'disabled':
+    default:
+      return disabledLabel
+  }
+})
 
 const authStatusLabel = computed(() =>
   status.value?.authStatus === 'not_configured'
@@ -171,7 +203,10 @@ const authStatusLabel = computed(() =>
 
 const capabilityItems = computed(() =>
   capabilities.value?.capabilities?.length
-    ? capabilities.value.capabilities
+    ? capabilities.value.capabilities.map(capability => ({
+        ...capability,
+        enabled: false,
+      }))
     : fallbackCapabilities,
 )
 
