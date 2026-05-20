@@ -597,6 +597,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewWebFetchProvider(log),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),
 		agenttools.NewSkillProvider(log),
+		agenttools.NewMemohHelpProvider(log),
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
