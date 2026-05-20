@@ -2,14 +2,14 @@
   <div class="flex items-center h-12 shrink-0 border-b border-border bg-background gap-1 [-webkit-app-region:drag]">
     <div
       ref="tabsContainerRef"
-      class="flex items-center flex-1 min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap [-webkit-app-region:no-drag]"
+      class="flex items-center h-full flex-1  min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap [-webkit-app-region:no-drag]"
     >
       <button
         v-for="tab in tabs"
         :ref="(el) => setTabRef(tab.id, el as Element | null)"
         :key="tab.id"
         type="button"
-        class="group inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md px-2.5 text-xs transition-colors max-w-[200px] [-webkit-app-region:no-drag]"
+        class="group inline-flex overflow-hidden items-center gap-1.5 h-8 shrink-0 rounded-md px-2.5 text-xs transition-colors max-w-50 [-webkit-app-region:no-drag]"
         :class="tab.id === activeId
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
           : 'text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground'"
@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type Component } from 'vue'
+import { computed, nextTick, watch, type Component, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { File as FileIcon, MessageSquare, Monitor, MoreHorizontal, TerminalSquare, X } from 'lucide-vue-next'
@@ -102,13 +102,33 @@ import {
 import { useWorkspaceTabsStore, type WorkspaceTab } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
+import { useResizeObserver } from '@vueuse/core'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
 const { tabs, activeId } = storeToRefs(store)
 
-const tabsContainerRef = ref<HTMLElement | null>(null)
+const tabsContainerRef = useTemplateRef('tabsContainerRef')
 const tabRefs = new Map<string, HTMLElement>()
+
+useResizeObserver(tabsContainerRef, () => {
+  const offsetNum = tabsContainerRef.value?.offsetHeight
+  const clientNum = tabsContainerRef.value?.clientHeight
+  if (typeof offsetNum !== 'number' || typeof clientNum !== 'number') {
+    return
+  }
+  if (offsetNum === clientNum) {   
+    tabRefs.values().forEach(el => {
+      el.style.marginTop = '0px'
+    })
+   
+  } else {
+    const pos = offsetNum - clientNum
+    tabRefs.values().forEach(el => {
+      el.style.marginTop = `${pos}px` 
+    })   
+  }
+})
 
 function setTabRef(id: string, el: Element | null) {
   if (el) tabRefs.set(id, el as HTMLElement)
