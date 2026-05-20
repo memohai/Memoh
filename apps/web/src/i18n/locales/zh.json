@@ -90,6 +90,7 @@
     "session": "会话列表",
     "chat": "对话",
     "bots": "智能体",
+    "aiDevelopmentEngine": "AI 开发引擎",
     "providers": "模型服务商",
     "settings": "系统设置",
     "webSearch": "搜索引擎",
@@ -179,6 +180,20 @@
     "github": "GitHub",
     "docs": "技术文档",
     "feedback": "问题反馈"
+  },
+  "aiDevelopmentEngine": {
+    "title": "AI 开发引擎",
+    "description": "查看当前连接状态和可用能力。",
+    "connectionStatus": "连接状态",
+    "authorizationStatus": "授权状态",
+    "displayName": "显示名称",
+    "capabilities": "能力列表",
+    "capabilitiesDescription": "第一版仅展示能力状态，所有能力保持关闭。",
+    "disabled": "未启用",
+    "enabled": "已启用",
+    "notConfigured": "未配置",
+    "loading": "加载中...",
+    "loadFailed": "加载 AI 开发引擎状态失败"
   },
   "chat": {
     "greeting": "你好！有什么我可以帮你的吗？",

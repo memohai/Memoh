@@ -66,6 +66,14 @@ const routes = [
         ],
       },
       {
+        name: 'ai-development-engine',
+        path: 'ai-development-engine',
+        component: () => import('@/pages/ai-development-engine/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.aiDevelopmentEngine'),
+        },
+      },
+      {
         name: 'providers',
         path: 'providers',
         component: () => import('@/pages/providers/index.vue'),

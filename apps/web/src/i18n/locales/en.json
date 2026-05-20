@@ -90,6 +90,7 @@
     "session": "Sessions",
     "chat": "Chat",
     "bots": "Bots",
+    "aiDevelopmentEngine": "AI 开发引擎",
     "providers": "Providers",
     "webSearch": "Web Search",
     "memory": "Memory",
@@ -183,6 +184,20 @@
     "github": "GitHub",
     "docs": "Documentation",
     "feedback": "Feedback"
+  },
+  "aiDevelopmentEngine": {
+    "title": "AI 开发引擎",
+    "description": "View the current connection state and available capabilities.",
+    "connectionStatus": "Connection State",
+    "authorizationStatus": "Authorization State",
+    "displayName": "Display Name",
+    "capabilities": "Capabilities",
+    "capabilitiesDescription": "The first version only displays capability state. Every capability remains off.",
+    "disabled": "Disabled",
+    "enabled": "Enabled",
+    "notConfigured": "Not Configured",
+    "loading": "Loading...",
+    "loadFailed": "Failed to load AI 开发引擎 status"
   },
   "chat": {
     "greeting": "Hi! How can I help you today?",

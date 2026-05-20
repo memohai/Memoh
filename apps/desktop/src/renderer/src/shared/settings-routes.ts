@@ -44,6 +44,12 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     ]
   },
   {
+    name: 'ai-development-engine',
+    path: '/settings/ai-development-engine',
+    loader: () => import('@memohai/web/pages/ai-development-engine/index.vue'),
+    meta: { breadcrumb: i18nRef('sidebar.aiDevelopmentEngine') }
+  },
+  {
     name: 'providers',
     path: '/settings/providers',
     loader: () => import('@memohai/web/pages/providers/index.vue'),

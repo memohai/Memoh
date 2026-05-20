@@ -63,7 +63,7 @@ import { computed, inject, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info, Palette } from 'lucide-vue-next'
+import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info, Palette, Cpu } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import {
   Sidebar,
@@ -119,6 +119,7 @@ type NavItem = { title: string; name: string; icon: Component }
 
 const allNavItems = computed<NavItem[]>(() => [
   { title: t('sidebar.bots'), name: 'bots', icon: Bot },
+  { title: t('sidebar.aiDevelopmentEngine'), name: 'ai-development-engine', icon: Cpu },
   { title: t('sidebar.providers'), name: 'providers', icon: Boxes },
   { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
   { title: t('sidebar.memory'), name: 'memory', icon: Brain },
