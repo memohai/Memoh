@@ -569,6 +569,7 @@ func startBackgroundExecStreamReader(log *slog.Logger, stream *bridge.ExecStream
 func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel context.CancelFunc) {
 	defer cancel()
 	var exitCode int32
+	var exitReceived bool
 	for {
 		msg, recvErr := stream.Recv()
 		if errors.Is(recvErr, io.EOF) {
@@ -583,6 +584,8 @@ func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel conte
 			r.resultCh <- background.AdoptResult{
 				Stdout:         stdout,
 				Stderr:         stderr,
+				ExitCode:       exitCode,
+				ExitReceived:   exitReceived,
 				Err:            recvErr,
 				OutputRecorded: outputRecorded,
 			}
@@ -595,6 +598,7 @@ func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel conte
 			r.appendChunk("stderr", string(msg.GetData()))
 		case pb.ExecOutput_EXIT:
 			exitCode = msg.GetExitCode()
+			exitReceived = true
 		}
 	}
 
@@ -603,6 +607,7 @@ func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel conte
 		Stdout:         stdout,
 		Stderr:         stderr,
 		ExitCode:       exitCode,
+		ExitReceived:   exitReceived,
 		OutputRecorded: outputRecorded,
 	}
 }

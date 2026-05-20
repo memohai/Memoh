@@ -305,6 +305,9 @@ func TestSpawnAdoptWritesOutputLogWhenStreamFails(t *testing.T) {
 	if notifications[0].Status != TaskFailed {
 		t.Fatalf("expected failed notification, got %s", notifications[0].Status)
 	}
+	if notifications[0].ExitCode != -1 {
+		t.Fatalf("expected exit code -1 when EXIT never arrived, got %d", notifications[0].ExitCode)
+	}
 
 	writesMu.Lock()
 	log := string(writes[outputFile])
@@ -313,6 +316,30 @@ func TestSpawnAdoptWritesOutputLogWhenStreamFails(t *testing.T) {
 		if !strings.Contains(log, want) {
 			t.Fatalf("expected output log to contain %q, got:\n%s", want, log)
 		}
+	}
+}
+
+// TestSpawnAdoptPreservesExitCodeWhenStreamFailsAfterExit pins down the
+// regression the user reported: when the bridge actually sent EXIT (so we
+// know the real exit code) but the gRPC stream subsequently errored, the
+// task must surface the real exit code instead of being clobbered to -1.
+func TestSpawnAdoptPreservesExitCodeWhenStreamFailsAfterExit(t *testing.T) {
+	mgr := New(nil)
+	resultCh := make(chan AdoptResult)
+
+	_, _ = mgr.SpawnAdopt(context.Background(), "bot1", "sess1", "deploy.sh", "/data", "", resultCh, nil)
+	resultCh <- AdoptResult{
+		Stdout:       "Build complete\n",
+		ExitCode:     0,
+		ExitReceived: true,
+		Err:          errors.New("stream closed after EXIT"),
+	}
+	notifications := waitDrain(t, mgr, "bot1", "sess1", 1)
+	if notifications[0].Status != TaskFailed {
+		t.Fatalf("expected failed notification (stream errored), got %s", notifications[0].Status)
+	}
+	if notifications[0].ExitCode != 0 {
+		t.Fatalf("expected real exit code 0 to be preserved, got %d", notifications[0].ExitCode)
 	}
 }
 

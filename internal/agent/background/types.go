@@ -156,10 +156,18 @@ const maxTailBytes = 4096
 
 // AdoptResult carries the outcome of a command whose execution was started
 // externally (e.g. via ExecStream) and then handed off to the Manager.
+//
+// ExitReceived distinguishes "the bridge actually sent us an EXIT frame"
+// (so ExitCode is the real value the process returned, even if the gRPC
+// stream errored out afterwards) from "we never saw an EXIT frame, ExitCode
+// is just its zero value". Without this flag, downstream code can't tell
+// "the command finished with exit 0 right before the stream died" from
+// "we have no idea what the exit code was".
 type AdoptResult struct {
 	Stdout         string
 	Stderr         string
 	ExitCode       int32
+	ExitReceived   bool
 	Err            error
 	OutputRecorded bool
 }

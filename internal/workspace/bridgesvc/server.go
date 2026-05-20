@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -400,16 +401,7 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 
 	streamPipe(stream, ptmx, pb.ExecOutput_STDOUT)
 
-	exitCode := int32(0)
-	if waitErr := cmd.Wait(); waitErr != nil {
-		exitErr := &exec.ExitError{}
-		if errors.As(waitErr, &exitErr) {
-			ec := exitErr.ExitCode()
-			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115
-		} else {
-			exitCode = -1
-		}
-	}
+	exitCode := resolveExitCode(cmd.Wait())
 
 	return stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,
@@ -482,22 +474,52 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	streamPipe(stream, stderrPipe, pb.ExecOutput_STDERR)
 	<-done
 
-	exitCode := int32(0)
-	if err := cmd.Wait(); err != nil {
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			ec := exitErr.ExitCode()
-			exitCode = int32(max(math.MinInt32, min(math.MaxInt32, ec))) //nolint:gosec // G115
-		} else {
-			exitCode = -1
-		}
-	}
+	exitCode := resolveExitCode(cmd.Wait())
 
 	_ = stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,
 		ExitCode: exitCode,
 	})
 	return nil
+}
+
+// resolveExitCode normalises the result of cmd.Wait() into a single int32
+// exit code that callers can rely on:
+//
+//   - nil               → 0 (clean exit)
+//   - *exec.ExitError   → real exit code, or 128+signal for signal-killed
+//     processes (the conventional shell encoding), so callers can tell
+//     "killed by SIGKILL" (137) from "actually returned -1".
+//   - any other error   → -1 (I/O failure during Wait; we genuinely don't know)
+//
+// Without this, signal-killed processes (including ones killed by our own
+// procCtx timeout via SIGKILL, which cannot be wrapped by /bin/sh -c) were
+// reported as -1, which looked like a generic failure even when the command
+// had already printed all of its expected output.
+func resolveExitCode(waitErr error) int32 {
+	if waitErr == nil {
+		return 0
+	}
+	exitErr := &exec.ExitError{}
+	if !errors.As(waitErr, &exitErr) {
+		return -1
+	}
+	if state := exitErr.ProcessState; state != nil {
+		if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			sig := int(ws.Signal())
+			if sig > 0 {
+				return int32(128 + sig) //nolint:gosec // G115: signal numbers are small positive ints.
+			}
+		}
+	}
+	ec := exitErr.ExitCode()
+	if ec < math.MinInt32 {
+		return math.MinInt32
+	}
+	if ec > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(ec)
 }
 
 func (s *Server) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {

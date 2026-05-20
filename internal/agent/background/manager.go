@@ -317,7 +317,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		stdout = ""
 		stderr = ""
 	}
-	m.completeTask(task, stdout, stderr, result.Err, result.ExitCode)
+	m.completeTask(task, stdout, stderr, result.Err, result.ExitCode, result.ExitReceived)
 }
 
 func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, writeFn WriteFileFunc, readFn ReadFileFunc) {
@@ -377,15 +377,27 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 
 	var stdout, stderr string
 	var exitCode int32
+	// `result` is non-nil whenever execFn returned a populated ExecResult or
+	// sentinel recovery succeeded. In either case the exit code is the real
+	// value the command returned, not a guess.
+	exitKnown := result != nil
 	if result != nil {
 		stdout = result.Stdout
 		stderr = result.Stderr
 		exitCode = result.ExitCode
 	}
-	m.completeTask(task, stdout, stderr, err, exitCode)
+	m.completeTask(task, stdout, stderr, err, exitCode, exitKnown)
 }
 
-func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error, exitCode int32) {
+// completeTask finalises a task's bookkeeping after execution.
+//
+// exitKnown distinguishes two cases when execErr is non-nil:
+//   - exitKnown=true: the bridge already delivered an EXIT frame (or the
+//     sentinel file was recovered) before the stream broke, so exitCode is
+//     real — record it instead of overwriting with -1.
+//   - exitKnown=false: we genuinely have no exit code (stream died before
+//     EXIT, sentinel unreadable) — fall back to -1 to flag the unknown.
+func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error, exitCode int32, exitKnown bool) {
 	if execErr != nil {
 		task.AppendOutput(fmt.Sprintf("[error] %v\n", execErr))
 	} else {
@@ -401,10 +413,14 @@ func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error,
 		return
 	}
 	task.CompletedAt = time.Now()
-	if execErr != nil {
+	switch {
+	case execErr != nil && !exitKnown:
 		task.Status = TaskFailed
 		task.ExitCode = -1
-	} else {
+	case execErr != nil && exitKnown:
+		task.Status = TaskFailed
+		task.ExitCode = exitCode
+	default:
 		task.ExitCode = exitCode
 		if exitCode == 0 {
 			task.Status = TaskCompleted
