@@ -6,6 +6,10 @@
 # Documentation
 *.md
 docs/
+!docs/
+!docs/embed.go
+!docs/docs/
+!docs/docs/**
 assets/
 
 # IDE
