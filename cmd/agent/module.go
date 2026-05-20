@@ -8,6 +8,7 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/aidevengine"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -61,6 +62,7 @@ func options() fx.Option {
 			accounts.NewService,
 			acl.NewService,
 			settings.NewService,
+			aidevengine.NewService,
 			toolapproval.NewService,
 			provideProvidersService,
 			searchproviders.NewService,
@@ -117,6 +119,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
+			provideServerHandler(handlers.NewAIDevelopmentEngineHandler),
 			provideServerHandler(handlers.NewToolApprovalHandler),
 			provideServerHandler(handlers.NewACLHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
