@@ -79,7 +79,6 @@
     "password": "Password",
     "login": "Sign In",
     "register": "Sign Up",
-    "forgotPassword": "Forgot Password?",
     "logout": "Sign Out",
     "logoutConfirm": "Are you sure you want to sign out?",
     "loginFailed": "Login Failed",
