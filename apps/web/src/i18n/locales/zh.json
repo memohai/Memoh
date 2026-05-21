@@ -79,7 +79,6 @@
     "password": "密码",
     "login": "登录",
     "register": "注册账户",
-    "forgotPassword": "忘记密码？",
     "logout": "退出登录",
     "logoutConfirm": "确定要退出当前账号吗？",
     "loginFailed": "登录失败",
