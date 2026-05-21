@@ -96,14 +96,6 @@
                 </FormControl>
               </FormItem>
             </FormField>
-            <div class="flex">
-              <a
-                href="#"
-                class="ml-auto inline-block text-xs underline mt-2"
-              >
-                {{ $t('auth.forgotPassword') }}
-              </a>
-            </div>
           </CardContent>
 
           <CardFooter>
