@@ -1,11 +1,20 @@
 <template>
   <div
     class="flex shrink-0 h-full relative"
-    :style="{ width: `${sidebarWidth}px` }"
+    :style="{ width: `${effectiveSidebarWidth}px` }"
   >
-    <div class="flex flex-col h-full flex-1 min-w-0 bg-sidebar border-r border-border">
-      <div class="flex items-center h-12 shrink-0 border-b border-border bg-sidebar/60 [-webkit-app-region:drag]">
-        <div class="flex items-center min-w-0 max-w-full px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden [-webkit-app-region:no-drag]">
+    <div
+      class="flex flex-col h-full flex-1 min-w-0 bg-sidebar border-r border-border"
+      :class="{ 'items-center': collapsed }"
+    >
+      <div
+        class="flex shrink-0 border-b border-border bg-sidebar/60 [-webkit-app-region:drag]"
+        :class="collapsed ? 'h-full w-full flex-col items-center py-1.5' : 'h-12 items-center'"
+      >
+        <div
+          class="flex min-w-0 max-w-full gap-1 overflow-x-auto overflow-y-hidden px-1.5 py-1 [-webkit-app-region:no-drag]"
+          :class="collapsed ? 'flex-col items-center overflow-visible' : 'items-center'"
+        >
           <button
             v-for="tab in activityTabs"
             :key="tab.id"
@@ -17,7 +26,7 @@
             :title="tab.label"
             :aria-label="tab.label"
             :aria-current="activeTab === tab.id ? 'page' : undefined"
-            @click="activeTab = tab.id"
+            @click="handleTabClick(tab.id)"
           >
             <component
               :is="tab.icon"
@@ -25,9 +34,30 @@
             />
           </button>
         </div>
+
+        <button
+          type="button"
+          class="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent/40 hover:text-foreground [-webkit-app-region:no-drag]"
+          :class="collapsed ? 'mt-auto' : 'ml-auto mr-1.5'"
+          :title="collapsed ? t('chat.expandSidebar') : t('chat.collapseSidebar')"
+          :aria-label="collapsed ? t('chat.expandSidebar') : t('chat.collapseSidebar')"
+          @click="toggleCollapsed"
+        >
+          <PanelLeftOpen
+            v-if="collapsed"
+            class="size-4"
+          />
+          <PanelLeftClose
+            v-else
+            class="size-4"
+          />
+        </button>
       </div>
 
-      <div class="flex-1 min-h-0 relative">
+      <div
+        v-if="!collapsed"
+        class="flex-1 min-h-0 relative"
+      >
         <div
           v-show="activeTab === 'sessions'"
           class="absolute inset-0"
@@ -99,6 +129,7 @@
     </div>
 
     <div
+      v-if="!collapsed"
       class="absolute top-0 right-0 w-1 h-full cursor-col-resize z-10 group"
       @mousedown="onResizeStart"
     >
@@ -111,11 +142,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, nextTick, type Component } from 'vue'
+import { ref, computed, onBeforeUnmount, nextTick, onMounted, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { MessageSquare, Folder, Sparkles, Plug, CalendarClock } from 'lucide-vue-next'
+import { MessageSquare, Folder, Sparkles, Plug, CalendarClock, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import ChatSidebarSessions from './chat-sidebar-sessions.vue'
 import ChatSidebarFiles from './chat-sidebar-files.vue'
@@ -144,8 +175,8 @@ const activityTabs = computed<ActivityTab[]>(() => [
 ])
 
 const activeTab = useLocalStorage<ActivityTabId>('chat-sidebar-active-tab', 'sessions')
+const collapsed = useLocalStorage('chat-sidebar-collapsed', false)
 
-// Guard against stale persisted value (e.g. legacy 'terminal' tab).
 if (!activityTabs.value.some((t) => t.id === activeTab.value)) {
   activeTab.value = 'sessions'
 }
@@ -155,8 +186,10 @@ const filesPanelRef = ref<InstanceType<typeof ChatSidebarFiles> | null>(null)
 const MIN_WIDTH = 200
 const MAX_WIDTH = 520
 const DEFAULT_WIDTH = 335
+const COLLAPSED_WIDTH = 48
 
 const sidebarWidth = useLocalStorage('chat-sidebar-width', DEFAULT_WIDTH)
+const effectiveSidebarWidth = computed(() => collapsed.value ? COLLAPSED_WIDTH : sidebarWidth.value)
 const isResizing = ref(false)
 
 function onResizeStart(e: MouseEvent) {
@@ -184,12 +217,8 @@ function onResizeStart(e: MouseEvent) {
   document.addEventListener('mouseup', onMouseUp)
 }
 
-onBeforeUnmount(() => {
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-})
-
 function openFilesAt(path: string) {
+  collapsed.value = false
   activeTab.value = 'files'
   void nextTick(() => {
     filesPanelRef.value?.navigateTo(path)
@@ -198,7 +227,33 @@ function openFilesAt(path: string) {
 
 function setActiveTab(tab: ActivityTabId) {
   activeTab.value = tab
+  collapsed.value = false
 }
+
+function handleTabClick(tab: ActivityTabId) {
+  setActiveTab(tab)
+}
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+}
+
+function handleExternalTab(event: Event) {
+  const detail = (event as CustomEvent<{ tab?: ActivityTabId }>).detail
+  const tab = detail?.tab
+  if (!tab || !activityTabs.value.some((item) => item.id === tab)) return
+  setActiveTab(tab)
+}
+
+onMounted(() => {
+  window.addEventListener('memoh:chat-sidebar-tab', handleExternalTab)
+})
+
+onBeforeUnmount(() => {
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('memoh:chat-sidebar-tab', handleExternalTab)
+})
 
 defineExpose({
   openFilesAt,

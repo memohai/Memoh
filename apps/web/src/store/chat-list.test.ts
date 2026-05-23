@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { UIStreamEvent, UIStreamEventHandler } from '@/composables/api/useChat'
 import { useChatStore } from './chat-list'
@@ -15,10 +15,24 @@ const api = vi.hoisted(() => ({
   locateMessageUI: vi.fn(),
 }))
 
+const sdkClient = vi.hoisted(() => ({
+  post: vi.fn(),
+}))
+
 vi.mock('@/composables/api/useChat', () => api)
+vi.mock('@memohai/sdk/client', () => ({ client: sdkClient }))
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+class TestCustomEvent<T = unknown> extends Event {
+  detail: T
+
+  constructor(type: string, init?: CustomEventInit<T>) {
+    super(type, init)
+    this.detail = init?.detail as T
+  }
 }
 
 describe('chat-list store', () => {
@@ -26,6 +40,14 @@ describe('chat-list store', () => {
   let sendEvents: UIStreamEvent[]
 
   beforeEach(() => {
+    const windowTarget = new EventTarget()
+    vi.stubGlobal('window', {
+      addEventListener: windowTarget.addEventListener.bind(windowTarget),
+      removeEventListener: windowTarget.removeEventListener.bind(windowTarget),
+      dispatchEvent: windowTarget.dispatchEvent.bind(windowTarget),
+    })
+    vi.stubGlobal('CustomEvent', TestCustomEvent)
+
     setActivePinia(createPinia())
     streamHandler = null
     sendEvents = [
@@ -65,6 +87,11 @@ describe('chat-list store', () => {
         onClose: null,
       }
     })
+    sdkClient.post.mockResolvedValue({ data: { id: 'run-1', status: 'queued' } })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('returns startup stream errors to the composer when no assistant output exists', async () => {
@@ -146,5 +173,41 @@ describe('chat-list store', () => {
       messages: [{ type: 'error', content: 'model failed' }],
       streaming: false,
     })
+  })
+
+  it('starts an AI development run for /codex chat commands', async () => {
+    const store = useChatStore()
+    const navigationEvents: Array<{ runId: string; target: string }> = []
+    const onNavigate = (event: Event) => {
+      navigationEvents.push((event as CustomEvent<{ runId: string; target: string }>).detail)
+    }
+    window.addEventListener('memoh:ai-development-engine-open', onNavigate)
+
+    await store.selectBot('bot-1')
+    const ws = api.connectWebSocket.mock.results.at(-1)?.value
+    const result = await store.sendMessage('/codex 修复登录问题')
+
+    expect(result).toMatchObject({ ok: true })
+    expect(sdkClient.post).toHaveBeenCalledWith(expect.objectContaining({
+      url: '/ai-development-engine/runs',
+      body: expect.objectContaining({
+        prompt: '修复登录问题',
+        workspacePath: 'F:\\Deep AI2026\\memoh',
+        autoRepair: true,
+      }),
+    }))
+    expect(ws?.send).not.toHaveBeenCalled()
+    expect(navigationEvents).toEqual([{
+      runId: 'run-1',
+      target: '/settings/ai-development-engine?runId=run-1',
+    }])
+    expect(store.messages[1]).toMatchObject({
+      role: 'assistant',
+      messages: [expect.objectContaining({
+        type: 'text',
+        content: expect.stringContaining('Codex CLI task started: run-1'),
+      })],
+    })
+    window.removeEventListener('memoh:ai-development-engine-open', onNavigate)
   })
 })
