@@ -45,6 +45,14 @@ declare module '@memohai/web/store/settings' {
   export function useSettingsStore(): unknown
 }
 
+declare module '@memohai/web/store/chat-list' {
+  export const AI_DEVELOPMENT_ENGINE_OPEN_EVENT: string
+  export interface AIDevelopmentEngineOpenEventDetail {
+    runId: string
+    target: string
+  }
+}
+
 declare module '@memohai/web/store/capabilities' {
   export function useCapabilitiesStore(): {
     localWorkspaceEnabled: boolean
