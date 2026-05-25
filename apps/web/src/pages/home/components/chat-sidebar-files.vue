@@ -87,7 +87,22 @@
       </Button>
     </div>
 
-    <div class="flex items-center px-2 py-1.5 shrink-0 overflow-x-auto">
+    <div class="flex items-center px-2 py-1.5 shrink-0 overflow-x-auto gap-1">
+      <div class="flex items-center gap-0.5 rounded border border-border/60 p-0.5 shrink-0">
+        <button
+          v-for="root in fileManagerRoots"
+          :key="root.path"
+          type="button"
+          class="rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+          :class="currentRoot === root.path
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-muted/60'"
+          :title="root.title"
+          @click="navigateTo(root.path)"
+        >
+          {{ root.label }}
+        </button>
+      </div>
       <nav class="flex min-w-0 items-center gap-0.5 text-[11px]">
         <template
           v-for="(seg, idx) in pathSegments(currentPath)"
@@ -332,7 +347,18 @@ const props = defineProps<{
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
 
+const fileManagerRoots = computed(() => [
+  { path: '/data', label: t('bots.files.rootData'), title: t('bots.files.rootDataTitle') },
+  { path: '/team', label: t('bots.files.rootTeam'), title: t('bots.files.rootTeamTitle') },
+])
 const currentPath = ref('/data')
+const currentRoot = computed(() => {
+  const cleaned = currentPath.value.replace(/\/+$/, '') || '/'
+  const match = fileManagerRoots.value.find(r =>
+    cleaned === r.path || cleaned.startsWith(`${r.path}/`),
+  )
+  return match?.path ?? '/data'
+})
 const entries = ref<HandlersFsFileInfo[]>([])
 const loading = ref(false)
 const uploadInputRef = ref<HTMLInputElement>()

@@ -200,6 +200,41 @@ func (q *Queries) GetTeamIssue(ctx context.Context, id string) (TeamIssue, error
 	return i, err
 }
 
+const getTeamIssueByNumber = `-- name: GetTeamIssueByNumber :one
+SELECT id, team_id, number, title, description, status, assignee_type, assignee_bot_id, assignee_user_id, created_by_type, created_by_bot_id, created_by_user_id, parent_issue_id, metadata, closed_at, created_at, updated_at FROM team_issues
+WHERE team_id = ?1 AND number = ?2
+`
+
+type GetTeamIssueByNumberParams struct {
+	TeamID string `json:"team_id"`
+	Number int64  `json:"number"`
+}
+
+func (q *Queries) GetTeamIssueByNumber(ctx context.Context, arg GetTeamIssueByNumberParams) (TeamIssue, error) {
+	row := q.db.QueryRowContext(ctx, getTeamIssueByNumber, arg.TeamID, arg.Number)
+	var i TeamIssue
+	err := row.Scan(
+		&i.ID,
+		&i.TeamID,
+		&i.Number,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.AssigneeType,
+		&i.AssigneeBotID,
+		&i.AssigneeUserID,
+		&i.CreatedByType,
+		&i.CreatedByBotID,
+		&i.CreatedByUserID,
+		&i.ParentIssueID,
+		&i.Metadata,
+		&i.ClosedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTeamIssueComment = `-- name: GetTeamIssueComment :one
 SELECT id, issue_id, team_id, parent_comment_id, author_type, author_bot_id, author_user_id, content, metadata, created_at, updated_at FROM team_issue_comments WHERE id = ?1
 `

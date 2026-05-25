@@ -495,13 +495,13 @@ func (r *Resolver) buildTeamSection(ctx context.Context, teamID, botID string) s
 	var sb strings.Builder
 
 	// (1) Team context.
+	dirName := agentteam.TeamDirName(team)
 	sb.WriteString("## Active Team\n\n")
 	sb.WriteString("- Team: " + team.Name + "\n")
+	sb.WriteString("- Team id: " + team.ID + "\n")
+	sb.WriteString("- Shared workspace: `/team/" + dirName + "/` — write team artifacts here. `/team/` only contains directories for the teams you belong to; teams you are not a member of are not visible at all.\n")
 	if team.Description != "" {
 		sb.WriteString("- Description: " + team.Description + "\n")
-	}
-	if team.SharedDirName != "" {
-		sb.WriteString("- Shared dir display name: " + team.SharedDirName + " (mounted at `/team`)\n")
 	}
 	if team.Instructions != "" {
 		sb.WriteString("- Team instructions:\n  > " + team.Instructions + "\n")

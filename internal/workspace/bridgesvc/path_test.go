@@ -36,6 +36,60 @@ func TestLocalPathResolverMapsDataMountToWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestLocalPathResolverMapsTeamSlugToHostRoot(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	allowed := t.TempDir()
+	srv := New(Options{
+		DefaultWorkDir: workspaceRoot,
+		WorkspaceRoot:  workspaceRoot,
+		DataMount:      "/data",
+		TeamMount:      "/team",
+		TeamRoots:      map[string]string{"engineering": allowed},
+	})
+
+	if _, err := srv.WriteFile(context.Background(), &pb.WriteFileRequest{
+		Path:    "/team/engineering/note.md",
+		Content: []byte("hello team"),
+	}); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(allowed, "note.md")) //nolint:gosec // test path is under t.TempDir
+	if err != nil {
+		t.Fatalf("read mapped team file failed: %v", err)
+	}
+	if string(got) != "hello team" {
+		t.Fatalf("mapped team file = %q, want \"hello team\"", string(got))
+	}
+}
+
+func TestLocalPathResolverDeniesUnlistedTeamSlug(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	allowed := t.TempDir()
+	srv := New(Options{
+		DefaultWorkDir: workspaceRoot,
+		WorkspaceRoot:  workspaceRoot,
+		DataMount:      "/data",
+		TeamMount:      "/team",
+		TeamRoots:      map[string]string{"engineering": allowed},
+	})
+
+	if _, err := srv.WriteFile(context.Background(), &pb.WriteFileRequest{
+		Path:    "/team/marketing/secret.md",
+		Content: []byte("nope"),
+	}); err == nil {
+		t.Fatalf("expected unlisted team path to fail, got nil error")
+	}
+	// The file must not have been written under the allowed dir either.
+	if _, err := os.Stat(filepath.Join(allowed, "secret.md")); err == nil {
+		t.Fatalf("unlisted team write leaked into allowed dir")
+	}
+}
+
 func TestLocalPathResolverAllowsHostAbsolutePath(t *testing.T) {
 	t.Parallel()
 

@@ -25,19 +25,22 @@ const { currentBotId } = storeToRefs(chatStore)
 
 const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null)
 
-const FILE_MANAGER_ROOT = '/data'
+const FILE_MANAGER_ROOTS = ['/data', '/team'] as const
+const DEFAULT_FILE_MANAGER_ROOT = FILE_MANAGER_ROOTS[0]
 
 function normalizeFileManagerPath(path: string): string {
   const trimmedPath = path.trim()
-  if (!trimmedPath) return FILE_MANAGER_ROOT
-  if (trimmedPath === FILE_MANAGER_ROOT || trimmedPath.startsWith(`${FILE_MANAGER_ROOT}/`)) {
-    return trimmedPath
+  if (!trimmedPath) return DEFAULT_FILE_MANAGER_ROOT
+  if (trimmedPath === '/') return DEFAULT_FILE_MANAGER_ROOT
+  for (const root of FILE_MANAGER_ROOTS) {
+    if (trimmedPath === root || trimmedPath.startsWith(`${root}/`)) {
+      return trimmedPath
+    }
   }
-  if (trimmedPath === '/') return FILE_MANAGER_ROOT
   if (trimmedPath.startsWith('/')) {
-    return `${FILE_MANAGER_ROOT}${trimmedPath}`
+    return `${DEFAULT_FILE_MANAGER_ROOT}${trimmedPath}`
   }
-  return `${FILE_MANAGER_ROOT}/${trimmedPath}`
+  return `${DEFAULT_FILE_MANAGER_ROOT}/${trimmedPath}`
 }
 
 provide(openInFileManagerKey, (path: string, isDir = false) => {

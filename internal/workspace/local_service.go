@@ -37,6 +37,18 @@ type LocalService struct {
 	logger       *slog.Logger
 	mu           sync.Mutex
 	localClients map[string]*localBridgeClient
+	teamMountsFn TeamMountsFn
+}
+
+// SetTeamMountsResolver mirrors Manager.SetTeamMountsResolver for local
+// workspaces. Local workspaces don't bind-mount anything kernel-side;
+// instead the resolver shape is handed to bridgesvc so its path
+// translation enforces per-bot team membership.
+func (s *LocalService) SetTeamMountsResolver(fn TeamMountsFn) {
+	if s == nil {
+		return
+	}
+	s.teamMountsFn = fn
 }
 
 type localContainerMetadata struct {
@@ -71,6 +83,35 @@ func NewLocalService(log *slog.Logger, cfg config.LocalConfig, dataRoot string) 
 
 func (s *LocalService) Enabled() bool {
 	return s != nil && s.cfg.Enabled
+}
+
+// resolveTeamRoots returns the slug → host-path map for the bot's
+// teams. The map becomes bridgesvc.Options.TeamRoots, which enforces
+// that only those slugs translate into a real host directory; any
+// other `/team/<x>` path lookup is denied at the bridge layer.
+func (s *LocalService) resolveTeamRoots(ctx context.Context, botID string) map[string]string {
+	if s == nil || s.teamMountsFn == nil {
+		return nil
+	}
+	teams, err := s.teamMountsFn(ctx, botID)
+	if err != nil {
+		s.logger.Warn(
+			"resolve team mounts failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		return nil
+	}
+	out := make(map[string]string, len(teams))
+	for _, t := range teams {
+		slug := strings.TrimSpace(t.Slug)
+		host := strings.TrimSpace(t.HostPath)
+		if slug == "" || host == "" {
+			continue
+		}
+		out[slug] = host
+	}
+	return out
 }
 
 func (s *LocalService) Close() {
@@ -291,7 +332,7 @@ func (*LocalService) SnapshotSupported(context.Context) bool {
 	return false
 }
 
-func (s *LocalService) MCPClient(_ context.Context, botID string) (*bridge.Client, error) {
+func (s *LocalService) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	meta, err := s.readMetadata(LocalContainerPrefix + strings.TrimSpace(botID))
 	if err != nil {
 		return nil, err
@@ -307,7 +348,7 @@ func (s *LocalService) MCPClient(_ context.Context, botID string) (*bridge.Clien
 	if cached, ok := s.localClients[botID]; ok {
 		return cached.client, nil
 	}
-	client, err := s.newBridgeClient(meta)
+	client, err := s.newBridgeClient(ctx, meta)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +379,7 @@ func (s *LocalService) DefaultWorkspacePath(botID, displayName string) string {
 	return filepath.Join(s.cfg.WorkspaceParent(), name)
 }
 
-func (s *LocalService) newBridgeClient(meta localContainerMetadata) (*localBridgeClient, error) {
+func (s *LocalService) newBridgeClient(ctx context.Context, meta localContainerMetadata) (*localBridgeClient, error) {
 	listener := bufconn.Listen(16 * 1024 * 1024)
 	server := grpc.NewServer(
 		grpc.MaxRecvMsgSize(16*1024*1024),
@@ -348,6 +389,8 @@ func (s *LocalService) newBridgeClient(meta localContainerMetadata) (*localBridg
 		DefaultWorkDir:    meta.WorkspacePath,
 		WorkspaceRoot:     meta.WorkspacePath,
 		DataMount:         config.DefaultDataMount,
+		TeamMount:         config.DefaultTeamMount,
+		TeamRoots:         s.resolveTeamRoots(ctx, meta.BotID),
 		AllowHostAbsolute: s.cfg.AllowAbsolutePaths,
 	}))
 	go func() {

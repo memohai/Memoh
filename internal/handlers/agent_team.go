@@ -5,8 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,10 +16,8 @@ import (
 
 // AgentTeamHandler exposes REST endpoints for Agent Team management.
 type AgentTeamHandler struct {
-	service     *agentteam.Service
-	teamFSRoot  string
-	logger      *slog.Logger
-	provisionFn func(teamID string) error
+	service *agentteam.Service
+	logger  *slog.Logger
 }
 
 // NewAgentTeamHandler builds the handler.
@@ -29,24 +26,6 @@ func NewAgentTeamHandler(log *slog.Logger, service *agentteam.Service) *AgentTea
 		service: service,
 		logger:  log.With(slog.String("handler", "agent_team")),
 	}
-}
-
-// SetTeamFSRoot configures the host path under which team shared directories
-// are provisioned (typically `{data_root}/teams`).
-func (h *AgentTeamHandler) SetTeamFSRoot(root string) {
-	if h == nil {
-		return
-	}
-	h.teamFSRoot = strings.TrimSpace(root)
-}
-
-// SetProvisionFn lets the caller override how a team directory is created.
-// Defaults to creating `{teamFSRoot}/{team_id}` with 0o770 permissions.
-func (h *AgentTeamHandler) SetProvisionFn(fn func(teamID string) error) {
-	if h == nil {
-		return
-	}
-	h.provisionFn = fn
 }
 
 // Register wires the handler into the Echo router.
@@ -272,27 +251,7 @@ func (h *AgentTeamHandler) CreateTeam(c echo.Context) error {
 	if err != nil {
 		return mapAgentTeamHTTPError(err)
 	}
-	h.provisionTeamFS(team.ID)
 	return c.JSON(http.StatusCreated, teamToResponse(team))
-}
-
-func (h *AgentTeamHandler) provisionTeamFS(teamID string) {
-	if teamID == "" {
-		return
-	}
-	if h.provisionFn != nil {
-		if err := h.provisionFn(teamID); err != nil {
-			h.logger.Warn("provision team fs failed", slog.String("team_id", teamID), slog.Any("error", err))
-		}
-		return
-	}
-	if h.teamFSRoot == "" {
-		return
-	}
-	dir := filepath.Join(h.teamFSRoot, teamID)
-	if err := os.MkdirAll(dir, 0o750); err != nil { //nolint:gosec // group-readable shared team dir
-		h.logger.Warn("create team fs dir failed", slog.String("team_id", teamID), slog.Any("error", err))
-	}
 }
 
 // ListTeams godoc
@@ -657,12 +616,15 @@ func (h *AgentTeamHandler) GetIssue(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	issue, err := h.service.GetIssue(c.Request().Context(), issueID)
 	if err != nil {
@@ -690,12 +652,15 @@ func (h *AgentTeamHandler) UpdateIssue(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	var req UpdateIssueRequest
 	if err := c.Bind(&req); err != nil {
@@ -736,12 +701,15 @@ func (h *AgentTeamHandler) AssignIssue(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	var req AssignIssueRequest
 	if err := c.Bind(&req); err != nil {
@@ -771,12 +739,15 @@ func (h *AgentTeamHandler) DeleteIssue(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	if err := h.service.DeleteIssue(c.Request().Context(), issueID); err != nil {
 		return mapAgentTeamHTTPError(err)
@@ -800,12 +771,15 @@ func (h *AgentTeamHandler) PostComment(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	var req CreateCommentRequest
 	if err := c.Bind(&req); err != nil {
@@ -840,12 +814,15 @@ func (h *AgentTeamHandler) ListComments(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	comments, err := h.service.ListComments(c.Request().Context(), issueID)
 	if err != nil {
@@ -872,12 +849,15 @@ func (h *AgentTeamHandler) ListHandoffs(c echo.Context) error {
 		return err
 	}
 	teamID := teamIDParam(c)
-	issueID := strings.TrimSpace(c.Param("issue_id"))
-	if teamID == "" || issueID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "team_id and issue_id are required")
+	if teamID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "team_id is required")
 	}
 	if _, err := h.service.GetTeamForOwner(c.Request().Context(), teamID, userID); err != nil {
 		return mapAgentTeamHTTPError(err)
+	}
+	issueID, err := h.resolveIssueIDParam(c, teamID)
+	if err != nil {
+		return err
 	}
 	handoffs, err := h.service.Store().ListHandoffsByIssue(c.Request().Context(), issueID)
 	if err != nil {
@@ -898,6 +878,26 @@ func (*AgentTeamHandler) requireUserID(c echo.Context) (string, error) {
 
 func teamIDParam(c echo.Context) string {
 	return strings.TrimSpace(c.Param("team_id"))
+}
+
+// resolveIssueIDParam reads the `:issue_id` path param and, when it is
+// a per-team integer (`3` or `#3`), translates it into the underlying
+// UUID. UUID values pass through verbatim. The team is consulted so we
+// only resolve numbers in the right scope.
+func (h *AgentTeamHandler) resolveIssueIDParam(c echo.Context, teamID string) (string, error) {
+	raw := strings.TrimSpace(c.Param("issue_id"))
+	if raw == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "issue_id is required")
+	}
+	cleaned := strings.TrimPrefix(raw, "#")
+	if _, err := strconv.Atoi(cleaned); err != nil {
+		return raw, nil
+	}
+	issue, err := h.service.ResolveIssueRef(c.Request().Context(), teamID, raw)
+	if err != nil {
+		return "", mapAgentTeamHTTPError(err)
+	}
+	return issue.ID, nil
 }
 
 func mapAgentTeamHTTPError(err error) error {

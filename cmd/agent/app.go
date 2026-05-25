@@ -237,12 +237,16 @@ func provideAccountStore(cfg config.Config, postgresStore *postgresstore.Store, 
 	}
 }
 
-func provideAgentTeamHandler(log *slog.Logger, service *agentteam.Service, cfg config.Config) *handlers.AgentTeamHandler {
-	h := handlers.NewAgentTeamHandler(log, service)
+func provideAgentTeamService(log *slog.Logger, store agentteam.Store, cfg config.Config) *agentteam.Service {
+	svc := agentteam.NewService(log, store)
 	if root := strings.TrimSpace(cfg.Workspace.DataRoot); root != "" {
-		h.SetTeamFSRoot(stdpath.Join(root, "teams"))
+		svc.SetTeamFSRoot(stdpath.Join(root, "teams"))
 	}
-	return h
+	return svc
+}
+
+func provideAgentTeamHandler(log *slog.Logger, service *agentteam.Service) *handlers.AgentTeamHandler {
+	return handlers.NewAgentTeamHandler(log, service)
 }
 
 func provideAgentTeamStore(cfg config.Config, postgresStore *postgresstore.Store, sqliteStore *sqlitestore.Store) (agentteam.Store, error) {
@@ -266,7 +270,7 @@ func provideBridgeProvider(manage *workspace.Manager) bridge.Provider {
 	return manage
 }
 
-func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries) *workspace.Manager {
+func provideLocalWorkspaceService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config) *workspace.LocalService {
 	localSvc := workspace.NewLocalService(log, cfg.Local, cfg.Workspace.DataRoot)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
@@ -274,6 +278,10 @@ func provideWorkspaceManager(lc fx.Lifecycle, log *slog.Logger, service ctr.Serv
 			return nil
 		},
 	})
+	return localSvc
+}
+
+func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, localSvc *workspace.LocalService) *workspace.Manager {
 	runtimeSvc := workspace.NewRuntimeRouter(service, localSvc)
 	return workspace.NewManager(log, runtimeSvc, networkController, cfg.Workspace, cfg.Containerd.Namespace, conn, queries)
 }
@@ -947,6 +955,34 @@ func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service)
 			return heartbeatService.Bootstrap(ctx)
 		},
 	})
+}
+
+func startAgentTeamService(lc fx.Lifecycle, teamService *agentteam.Service) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			teamService.ProvisionAllTeamsFS(ctx)
+			return nil
+		},
+	})
+}
+
+func wireWorkspaceTeamMounts(manager *workspace.Manager, localSvc *workspace.LocalService, teamService *agentteam.Service) {
+	// ListMountsForBot also auto-provisions each team's host dir and
+	// seeds a placeholder README on the fly, so the bind mount lands
+	// on a directory that already exists and is browsable.
+	resolver := func(ctx context.Context, botID string) ([]workspace.TeamMount, error) {
+		mounts, err := teamService.ListMountsForBot(ctx, botID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]workspace.TeamMount, 0, len(mounts))
+		for _, m := range mounts {
+			out = append(out, workspace.TeamMount{Slug: m.Slug, HostPath: m.HostPath})
+		}
+		return out, nil
+	}
+	manager.SetTeamMountsResolver(resolver)
+	localSvc.SetTeamMountsResolver(resolver)
 }
 
 func wireResolverOutbound(resolver *flow.Resolver, channelManager *channel.Manager) {

@@ -17,6 +17,7 @@ type Service struct {
 	store      Store
 	dispatcher *Dispatcher
 	logger     *slog.Logger
+	teamFSRoot string
 }
 
 // NewService builds a new agentteam.Service.
@@ -30,6 +31,63 @@ func NewService(log *slog.Logger, store Store) *Service {
 	}
 	s.dispatcher = NewDispatcher(log, s)
 	return s
+}
+
+// SetTeamFSRoot configures the host directory that backs the `/team`
+// container mount. When set, the service auto-provisions a per-team
+// subdirectory (plus a placeholder README) on team creation and
+// startup backfill.
+func (s *Service) SetTeamFSRoot(root string) {
+	if s == nil {
+		return
+	}
+	s.teamFSRoot = strings.TrimSpace(root)
+}
+
+// TeamFSRoot returns the configured host root, or "" when unset.
+func (s *Service) TeamFSRoot() string {
+	if s == nil {
+		return ""
+	}
+	return s.teamFSRoot
+}
+
+// provisionTeamFS seeds the host dir + README for a single team. It
+// logs and swallows errors so persistence-layer success isn't gated on
+// filesystem access.
+func (s *Service) provisionTeamFS(team Team) {
+	if s == nil || s.teamFSRoot == "" {
+		return
+	}
+	if err := ProvisionTeamFS(s.teamFSRoot, team); err != nil {
+		s.logger.Warn(
+			"provision team fs failed",
+			slog.String("team_id", team.ID),
+			slog.String("root", s.teamFSRoot),
+			slog.Any("error", err),
+		)
+	}
+}
+
+// ProvisionAllTeamsFS walks every active team and makes sure each one
+// has its host directory + README. Intended to run once at server
+// startup so existing teams created before the FS-seed logic existed
+// still get a usable `/team/<id>` directory.
+//
+// Errors are logged and not returned — a single bad team must not
+// abort server startup.
+func (s *Service) ProvisionAllTeamsFS(ctx context.Context) {
+	if s == nil || s.store == nil || s.teamFSRoot == "" {
+		return
+	}
+	teams, err := s.store.ListAllTeams(ctx)
+	if err != nil {
+		s.logger.Warn("list teams for fs backfill failed", slog.Any("error", err))
+		return
+	}
+	for _, t := range teams {
+		s.provisionTeamFS(t)
+	}
 }
 
 // Dispatcher returns the comment dispatcher used to route mentions to handoffs.
@@ -79,7 +137,12 @@ func (s *Service) CreateTeam(ctx context.Context, input CreateTeamInput) (Team, 
 			return Team{}, err
 		}
 	}
-	return s.store.CreateTeam(ctx, input)
+	team, err := s.store.CreateTeam(ctx, input)
+	if err != nil {
+		return Team{}, err
+	}
+	s.provisionTeamFS(team)
+	return team, nil
 }
 
 // GetTeam returns a team by id.
@@ -120,6 +183,44 @@ func (s *Service) ListTeamsForBot(ctx context.Context, botID string) ([]Team, er
 		return nil, errors.New("agentteam: store not configured")
 	}
 	return s.store.ListTeamsForBot(ctx, botID)
+}
+
+// TeamMount is one entry for the workspace container's `/team/<slug>`
+// bind layout. Slug is the agent-facing directory name; HostPath points
+// at the corresponding directory under teamFSRoot on the host.
+type TeamMount struct {
+	Slug     string
+	HostPath string
+}
+
+// ListMountsForBot returns the team-mount descriptors for a bot, one
+// per team it currently belongs to. The shared host directory is
+// auto-provisioned (and seeded with a README) on the fly so the bot
+// always finds a usable directory the first time it looks. An unset
+// teamFSRoot results in no mounts.
+func (s *Service) ListMountsForBot(ctx context.Context, botID string) ([]TeamMount, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("agentteam: service not configured")
+	}
+	root := strings.TrimSpace(s.teamFSRoot)
+	if root == "" || strings.TrimSpace(botID) == "" {
+		return nil, nil
+	}
+	teams, err := s.store.ListTeamsForBot(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	mounts := make([]TeamMount, 0, len(teams))
+	for _, t := range teams {
+		s.provisionTeamFS(t)
+		slug := TeamDirName(t)
+		host := TeamFSPath(root, t)
+		if slug == "" || host == "" {
+			continue
+		}
+		mounts = append(mounts, TeamMount{Slug: slug, HostPath: host})
+	}
+	return mounts, nil
 }
 
 // UpdateTeam patches mutable team fields.
@@ -245,6 +346,70 @@ func (s *Service) GetIssue(ctx context.Context, id string) (Issue, error) {
 		return Issue{}, errors.New("agentteam: store not configured")
 	}
 	return s.store.GetIssue(ctx, id)
+}
+
+// GetIssueByNumber resolves a per-team integer issue number into the
+// underlying issue record. Agents and the URL routing layer use this so
+// callers can refer to issues by their human-friendly `#N` instead of
+// the UUID.
+func (s *Service) GetIssueByNumber(ctx context.Context, teamID string, number int32) (Issue, error) {
+	if s.store == nil {
+		return Issue{}, errors.New("agentteam: store not configured")
+	}
+	if strings.TrimSpace(teamID) == "" {
+		return Issue{}, fmt.Errorf("%w: team_id required", ErrInvalidInput)
+	}
+	if number <= 0 {
+		return Issue{}, fmt.Errorf("%w: number must be positive", ErrInvalidInput)
+	}
+	return s.store.GetIssueByNumber(ctx, teamID, number)
+}
+
+// ResolveIssueRef accepts a flexible issue reference and returns the
+// resolved Issue. The reference can be:
+//   - a per-team integer ("123") — requires teamID;
+//   - "#123" — requires teamID;
+//   - a UUID — teamID optional;
+//   - empty — returns ErrInvalidInput.
+//
+// Agents and HTTP path parameters share this helper so the API and
+// tools accept the same shapes.
+func (s *Service) ResolveIssueRef(ctx context.Context, teamID, ref string) (Issue, error) {
+	if s.store == nil {
+		return Issue{}, errors.New("agentteam: store not configured")
+	}
+	cleaned := strings.TrimSpace(ref)
+	if cleaned == "" {
+		return Issue{}, fmt.Errorf("%w: issue reference required", ErrInvalidInput)
+	}
+	cleaned = strings.TrimPrefix(cleaned, "#")
+	if n, err := parsePositiveInt(cleaned); err == nil {
+		if strings.TrimSpace(teamID) == "" {
+			return Issue{}, fmt.Errorf("%w: numeric issue reference needs a team_id", ErrInvalidInput)
+		}
+		return s.store.GetIssueByNumber(ctx, teamID, n)
+	}
+	return s.store.GetIssue(ctx, cleaned)
+}
+
+func parsePositiveInt(s string) (int32, error) {
+	if s == "" {
+		return 0, errors.New("empty")
+	}
+	var n int32
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, errors.New("non-digit")
+		}
+		if n > (1<<31-1)/10 {
+			return 0, errors.New("overflow")
+		}
+		n = n*10 + (r - '0')
+	}
+	if n <= 0 {
+		return 0, errors.New("non-positive")
+	}
+	return n, nil
 }
 
 // ListIssuesByTeam returns all issues for a team.

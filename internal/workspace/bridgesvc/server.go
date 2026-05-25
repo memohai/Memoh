@@ -39,9 +39,17 @@ const (
 )
 
 type Options struct {
-	DefaultWorkDir    string
-	WorkspaceRoot     string
-	DataMount         string
+	DefaultWorkDir string
+	WorkspaceRoot  string
+	DataMount      string
+	TeamMount      string
+	// TeamRoots maps the per-team slug (the first path segment under
+	// TeamMount, e.g. "engineering" in `/team/engineering`) to its host
+	// directory. Only slugs in this map are reachable; any other
+	// `/team/<x>` path is rejected. This is the membership boundary
+	// for local workspaces; container backends enforce the same shape
+	// via individual bind mounts.
+	TeamRoots         map[string]string
 	AllowHostAbsolute bool
 }
 
@@ -50,6 +58,8 @@ type Server struct {
 	defaultWorkDir    string
 	workspaceRoot     string
 	dataMount         string
+	teamMount         string
+	teamRoots         map[string]string
 	allowHostAbsolute bool
 }
 
@@ -68,10 +78,25 @@ func New(opts Options) *Server {
 			workspaceRoot = abs
 		}
 	}
+	teamMount := strings.TrimRight(strings.TrimSpace(opts.TeamMount), string(filepath.Separator))
+	teamRoots := make(map[string]string, len(opts.TeamRoots))
+	for slug, host := range opts.TeamRoots {
+		slug = strings.TrimSpace(slug)
+		host = strings.TrimSpace(host)
+		if slug == "" || host == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(host); err == nil {
+			host = abs
+		}
+		teamRoots[slug] = filepath.Clean(host)
+	}
 	return &Server{
 		defaultWorkDir:    filepath.Clean(defaultWorkDir),
 		workspaceRoot:     filepath.Clean(workspaceRoot),
 		dataMount:         filepath.Clean(dataMount),
+		teamMount:         filepath.Clean(teamMount),
+		teamRoots:         teamRoots,
 		allowHostAbsolute: opts.AllowHostAbsolute,
 	}
 }
@@ -676,6 +701,14 @@ func (s *Server) resolveExecWorkDir(path string) string {
 	return s.resolvePath(path)
 }
 
+// teamDeniedSentinel returns a path that every os syscall will reject
+// (the NUL byte makes the kernel return EINVAL). Used by resolvePath to
+// refuse `/team/<slug>` access in local mode when the slug is outside
+// the bot's team membership.
+func teamDeniedSentinel(slug string) string {
+	return "/\x00memoh-team-denied-" + slug
+}
+
 func (s *Server) resolvePath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -683,6 +716,33 @@ func (s *Server) resolvePath(path string) string {
 	}
 	clean := filepath.Clean(path)
 	if filepath.IsAbs(clean) {
+		// /team/<slug>/... — only the slugs in TeamRoots are reachable.
+		// In container mode (workspaceRoot == ".") the kernel handles the
+		// per-team bind mounts, so we never remap; this branch is the
+		// membership boundary for local workspaces.
+		if s.workspaceRoot != "." && s.teamMount != "" && s.teamMount != "." &&
+			(clean == s.teamMount || strings.HasPrefix(clean, s.teamMount+string(filepath.Separator))) {
+			rel := strings.TrimPrefix(clean, s.teamMount)
+			rel = strings.TrimPrefix(rel, string(filepath.Separator))
+			if rel == "" {
+				// Bare `/team` listing is unsupported in local mode; we
+				// don't have a single host root to enumerate against
+				// because each slug maps to its own directory.
+				return teamDeniedSentinel("")
+			}
+			slug, sub, _ := strings.Cut(rel, string(filepath.Separator))
+			if host, ok := s.teamRoots[slug]; ok {
+				if sub == "" {
+					return host
+				}
+				return filepath.Join(host, sub)
+			}
+			// Slug isn't in the allow-list. Return a sentinel path
+			// containing a NUL byte so any subsequent os.Open / Stat /
+			// WriteFile call fails with EINVAL instead of silently
+			// targeting an unrelated location under workspaceRoot.
+			return teamDeniedSentinel(slug)
+		}
 		if s.workspaceRoot != "." && (clean == s.dataMount || strings.HasPrefix(clean, s.dataMount+string(filepath.Separator))) {
 			rel := strings.TrimPrefix(clean, s.dataMount)
 			return filepath.Join(s.workspaceRoot, strings.TrimPrefix(rel, string(filepath.Separator)))

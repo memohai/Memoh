@@ -315,6 +315,18 @@ func (s *AgentTeamStore) ListAllTeamsByOwner(ctx context.Context, ownerUserID st
 	return out, nil
 }
 
+func (s *AgentTeamStore) ListAllTeams(ctx context.Context) ([]agentteam.Team, error) {
+	rows, err := s.queries.ListAllAgentTeams(ctx)
+	if err != nil {
+		return nil, mapAgentTeamErr(err)
+	}
+	out := make([]agentteam.Team, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, teamFromSQLite(r))
+	}
+	return out, nil
+}
+
 func (s *AgentTeamStore) ListTeamsForBot(ctx context.Context, botID string) ([]agentteam.Team, error) {
 	rows, err := s.queries.ListAgentTeamsForBot(ctx, sql.NullString{String: botID, Valid: botID != ""})
 	if err != nil {
@@ -478,6 +490,14 @@ func (s *AgentTeamStore) GetIssue(ctx context.Context, id string) (agentteam.Iss
 
 func (s *AgentTeamStore) GetIssueInTeam(ctx context.Context, id, teamID string) (agentteam.Issue, error) {
 	row, err := s.queries.GetTeamIssueInTeam(ctx, sqlitesqlc.GetTeamIssueInTeamParams{ID: id, TeamID: teamID})
+	if err != nil {
+		return agentteam.Issue{}, mapAgentTeamErr(err)
+	}
+	return issueFromSQLite(row), nil
+}
+
+func (s *AgentTeamStore) GetIssueByNumber(ctx context.Context, teamID string, number int32) (agentteam.Issue, error) {
+	row, err := s.queries.GetTeamIssueByNumber(ctx, sqlitesqlc.GetTeamIssueByNumberParams{TeamID: teamID, Number: int64(number)})
 	if err != nil {
 		return agentteam.Issue{}, mapAgentTeamErr(err)
 	}

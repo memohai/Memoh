@@ -90,6 +90,28 @@ type Manager struct {
 	grpcPool          *bridge.Pool
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
+	teamMountsFn      TeamMountsFn
+}
+
+// TeamMount describes a single team's bind mount entry: the slug that
+// the bot sees as `/team/<slug>`, and the host directory backing it.
+type TeamMount struct {
+	Slug     string
+	HostPath string
+}
+
+// TeamMountsFn returns the per-bot team mounts. Membership is enforced
+// here: the function only returns teams the bot is actually a member of,
+// so unrelated teams remain invisible inside the container.
+type TeamMountsFn func(ctx context.Context, botID string) ([]TeamMount, error)
+
+// SetTeamMountsResolver wires the per-bot team mount resolver. When
+// unset, no team mounts are produced.
+func (m *Manager) SetTeamMountsResolver(fn TeamMountsFn) {
+	if m == nil {
+		return
+	}
+	m.teamMountsFn = fn
 }
 
 type WorkspaceStartConfig struct {
@@ -314,16 +336,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 			Options:     []string{"rbind", "rw"},
 		},
 	}
-	if teamRoot := m.teamSharedRoot(); teamRoot != "" {
-		if err := os.MkdirAll(teamRoot, 0o750); err == nil { //nolint:gosec // group-readable shared team dir
-			mounts = append(mounts, ctr.MountSpec{
-				Destination: "/team",
-				Type:        "bind",
-				Source:      teamRoot,
-				Options:     []string{"rbind", "rw"},
-			})
-		}
-	}
+	mounts = append(mounts, m.teamBindMounts(ctx, botID)...)
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
 
@@ -619,14 +632,52 @@ func (m *Manager) dataRoot() string {
 	return m.cfg.DataRootPath()
 }
 
-// teamSharedRoot returns the host path that backs `/team` inside the
-// workspace. Empty when the data root is not configured.
-func (m *Manager) teamSharedRoot() string {
-	root := strings.TrimSpace(m.dataRoot())
-	if root == "" {
-		return ""
+// teamBindMounts produces one read-write bind mount per team that the
+// bot is currently a member of. Each mount lands at `/team/<slug>` so
+// the container only sees its own teams' files — never a sibling
+// team's directory. Errors are logged and treated as "no team mounts"
+// so a transient team-service failure can't block container creation.
+func (m *Manager) teamBindMounts(ctx context.Context, botID string) []ctr.MountSpec {
+	if m == nil || m.teamMountsFn == nil {
+		return nil
 	}
-	return filepath.Join(root, "teams")
+	teams, err := m.teamMountsFn(ctx, botID)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.Warn(
+				"resolve team mounts failed; bot will start without team filesystems",
+				slog.String("bot_id", botID),
+				slog.Any("error", err),
+			)
+		}
+		return nil
+	}
+	mounts := make([]ctr.MountSpec, 0, len(teams))
+	for _, t := range teams {
+		slug := strings.TrimSpace(t.Slug)
+		host := strings.TrimSpace(t.HostPath)
+		if slug == "" || host == "" {
+			continue
+		}
+		if err := os.MkdirAll(host, 0o750); err != nil { //nolint:gosec // group-readable shared team dir
+			if m.logger != nil {
+				m.logger.Warn(
+					"create team host dir failed; skipping mount",
+					slog.String("bot_id", botID),
+					slog.String("team_slug", slug),
+					slog.Any("error", err),
+				)
+			}
+			continue
+		}
+		mounts = append(mounts, ctr.MountSpec{
+			Destination: "/team/" + slug,
+			Type:        "bind",
+			Source:      host,
+			Options:     []string{"rbind", "rw"},
+		})
+	}
+	return mounts
 }
 
 func (m *Manager) imageRef() string {

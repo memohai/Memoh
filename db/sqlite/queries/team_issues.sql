@@ -33,6 +33,10 @@ SELECT * FROM team_issues WHERE id = sqlc.arg(id);
 SELECT * FROM team_issues
 WHERE id = sqlc.arg(id) AND team_id = sqlc.arg(team_id);
 
+-- name: GetTeamIssueByNumber :one
+SELECT * FROM team_issues
+WHERE team_id = sqlc.arg(team_id) AND number = sqlc.arg(number);
+
 -- name: ListTeamIssuesByTeam :many
 SELECT * FROM team_issues
 WHERE team_id = sqlc.arg(team_id)

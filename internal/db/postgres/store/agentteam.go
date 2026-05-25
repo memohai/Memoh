@@ -447,6 +447,14 @@ func (s *AgentTeamStore) ListAllTeamsByOwner(ctx context.Context, ownerUserID st
 	return teamRecords(rows), nil
 }
 
+func (s *AgentTeamStore) ListAllTeams(ctx context.Context) ([]agentteam.Team, error) {
+	rows, err := s.queries.ListAllAgentTeams(ctx)
+	if err != nil {
+		return nil, mapAgentTeamErr(err)
+	}
+	return teamRecords(rows), nil
+}
+
 func (s *AgentTeamStore) ListTeamsForBot(ctx context.Context, botID string) ([]agentteam.Team, error) {
 	bID := db.ParseUUIDOrEmpty(botID)
 	rows, err := s.queries.ListAgentTeamsForBot(ctx, bID)
@@ -666,6 +674,18 @@ func (s *AgentTeamStore) GetIssueInTeam(ctx context.Context, id, teamID string) 
 		return agentteam.Issue{}, err
 	}
 	row, err := s.queries.GetTeamIssueInTeam(ctx, dbsqlc.GetTeamIssueInTeamParams{ID: uid, TeamID: tID})
+	if err != nil {
+		return agentteam.Issue{}, mapAgentTeamErr(err)
+	}
+	return issueRecord(row), nil
+}
+
+func (s *AgentTeamStore) GetIssueByNumber(ctx context.Context, teamID string, number int32) (agentteam.Issue, error) {
+	tID, err := db.ParseUUID(teamID)
+	if err != nil {
+		return agentteam.Issue{}, err
+	}
+	row, err := s.queries.GetTeamIssueByNumber(ctx, dbsqlc.GetTeamIssueByNumberParams{TeamID: tID, Number: number})
 	if err != nil {
 		return agentteam.Issue{}, mapAgentTeamErr(err)
 	}

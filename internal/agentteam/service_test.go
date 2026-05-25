@@ -1,10 +1,85 @@
 package agentteam
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+type stubResolveStore struct {
+	memStore
+	issues map[string]Issue
+}
+
+func (s *stubResolveStore) GetIssue(_ context.Context, id string) (Issue, error) {
+	for _, i := range s.issues {
+		if i.ID == id {
+			return i, nil
+		}
+	}
+	return Issue{}, ErrNotFound
+}
+
+func (s *stubResolveStore) GetIssueByNumber(_ context.Context, teamID string, number int32) (Issue, error) {
+	for _, i := range s.issues {
+		if i.TeamID == teamID && i.Number == number {
+			return i, nil
+		}
+	}
+	return Issue{}, ErrNotFound
+}
+
+func TestResolveIssueRefAcceptsNumberHashAndUUID(t *testing.T) {
+	t.Parallel()
+	want := Issue{ID: "uuid-3", TeamID: "team-a", Number: 3}
+	store := &stubResolveStore{issues: map[string]Issue{"k": want}}
+	svc := NewService(slog.Default(), store)
+	_ = strconv.Itoa(int(want.Number))
+
+	t.Run("bare number", func(t *testing.T) {
+		t.Parallel()
+		issue, err := svc.ResolveIssueRef(context.Background(), "team-a", "3")
+		if err != nil || issue.ID != "uuid-3" {
+			t.Fatalf("bare number: got id=%q err=%v", issue.ID, err)
+		}
+	})
+	t.Run("hash prefix", func(t *testing.T) {
+		t.Parallel()
+		issue, err := svc.ResolveIssueRef(context.Background(), "team-a", "#3")
+		if err != nil || issue.ID != "uuid-3" {
+			t.Fatalf("hash form: got id=%q err=%v", issue.ID, err)
+		}
+	})
+	t.Run("uuid", func(t *testing.T) {
+		t.Parallel()
+		issue, err := svc.ResolveIssueRef(context.Background(), "team-a", "uuid-3")
+		if err != nil || issue.ID != "uuid-3" {
+			t.Fatalf("uuid form: got id=%q err=%v", issue.ID, err)
+		}
+	})
+	t.Run("number without team rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := svc.ResolveIssueRef(context.Background(), "", "5")
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got %v", err)
+		}
+	})
+	t.Run("empty rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := svc.ResolveIssueRef(context.Background(), "team-a", "")
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got %v", err)
+		}
+	})
+
+	// Keep strings/json package imports used.
+	_ = strings.TrimSpace("")
+	_ = json.RawMessage(nil)
+}
 
 func TestValidateSharedDirName(t *testing.T) {
 	cases := []struct {

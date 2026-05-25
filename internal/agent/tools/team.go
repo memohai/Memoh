@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -119,7 +120,13 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 					"status":           map[string]any{"type": "string", "description": "Initial status: backlog, todo (default), in_progress, blocked, review."},
 					"assignee_bot_id":  map[string]any{"type": "string", "description": "Optional bot id to assign as the executor."},
 					"assignee_user_id": map[string]any{"type": "string", "description": "Optional user id to assign."},
-					"parent_issue_id":  map[string]any{"type": "string", "description": "Optional parent issue id for sub-tasks."},
+					"parent_issue": map[string]any{
+						"description": "Optional parent issue (per-team integer number or UUID) for sub-tasks.",
+						"oneOf": []any{
+							map[string]any{"type": "integer"},
+							map[string]any{"type": "string"},
+						},
+					},
 				},
 				"required": []string{"title"},
 			},
@@ -146,6 +153,18 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 				case assigneeUser != "":
 					assigneeType = "user"
 				}
+				parentRef := strings.TrimSpace(StringArg(args, "parent_issue"))
+				if parentRef == "" {
+					parentRef = strings.TrimSpace(StringArg(args, "parent_issue_id"))
+				}
+				parentUUID := ""
+				if parentRef != "" {
+					parent, perr := p.service.ResolveIssueRef(ctx.Context, teamID, parentRef)
+					if perr != nil {
+						return nil, errors.New("parent_issue: " + perr.Error())
+					}
+					parentUUID = parent.ID
+				}
 				issue, err := p.service.CreateIssue(ctx.Context, agentteam.CreateIssueInput{
 					TeamID:         teamID,
 					Title:          title,
@@ -156,7 +175,7 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 					AssigneeUserID: assigneeUser,
 					CreatedByType:  agentteam.ActorBot,
 					CreatedByBotID: sess.BotID,
-					ParentIssueID:  strings.TrimSpace(StringArg(args, "parent_issue_id")),
+					ParentIssueID:  parentUUID,
 				})
 				if err != nil {
 					return nil, err
@@ -209,28 +228,27 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 		},
 		{
 			Name:        "issue_get",
-			Description: "Fetch a team issue with its comments. Defaults to the current session's issue when issue_id is omitted.",
+			Description: "Fetch a team issue with its comments. Defaults to the current session's issue when `issue` is omitted.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"issue_id": map[string]any{"type": "string", "description": "Issue ID. Defaults to the current session issue."},
+					"issue": map[string]any{
+						"description": "Issue reference. Either the per-team integer number (e.g. 3 or \"#3\") or the full UUID. Defaults to the current session issue.",
+						"oneOf": []any{
+							map[string]any{"type": "integer"},
+							map[string]any{"type": "string"},
+						},
+					},
 				},
 				"required": []string{},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				issueID := strings.TrimSpace(StringArg(args, "issue_id"))
-				if issueID == "" {
-					issueID = sess.IssueID
-				}
-				if issueID == "" {
-					return nil, errors.New("issue_id is required")
-				}
-				issue, err := p.service.GetIssue(ctx.Context, issueID)
+				issue, err := p.resolveSessionIssue(ctx.Context, sess, args)
 				if err != nil {
 					return nil, err
 				}
-				comments, err := p.service.ListComments(ctx.Context, issueID)
+				comments, err := p.service.ListComments(ctx.Context, issue.ID)
 				if err != nil {
 					return nil, err
 				}
@@ -254,7 +272,13 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"issue_id":          map[string]any{"type": "string", "description": "Issue ID. Defaults to the current session issue."},
+					"issue": map[string]any{
+						"description": "Issue reference. Either the per-team integer number (e.g. 3 or \"#3\") or the full UUID. Defaults to the current session issue.",
+						"oneOf": []any{
+							map[string]any{"type": "integer"},
+							map[string]any{"type": "string"},
+						},
+					},
 					"content":           map[string]any{"type": "string", "description": "Markdown content for the comment."},
 					"parent_comment_id": map[string]any{"type": "string", "description": "Optional parent comment ID to reply in a thread. When the bot is running inside a handoff, the trigger comment is used automatically; pass an explicit value (or the special token \"none\") to override."},
 				},
@@ -262,13 +286,11 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				issueID := strings.TrimSpace(StringArg(args, "issue_id"))
-				if issueID == "" {
-					issueID = sess.IssueID
+				issue, err := p.resolveSessionIssue(ctx.Context, sess, args)
+				if err != nil {
+					return nil, err
 				}
-				if issueID == "" {
-					return nil, errors.New("issue_id is required")
-				}
+				issueID := issue.ID
 				content := StringArg(args, "content")
 				if strings.TrimSpace(content) == "" {
 					return nil, errors.New("content is required")
@@ -311,29 +333,32 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"issue_id": map[string]any{"type": "string", "description": "Issue ID. Defaults to the current session issue."},
-					"status":   map[string]any{"type": "string", "description": "New status."},
+					"issue": map[string]any{
+						"description": "Issue reference. Either the per-team integer number (e.g. 3 or \"#3\") or the full UUID. Defaults to the current session issue.",
+						"oneOf": []any{
+							map[string]any{"type": "integer"},
+							map[string]any{"type": "string"},
+						},
+					},
+					"status": map[string]any{"type": "string", "description": "New status."},
 				},
 				"required": []string{"status"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				issueID := strings.TrimSpace(StringArg(args, "issue_id"))
-				if issueID == "" {
-					issueID = sess.IssueID
-				}
-				if issueID == "" {
-					return nil, errors.New("issue_id is required")
+				target, err := p.resolveSessionIssue(ctx.Context, sess, args)
+				if err != nil {
+					return nil, err
 				}
 				status := agentteam.IssueStatus(strings.TrimSpace(StringArg(args, "status")))
 				if status == "" {
 					return nil, errors.New("status is required")
 				}
-				issue, err := p.service.UpdateIssue(ctx.Context, issueID, agentteam.UpdateIssueInput{Status: &status})
+				updated, err := p.service.UpdateIssue(ctx.Context, target.ID, agentteam.UpdateIssueInput{Status: &status})
 				if err != nil {
 					return nil, err
 				}
-				return issueToMap(issue), nil
+				return issueToMap(updated), nil
 			},
 		},
 		{
@@ -342,7 +367,13 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"issue_id":         map[string]any{"type": "string", "description": "Issue ID. Defaults to the current session issue."},
+					"issue": map[string]any{
+						"description": "Issue reference. Either the per-team integer number (e.g. 3 or \"#3\") or the full UUID. Defaults to the current session issue.",
+						"oneOf": []any{
+							map[string]any{"type": "integer"},
+							map[string]any{"type": "string"},
+						},
+					},
 					"assignee_bot_id":  map[string]any{"type": "string", "description": "Bot id to assign. Mutually exclusive with assignee_user_id."},
 					"assignee_user_id": map[string]any{"type": "string", "description": "User id to assign. Mutually exclusive with assignee_bot_id."},
 				},
@@ -350,12 +381,9 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				args := inputAsMap(input)
-				issueID := strings.TrimSpace(StringArg(args, "issue_id"))
-				if issueID == "" {
-					issueID = sess.IssueID
-				}
-				if issueID == "" {
-					return nil, errors.New("issue_id is required")
+				target, err := p.resolveSessionIssue(ctx.Context, sess, args)
+				if err != nil {
+					return nil, err
 				}
 				botID := strings.TrimSpace(StringArg(args, "assignee_bot_id"))
 				userID := strings.TrimSpace(StringArg(args, "assignee_user_id"))
@@ -366,7 +394,7 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 				case userID != "":
 					assigneeType = "user"
 				}
-				issue, err := p.service.AssignIssue(ctx.Context, issueID, agentteam.AssignIssueInput{
+				updated, err := p.service.AssignIssue(ctx.Context, target.ID, agentteam.AssignIssueInput{
 					AssigneeType:   assigneeType,
 					AssigneeBotID:  botID,
 					AssigneeUserID: userID,
@@ -374,10 +402,49 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 				if err != nil {
 					return nil, err
 				}
-				return issueToMap(issue), nil
+				return issueToMap(updated), nil
 			},
 		},
 	}, nil
+}
+
+// resolveSessionIssue picks an Issue from tool arguments and session
+// context. It accepts an `issue` arg shaped as a per-team integer
+// (3 / "#3") or a UUID. When `issue` is omitted, the active session's
+// IssueID (always a UUID) is used.
+func (p *TeamProvider) resolveSessionIssue(ctx context.Context, sess SessionContext, args map[string]any) (agentteam.Issue, error) {
+	if p == nil || p.service == nil {
+		return agentteam.Issue{}, errors.New("team service not configured")
+	}
+	teamID := strings.TrimSpace(sess.TeamID)
+	raw, ok := args["issue"]
+	if !ok || raw == nil {
+		if v := strings.TrimSpace(StringArg(args, "issue_id")); v != "" {
+			raw = v
+		}
+	}
+	switch v := raw.(type) {
+	case nil:
+		if strings.TrimSpace(sess.IssueID) == "" {
+			return agentteam.Issue{}, errors.New("no active session issue — pass `issue`")
+		}
+		return p.service.GetIssue(ctx, sess.IssueID)
+	case string:
+		return p.service.ResolveIssueRef(ctx, teamID, v)
+	case float64:
+		if v != float64(int64(v)) {
+			return agentteam.Issue{}, errors.New("issue must be an integer or string")
+		}
+		return p.service.ResolveIssueRef(ctx, teamID, strconv.FormatInt(int64(v), 10))
+	case int:
+		return p.service.ResolveIssueRef(ctx, teamID, strconv.Itoa(v))
+	case int32:
+		return p.service.ResolveIssueRef(ctx, teamID, strconv.FormatInt(int64(v), 10))
+	case int64:
+		return p.service.ResolveIssueRef(ctx, teamID, strconv.FormatInt(v, 10))
+	default:
+		return p.service.ResolveIssueRef(ctx, teamID, strings.TrimSpace(StringArg(args, "issue")))
+	}
 }
 
 func issueToMap(i agentteam.Issue) map[string]any {
@@ -385,6 +452,7 @@ func issueToMap(i agentteam.Issue) map[string]any {
 		"id":           i.ID,
 		"team_id":      i.TeamID,
 		"number":       i.Number,
+		"ref":          "#" + strconv.FormatInt(int64(i.Number), 10),
 		"title":        i.Title,
 		"description":  i.Description,
 		"status":       string(i.Status),

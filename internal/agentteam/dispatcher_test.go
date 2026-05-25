@@ -128,6 +128,7 @@ func (*memStore) GetTeamForOwner(context.Context, string, string) (Team, error) 
 }
 func (*memStore) ListTeamsByOwner(context.Context, string) ([]Team, error)    { return nil, nil }
 func (*memStore) ListAllTeamsByOwner(context.Context, string) ([]Team, error) { return nil, nil }
+func (*memStore) ListAllTeams(context.Context) ([]Team, error)                { return nil, nil }
 func (*memStore) ListTeamsForBot(context.Context, string) ([]Team, error)     { return nil, nil }
 func (*memStore) UpdateTeam(context.Context, string, UpdateTeamInput) (Team, error) {
 	return Team{}, ErrNotFound
@@ -162,6 +163,11 @@ func (*memStore) CreateIssue(context.Context, CreateIssueInput) (Issue, error) {
 	return Issue{}, ErrNotFound
 }
 func (*memStore) GetIssue(context.Context, string) (Issue, error) { return Issue{}, ErrNotFound }
+
+func (*memStore) GetIssueByNumber(context.Context, string, int32) (Issue, error) {
+	return Issue{}, ErrNotFound
+}
+
 func (*memStore) GetIssueInTeam(context.Context, string, string) (Issue, error) {
 	return Issue{}, ErrNotFound
 }

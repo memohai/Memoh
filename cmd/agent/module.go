@@ -8,7 +8,6 @@ import (
 
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/agentteam"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/bots"
@@ -53,7 +52,8 @@ func options() fx.Option {
 			provideDBQueries,
 			provideAccountStore,
 			provideAgentTeamStore,
-			agentteam.NewService,
+			provideAgentTeamService,
+			provideLocalWorkspaceService,
 			provideWorkspaceManager,
 			provideBridgeProvider,
 			provideMemoryLLM,
@@ -156,6 +156,8 @@ func options() fx.Option {
 			startSearchProviderBootstrap,
 			startScheduleService,
 			startHeartbeatService,
+			startAgentTeamService,
+			wireWorkspaceTeamMounts,
 			wireResolverOutbound,
 			startChannelManager,
 			startEmailManager,

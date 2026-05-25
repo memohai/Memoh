@@ -33,6 +33,11 @@ SELECT * FROM agent_teams
 WHERE owner_user_id = sqlc.arg(owner_user_id)
 ORDER BY created_at DESC;
 
+-- name: ListAllAgentTeams :many
+SELECT * FROM agent_teams
+WHERE archived_at IS NULL
+ORDER BY created_at DESC;
+
 -- name: UpdateAgentTeam :one
 UPDATE agent_teams SET
   name = COALESCE(sqlc.narg(name), name),

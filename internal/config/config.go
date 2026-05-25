@@ -16,6 +16,7 @@ const (
 	DefaultSocketPath       = "/run/containerd/containerd.sock"
 	DefaultDataRoot         = "data"
 	DefaultDataMount        = "/data"
+	DefaultTeamMount        = "/team"
 	DefaultCNIBinaryDir     = "/opt/cni/bin"
 	DefaultCNIConfigDir     = "/etc/cni/net.d"
 	DefaultJWTExpiresIn     = "24h"

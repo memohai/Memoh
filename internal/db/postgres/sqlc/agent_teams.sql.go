@@ -475,6 +475,43 @@ func (q *Queries) ListAgentTeamsForBot(ctx context.Context, botID pgtype.UUID) (
 	return items, nil
 }
 
+const listAllAgentTeams = `-- name: ListAllAgentTeams :many
+SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
+WHERE archived_at IS NULL
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAllAgentTeams(ctx context.Context) ([]AgentTeam, error) {
+	rows, err := q.db.Query(ctx, listAllAgentTeams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentTeam
+	for rows.Next() {
+		var i AgentTeam
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Name,
+			&i.Description,
+			&i.SharedDirName,
+			&i.Instructions,
+			&i.Metadata,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllAgentTeamsByOwner = `-- name: ListAllAgentTeamsByOwner :many
 SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
 WHERE owner_user_id = $1
