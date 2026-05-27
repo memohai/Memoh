@@ -512,7 +512,18 @@ func TestDispatcherBotReplyMentioningDelegatorDoesNotCreateExtraHandoff(t *testi
 	}
 }
 
-func TestDispatcherReturnReplyMentioningParentAuthorDoesNotCreateExtraHandoff(t *testing.T) {
+// TestDispatcherReturnReplyMentioningParentAuthorContinuesDebate covers
+// the multi-round bot-to-bot debate path that the old per-author skip
+// rule used to suppress: leader received a system-return after worker
+// confirmed, then chose to ping worker again with substantive content
+// (`@Worker thanks, done`). The dispatcher should treat that mention
+// as a fresh handoff so worker can actually respond — the previous
+// return chain already terminated and there is no other channel to
+// reach worker.
+//
+// If a bot wants to acknowledge politely without re-engaging the
+// counterpart, it should simply omit the @mention.
+func TestDispatcherReturnReplyMentioningParentAuthorContinuesDebate(t *testing.T) {
 	t.Parallel()
 	store := newMemStore()
 	seedTeamRoster(store)
@@ -554,8 +565,74 @@ func TestDispatcherReturnReplyMentioningParentAuthorDoesNotCreateExtraHandoff(t 
 	}
 
 	pendingForWorker, _ := store.ListPendingHandoffsToBotForIssue(context.Background(), "bot-2", "issue-1")
-	if len(pendingForWorker) != 0 {
-		t.Fatalf("expected no new handoff back to parent author, got %d", len(pendingForWorker))
+	if len(pendingForWorker) != 1 {
+		t.Fatalf("expected one new handoff to parent author, got %d", len(pendingForWorker))
+	}
+	if pendingForWorker[0].FromActorType != ActorBot ||
+		pendingForWorker[0].FromBotID != "bot-1" ||
+		pendingForWorker[0].TriggerCommentID != "cmt-leader-reply" {
+		t.Fatalf("unexpected handoff shape: %+v", pendingForWorker[0])
+	}
+}
+
+// TestDispatcherWorkerThanksLeaderStillSuppressedByActiveHandoff pins
+// the "polite return" path that rule (A) is responsible for: when
+// worker is the one currently inside a leader→worker handoff and
+// replies `@Leader done`, the from-bot is already going to be woken
+// through the system return — a duplicate handoff toward leader must
+// not be created. This is the case the old (B) rule was originally
+// meant to catch but addressed too broadly.
+func TestDispatcherWorkerThanksLeaderStillSuppressedByActiveHandoff(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	store.setComment(Comment{
+		ID:          "cmt-leader-mention",
+		IssueID:     "issue-1",
+		TeamID:      "team-1",
+		AuthorType:  ActorBot,
+		AuthorBotID: "bot-1",
+		Content:     "@Worker please look",
+	})
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	if _, err := store.CreateHandoff(context.Background(), CreateHandoffInput{
+		TeamID:           "team-1",
+		IssueID:          "issue-1",
+		FromActorType:    ActorBot,
+		FromBotID:        "bot-1",
+		ToBotID:          "bot-2",
+		TriggerCommentID: "cmt-leader-mention",
+		SourceSessionID:  "sess-leader-1",
+		Status:           HandoffDispatched,
+	}); err != nil {
+		t.Fatalf("CreateHandoff: %v", err)
+	}
+
+	reply := Comment{
+		ID:              "cmt-worker-result",
+		IssueID:         "issue-1",
+		TeamID:          "team-1",
+		AuthorType:      ActorBot,
+		AuthorBotID:     "bot-2",
+		Content:         "@Leader done",
+		ParentCommentID: "cmt-leader-mention",
+		SourceSessionID: "sess-worker-1",
+	}
+	if err := d.HandleComment(context.Background(), reply); err != nil {
+		t.Fatalf("HandleComment: %v", err)
+	}
+
+	pendingForLeader, _ := store.ListPendingHandoffsToBotForIssue(context.Background(), "bot-1", "issue-1")
+	// Exactly one return handoff (system → leader) — the @Leader
+	// mention must not produce a second bot-to-bot handoff alongside
+	// it.
+	if len(pendingForLeader) != 1 {
+		t.Fatalf("expected exactly one return handoff toward leader, got %d", len(pendingForLeader))
+	}
+	if pendingForLeader[0].FromActorType != ActorSystem {
+		t.Fatalf("expected system-return handoff, got %s", pendingForLeader[0].FromActorType)
 	}
 }
 

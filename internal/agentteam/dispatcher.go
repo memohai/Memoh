@@ -65,6 +65,24 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 		return errors.New("agentteam: comment ID required")
 	}
 
+	// Mentions in this comment that point at bots whose follow-up will
+	// already be delivered through a return handoff — those are skipped
+	// so the same bot does not wake up twice on the same reply.
+	//
+	// Important: we ONLY suppress when an active bot-from handoff was
+	// just closed by `finalizeAndReturn`. In that case the from-bot is
+	// going to be woken via the system return; @-ing them again here
+	// would create a duplicate.
+	//
+	// Earlier versions of this branch additionally suppressed any bot
+	// referenced by `ParentCommentID`'s author. That was too aggressive:
+	// it also blocked legitimate "continue the debate" replies (bot A
+	// answers bot B's question, then B writes `@A I disagree because…`).
+	// In that scenario A has no active handoff left — the previous
+	// return chain already terminated — and the new mention should
+	// create a fresh handoff so A can actually respond. We rely on (A)
+	// alone, which checks live handoff state instead of guessing from
+	// the comment thread shape.
 	skipMentionTargets := map[string]struct{}{}
 	if comment.AuthorType == ActorBot && strings.TrimSpace(comment.AuthorBotID) != "" {
 		completed, err := d.finalizeAndReturn(ctx, comment)
@@ -74,11 +92,6 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 		for _, ho := range completed {
 			if ho.FromActorType == ActorBot && strings.TrimSpace(ho.FromBotID) != "" {
 				skipMentionTargets[ho.FromBotID] = struct{}{}
-			}
-		}
-		if parentID := strings.TrimSpace(comment.ParentCommentID); parentID != "" {
-			if parent, err := d.service.Store().GetComment(ctx, parentID); err == nil && parent.AuthorType == ActorBot && strings.TrimSpace(parent.AuthorBotID) != "" {
-				skipMentionTargets[parent.AuthorBotID] = struct{}{}
 			}
 		}
 	}
