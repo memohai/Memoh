@@ -2053,7 +2053,6 @@
     "next": "Next",
     "skip": "Skip",
     "start": "Get Started",
-    "complete": "Start Using",
     "welcome": {
       "title": "Welcome to Memoh",
       "subtitle": "Your private AI agent platform",
@@ -2087,7 +2086,8 @@
     "complete": {
       "title": "You're All Set!",
       "subtitle": "Your workspace is ready.",
-      "hint": "You can always configure more channels and settings later."
+      "hint": "You can always configure more channels and settings later.",
+      "action": "Start Using"
     }
   }
 }

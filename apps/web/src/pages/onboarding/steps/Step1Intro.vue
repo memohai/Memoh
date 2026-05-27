@@ -34,12 +34,17 @@ let lastFpsTime = 0
 let isDegraded = false
 
 onMounted(() => {
-  if (localStorage.getItem('memoh:onboarding:intro-seen') === '1') {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     skipAnimation()
     return
   }
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    skipAnimation()
+  if (localStorage.getItem('memoh:onboarding:intro-seen') === '1') {
+    isSkipped.value = true
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        showContent.value = true
+      })
+    })
     return
   }
   initBubbles()
@@ -143,7 +148,7 @@ const skipAnimation = () => {
         <!-- Memoh Logo -->
         <div
           class="absolute z-20 flex items-center justify-center w-24 h-24 bg-background rounded-2xl border border-border transition-all duration-1000 shadow-none"
-          :class="{ 'scale-110 ring-2 ring-primary/20': !isSkipped && !showContent, 'scale-100': showContent }"
+          :class="showContent ? 'scale-100' : 'scale-110 ring-2 ring-primary/20'"
         >
           <img
             src="/logo.svg"
@@ -202,7 +207,7 @@ const skipAnimation = () => {
           :class="showContent ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'"
         >
           <button
-            class="inline-flex h-[42px] w-[240px] items-center justify-center rounded-full bg-primary px-5 font-normal text-primary-foreground shadow-none ring-[0.8px] ring-primary ring-offset-2 ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            class="inline-flex h-[42px] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none ring-[0.8px] ring-primary ring-offset-2 ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             @click="handleStart"
           >
             {{ t('onboarding.start') }}
