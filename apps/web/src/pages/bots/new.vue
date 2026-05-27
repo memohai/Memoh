@@ -266,6 +266,9 @@
       v-model:open="avatarDialogOpen"
       v-model:avatar-url="form.avatar_url"
       :fallback-text="avatarFallback"
+      :title="t('bots.editAvatar')"
+      :description="t('bots.editAvatarDescription')"
+      :placeholder="t('bots.avatarUrlPlaceholder')"
     />
   </section>
 </template>
@@ -305,7 +308,7 @@ import { emptyTimezoneValue } from '@/utils/timezones'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import ModelSelect from './components/model-select.vue'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
-import AvatarEditDialog from './components/avatar-edit-dialog.vue'
+import AvatarEditDialog from '@/components/avatar-edit-dialog/index.vue'
 
 const router = useRouter()
 const { t } = useI18n()

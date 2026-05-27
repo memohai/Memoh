@@ -75,7 +75,10 @@
     "actionRequired": "Action Required",
     "preview": "Preview",
     "raw": "Source",
-    "saving": "Saving..."
+    "saving": "Saving...",
+    "editAvatar": "Edit Avatar",
+    "editAvatarDescription": "Set the image URL for the avatar.",
+    "avatarUrlPlaceholder": "Enter avatar image URL"
   },
   "auth": {
     "welcome": "Welcome Back",
@@ -122,6 +125,9 @@
     "updateFailed": "Failed to update team",
     "teamDeleted": "Team deleted",
     "teamDeleteFailed": "Failed to delete team",
+    "editAvatar": "Edit Team Avatar",
+    "editAvatarDescription": "Set the image URL for the team avatar.",
+    "avatarUrlPlaceholder": "Enter team avatar image URL",
     "settings": "Settings",
     "settingsDescription": "Configure the team profile, members, and collaboration workspace.",
     "teamSettingsHint": "These details are shown in the workspace and included in agent team context.",

@@ -12848,6 +12848,9 @@ const docTemplate = `{
         "handlers.CreateTeamRequest": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -13810,6 +13813,9 @@ const docTemplate = `{
                 "archived_at": {
                     "type": "string"
                 },
+                "avatar_url": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -13997,6 +14003,9 @@ const docTemplate = `{
         "handlers.UpdateTeamRequest": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },

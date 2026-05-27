@@ -34,6 +34,7 @@ type AgentTeam struct {
 	OwnerUserID   pgtype.UUID        `json:"owner_user_id"`
 	Name          string             `json:"name"`
 	Description   string             `json:"description"`
+	AvatarUrl     string             `json:"avatar_url"`
 	SharedDirName string             `json:"shared_dir_name"`
 	Instructions  string             `json:"instructions"`
 	Metadata      []byte             `json:"metadata"`

@@ -727,6 +727,7 @@ CREATE TABLE IF NOT EXISTS agent_teams (
   owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT NOT NULL DEFAULT '',
   shared_dir_name TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,

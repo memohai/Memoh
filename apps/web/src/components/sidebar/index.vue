@@ -53,6 +53,9 @@
 
       <SidebarContent class="@container/bots">
         <SidebarGroup class="px-2 py-0">
+          <SidebarGroupLabel class="text-[10px] uppercase text-muted-foreground tracking-wide">
+            {{ t('sidebar.bots') }}
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu class="gap-1">
               <SidebarMenuItem
@@ -82,7 +85,7 @@
 
         <SidebarGroup
           v-if="teams.length > 0"
-          class="px-2 py-0"
+          class="px-2 py-0 group-data-[collapsible=icon]:mt-3"
         >
           <SidebarGroupLabel class="text-[10px] uppercase text-muted-foreground tracking-wide">
             {{ t('sidebar.teams') }}
@@ -95,12 +98,41 @@
               >
                 <SidebarMenuButton
                   :tooltip="team.name"
-                  :is-active="isTeamActive(team.id)"
-                  class="h-9 gap-2"
-                  @click="goToTeam(team.id)"
+                  as-child
                 >
-                  <Users class="size-3.5" />
-                  <span class="text-xs font-medium truncate">{{ team.name }}</span>
+                  <button
+                    :class="[
+                      'group/team flex items-center gap-2.5 w-full h-9.5 px-2.5 rounded-lg transition-colors',
+                      'group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0',
+                      isTeamActive(team.id)
+                        ? 'bg-sidebar-accent'
+                        : 'hover:bg-sidebar-accent/60',
+                    ]"
+                    @click="goToTeam(team.id)"
+                  >
+                    <div class="size-6.5 shrink-0 rounded-full border border-border bg-accent overflow-hidden p-px group-data-[collapsible=icon]:mx-auto">
+                      <img
+                        v-if="team.avatar_url && !teamImageError[team.id ?? '']"
+                        :src="team.avatar_url"
+                        :alt="team.name"
+                        class="size-full rounded-full object-cover"
+                        @error="() => { if (team.id) teamImageError[team.id] = true }"
+                      >
+                      <span
+                        v-else
+                        class="size-full flex items-center justify-center text-[8px] font-medium text-muted-foreground"
+                      >
+                        <Users
+                          v-if="!teamInitials(team)"
+                          class="size-3"
+                        />
+                        <template v-else>
+                          {{ teamInitials(team) }}
+                        </template>
+                      </span>
+                    </div>
+                    <span class="text-xs font-medium text-foreground truncate flex-1 text-left group-data-[collapsible=icon]:hidden">{{ team.name }}</span>
+                  </button>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -133,7 +165,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
@@ -184,6 +216,8 @@ const { data: teamsData } = useQuery({
   },
 })
 const teams = computed(() => teamsData.value ?? [])
+// 头像加载失败的 team id 集合：渲染时降级到字母 / Users 图标。
+const teamImageError = reactive<Record<string, boolean>>({})
 
 const isSettingsActive = computed(() => route.path.startsWith('/settings'))
 
@@ -195,5 +229,11 @@ function isTeamActive(teamId: string | undefined): boolean {
 function goToTeam(teamId: string | undefined) {
   if (!teamId) return
   router.push({ name: 'team-workspace', params: { teamId } })
+}
+
+function teamInitials(team: { name?: string }): string {
+  const label = (team.name ?? '').trim()
+  if (!label) return ''
+  return label.slice(0, 2).toUpperCase()
 }
 </script>

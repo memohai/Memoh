@@ -75,7 +75,10 @@
     "actionRequired": "需要操作",
     "preview": "预览",
     "raw": "源码",
-    "saving": "保存中..."
+    "saving": "保存中...",
+    "editAvatar": "编辑头像",
+    "editAvatarDescription": "设置头像图片的链接地址。",
+    "avatarUrlPlaceholder": "输入头像图片地址"
   },
   "auth": {
     "welcome": "欢迎回来",
@@ -122,6 +125,9 @@
     "updateFailed": "更新团队失败",
     "teamDeleted": "团队已删除",
     "teamDeleteFailed": "删除团队失败",
+    "editAvatar": "编辑团队头像",
+    "editAvatarDescription": "设置团队头像图片的链接地址。",
+    "avatarUrlPlaceholder": "输入团队头像图片地址",
     "settings": "设置",
     "settingsDescription": "配置团队资料、成员和协作工作区。",
     "teamSettingsHint": "这些信息会展示在工作区中，并作为 agent team 上下文提供给 Bot。",

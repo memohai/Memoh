@@ -66,6 +66,7 @@ type TeamResponse struct {
 	OwnerUserID   string          `json:"owner_user_id"`
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
+	AvatarURL     string          `json:"avatar_url"`
 	SharedDirName string          `json:"shared_dir_name"`
 	Instructions  string          `json:"instructions"`
 	Metadata      json.RawMessage `json:"metadata"`
@@ -156,6 +157,7 @@ type HandoffResponse struct {
 type CreateTeamRequest struct {
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
+	AvatarURL     string          `json:"avatar_url"`
 	SharedDirName string          `json:"shared_dir_name"`
 	Instructions  string          `json:"instructions"`
 	Metadata      json.RawMessage `json:"metadata"`
@@ -164,6 +166,7 @@ type CreateTeamRequest struct {
 type UpdateTeamRequest struct {
 	Name          *string         `json:"name"`
 	Description   *string         `json:"description"`
+	AvatarURL     *string         `json:"avatar_url"`
 	SharedDirName *string         `json:"shared_dir_name"`
 	Instructions  *string         `json:"instructions"`
 	Metadata      json.RawMessage `json:"metadata"`
@@ -244,6 +247,7 @@ func (h *AgentTeamHandler) CreateTeam(c echo.Context) error {
 		OwnerUserID:   userID,
 		Name:          req.Name,
 		Description:   req.Description,
+		AvatarURL:     req.AvatarURL,
 		SharedDirName: req.SharedDirName,
 		Instructions:  req.Instructions,
 		Metadata:      []byte(req.Metadata),
@@ -328,6 +332,7 @@ func (h *AgentTeamHandler) UpdateTeam(c echo.Context) error {
 	team, err := h.service.UpdateTeam(c.Request().Context(), teamID, agentteam.UpdateTeamInput{
 		Name:          req.Name,
 		Description:   req.Description,
+		AvatarURL:     req.AvatarURL,
 		SharedDirName: req.SharedDirName,
 		Instructions:  req.Instructions,
 		Metadata:      []byte(req.Metadata),
@@ -935,6 +940,7 @@ func teamToResponse(t agentteam.Team) TeamResponse {
 		OwnerUserID:   t.OwnerUserID,
 		Name:          t.Name,
 		Description:   t.Description,
+		AvatarURL:     t.AvatarURL,
 		SharedDirName: t.SharedDirName,
 		Instructions:  t.Instructions,
 		Metadata:      metaJSON(t.Metadata),

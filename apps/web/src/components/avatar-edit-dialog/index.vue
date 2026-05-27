@@ -2,9 +2,9 @@
   <Dialog v-model:open="open">
     <DialogContent class="sm:max-w-md">
       <DialogHeader>
-        <DialogTitle>{{ $t('bots.editAvatar') }}</DialogTitle>
+        <DialogTitle>{{ title ?? $t('common.editAvatar') }}</DialogTitle>
         <DialogDescription>
-          {{ $t('bots.editAvatarDescription') }}
+          {{ description ?? $t('common.editAvatarDescription') }}
         </DialogDescription>
       </DialogHeader>
       <div class="mt-4 flex flex-col items-center gap-4">
@@ -22,7 +22,7 @@
           v-model="draft"
           type="url"
           class="w-full"
-          :placeholder="$t('bots.avatarUrlPlaceholder')"
+          :placeholder="placeholder ?? $t('common.avatarUrlPlaceholder')"
         />
       </div>
       <DialogFooter class="mt-6">
@@ -61,8 +61,14 @@ import { ref, computed, watch } from 'vue'
 
 withDefaults(defineProps<{
   fallbackText?: string
+  title?: string
+  description?: string
+  placeholder?: string
 }>(), {
   fallbackText: '',
+  title: undefined,
+  description: undefined,
+  placeholder: undefined,
 })
 
 const open = defineModel<boolean>('open', { default: false })

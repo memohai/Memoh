@@ -1650,6 +1650,8 @@ definitions:
     type: object
   handlers.CreateTeamRequest:
     properties:
+      avatar_url:
+        type: string
       description:
         type: string
       instructions:
@@ -2276,6 +2278,8 @@ definitions:
     properties:
       archived_at:
         type: string
+      avatar_url:
+        type: string
       created_at:
         type: string
       description:
@@ -2398,6 +2402,8 @@ definitions:
     type: object
   handlers.UpdateTeamRequest:
     properties:
+      avatar_url:
+        type: string
       description:
         type: string
       instructions:

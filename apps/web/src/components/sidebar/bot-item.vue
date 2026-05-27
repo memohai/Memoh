@@ -81,7 +81,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import type { BotsBot } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -99,6 +99,7 @@ import { ref } from 'vue'
 const props = defineProps<{ bot: BotsBot }>()
 
 const router = useRouter()
+const route = useRoute()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const { isPinned, togglePin } = usePinnedBots()
@@ -106,7 +107,11 @@ const { isPinned, togglePin } = usePinnedBots()
 const displayName = computed(() => props.bot.display_name || props.bot.id || '')
 const avatarFallback = useAvatarInitials(() => displayName.value, 'B')
 
-const isActive = computed(() => currentBotId.value === props.bot.id)
+// Bot 选中态只在 chat/home 路由下生效，避免和 team 工作区同时高亮。
+const isActive = computed(() =>
+  currentBotId.value === props.bot.id
+  && (route.name === 'chat' || route.name === 'home'),
+)
 const pinned = computed(() => isPinned(props.bot.id ?? ''))
 const isError=ref(false)
 

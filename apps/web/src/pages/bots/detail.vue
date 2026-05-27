@@ -43,6 +43,9 @@
       v-model:open="avatarDialogOpen"
       v-model:avatar-url="avatarUrlModel"
       :fallback-text="avatarFallback"
+      :title="t('bots.editAvatar')"
+      :description="t('bots.editAvatarDescription')"
+      :placeholder="t('bots.avatarUrlPlaceholder')"
     />
   </section>
 </template>
@@ -86,7 +89,7 @@ import BotOverview from './components/bot-overview.vue'
 import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotAccess from './components/bot-access.vue'
-import AvatarEditDialog from './components/avatar-edit-dialog.vue'
+import AvatarEditDialog from '@/components/avatar-edit-dialog/index.vue'
 import BotDetailSidebar from './components/bot-detail-sidebar.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'

@@ -985,6 +985,7 @@ export type HandlersCreateSnapshotResponse = {
 };
 
 export type HandlersCreateTeamRequest = {
+    avatar_url?: string;
     description?: string;
     instructions?: string;
     metadata?: Array<number>;
@@ -1349,6 +1350,7 @@ export type HandlersSupermarketTagsResponse = {
 
 export type HandlersTeamResponse = {
     archived_at?: string;
+    avatar_url?: string;
     created_at?: string;
     description?: string;
     id?: string;
@@ -1414,6 +1416,7 @@ export type HandlersUpdateMemberRequest = {
 };
 
 export type HandlersUpdateTeamRequest = {
+    avatar_url?: string;
     description?: string;
     instructions?: string;
     metadata?: Array<number>;

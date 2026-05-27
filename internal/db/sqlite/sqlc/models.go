@@ -40,6 +40,7 @@ type AgentTeam struct {
 	ArchivedAt    sql.NullString `json:"archived_at"`
 	CreatedAt     string         `json:"created_at"`
 	UpdatedAt     string         `json:"updated_at"`
+	AvatarUrl     string         `json:"avatar_url"`
 }
 
 type AgentTeamMember struct {

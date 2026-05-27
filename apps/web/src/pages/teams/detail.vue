@@ -15,8 +15,33 @@
             </Button>
 
             <div class="flex items-center gap-3">
-              <div class="flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted/40">
-                <Users class="size-5 text-muted-foreground" />
+              <div class="group/avatar relative size-10 shrink-0 overflow-hidden rounded-full">
+                <Avatar class="size-10 rounded-full">
+                  <AvatarImage
+                    v-if="team?.avatar_url"
+                    :src="team.avatar_url"
+                    :alt="team.name"
+                  />
+                  <AvatarFallback class="text-sm">
+                    <Users
+                      v-if="!teamInitials"
+                      class="size-4"
+                    />
+                    <template v-else>
+                      {{ teamInitials }}
+                    </template>
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  type="button"
+                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                  :title="t('common.edit')"
+                  :aria-label="t('common.edit')"
+                  :disabled="!team"
+                  @click="avatarDialogOpen = true"
+                >
+                  <SquarePen class="size-4 text-white" />
+                </button>
               </div>
               <div class="min-w-0">
                 <h2 class="truncate text-sm font-semibold text-foreground">
@@ -436,6 +461,15 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AvatarEditDialog
+      v-model:open="avatarDialogOpen"
+      v-model:avatar-url="avatarUrlModel"
+      :fallback-text="teamInitials"
+      :title="t('teams.editAvatar')"
+      :description="t('teams.editAvatarDescription')"
+      :placeholder="t('teams.avatarUrlPlaceholder')"
+    />
   </section>
 </template>
 
@@ -459,12 +493,14 @@ import {
   LayoutDashboard,
   Plus,
   Settings,
+  SquarePen,
   Trash2,
   Users,
 } from 'lucide-vue-next'
 import {
   Avatar,
   AvatarFallback,
+  AvatarImage,
   Badge,
   Button,
   Card,
@@ -490,6 +526,7 @@ import {
   Textarea,
   Toggle,
 } from '@memohai/ui'
+import AvatarEditDialog from '@/components/avatar-edit-dialog/index.vue'
 import {
   deleteTeamsByTeamId,
   deleteTeamsByTeamIdMembersByMemberId,
@@ -567,6 +604,25 @@ watch(team, (next) => {
     route.meta.breadcrumb = () => next.name
   }
 }, { immediate: true })
+
+const avatarDialogOpen = ref(false)
+
+const teamInitials = computed(() => {
+  const label = (team.value?.name ?? '').trim()
+  if (!label) return ''
+  return label.slice(0, 2).toUpperCase()
+})
+
+// 头像 v-model 桥接：双向绑定到当前 team.avatar_url，
+// 写入时直接调用 PUT /teams/:team_id 保存，对话框关闭即写库。
+const avatarUrlModel = computed<string>({
+  get: () => team.value?.avatar_url ?? '',
+  set: (next) => {
+    const trimmed = (next ?? '').trim()
+    if (trimmed === (team.value?.avatar_url ?? '')) return
+    void saveTeamPatch({ avatar_url: trimmed })
+  },
+})
 
 const showMemberDialog = ref(false)
 const editingMember = ref<HandlersMemberResponse | null>(null)

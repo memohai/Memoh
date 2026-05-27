@@ -1,9 +1,10 @@
 -- name: CreateAgentTeam :one
-INSERT INTO agent_teams (owner_user_id, name, description, shared_dir_name, instructions, metadata)
+INSERT INTO agent_teams (owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata)
 VALUES (
   sqlc.arg(owner_user_id),
   sqlc.arg(name),
   sqlc.arg(description),
+  sqlc.arg(avatar_url),
   sqlc.arg(shared_dir_name),
   sqlc.arg(instructions),
   sqlc.arg(metadata)
@@ -37,6 +38,7 @@ ORDER BY created_at DESC;
 UPDATE agent_teams SET
   name = COALESCE(sqlc.narg(name), name),
   description = COALESCE(sqlc.narg(description), description),
+  avatar_url = COALESCE(sqlc.narg(avatar_url), avatar_url),
   shared_dir_name = COALESCE(sqlc.narg(shared_dir_name), shared_dir_name),
   instructions = COALESCE(sqlc.narg(instructions), instructions),
   metadata = COALESCE(sqlc.narg(metadata), metadata),

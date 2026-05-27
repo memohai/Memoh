@@ -66,6 +66,7 @@ type Team struct {
 	OwnerUserID   string
 	Name          string
 	Description   string
+	AvatarURL     string
 	SharedDirName string
 	Instructions  string
 	Metadata      []byte
@@ -193,6 +194,7 @@ type CreateTeamInput struct {
 	OwnerUserID   string
 	Name          string
 	Description   string
+	AvatarURL     string
 	SharedDirName string
 	Instructions  string
 	Metadata      []byte
@@ -203,6 +205,7 @@ type CreateTeamInput struct {
 type UpdateTeamInput struct {
 	Name          *string
 	Description   *string
+	AvatarURL     *string
 	SharedDirName *string
 	Instructions  *string
 	Metadata      []byte

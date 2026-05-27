@@ -64,7 +64,7 @@ func (q *Queries) AddAgentTeamMember(ctx context.Context, arg AddAgentTeamMember
 const archiveAgentTeam = `-- name: ArchiveAgentTeam :one
 UPDATE agent_teams SET archived_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
+RETURNING id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
 `
 
 func (q *Queries) ArchiveAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTeam, error) {
@@ -75,6 +75,7 @@ func (q *Queries) ArchiveAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTe
 		&i.OwnerUserID,
 		&i.Name,
 		&i.Description,
+		&i.AvatarUrl,
 		&i.SharedDirName,
 		&i.Instructions,
 		&i.Metadata,
@@ -86,22 +87,24 @@ func (q *Queries) ArchiveAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTe
 }
 
 const createAgentTeam = `-- name: CreateAgentTeam :one
-INSERT INTO agent_teams (owner_user_id, name, description, shared_dir_name, instructions, metadata)
+INSERT INTO agent_teams (owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata)
 VALUES (
   $1,
   $2,
   $3,
   $4,
   $5,
-  $6
+  $6,
+  $7
 )
-RETURNING id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
+RETURNING id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
 `
 
 type CreateAgentTeamParams struct {
 	OwnerUserID   pgtype.UUID `json:"owner_user_id"`
 	Name          string      `json:"name"`
 	Description   string      `json:"description"`
+	AvatarUrl     string      `json:"avatar_url"`
 	SharedDirName string      `json:"shared_dir_name"`
 	Instructions  string      `json:"instructions"`
 	Metadata      []byte      `json:"metadata"`
@@ -112,6 +115,7 @@ func (q *Queries) CreateAgentTeam(ctx context.Context, arg CreateAgentTeamParams
 		arg.OwnerUserID,
 		arg.Name,
 		arg.Description,
+		arg.AvatarUrl,
 		arg.SharedDirName,
 		arg.Instructions,
 		arg.Metadata,
@@ -122,6 +126,7 @@ func (q *Queries) CreateAgentTeam(ctx context.Context, arg CreateAgentTeamParams
 		&i.OwnerUserID,
 		&i.Name,
 		&i.Description,
+		&i.AvatarUrl,
 		&i.SharedDirName,
 		&i.Instructions,
 		&i.Metadata,
@@ -151,7 +156,7 @@ func (q *Queries) DeleteAgentTeamMember(ctx context.Context, id pgtype.UUID) err
 }
 
 const getAgentTeam = `-- name: GetAgentTeam :one
-SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams WHERE id = $1
+SELECT id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams WHERE id = $1
 `
 
 func (q *Queries) GetAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTeam, error) {
@@ -162,6 +167,7 @@ func (q *Queries) GetAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTeam, 
 		&i.OwnerUserID,
 		&i.Name,
 		&i.Description,
+		&i.AvatarUrl,
 		&i.SharedDirName,
 		&i.Instructions,
 		&i.Metadata,
@@ -173,7 +179,7 @@ func (q *Queries) GetAgentTeam(ctx context.Context, id pgtype.UUID) (AgentTeam, 
 }
 
 const getAgentTeamForOwner = `-- name: GetAgentTeamForOwner :one
-SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
+SELECT id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
 WHERE id = $1 AND owner_user_id = $2
 `
 
@@ -190,6 +196,7 @@ func (q *Queries) GetAgentTeamForOwner(ctx context.Context, arg GetAgentTeamForO
 		&i.OwnerUserID,
 		&i.Name,
 		&i.Description,
+		&i.AvatarUrl,
 		&i.SharedDirName,
 		&i.Instructions,
 		&i.Metadata,
@@ -399,7 +406,7 @@ func (q *Queries) ListAgentTeamMembers(ctx context.Context, teamID pgtype.UUID) 
 }
 
 const listAgentTeamsByOwner = `-- name: ListAgentTeamsByOwner :many
-SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
+SELECT id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
 WHERE owner_user_id = $1
   AND archived_at IS NULL
 ORDER BY created_at DESC
@@ -419,6 +426,7 @@ func (q *Queries) ListAgentTeamsByOwner(ctx context.Context, ownerUserID pgtype.
 			&i.OwnerUserID,
 			&i.Name,
 			&i.Description,
+			&i.AvatarUrl,
 			&i.SharedDirName,
 			&i.Instructions,
 			&i.Metadata,
@@ -437,7 +445,7 @@ func (q *Queries) ListAgentTeamsByOwner(ctx context.Context, ownerUserID pgtype.
 }
 
 const listAgentTeamsForBot = `-- name: ListAgentTeamsForBot :many
-SELECT t.id, t.owner_user_id, t.name, t.description, t.shared_dir_name, t.instructions, t.metadata, t.archived_at, t.created_at, t.updated_at FROM agent_teams t
+SELECT t.id, t.owner_user_id, t.name, t.description, t.avatar_url, t.shared_dir_name, t.instructions, t.metadata, t.archived_at, t.created_at, t.updated_at FROM agent_teams t
 JOIN agent_team_members m ON m.team_id = t.id
 WHERE m.bot_id = $1
   AND t.archived_at IS NULL
@@ -458,6 +466,7 @@ func (q *Queries) ListAgentTeamsForBot(ctx context.Context, botID pgtype.UUID) (
 			&i.OwnerUserID,
 			&i.Name,
 			&i.Description,
+			&i.AvatarUrl,
 			&i.SharedDirName,
 			&i.Instructions,
 			&i.Metadata,
@@ -476,7 +485,7 @@ func (q *Queries) ListAgentTeamsForBot(ctx context.Context, botID pgtype.UUID) (
 }
 
 const listAllAgentTeams = `-- name: ListAllAgentTeams :many
-SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
+SELECT id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
 WHERE archived_at IS NULL
 ORDER BY created_at DESC
 `
@@ -495,6 +504,7 @@ func (q *Queries) ListAllAgentTeams(ctx context.Context) ([]AgentTeam, error) {
 			&i.OwnerUserID,
 			&i.Name,
 			&i.Description,
+			&i.AvatarUrl,
 			&i.SharedDirName,
 			&i.Instructions,
 			&i.Metadata,
@@ -513,7 +523,7 @@ func (q *Queries) ListAllAgentTeams(ctx context.Context) ([]AgentTeam, error) {
 }
 
 const listAllAgentTeamsByOwner = `-- name: ListAllAgentTeamsByOwner :many
-SELECT id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
+SELECT id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at FROM agent_teams
 WHERE owner_user_id = $1
 ORDER BY created_at DESC
 `
@@ -532,6 +542,7 @@ func (q *Queries) ListAllAgentTeamsByOwner(ctx context.Context, ownerUserID pgty
 			&i.OwnerUserID,
 			&i.Name,
 			&i.Description,
+			&i.AvatarUrl,
 			&i.SharedDirName,
 			&i.Instructions,
 			&i.Metadata,
@@ -553,17 +564,19 @@ const updateAgentTeam = `-- name: UpdateAgentTeam :one
 UPDATE agent_teams SET
   name = COALESCE($1, name),
   description = COALESCE($2, description),
-  shared_dir_name = COALESCE($3, shared_dir_name),
-  instructions = COALESCE($4, instructions),
-  metadata = COALESCE($5, metadata),
+  avatar_url = COALESCE($3, avatar_url),
+  shared_dir_name = COALESCE($4, shared_dir_name),
+  instructions = COALESCE($5, instructions),
+  metadata = COALESCE($6, metadata),
   updated_at = now()
-WHERE id = $6
-RETURNING id, owner_user_id, name, description, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
+WHERE id = $7
+RETURNING id, owner_user_id, name, description, avatar_url, shared_dir_name, instructions, metadata, archived_at, created_at, updated_at
 `
 
 type UpdateAgentTeamParams struct {
 	Name          pgtype.Text `json:"name"`
 	Description   pgtype.Text `json:"description"`
+	AvatarUrl     pgtype.Text `json:"avatar_url"`
 	SharedDirName pgtype.Text `json:"shared_dir_name"`
 	Instructions  pgtype.Text `json:"instructions"`
 	Metadata      []byte      `json:"metadata"`
@@ -574,6 +587,7 @@ func (q *Queries) UpdateAgentTeam(ctx context.Context, arg UpdateAgentTeamParams
 	row := q.db.QueryRow(ctx, updateAgentTeam,
 		arg.Name,
 		arg.Description,
+		arg.AvatarUrl,
 		arg.SharedDirName,
 		arg.Instructions,
 		arg.Metadata,
@@ -585,6 +599,7 @@ func (q *Queries) UpdateAgentTeam(ctx context.Context, arg UpdateAgentTeamParams
 		&i.OwnerUserID,
 		&i.Name,
 		&i.Description,
+		&i.AvatarUrl,
 		&i.SharedDirName,
 		&i.Instructions,
 		&i.Metadata,

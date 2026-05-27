@@ -74,6 +74,7 @@ func teamFromSQLite(row sqlitesqlc.AgentTeam) agentteam.Team {
 		OwnerUserID:   row.OwnerUserID,
 		Name:          row.Name,
 		Description:   row.Description,
+		AvatarURL:     row.AvatarUrl,
 		SharedDirName: row.SharedDirName,
 		Instructions:  row.Instructions,
 		Metadata:      []byte(row.Metadata),
@@ -265,6 +266,7 @@ func (s *AgentTeamStore) CreateTeam(ctx context.Context, input agentteam.CreateT
 		OwnerUserID:   input.OwnerUserID,
 		Name:          input.Name,
 		Description:   input.Description,
+		AvatarUrl:     input.AvatarURL,
 		SharedDirName: input.SharedDirName,
 		Instructions:  input.Instructions,
 		Metadata:      jsonOrEmptyString(input.Metadata),
@@ -347,6 +349,7 @@ func (s *AgentTeamStore) UpdateTeam(ctx context.Context, id string, input agentt
 	row, err := s.queries.UpdateAgentTeam(ctx, sqlitesqlc.UpdateAgentTeamParams{
 		Name:          ptrNull(input.Name),
 		Description:   ptrNull(input.Description),
+		AvatarUrl:     ptrNull(input.AvatarURL),
 		SharedDirName: ptrNull(input.SharedDirName),
 		Instructions:  ptrNull(input.Instructions),
 		Metadata:      metaParam,

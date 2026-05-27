@@ -12839,6 +12839,9 @@
         "handlers.CreateTeamRequest": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -13801,6 +13804,9 @@
                 "archived_at": {
                     "type": "string"
                 },
+                "avatar_url": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -13988,6 +13994,9 @@
         "handlers.UpdateTeamRequest": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
