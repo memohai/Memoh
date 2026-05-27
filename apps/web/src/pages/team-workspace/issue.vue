@@ -126,10 +126,13 @@
               </div>
             </div>
 
-            <MarkdownPreview
+            <MentionMarkdown
               v-else-if="issue?.description?.trim()"
               :content="issue.description"
-              class="!h-auto !overflow-visible !bg-transparent [&>.prose]:px-0 [&>.prose]:py-0 [&_.markdown-renderer]:text-sm [&_.markdown-renderer]:leading-6 [&_.markdown-renderer_li]:text-sm [&_.markdown-renderer_li]:leading-6 [&_.markdown-renderer_p]:text-sm [&_.markdown-renderer_p]:leading-6 [&_.prose]:text-sm [&_.prose]:leading-6 [&_.prose_li]:text-sm [&_.prose_li]:leading-6 [&_.prose_p]:text-sm [&_.prose_p]:leading-6"
+              :members="members"
+              :bots="bots"
+              markdown-class="!h-auto !overflow-visible !bg-transparent [&>.prose]:px-0 [&>.prose]:py-0 [&_.markdown-renderer]:text-sm [&_.markdown-renderer]:leading-6 [&_.markdown-renderer_li]:text-sm [&_.markdown-renderer_li]:leading-6 [&_.markdown-renderer_p]:text-sm [&_.markdown-renderer_p]:leading-6 [&_.prose]:text-sm [&_.prose]:leading-6 [&_.prose_li]:text-sm [&_.prose_li]:leading-6 [&_.prose_p]:text-sm [&_.prose_p]:leading-6"
+              @open="openMention"
             />
             <div
               v-else
@@ -171,10 +174,11 @@
             :author-meta="formatDate(comment.created_at)"
             :author-type="comment.author_type || 'user'"
           >
-            <MentionText
+            <MentionMarkdown
               :content="comment.content"
               :members="members"
               :bots="bots"
+              markdown-class="!h-auto !overflow-visible !bg-transparent [&>.prose]:px-0 [&>.prose]:py-0 [&_.markdown-renderer]:text-sm [&_.markdown-renderer]:leading-6 [&_.markdown-renderer_li]:text-sm [&_.markdown-renderer_li]:leading-6 [&_.markdown-renderer_p]:text-sm [&_.markdown-renderer_p]:leading-6 [&_.prose]:text-sm [&_.prose]:leading-6 [&_.prose_li]:text-sm [&_.prose_li]:leading-6 [&_.prose_p]:text-sm [&_.prose_p]:leading-6"
               @open="openMention"
             />
           </IssueTimelineItem>
@@ -488,12 +492,11 @@ import {
   postTeamsByTeamIdIssuesByIssueIdComments,
   putTeamsByTeamIdIssuesByIssueId,
 } from '@memohai/sdk'
-import MarkdownPreview from '@/components/markdown-preview/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import IssueMarkdownComposer from './components/IssueMarkdownComposer.vue'
 import IssueSidebarSection from './components/IssueSidebarSection.vue'
 import IssueTimelineItem from './components/IssueTimelineItem.vue'
-import MentionText from './components/MentionText.vue'
+import MentionMarkdown from './components/MentionMarkdown.vue'
 
 type IssueStatus = 'backlog' | 'todo' | 'in_progress' | 'blocked' | 'review' | 'done' | 'cancelled'
 
