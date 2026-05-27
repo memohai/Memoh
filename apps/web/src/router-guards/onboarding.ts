@@ -26,6 +26,9 @@ export async function checkOnboarding(): Promise<boolean> {
       .then(({ data }) => {
         const meta = data?.metadata
         completed = meta?.onboarding_completed === true
+        if (completed) {
+          localStorage.setItem('memoh:onboarding:completed', '1')
+        }
       })
       .catch((err) => {
         console.warn('[onboarding-guard] failed to check onboarding status, allowing navigation', err)

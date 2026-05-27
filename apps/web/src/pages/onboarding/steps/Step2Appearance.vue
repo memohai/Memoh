@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/store/settings'
 import { Button, ButtonGroup } from '@memohai/ui'
+import { colorSchemes } from '@/constants/color-schemes'
 
 const { t } = useI18n()
 const settings = useSettingsStore()
@@ -54,6 +55,23 @@ const settings = useSettingsStore()
             @click="settings.setTheme('dark')"
           >
             {{ t('onboarding.appearance.dark') }}
+          </Button>
+        </ButtonGroup>
+      </div>
+
+      <div>
+        <label class="text-sm font-medium mb-2 block">
+          {{ t('onboarding.appearance.colorScheme') }}
+        </label>
+        <ButtonGroup>
+          <Button
+            v-for="scheme in colorSchemes"
+            :key="scheme.id"
+            :variant="settings.colorScheme === scheme.id ? 'default' : 'outline'"
+            size="sm"
+            @click="settings.setColorScheme(scheme.id)"
+          >
+            {{ t(scheme.labelKey) }}
           </Button>
         </ButtonGroup>
       </div>

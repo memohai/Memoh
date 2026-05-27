@@ -2054,15 +2054,6 @@
     "skip": "Skip",
     "start": "Get Started",
     "complete": "Start Using",
-    "steps": {
-      "welcome": "Welcome",
-      "intro": "Introduction",
-      "appearance": "Appearance",
-      "provider": "Provider",
-      "bot": "Bot",
-      "im": "IM Integration",
-      "complete": "All Done"
-    },
     "welcome": {
       "title": "Welcome to Memoh",
       "subtitle": "Your private AI agent platform",
@@ -2076,6 +2067,7 @@
       "title": "Customize Appearance",
       "language": "Language",
       "theme": "Theme",
+      "colorScheme": "Color Scheme",
       "light": "Light",
       "dark": "Dark"
     },

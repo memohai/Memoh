@@ -37,20 +37,19 @@ export function useOnboarding() {
 
   async function complete() {
     completing.value = true
+    localStorage.removeItem('memoh:dev:force-onboarding')
     try {
-      localStorage.removeItem('memoh:dev:force-onboarding')
-      localStorage.setItem('memoh:onboarding:completed', '1')
       await putUsersMe({
         body: {
           metadata: { onboarding_completed: true },
         },
       })
-      router.push('/')
+      localStorage.setItem('memoh:onboarding:completed', '1')
     } catch {
-      router.push('/')
-    } finally {
-      completing.value = false
+      // API failed, but don't block the user — the guard will retry next load
     }
+    router.push('/')
+    completing.value = false
   }
 
   return {
