@@ -426,7 +426,11 @@ func (s *Service) IsBotInTeam(ctx context.Context, teamID, botID string) (bool, 
 
 // ── Issues ──────────────────────────────────────────────────────────────────
 
-// CreateIssue creates a new issue scoped to a team.
+// CreateIssue creates a new issue scoped to a team. After the row is
+// persisted, mentions inside `input.Description` are routed through the
+// dispatcher so a `@bot` in the initial description spawns the same
+// handoff a top-level `@bot` comment would. The dispatcher hook is
+// best-effort and never blocks the create.
 func (s *Service) CreateIssue(ctx context.Context, input CreateIssueInput) (Issue, error) {
 	if s.store == nil {
 		return Issue{}, errors.New("agentteam: store not configured")
@@ -443,7 +447,20 @@ func (s *Service) CreateIssue(ctx context.Context, input CreateIssueInput) (Issu
 	if input.CreatedByType == "" {
 		input.CreatedByType = ActorUser
 	}
-	return s.store.CreateIssue(ctx, input)
+	issue, err := s.store.CreateIssue(ctx, input)
+	if err != nil {
+		return Issue{}, err
+	}
+	if s.dispatcher != nil {
+		if derr := s.dispatcher.HandleIssueCreated(ctx, issue, input.SourceSessionID); derr != nil && s.logger != nil {
+			s.logger.Warn(
+				"dispatch issue description mentions failed",
+				slog.String("issue_id", issue.ID),
+				slog.Any("error", derr),
+			)
+		}
+	}
+	return issue, nil
 }
 
 // GetIssue returns an issue by id.

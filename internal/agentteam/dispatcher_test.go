@@ -967,3 +967,236 @@ func TestDispatcherFailHandoffWhenTriggerFails(t *testing.T) {
 	}
 	t.Fatal("handoff was not marked failed after trigger error")
 }
+
+// TestDispatcherHandleIssueCreatedFansOutMentions verifies a user-authored
+// issue whose description names a bot spawns a handoff with the issue
+// creator as the source actor and an empty trigger_comment_id (because no
+// comment row backs the description).
+func TestDispatcherHandleIssueCreatedFansOutMentions(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	issue := Issue{
+		ID:              "issue-99",
+		TeamID:          "team-1",
+		Number:          7,
+		Title:           "Roll out X",
+		Description:     "Hey @Worker, please draft the plan.",
+		CreatedByType:   ActorUser,
+		CreatedByUserID: "user-1",
+	}
+	if err := d.HandleIssueCreated(context.Background(), issue, ""); err != nil {
+		t.Fatalf("HandleIssueCreated: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.handoffs) != 1 {
+		t.Fatalf("want 1 handoff, got %d", len(store.handoffs))
+	}
+	for _, h := range store.handoffs {
+		if h.ToBotID != "bot-2" {
+			t.Fatalf("ToBotID = %q, want bot-2 (Worker)", h.ToBotID)
+		}
+		if h.IssueID != "issue-99" {
+			t.Fatalf("IssueID = %q, want issue-99", h.IssueID)
+		}
+		if h.TriggerCommentID != "" {
+			t.Fatalf("TriggerCommentID = %q, want empty (description-triggered)", h.TriggerCommentID)
+		}
+		if h.FromActorType != ActorUser {
+			t.Fatalf("FromActorType = %q, want %q", h.FromActorType, ActorUser)
+		}
+		if h.FromUserID != "user-1" {
+			t.Fatalf("FromUserID = %q, want user-1", h.FromUserID)
+		}
+		if h.Status != HandoffPending {
+			t.Fatalf("Status = %q, want pending", h.Status)
+		}
+	}
+}
+
+// TestDispatcherHandleIssueCreatedBotAuthorPropagatesSession ensures a
+// bot-authored issue (e.g. created via issue_create tool) propagates the
+// originating session id onto the handoff so the eventual return wakes
+// the creator back up in the same session, not in a per-issue scratch.
+func TestDispatcherHandleIssueCreatedBotAuthorPropagatesSession(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	issue := Issue{
+		ID:             "issue-100",
+		TeamID:         "team-1",
+		Description:    "@Worker can you take this?",
+		CreatedByType:  ActorBot,
+		CreatedByBotID: "bot-1",
+	}
+	if err := d.HandleIssueCreated(context.Background(), issue, "sess-leader-1"); err != nil {
+		t.Fatalf("HandleIssueCreated: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.handoffs) != 1 {
+		t.Fatalf("want 1 handoff, got %d", len(store.handoffs))
+	}
+	for _, h := range store.handoffs {
+		if h.FromActorType != ActorBot || h.FromBotID != "bot-1" {
+			t.Fatalf("from actor mismatch: %q / %q", h.FromActorType, h.FromBotID)
+		}
+		if h.SourceSessionID != "sess-leader-1" {
+			t.Fatalf("SourceSessionID = %q, want sess-leader-1", h.SourceSessionID)
+		}
+	}
+}
+
+// TestDispatcherHandleIssueCreatedSkipsSelfMention guards against a bot
+// that mentions itself in the description of an issue it created — that
+// would create a self-handoff loop.
+func TestDispatcherHandleIssueCreatedSkipsSelfMention(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	issue := Issue{
+		ID:             "issue-101",
+		TeamID:         "team-1",
+		Description:    "@Leader will pick this up later",
+		CreatedByType:  ActorBot,
+		CreatedByBotID: "bot-1",
+	}
+	if err := d.HandleIssueCreated(context.Background(), issue, "sess-1"); err != nil {
+		t.Fatalf("HandleIssueCreated: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.handoffs) != 0 {
+		t.Fatalf("want 0 handoffs (self-mention), got %d", len(store.handoffs))
+	}
+}
+
+// TestDispatcherHandleIssueCreatedIgnoresEmptyDescription is a fast-path
+// guard: no description, no mentions, no work to do.
+func TestDispatcherHandleIssueCreatedIgnoresEmptyDescription(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	issue := Issue{
+		ID:            "issue-102",
+		TeamID:        "team-1",
+		Description:   "",
+		CreatedByType: ActorUser,
+	}
+	if err := d.HandleIssueCreated(context.Background(), issue, ""); err != nil {
+		t.Fatalf("HandleIssueCreated: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.handoffs) != 0 {
+		t.Fatalf("want 0 handoffs, got %d", len(store.handoffs))
+	}
+}
+
+// TestDispatcherHandleIssueCreatedIgnoresUserMention confirms @<human>
+// in the description is notification-only — only bot mentions spawn
+// handoffs, same as for comments.
+func TestDispatcherHandleIssueCreatedIgnoresUserMention(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	seedTeamRoster(store)
+	svc := newServiceWithStore(t, store)
+	d := svc.Dispatcher()
+
+	issue := Issue{
+		ID:             "issue-103",
+		TeamID:         "team-1",
+		Description:    "@Owner please review",
+		CreatedByType:  ActorBot,
+		CreatedByBotID: "bot-1",
+	}
+	if err := d.HandleIssueCreated(context.Background(), issue, "sess-1"); err != nil {
+		t.Fatalf("HandleIssueCreated: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.handoffs) != 0 {
+		t.Fatalf("want 0 handoffs (user mention only), got %d", len(store.handoffs))
+	}
+}
+
+// TestServiceCreateIssueDispatchesDescriptionMentions is an integration-ish
+// check on the Service.CreateIssue → dispatcher.HandleIssueCreated wiring:
+// a stored issue whose description mentions a bot should fan out the
+// handoff automatically.
+func TestServiceCreateIssueDispatchesDescriptionMentions(t *testing.T) {
+	t.Parallel()
+	base := newMemStore()
+	seedTeamRoster(base)
+	store := &createIssueStubStore{memStore: base}
+	svc := newServiceWithStore(t, store)
+
+	got, err := svc.CreateIssue(context.Background(), CreateIssueInput{
+		TeamID:          "team-1",
+		Title:           "Investigate latency",
+		Description:     "@Worker can you take this?",
+		CreatedByType:   ActorBot,
+		CreatedByBotID:  "bot-1",
+		SourceSessionID: "sess-creator",
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if got.ID != "issue-created-1" {
+		t.Fatalf("issue ID = %q, want issue-created-1", got.ID)
+	}
+
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.handoffs) != 1 {
+		t.Fatalf("want 1 handoff, got %d", len(base.handoffs))
+	}
+	for _, h := range base.handoffs {
+		if h.ToBotID != "bot-2" {
+			t.Fatalf("ToBotID = %q, want bot-2", h.ToBotID)
+		}
+		if h.SourceSessionID != "sess-creator" {
+			t.Fatalf("SourceSessionID = %q, want sess-creator", h.SourceSessionID)
+		}
+		if h.TriggerCommentID != "" {
+			t.Fatalf("TriggerCommentID should be empty, got %q", h.TriggerCommentID)
+		}
+	}
+}
+
+// createIssueStubStore wraps memStore and adds a CreateIssue implementation
+// that "persists" the issue so Service.CreateIssue's post-store dispatcher
+// hook fires. Everything else is delegated to the embedded memStore.
+type createIssueStubStore struct {
+	*memStore
+}
+
+func (*createIssueStubStore) CreateIssue(_ context.Context, in CreateIssueInput) (Issue, error) {
+	return Issue{
+		ID:              "issue-created-1",
+		TeamID:          in.TeamID,
+		Title:           in.Title,
+		Description:     in.Description,
+		Status:          in.Status,
+		CreatedByType:   in.CreatedByType,
+		CreatedByBotID:  in.CreatedByBotID,
+		CreatedByUserID: in.CreatedByUserID,
+		ParentIssueID:   in.ParentIssueID,
+	}, nil
+}

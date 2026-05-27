@@ -96,11 +96,58 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 		}
 	}
 
-	mentions := ParseMentions(comment.Content)
-	if len(mentions) == 0 || strings.TrimSpace(comment.TeamID) == "" {
+	d.dispatchMentionsInComment(ctx, comment, skipMentionTargets)
+	return nil
+}
+
+// HandleIssueCreated is the post-CreateIssue hook. Mentions inside the
+// initial description are treated like mentions in a top-level comment
+// authored by whoever created the issue: a handoff is fanned out to each
+// addressed bot, no comment row is involved (the description itself is
+// the "trigger text"). The synthetic Comment carries an empty ID so the
+// store records the resulting handoffs with a NULL trigger_comment_id;
+// downstream finalize / return routing still works because the bot's
+// reply will be a top-level comment which closes ALL pending handoffs
+// for (bot, issue).
+//
+// `sourceSessionID` should be the session that authored the issue when
+// known (set by the issue_create tool); HTTP-created issues pass "".
+func (d *Dispatcher) HandleIssueCreated(ctx context.Context, issue Issue, sourceSessionID string) error {
+	if d == nil || d.service == nil {
+		return errors.New("agentteam: dispatcher not configured")
+	}
+	if strings.TrimSpace(issue.ID) == "" || strings.TrimSpace(issue.TeamID) == "" {
+		return errors.New("agentteam: issue ID and team ID required")
+	}
+	if strings.TrimSpace(issue.Description) == "" {
 		return nil
 	}
+	synthetic := Comment{
+		IssueID:         issue.ID,
+		TeamID:          issue.TeamID,
+		AuthorType:      issue.CreatedByType,
+		AuthorBotID:     issue.CreatedByBotID,
+		AuthorUserID:    issue.CreatedByUserID,
+		Content:         issue.Description,
+		SourceSessionID: strings.TrimSpace(sourceSessionID),
+	}
+	if synthetic.AuthorType == "" {
+		synthetic.AuthorType = ActorUser
+	}
+	d.dispatchMentionsInComment(ctx, synthetic, nil)
+	return nil
+}
 
+// dispatchMentionsInComment is the shared mention → handoff fan-out used
+// by both HandleComment (real posted comment) and HandleIssueCreated
+// (synthetic comment derived from issue.description). skip is consulted
+// to suppress duplicate wake-ups for bots that are already going to be
+// woken via a queued system return.
+func (d *Dispatcher) dispatchMentionsInComment(ctx context.Context, comment Comment, skip map[string]struct{}) {
+	mentions := ParseMentions(comment.Content)
+	if len(mentions) == 0 || strings.TrimSpace(comment.TeamID) == "" {
+		return
+	}
 	roster, err := d.service.Store().ListMembers(ctx, comment.TeamID)
 	if err != nil {
 		d.logger.Warn(
@@ -108,14 +155,13 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 			slog.String("team_id", comment.TeamID),
 			slog.Any("error", err),
 		)
-		return nil
+		return
 	}
-
 	for _, m := range mentions {
 		member, ok := MatchMember(m.Name, roster)
 		if !ok {
-			// Unknown or ambiguous label; leave the @ as plain text so the
-			// human reader still sees it without surprise routing.
+			// Unknown or ambiguous label; leave the @ as plain text so
+			// the human reader still sees it without surprise routing.
 			continue
 		}
 		if member.MemberType != MemberBot {
@@ -129,7 +175,7 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 		if comment.AuthorType == ActorBot && comment.AuthorBotID == targetBotID {
 			continue
 		}
-		if _, ok := skipMentionTargets[targetBotID]; ok {
+		if _, ok := skip[targetBotID]; ok {
 			continue
 		}
 		if _, err := d.createHandoffForMention(ctx, comment, targetBotID); err != nil {
@@ -142,7 +188,6 @@ func (d *Dispatcher) HandleComment(ctx context.Context, comment Comment) error {
 			continue
 		}
 	}
-	return nil
 }
 
 func (d *Dispatcher) createHandoffForMention(ctx context.Context, comment Comment, targetBotID string) (Handoff, error) {

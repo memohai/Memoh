@@ -193,16 +193,17 @@ func (p *TeamProvider) Tools(_ context.Context, session SessionContext) ([]sdk.T
 					parentUUID = parent.ID
 				}
 				issue, err := p.service.CreateIssue(ctx.Context, agentteam.CreateIssueInput{
-					TeamID:         team.ID,
-					Title:          title,
-					Description:    StringArg(args, "description"),
-					Status:         status,
-					AssigneeType:   assigneeType,
-					AssigneeBotID:  assigneeBot,
-					AssigneeUserID: assigneeUser,
-					CreatedByType:  agentteam.ActorBot,
-					CreatedByBotID: sess.BotID,
-					ParentIssueID:  parentUUID,
+					TeamID:          team.ID,
+					Title:           title,
+					Description:     StringArg(args, "description"),
+					Status:          status,
+					AssigneeType:    assigneeType,
+					AssigneeBotID:   assigneeBot,
+					AssigneeUserID:  assigneeUser,
+					CreatedByType:   agentteam.ActorBot,
+					CreatedByBotID:  sess.BotID,
+					ParentIssueID:   parentUUID,
+					SourceSessionID: sess.SessionID,
 				})
 				if err != nil {
 					return nil, p.translateTeamFKError(ctx.Context, sess, team.ID, err)

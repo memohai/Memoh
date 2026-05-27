@@ -245,6 +245,13 @@ type CreateIssueInput struct {
 	CreatedByUserID string
 	ParentIssueID   string
 	Metadata        []byte
+
+	// SourceSessionID is a transient hint used by the dispatcher to
+	// route a return handoff back to the originating session when the
+	// description contains @mentions. Store implementations do NOT
+	// persist this field; it is only read by Service.CreateIssue after
+	// the row has been inserted.
+	SourceSessionID string
 }
 
 // UpdateIssueInput captures the optional fields of UpdateIssue.
