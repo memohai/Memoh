@@ -113,8 +113,8 @@ importers:
         specifier: ^0.562.0
         version: 0.562.0(vue@3.5.26(typescript@5.9.3))
       markstream-vue:
-        specifier: 0.0.7-beta.2
-        version: 0.0.7-beta.2(katex@0.16.37)(mermaid@11.12.3)(shiki@3.23.0)(stream-markdown@0.0.13(shiki@3.23.0))(stream-monaco@0.0.18(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
+        specifier: 1.0.1-beta.1
+        version: 1.0.1-beta.1(katex@0.16.37)(mermaid@11.12.3)(stream-markdown@0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3)))(stream-monaco@0.0.41(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@5.9.3)(vue@3.5.26(typescript@5.9.3))
@@ -212,8 +212,8 @@ importers:
         specifier: ^0.562.0
         version: 0.562.0(vue@3.5.26(typescript@5.9.3))
       markstream-vue:
-        specifier: 0.0.7-beta.2
-        version: 0.0.7-beta.2(katex@0.16.37)(mermaid@11.12.3)(shiki@3.23.0)(stream-markdown@0.0.13(shiki@3.23.0))(stream-monaco@0.0.18(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
+        specifier: 1.0.1-beta.1
+        version: 1.0.1-beta.1(katex@0.16.37)(mermaid@11.12.3)(stream-markdown@0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3)))(stream-monaco@0.0.41(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3))
       mermaid:
         specifier: ^11.12.2
         version: 11.12.3
@@ -242,11 +242,11 @@ importers:
         specifier: ^1.15.7
         version: 1.15.7
       stream-markdown:
-        specifier: ^0.0.13
-        version: 0.0.13(shiki@3.23.0)
+        specifier: ^0.0.15
+        version: 0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3))
       stream-monaco:
-        specifier: ^0.0.18
-        version: 0.0.18(monaco-editor@0.52.2)
+        specifier: ^0.0.41
+        version: 0.0.41(monaco-editor@0.52.2)
       tailwindcss:
         specifier: ^4.2.2
         version: 4.2.2
@@ -675,6 +675,9 @@ packages:
 
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
+
+  '@chenglou/pretext@0.0.5':
+    resolution: {integrity: sha512-A8GZN10REdFGsyuiUgLV8jjPDDFMg5GmgxGWV0I3igxBOnzj+jgz2VMmVD7g+SFyoctfeqHFxbNatKSzVRWtRg==}
 
   '@chevrotain/cst-dts-gen@11.1.2':
     resolution: {integrity: sha512-XTsjvDVB5nDZBQB8o0o/0ozNelQtn2KrUVteIHSlPd2VAV2utEb6JzyCJaJ8tGxACR4RiBNWy5uYUHX2eji88Q==}
@@ -1454,11 +1457,20 @@ packages:
   '@floating-ui/core@1.7.3':
     resolution: {integrity: sha512-sGnvb5dmrJaKEZ+LDIpguvdX3bDlEllmv4/ClQ9awcmCZrlx5jQyyMWFM5kBI+EyNOCDDiKk8il0zeuX3Zlg/w==}
 
+  '@floating-ui/core@1.7.5':
+    resolution: {integrity: sha512-1Ih4WTWyw0+lKyFMcBHGbb5U5FtuHJuujoyyr5zTaWS5EYMeT6Jb2AuDeftsCsEuchO+mM2ij5+q9crhydzLhQ==}
+
   '@floating-ui/dom@1.7.4':
     resolution: {integrity: sha512-OOchDgh4F2CchOX94cRVqhvy7b3AFb+/rQXyswmzmGakRfkMgoWVjfnLWkRirfLEfuD4ysVW16eXzwt3jHIzKA==}
 
+  '@floating-ui/dom@1.7.6':
+    resolution: {integrity: sha512-9gZSAI5XM36880PPMm//9dfiEngYoC6Am2izES1FF406YFsjvyBMmeJ2g4SAju3xWwtuynNRFL2s9hgxpLI5SQ==}
+
   '@floating-ui/utils@0.2.10':
     resolution: {integrity: sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ==}
+
+  '@floating-ui/utils@0.2.11':
+    resolution: {integrity: sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg==}
 
   '@floating-ui/vue@1.1.9':
     resolution: {integrity: sha512-BfNqNW6KA83Nexspgb9DZuz578R7HT8MZw1CfK9I6Ah4QReNWEJsXWHN+SdmOVLNGmTPDi+fDT535Df5PzMLbQ==}
@@ -2205,6 +2217,7 @@ packages:
 
   '@types/moment@2.13.0':
     resolution: {integrity: sha512-DyuyYGpV6r+4Z1bUznLi/Y7HpGn4iQ4IVcGn8zrr1P4KotKLdH0sbK1TFR6RGyX6B+G8u83wCzL+bpawKU/hdQ==}
+    deprecated: This is a stub types definition for Moment (https://github.com/moment/moment). Moment provides its own type definitions, so you don't need @types/moment installed!
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
@@ -4057,6 +4070,7 @@ packages:
 
   lucide-vue-next@0.562.0:
     resolution: {integrity: sha512-LN0BLGKMFulv0lnfK29r14DcngRUhIqdcaL0zXTt2o0oS9odlrjCGaU3/X9hIihOjjN8l8e+Y9G/famcNYaI7Q==}
+    deprecated: Package deprecated. Please use @lucide/vue instead.
     peerDependencies:
       vue: '>=3.0.1'
 
@@ -4091,8 +4105,8 @@ packages:
   markdown-it-task-checkbox@1.0.6:
     resolution: {integrity: sha512-7pxkHuvqTOu3iwVGmDPeYjQg+AIS9VQxzyLP9JCg9lBjgPAJXGEkChK6A2iFuj3tS0GV3HG2u5AMNhcQqwxpJw==}
 
-  markdown-it-ts@0.0.3:
-    resolution: {integrity: sha512-nZpRTJj4S6bN0I5wsNBtgzDKx+HYBBSsvKjGdYw7/tPdrzfo3gUTt3ZbeAjPGeZaC6a4LFi4JdhTVeLm3F6TIQ==}
+  markdown-it-ts@1.0.0:
+    resolution: {integrity: sha512-hQT/yCYryC3jNs2wJ35R4m1zKcBxNuFaKCGzwpmq2OuMXMNbUK1oTwCxONIjy5lXWWG1UCNbGXe1nbTiWbH/iA==}
     engines: {node: '>=18'}
 
   marked@16.4.2:
@@ -4100,25 +4114,28 @@ packages:
     engines: {node: '>= 20'}
     hasBin: true
 
-  markstream-vue@0.0.7-beta.2:
-    resolution: {integrity: sha512-LxE0CMfE8F0UbHxsQHRsh9Ym/CsHzbtk77FThYqtFF0CN79KtV7NFLldB/RyBXJTDbgN4ppcgzca5Qhpm5Vcjw==}
+  markstream-core@1.0.0:
+    resolution: {integrity: sha512-V39W0rPgJ5Yj/XEl11LaKQxX9dYOI34RL729Zoi9oyy/Y6z6H+PJOsBFktu7gU9ZZxCsevWMb/Re2LgSKbWfRg==}
+
+  markstream-vue@1.0.1-beta.1:
+    resolution: {integrity: sha512-45br3sbOQirIg0tmPMWRmdWk/vLE5aJtVx7cvLaa3e+klyYpILzQ7c4eOMq2EZkQTVewJhZHUVc2FTj+ujUJPg==}
     peerDependencies:
       '@antv/infographic': ^0.2.3
+      '@terrastruct/d2': '>=0.1.33'
       katex: '>=0.16.22'
       mermaid: '>=11'
-      shiki: ^3.13.0
-      stream-markdown: '>=0.0.13'
-      stream-monaco: '>=0.0.17'
+      stream-markdown: '>=0.0.15'
+      stream-monaco: '>=0.0.41'
       vue: '>=3.0.0'
       vue-i18n: '>=9'
     peerDependenciesMeta:
       '@antv/infographic':
         optional: true
+      '@terrastruct/d2':
+        optional: true
       katex:
         optional: true
       mermaid:
-        optional: true
-      shiki:
         optional: true
       stream-markdown:
         optional: true
@@ -4702,6 +4719,20 @@ packages:
     resolution: {integrity: sha512-ObmnIF4hXNg1BqhnHmgbDETF8dLPCggZWBjkQfhZpbszZnYur5DUljTcCHii5LC3J5E0yeO/1LIMyH+UvHQgyw==}
     engines: {node: '>= 0.4'}
 
+  shiki-stream@0.1.4:
+    resolution: {integrity: sha512-4pz6JGSDmVTTkPJ/ueixHkFAXY4ySCc+unvCaDZV7hqq/sdJZirRxgIXSuNSKgiFlGTgRR97sdu2R8K55sPsrw==}
+    peerDependencies:
+      react: ^19.0.0
+      solid-js: ^1.9.0
+      vue: ^3.2.0
+    peerDependenciesMeta:
+      react:
+        optional: true
+      solid-js:
+        optional: true
+      vue:
+        optional: true
+
   shiki@2.5.0:
     resolution: {integrity: sha512-mI//trrsaiCIPsja5CNfsyNOqgAZUb6VpJA+340toL42UpzQlXpwRV9nch69X6gaUxrr9kaOOa6e3y3uAkGFxQ==}
 
@@ -4779,19 +4810,19 @@ packages:
   std-env@3.10.0:
     resolution: {integrity: sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg==}
 
-  stream-markdown-parser@0.0.59-beta.5:
-    resolution: {integrity: sha512-DDq9GgPm6729q8i4UGJXWytgLgAvpOTG3VAHhxfmB6zFf+fnBaAsU8UqY2nghJ7HVIKRKOQxSwE7jeMEw7K/pg==}
+  stream-markdown-parser@1.0.0:
+    resolution: {integrity: sha512-uOYQ8G9YFFtGM726fK77O/mJPYrwYHPy0DKBtk7bCPmkf06XwDVSOAFRTo2FsXnZ3vAaPBtxOgNGJ0CGieBcSQ==}
 
-  stream-markdown@0.0.13:
-    resolution: {integrity: sha512-XYhBEtKA76L6q3Uegvu8QOiUDAV4bfF1TcP3rot8eK0AR1+WGHBB6IfT9GJeLFJ7+qZgrH+WxQp/8lZ6CXjeeg==}
+  stream-markdown@0.0.15:
+    resolution: {integrity: sha512-1WlzjZUb9W5BWZYMKCr2/exPVh5P7HIhHzkcYZczkXm0upiuN4zEddwjdckL+WSQWGGlv9bboXCqcTYCEgqexw==}
     peerDependencies:
       shiki: '>=3.13.0'
 
-  stream-monaco@0.0.18:
-    resolution: {integrity: sha512-YvSw4MrC8VQqKiED38s45AqoptkhWnMuAYhcG0fNPVvTv1iGCEZl7D0uLVY0RM5qBpDqZD2rCUemCF3o3tmt5Q==}
+  stream-monaco@0.0.41:
+    resolution: {integrity: sha512-TkGqo94td8SRciHm9C3Fi8zfHHz6mxtcn/Z8kzPO47y0AJ5quDs4oXmw4lnxneAt6fARTK1JuEqnh8aJ+RxOvA==}
     hasBin: true
     peerDependencies:
-      monaco-editor: ^0.52.2
+      monaco-editor: '>=0.52.2 <0.56.0'
 
   string-argv@0.3.2:
     resolution: {integrity: sha512-aqD2Q0144Z+/RqG52NeHEkZauTAUWJO8c6yTftGJKO3Tja5tUgIfmIl6kExvhtxSDP7fXB6DvzkfMpCd/F3G+Q==}
@@ -5876,6 +5907,8 @@ snapshots:
 
   '@braintree/sanitize-url@7.1.2': {}
 
+  '@chenglou/pretext@0.0.5': {}
+
   '@chevrotain/cst-dts-gen@11.1.2':
     dependencies:
       '@chevrotain/gast': 11.1.2
@@ -6427,12 +6460,23 @@ snapshots:
     dependencies:
       '@floating-ui/utils': 0.2.10
 
+  '@floating-ui/core@1.7.5':
+    dependencies:
+      '@floating-ui/utils': 0.2.11
+
   '@floating-ui/dom@1.7.4':
     dependencies:
       '@floating-ui/core': 1.7.3
       '@floating-ui/utils': 0.2.10
 
+  '@floating-ui/dom@1.7.6':
+    dependencies:
+      '@floating-ui/core': 1.7.5
+      '@floating-ui/utils': 0.2.11
+
   '@floating-ui/utils@0.2.10': {}
+
+  '@floating-ui/utils@0.2.11': {}
 
   '@floating-ui/vue@1.1.9(vue@3.5.26(typescript@5.9.3))':
     dependencies:
@@ -9340,8 +9384,10 @@ snapshots:
 
   markdown-it-task-checkbox@1.0.6: {}
 
-  markdown-it-ts@0.0.3:
+  markdown-it-ts@1.0.0:
     dependencies:
+      '@types/linkify-it': 5.0.0
+      '@types/mdurl': 2.0.0
       entities: 4.5.0
       linkify-it: 5.0.0
       mdurl: 2.0.0
@@ -9350,17 +9396,20 @@ snapshots:
 
   marked@16.4.2: {}
 
-  markstream-vue@0.0.7-beta.2(katex@0.16.37)(mermaid@11.12.3)(shiki@3.23.0)(stream-markdown@0.0.13(shiki@3.23.0))(stream-monaco@0.0.18(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3)):
+  markstream-core@1.0.0: {}
+
+  markstream-vue@1.0.1-beta.1(katex@0.16.37)(mermaid@11.12.3)(stream-markdown@0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3)))(stream-monaco@0.0.41(monaco-editor@0.52.2))(vue-i18n@11.2.8(vue@3.5.26(typescript@5.9.3)))(vue@3.5.26(typescript@5.9.3)):
     dependencies:
-      '@floating-ui/dom': 1.7.4
-      stream-markdown-parser: 0.0.59-beta.5
+      '@chenglou/pretext': 0.0.5
+      '@floating-ui/dom': 1.7.6
+      markstream-core: 1.0.0
+      stream-markdown-parser: 1.0.0
       vue: 3.5.26(typescript@5.9.3)
     optionalDependencies:
       katex: 0.16.37
       mermaid: 11.12.3
-      shiki: 3.23.0
-      stream-markdown: 0.0.13(shiki@3.23.0)
-      stream-monaco: 0.0.18(monaco-editor@0.52.2)
+      stream-markdown: 0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3))
+      stream-monaco: 0.0.41(monaco-editor@0.52.2)
       vue-i18n: 11.2.8(vue@3.5.26(typescript@5.9.3))
 
   matcher@3.0.0:
@@ -9974,6 +10023,12 @@ snapshots:
 
   shell-quote@1.8.3: {}
 
+  shiki-stream@0.1.4(vue@3.5.26(typescript@5.9.3)):
+    dependencies:
+      '@shikijs/core': 3.23.0
+    optionalDependencies:
+      vue: 3.5.26(typescript@5.9.3)
+
   shiki@2.5.0:
     dependencies:
       '@shikijs/core': 2.5.0
@@ -10058,7 +10113,7 @@ snapshots:
 
   std-env@3.10.0: {}
 
-  stream-markdown-parser@0.0.59-beta.5:
+  stream-markdown-parser@1.0.0:
     dependencies:
       markdown-it-container: 4.0.0
       markdown-it-footnote: 4.0.0
@@ -10067,13 +10122,18 @@ snapshots:
       markdown-it-sub: 2.0.0
       markdown-it-sup: 2.0.0
       markdown-it-task-checkbox: 1.0.6
-      markdown-it-ts: 0.0.3
+      markdown-it-ts: 1.0.0
 
-  stream-markdown@0.0.13(shiki@3.23.0):
+  stream-markdown@0.0.15(shiki@3.23.0)(vue@3.5.26(typescript@5.9.3)):
     dependencies:
       shiki: 3.23.0
+      shiki-stream: 0.1.4(vue@3.5.26(typescript@5.9.3))
+    transitivePeerDependencies:
+      - react
+      - solid-js
+      - vue
 
-  stream-monaco@0.0.18(monaco-editor@0.52.2):
+  stream-monaco@0.0.41(monaco-editor@0.52.2):
     dependencies:
       '@shikijs/monaco': 3.23.0
       alien-signals: 2.0.8
