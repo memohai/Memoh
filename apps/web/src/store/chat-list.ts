@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
@@ -110,13 +111,18 @@ export interface ChatSystemTurn {
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn
 
 interface PendingAssistantStream {
+  streamId: string
   assistantTurn: ChatAssistantTurn
   botId: string
   sessionId: string
   done: boolean
   resolve: () => void
   reject: (err: Error) => void
-  streamError?: StreamFailureError
+}
+
+interface StreamIdentity {
+  stream_id?: string
+  session_id?: string
 }
 
 export type SendMessageStage = 'startup' | 'stream'
@@ -164,8 +170,15 @@ export const useChatStore = defineStore('chat', () => {
   const { currentBotId, sessionId } = storeToRefs(selectionStore)
 
   const messages = reactive<ChatMessage[]>([])
-  const streamingSessionId = ref<string | null>(null)
-  const streaming = computed(() => streamingSessionId.value !== null && streamingSessionId.value === sessionId.value)
+  const pendingAssistantStreams = reactive(new Map<string, PendingAssistantStream>())
+  const pendingStreams = () => [...pendingAssistantStreams.values()].filter(stream => !stream.done)
+  const streamingSessionId = computed(() => {
+    const activeSid = (sessionId.value ?? '').trim()
+    const activeSessionIds = pendingStreams().map(stream => stream.sessionId)
+    if (activeSid && activeSessionIds.includes(activeSid)) return activeSid
+    return activeSessionIds[0] ?? null
+  })
+  const streaming = computed(() => isSessionStreaming(sessionId.value))
   const sessions = ref<SessionSummary[]>([])
   const loading = ref(false)
   const loadingChats = ref(false)
@@ -190,13 +203,10 @@ export const useChatStore = defineStore('chat', () => {
     fsChangedAt.value = Date.now()
   }
 
-  let abortFn: (() => void) | null = null
   let messageEventsSince = ''
-  let pendingAssistantStream: PendingAssistantStream | null = null
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
-  let suppressNextStartPlaceholder = false
   const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   // Open chat tabs share this store, so keep a small per-session view cache.
@@ -224,15 +234,11 @@ export const useChatStore = defineStore('chat', () => {
     if (newId) {
       void initialize()
     } else {
-      stopMessageEvents()
-      stopWebSocket()
-      rejectPendingAssistantStream(new Error('Bot stream stopped'))
-      messageEventsSince = ''
-      sessions.value = []
-      sessionId.value = null
-      replaceMessages([])
+      resetUserScopedState()
     }
   }, { immediate: true })
+
+  onAuthSessionCleared(() => resetUserScopedState({ clearSelection: true }))
 
   const nextId = () => `${Date.now()}-${Math.floor(Math.random() * 1000)}`
 
@@ -359,7 +365,7 @@ export const useChatStore = defineStore('chat', () => {
 
   function mergeBackgroundTask(existing: BackgroundTask | undefined, incoming: BackgroundTask): BackgroundTask {
     const merged: BackgroundTask = existing ? { ...existing } : { taskId: incoming.taskId, status: incoming.status }
-    const writable = merged as Record<string, unknown>
+    const writable = merged as unknown as Record<string, unknown>
     for (const [key, value] of Object.entries(incoming)) {
       if (value === undefined || value === '') continue
       writable[key] = value
@@ -589,11 +595,12 @@ export const useChatStore = defineStore('chat', () => {
     return target
   }
 
-  function findUserTurnBeforeAssistant(assistantTurn: ChatAssistantTurn): ChatUserTurn | null {
-    const index = messages.indexOf(assistantTurn)
+  function findUserTurnBeforeAssistant(assistantTurn: ChatAssistantTurn, botId = currentBotId.value ?? '', targetSessionId = sessionId.value ?? ''): ChatUserTurn | null {
+    const items = collectionForTurn(botId, targetSessionId, assistantTurn)
+    const index = items.indexOf(assistantTurn)
     if (index < 0) return null
     for (let i = index - 1; i >= 0; i -= 1) {
-      const item = messages[i]
+      const item = items[i]
       if (item?.role === 'user') return item
     }
     return null
@@ -749,17 +756,122 @@ export const useChatStore = defineStore('chat', () => {
     if (key) sessionMessageStates.delete(key)
   }
 
-  function createCompletionForAssistantTurn(assistantTurn: ChatAssistantTurn): Promise<void> {
+  function createStreamId(): string {
+    const randomUUID = globalThis.crypto?.randomUUID
+    if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto)
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  }
+
+  function fallbackStreamId(targetSessionId?: string | null): string {
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    return sid ? `session:${sid}:agent-stream` : 'legacy-stream'
+  }
+
+  function activeStreamIdsForSession(targetSessionId?: string | null): string[] {
+    const sid = (targetSessionId ?? '').trim()
+    if (!sid) return []
+    return pendingStreams()
+      .filter(stream => stream.sessionId === sid)
+      .map(stream => stream.streamId)
+  }
+
+  function isSessionStreaming(targetSessionId?: string | null): boolean {
+    return activeStreamIdsForSession(targetSessionId).length > 0
+  }
+
+  function streamIdForEvent(event: StreamIdentity, targetSessionId?: string): string {
+    const explicit = (event.stream_id ?? '').trim()
+    if (explicit) return explicit
+    const sid = (event.session_id ?? targetSessionId ?? '').trim()
+    const activeIds = activeStreamIdsForSession(sid)
+    return activeIds.length === 1 ? activeIds[0]! : fallbackStreamId(sid)
+  }
+
+  function trackAssistantStream(streamId: string, assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      pendingAssistantStream = {
+      const id = streamId.trim()
+      if (!id) {
+        reject(new Error('stream_id is required'))
+        return
+      }
+      if (pendingAssistantStreams.has(id)) {
+        reject(new Error(`stream_id ${id} is already active`))
+        return
+      }
+      pendingAssistantStreams.set(id, {
+        streamId: id,
         assistantTurn,
-        botId: currentBotId.value ?? '',
-        sessionId: streamingSessionId.value ?? sessionId.value ?? '',
+        botId,
+        sessionId: targetSessionId.trim(),
         done: false,
         resolve,
         reject,
-      }
+      })
     })
+  }
+
+  function getAssistantStream(streamId: string): PendingAssistantStream | undefined {
+    return pendingAssistantStreams.get(streamId.trim())
+  }
+
+  function finishAssistantStream(streamId: string): PendingAssistantStream | undefined {
+    const stream = getAssistantStream(streamId)
+    if (!stream || stream.done) return undefined
+    stream.assistantTurn.streaming = false
+    stream.done = true
+    pendingAssistantStreams.delete(stream.streamId)
+    return stream
+  }
+
+  function resolveAssistantStream(streamId: string) {
+    finishAssistantStream(streamId)?.resolve()
+  }
+
+  function rejectAssistantStream(streamId: string, err: Error) {
+    finishAssistantStream(streamId)?.reject(err)
+  }
+
+  function forgetAssistantStream(streamId: string) {
+    pendingAssistantStreams.delete(streamId.trim())
+  }
+
+  function appendTurnToSession(botId: string, targetSessionId: string, turn: ChatMessage) {
+    const bid = botId.trim()
+    const sid = targetSessionId.trim()
+    if (!bid || !sid) return
+    if (currentBotId.value === bid && sessionId.value === sid) {
+      messages.push(turn)
+      return
+    }
+    const key = sessionMessageKey(bid, sid)
+    if (!key) return
+    const cached = sessionMessageStates.get(key)
+    if (cached) {
+      cached.items.push(turn)
+    } else {
+      sessionMessageStates.set(key, {
+        items: [turn],
+        hasMoreOlder: true,
+      })
+    }
+  }
+
+  function removeTurnFromSession(botId: string, targetSessionId: string, turn: ChatMessage) {
+    const idx = messages.indexOf(turn)
+    if (idx >= 0) messages.splice(idx, 1)
+    const key = sessionMessageKey(botId, targetSessionId)
+    const cached = key ? sessionMessageStates.get(key) : undefined
+    if (!cached) return
+    const cachedIdx = cached.items.indexOf(turn)
+    if (cachedIdx >= 0) cached.items.splice(cachedIdx, 1)
+  }
+
+  function collectionForTurn(botId: string, targetSessionId: string, turn: ChatMessage): ChatMessage[] {
+    if (messages.includes(turn)) return messages
+    const key = sessionMessageKey(botId, targetSessionId)
+    const cached = key ? sessionMessageStates.get(key) : undefined
+    if (cached?.items.includes(turn)) return cached.items
+    return messages
   }
 
   function createOptimisticAssistantTurn(): ChatAssistantTurn {
@@ -789,36 +901,20 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function resolvePendingAssistantStream() {
-    if (!pendingAssistantStream || pendingAssistantStream.done) return
-    const session = pendingAssistantStream
-    session.assistantTurn.streaming = false
-    session.done = true
-    pendingAssistantStream = null
-    if (session.streamError) {
-      session.reject(session.streamError)
-      return
+  function ensureDiscussStream(streamId: string, targetSessionId?: string): PendingAssistantStream {
+    const id = streamIdForEvent({ stream_id: streamId, session_id: targetSessionId }, targetSessionId)
+    const existing = getAssistantStream(id)
+    if (existing && !existing.done) {
+      return existing
     }
-    session.resolve()
-  }
-
-  function rejectPendingAssistantStream(err: Error) {
-    if (!pendingAssistantStream || pendingAssistantStream.done) return
-    const session = pendingAssistantStream
-    session.assistantTurn.streaming = false
-    session.done = true
-    pendingAssistantStream = null
-    session.reject(err)
-  }
-
-  function ensureDiscussStream(): PendingAssistantStream {
-    if (pendingAssistantStream && !pendingAssistantStream.done) {
-      return pendingAssistantStream
-    }
-    messages.push(createOptimisticAssistantTurn())
-    const assistantTurn = messages[messages.length - 1] as ChatAssistantTurn
-    void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
-    return pendingAssistantStream!
+    const sid = (targetSessionId ?? sessionId.value ?? '').trim()
+    const bid = (currentBotId.value ?? '').trim()
+    const assistantTurn = createOptimisticAssistantTurn()
+    appendTurnToSession(bid, sid, assistantTurn)
+    void trackAssistantStream(id, assistantTurn, bid, sid).catch((error: Error) => {
+      finalizeStreamFailure(assistantTurn, bid, sid, error)
+    })
+    return getAssistantStream(id)!
   }
 
   function upsertAssistantUIMessage(turn: ChatAssistantTurn, message: UIMessage) {
@@ -835,13 +931,13 @@ export const useChatStore = defineStore('chat', () => {
     return turn.messages.some(block => block.type !== 'error')
   }
 
-  function rememberAssistantError(errorMessage: string, assistantTurn: ChatAssistantTurn) {
-    const sid = (streamingSessionId.value ?? sessionId.value ?? '').trim()
+  function rememberAssistantError(errorMessage: string, botId: string, targetSessionId: string, assistantTurn: ChatAssistantTurn) {
+    const sid = targetSessionId.trim()
     const text = errorMessage.trim()
     if (!sid || !text) return
     const current = ephemeralAssistantErrors.get(sid) ?? []
     if (current.some(item => item.content === text)) return
-    const anchorUser = findUserTurnBeforeAssistant(assistantTurn)
+    const anchorUser = findUserTurnBeforeAssistant(assistantTurn, botId, sid)
     ephemeralAssistantErrors.set(sid, [...current, {
       content: text,
       timestamp: new Date().toISOString(),
@@ -849,16 +945,26 @@ export const useChatStore = defineStore('chat', () => {
     }].slice(-5))
   }
 
-  function appendAssistantError(session: PendingAssistantStream, errorMessage: string) {
+  function appendAssistantError(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, errorMessage: string) {
     const text = errorMessage.trim()
     if (!text) return
 
-    rememberAssistantError(text, session.assistantTurn)
-    session.assistantTurn.messages.push({
-      id: nextAssistantMessageId(session.assistantTurn),
+    rememberAssistantError(text, botId, targetSessionId, assistantTurn)
+    assistantTurn.messages.push({
+      id: nextAssistantMessageId(assistantTurn),
       type: 'error',
       content: text,
     })
+  }
+
+  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
+    if (!hasVisibleAssistantBlocks(assistantTurn)) {
+      removeTurnFromSession(botId, targetSessionId, assistantTurn)
+      return
+    }
+    if (error.name === 'AbortError') return
+    if (assistantTurn.messages.some(block => block.type === 'error')) return
+    appendAssistantError(assistantTurn, botId, targetSessionId, error.message)
   }
 
   function rememberStartupSendFailure(failure: Omit<StartupSendFailure, 'id'>) {
@@ -875,50 +981,40 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function pruneEmptyAssistantTurnIfPending() {
-    if (!pendingAssistantStream) return
-    const turn = pendingAssistantStream.assistantTurn
+  function pruneEmptyAssistantTurnIfPending(streamId: string) {
+    const session = getAssistantStream(streamId)
+    if (!session) return
+    const turn = session.assistantTurn
     if (turn.messages.length > 0) return
-    const idx = messages.indexOf(turn)
-    if (idx >= 0) messages.splice(idx, 1)
+    removeTurnFromSession(session.botId, session.sessionId, turn)
   }
 
   function handleWSStreamEvent(event: UIStreamEvent, targetSessionId?: string) {
+    const sid = (event.session_id ?? targetSessionId ?? sessionId.value ?? '').trim()
+    const streamId = streamIdForEvent(event, sid)
+
     switch (event.type) {
       case 'start':
-        if (suppressNextStartPlaceholder) {
-          suppressNextStartPlaceholder = false
-        } else {
-          ensureDiscussStream()
-        }
+        ensureDiscussStream(streamId, sid)
         break
       case 'message':
-        upsertAssistantUIMessage(ensureDiscussStream().assistantTurn, event.data)
+        upsertAssistantUIMessage(ensureDiscussStream(streamId, sid).assistantTurn, event.data)
         break
       case 'end':
-        const endedBotId = pendingAssistantStream?.botId
-        const endedSessionId = targetSessionId || pendingAssistantStream?.sessionId
-        pruneEmptyAssistantTurnIfPending()
-        resolvePendingAssistantStream()
-        streamingSessionId.value = null
-        loading.value = false
-        abortFn = null
+        const endedSession = getAssistantStream(streamId)
+        const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
+        const endedSessionId = sid || endedSession?.sessionId
+        pruneEmptyAssistantTurnIfPending(streamId)
+        resolveAssistantStream(streamId)
+        loading.value = isSessionStreaming(sessionId.value)
         void refreshCurrentSession(endedBotId, endedSessionId)
         break
       case 'error': {
-        const session = ensureDiscussStream()
+        const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
         const message = event.message || 'stream error'
         const stage: SendMessageStage = hasVisibleAssistantBlocks(session.assistantTurn) ? 'stream' : 'startup'
-        if (stage === 'stream') {
-          appendAssistantError(session, message)
-        } else {
-          const idx = messages.indexOf(session.assistantTurn)
-          if (idx >= 0) messages.splice(idx, 1)
-        }
-        rejectPendingAssistantStream(new StreamFailureError(message, stage))
-        loading.value = false
-        streamingSessionId.value = null
-        abortFn = null
+        rejectAssistantStream(streamId, new StreamFailureError(message, stage))
+        loading.value = isSessionStreaming(sessionId.value)
         break
       }
     }
@@ -933,6 +1029,42 @@ export const useChatStore = defineStore('chat', () => {
       activeWs.close()
       activeWs = null
     }
+  }
+
+  function resetUserScopedState(options: { clearSelection?: boolean } = {}) {
+    stopMessageEvents()
+    abortAllAssistantStreams()
+    stopWebSocket()
+
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+    refreshPromise = null
+    messageEventsSince = ''
+
+    sessions.value = []
+    bots.value = []
+    sessionId.value = null
+    if (options.clearSelection && currentBotId.value) {
+      currentBotId.value = null
+    }
+    replaceMessages([])
+    hasMoreOlder.value = true
+    loading.value = false
+    loadingChats.value = false
+    loadingOlder.value = false
+    initializing.value = false
+    overrideModelId.value = ''
+    overrideReasoningEffort.value = ''
+    startupSendFailure.value = null
+    fsChangedAt.value = 0
+
+    pendingAssistantStreams.clear()
+    pendingBackgroundEvents.clear()
+    latestBackgroundTasks.clear()
+    sessionMessageStates.clear()
+    ephemeralAssistantErrors.clear()
   }
 
   function startWebSocket(targetBotId: string) {
@@ -977,14 +1109,6 @@ export const useChatStore = defineStore('chat', () => {
         cacheFetchedMessages(bid, sid, normalized, moreOlder)
       }
       touchSession(sid)
-      const streamStillActive = streamingSessionId.value === sid && pendingAssistantStream && !pendingAssistantStream.done
-      if (!streamStillActive && pendingAssistantStream) {
-        pendingAssistantStream.assistantTurn.streaming = false
-        pendingAssistantStream = null
-      }
-      if (!streamStillActive) {
-        streamingSessionId.value = null
-      }
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -1004,7 +1128,7 @@ export const useChatStore = defineStore('chat', () => {
     refreshTimer = setTimeout(() => {
       refreshTimer = null
       const sidNow = (sessionId.value ?? '').trim()
-      const streamActive = streamingSessionId.value === sidNow && pendingAssistantStream && !pendingAssistantStream.done
+      const streamActive = isSessionStreaming(sidNow)
       if (streamActive) return
       void refreshCurrentSession()
     }, delay)
@@ -1076,14 +1200,12 @@ export const useChatStore = defineStore('chat', () => {
     const sid = (event.session_id ?? '').trim()
     const activeSid = (sessionId.value ?? '').trim()
     if (sid && activeSid && sid !== activeSid) {
-      const isKnownBackgroundStream = streamingSessionId.value === sid && pendingAssistantStream && !pendingAssistantStream.done
+      const isKnownBackgroundStream = !!stream.stream_id && pendingAssistantStreams.has(stream.stream_id)
       if (!isKnownBackgroundStream) return
     }
 
     if (stream.type === 'start' || stream.type === 'message') {
-      if (sid) streamingSessionId.value = sid
       loading.value = true
-      suppressNextStartPlaceholder = false
     }
 
     handleWSStreamEvent(stream, sid || undefined)
@@ -1143,17 +1265,24 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function abort() {
-    if (activeWs?.connected) {
-      activeWs.abort()
+    const activeIds = activeStreamIdsForSession(sessionId.value)
+    const abortError = new Error('aborted')
+    abortError.name = 'AbortError'
+    for (const streamId of activeIds) {
+      if (activeWs?.connected) activeWs.abort(streamId)
+      rejectAssistantStream(streamId, abortError)
     }
-    abortFn?.()
-    abortFn = null
-    for (const message of messages) {
-      if (message.role === 'assistant' && message.streaming) {
-        message.streaming = false
-      }
+    loading.value = isSessionStreaming(sessionId.value)
+  }
+
+  function abortAllAssistantStreams() {
+    const abortError = new Error('aborted')
+    abortError.name = 'AbortError'
+    for (const stream of pendingStreams()) {
+      if (activeWs?.connected) activeWs.abort(stream.streamId)
+      rejectAssistantStream(stream.streamId, abortError)
     }
-    streamingSessionId.value = null
+    loading.value = false
   }
 
   async function ensureBot(): Promise<string | null> {
@@ -1352,6 +1481,7 @@ export const useChatStore = defineStore('chat', () => {
   async function selectBot(targetBotId: string) {
     if (currentBotId.value === targetBotId) return
     abort()
+    abortAllAssistantStreams()
     currentBotId.value = targetBotId
     sessionId.value = null
     await initialize()
@@ -1431,6 +1561,7 @@ export const useChatStore = defineStore('chat', () => {
     let userTurn: ChatUserTurn | null = null
     let sendBotId = ''
     let sendSessionId = ''
+    let sendStreamId = ''
 
     try {
       await ensureActiveSession()
@@ -1439,7 +1570,7 @@ export const useChatStore = defineStore('chat', () => {
       const sid = sessionId.value!
       sendBotId = bid
       sendSessionId = sid
-      streamingSessionId.value = sid
+      sendStreamId = createStreamId()
 
       userTurn = createOptimisticUserTurn(trimmed, attachments)
       messages.push(userTurn)
@@ -1455,15 +1586,10 @@ export const useChatStore = defineStore('chat', () => {
         if (!ws.connected) {
           throw new StreamFailureError('WebSocket is not connected', 'startup')
         }
-        const completion = createCompletionForAssistantTurn(assistantTurn)
-        abortFn = () => {
-          const abortError = new Error('aborted')
-          abortError.name = 'AbortError'
-          ws.abort()
-          rejectPendingAssistantStream(abortError)
-        }
+        const completion = trackAssistantStream(sendStreamId, assistantTurn, bid, sid)
         ws.send({
           type: 'message',
+          stream_id: sendStreamId,
           text: trimmed,
           session_id: sid,
           attachments,
@@ -1473,71 +1599,36 @@ export const useChatStore = defineStore('chat', () => {
         await completion
         await refreshCurrentSession(bid, sid)
       } else {
-        void createCompletionForAssistantTurn(assistantTurn).catch(() => {})
         await sendLocalChannelMessage(bid, trimmed, attachments, { modelId, reasoningEffort })
         await refreshCurrentSession(bid, sid)
       }
 
       assistantTurn.streaming = false
-      streamingSessionId.value = null
       loading.value = false
-      abortFn = null
       touchSession(sid)
       return { ok: true }
     } catch (error) {
-      const isAbort = error instanceof Error && error.name === 'AbortError'
-      const reason = error instanceof Error ? error.message : 'Unknown error'
-      const stage: SendMessageStage = error instanceof StreamFailureError
-        ? error.stage
+      const err = error instanceof Error ? error : new Error('Unknown error')
+      const isAbort = err.name === 'AbortError'
+      const reason = err.message
+      const stage: SendMessageStage = err instanceof StreamFailureError
+        ? err.stage
         : (assistantTurn && hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+      const bid = sendBotId || currentBotId.value || ''
+      const sid = sendSessionId || sessionId.value || ''
 
-      if (!isAbort && stage === 'startup') {
-        if (assistantTurn) {
-          const idx = messages.indexOf(assistantTurn)
-          if (idx >= 0) messages.splice(idx, 1)
-        }
-        if (userTurn) {
-          const idx = messages.indexOf(userTurn)
-          if (idx >= 0) messages.splice(idx, 1)
-        }
-      } else if (!isAbort && assistantTurn && stage === 'stream') {
-        if (!assistantTurn.messages.some(block => block.type === 'error')) {
-          appendAssistantError({ assistantTurn, done: false, resolve: () => {}, reject: () => {} }, reason)
-        }
-        assistantTurn.streaming = false
-      } else if (!isAbort) {
-        messages.push({
-          id: nextId(),
-          role: 'assistant',
-          messages: [{
-            id: 0,
-            type: 'error',
-            content: reason,
-          }],
-          timestamp: new Date().toISOString(),
-          streaming: false,
-        })
+      if (assistantTurn) finalizeStreamFailure(assistantTurn, bid, sid, err)
+      if (!isAbort && stage === 'startup' && userTurn) {
+        removeTurnFromSession(bid, sid, userTurn)
       }
-      pendingAssistantStream = null
-      streamingSessionId.value = null
+
+      if (sendStreamId) forgetAssistantStream(sendStreamId)
       loading.value = false
-      abortFn = null
+
       if (isAbort) return { ok: false, stage: 'stream', error: reason }
       if (stage === 'startup') {
-        rememberStartupSendFailure({
-          botId: sendBotId || currentBotId.value || '',
-          sessionId: sendSessionId || sessionId.value || '',
-          error: reason,
-          restoreInput: text,
-          restoreAttachments: attachments,
-        })
-        return {
-          ok: false,
-          stage,
-          error: reason,
-          restoreInput: text,
-          restoreAttachments: attachments,
-        }
+        rememberStartupSendFailure({ botId: bid, sessionId: sid, error: reason, restoreInput: text, restoreAttachments: attachments })
+        return { ok: false, stage, error: reason, restoreInput: text, restoreAttachments: attachments }
       }
       return { ok: false, stage, error: reason }
     }
@@ -1548,9 +1639,13 @@ export const useChatStore = defineStore('chat', () => {
     const sid = sessionId.value ?? ''
     if (!bid || !sid || !approval.approval_id || streaming.value) return
     const ws = ensureWebSocket(bid)
-    streamingSessionId.value = sid
+    const streamId = createStreamId()
+    const assistantTurn = createOptimisticAssistantTurn()
+    messages.push(assistantTurn)
+    void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
+      finalizeStreamFailure(assistantTurn, bid, sid, error)
+    })
     loading.value = true
-    suppressNextStartPlaceholder = true
     // Optimistically update the approved/rejected tool block before the
     // server snapshot arrives so the buttons disappear immediately.
     for (const message of messages) {
@@ -1565,17 +1660,9 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
     }
-    abortFn = () => {
-      const abortError = new Error('aborted')
-      abortError.name = 'AbortError'
-      ws?.abort()
-      rejectPendingAssistantStream(abortError)
-      streamingSessionId.value = null
-      loading.value = false
-      abortFn = null
-    }
     ws?.send({
       type: 'tool_approval_response',
+      stream_id: streamId,
       session_id: sid,
       approval_id: approval.approval_id,
       short_id: approval.short_id,
@@ -1605,6 +1692,7 @@ export const useChatStore = defineStore('chat', () => {
     bots,
     activeSession,
     activeChatReadOnly,
+    isSessionStreaming,
     loading,
     loadingChats,
     loadingOlder,
@@ -1627,6 +1715,7 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     respondToolApproval,
     clearMessages,
+    resetUserScopedState,
     loadOlderMessages,
     findMessageIdByExternalId,
     locateMessageByExternalId,

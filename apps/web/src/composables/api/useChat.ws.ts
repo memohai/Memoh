@@ -3,6 +3,7 @@ import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useC
 
 export interface WSClientMessage {
   type: 'message' | 'abort' | 'tool_approval_response'
+  stream_id?: string
   text?: string
   session_id?: string
   attachments?: ChatAttachment[]
@@ -17,7 +18,7 @@ export interface WSClientMessage {
 
 export interface ChatWebSocket {
   send: (msg: WSClientMessage) => void
-  abort: () => void
+  abort: (streamId: string) => void
   close: () => void
   readonly connected: boolean
   onOpen: (() => void) | null
@@ -58,9 +59,11 @@ export function connectWebSocket(
       }
       sendQueue.push(payload)
     },
-    abort() {
+    abort(streamId: string) {
+      const id = streamId.trim()
+      if (!id) return
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'abort' }))
+        ws.send(JSON.stringify({ type: 'abort', stream_id: id }))
       }
     },
     close() {

@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -175,8 +179,97 @@ func displayTCPReady(ctx context.Context, addr string) bool {
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
-	return true
+	return probeRFBNoneSecurity(conn) == nil
+}
+
+func probeRFBNoneSecurity(conn net.Conn) error {
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		return err
+	}
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
+
+	version := make([]byte, 12)
+	if _, err := io.ReadFull(conn, version); err != nil {
+		return fmt.Errorf("read RFB version: %w", err)
+	}
+	if _, err := conn.Write(version); err != nil {
+		return fmt.Errorf("write RFB version: %w", err)
+	}
+	count := []byte{0}
+	if _, err := io.ReadFull(conn, count); err != nil {
+		return fmt.Errorf("read RFB security types: %w", err)
+	}
+	if count[0] == 0 {
+		reason, err := readRFBReason(conn)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("RFB security negotiation failed: %s", reason)
+	}
+	types := make([]byte, int(count[0]))
+	if _, err := io.ReadFull(conn, types); err != nil {
+		return fmt.Errorf("read RFB security type list: %w", err)
+	}
+	if !containsRFBType(types, 1) {
+		return errors.New("RFB server does not allow None security")
+	}
+	if _, err := conn.Write([]byte{1}); err != nil {
+		return fmt.Errorf("write RFB security type: %w", err)
+	}
+	result := make([]byte, 4)
+	if _, err := io.ReadFull(conn, result); err != nil {
+		return fmt.Errorf("read RFB security result: %w", err)
+	}
+	if binary.BigEndian.Uint32(result) != 0 {
+		reason, err := readRFBReason(conn)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("RFB security rejected: %s", reason)
+	}
+	if _, err := conn.Write([]byte{1}); err != nil {
+		return fmt.Errorf("write RFB client init: %w", err)
+	}
+	header := make([]byte, 24)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return fmt.Errorf("read RFB server init: %w", err)
+	}
+	nameLen := binary.BigEndian.Uint32(header[20:24])
+	if nameLen > 0 {
+		if _, err := io.CopyN(io.Discard, conn, int64(nameLen)); err != nil {
+			return fmt.Errorf("read RFB server name: %w", err)
+		}
+	}
+	return nil
+}
+
+func readRFBReason(r io.Reader) (string, error) {
+	sizeBuf := make([]byte, 4)
+	if _, err := io.ReadFull(r, sizeBuf); err != nil {
+		return "", err
+	}
+	size := binary.BigEndian.Uint32(sizeBuf)
+	if size == 0 {
+		return "", nil
+	}
+	if size > 64*1024 {
+		return "", fmt.Errorf("RFB reason too large: %d", size)
+	}
+	data := make([]byte, int(size))
+	if _, err := io.ReadFull(r, data); err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func containsRFBType(types []byte, target byte) bool {
+	for _, value := range types {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func displayRFBTCPAddr() string {

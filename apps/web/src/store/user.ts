@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { reactive, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
+import { useQueryCache } from '@pinia/colada'
+import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
 
 export interface UserInfo {
   id: string;
@@ -26,7 +28,31 @@ export const useUserStore = defineStore(
 
     const localToken = useLocalStorage('token', '')
 
+    const resetUserInfo = () => {
+      for (const key of Object.keys(userInfo) as (keyof UserInfo)[]) {
+        userInfo[key] = key === 'timezone' ? 'UTC' : ''
+      }
+    }
+
+    const clearQueryCache = () => {
+      try {
+        const queryCache = useQueryCache()
+        queryCache.cancelQueries({}, new Error('auth session changed'))
+        for (const entry of queryCache.getEntries()) {
+          queryCache.remove(entry)
+        }
+      } catch (error) {
+        console.warn('Failed to clear query cache after auth session change:', error)
+      }
+    }
+
+    const clearFrontendSessionState = (reason: AuthSessionClearReason) => {
+      clearQueryCache()
+      notifyAuthSessionCleared(reason)
+    }
+
     const login = (userData: UserInfo, token: string) => {
+      clearFrontendSessionState('login')
       localToken.value = token
       for (const key of Object.keys(userData) as (keyof UserInfo)[]) {
         userInfo[key] = userData[key]
@@ -43,24 +69,32 @@ export const useUserStore = defineStore(
     }
 
     const exitLogin = () => {
+      clearFrontendSessionState('logout')
       localToken.value = ''
-      for (const key of Object.keys(userInfo) as (keyof UserInfo)[]) {
-        userInfo[key as keyof UserInfo] = key === 'timezone' ? 'UTC' : ''
-      }
+      resetUserInfo()
     }
     const router = useRouter()
     watch(
       localToken,
       () => {
         if (!localToken.value) {
-          exitLogin()
-          router.replace({ name: 'Login' })
+          clearFrontendSessionState('token-cleared')
+          resetUserInfo()
+          if (router.currentRoute.value.name !== 'Login') {
+            void router.replace({ name: 'Login' })
+          }
         }
       },
       {
         immediate: true,
       },
     )
+    onAuthSessionCleared(({ reason }) => {
+      if (reason !== 'unauthorized') return
+      clearQueryCache()
+      localToken.value = ''
+      resetUserInfo()
+    })
     return {
       userInfo,
       login,

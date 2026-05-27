@@ -35,6 +35,10 @@ export function clearTerminalSnapshotsForBot(botId: string) {
   }
 }
 
+export function clearTerminalSnapshots() {
+  snapshots.clear()
+}
+
 function pruneTerminalSnapshots() {
   if (snapshots.size <= MAX_TERMINAL_SNAPSHOTS) return
   const entries = [...snapshots.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)

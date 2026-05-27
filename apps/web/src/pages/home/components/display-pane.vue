@@ -355,6 +355,8 @@ const BITRATE_CHART_PADDING = 4
 const BITRATE_CHART_GRID = [14, 30, 46]
 const FALLBACK_DISPLAY_WIDTH = 1280
 const FALLBACK_DISPLAY_HEIGHT = 960
+const CONNECT_TIMEOUT_MS = 15000
+const INACTIVE_RECONNECT_MS = 10000
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
@@ -380,6 +382,9 @@ let snapshotTimer: ReturnType<typeof window.setTimeout> | null = null
 let snapshotFrameRequest: number | null = null
 let statsTimer: ReturnType<typeof window.setInterval> | null = null
 let lastStatsSample: StatsSample | null = null
+let connectTimeoutTimer: ReturnType<typeof window.setTimeout> | null = null
+let connectAttempt = 0
+let inactiveSince: number | null = null
 
 const statusLabel = computed(() => {
   if (status.value === 'unavailable') {
@@ -497,6 +502,7 @@ function formatUnavailableReason(reason: string): string {
 }
 
 function cleanupLocal() {
+  clearConnectTimeout()
   stopSnapshotCapture()
   stopStatsPolling()
   closeStatsMenu()
@@ -517,6 +523,23 @@ function cleanupLocal() {
     }
     videoRef.value.srcObject = null
   }
+}
+
+function clearConnectTimeout() {
+  if (!connectTimeoutTimer) return
+  window.clearTimeout(connectTimeoutTimer)
+  connectTimeoutTimer = null
+}
+
+function startConnectTimeout(attempt: number) {
+  clearConnectTimeout()
+  connectTimeoutTimer = window.setTimeout(() => {
+    if (attempt !== connectAttempt || status.value !== 'connecting') return
+    cleanupLocal()
+    status.value = 'unavailable'
+    unavailableReason.value = t('chat.display.status.timeout')
+    prepareProgress.value = null
+  }, CONNECT_TIMEOUT_MS)
 }
 
 function closeRemoteSession() {
@@ -545,6 +568,7 @@ function closeDisplayWindow() {
 function setPeerStatus(next: RTCPeerConnectionState) {
   switch (next) {
     case 'connected':
+      clearConnectTimeout()
       status.value = 'connected'
       startSnapshotCapture()
       if (statsVisible.value) {
@@ -554,6 +578,7 @@ function setPeerStatus(next: RTCPeerConnectionState) {
     case 'failed':
     case 'closed':
     case 'disconnected':
+      clearConnectTimeout()
       status.value = 'disconnected'
       stopSnapshotCapture()
       stopStatsPolling()
@@ -778,6 +803,10 @@ function sendInput(payload: Record<string, unknown>) {
   inputChannel.send(JSON.stringify(payload))
 }
 
+function inputReady() {
+  return inputChannel?.readyState === 'open'
+}
+
 function buttonBit(button: number): number {
   switch (button) {
     case 0: return 1
@@ -810,6 +839,10 @@ function resolveVideoPoint(event: MouseEvent | WheelEvent): { x: number; y: numb
 }
 
 function sendPointer(event: MouseEvent | WheelEvent, mask = pointerMask) {
+  if (!inputReady() && status.value === 'connected') {
+    void connect()
+    return
+  }
   const point = resolveVideoPoint(event)
   if (!point) return
   lastPointerPoint = point
@@ -1100,10 +1133,12 @@ async function prepareDisplay(): Promise<boolean> {
 }
 
 async function connect() {
-  cleanup()
+  cleanupLocal()
+  const attempt = ++connectAttempt
   status.value = 'connecting'
   unavailableReason.value = ''
   prepareProgress.value = null
+  startConnectTimeout(attempt)
 
   try {
     let info = await loadDisplayInfo()
@@ -1164,7 +1199,6 @@ async function connect() {
     prepareProgress.value = null
   } catch (error) {
     cleanupLocal()
-    closeRemoteSession()
     status.value = 'unavailable'
     unavailableReason.value = resolveApiErrorMessage(error, t('chat.display.status.unavailable'))
     prepareProgress.value = null
@@ -1173,11 +1207,24 @@ async function connect() {
 
 function handleVisibilityChange() {
   if (document.visibilityState === 'hidden') {
+    inactiveSince = Date.now()
     stopSnapshotCapture()
     stopStatsPolling()
     return
   }
+  const actualState = peer?.connectionState
+  if (actualState === 'failed' || actualState === 'closed' || actualState === 'disconnected') {
+    setPeerStatus(actualState)
+    void connect()
+    return
+  }
   if (status.value === 'connected') {
+    if (inactiveSince && Date.now() - inactiveSince >= INACTIVE_RECONNECT_MS) {
+      inactiveSince = null
+      void connect()
+      return
+    }
+    inactiveSince = null
     startSnapshotCapture()
     if (statsVisible.value) {
       startStatsPolling()
@@ -1194,9 +1241,16 @@ onMounted(() => {
 
 watch(() => props.active, (active) => {
   if (!active) {
+    inactiveSince = Date.now()
     restartSnapshotCapture()
     return
   }
+  if (inactiveSince && Date.now() - inactiveSince >= INACTIVE_RECONNECT_MS && status.value === 'connected') {
+    inactiveSince = null
+    void connect()
+    return
+  }
+  inactiveSince = null
   restartSnapshotCapture()
   if (peer || status.value === 'connecting' || status.value === 'connected') return
   void connect()
@@ -1210,6 +1264,7 @@ watch(() => props.botId, () => {
   }
   void connect()
 })
+
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (fullScreenIconTimer) {

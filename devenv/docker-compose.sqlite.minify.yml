@@ -61,9 +61,19 @@ services:
     privileged: true
     pid: host
     command: ["air", "-c", ".air.toml"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CONFIG_PATH: /workspace/devenv/app.sqlite.dev.toml
       GOFLAGS: -buildvcs=false
+      # Proxy: use host.docker.internal for localhost proxies, e.g.
+      #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev:sqlite:minify
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},qdrant,sparse,server,web,migrate,deps,memoh-dev-sqlite-qdrant,memoh-dev-sqlite-sparse,memoh-dev-sqlite-server,memoh-dev-sqlite-web,memoh-dev-sqlite-migrate,memoh-dev-sqlite-deps"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},qdrant,sparse,server,web,migrate,deps,memoh-dev-sqlite-qdrant,memoh-dev-sqlite-sparse,memoh-dev-sqlite-server,memoh-dev-sqlite-web,memoh-dev-sqlite-migrate,memoh-dev-sqlite-deps"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_SQLITE_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30200}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_SQLITE_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30300}"
     volumes:

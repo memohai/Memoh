@@ -42,7 +42,17 @@ services:
     container_name: memoh-server
     privileged: true
     pid: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      # Proxy: use host.docker.internal for localhost proxies, e.g.
+      #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,memoh-postgres,memoh-qdrant,memoh-sparse,memoh-server,memoh-web,memoh-migrate"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:

@@ -10105,6 +10105,37 @@ paths:
       tags:
       - users
   /users/{id}:
+    delete:
+      description: Remove a workspace member by removing login credentials and disabling
+        the account
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Remove member (admin only)
+      tags:
+      - users
     get:
       description: Get user details (self or admin only)
       parameters:

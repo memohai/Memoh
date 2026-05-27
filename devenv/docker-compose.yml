@@ -81,9 +81,19 @@ services:
     privileged: true
     pid: host
     command: ["air", "-c", ".air.toml"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
+      # Proxy: use host.docker.internal for localhost proxies, e.g.
+      #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,deps,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,deps,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
       MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DEV_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
     volumes:

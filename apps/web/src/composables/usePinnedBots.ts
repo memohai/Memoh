@@ -1,6 +1,11 @@
 import { useStorage } from '@vueuse/core'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 
 const pinnedBotIds = useStorage<string[]>('pinned-bot-ids', [])
+
+onAuthSessionCleared(() => {
+  pinnedBotIds.value = []
+})
 
 export function usePinnedBots() {
   function isPinned(botId: string) {

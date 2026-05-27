@@ -85,6 +85,7 @@ type AccountStore interface {
 	UpdateAdmin(ctx context.Context, input UpdateAccountAdminInput) (AccountRecord, error)
 	UpdateProfile(ctx context.Context, input UpdateAccountProfileInput) (AccountRecord, error)
 	UpdatePassword(ctx context.Context, input UpdateAccountPasswordInput) error
+	RemoveMember(ctx context.Context, userID string) error
 }
 
 type BotStore interface {

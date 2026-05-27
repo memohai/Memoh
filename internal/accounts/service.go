@@ -344,6 +344,18 @@ func (s *Service) ResetPassword(ctx context.Context, userID, newPassword string)
 	})
 }
 
+// RemoveMember removes a workspace member's login identity and marks it inactive.
+func (s *Service) RemoveMember(ctx context.Context, userID string) error {
+	if s.store == nil {
+		return errors.New("account store not configured")
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return errors.New("user id is required")
+	}
+	return s.store.RemoveMember(ctx, userID)
+}
+
 func normalizeRole(raw string) (string, error) {
 	role := strings.ToLower(strings.TrimSpace(raw))
 	if role == "" {

@@ -15,6 +15,7 @@ export interface SettingsRouteSpec {
   loader?: () => Promise<Component | { default: Component }>
   meta?: {
     breadcrumb?: string | { value: string } | ((route: { params: Record<string, string | string[] | undefined> }) => string | undefined)
+    adminOnly?: boolean
   }
   children?: SettingsRouteSpec[]
 }
@@ -48,6 +49,12 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     path: '/settings/providers',
     loader: () => import('@memohai/web/pages/providers/index.vue'),
     meta: { breadcrumb: i18nRef('sidebar.providers') }
+  },
+  {
+    name: 'people',
+    path: '/settings/people',
+    loader: () => import('@memohai/web/pages/people/index.vue'),
+    meta: { breadcrumb: i18nRef('sidebar.people'), adminOnly: true }
   },
   {
     name: 'web-search',

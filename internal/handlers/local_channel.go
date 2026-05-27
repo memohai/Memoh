@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -259,6 +260,7 @@ var wsUpgrader = websocket.Upgrader{
 
 type wsClientMessage struct {
 	Type            string            `json:"type"`
+	StreamID        string            `json:"stream_id,omitempty"`
 	Text            string            `json:"text,omitempty"`
 	SessionID       string            `json:"session_id,omitempty"`
 	Attachments     []json.RawMessage `json:"attachments,omitempty"`
@@ -269,6 +271,81 @@ type wsClientMessage struct {
 	ToolCallID      string            `json:"tool_call_id,omitempty"`
 	Decision        string            `json:"decision,omitempty"`
 	Reason          string            `json:"reason,omitempty"`
+}
+
+type wsOutboundEvent struct {
+	Type      string `json:"type"`
+	StreamID  string `json:"stream_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Data      any    `json:"data,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+type activeWSStream struct {
+	streamID string
+	cancel   context.CancelFunc
+	abortCh  chan struct{}
+}
+
+type wsStreamRegistry struct {
+	mu   sync.Mutex
+	byID map[string]*activeWSStream
+}
+
+func newWSStreamRegistry() *wsStreamRegistry {
+	return &wsStreamRegistry{
+		byID: make(map[string]*activeWSStream),
+	}
+}
+
+func (r *wsStreamRegistry) register(stream *activeWSStream) error {
+	streamID := strings.TrimSpace(stream.streamID)
+	if streamID == "" {
+		return errors.New("stream_id is required")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.byID[streamID]; exists {
+		return fmt.Errorf("stream_id %q is already active", streamID)
+	}
+	stream.streamID = streamID
+	r.byID[streamID] = stream
+	return nil
+}
+
+func (r *wsStreamRegistry) finish(streamID string) {
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stream := r.byID[streamID]
+	if stream == nil {
+		return
+	}
+	delete(r.byID, streamID)
+}
+
+func (r *wsStreamRegistry) abort(streamID string) bool {
+	streamID = strings.TrimSpace(streamID)
+	if streamID == "" {
+		return false
+	}
+
+	r.mu.Lock()
+	stream := r.byID[streamID]
+	r.mu.Unlock()
+	if stream == nil {
+		return false
+	}
+	select {
+	case stream.abortCh <- struct{}{}:
+	default:
+	}
+	stream.cancel()
+	return true
 }
 
 // wsWriter serialises all WebSocket writes through a single goroutine to
@@ -349,6 +426,110 @@ func extractRawBearerToken(c echo.Context) string {
 	return strings.TrimSpace(c.QueryParam("token"))
 }
 
+func sendWSError(writer *wsWriter, streamID, sessionID, message string) {
+	writer.SendJSON(wsOutboundEvent{
+		Type:      "error",
+		StreamID:  strings.TrimSpace(streamID),
+		SessionID: strings.TrimSpace(sessionID),
+		Message:   message,
+	})
+}
+
+func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Context, writer *wsWriter, botID, sessionID, streamID string, eventCh <-chan flow.WSStreamEvent) {
+	converter := conversation.NewUIMessageStreamConverter()
+	outboundAssetRefs := make([]messagepkg.AssetRef, 0)
+	for event := range eventCh {
+		processed := h.processWSEvent(ctx, botID, event)
+		for _, p := range processed {
+			if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
+				outboundAssetRefs = append(outboundAssetRefs, refs...)
+			}
+
+			var streamEvent agentpkg.StreamEvent
+			if err := json.Unmarshal(p, &streamEvent); err != nil {
+				continue
+			}
+
+			switch streamEvent.Type {
+			case agentpkg.EventAgentStart:
+				writer.SendJSON(wsOutboundEvent{
+					Type:      "start",
+					StreamID:  streamID,
+					SessionID: sessionID,
+				})
+				continue
+			case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
+				for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
+					writer.SendJSON(wsOutboundEvent{
+						Type:      "message",
+						StreamID:  streamID,
+						SessionID: sessionID,
+						Data:      uiMessage,
+					})
+				}
+				writer.SendJSON(wsOutboundEvent{
+					Type:      "end",
+					StreamID:  streamID,
+					SessionID: sessionID,
+				})
+				continue
+			case agentpkg.EventError:
+				message := strings.TrimSpace(streamEvent.Error)
+				if message == "" {
+					message = "stream error"
+				}
+				sendWSError(writer, streamID, sessionID, message)
+				continue
+			}
+
+			uiEvents := converter.HandleEvent(uiStreamEventFromAgentEvent(streamEvent))
+			for _, uiMessage := range uiEvents {
+				writer.SendJSON(wsOutboundEvent{
+					Type:      "message",
+					StreamID:  streamID,
+					SessionID: sessionID,
+					Data:      uiMessage,
+				})
+			}
+		}
+	}
+	if len(outboundAssetRefs) > 0 {
+		h.resolver.LinkOutboundAssets(assetCtx, botID, sessionID, outboundAssetRefs)
+	}
+}
+
+type wsStreamRunner func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error
+
+func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, activeStreams *wsStreamRegistry, writer *wsWriter, botID, sessionID, streamID, logLabel string, runner wsStreamRunner) {
+	streamCtx, streamCancel := context.WithCancel(baseCtx)
+	abortCh := make(chan struct{}, 1)
+	if err := activeStreams.register(&activeWSStream{
+		streamID: streamID,
+		cancel:   streamCancel,
+		abortCh:  abortCh,
+	}); err != nil {
+		streamCancel()
+		sendWSError(writer, streamID, sessionID, err.Error())
+		return
+	}
+
+	eventCh := make(chan flow.WSStreamEvent, 64)
+	go func() {
+		defer streamCancel()
+		err := func() error {
+			defer activeStreams.finish(streamID)
+			defer close(eventCh)
+			return runner(streamCtx, eventCh, abortCh)
+		}()
+		if err != nil && connCtx.Err() == nil {
+			h.logger.Error("ws stream error", slog.String("operation", logLabel), slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
+			sendWSError(writer, streamID, sessionID, err.Error())
+		}
+	}()
+
+	go h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, sessionID, streamID, eventCh)
+}
+
 // HandleWebSocket godoc
 // @Summary WebSocket chat endpoint
 // @Description Upgrade to WebSocket for bidirectional chat streaming with abort support.
@@ -394,8 +575,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	defer connCancel()
 	streamBaseCtx := context.WithoutCancel(c.Request().Context())
 
-	abortCh := make(chan struct{}, 1)
-	var activeCancel context.CancelFunc
+	activeStreams := newWSStreamRegistry()
 
 	for {
 		_, raw, readErr := conn.ReadMessage()
@@ -419,217 +599,89 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 		switch msg.Type {
 		case "abort":
-			select {
-			case abortCh <- struct{}{}:
-			default:
+			streamID := strings.TrimSpace(msg.StreamID)
+			if streamID == "" {
+				sendWSError(writer, "", strings.TrimSpace(msg.SessionID), "stream_id is required")
+				continue
 			}
+			activeStreams.abort(streamID)
 
 		case "tool_approval_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
 			if sessionID == "" {
-				writer.SendJSON(map[string]string{"type": "error", "message": "session_id is required"})
+				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				continue
+			}
+			streamID := strings.TrimSpace(msg.StreamID)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
 				continue
 			}
 			explicitID := strings.TrimSpace(msg.ApprovalID)
 			if explicitID == "" && msg.ShortID > 0 {
 				explicitID = strconv.Itoa(msg.ShortID)
 			}
-			streamCtx, streamCancel := context.WithCancel(streamBaseCtx)
-			activeCancel = streamCancel
-			eventCh := make(chan flow.WSStreamEvent, 64)
 
-			var (
-				outboundAssetMu   sync.Mutex
-				outboundAssetRefs []messagepkg.AssetRef
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws approval stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}) error {
+					return h.resolver.RespondToolApproval(ctx, flow.ToolApprovalResponseInput{
+						BotID:                  botID,
+						SessionID:              sessionID,
+						ActorChannelIdentityID: channelIdentityID,
+						ApprovalID:             strings.TrimSpace(msg.ApprovalID),
+						ExplicitID:             explicitID,
+						Decision:               strings.TrimSpace(msg.Decision),
+						Reason:                 strings.TrimSpace(msg.Reason),
+						ChatToken:              bearerToken,
+					}, eventCh)
+				},
 			)
-
-			go func() {
-				defer streamCancel()
-				defer close(eventCh)
-				if err := h.resolver.RespondToolApproval(streamCtx, flow.ToolApprovalResponseInput{
-					BotID:                  botID,
-					SessionID:              sessionID,
-					ActorChannelIdentityID: channelIdentityID,
-					ApprovalID:             strings.TrimSpace(msg.ApprovalID),
-					ExplicitID:             explicitID,
-					Decision:               strings.TrimSpace(msg.Decision),
-					Reason:                 strings.TrimSpace(msg.Reason),
-					ChatToken:              bearerToken,
-				}, eventCh); err != nil {
-					if connCtx.Err() == nil {
-						h.logger.Error("ws approval stream error", slog.Any("error", err), slog.String("bot_id", botID), slog.String("session_id", sessionID))
-						writer.SendJSON(map[string]string{"type": "error", "message": err.Error()})
-					}
-				}
-			}()
-
-			go func() {
-				converter := conversation.NewUIMessageStreamConverter()
-				for event := range eventCh {
-					processed := h.processWSEvent(streamCtx, botID, event)
-					for _, p := range processed {
-						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
-							outboundAssetMu.Lock()
-							outboundAssetRefs = append(outboundAssetRefs, refs...)
-							outboundAssetMu.Unlock()
-						}
-
-						var streamEvent agentpkg.StreamEvent
-						if err := json.Unmarshal(p, &streamEvent); err != nil {
-							continue
-						}
-
-						switch streamEvent.Type {
-						case agentpkg.EventAgentStart:
-							writer.SendJSON(map[string]string{"type": "start"})
-							continue
-						case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-							for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
-								writer.SendJSON(map[string]any{
-									"type": "message",
-									"data": uiMessage,
-								})
-							}
-							writer.SendJSON(map[string]string{"type": "end"})
-							continue
-						case agentpkg.EventError:
-							message := strings.TrimSpace(streamEvent.Error)
-							if message == "" {
-								message = "stream error"
-							}
-							writer.SendJSON(map[string]string{"type": "error", "message": message})
-							continue
-						}
-
-						uiEvents := converter.HandleEvent(uiStreamEventFromAgentEvent(streamEvent))
-						for _, uiMessage := range uiEvents {
-							writer.SendJSON(map[string]any{
-								"type": "message",
-								"data": uiMessage,
-							})
-						}
-					}
-				}
-				outboundAssetMu.Lock()
-				refs := outboundAssetRefs
-				outboundAssetMu.Unlock()
-				if len(refs) > 0 {
-					h.resolver.LinkOutboundAssets(streamBaseCtx, botID, sessionID, refs)
-				}
-			}()
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
+			streamID := strings.TrimSpace(msg.StreamID)
 
 			chatAttachments := parseWSClientAttachments(msg.Attachments)
 
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			if sessionID == "" {
+				sendWSError(writer, streamID, "", "session_id is required")
+				continue
+			}
 			if text == "" && len(chatAttachments) == 0 {
-				writer.SendJSON(map[string]string{"type": "error", "message": "message text or attachments required"})
+				sendWSError(writer, streamID, sessionID, "message text or attachments required")
 				continue
 			}
 
-			// Drain any previous abort signal.
-			select {
-			case <-abortCh:
-			default:
-			}
-
-			streamCtx, streamCancel := context.WithCancel(streamBaseCtx)
-			activeCancel = streamCancel
-			eventCh := make(chan flow.WSStreamEvent, 64)
-
-			var (
-				outboundAssetMu   sync.Mutex
-				outboundAssetRefs []messagepkg.AssetRef
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, abortCh <-chan struct{}) error {
+					req := conversation.ChatRequest{
+						BotID:                   botID,
+						ChatID:                  botID,
+						SessionID:               sessionID,
+						Token:                   bearerToken,
+						UserID:                  channelIdentityID,
+						SourceChannelIdentityID: channelIdentityID,
+						ConversationType:        channel.ConversationTypePrivate,
+						Query:                   text,
+						CurrentChannel:          h.channelType.String(),
+						Channels:                []string{h.channelType.String()},
+						Attachments:             chatAttachments,
+						Model:                   strings.TrimSpace(msg.ModelID),
+						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
+					}
+					return h.resolver.StreamChatWS(ctx, req, eventCh, abortCh)
+				},
 			)
 
-			go func() {
-				defer streamCancel()
-				defer close(eventCh)
-				req := conversation.ChatRequest{
-					BotID:                   botID,
-					ChatID:                  botID,
-					SessionID:               sessionID,
-					Token:                   bearerToken,
-					UserID:                  channelIdentityID,
-					SourceChannelIdentityID: channelIdentityID,
-					ConversationType:        channel.ConversationTypePrivate,
-					Query:                   text,
-					CurrentChannel:          h.channelType.String(),
-					Channels:                []string{h.channelType.String()},
-					Attachments:             chatAttachments,
-					Model:                   strings.TrimSpace(msg.ModelID),
-					ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
-				}
-				if streamErr := h.resolver.StreamChatWS(streamCtx, req, eventCh, abortCh); streamErr != nil {
-					if connCtx.Err() == nil {
-						h.logger.Error("ws stream error", slog.Any("error", streamErr), slog.String("bot_id", botID), slog.String("session_id", sessionID))
-						writer.SendJSON(map[string]string{"type": "error", "message": streamErr.Error()})
-					}
-				}
-			}()
-
-			go func() {
-				converter := conversation.NewUIMessageStreamConverter()
-				for event := range eventCh {
-					processed := h.processWSEvent(streamCtx, botID, event)
-					for _, p := range processed {
-						if refs := extractAssetRefsFromProcessedEvent(p); len(refs) > 0 {
-							outboundAssetMu.Lock()
-							outboundAssetRefs = append(outboundAssetRefs, refs...)
-							outboundAssetMu.Unlock()
-						}
-
-						var streamEvent agentpkg.StreamEvent
-						if err := json.Unmarshal(p, &streamEvent); err != nil {
-							continue
-						}
-
-						switch streamEvent.Type {
-						case agentpkg.EventAgentStart:
-							writer.SendJSON(map[string]string{"type": "start"})
-							continue
-						case agentpkg.EventAgentEnd, agentpkg.EventAgentAbort:
-							for _, uiMessage := range conversation.ConvertRawModelMessagesToUIAssistantMessages(streamEvent.Messages) {
-								writer.SendJSON(map[string]any{
-									"type": "message",
-									"data": uiMessage,
-								})
-							}
-							writer.SendJSON(map[string]string{"type": "end"})
-							continue
-						case agentpkg.EventError:
-							message := strings.TrimSpace(streamEvent.Error)
-							if message == "" {
-								message = "stream error"
-							}
-							writer.SendJSON(map[string]string{"type": "error", "message": message})
-							continue
-						}
-
-						uiEvents := converter.HandleEvent(uiStreamEventFromAgentEvent(streamEvent))
-						for _, uiMessage := range uiEvents {
-							writer.SendJSON(map[string]any{
-								"type": "message",
-								"data": uiMessage,
-							})
-						}
-					}
-				}
-				outboundAssetMu.Lock()
-				refs := outboundAssetRefs
-				outboundAssetMu.Unlock()
-				if len(refs) > 0 {
-					h.resolver.LinkOutboundAssets(streamBaseCtx, botID, sessionID, refs)
-				}
-			}()
-
 		default:
-			writer.SendJSON(map[string]string{"type": "error", "message": "unknown message type: " + msg.Type})
+			sendWSError(writer, strings.TrimSpace(msg.StreamID), strings.TrimSpace(msg.SessionID), "unknown message type: "+msg.Type)
 		}
 	}
-	_ = activeCancel
 	return nil
 }
 

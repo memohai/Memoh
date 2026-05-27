@@ -104,6 +104,19 @@ SET password_hash = $2,
 WHERE id = $1
 RETURNING *;
 
+-- name: RemoveMember :one
+UPDATE users
+SET username = NULL,
+    email = NULL,
+    password_hash = NULL,
+    display_name = NULL,
+    avatar_url = NULL,
+    data_root = NULL,
+    is_active = FALSE,
+    updated_at = now()
+WHERE id = sqlc.arg(user_id)
+RETURNING id;
+
 -- name: UpdateAccountLastLogin :one
 UPDATE users
 SET last_login_at = now(),

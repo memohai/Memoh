@@ -16,6 +16,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/identity"
 )
 
@@ -58,6 +59,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	userGroup.PUT("/:id", h.UpdateUser)
 	userGroup.PUT("/:id/password", h.ResetUserPassword)
 	userGroup.POST("", h.CreateUser)
+	userGroup.DELETE("/:id", h.RemoveMember)
 
 	botGroup := e.Group("/bots")
 	botGroup.POST("", h.CreateBot)
@@ -339,6 +341,51 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, resp)
+}
+
+// RemoveMember godoc
+// @Summary Remove member (admin only)
+// @Description Remove a workspace member by removing login credentials and disabling the account
+// @Tags users
+// @Param id path string true "User ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /users/{id} [delete].
+func (h *UsersHandler) RemoveMember(c echo.Context) error {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !isAdmin {
+		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
+	}
+	targetID := strings.TrimSpace(c.Param("id"))
+	if targetID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
+	}
+	if targetID == channelIdentityID {
+		return echo.NewHTTPError(http.StatusBadRequest, "cannot remove current member")
+	}
+	if _, err := h.service.Get(c.Request().Context(), targetID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "member not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if err := h.service.RemoveMember(c.Request().Context(), targetID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "member not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // CreateBot godoc

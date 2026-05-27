@@ -10,6 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 func TestReadRTCSettings(t *testing.T) {
@@ -72,6 +75,93 @@ func TestReadRTCSettingsUsesInferredNATIPs(t *testing.T) {
 	}
 	if len(cfg.NATIPs) != 2 || cfg.NATIPs[0] != "100.123.2.67" || cfg.NATIPs[1] != "10.0.0.2" {
 		t.Fatalf("unexpected inferred NAT IPs: %#v", cfg.NATIPs)
+	}
+}
+
+func TestSessionReplacingPeerKeepsNewPeer(t *testing.T) {
+	sess := newSession(NewService(nil, nil), "bot-1", "gst-launch-1.0", CodecVP8)
+	first := &peerSession{id: "viewer-1", trackID: "track-1", state: "connected"}
+	second := &peerSession{id: "viewer-1", trackID: "track-2", state: "new"}
+
+	sess.addPeer(first)
+	sess.addPeer(second)
+	sess.removePeer(first)
+
+	if got := sess.peer("viewer-1"); got != second {
+		t.Fatal("closing a replaced peer must not remove the newer peer for the same display session")
+	}
+}
+
+func TestSessionCloseStalePeers(t *testing.T) {
+	sess := newSession(NewService(nil, nil), "bot-1", "gst-launch-1.0", CodecVP8)
+	fresh := &peerSession{id: "fresh", createdAt: time.Now(), state: webrtc.PeerConnectionStateConnecting.String()}
+	staleConnecting := &peerSession{id: "stale-connecting", createdAt: time.Now().Add(-stalePeerTTL - time.Second), state: webrtc.PeerConnectionStateConnecting.String()}
+	staleDisconnected := &peerSession{id: "stale-disconnected", createdAt: time.Now(), state: webrtc.PeerConnectionStateDisconnected.String()}
+	staleClosed := make(map[string]bool)
+	staleConnecting.close = func() {
+		staleClosed[staleConnecting.id] = true
+		sess.removePeer(staleConnecting)
+	}
+	staleDisconnected.close = func() {
+		staleClosed[staleDisconnected.id] = true
+		sess.removePeer(staleDisconnected)
+	}
+
+	sess.addPeer(fresh)
+	sess.addPeer(staleConnecting)
+	sess.addPeer(staleDisconnected)
+	sess.closeStalePeers(time.Now())
+
+	if sess.peer("fresh") == nil {
+		t.Fatal("fresh connecting peer should remain active")
+	}
+	if sess.peer("stale-connecting") != nil {
+		t.Fatal("old connecting peer should be removed")
+	}
+	if sess.peer("stale-disconnected") != nil {
+		t.Fatal("disconnected peer should be removed")
+	}
+	if !staleClosed["stale-connecting"] || !staleClosed["stale-disconnected"] {
+		t.Fatal("stale peers should be closed through their close callbacks")
+	}
+}
+
+func TestSessionWaitsForInFlightStart(t *testing.T) {
+	service := NewService(nil, nil)
+	start := &sessionStart{done: make(chan struct{})}
+	service.starting["bot-1"] = start
+	expected := newSession(service, "bot-1", "gst-launch-1.0", CodecVP8)
+
+	done := make(chan struct {
+		sess *session
+		err  error
+	}, 1)
+	go func() {
+		sess, err := service.session(context.Background(), "bot-1", "gst-launch-1.0", CodecVP8)
+		done <- struct {
+			sess *session
+			err  error
+		}{sess: sess, err: err}
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("session should wait for the in-flight encoder start")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	service.finishSessionStart("bot-1", start, expected, nil)
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("session returned error: %v", result.err)
+		}
+		if result.sess != expected {
+			t.Fatal("session should reuse the encoder from the in-flight start")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session did not return after in-flight start completed")
 	}
 }
 

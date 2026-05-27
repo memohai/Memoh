@@ -1,4 +1,5 @@
 import { client } from '@memohai/sdk/client'
+import { notifyAuthSessionCleared } from './auth-session'
 
 export interface SetupApiClientOptions {
   baseUrl?: string
@@ -67,6 +68,7 @@ export function setupApiClient(options: SetupApiClientOptions = {}) {
   client.interceptors.response.use((response) => {
     if (response.status === 401) {
       localStorage.removeItem('token')
+      notifyAuthSessionCleared('unauthorized')
       options.onUnauthorized?.()
     }
     return response

@@ -16,8 +16,10 @@ class MockWebSocket {
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
+  readonly url: string
 
-  constructor(public readonly url: string) {
+  constructor(url: string) {
+    this.url = url
     MockWebSocket.instances.push(this)
   }
 
@@ -56,10 +58,10 @@ describe('useChat.ws', () => {
   it('queues outbound messages until socket opens', () => {
     const onStreamEvent = vi.fn()
     const ws = connectWebSocket('bot-1', onStreamEvent)
-    const socket = MockWebSocket.instances[0]
+    const socket = MockWebSocket.instances[0]!
 
     expect(socket).toBeDefined()
-    ws.send({ type: 'message', text: 'hello', session_id: 'session-1' })
+    ws.send({ type: 'message', stream_id: 'stream-1', text: 'hello', session_id: 'session-1' })
     expect(socket.sent).toEqual([])
 
     socket.open()
@@ -67,8 +69,22 @@ describe('useChat.ws', () => {
     expect(socket.sent).toHaveLength(1)
     expect(JSON.parse(socket.sent[0]!)).toEqual({
       type: 'message',
+      stream_id: 'stream-1',
       text: 'hello',
       session_id: 'session-1',
+    })
+  })
+
+  it('sends targeted abort messages', () => {
+    const ws = connectWebSocket('bot-1', vi.fn())
+    const socket = MockWebSocket.instances[0]!
+    socket.open()
+
+    ws.abort('stream-1')
+
+    expect(JSON.parse(socket.sent[0]!)).toEqual({
+      type: 'abort',
+      stream_id: 'stream-1',
     })
   })
 

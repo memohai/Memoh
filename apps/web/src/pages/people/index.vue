@@ -1,0 +1,683 @@
+<template>
+  <section class="max-w-7xl mx-auto px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12">
+    <div class="space-y-6">
+      <header class="flex flex-col gap-4 border-b border-border/50 pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <h1 class="text-lg font-semibold">
+            {{ t('people.title') }}
+          </h1>
+          <p class="mt-1 text-xs text-muted-foreground">
+            {{ t('people.subtitle') }}
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            :title="t('common.refresh')"
+            :aria-label="t('common.refresh')"
+            :disabled="loading"
+            @click="loadUsers"
+          >
+            <RefreshCw
+              class="size-4"
+              :class="loading ? 'animate-spin' : ''"
+            />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            class="gap-2"
+            @click="openCreateDialog"
+          >
+            <UserPlus class="size-4" />
+            {{ t('people.newMember') }}
+          </Button>
+        </div>
+      </header>
+
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div class="rounded-md border bg-background p-4">
+          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+            {{ t('people.totalMembers') }}
+          </p>
+          <p class="mt-2 text-2xl font-semibold tabular-nums">
+            {{ users.length }}
+          </p>
+        </div>
+        <div class="rounded-md border bg-background p-4">
+          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+            {{ t('people.activeMembers') }}
+          </p>
+          <p class="mt-2 text-2xl font-semibold tabular-nums">
+            {{ activeCount }}
+          </p>
+        </div>
+        <div class="rounded-md border bg-background p-4">
+          <p class="text-[11px] font-medium uppercase tracking-normal text-muted-foreground">
+            {{ t('people.admins') }}
+          </p>
+          <p class="mt-2 text-2xl font-semibold tabular-nums">
+            {{ adminCount }}
+          </p>
+        </div>
+      </div>
+
+      <Alert
+        v-if="loadError"
+        variant="destructive"
+      >
+        <AlertTitle>{{ t('people.loadFailed') }}</AlertTitle>
+        <AlertDescription>{{ loadError }}</AlertDescription>
+      </Alert>
+
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle class="text-sm">
+              {{ t('people.members') }}
+            </CardTitle>
+            <CardDescription class="text-xs">
+              {{ t('people.memberCount', { count: users.length }) }}
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div
+            v-if="loading && users.length === 0"
+            class="space-y-2"
+          >
+            <Skeleton
+              v-for="index in 5"
+              :key="index"
+              class="h-12 w-full"
+            />
+          </div>
+
+          <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="min-w-64">
+                  {{ t('people.member') }}
+                </TableHead>
+                <TableHead>{{ t('people.role') }}</TableHead>
+                <TableHead>{{ t('common.status') }}</TableHead>
+                <TableHead>{{ t('people.lastLogin') }}</TableHead>
+                <TableHead class="w-32 text-right">
+                  {{ t('common.actions') }}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-if="users.length === 0">
+                <TableCell
+                  colspan="5"
+                  class="h-28 text-center text-muted-foreground"
+                >
+                  {{ t('people.empty') }}
+                </TableCell>
+              </TableRow>
+              <TableRow
+                v-for="user in users"
+                :key="user.id"
+              >
+                <TableCell class="min-w-64">
+                  <div class="flex items-center gap-3">
+                    <Avatar class="size-9 shrink-0">
+                      <AvatarImage
+                        v-if="user.avatar_url"
+                        :src="user.avatar_url"
+                        :alt="memberName(user)"
+                      />
+                      <AvatarFallback>{{ memberInitials(user) }}</AvatarFallback>
+                    </Avatar>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
+                        <p class="truncate text-xs font-medium">
+                          {{ memberName(user) }}
+                        </p>
+                        <Badge
+                          v-if="isSelf(user)"
+                          variant="outline"
+                          size="sm"
+                        >
+                          {{ t('people.you') }}
+                        </Badge>
+                      </div>
+                      <p class="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        @{{ user.username }}
+                        <span v-if="user.email"> · {{ user.email }}</span>
+                      </p>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    :variant="normalizeRole(user.role) === 'admin' ? 'secondary' : 'outline'"
+                    size="sm"
+                  >
+                    {{ roleLabel(user.role) }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2">
+                    <Switch
+                      :model-value="!!user.is_active"
+                      :disabled="isSelf(user) || isUserPending(user)"
+                      :aria-label="t('people.toggleStatus', { name: memberName(user) })"
+                      @update:model-value="(value) => updateUserStatus(user, !!value)"
+                    />
+                    <span class="text-[11px] text-muted-foreground">
+                      {{ user.is_active ? t('common.active') : t('common.inactive') }}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell class="text-muted-foreground">
+                  {{ formatMemberDate(user.last_login_at, t('people.never')) }}
+                </TableCell>
+                <TableCell>
+                  <div class="flex justify-end gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      :title="t('people.resetPassword')"
+                      :aria-label="t('people.resetPasswordFor', { name: memberName(user) })"
+                      :disabled="isUserPending(user)"
+                      @click="openResetDialog(user)"
+                    >
+                      <KeyRound class="size-4" />
+                    </Button>
+                    <ConfirmPopover
+                      :title="t('people.removeMember')"
+                      :message="t('people.removeConfirm', { name: memberName(user) })"
+                      :confirm-text="t('people.removeMember')"
+                      variant="destructive"
+                      :loading="isUserPending(user)"
+                      @confirm="removeMember(user)"
+                    >
+                      <template #trigger>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          :title="t('people.removeMember')"
+                          :aria-label="t('people.removeMemberFor', { name: memberName(user) })"
+                          :disabled="isSelf(user) || isUserPending(user)"
+                        >
+                          <Trash2 class="size-4" />
+                        </Button>
+                      </template>
+                    </ConfirmPopover>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+
+    <Dialog v-model:open="createDialogOpen">
+      <DialogContent class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{{ t('people.newMember') }}</DialogTitle>
+          <DialogDescription>{{ t('people.newMemberDescription') }}</DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4">
+          <div class="grid gap-2">
+            <Label for="people-create-username">{{ t('auth.username') }}</Label>
+            <Input
+              id="people-create-username"
+              v-model="createForm.username"
+              autocomplete="off"
+              :placeholder="t('people.usernamePlaceholder')"
+            />
+          </div>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
+              <Label for="people-create-display-name">{{ t('settings.displayName') }}</Label>
+              <Input
+                id="people-create-display-name"
+                v-model="createForm.displayName"
+                autocomplete="off"
+                :placeholder="t('people.displayNamePlaceholder')"
+              />
+            </div>
+            <div class="grid gap-2">
+              <Label for="people-create-email">{{ t('people.email') }}</Label>
+              <Input
+                id="people-create-email"
+                v-model="createForm.email"
+                type="email"
+                autocomplete="off"
+                :placeholder="t('people.emailPlaceholder')"
+              />
+            </div>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
+              <Label for="people-create-role">{{ t('people.role') }}</Label>
+              <Select v-model="createForm.role">
+                <SelectTrigger id="people-create-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="member">
+                    {{ t('people.roles.member') }}
+                  </SelectItem>
+                  <SelectItem value="admin">
+                    {{ t('people.roles.admin') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <Label>{{ t('people.activeOnCreate') }}</Label>
+                <p class="mt-1 text-[11px] text-muted-foreground">
+                  {{ t('people.activeOnCreateHint') }}
+                </p>
+              </div>
+              <Switch v-model="createForm.isActive" />
+            </div>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
+              <Label for="people-create-password">{{ t('auth.password') }}</Label>
+              <Input
+                id="people-create-password"
+                v-model="createForm.password"
+                type="password"
+                autocomplete="new-password"
+              />
+            </div>
+            <div class="grid gap-2">
+              <Label for="people-create-confirm-password">{{ t('settings.confirmPassword') }}</Label>
+              <Input
+                id="people-create-confirm-password"
+                v-model="createForm.confirmPassword"
+                type="password"
+                autocomplete="new-password"
+              />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="creating"
+            @click="createDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            type="button"
+            :disabled="creating"
+            @click="createUser"
+          >
+            <Spinner
+              v-if="creating"
+              class="size-4"
+            />
+            {{ t('common.create') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="resetDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ t('people.resetPassword') }}</DialogTitle>
+          <DialogDescription>
+            {{ t('people.resetPasswordDescription', { name: resetTargetName }) }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4">
+          <div class="grid gap-2">
+            <Label for="people-reset-password">{{ t('settings.newPassword') }}</Label>
+            <Input
+              id="people-reset-password"
+              v-model="resetForm.password"
+              type="password"
+              autocomplete="new-password"
+            />
+          </div>
+          <div class="grid gap-2">
+            <Label for="people-reset-confirm-password">{{ t('settings.confirmPassword') }}</Label>
+            <Input
+              id="people-reset-confirm-password"
+              v-model="resetForm.confirmPassword"
+              type="password"
+              autocomplete="new-password"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="resettingPassword"
+            @click="resetDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            type="button"
+            :disabled="resettingPassword"
+            @click="resetPassword"
+          >
+            <Spinner
+              v-if="resettingPassword"
+              class="size-4"
+            />
+            {{ t('people.resetPassword') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import { KeyRound, RefreshCw, Trash2, UserPlus } from 'lucide-vue-next'
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Skeleton,
+  Spinner,
+  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@memohai/ui'
+import ConfirmPopover from '@/components/confirm-popover/index.vue'
+import { useUserStore } from '@/store/user'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { formatDateTime } from '@/utils/date-time'
+import {
+  deleteUsersById,
+  getUsers,
+  postUsers,
+  putUsersById,
+  putUsersByIdPassword,
+} from '@memohai/sdk'
+import type {
+  AccountsAccount,
+  AccountsCreateAccountRequest,
+  AccountsResetPasswordRequest,
+  AccountsUpdateAccountRequest,
+} from '@memohai/sdk'
+
+const { t } = useI18n()
+const userStore = useUserStore()
+
+type MemberRole = 'admin' | 'member'
+type UserAccount = AccountsAccount
+
+const users = ref<UserAccount[]>([])
+const loading = ref(false)
+const creating = ref(false)
+const resettingPassword = ref(false)
+const loadError = ref('')
+const pendingUserIds = ref<Set<string>>(new Set())
+
+const createDialogOpen = ref(false)
+const resetDialogOpen = ref(false)
+const resetTarget = ref<UserAccount | null>(null)
+
+const createForm = reactive({
+  username: '',
+  displayName: '',
+  email: '',
+  role: 'member' as MemberRole,
+  isActive: true,
+  password: '',
+  confirmPassword: '',
+})
+
+const resetForm = reactive({
+  password: '',
+  confirmPassword: '',
+})
+
+const activeCount = computed(() => users.value.filter(user => !!user.is_active).length)
+const adminCount = computed(() => users.value.filter(user => normalizeRole(user.role) === 'admin').length)
+const currentUserId = computed(() => userStore.userInfo.id)
+const resetTargetName = computed(() => resetTarget.value ? memberName(resetTarget.value) : '')
+
+onMounted(() => {
+  void loadUsers()
+})
+
+async function loadUsers() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const { data } = await getUsers({ throwOnError: true })
+    users.value = data.items ?? []
+  } catch (error) {
+    loadError.value = resolveApiErrorMessage(error, t('people.loadFailed'), { prefixFallback: true })
+    toast.error(loadError.value)
+  } finally {
+    loading.value = false
+  }
+}
+
+function normalizeRole(role: string | undefined): MemberRole {
+  return role === 'admin' ? 'admin' : 'member'
+}
+
+function roleLabel(role: string | undefined): string {
+  return t(`people.roles.${normalizeRole(role)}`)
+}
+
+function memberName(user: UserAccount): string {
+  return (user.display_name || user.username || user.id || '').trim()
+}
+
+function memberInitials(user: UserAccount): string {
+  const value = memberName(user) || 'U'
+  return value.slice(0, 2).toUpperCase()
+}
+
+function isSelf(user: UserAccount): boolean {
+  return !!user.id && user.id === currentUserId.value
+}
+
+function isUserPending(user: UserAccount): boolean {
+  return !!user.id && pendingUserIds.value.has(user.id)
+}
+
+function setUserPending(userID: string, pending: boolean) {
+  const next = new Set(pendingUserIds.value)
+  if (pending) {
+    next.add(userID)
+  } else {
+    next.delete(userID)
+  }
+  pendingUserIds.value = next
+}
+
+function formatMemberDate(value: string | undefined, fallback: string): string {
+  return formatDateTime(value, { fallback })
+}
+
+function resetCreateForm() {
+  createForm.username = ''
+  createForm.displayName = ''
+  createForm.email = ''
+  createForm.role = 'member'
+  createForm.isActive = true
+  createForm.password = ''
+  createForm.confirmPassword = ''
+}
+
+function openCreateDialog() {
+  resetCreateForm()
+  createDialogOpen.value = true
+}
+
+function openResetDialog(user: UserAccount) {
+  resetTarget.value = user
+  resetForm.password = ''
+  resetForm.confirmPassword = ''
+  resetDialogOpen.value = true
+}
+
+function validatePasswordPair(password: string, confirmPassword: string): boolean {
+  if (!password.trim()) {
+    toast.error(t('settings.passwordRequired'))
+    return false
+  }
+  if (password !== confirmPassword) {
+    toast.error(t('settings.passwordNotMatch'))
+    return false
+  }
+  return true
+}
+
+async function createUser() {
+  const username = createForm.username.trim()
+  const password = createForm.password.trim()
+  const confirmPassword = createForm.confirmPassword.trim()
+  if (!username) {
+    toast.error(t('people.usernameRequired'))
+    return
+  }
+  if (!validatePasswordPair(password, confirmPassword)) return
+
+  creating.value = true
+  try {
+    const body: AccountsCreateAccountRequest = {
+      username,
+      password,
+      display_name: createForm.displayName.trim() || undefined,
+      email: createForm.email.trim() || undefined,
+      role: createForm.role,
+      is_active: createForm.isActive,
+    }
+    await postUsers({ body, throwOnError: true })
+    toast.success(t('people.createSuccess'))
+    createDialogOpen.value = false
+    resetCreateForm()
+    await loadUsers()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.createFailed'), { prefixFallback: true }))
+  } finally {
+    creating.value = false
+  }
+}
+
+async function updateUserStatus(user: UserAccount, isActive: boolean) {
+  const userID = user.id
+  if (!userID || isSelf(user)) return
+
+  setUserPending(userID, true)
+  try {
+    const body: AccountsUpdateAccountRequest = {
+      role: normalizeRole(user.role),
+      display_name: user.display_name || user.username || '',
+      avatar_url: user.avatar_url || '',
+      is_active: isActive,
+    }
+    await putUsersById({
+      path: { id: userID },
+      body,
+      throwOnError: true,
+    })
+    toast.success(isActive ? t('people.enableSuccess') : t('people.disableSuccess'))
+    await loadUsers()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.statusUpdateFailed'), { prefixFallback: true }))
+    await loadUsers()
+  } finally {
+    setUserPending(userID, false)
+  }
+}
+
+async function resetPassword() {
+  const target = resetTarget.value
+  if (!target?.id) return
+  const password = resetForm.password.trim()
+  const confirmPassword = resetForm.confirmPassword.trim()
+  if (!validatePasswordPair(password, confirmPassword)) return
+
+  resettingPassword.value = true
+  setUserPending(target.id, true)
+  try {
+    const body: AccountsResetPasswordRequest = {
+      new_password: password,
+    }
+    await putUsersByIdPassword({
+      path: { id: target.id },
+      body,
+      throwOnError: true,
+    })
+    toast.success(t('people.resetPasswordSuccess'))
+    resetDialogOpen.value = false
+    resetTarget.value = null
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.resetPasswordFailed'), { prefixFallback: true }))
+  } finally {
+    setUserPending(target.id, false)
+    resettingPassword.value = false
+  }
+}
+
+async function removeMember(user: UserAccount) {
+  const userID = user.id
+  if (!userID || isSelf(user)) return
+
+  setUserPending(userID, true)
+  try {
+    await deleteUsersById({
+      path: { id: userID },
+      throwOnError: true,
+    })
+    toast.success(t('people.removeSuccess'))
+    await loadUsers()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('people.removeFailed'), { prefixFallback: true }))
+  } finally {
+    setUserPending(userID, false)
+  }
+}
+</script>

@@ -45,6 +45,14 @@ declare module '@memohai/web/store/settings' {
   export function useSettingsStore(): unknown
 }
 
+declare module '@memohai/web/store/user' {
+  export function useUserStore(): {
+    userInfo: {
+      role: string
+    }
+  }
+}
+
 declare module '@memohai/web/store/capabilities' {
   export function useCapabilitiesStore(): {
     localWorkspaceEnabled: boolean

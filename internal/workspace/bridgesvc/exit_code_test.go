@@ -25,7 +25,7 @@ func TestResolveExitCodeFromCommands(t *testing.T) {
 	}{
 		{"clean_exit", "true", 0},
 		{"explicit_exit_42", "exit 42", 42},
-		{"sh_handles_sigterm", "echo hi; kill -SIGTERM $$", 1}, // shell wraps it
+		{"shell_sigterm", "echo hi; kill -TERM $$", 128 + 15},
 		{"direct_sigkill", "exec sh -c 'echo hi; kill -KILL $$'", 128 + 9},
 		{"direct_sigterm", "exec sh -c 'kill -TERM $$'", 128 + 15},
 		{"direct_sigint", "exec sh -c 'kill -INT $$'", 128 + 2},

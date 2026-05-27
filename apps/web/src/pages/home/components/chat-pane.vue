@@ -275,6 +275,7 @@ import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-sele
 import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment } from '@/composables/api/useChat'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 
 const props = withDefaults(defineProps<{
   tabId?: string
@@ -412,6 +413,12 @@ const {
 } = useMediaGallery(messages)
 
 const inputText = ref('')
+const stopAuthSessionCleanup = onAuthSessionCleared(() => {
+  inputDrafts.value = {}
+  inputText.value = ''
+  pendingFiles.value = []
+  composerError.value = ''
+})
 const inputDraftKey = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
   const tabId = props.tabId.trim()
@@ -479,6 +486,7 @@ const { height } = useElementBounding(descEl)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
 
 onBeforeUnmount(() => {
+  stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
 })
 

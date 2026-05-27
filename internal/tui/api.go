@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/conversation"
@@ -181,6 +182,7 @@ func (c *Client) StreamChat(ctx context.Context, req ChatRequest, onEvent func(C
 
 	payload := map[string]string{
 		"type":       "message",
+		"stream_id":  uuid.NewString(),
 		"text":       req.Text,
 		"session_id": req.SessionID,
 	}

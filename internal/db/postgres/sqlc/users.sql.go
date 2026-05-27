@@ -238,6 +238,27 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const removeMember = `-- name: RemoveMember :one
+UPDATE users
+SET username = NULL,
+    email = NULL,
+    password_hash = NULL,
+    display_name = NULL,
+    avatar_url = NULL,
+    data_root = NULL,
+    is_active = FALSE,
+    updated_at = now()
+WHERE id = $1
+RETURNING id
+`
+
+func (q *Queries) RemoveMember(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, removeMember, userID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const searchAccounts = `-- name: SearchAccounts :many
 SELECT id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 FROM users

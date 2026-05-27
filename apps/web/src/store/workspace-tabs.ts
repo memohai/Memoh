@@ -3,7 +3,9 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useStorage } from '@vueuse/core'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 import {
+  clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
   deleteTerminalSnapshot,
   terminalCacheKey,
@@ -256,6 +258,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function openDisplay() {
     const state = ensureBot(currentBotId.value)
     if (!state) return
+    const existing = state.tabs.find((tab) => tab.type === 'display')
+    if (existing) {
+      commit({ ...state, activeId: existing.id })
+      return
+    }
     const nextCounter = state.displayCounter + 1
     const id = displayTabId(nextCounter)
     const tab: WorkspaceTab = {
@@ -320,7 +327,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function isTabBusy(tab: WorkspaceTab, dirty: Record<string, boolean>): boolean {
     switch (tab.type) {
       case 'chat':
-        return chatStore.streamingSessionId === tab.sessionId
+        return chatStore.isSessionStreaming(tab.sessionId)
       case 'file':
         return dirty[tab.id] === true
       case 'terminal':
@@ -386,6 +393,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     void nextTick(() => clearTerminalSnapshotsForBot(bid))
   }
 
+  function resetAll() {
+    storage.value = {}
+    void nextTick(() => clearTerminalSnapshots())
+  }
+
+  onAuthSessionCleared(() => resetAll())
+
   // When the active tab is a chat tab, keep chat-store selection in sync.
   watch(activeTab, (tab) => {
     if (!tab) return
@@ -450,5 +464,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     updateChatTitle,
     setActive,
     resetBot,
+    resetAll,
   }
 })

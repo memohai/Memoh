@@ -145,6 +145,15 @@ func (s *Store) UpdatePassword(ctx context.Context, input dbstore.UpdateAccountP
 	return mapQueryErr(err)
 }
 
+func (s *Store) RemoveMember(ctx context.Context, userID string) error {
+	id, err := db.ParseUUID(userID)
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.RemoveMember(ctx, id)
+	return mapQueryErr(err)
+}
+
 func mapQueryErr(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return db.ErrNotFound

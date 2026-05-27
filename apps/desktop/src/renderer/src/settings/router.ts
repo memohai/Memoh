@@ -1,6 +1,7 @@
 import { h } from 'vue'
 import { createRouter, createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH, type SettingsRouteSpec } from '../shared/settings-routes'
+import { useUserStore } from '@memohai/web/store/user'
 
 // Settings-window router. Mirrors the path layout under `/settings/*` from
 // @memohai/web's main router so the reused @memohai/web `SettingsSidebar`
@@ -45,6 +46,15 @@ router.onError((error: Error) => {
     return
   }
   throw error
+})
+
+router.beforeEach((to) => {
+  if (!to.meta.adminOnly) return true
+
+  const userStore = useUserStore()
+  return String(userStore.userInfo.role).toLowerCase() === 'admin'
+    ? true
+    : SETTINGS_DEFAULT_PATH
 })
 
 export default router

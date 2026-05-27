@@ -224,19 +224,27 @@ export type UITurn = UIUserTurn | UIAssistantTurn | UISystemTurn
 
 export interface UIStreamStartEvent {
   type: 'start'
+  stream_id?: string
+  session_id?: string
 }
 
 export interface UIStreamMessageEvent {
   type: 'message'
+  stream_id?: string
+  session_id?: string
   data: UIMessage
 }
 
 export interface UIStreamEndEvent {
   type: 'end'
+  stream_id?: string
+  session_id?: string
 }
 
 export interface UIStreamErrorEvent {
   type: 'error'
+  stream_id?: string
+  session_id?: string
   message: string
 }
 

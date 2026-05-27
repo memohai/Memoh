@@ -10318,6 +10318,46 @@ export type PutUsersMePasswordResponses = {
     204: unknown;
 };
 
+export type DeleteUsersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * User ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/users/{id}';
+};
+
+export type DeleteUsersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteUsersByIdError = DeleteUsersByIdErrors[keyof DeleteUsersByIdErrors];
+
+export type DeleteUsersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type GetUsersByIdData = {
     body?: never;
     path: {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { onAuthSessionCleared } from '@/lib/auth-session'
 
 export interface DisplaySnapshot {
   botId: string
@@ -38,11 +39,18 @@ export const useDisplaySnapshotsStore = defineStore('display-snapshots', () => {
     return snapshots.value[key(botId, id)]
   }
 
+  function clear() {
+    snapshots.value = {}
+  }
+
+  onAuthSessionCleared(() => clear())
+
   const items = computed(() => Object.values(snapshots.value))
 
   return {
     items,
     upsert,
     find,
+    clear,
   }
 })

@@ -6,6 +6,7 @@ import {
 import { h } from 'vue'
 import { RouterView } from 'vue-router'
 import { i18nRef } from './i18n'
+import { useUserStore } from '@/store/user'
 
 const routes = [
   {
@@ -168,6 +169,15 @@ const routes = [
         },
       },
       {
+        name: 'people',
+        path: 'people',
+        component: () => import('@/pages/people/index.vue'),
+        meta: {
+          breadcrumb: i18nRef('sidebar.people'),
+          adminOnly: true,
+        },
+      },
+      {
         name: 'appearance',
         path: 'appearance',
         component: () => import('@/pages/appearance/index.vue'),
@@ -249,7 +259,16 @@ router.beforeEach((to) => {
   if (to.path.startsWith('/oauth/')) {
     return true
   }
-  return token ? true : { name: 'Login' }
+  if (!token) {
+    return { name: 'Login' }
+  }
+  if (to.meta.adminOnly) {
+    const userStore = useUserStore()
+    if (String(userStore.userInfo.role).toLowerCase() !== 'admin') {
+      return { name: 'bots' }
+    }
+  }
+  return true
 })
 
 export default router

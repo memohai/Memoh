@@ -44,6 +44,7 @@ const (
 	h264FmtpLine         = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
 	displayProbePeriod   = 5 * time.Second
 	socketProbeTimeout   = 300 * time.Millisecond
+	stalePeerTTL         = 2 * time.Minute
 	screenshotTimeout    = 15 * time.Second
 	screenshotWidth      = 1280
 	screenshotQuality    = 82
@@ -135,6 +136,13 @@ type Service struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	starting map[string]*sessionStart
+}
+
+type sessionStart struct {
+	done chan struct{}
+	sess *session
+	err  error
 }
 
 func NewService(logger *slog.Logger, workspace Workspace) *Service {
@@ -145,6 +153,7 @@ func NewService(logger *slog.Logger, workspace Workspace) *Service {
 		logger:    logger.With(slog.String("component", "display")),
 		workspace: workspace,
 		sessions:  make(map[string]*session),
+		starting:  make(map[string]*sessionStart),
 	}
 }
 
@@ -162,8 +171,7 @@ func (s *Service) displayReachable(ctx context.Context, botID string) bool {
 	if err != nil {
 		return false
 	}
-	_ = conn.Close()
-	return true
+	return probeRFBNoneSecurity(conn) == nil
 }
 
 func (s *Service) dialRFB(ctx context.Context, botID string) (net.Conn, error) {
@@ -263,6 +271,7 @@ func (s *Service) ListSessions(botID string) []SessionInfo {
 	if sess == nil || sess.closed() {
 		return nil
 	}
+	sess.closeStalePeers(time.Now())
 	return sess.peerInfos()
 }
 
@@ -396,11 +405,32 @@ func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (
 		}
 		return sess, nil
 	}
+	if start := s.starting[botID]; start != nil {
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-start.done:
+		}
+		if start.err != nil {
+			return nil, start.err
+		}
+		if start.sess == nil || start.sess.closed() {
+			return nil, fmt.Errorf("%w: display pipeline is not running", ErrEncoderUnavailable)
+		}
+		if start.sess.codec != codec {
+			return nil, fmt.Errorf("%w: another viewer is already using %s", ErrCodecUnsupported, start.sess.codec)
+		}
+		return start.sess, nil
+	}
+	start := &sessionStart{done: make(chan struct{})}
+	s.starting[botID] = start
 	s.mu.Unlock()
 
 	sess := newSession(s, botID, gstLaunch, codec)
 	if err := sess.start(ctx); err != nil {
 		sess.stop()
+		s.finishSessionStart(botID, start, nil, err)
 		return nil, err
 	}
 
@@ -409,15 +439,30 @@ func (s *Service) session(ctx context.Context, botID, gstLaunch, codec string) (
 	if current == nil || current.closed() {
 		s.sessions[botID] = sess
 		s.mu.Unlock()
+		s.finishSessionStart(botID, start, sess, nil)
 		return sess, nil
 	}
 	s.mu.Unlock()
 
 	sess.stop()
 	if current.codec != codec {
-		return nil, fmt.Errorf("%w: another viewer is already using %s", ErrCodecUnsupported, current.codec)
+		err := fmt.Errorf("%w: another viewer is already using %s", ErrCodecUnsupported, current.codec)
+		s.finishSessionStart(botID, start, nil, err)
+		return nil, err
 	}
+	s.finishSessionStart(botID, start, current, nil)
 	return current, nil
+}
+
+func (s *Service) finishSessionStart(botID string, start *sessionStart, sess *session, err error) {
+	start.sess = sess
+	start.err = err
+	s.mu.Lock()
+	if s.starting[botID] == start {
+		delete(s.starting, botID)
+	}
+	s.mu.Unlock()
+	close(start.done)
 }
 
 func (s *Service) removeSession(botID string, target *session) {
@@ -456,6 +501,7 @@ type peerSession struct {
 	id        string
 	codec     string
 	createdAt time.Time
+	trackID   string
 
 	mu    sync.RWMutex
 	state string
@@ -559,11 +605,17 @@ func (s *session) start(ctx context.Context) error {
 
 	go s.acceptProxy()
 	go s.forwardRTP()
-	go s.waitGStreamer()
+	gstreamerDone := make(chan error, 1)
+	go s.waitGStreamer(gstreamerDone)
 
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
+	case err := <-gstreamerDone:
+		if err != nil {
+			return fmt.Errorf("%w: display pipeline exited during startup: %w", ErrEncoderUnavailable, err)
+		}
+		return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
 	case <-time.After(150 * time.Millisecond):
 		if s.closed() {
 			return fmt.Errorf("%w: display pipeline exited during startup", ErrEncoderUnavailable)
@@ -580,6 +632,8 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
+	s.closeStalePeers(time.Now())
+	previousPeer := s.peer(sessionID)
 
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := registerVideoCodec(mediaEngine, s.codec); err != nil {
@@ -630,19 +684,20 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		})
 	})
 
-	trackID := sessionID
+	trackID := uuid.NewString()
 	s.addTrack(trackID, track)
 	peer := &peerSession{
 		id:        sessionID,
 		codec:     s.codec,
 		createdAt: time.Now(),
 		state:     "new",
+		trackID:   trackID,
 	}
 
 	var cleanupOnce sync.Once
 	cleanup := func(closePeer bool) {
 		cleanupOnce.Do(func() {
-			s.removePeer(sessionID)
+			s.removePeer(peer)
 			s.removeTrack(trackID)
 			if closePeer {
 				_ = pc.Close()
@@ -651,6 +706,9 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	}
 	peer.close = func() { cleanup(true) }
 	s.addPeer(peer)
+	if previousPeer != nil {
+		previousPeer.closeNow()
+	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		peer.setState(state.String())
@@ -762,10 +820,21 @@ func (s *session) addPeer(peer *peerSession) {
 	s.peersMu.Unlock()
 }
 
-func (s *session) removePeer(id string) {
+func (s *session) removePeer(peer *peerSession) {
+	if peer == nil {
+		return
+	}
 	s.peersMu.Lock()
-	delete(s.peers, id)
+	if current := s.peers[peer.id]; current == peer {
+		delete(s.peers, peer.id)
+	}
 	s.peersMu.Unlock()
+}
+
+func (s *session) peer(id string) *peerSession {
+	s.peersMu.RLock()
+	defer s.peersMu.RUnlock()
+	return s.peers[strings.TrimSpace(id)]
 }
 
 func (s *session) peerInfos() []SessionInfo {
@@ -793,6 +862,20 @@ func (s *session) closePeer(id string) bool {
 	return true
 }
 
+func (s *session) closeStalePeers(now time.Time) {
+	s.peersMu.RLock()
+	stale := make([]*peerSession, 0)
+	for _, peer := range s.peers {
+		if peer.stale(now) {
+			stale = append(stale, peer)
+		}
+	}
+	s.peersMu.RUnlock()
+	for _, peer := range stale {
+		peer.closeNow()
+	}
+}
+
 func (p *peerSession) setState(state string) {
 	p.mu.Lock()
 	p.state = state
@@ -817,6 +900,23 @@ func (p *peerSession) closeNow() {
 			p.close()
 		}
 	})
+}
+
+func (p *peerSession) stale(now time.Time) bool {
+	p.mu.RLock()
+	state := p.state
+	p.mu.RUnlock()
+	switch state {
+	case webrtc.PeerConnectionStateClosed.String(),
+		webrtc.PeerConnectionStateDisconnected.String(),
+		webrtc.PeerConnectionStateFailed.String():
+		return true
+	case webrtc.PeerConnectionStateNew.String(),
+		webrtc.PeerConnectionStateConnecting.String():
+		return now.Sub(p.createdAt) > stalePeerTTL
+	default:
+		return false
+	}
 }
 
 func (s *session) stop() {
@@ -924,8 +1024,14 @@ func (s *session) forwardRTP() {
 	}
 }
 
-func (s *session) waitGStreamer() {
+func (s *session) waitGStreamer(done chan<- error) {
 	err := s.cmd.Wait()
+	if done != nil {
+		select {
+		case done <- err:
+		default:
+		}
+	}
 	if s.ctx.Err() == nil {
 		s.service.logger.Warn("display gstreamer pipeline exited", slog.String("bot_id", s.botID), slog.Any("error", err))
 		s.stop()
@@ -1339,62 +1445,74 @@ func (c *rfbInputClient) Key(keysym uint32, down bool) error {
 }
 
 func (c *rfbInputClient) handshake() error {
-	if err := c.conn.SetDeadline(time.Now().Add(displayProbePeriod)); err != nil {
+	return handshakeRFBNoneSecurity(c.conn, true)
+}
+
+func probeRFBNoneSecurity(conn net.Conn) error {
+	defer func() { _ = conn.Close() }()
+	return handshakeRFBNoneSecurity(conn, true)
+}
+
+func handshakeRFBNoneSecurity(conn net.Conn, clientInit bool) error {
+	if err := conn.SetDeadline(time.Now().Add(displayProbePeriod)); err != nil {
 		return err
 	}
-	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
 	version := make([]byte, 12)
-	if _, err := io.ReadFull(c.conn, version); err != nil {
+	if _, err := io.ReadFull(conn, version); err != nil {
 		return fmt.Errorf("read RFB version: %w", err)
 	}
-	if _, err := c.conn.Write(version); err != nil {
+	if _, err := conn.Write(version); err != nil {
 		return fmt.Errorf("write RFB version: %w", err)
 	}
 
 	count := []byte{0}
-	if _, err := io.ReadFull(c.conn, count); err != nil {
+	if _, err := io.ReadFull(conn, count); err != nil {
 		return fmt.Errorf("read RFB security types: %w", err)
 	}
 	if count[0] == 0 {
-		reason, err := readRFBString(c.conn)
+		reason, err := readRFBString(conn)
 		if err != nil {
 			return err
 		}
 		return fmt.Errorf("RFB security negotiation failed: %s", reason)
 	}
 	types := make([]byte, int(count[0]))
-	if _, err := io.ReadFull(c.conn, types); err != nil {
+	if _, err := io.ReadFull(conn, types); err != nil {
 		return fmt.Errorf("read RFB security type list: %w", err)
 	}
 	if !containsByte(types, 1) {
 		return errors.New("RFB server does not allow None security")
 	}
-	if _, err := c.conn.Write([]byte{1}); err != nil {
+	if _, err := conn.Write([]byte{1}); err != nil {
 		return fmt.Errorf("write RFB security type: %w", err)
 	}
 	result := make([]byte, 4)
-	if _, err := io.ReadFull(c.conn, result); err != nil {
+	if _, err := io.ReadFull(conn, result); err != nil {
 		return fmt.Errorf("read RFB security result: %w", err)
 	}
 	if binary.BigEndian.Uint32(result) != 0 {
-		reason, err := readRFBString(c.conn)
+		reason, err := readRFBString(conn)
 		if err != nil {
 			return err
 		}
 		return fmt.Errorf("RFB security rejected: %s", reason)
 	}
+	if !clientInit {
+		return nil
+	}
 
-	if _, err := c.conn.Write([]byte{1}); err != nil {
+	if _, err := conn.Write([]byte{1}); err != nil {
 		return fmt.Errorf("write RFB client init: %w", err)
 	}
 	header := make([]byte, 24)
-	if _, err := io.ReadFull(c.conn, header); err != nil {
+	if _, err := io.ReadFull(conn, header); err != nil {
 		return fmt.Errorf("read RFB server init: %w", err)
 	}
 	nameLen := binary.BigEndian.Uint32(header[20:24])
 	if nameLen > 0 {
-		if _, err := io.CopyN(io.Discard, c.conn, int64(nameLen)); err != nil {
+		if _, err := io.CopyN(io.Discard, conn, int64(nameLen)); err != nil {
 			return fmt.Errorf("read RFB server name: %w", err)
 		}
 	}

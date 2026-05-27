@@ -135,6 +135,67 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 	}
 }
 
+func TestWSStreamRegistry_AbortsOnlyTargetStream(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	abortA := make(chan struct{}, 1)
+	abortB := make(chan struct{}, 1)
+
+	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: abortA}); err != nil {
+		t.Fatalf("register stream-a: %v", err)
+	}
+	if err := registry.register(&activeWSStream{streamID: "stream-b", cancel: cancelB, abortCh: abortB}); err != nil {
+		t.Fatalf("register stream-b: %v", err)
+	}
+
+	if !registry.abort("stream-a") {
+		t.Fatal("expected stream-a abort to succeed")
+	}
+
+	select {
+	case <-abortA:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stream-a abort signal")
+	}
+	select {
+	case <-ctxA.Done():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stream-a context cancellation")
+	}
+	select {
+	case <-abortB:
+		t.Fatal("stream-b received abort signal")
+	default:
+	}
+	select {
+	case <-ctxB.Done():
+		t.Fatal("stream-b context was cancelled")
+	default:
+	}
+}
+
+func TestWSStreamRegistry_RejectsDuplicateStreamID(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	_, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	_, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+
+	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
+		t.Fatalf("register stream-a: %v", err)
+	}
+	if err := registry.register(&activeWSStream{streamID: "stream-a", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err == nil {
+		t.Fatal("expected duplicate stream id registration to fail")
+	}
+}
+
 func TestWSIngestAttachments_RewritesContainerPathToAssetRef(t *testing.T) {
 	t.Parallel()
 
