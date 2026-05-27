@@ -1,8 +1,6 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { putUsersMe } from '@memohai/sdk'
-import { detectLocale } from '@/utils/detect-locale'
-import { useSettingsStore } from '@/store/settings'
 
 export const LAST_STEP_INDEX = 6
 export const STEP_COUNT = 7
@@ -14,14 +12,6 @@ export function useOnboarding() {
 
   const isFirstStep = computed(() => currentStep.value === 0)
   const isLastStep = computed(() => currentStep.value === LAST_STEP_INDEX)
-
-  function detectAndApplyLocale() {
-    if (localStorage.getItem('language')) return
-    const detected = detectLocale()
-    if (detected !== 'en') {
-      useSettingsStore().setLanguage(detected)
-    }
-  }
 
   function nextStep() {
     if (currentStep.value < LAST_STEP_INDEX) {
@@ -73,6 +63,5 @@ export function useOnboarding() {
     goToStep,
     skipToEnd,
     complete,
-    detectAndApplyLocale,
   }
 }

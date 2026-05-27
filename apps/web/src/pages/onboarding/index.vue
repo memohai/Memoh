@@ -21,7 +21,6 @@ const {
   goToStep,
   skipToEnd,
   complete,
-  detectAndApplyLocale,
 } = useOnboarding()
 
 const stepComponents = [
@@ -43,7 +42,6 @@ function readStepFromQuery(): number | null {
 }
 
 onMounted(() => {
-  detectAndApplyLocale()
   const step = readStepFromQuery()
   if (step !== null) {
     goToStep(step)
