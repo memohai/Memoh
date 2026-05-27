@@ -5,7 +5,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
-import { getUsersMe } from '@memohai/sdk'
+import { checkOnboarding } from '@memohai/web/router-guards/onboarding'
 
 // Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
 // (e.g. via the chat sidebar's settings button or any reused @memohai/web
@@ -81,13 +81,6 @@ router.onError((error: Error) => {
   throw error
 })
 
-let onboardingCheckDone = false
-let onboardingCompleted = false
-
-function shouldForceOnboarding(): boolean {
-  return localStorage.getItem('memoh:dev:force-onboarding') === '1'
-}
-
 router.beforeEach(async (to: RouteLocationNormalized) => {
   // Settings lives in its own BrowserWindow. Any in-app navigation aimed at
   // the settings tree — whether via path (`router.push('/settings/bots')`)
@@ -133,24 +126,8 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
     return true
   }
 
-  // Dev override: force onboarding regardless of DB state
-  if (shouldForceOnboarding()) {
-    return { path: '/onboarding' }
-  }
-
-  // Check onboarding status once per session
-  if (!onboardingCheckDone) {
-    try {
-      const { data } = await getUsersMe({ throwOnError: true })
-      const meta = data.metadata as Record<string, unknown> | undefined
-      onboardingCompleted = meta?.onboarding_completed === true
-    } catch {
-      onboardingCompleted = true
-    }
-    onboardingCheckDone = true
-  }
-
-  if (!onboardingCompleted) {
+  const completed = await checkOnboarding()
+  if (!completed) {
     return { path: '/onboarding' }
   }
 

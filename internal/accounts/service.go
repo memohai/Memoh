@@ -395,7 +395,9 @@ func toAccount(row dbstore.AccountRecord) Account {
 	timezone := strings.TrimSpace(row.Timezone)
 	var metadata map[string]any
 	if row.Metadata != "" {
-		_ = json.Unmarshal([]byte(row.Metadata), &metadata)
+		if err := json.Unmarshal([]byte(row.Metadata), &metadata); err != nil {
+			slog.Warn("failed to unmarshal user metadata", "user_id", row.ID, "error", err)
+		}
 	}
 	return Account{
 		ID:          row.ID,
@@ -413,6 +415,9 @@ func toAccount(row dbstore.AccountRecord) Account {
 	}
 }
 
+// mergeMetadata shallow-merges incoming JSON keys into existing metadata.
+// Top-level keys in incoming replace those in existing; nested objects are
+// replaced wholesale, not deep-merged.
 func mergeMetadata(existing string, incoming json.RawMessage) string {
 	if len(incoming) == 0 {
 		if existing == "" {

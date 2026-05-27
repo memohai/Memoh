@@ -9,6 +9,10 @@
 // TS otherwise complains that the resolved file "is not a module".
 export {}
 
+declare module '@memohai/web/router-guards/onboarding' {
+  export function checkOnboarding(): Promise<boolean>
+}
+
 declare module '@memohai/web/router' {
   import type { Router } from 'vue-router'
   const router: Router

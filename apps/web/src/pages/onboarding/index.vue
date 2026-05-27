@@ -3,14 +3,10 @@ import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@memohai/ui'
-import { useOnboarding } from '@/composables/useOnboarding'
+import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
 
-import Step0Welcome from './steps/Step0Welcome.vue'
-import Step1Intro from './steps/Step1Intro.vue'
+import PlaceholderStep from './steps/PlaceholderStep.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
-import Step3Provider from './steps/Step3Provider.vue'
-import Step4BotCreate from './steps/Step4BotCreate.vue'
-import Step5IM from './steps/Step5IM.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
 const { t } = useI18n()
@@ -23,34 +19,42 @@ const {
   nextStep,
   prevStep,
   goToStep,
+  skipToEnd,
   complete,
   detectAndApplyLocale,
 } = useOnboarding()
 
 const stepComponents = [
-  Step0Welcome,
-  Step1Intro,
-  Step2Appearance,
-  Step3Provider,
-  Step4BotCreate,
-  Step5IM,
-  Step6Complete,
+  { component: PlaceholderStep, props: { heading: true, titleKey: 'onboarding.welcome.title', descKey: 'onboarding.welcome.description' } },
+  { component: PlaceholderStep, props: { titleKey: 'onboarding.intro.title', descKey: 'onboarding.intro.placeholder' } },
+  { component: Step2Appearance, props: {} },
+  { component: PlaceholderStep, props: { titleKey: 'onboarding.provider.title', descKey: 'onboarding.provider.placeholder' } },
+  { component: PlaceholderStep, props: { titleKey: 'onboarding.bot.title', descKey: 'onboarding.bot.placeholder' } },
+  { component: PlaceholderStep, props: { titleKey: 'onboarding.im.title', descKey: 'onboarding.im.placeholder' } },
+  { component: Step6Complete, props: {} },
 ]
+
+function readStepFromQuery(): number | null {
+  const raw = route.query.step
+  if (raw === undefined || raw === '') return null
+  const step = Number.parseInt(String(raw), 10)
+  if (!Number.isInteger(step) || step < 0 || step >= STEP_COUNT) return null
+  return step
+}
 
 onMounted(() => {
   detectAndApplyLocale()
-  const stepParam = route.query.step
-  if (stepParam !== undefined) {
-    const step = Number(stepParam)
-    if (!isNaN(step) && step >= 0 && step <= 6) {
-      goToStep(step)
-    }
+  const step = readStepFromQuery()
+  if (step !== null) {
+    goToStep(step)
   }
 })
 
 watch(currentStep, (step) => {
   if (route.query.step !== String(step)) {
-    window.history.replaceState(null, '', `?step=${step}`)
+    const params = new URLSearchParams(window.location.search)
+    params.set('step', String(step))
+    window.history.replaceState(null, '', `?${params.toString()}`)
   }
 })
 </script>
@@ -61,7 +65,7 @@ watch(currentStep, (step) => {
       <!-- Step indicator -->
       <div class="flex items-center justify-center gap-2 mb-8">
         <div
-          v-for="i in 7"
+          v-for="i in STEP_COUNT"
           :key="i"
           class="h-1.5 rounded-full transition-all duration-300"
           :class="i - 1 === currentStep
@@ -74,7 +78,7 @@ watch(currentStep, (step) => {
 
       <!-- Step content -->
       <div class="mb-8">
-        <component :is="stepComponents[currentStep]" />
+        <component :is="stepComponents[currentStep].component" v-bind="stepComponents[currentStep].props" />
       </div>
 
       <!-- Navigation -->
@@ -93,7 +97,7 @@ watch(currentStep, (step) => {
             v-if="!isLastStep"
             variant="ghost"
             class="text-muted-foreground"
-            @click="nextStep"
+            @click="skipToEnd"
           >
             {{ t('onboarding.skip') }}
           </Button>

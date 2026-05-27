@@ -9,7 +9,11 @@ export type Locale = 'en' | 'zh'
 function getInitialLocale(): Locale {
   const stored = localStorage.getItem('language')
   if (stored === 'en' || stored === 'zh') return stored
-  return detectLocale()
+  const detected = detectLocale()
+  // Write detected locale so that the settings store's useStorage picks it up
+  // instead of overwriting with its 'en' default.
+  localStorage.setItem('language', detected)
+  return detected
 }
 
 const i18n = createI18n<typeof en | typeof zh, Locale>({
