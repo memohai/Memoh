@@ -5,6 +5,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
+import { getUsersMe } from '@memohai/sdk'
 
 // Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
 // (e.g. via the chat sidebar's settings button or any reused @memohai/web
@@ -28,6 +29,11 @@ const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(({ name, path }
 }))
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('@memohai/web/pages/onboarding/index.vue'),
+  },
   {
     path: '/',
     component: () => import('@memohai/web/pages/main-section/index.vue'),
@@ -75,7 +81,14 @@ router.onError((error: Error) => {
   throw error
 })
 
-router.beforeEach((to: RouteLocationNormalized) => {
+let onboardingCheckDone = false
+let onboardingCompleted = false
+
+function shouldForceOnboarding(): boolean {
+  return localStorage.getItem('memoh:dev:force-onboarding') === '1'
+}
+
+router.beforeEach(async (to: RouteLocationNormalized) => {
   // Settings lives in its own BrowserWindow. Any in-app navigation aimed at
   // the settings tree — whether via path (`router.push('/settings/bots')`)
   // or via name resolved through the placeholder stubs above
@@ -111,7 +124,37 @@ router.beforeEach((to: RouteLocationNormalized) => {
   if (to.path.startsWith('/oauth/')) {
     return true
   }
-  return token ? true : { name: 'Login' }
+  if (!token) {
+    return { name: 'Login' }
+  }
+
+  // Onboarding page: always accessible
+  if (to.path === '/onboarding') {
+    return true
+  }
+
+  // Dev override: force onboarding regardless of DB state
+  if (shouldForceOnboarding()) {
+    return { path: '/onboarding' }
+  }
+
+  // Check onboarding status once per session
+  if (!onboardingCheckDone) {
+    try {
+      const { data } = await getUsersMe({ throwOnError: true })
+      const meta = data.metadata as Record<string, unknown> | undefined
+      onboardingCompleted = meta?.onboarding_completed === true
+    } catch {
+      onboardingCompleted = true
+    }
+    onboardingCheckDone = true
+  }
+
+  if (!onboardingCompleted) {
+    return { path: '/onboarding' }
+  }
+
+  return true
 })
 
 export default router

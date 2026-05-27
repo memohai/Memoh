@@ -2043,5 +2043,54 @@
   },
   "languages": {
     "auto": "自动"
+  },
+  "onboarding": {
+    "prev": "上一步",
+    "next": "下一步",
+    "skip": "跳过",
+    "start": "开始",
+    "complete": "开始使用",
+    "steps": {
+      "welcome": "欢迎",
+      "intro": "产品介绍",
+      "appearance": "外观定制",
+      "provider": "服务商配置",
+      "bot": "创建 Bot",
+      "im": "IM 接入",
+      "complete": "配置完成"
+    },
+    "welcome": {
+      "title": "欢迎使用 Memoh",
+      "subtitle": "你的私有化 AI 智能体平台",
+      "description": "只需几步，完成你的专属工作空间配置。"
+    },
+    "intro": {
+      "title": "什么是 Memoh？",
+      "placeholder": "介绍页内容即将推出。"
+    },
+    "appearance": {
+      "title": "外观定制",
+      "language": "语言",
+      "theme": "主题",
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "provider": {
+      "title": "配置 AI 服务商",
+      "placeholder": "服务商配置即将推出。"
+    },
+    "bot": {
+      "title": "创建你的第一个 Bot",
+      "placeholder": "Bot 创建即将推出。"
+    },
+    "im": {
+      "title": "接入 IM 渠道",
+      "placeholder": "IM 接入即将推出。"
+    },
+    "complete": {
+      "title": "一切就绪！",
+      "subtitle": "你的工作空间已配置完成。",
+      "hint": "之后仍可在设置中接入更多渠道和服务。"
+    }
   }
 }

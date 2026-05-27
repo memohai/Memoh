@@ -444,8 +444,9 @@ SET display_name = ?1,
     avatar_url = ?2,
     timezone = ?3,
     is_active = ?4,
+    metadata = ?5,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?5
+WHERE id = ?6
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
 `
 
@@ -454,6 +455,7 @@ type UpdateAccountProfileParams struct {
 	AvatarUrl   sql.NullString `json:"avatar_url"`
 	Timezone    string         `json:"timezone"`
 	IsActive    int64          `json:"is_active"`
+	Metadata    string         `json:"metadata"`
 	ID          string         `json:"id"`
 }
 
@@ -463,6 +465,7 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		arg.AvatarUrl,
 		arg.Timezone,
 		arg.IsActive,
+		arg.Metadata,
 		arg.ID,
 	)
 	var i User

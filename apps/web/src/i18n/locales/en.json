@@ -2047,5 +2047,54 @@
   },
   "languages": {
     "auto": "Auto"
+  },
+  "onboarding": {
+    "prev": "Previous",
+    "next": "Next",
+    "skip": "Skip",
+    "start": "Get Started",
+    "complete": "Start Using",
+    "steps": {
+      "welcome": "Welcome",
+      "intro": "Introduction",
+      "appearance": "Appearance",
+      "provider": "Provider",
+      "bot": "Bot",
+      "im": "IM Integration",
+      "complete": "All Done"
+    },
+    "welcome": {
+      "title": "Welcome to Memoh",
+      "subtitle": "Your private AI agent platform",
+      "description": "Let's set up your workspace in a few steps."
+    },
+    "intro": {
+      "title": "What is Memoh?",
+      "placeholder": "Introduction page content coming soon."
+    },
+    "appearance": {
+      "title": "Customize Appearance",
+      "language": "Language",
+      "theme": "Theme",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "provider": {
+      "title": "Configure AI Provider",
+      "placeholder": "Provider configuration coming soon."
+    },
+    "bot": {
+      "title": "Create Your First Bot",
+      "placeholder": "Bot creation coming soon."
+    },
+    "im": {
+      "title": "Connect IM Channels",
+      "placeholder": "IM integration coming soon."
+    },
+    "complete": {
+      "title": "You're All Set!",
+      "subtitle": "Your workspace is ready.",
+      "hint": "You can always configure more channels and settings later."
+    }
   }
 }

@@ -12,6 +12,7 @@ export type AccountsAccount = {
     id?: string;
     is_active?: boolean;
     last_login_at?: string;
+    metadata?: Record<string, unknown>;
     role?: string;
     timezone?: string;
     updated_at?: string;
@@ -52,6 +53,7 @@ export type AccountsUpdateProfileRequest = {
     avatar_url?: string;
     display_name?: string;
     timezone?: string;
+    metadata?: Record<string, unknown>;
 };
 
 export type AclChannelIdentityCandidate = {

@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -282,12 +283,14 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 	if tzName == "" {
 		tzName = "UTC"
 	}
+	metadata := mergeMetadata(existing.Metadata, req.Metadata)
 	row, err := s.store.UpdateProfile(ctx, dbstore.UpdateAccountProfileInput{
 		UserID:      userID,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 		Timezone:    tzName,
 		IsActive:    existing.IsActive,
+		Metadata:    metadata,
 	})
 	if err != nil {
 		return Account{}, err
@@ -390,6 +393,10 @@ func toAccount(row dbstore.AccountRecord) Account {
 	}
 	avatarURL := strings.TrimSpace(row.AvatarURL)
 	timezone := strings.TrimSpace(row.Timezone)
+	var metadata map[string]any
+	if row.Metadata != "" {
+		_ = json.Unmarshal([]byte(row.Metadata), &metadata)
+	}
 	return Account{
 		ID:          row.ID,
 		Username:    username,
@@ -399,8 +406,36 @@ func toAccount(row dbstore.AccountRecord) Account {
 		AvatarURL:   avatarURL,
 		Timezone:    timezone,
 		IsActive:    row.IsActive,
+		Metadata:    metadata,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 		LastLoginAt: row.LastLoginAt,
 	}
+}
+
+func mergeMetadata(existing string, incoming json.RawMessage) string {
+	if len(incoming) == 0 {
+		if existing == "" {
+			return "{}"
+		}
+		return existing
+	}
+	base := map[string]any{}
+	if existing != "" {
+		if err := json.Unmarshal([]byte(existing), &base); err != nil {
+			base = map[string]any{}
+		}
+	}
+	var overlay map[string]any
+	if err := json.Unmarshal(incoming, &overlay); err != nil {
+		overlay = map[string]any{}
+	}
+	for k, v := range overlay {
+		base[k] = v
+	}
+	result, err := json.Marshal(base)
+	if err != nil {
+		return "{}"
+	}
+	return string(result)
 }

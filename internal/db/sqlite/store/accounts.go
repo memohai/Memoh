@@ -107,6 +107,7 @@ func (s *Store) UpdateProfile(ctx context.Context, input dbstore.UpdateAccountPr
 		AvatarUrl:   nullable(input.AvatarURL),
 		Timezone:    input.Timezone,
 		IsActive:    boolInt(input.IsActive),
+		Metadata:    input.Metadata,
 	})
 	if err != nil {
 		return dbstore.AccountRecord{}, mapQueryErr(err)
@@ -165,6 +166,7 @@ func accountRecord(row sqlitesqlc.User) dbstore.AccountRecord {
 		PasswordHash:    row.PasswordHash.String,
 		HasPasswordHash: row.PasswordHash.Valid,
 		IsActive:        row.IsActive != 0,
+		Metadata:        row.Metadata,
 		CreatedAt:       parseTime(row.CreatedAt),
 		UpdatedAt:       parseTime(row.UpdatedAt),
 		LastLoginAt:     parseTime(row.LastLoginAt.String),

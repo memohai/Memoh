@@ -1,20 +1,24 @@
 package accounts
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Account represents a human account credential record.
 type Account struct {
-	ID          string    `json:"id"`
-	Username    string    `json:"username"`
-	Email       string    `json:"email,omitempty"`
-	Role        string    `json:"role"`
-	DisplayName string    `json:"display_name"`
-	AvatarURL   string    `json:"avatar_url,omitempty"`
-	Timezone    string    `json:"timezone,omitempty"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	LastLoginAt time.Time `json:"last_login_at,omitempty"`
+	ID          string         `json:"id"`
+	Username    string         `json:"username"`
+	Email       string         `json:"email,omitempty"`
+	Role        string         `json:"role"`
+	DisplayName string         `json:"display_name"`
+	AvatarURL   string         `json:"avatar_url,omitempty"`
+	Timezone    string         `json:"timezone,omitempty"`
+	IsActive    bool           `json:"is_active"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	LastLoginAt time.Time      `json:"last_login_at,omitempty"`
 }
 
 // CreateAccountRequest is the input for creating an account.
@@ -38,9 +42,10 @@ type UpdateAccountRequest struct {
 
 // UpdateProfileRequest is the input for self-service profile updates.
 type UpdateProfileRequest struct {
-	DisplayName *string `json:"display_name,omitempty"`
-	AvatarURL   *string `json:"avatar_url,omitempty"`
-	Timezone    *string `json:"timezone,omitempty"`
+	DisplayName *string         `json:"display_name,omitempty"`
+	AvatarURL   *string         `json:"avatar_url,omitempty"`
+	Timezone    *string         `json:"timezone,omitempty"`
+	Metadata    json.RawMessage `json:"metadata,omitempty"`
 }
 
 // UpdatePasswordRequest is the input for password change.

@@ -431,6 +431,7 @@ SET display_name = $2,
     avatar_url = $3,
     timezone = $4,
     is_active = $5,
+    metadata = $6,
     updated_at = now()
 WHERE id = $1
 RETURNING id, username, email, password_hash, role, display_name, avatar_url, timezone, data_root, last_login_at, is_active, metadata, created_at, updated_at
@@ -442,6 +443,7 @@ type UpdateAccountProfileParams struct {
 	AvatarUrl   pgtype.Text `json:"avatar_url"`
 	Timezone    string      `json:"timezone"`
 	IsActive    bool        `json:"is_active"`
+	Metadata    []byte      `json:"metadata"`
 }
 
 func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountProfileParams) (User, error) {
@@ -451,6 +453,7 @@ func (q *Queries) UpdateAccountProfile(ctx context.Context, arg UpdateAccountPro
 		arg.AvatarUrl,
 		arg.Timezone,
 		arg.IsActive,
+		arg.Metadata,
 	)
 	var i User
 	err := row.Scan(

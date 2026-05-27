@@ -91,6 +91,7 @@ SET display_name = sqlc.arg(display_name),
     avatar_url = sqlc.arg(avatar_url),
     timezone = sqlc.arg(timezone),
     is_active = sqlc.arg(is_active),
+    metadata = sqlc.arg(metadata),
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
 RETURNING *;

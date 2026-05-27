@@ -30,6 +30,7 @@ type AccountRecord struct {
 	PasswordHash    string
 	HasPasswordHash bool
 	IsActive        bool
+	Metadata        string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	LastLoginAt     time.Time
@@ -66,6 +67,7 @@ type UpdateAccountProfileInput struct {
 	AvatarURL   string
 	Timezone    string
 	IsActive    bool
+	Metadata    string
 }
 
 type UpdateAccountPasswordInput struct {

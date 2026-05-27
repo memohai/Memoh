@@ -7,8 +7,14 @@ import { h } from 'vue'
 import { RouterView } from 'vue-router'
 import { i18nRef } from './i18n'
 import { useUserStore } from '@/store/user'
+import { getUsersMe } from '@memohai/sdk'
 
 const routes = [
+  {
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('@/pages/onboarding/index.vue'),
+  },
   {
     path: '/',
     component: () => import('@/pages/main-section/index.vue'),
@@ -204,7 +210,14 @@ router.onError((error) => {
   throw error
 })
 
-router.beforeEach((to) => {
+let onboardingCheckDone = false
+let onboardingCompleted = false
+
+function shouldForceOnboarding(): boolean {
+  return localStorage.getItem('memoh:dev:force-onboarding') === '1'
+}
+
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('token')
 
   if (to.fullPath === '/login') {
@@ -222,6 +235,34 @@ router.beforeEach((to) => {
       return { name: 'bots' }
     }
   }
+
+  // Onboarding page: always accessible
+  if (to.path === '/onboarding') {
+    return true
+  }
+
+  // Dev override: force onboarding regardless of DB state
+  if (shouldForceOnboarding()) {
+    return { path: '/onboarding' }
+  }
+
+  // Check onboarding status once per session
+  if (!onboardingCheckDone) {
+    try {
+      const { data } = await getUsersMe({ throwOnError: true })
+      const meta = data.metadata as Record<string, unknown> | undefined
+      onboardingCompleted = meta?.onboarding_completed === true
+    } catch {
+      onboardingCompleted = true
+    }
+    onboardingCheckDone = true
+  }
+
+  if (!onboardingCompleted) {
+    return { path: '/onboarding' }
+  }
+
+
   return true
 })
 
