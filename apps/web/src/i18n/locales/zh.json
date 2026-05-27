@@ -2056,11 +2056,12 @@
       "description": "只需几步，完成你的专属工作空间配置。"
     },
     "intro": {
-      "title": "什么是 Memoh？",
+      "title": "欢迎使用 Memoh",
+      "description": "你的私有化 AI 智能体平台，自托管部署，\n零遥测，为开发者打造",
       "placeholder": "介绍页内容即将推出。"
     },
     "appearance": {
-      "title": "外观定制",
+      "title": "选择你的风格",
       "language": "语言",
       "theme": "主题",
       "colorScheme": "配色方案",

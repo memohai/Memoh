@@ -2060,11 +2060,12 @@
       "description": "Let's set up your workspace in a few steps."
     },
     "intro": {
-      "title": "What is Memoh?",
+      "title": "Welcome to Memoh",
+      "description": "Your private AI agent platform, on your own infra.\nZero telemetry, fully self-hosted.",
       "placeholder": "Introduction page content coming soon."
     },
     "appearance": {
-      "title": "Customize Appearance",
+      "title": "Choose your style",
       "language": "Language",
       "theme": "Theme",
       "colorScheme": "Color Scheme",

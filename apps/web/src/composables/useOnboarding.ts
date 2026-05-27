@@ -5,10 +5,11 @@ import { putUsersMe } from '@memohai/sdk'
 export const LAST_STEP_INDEX = 6
 export const STEP_COUNT = 7
 
+const currentStep = ref(0)
+const completing = ref(false)
+
 export function useOnboarding() {
   const router = useRouter()
-  const currentStep = ref(0)
-  const completing = ref(false)
 
   const isFirstStep = computed(() => currentStep.value === 0)
   const isLastStep = computed(() => currentStep.value === LAST_STEP_INDEX)

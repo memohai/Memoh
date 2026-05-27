@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/store/settings'
 import { Button, ButtonGroup } from '@memohai/ui'
@@ -6,16 +7,29 @@ import { colorSchemes } from '@/constants/color-schemes'
 
 const { t } = useI18n()
 const settings = useSettingsStore()
+
+const visible = ref(false)
+onMounted(() => {
+  requestAnimationFrame(() => {
+    visible.value = true
+  })
+})
 </script>
 
 <template>
   <div class="text-center">
-    <h2 class="text-xl font-semibold mb-6">
+    <h2
+      class="text-xl font-semibold mb-6 transition-all duration-500 ease-out"
+      :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+    >
       {{ t('onboarding.appearance.title') }}
     </h2>
 
     <div class="space-y-6">
-      <div>
+      <div
+        class="transition-all duration-500 ease-out delay-[120ms]"
+        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      >
         <label class="text-sm font-medium mb-2 block">
           {{ t('onboarding.appearance.language') }}
         </label>
@@ -37,7 +51,10 @@ const settings = useSettingsStore()
         </ButtonGroup>
       </div>
 
-      <div>
+      <div
+        class="transition-all duration-500 ease-out delay-[240ms]"
+        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      >
         <label class="text-sm font-medium mb-2 block">
           {{ t('onboarding.appearance.theme') }}
         </label>
@@ -59,7 +76,10 @@ const settings = useSettingsStore()
         </ButtonGroup>
       </div>
 
-      <div>
+      <div
+        class="transition-all duration-500 ease-out delay-[360ms]"
+        :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      >
         <label class="text-sm font-medium mb-2 block">
           {{ t('onboarding.appearance.colorScheme') }}
         </label>

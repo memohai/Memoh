@@ -15,7 +15,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const colorMode = useColorMode()
   const i18n = useI18n()
   const language = useStorage<Locale>('language', 'en')
-  const theme = useStorage<'light' | 'dark'>('theme', 'light')
+  const theme = useStorage<'light' | 'dark'>('theme',
+    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
 
   const applyColorScheme = (value: ColorSchemeId) => {

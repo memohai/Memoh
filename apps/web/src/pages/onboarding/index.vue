@@ -6,6 +6,7 @@ import { Button } from '@memohai/ui'
 import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
 
 import PlaceholderStep from './steps/PlaceholderStep.vue'
+import Step1Intro from './steps/Step1Intro.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
@@ -24,12 +25,12 @@ const {
 } = useOnboarding()
 
 const stepComponents = [
-  { component: PlaceholderStep, props: { heading: true, titleKey: 'onboarding.welcome.title', descKey: 'onboarding.welcome.description' } },
-  { component: PlaceholderStep, props: { titleKey: 'onboarding.intro.title', descKey: 'onboarding.intro.placeholder' } },
+  { component: Step1Intro, props: {} },
   { component: Step2Appearance, props: {} },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.provider.title', descKey: 'onboarding.provider.placeholder' } },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.bot.title', descKey: 'onboarding.bot.placeholder' } },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.im.title', descKey: 'onboarding.im.placeholder' } },
+  { component: PlaceholderStep, props: { titleKey: 'onboarding.welcome.title', descKey: 'onboarding.welcome.description' } },
   { component: Step6Complete, props: {} },
 ]
 
@@ -58,10 +59,21 @@ watch(currentStep, (step) => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-background p-4">
-    <div class="w-full max-w-lg">
+  <div class="min-h-screen flex flex-col bg-background p-4">
+    <!-- Step content — fills available space -->
+    <div class="flex-1 flex items-center justify-center">
+      <div class="w-full max-w-lg">
+        <component
+          :is="stepComponents[currentStep].component"
+          v-bind="stepComponents[currentStep].props"
+        />
+      </div>
+    </div>
+
+    <!-- Bottom area: step indicator + navigation -->
+    <div class="flex flex-col items-center gap-6 pb-6">
       <!-- Step indicator -->
-      <div class="flex items-center justify-center gap-2 mb-8">
+      <div class="flex items-center justify-center gap-2">
         <div
           v-for="i in STEP_COUNT"
           :key="i"
@@ -74,13 +86,11 @@ watch(currentStep, (step) => {
         />
       </div>
 
-      <!-- Step content -->
-      <div class="mb-8">
-        <component :is="stepComponents[currentStep].component" v-bind="stepComponents[currentStep].props" />
-      </div>
-
       <!-- Navigation -->
-      <div class="flex items-center justify-between">
+      <div
+        v-if="!isFirstStep"
+        class="flex items-center justify-between w-full max-w-lg"
+      >
         <Button
           v-if="!isFirstStep"
           variant="outline"
@@ -106,7 +116,7 @@ watch(currentStep, (step) => {
             {{ t('onboarding.next') }}
           </Button>
           <Button
-            v-else
+            v-if="isLastStep"
             :disabled="completing"
             @click="complete"
           >
