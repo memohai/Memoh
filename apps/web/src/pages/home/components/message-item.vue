@@ -136,6 +136,7 @@
             <MarkdownRender
               :content="message.text"
               :is-dark="isDark"
+              :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               custom-id="chat-msg"
             />
@@ -266,6 +267,7 @@
             <MarkdownRender
               :content="block.content"
               :is-dark="isDark"
+              :smooth-streaming="isAssistantBlockStreaming(i)"
               :typewriter="isAssistantBlockStreaming(i)"
               custom-id="chat-msg"
             />
