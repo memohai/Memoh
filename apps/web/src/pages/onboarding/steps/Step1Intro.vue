@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOnboarding } from '@/composables/useOnboarding'
 
 const { t } = useI18n()
-const { nextStep } = useOnboarding()
+const { nextStep, introTextVisible } = useOnboarding()
 
 const exiting = ref(false)
 const isSkipped = ref(false)
 const showContent = ref(false)
+
+watch(showContent, (v) => {
+  if (v) introTextVisible.value = true
+})
 
 interface Bubble {
   id: number

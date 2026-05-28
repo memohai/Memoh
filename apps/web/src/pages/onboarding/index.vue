@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
 
@@ -9,7 +9,9 @@ import Step2Appearance from './steps/Step2Appearance.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
 const route = useRoute()
-const { currentStep, goToStep } = useOnboarding()
+const { currentStep, introTextVisible, goToStep } = useOnboarding()
+
+const dotsVisible = computed(() => currentStep.value > 0 || introTextVisible.value)
 
 const stepComponents = [
   { component: Step1Intro, props: {} },
@@ -56,7 +58,10 @@ watch(currentStep, (step) => {
       </div>
     </div>
 
-    <div class="flex items-center justify-center gap-2 pb-6">
+    <div
+      class="flex items-center justify-center gap-2 pb-6 transition-opacity duration-500 ease-out"
+      :class="dotsVisible ? 'opacity-100' : 'opacity-0'"
+    >
       <div
         v-for="i in STEP_COUNT"
         :key="i"

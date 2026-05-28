@@ -7,6 +7,7 @@ export const STEP_COUNT = 7
 
 const currentStep = ref(0)
 const completing = ref(false)
+const introTextVisible = ref(false)
 
 export function useOnboarding() {
   const router = useRouter()
@@ -56,6 +57,7 @@ export function useOnboarding() {
   return {
     currentStep,
     completing,
+    introTextVisible,
     isFirstStep,
     isLastStep,
     nextStep,

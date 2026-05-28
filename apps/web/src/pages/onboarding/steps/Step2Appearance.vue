@@ -109,35 +109,44 @@ function go(action: () => void) {
           <Label class="mb-2 block text-sm font-medium">
             {{ t('settings.appearance.colorScheme') }}
           </Label>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-3 gap-3">
             <button
               v-for="scheme in colorSchemes"
               :key="scheme.id"
               type="button"
-              class="rounded-lg border bg-background p-3 text-left transition-colors hover:bg-accent"
-              :class="colorScheme === scheme.id ? 'border-foreground' : 'border-border'"
+              class="rounded-lg border bg-background p-2 text-left transition-colors"
+              :class="colorScheme === scheme.id ? 'border-foreground' : 'border-border hover:border-muted-foreground/50'"
               @click="setColorScheme(scheme.id)"
             >
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-xs font-medium">
-                    {{ t(scheme.labelKey) }}
-                  </p>
-                  <p class="mt-1 text-[11px] text-muted-foreground">
-                    {{ t(scheme.descriptionKey) }}
-                  </p>
+              <div class="rounded-md border border-border bg-muted p-2">
+                <div class="h-1.5 w-3/5 rounded-full bg-muted-foreground/40" />
+                <div class="mt-1 h-1.5 w-4/5 rounded-full bg-muted-foreground/20" />
+                <div class="mt-2 flex items-center gap-1">
+                  <div
+                    class="h-2 w-1/2 rounded-full"
+                    :style="{ backgroundColor: scheme.swatches[4] }"
+                  />
+                  <div
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ backgroundColor: scheme.swatches[5] }"
+                  />
+                  <div
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ backgroundColor: scheme.swatches[6] }"
+                  />
+                  <div
+                    class="size-2 shrink-0 rounded-full"
+                    :style="{ backgroundColor: scheme.swatches[7] }"
+                  />
                 </div>
+              </div>
+              <div class="mt-2 flex items-center justify-between gap-2 px-0.5">
+                <p class="text-xs font-medium">
+                  {{ t(scheme.labelKey) }}
+                </p>
                 <Check
                   v-if="colorScheme === scheme.id"
-                  class="size-4 shrink-0"
-                />
-              </div>
-              <div class="mt-3 flex gap-1.5">
-                <span
-                  v-for="swatch in scheme.swatches"
-                  :key="swatch"
-                  class="size-5 rounded-full border border-border"
-                  :style="{ backgroundColor: swatch }"
+                  class="size-3.5 shrink-0"
                 />
               </div>
             </button>
