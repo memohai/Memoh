@@ -17,19 +17,23 @@ import (
 // SDKModelConfig holds provider and model information resolved from DB,
 // used to construct a Twilight AI SDK Model instance.
 type SDKModelConfig struct {
-	ModelID         string
-	ClientType      string
-	APIKey          string //nolint:gosec // carries provider credential material at runtime
-	CodexAccountID  string
-	BaseURL         string
-	HTTPClient      *http.Client
-	ReasoningConfig *ReasoningConfig
+	ModelID        string
+	ClientType     string
+	APIKey         string //nolint:gosec // carries provider credential material at runtime
+	CodexAccountID string
+	BaseURL        string
+	// ChatCompletionsCompat selects narrow compatibility behavior for
+	// OpenAI-compatible /chat/completions backends.
+	ChatCompletionsCompat string
+	HTTPClient            *http.Client
+	ReasoningConfig       *ReasoningConfig
 }
 
 // ReasoningConfig controls extended thinking/reasoning behavior.
 type ReasoningConfig struct {
-	Enabled bool
-	Effort  string
+	Enabled  bool
+	Disabled bool
+	Effort   string
 }
 
 var (
@@ -42,15 +46,19 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = NewProviderHTTPClient(0)
 	}
+	chatCompletionsCompat := ResolveChatCompletionsCompat(cfg.BaseURL, cfg.ChatCompletionsCompat)
 
 	switch ClientType(cfg.ClientType) {
 	case ClientTypeOpenAICompletions:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
+			openaicompletions.WithHTTPClient(cfg.HTTPClient),
 		}
-		opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
+		}
+		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
+			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
 		}
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
@@ -111,10 +119,13 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	default:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
+			openaicompletions.WithHTTPClient(cfg.HTTPClient),
 		}
-		opts = append(opts, openaicompletions.WithHTTPClient(cfg.HTTPClient))
 		if cfg.BaseURL != "" {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
+		}
+		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
+			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
 		}
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
@@ -123,7 +134,22 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 
 // BuildReasoningOptions returns SDK generation options for reasoning/thinking.
 func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
-	if cfg.ReasoningConfig == nil || !cfg.ReasoningConfig.Enabled {
+	if cfg.ReasoningConfig == nil {
+		return nil
+	}
+
+	if ClientType(cfg.ClientType) == ClientTypeOpenAICompletions && isDeepSeekChatCompletionsCompat(cfg.ChatCompletionsCompat) {
+		switch {
+		case cfg.ReasoningConfig.Disabled:
+			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
+		case cfg.ReasoningConfig.Enabled && cfg.ReasoningConfig.Effort != "":
+			return []sdk.GenerateOption{sdk.WithReasoningEffort(cfg.ReasoningConfig.Effort)}
+		default:
+			return nil
+		}
+	}
+
+	if !cfg.ReasoningConfig.Enabled {
 		return nil
 	}
 	effort := cfg.ReasoningConfig.Effort

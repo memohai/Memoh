@@ -333,6 +333,7 @@
     "modelDefault": "Default",
     "reasoningEffort": "Reasoning",
     "reasoningOff": "Off",
+    "reasoningAdaptive": "Adaptive",
     "reasoningNone": "None",
     "reasoningLow": "Low",
     "reasoningMedium": "Medium",

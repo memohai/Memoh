@@ -1579,7 +1579,7 @@ export const useChatStore = defineStore('chat', () => {
 
       const modelId = overrideModelId.value || undefined
       const effort = overrideReasoningEffort.value
-      const reasoningEffort = effort && effort !== 'off' ? effort : undefined
+      const reasoningEffort = effort || undefined
 
       const ws = ensureWebSocket(bid)
       if (ws) {

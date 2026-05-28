@@ -703,10 +703,12 @@ func (*Agent) buildGenerateOptions(cfg RunConfig, tools []sdk.Tool, prepareStep 
 	opts = append(opts, sdk.WithPrepareStep(midTaskPrune))
 
 	opts = append(opts, models.BuildReasoningOptions(models.SDKModelConfig{
-		ClientType: models.ResolveClientType(cfg.Model),
+		ClientType:            models.ResolveClientType(cfg.Model),
+		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
 		ReasoningConfig: &models.ReasoningConfig{
-			Enabled: cfg.ReasoningEffort != "",
-			Effort:  cfg.ReasoningEffort,
+			Enabled:  cfg.ReasoningEffort != "",
+			Disabled: cfg.ReasoningDisabled,
+			Effort:   cfg.ReasoningEffort,
 		},
 	})...)
 	return opts

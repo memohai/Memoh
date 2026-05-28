@@ -2,6 +2,8 @@ name: DeepSeek
 client_type: openai-completions
 icon: deepseek-color
 base_url: https://api.deepseek.com/v1
+config:
+  chat_completions_compat: deepseek
 
 models:
   - model_id: deepseek-v4-flash

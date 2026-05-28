@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/settings"
 )
 
 func TestMatchesModelReference_ModelID(t *testing.T) {
@@ -86,5 +87,94 @@ func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
 	}
 	if req.Provider != "openai-responses" {
 		t.Fatalf("unexpected provider override: %q", req.Provider)
+	}
+}
+
+func TestResolveReasoningConfig(t *testing.T) {
+	t.Parallel()
+
+	reasoningModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				Compatibilities: []string{models.CompatReasoning},
+			},
+		},
+	}
+	plainModel := models.GetResponse{}
+
+	tests := []struct {
+		name          string
+		model         models.GetResponse
+		botSettings   settings.Settings
+		requestEffort string
+		want          *models.ReasoningConfig
+	}{
+		{
+			name:          "disable overrides bot default",
+			model:         reasoningModel,
+			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			requestEffort: reasoningEffortDisable,
+			want:          &models.ReasoningConfig{Disabled: true},
+		},
+		{
+			name:          "adaptive enables reasoning without fixed effort",
+			model:         reasoningModel,
+			requestEffort: reasoningEffortAdaptive,
+			want:          &models.ReasoningConfig{Enabled: true},
+		},
+		{
+			name:          "none is preserved as effort",
+			model:         reasoningModel,
+			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			requestEffort: models.ReasoningEffortNone,
+			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortNone},
+		},
+		{
+			name:          "explicit effort is trimmed",
+			model:         reasoningModel,
+			requestEffort: " low ",
+			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortLow},
+		},
+		{
+			name:        "bot default is used when no request override",
+			model:       reasoningModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: " high "},
+			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "bot default falls back to medium",
+			model:       reasoningModel,
+			botSettings: settings.Settings{ReasoningEnabled: true},
+			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortMedium},
+		},
+		{
+			name:        "disabled bot explicitly disables reasoning",
+			model:       reasoningModel,
+			botSettings: settings.Settings{ReasoningEnabled: false, ReasoningEffort: models.ReasoningEffortHigh},
+			want:        &models.ReasoningConfig{Disabled: true},
+		},
+		{
+			name:          "model without reasoning ignores request",
+			model:         plainModel,
+			requestEffort: models.ReasoningEffortHigh,
+			want:          nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort)
+			if got == nil || tt.want == nil {
+				if got != tt.want {
+					t.Fatalf("expected %#v, got %#v", tt.want, got)
+				}
+				return
+			}
+			if got.Enabled != tt.want.Enabled || got.Disabled != tt.want.Disabled || got.Effort != tt.want.Effort {
+				t.Fatalf("expected %#v, got %#v", tt.want, got)
+			}
+		})
 	}
 }

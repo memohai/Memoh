@@ -59,7 +59,7 @@
                   class="size-3"
                   :style="{ opacity: EFFORT_OPACITY[reasoningFormValue] ?? 0.5 }"
                 />
-                {{ reasoningFormValue === 'off' ? $t('chat.reasoningOff') : $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}
+                {{ $t(EFFORT_LABELS[reasoningFormValue] ?? reasoningFormValue) }}
               </span>
               <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
             </Button>
@@ -100,7 +100,7 @@ import { Label, Separator, Popover, PopoverTrigger, PopoverContent, Button, Swit
 import { Lightbulb, ChevronDown } from 'lucide-vue-next'
 import ModelSelect from './model-select.vue'
 import ReasoningEffortSelect from './reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY } from './reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE } from './reasoning-effort'
 import type { SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 
 const props = defineProps<{
@@ -124,7 +124,7 @@ const availableReasoningEfforts = computed(() => {
 })
 
 watch(availableReasoningEfforts, (efforts) => {
-  if (!efforts.includes(props.form.reasoning_effort)) {
+  if (props.form.reasoning_enabled && !efforts.includes(props.form.reasoning_effort)) {
     // eslint-disable-next-line vue/no-mutating-props
     props.form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
   }
@@ -133,9 +133,9 @@ watch(availableReasoningEfforts, (efforts) => {
 const reasoningPopoverOpen = ref(false)
 
 const reasoningFormValue = computed({
-  get: () => props.form.reasoning_enabled ? props.form.reasoning_effort : 'off',
+  get: () => props.form.reasoning_enabled ? props.form.reasoning_effort : REASONING_EFFORT_DISABLE,
   set: (v: string) => {
-    if (v === 'off') {
+    if (v === REASONING_EFFORT_DISABLE) {
       // eslint-disable-next-line vue/no-mutating-props
       props.form.reasoning_enabled = false
     } else {

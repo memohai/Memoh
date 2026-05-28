@@ -62,20 +62,22 @@ type InjectMessage struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
-	Model              *sdk.Model
-	ReasoningEffort    string
-	Messages           []sdk.Message
-	Query              string
-	System             string
-	SessionType        string
-	SupportsImageInput bool
-	SupportsToolCall   bool
-	DisplayEnabled     bool
-	InlineImages       []sdk.ImagePart
-	Identity           SessionContext
-	Skills             []SkillEntry
-	LoopDetection      LoopDetectionConfig
-	Retry              RetryConfig
+	Model                 *sdk.Model
+	ReasoningEffort       string
+	ReasoningDisabled     bool
+	ChatCompletionsCompat string
+	Messages              []sdk.Message
+	Query                 string
+	System                string
+	SessionType           string
+	SupportsImageInput    bool
+	SupportsToolCall      bool
+	DisplayEnabled        bool
+	InlineImages          []sdk.ImagePart
+	Identity              SessionContext
+	Skills                []SkillEntry
+	LoopDetection         LoopDetectionConfig
+	Retry                 RetryConfig
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier

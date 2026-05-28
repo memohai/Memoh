@@ -272,7 +272,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -354,8 +354,8 @@ const activeModelSupportsReasoning = computed(() =>
 
 const availableReasoningEfforts = computed(() => {
   const efforts = ((activeModel.value?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((e) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(e))
-  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
+    .filter((e) => [REASONING_EFFORT_ADAPTIVE, 'none', 'low', 'medium', 'high', 'xhigh'].includes(e))
+  return [...new Set([REASONING_EFFORT_ADAPTIVE, ...(efforts.length > 0 ? efforts : ['low', 'medium', 'high'])])]
 })
 
 const selectedModelLabel = computed(() => {
@@ -365,7 +365,6 @@ const selectedModelLabel = computed(() => {
 
 const selectedReasoningLabel = computed(() => {
   const v = overrideReasoningEffort.value
-  if (v === 'off') return t('chat.reasoningOff')
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
@@ -382,7 +381,7 @@ function initFromBotSettings() {
     if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
       overrideReasoningEffort.value = botSettings.value.reasoning_effort
     } else {
-      overrideReasoningEffort.value = 'off'
+      overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     }
   }
 }
@@ -397,7 +396,7 @@ watch(currentBotId, () => {
 function onModelSelected() {
   modelPopoverOpen.value = false
   if (!activeModelSupportsReasoning.value) {
-    overrideReasoningEffort.value = 'off'
+    overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
   }
 }
 

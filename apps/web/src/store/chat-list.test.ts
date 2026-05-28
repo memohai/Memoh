@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { UIStreamEvent, UIStreamEventHandler } from '@/composables/api/useChat'
+import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useChatStore } from './chat-list'
 
 const api = vi.hoisted(() => ({
@@ -156,6 +157,37 @@ describe('chat-list store', () => {
       messages: [{ type: 'error', content: 'model failed' }],
       streaming: false,
     })
+  })
+
+  it('sends disable as an explicit reasoning effort override', async () => {
+    sendEvents = []
+    const sent: Array<{ reasoning_effort?: string; stream_id?: string; session_id?: string }> = []
+    api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
+      streamHandler = onStreamEvent
+      return {
+        get connected() {
+          return true
+        },
+        send: vi.fn((message: { reasoning_effort?: string; stream_id?: string; session_id?: string }) => {
+          sent.push(message)
+          onStreamEvent({ type: 'start', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
+          onStreamEvent({ type: 'end', stream_id: message.stream_id, session_id: message.session_id } as UIStreamEvent)
+        }),
+        abort: vi.fn(),
+        close: vi.fn(),
+        onOpen: null,
+        onClose: null,
+      }
+    })
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    store.overrideReasoningEffort = REASONING_EFFORT_DISABLE
+    const result = await store.sendMessage('hello')
+
+    expect(result).toMatchObject({ ok: true })
+    expect(sent).toHaveLength(1)
+    expect(sent[0].reasoning_effort).toBe(REASONING_EFFORT_DISABLE)
   })
 
   it('routes interleaved websocket events by stream id', async () => {

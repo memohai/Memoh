@@ -536,13 +536,10 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
-	reasoningEffort := p.ReasoningEffort
-	if reasoningEffort == "" && chatModel.HasCompatibility(models.CompatReasoning) && botSettings.ReasoningEnabled {
-		reasoningEffort = botSettings.ReasoningEffort
-	}
-	var reasoningConfig *models.ReasoningConfig
-	if reasoningEffort != "" {
-		reasoningConfig = &models.ReasoningConfig{Enabled: true, Effort: reasoningEffort}
+	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort)
+	reasoningEffort := ""
+	if reasoningConfig != nil && reasoningConfig.Enabled {
+		reasoningEffort = reasoningConfig.Effort
 	}
 
 	authResolver := providers.NewService(nil, r.queries, "")
@@ -552,14 +549,21 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
+	baseURL := providers.ProviderConfigString(provider, "base_url")
+	chatCompletionsCompat := models.ResolveChatCompletionsCompat(
+		baseURL,
+		providers.ProviderConfigString(provider, "chat_completions_compat"),
+	)
+
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
-		ModelID:         chatModel.ModelID,
-		ClientType:      provider.ClientType,
-		APIKey:          creds.APIKey,
-		CodexAccountID:  creds.CodexAccountID,
-		BaseURL:         providers.ProviderConfigString(provider, "base_url"),
-		HTTPClient:      r.streamHTTPClient,
-		ReasoningConfig: reasoningConfig,
+		ModelID:               chatModel.ModelID,
+		ClientType:            provider.ClientType,
+		APIKey:                creds.APIKey,
+		CodexAccountID:        creds.CodexAccountID,
+		BaseURL:               baseURL,
+		ChatCompletionsCompat: chatCompletionsCompat,
+		HTTPClient:            r.streamHTTPClient,
+		ReasoningConfig:       reasoningConfig,
 	})
 
 	var agentSkills []agentpkg.SkillEntry
@@ -580,13 +584,15 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	cfg := agentpkg.RunConfig{
-		Model:              sdkModel,
-		ReasoningEffort:    reasoningEffort,
-		PromptCacheTTL:     providers.ProviderConfigString(provider, "prompt_cache_ttl"),
-		SessionType:        p.SessionType,
-		SupportsImageInput: chatModel.HasCompatibility(models.CompatVision),
-		SupportsToolCall:   chatModel.HasCompatibility(models.CompatToolCall),
-		DisplayEnabled:     botSettings.DisplayEnabled,
+		Model:                 sdkModel,
+		ReasoningEffort:       reasoningEffort,
+		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
+		ChatCompletionsCompat: chatCompletionsCompat,
+		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		SessionType:           p.SessionType,
+		SupportsImageInput:    chatModel.HasCompatibility(models.CompatVision),
+		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
+		DisplayEnabled:        botSettings.DisplayEnabled,
 		Identity: agentpkg.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -608,6 +614,38 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	}
 
 	return cfg, chatModel, provider, nil
+}
+
+const (
+	reasoningEffortAdaptive = "adaptive"
+	reasoningEffortDisable  = "disable"
+)
+
+func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort string) *models.ReasoningConfig {
+	if !chatModel.HasCompatibility(models.CompatReasoning) {
+		return nil
+	}
+	requestedEffort = strings.TrimSpace(requestedEffort)
+	switch {
+	case reasoningEffortDisabled(requestedEffort):
+		return &models.ReasoningConfig{Disabled: true}
+	case requestedEffort == reasoningEffortAdaptive:
+		return &models.ReasoningConfig{Enabled: true}
+	case requestedEffort != "":
+		return &models.ReasoningConfig{Enabled: true, Effort: requestedEffort}
+	case botSettings.ReasoningEnabled:
+		effort := strings.TrimSpace(botSettings.ReasoningEffort)
+		if effort == "" {
+			effort = models.ReasoningEffortMedium
+		}
+		return &models.ReasoningConfig{Enabled: true, Effort: effort}
+	default:
+		return &models.ReasoningConfig{Disabled: true}
+	}
+}
+
+func reasoningEffortDisabled(effort string) bool {
+	return strings.TrimSpace(effort) == reasoningEffortDisable
 }
 
 func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {

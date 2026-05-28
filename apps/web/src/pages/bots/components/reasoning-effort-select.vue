@@ -6,10 +6,10 @@
     <button
       type="button"
       role="option"
-      :aria-selected="modelValue === 'off'"
+      :aria-selected="modelValue === REASONING_EFFORT_DISABLE"
       class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
-      :class="{ 'bg-accent': modelValue === 'off' }"
-      @click="$emit('update:modelValue', 'off')"
+      :class="{ 'bg-accent': modelValue === REASONING_EFFORT_DISABLE }"
+      @click="$emit('update:modelValue', REASONING_EFFORT_DISABLE)"
     >
       <Lightbulb class="size-3.5 shrink-0 opacity-10" />
       {{ $t('chat.reasoningOff') }}
@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { Lightbulb } from 'lucide-vue-next'
-import { EFFORT_LABELS, EFFORT_OPACITY } from './reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE } from './reasoning-effort'
 
 defineProps<{
   efforts: string[]
