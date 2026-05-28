@@ -12,7 +12,9 @@ export type AccountsAccount = {
     id?: string;
     is_active?: boolean;
     last_login_at?: string;
-    metadata?: Record<string, unknown>;
+    metadata?: {
+        [key: string]: unknown;
+    };
     role?: string;
     timezone?: string;
     updated_at?: string;
@@ -52,8 +54,10 @@ export type AccountsUpdatePasswordRequest = {
 export type AccountsUpdateProfileRequest = {
     avatar_url?: string;
     display_name?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
     timezone?: string;
-    metadata?: Record<string, unknown>;
 };
 
 export type AclChannelIdentityCandidate = {
@@ -1669,7 +1673,10 @@ export type ProvidersTestResponse = {
     latency_ms?: number;
     message?: string;
     reachable?: boolean;
+    status?: ProvidersTestStatus;
 };
+
+export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error';
 
 export type ProvidersUpdateRequest = {
     client_type?: string;

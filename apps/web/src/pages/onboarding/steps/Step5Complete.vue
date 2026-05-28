@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plug, AudioLines, Globe } from 'lucide-vue-next'
+import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
@@ -11,6 +11,7 @@ const { complete, completing } = useOnboarding()
 
 const visible = ref(false)
 const exiting = ref(false)
+const hasProvider = ref(true)
 
 const cards = [
   { icon: Plug, titleKey: 'onboarding.complete.cards.im.title', descKey: 'onboarding.complete.cards.im.desc' },
@@ -19,6 +20,8 @@ const cards = [
 ] as const
 
 onMounted(() => {
+  const count = Number.parseInt(sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount) ?? '0', 10)
+  hasProvider.value = Number.isFinite(count) && count > 0
   nextFrame(() => {
     visible.value = true
   })
@@ -73,6 +76,19 @@ async function handleComplete() {
         <div class="text-xs text-muted-foreground leading-relaxed">
           {{ t(card.descKey) }}
         </div>
+      </div>
+    </div>
+
+    <div
+      v-if="!hasProvider"
+      class="mb-8 flex justify-center transition-all duration-[350ms] ease-out delay-[200ms]"
+      :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+    >
+      <div class="inline-flex items-start gap-2.5 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-left">
+        <AlertTriangle class="size-4 shrink-0 text-yellow-600 dark:text-yellow-500 mt-0.5" />
+        <p class="text-xs text-muted-foreground leading-relaxed">
+          {{ t('onboarding.complete.noProviderWarning') }}
+        </p>
       </div>
     </div>
 

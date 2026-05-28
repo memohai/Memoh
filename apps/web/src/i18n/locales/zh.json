@@ -2089,6 +2089,8 @@
         "saveFailed": "保存失败",
         "errorHttpTitle": "连接失败",
         "errorHttpDescription": "请检查 API 密钥与接口地址是否正确。",
+        "errorAuthTitle": "API 密钥无效",
+        "errorAuthDescription": "服务商拒绝了你的 API 密钥，请确认密钥是否正确且未过期。",
         "errorUnreachableTitle": "无法连接服务商",
         "errorUnreachableDescription": "无法连接到该服务商，请确认 API 密钥和接口地址是否正确。",
         "errorNoModelsTitle": "未获取到模型",
@@ -2129,7 +2131,8 @@
           "desc": "接入搜索引擎，让 Bot 获取实时信息"
         }
       },
-      "saveFailed": "保存失败，请重试"
+      "saveFailed": "保存失败，请重试",
+      "noProviderWarning": "你尚未配置 AI 服务商，Bot 将无法回复消息。请前往 设置 → 服务商 添加"
     }
   }
 }

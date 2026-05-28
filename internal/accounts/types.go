@@ -45,7 +45,7 @@ type UpdateProfileRequest struct {
 	DisplayName *string         `json:"display_name,omitempty"`
 	AvatarURL   *string         `json:"avatar_url,omitempty"`
 	Timezone    *string         `json:"timezone,omitempty"`
-	Metadata    json.RawMessage `json:"metadata,omitempty"`
+	Metadata    json.RawMessage `json:"metadata,omitempty" swaggertype:"object"`
 }
 
 // UpdatePasswordRequest is the input for password change.

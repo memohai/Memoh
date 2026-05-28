@@ -241,13 +241,44 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
-	latency := time.Since(start).Milliseconds()
 
-	return TestResponse{
-		Reachable: result.Status != sdk.ProviderStatusUnreachable,
-		LatencyMs: latency,
-		Message:   result.Message,
-	}, nil
+	switch result.Status {
+	case sdk.ProviderStatusUnreachable:
+		return TestResponse{
+			Status:    TestStatusError,
+			Reachable: false,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   result.Message,
+		}, nil
+	case sdk.ProviderStatusUnhealthy:
+		status := TestStatusError
+		if strings.Contains(result.Message, "authentication failed") {
+			status = TestStatusAuthError
+		}
+		return TestResponse{
+			Status:    status,
+			Reachable: true,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   result.Message,
+		}, nil
+	default:
+		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
+			if strings.Contains(probeErr.Error(), "authentication failed") {
+				return TestResponse{
+					Status:    TestStatusAuthError,
+					Reachable: true,
+					LatencyMs: time.Since(start).Milliseconds(),
+					Message:   probeErr.Error(),
+				}, nil
+			}
+		}
+		return TestResponse{
+			Status:    TestStatusOK,
+			Reachable: true,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   result.Message,
+		}, nil
+	}
 }
 
 // FetchRemoteModels fetches models from the provider's /v1/models endpoint.

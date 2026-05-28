@@ -107,7 +107,7 @@ onMounted(() => {
 
   if (import.meta.env.DEV) {
     ;(window as unknown as Record<string, unknown>).__step3 = {
-      showError(kind: 'http' | 'unreachable' | 'noModels' = 'noModels') {
+      showError(kind: 'http' | 'unreachable' | 'authError' | 'noModels' = 'noModels') {
         createdProviderId.value = 'mock-provider-id'
         errorState.value = kind
         manualMode.value = false
@@ -135,7 +135,7 @@ onMounted(() => {
         }
       },
     }
-    console.info('[step3] dev helpers: __step3.showError("http"|"noModels"), __step3.showManual(), __step3.openAddDialog(), __step3.reset()')
+    console.info('[step3] dev helpers: __step3.showError("http"|"unreachable"|"authError"|"noModels"), __step3.showManual(), __step3.openAddDialog(), __step3.reset()')
   }
 })
 </script>
@@ -328,16 +328,20 @@ onMounted(() => {
               <p class="text-sm font-medium text-destructive">
                 {{ errorState === 'unreachable'
                   ? t('onboarding.provider.form.errorUnreachableTitle')
-                  : errorState === 'noModels'
-                    ? t('onboarding.provider.form.errorNoModelsTitle')
-                    : t('onboarding.provider.form.errorHttpTitle') }}
+                  : errorState === 'authError'
+                    ? t('onboarding.provider.form.errorAuthTitle')
+                    : errorState === 'noModels'
+                      ? t('onboarding.provider.form.errorNoModelsTitle')
+                      : t('onboarding.provider.form.errorHttpTitle') }}
               </p>
               <p class="mt-1 text-xs text-muted-foreground leading-relaxed">
                 {{ errorState === 'unreachable'
                   ? t('onboarding.provider.form.errorUnreachableDescription')
-                  : errorState === 'noModels'
-                    ? t('onboarding.provider.form.errorNoModelsDescription')
-                    : t('onboarding.provider.form.errorHttpDescription') }}
+                  : errorState === 'authError'
+                    ? t('onboarding.provider.form.errorAuthDescription')
+                    : errorState === 'noModels'
+                      ? t('onboarding.provider.form.errorNoModelsDescription')
+                      : t('onboarding.provider.form.errorHttpDescription') }}
               </p>
               <p
                 v-if="errorDetail"
@@ -355,7 +359,7 @@ onMounted(() => {
                   {{ t('onboarding.provider.form.retry') }}
                 </button>
                 <button
-                  v-if="errorState !== 'unreachable'"
+                  v-if="errorState !== 'unreachable' && errorState !== 'authError'"
                   type="button"
                   class="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
                   :disabled="importing || !createdProviderId"
@@ -454,8 +458,11 @@ onMounted(() => {
             leave-from-class="opacity-100 translate-y-0"
             leave-to-class="opacity-0 -translate-y-1"
           >
-            <span :key="formCtaLabel" class="inline-flex items-center gap-2">
-              <Spinner v-if="importing" />
+            <span
+              :key="formCtaLabel"
+              class="inline-flex items-center gap-2"
+            >
+              <Spinner v-if="submitting" />
               {{ formCtaLabel }}
             </span>
           </Transition>

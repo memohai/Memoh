@@ -45,6 +45,14 @@ watch(currentStep, (step) => {
     router.replace({ query: { step: String(step) } })
   }
 })
+
+watch(() => route.query.step, (val) => {
+  if (val === undefined || val === '') return
+  const step = Number.parseInt(String(val), 10)
+  if (Number.isInteger(step) && step >= 0 && step < STEP_COUNT && step !== currentStep.value) {
+    goToStep(step)
+  }
+})
 </script>
 
 <template>

@@ -15,6 +15,9 @@ definitions:
         type: boolean
       last_login_at:
         type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       role:
         type: string
       timezone:
@@ -77,6 +80,8 @@ definitions:
         type: string
       display_name:
         type: string
+      metadata:
+        type: object
       timezone:
         type: string
     type: object
@@ -2777,7 +2782,19 @@ definitions:
         type: string
       reachable:
         type: boolean
+      status:
+        $ref: '#/definitions/providers.TestStatus'
     type: object
+  providers.TestStatus:
+    enum:
+    - ok
+    - auth_error
+    - error
+    type: string
+    x-enum-varnames:
+    - TestStatusOK
+    - TestStatusAuthError
+    - TestStatusError
   providers.UpdateRequest:
     properties:
       client_type:

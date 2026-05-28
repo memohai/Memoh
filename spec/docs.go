@@ -9773,6 +9773,10 @@ const docTemplate = `{
                 "last_login_at": {
                     "type": "string"
                 },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "role": {
                     "type": "string"
                 },
@@ -9868,6 +9872,9 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                },
+                "metadata": {
+                    "type": "object"
                 },
                 "timezone": {
                     "type": "string"
@@ -13948,8 +13955,24 @@ const docTemplate = `{
                 },
                 "reachable": {
                     "type": "boolean"
+                },
+                "status": {
+                    "$ref": "#/definitions/providers.TestStatus"
                 }
             }
+        },
+        "providers.TestStatus": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "auth_error",
+                "error"
+            ],
+            "x-enum-varnames": [
+                "TestStatusOK",
+                "TestStatusAuthError",
+                "TestStatusError"
+            ]
         },
         "providers.UpdateRequest": {
             "type": "object",

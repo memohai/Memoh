@@ -31,9 +31,10 @@ export function useProviderSetup(options: {
 
   const formError = ref('')
   const createdProviderId = ref<string | null>(null)
-  const errorState = ref<'http' | 'unreachable' | 'noModels' | null>(null)
+  const errorState = ref<'http' | 'unreachable' | 'authError' | 'noModels' | null>(null)
   const errorDetail = ref('')
   const manualMode = ref(false)
+  const saving = ref(false)
   const suppressDirtyReset = ref(false)
 
   const openModelState = ref(false)
@@ -108,14 +109,16 @@ export function useProviderSetup(options: {
     },
   })
 
-  const submitting = computed(() => importing.value)
+  const submitting = computed(() => saving.value || importing.value)
 
   const formCtaLabel = computed(() => {
+    if (saving.value) return t('onboarding.provider.form.importing')
     if (importing.value) return t('onboarding.provider.form.importing')
     return t('onboarding.next')
   })
 
   const formCtaDisabled = computed(() => {
+    if (saving.value) return true
     if (importing.value) return true
     if (manualMode.value) return providerModels.value.length === 0
     if (errorState.value) return true
@@ -127,6 +130,7 @@ export function useProviderSetup(options: {
     errorState.value = null
     errorDetail.value = ''
     manualMode.value = false
+    saving.value = false
     openModelState.value = false
     openModelTitle.value = 'title'
     openModelEdit.value = null
@@ -201,8 +205,13 @@ export function useProviderSetup(options: {
         path: { id: providerId },
         throwOnError: true,
       })
-      if (!testResult?.reachable) {
-        errorState.value = 'unreachable'
+      if (testResult?.status === 'auth_error') {
+        errorState.value = 'authError'
+        errorDetail.value = testResult?.message ?? ''
+        return
+      }
+      if (testResult?.status === 'error') {
+        errorState.value = testResult?.reachable ? 'http' : 'unreachable'
         errorDetail.value = testResult?.message ?? ''
         return
       }
@@ -235,15 +244,21 @@ export function useProviderSetup(options: {
   }
 
   async function saveAndNext() {
+    if (saving.value) return
     if (manualMode.value) {
       if (providerModels.value.length === 0) return
       options.onProviderReady()
       return
     }
 
-    const providerId = await ensureProviderCreated()
-    if (!providerId) return
-    await runImport(providerId)
+    saving.value = true
+    try {
+      const providerId = await ensureProviderCreated()
+      if (!providerId) return
+      await runImport(providerId)
+    } finally {
+      saving.value = false
+    }
   }
 
   async function onRetry() {

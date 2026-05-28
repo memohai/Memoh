@@ -45,11 +45,21 @@ type CountResponse struct {
 	Count int64 `json:"count"`
 }
 
+// TestStatus represents the outcome of testing a provider.
+type TestStatus string
+
+const (
+	TestStatusOK        TestStatus = "ok"
+	TestStatusAuthError TestStatus = "auth_error"
+	TestStatusError     TestStatus = "error"
+)
+
 // TestResponse is returned by POST /providers/:id/test.
 type TestResponse struct {
-	Reachable bool   `json:"reachable"`
-	LatencyMs int64  `json:"latency_ms,omitempty"`
-	Message   string `json:"message,omitempty"`
+	Status    TestStatus `json:"status"`
+	Reachable bool       `json:"reachable"`
+	LatencyMs int64      `json:"latency_ms,omitempty"`
+	Message   string     `json:"message,omitempty"`
 }
 
 // OAuthStatus is returned by GET /providers/:id/oauth/status.

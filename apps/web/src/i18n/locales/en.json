@@ -2093,6 +2093,8 @@
         "saveFailed": "Failed to save provider",
         "errorHttpTitle": "Connection failed",
         "errorHttpDescription": "Please check your API key and base URL.",
+        "errorAuthTitle": "Invalid API key",
+        "errorAuthDescription": "The provider rejected your API key. Please check that it is correct and has not expired.",
         "errorUnreachableTitle": "Provider unreachable",
         "errorUnreachableDescription": "Could not connect to this provider. Please verify your API key and base URL are correct.",
         "errorNoModelsTitle": "No models received",
@@ -2133,7 +2135,8 @@
           "desc": "Plug in search engines for real-time info"
         }
       },
-      "saveFailed": "Failed to save, please try again"
+      "saveFailed": "Failed to save, please try again",
+      "noProviderWarning": "You haven't configured an AI provider yet. Your bot won't be able to reply until you add one in Settings → Providers"
     }
   }
 }
