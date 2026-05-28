@@ -24,6 +24,7 @@ const isDark = computed(() => settings.theme === 'dark')
         :content="props.content"
         :is-dark="isDark"
         :typewriter="false"
+        :fade="false"
         custom-id="file-preview-md"
       />
     </div>

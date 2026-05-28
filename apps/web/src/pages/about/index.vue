@@ -111,6 +111,7 @@
                       :content="cleanMarkdownBody(checkResult.body)"
                       :is-dark="isDark"
                       :typewriter="false"
+                      :fade="false"
                       custom-id="release-notes"
                     />
                   </div>

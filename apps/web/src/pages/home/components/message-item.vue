@@ -138,6 +138,7 @@
               :is-dark="isDark"
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
+              :fade="message.streaming"
               custom-id="chat-msg"
             />
           </div>
@@ -269,6 +270,7 @@
               :is-dark="isDark"
               :smooth-streaming="isAssistantBlockStreaming(i)"
               :typewriter="isAssistantBlockStreaming(i)"
+              :fade="isAssistantBlockStreaming(i)"
               custom-id="chat-msg"
             />
           </div>
