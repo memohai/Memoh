@@ -12,7 +12,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="text-left">
+  <div class="text-left min-h-[542px] flex flex-col">
     <h2 class="text-3xl font-semibold mb-4">
       {{ t(titleKey) }}
     </h2>
@@ -20,7 +20,7 @@ defineProps<{
       {{ t(descKey) }}
     </p>
 
-    <div class="mt-12 flex items-center justify-end gap-3">
+    <div class="mt-auto pt-12 flex items-center justify-end gap-3">
       <button
         class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         @click="prevStep"

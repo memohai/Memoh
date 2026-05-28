@@ -2069,7 +2069,37 @@
     },
     "provider": {
       "title": "配置 AI 服务商",
-      "placeholder": "服务商配置即将推出。"
+      "placeholder": "服务商配置即将推出。",
+      "description": "选择常用服务商，配置 API 密钥即可开始使用。",
+      "custom": "自定义",
+      "form": {
+        "name": "名称",
+        "namePlaceholder": "例如：我的 OpenAI",
+        "apiKey": "API 密钥",
+        "apiKeyPlaceholder": "sk-...",
+        "baseUrl": "Base URL",
+        "baseUrlPlaceholder": "https://api.example.com/v1",
+        "clientType": "API 格式",
+        "clientTypePlaceholder": "选择 API 格式",
+        "save": "保存",
+        "saving": "保存中...",
+        "importing": "导入模型中...",
+        "cancel": "取消",
+        "requiredError": "请填写所有字段",
+        "saveFailed": "保存失败",
+        "errorHttpTitle": "连接失败",
+        "errorHttpDescription": "请检查 API 密钥与接口地址是否正确。",
+        "errorNoModelsTitle": "未获取到模型",
+        "errorNoModelsDescription": "服务商可能不提供模型列表接口，你可以重试或手动添加模型。",
+        "retry": "重试",
+        "manualAdd": "手动添加",
+        "skipStep": "跳过此步",
+        "manualAddTitle": "手动添加模型",
+        "manualAddEmpty": "尚未添加模型",
+        "manualAddBtn": "添加",
+        "manualAddedCount": "已添加 {count} 个模型",
+        "removeModel": "移除"
+      }
     },
     "bot": {
       "title": "创建你的第一个 Bot",

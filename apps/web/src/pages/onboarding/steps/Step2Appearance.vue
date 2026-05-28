@@ -37,7 +37,7 @@ function go(action: () => void) {
     class="transition-all duration-[175ms] ease-out"
     :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
   >
-    <div class="text-left">
+    <div class="text-left min-h-[542px] flex flex-col">
       <h2
         class="text-3xl font-semibold mb-8 transition-all duration-[350ms] ease-out"
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
@@ -155,7 +155,7 @@ function go(action: () => void) {
       </div>
 
       <div
-        class="mt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[320ms]"
+        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[320ms]"
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
       >
         <button

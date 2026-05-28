@@ -2073,7 +2073,37 @@
     },
     "provider": {
       "title": "Configure AI Provider",
-      "placeholder": "Provider configuration coming soon."
+      "placeholder": "Provider configuration coming soon.",
+      "description": "Pick a provider and drop in your API key.",
+      "custom": "Custom",
+      "form": {
+        "name": "Name",
+        "namePlaceholder": "e.g. My OpenAI",
+        "apiKey": "API Key",
+        "apiKeyPlaceholder": "sk-...",
+        "baseUrl": "Base URL",
+        "baseUrlPlaceholder": "https://api.example.com/v1",
+        "clientType": "API Format",
+        "clientTypePlaceholder": "Select API format",
+        "save": "Save",
+        "saving": "Saving...",
+        "importing": "Importing models...",
+        "cancel": "Cancel",
+        "requiredError": "Please fill in all fields",
+        "saveFailed": "Failed to save provider",
+        "errorHttpTitle": "Connection failed",
+        "errorHttpDescription": "Please check your API key and base URL.",
+        "errorNoModelsTitle": "No models received",
+        "errorNoModelsDescription": "This provider may not expose a model list. You can retry or add models manually.",
+        "retry": "Retry",
+        "manualAdd": "Add manually",
+        "skipStep": "Skip this step",
+        "manualAddTitle": "Add models manually",
+        "manualAddEmpty": "No models added yet",
+        "manualAddBtn": "Add",
+        "manualAddedCount": "{count} model(s) added",
+        "removeModel": "Remove"
+      }
     },
     "bot": {
       "title": "Create Your First Bot",

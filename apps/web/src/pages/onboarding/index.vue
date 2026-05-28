@@ -6,6 +6,7 @@ import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
 import PlaceholderStep from './steps/PlaceholderStep.vue'
 import Step1Intro from './steps/Step1Intro.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
+import Step3Provider from './steps/Step3Provider.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
 const route = useRoute()
@@ -16,7 +17,7 @@ const dotsVisible = computed(() => currentStep.value > 0 || introTextVisible.val
 const stepComponents = [
   { component: Step1Intro, props: {} },
   { component: Step2Appearance, props: {} },
-  { component: PlaceholderStep, props: { titleKey: 'onboarding.provider.title', descKey: 'onboarding.provider.placeholder' } },
+  { component: Step3Provider, props: {} },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.bot.title', descKey: 'onboarding.bot.placeholder' } },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.im.title', descKey: 'onboarding.im.placeholder' } },
   { component: PlaceholderStep, props: { titleKey: 'onboarding.welcome.title', descKey: 'onboarding.welcome.description' } },
