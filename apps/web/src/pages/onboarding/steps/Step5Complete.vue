@@ -24,11 +24,15 @@ onMounted(() => {
   })
 })
 
-function handleComplete() {
+async function handleComplete() {
   if (completing.value) return
   exiting.value = true
   sessionStorage.setItem('memoh:onboarding-entry-animation', '1')
-  void complete(175)
+  const ok = await complete(175)
+  if (!ok) {
+    exiting.value = false
+    sessionStorage.removeItem('memoh:onboarding-entry-animation')
+  }
 }
 </script>
 
@@ -59,7 +63,10 @@ function handleComplete() {
         :key="card.titleKey"
         class="rounded-xl border bg-muted/30 px-5 py-6"
       >
-        <component :is="card.icon" class="size-5 text-muted-foreground mb-4" />
+        <component
+          :is="card.icon"
+          class="size-5 text-muted-foreground mb-4"
+        />
         <div class="text-sm font-medium mb-1.5">
           {{ t(card.titleKey) }}
         </div>

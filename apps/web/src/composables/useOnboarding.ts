@@ -47,7 +47,7 @@ export function useOnboarding() {
     currentStep.value = LAST_STEP_INDEX
   }
 
-  async function complete(minTransitionMs = 0) {
+  async function complete(minTransitionMs = 0): Promise<boolean> {
     completing.value = true
     const minWait = new Promise<void>((resolve) => setTimeout(resolve, minTransitionMs))
     try {
@@ -60,7 +60,7 @@ export function useOnboarding() {
     } catch {
       toast.error(t('onboarding.complete.saveFailed'))
       completing.value = false
-      return
+      return false
     }
     await minWait
     const createdBotId = sessionStorage.getItem('memoh:onboarding-created-bot-id')
@@ -69,6 +69,7 @@ export function useOnboarding() {
     localStorage.removeItem('memoh:dev:force-onboarding')
     await router.replace(createdBotId ? `/chat/${createdBotId}` : '/')
     completing.value = false
+    return true
   }
 
   return {

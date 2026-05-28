@@ -7,7 +7,7 @@ import Step1Intro from './steps/Step1Intro.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
 import Step3Provider from './steps/Step3Provider.vue'
 import Step4Bot from './steps/Step4Bot.vue'
-import Step6Complete from './steps/Step6Complete.vue'
+import Step5Complete from './steps/Step5Complete.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,7 +20,7 @@ const stepComponents = [
   { component: Step2Appearance, props: {} },
   { component: Step3Provider, props: {} },
   { component: Step4Bot, props: {} },
-  { component: Step6Complete, props: {} },
+  { component: Step5Complete, props: {} },
 ]
 
 

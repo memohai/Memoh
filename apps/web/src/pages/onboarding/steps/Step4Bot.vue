@@ -39,6 +39,7 @@ const capabilities = useCapabilitiesStore()
 const visible = ref(false)
 const exiting = ref(false)
 const workspaceVisible = ref(false)
+const submitting = ref(false)
 
 onMounted(() => {
   void capabilities.load()
@@ -108,7 +109,8 @@ const { mutateAsync: createBot } = useMutation({
 })
 
 async function handleSubmit() {
-  if (!canSubmit.value) return
+  if (!canSubmit.value || submitting.value) return
+  submitting.value = true
 
   const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
     ? {
@@ -152,6 +154,8 @@ async function handleSubmit() {
     go(nextStep)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    submitting.value = false
   }
 }
 </script>
@@ -302,7 +306,7 @@ async function handleSubmit() {
           </button>
           <button
             class="inline-flex h-[42px] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="!canSubmit"
+            :disabled="!canSubmit || submitting"
             @click="handleSubmit"
           >
             {{ t('onboarding.next') }}
