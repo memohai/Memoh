@@ -1,6 +1,9 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { putUsersMe } from '@memohai/sdk'
+import { toast } from 'vue-sonner'
+import { useUserStore } from '@/store/user'
 
 export const LAST_STEP_INDEX = 6
 export const STEP_COUNT = 7
@@ -9,8 +12,15 @@ const currentStep = ref(0)
 const completing = ref(false)
 const introTextVisible = ref(false)
 
+export function resetOnboardingState() {
+  currentStep.value = 0
+  completing.value = false
+  introTextVisible.value = false
+}
+
 export function useOnboarding() {
   const router = useRouter()
+  const { t } = useI18n()
 
   const isFirstStep = computed(() => currentStep.value === 0)
   const isLastStep = computed(() => currentStep.value === LAST_STEP_INDEX)
@@ -39,18 +49,21 @@ export function useOnboarding() {
 
   async function complete() {
     completing.value = true
-    localStorage.removeItem('memoh:dev:force-onboarding')
     try {
       await putUsersMe({
-        body: {
-          metadata: { onboarding_completed: true },
-        },
+        body: { metadata: { onboarding_completed: true } },
+        throwOnError: true,
       })
-      localStorage.setItem('memoh:onboarding:completed', '1')
+      const userStore = useUserStore()
+      userStore.onboardingCompleted = true
     } catch {
-      // API failed, but don't block the user — the guard will retry next load
+      toast.error(t('onboarding.complete.saveFailed'))
+      completing.value = false
+      return
     }
-    router.push('/')
+    sessionStorage.removeItem('onboarding.provider.addedCount')
+    localStorage.removeItem('memoh:dev:force-onboarding')
+    await router.replace('/')
     completing.value = false
   }
 

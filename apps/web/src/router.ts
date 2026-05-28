@@ -7,7 +7,7 @@ import { h } from 'vue'
 import { RouterView } from 'vue-router'
 import { i18nRef } from './i18n'
 import { useUserStore } from '@/store/user'
-import { checkOnboarding } from '@/router-guards/onboarding'
+import { ensureOnboarding } from '@/router-guards/onboarding'
 
 const routes = [
   {
@@ -230,10 +230,11 @@ router.beforeEach(async (to) => {
   }
 
   if (to.path === '/onboarding') {
-    return true
+    const completed = await ensureOnboarding()
+    return completed ? { path: '/' } : true
   }
 
-  const completed = await checkOnboarding()
+  const completed = await ensureOnboarding()
   if (!completed) {
     return { path: '/onboarding' }
   }

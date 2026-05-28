@@ -10,7 +10,7 @@
 export {}
 
 declare module '@memohai/web/router-guards/onboarding' {
-  export function checkOnboarding(): Promise<boolean>
+  export function ensureOnboarding(): Promise<boolean>
 }
 
 declare module '@memohai/web/router' {

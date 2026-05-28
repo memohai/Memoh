@@ -1,6 +1,7 @@
 export interface ProviderPreset {
   id: string
   name: string
+  registryName?: string
   clientType: string
   baseUrl: string
   icon: string
@@ -10,7 +11,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: 'openai',
     name: 'OpenAI',
-    clientType: 'openai-completions',
+    clientType: 'openai-responses',
     baseUrl: 'https://api.openai.com/v1',
     icon: 'openai',
   },
@@ -31,6 +32,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: 'google',
     name: 'Google Gemini',
+    registryName: 'Google',
     clientType: 'google-generative-ai',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     icon: 'gemini-color',
@@ -52,6 +54,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: 'minimax',
     name: 'MiniMax',
+    registryName: 'Minimax',
     clientType: 'openai-completions',
     baseUrl: 'https://api.minimaxi.com/v1',
     icon: 'minimax-color',
@@ -59,7 +62,8 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: 'xai',
     name: 'xAI Grok',
-    clientType: 'openai-completions',
+    registryName: 'xAI (Grok)',
+    clientType: 'openai-responses',
     baseUrl: 'https://api.x.ai/v1',
     icon: 'xai',
   },

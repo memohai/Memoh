@@ -5,7 +5,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
-import { checkOnboarding } from '@memohai/web/router-guards/onboarding'
+import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 
 // Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
 // (e.g. via the chat sidebar's settings button or any reused @memohai/web
@@ -121,12 +121,13 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
     return { name: 'Login' }
   }
 
-  // Onboarding page: always accessible
+  // Onboarding: redirect completed users away, let incomplete users through
   if (to.path === '/onboarding') {
-    return true
+    const completed = await ensureOnboarding()
+    return completed ? { path: '/' } : true
   }
 
-  const completed = await checkOnboarding()
+  const completed = await ensureOnboarding()
   if (!completed) {
     return { path: '/onboarding' }
   }

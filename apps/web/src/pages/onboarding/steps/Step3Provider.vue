@@ -7,6 +7,8 @@ import {
   postProvidersByIdImportModels,
   deleteModelsById,
   getProvidersByIdModels,
+  getProvidersNameByName,
+  putProvidersById,
   type ProvidersCreateRequest,
   type ModelsGetResponse,
 } from '@memohai/sdk'
@@ -207,6 +209,21 @@ async function ensureProviderCreated(): Promise<string | null> {
   formError.value = ''
 
   try {
+    const lookupName = selectedPreset.value?.registryName ?? name
+    const { data: existing } = await getProvidersNameByName({
+      path: { name: lookupName },
+    })
+
+    if (existing?.id) {
+      await putProvidersById({
+        path: { id: existing.id },
+        body: { config: { base_url: baseUrl, api_key: apiKey }, enable: true },
+        throwOnError: true,
+      })
+      createdProviderId.value = existing.id
+      return existing.id
+    }
+
     const result = await createProvider({
       name,
       client_type: formValues.value.client_type,
@@ -227,21 +244,29 @@ async function ensureProviderCreated(): Promise<string | null> {
 
 async function runImport(providerId: string) {
   errorState.value = null
+  let importFailed = false
   try {
-    const result = await importModels(providerId)
-    const created = result?.created ?? 0
-    if (created >= 1) {
+    await importModels(providerId)
+  } catch {
+    importFailed = true
+  }
+
+  try {
+    const { data: models } = await getProvidersByIdModels({
+      path: { id: providerId },
+    })
+    if (models && models.length > 0) {
       addedCount.value++
       sessionStorage.setItem(ADDED_COUNT_KEY, String(addedCount.value))
       go(nextStep)
+      return
     }
-    else {
-      errorState.value = 'noModels'
-    }
-  }
-  catch {
+  } catch {
     errorState.value = 'http'
+    return
   }
+
+  errorState.value = importFailed ? 'http' : 'noModels'
 }
 
 async function saveAndNext() {

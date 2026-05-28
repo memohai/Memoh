@@ -83,6 +83,7 @@ SET display_name = $2,
     avatar_url = $3,
     timezone = $4,
     is_active = $5,
+    metadata = $6,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

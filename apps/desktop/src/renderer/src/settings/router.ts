@@ -2,6 +2,7 @@ import { h } from 'vue'
 import { createRouter, createMemoryHistory, RouterView, type RouteRecordRaw } from 'vue-router'
 import { SETTINGS_ROUTE_SPECS, SETTINGS_DEFAULT_PATH, type SettingsRouteSpec } from '../shared/settings-routes'
 import { useUserStore } from '@memohai/web/store/user'
+import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 
 // Settings-window router. Mirrors the path layout under `/settings/*` from
 // @memohai/web's main router so the reused @memohai/web `SettingsSidebar`
@@ -33,6 +34,15 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createMemoryHistory(),
   routes,
+})
+
+router.beforeEach(async () => {
+  const completed = await ensureOnboarding()
+  if (!completed) {
+    void window.api?.window?.closeSelf()
+    return false
+  }
+  return true
 })
 
 router.onError((error: Error) => {

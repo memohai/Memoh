@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, watch, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
 
 import PlaceholderStep from './steps/PlaceholderStep.vue'
@@ -10,6 +10,7 @@ import Step3Provider from './steps/Step3Provider.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
 const route = useRoute()
+const router = useRouter()
 const { currentStep, introTextVisible, goToStep } = useOnboarding()
 
 const dotsVisible = computed(() => currentStep.value > 0 || introTextVisible.value)
@@ -41,9 +42,7 @@ onMounted(() => {
 
 watch(currentStep, (step) => {
   if (route.query.step !== String(step)) {
-    const params = new URLSearchParams(window.location.search)
-    params.set('step', String(step))
-    window.history.replaceState(null, '', `?${params.toString()}`)
+    router.replace({ query: { step: String(step) } })
   }
 })
 </script>

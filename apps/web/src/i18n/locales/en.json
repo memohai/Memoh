@@ -2117,7 +2117,8 @@
       "title": "You're All Set!",
       "subtitle": "Your workspace is ready.",
       "hint": "You can always configure more channels and settings later.",
-      "action": "Start Using"
+      "action": "Start Using",
+      "saveFailed": "Failed to save, please try again"
     }
   }
 }
