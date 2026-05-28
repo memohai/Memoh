@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { putUsersMe } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useUserStore } from '@/store/user'
+import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 
 export const LAST_STEP_INDEX = 4
 export const STEP_COUNT = 5
@@ -63,10 +64,10 @@ export function useOnboarding() {
       return false
     }
     await minWait
-    const createdBotId = sessionStorage.getItem('memoh:onboarding-created-bot-id')
-    sessionStorage.removeItem('memoh:onboarding-created-bot-id')
-    sessionStorage.removeItem('onboarding.provider.addedCount')
-    localStorage.removeItem('memoh:dev:force-onboarding')
+    const createdBotId = sessionStorage.getItem(ONBOARDING_KEYS.createdBotId)
+    sessionStorage.removeItem(ONBOARDING_KEYS.createdBotId)
+    sessionStorage.removeItem(ONBOARDING_KEYS.providerAddedCount)
+    localStorage.removeItem(ONBOARDING_KEYS.forceOnboarding)
     await router.replace(createdBotId ? `/chat/${createdBotId}` : '/')
     completing.value = false
     return true

@@ -29,15 +29,14 @@ import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import { providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
-
-const ADDED_COUNT_KEY = 'onboarding.provider.addedCount'
+import { useStepTransition, nextFrame } from '../useStepTransition'
+import { ONBOARDING_KEYS } from '../constants'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
+const { visible, exiting, leave } = useStepTransition()
 
-const visible = ref(false)
 const listVisible = ref(false)
-const exiting = ref(false)
 const mode = ref<'list' | 'form'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
@@ -169,12 +168,10 @@ function openForm(preset: ProviderPreset | null) {
     mode.value = 'form'
     formVisible.value = false
     formContentVisible.value = false
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        formVisible.value = true
-        formContentVisible.value = true
-        suppressDirtyReset.value = false
-      })
+    nextFrame(() => {
+      formVisible.value = true
+      formContentVisible.value = true
+      suppressDirtyReset.value = false
     })
   }, 175)
 }
@@ -188,11 +185,9 @@ function backToList() {
     resetFormState()
     listVisible.value = false
     visible.value = false
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        listVisible.value = true
-        visible.value = true
-      })
+    nextFrame(() => {
+      listVisible.value = true
+      visible.value = true
     })
   }, 175)
 }
@@ -258,8 +253,8 @@ async function runImport(providerId: string) {
     })
     if (models && models.length > 0) {
       addedCount.value++
-      sessionStorage.setItem(ADDED_COUNT_KEY, String(addedCount.value))
-      go(nextStep)
+      sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+      leave(nextStep)
       return
     }
   } catch {
@@ -274,8 +269,8 @@ async function saveAndNext() {
   if (manualMode.value) {
     if (providerModels.value.length === 0) return
     addedCount.value++
-    sessionStorage.setItem(ADDED_COUNT_KEY, String(addedCount.value))
-    go(nextStep)
+    sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+    leave(nextStep)
     return
   }
 
@@ -306,9 +301,9 @@ async function onEnterManual() {
 function onSkipStep() {
   if (createdProviderId.value) {
     addedCount.value++
-    sessionStorage.setItem(ADDED_COUNT_KEY, String(addedCount.value))
+    sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
   }
-  go(nextStep)
+  leave(nextStep)
 }
 
 function handleEditModel(model: ModelsGetResponse) {
@@ -338,16 +333,13 @@ watch(
 )
 
 onMounted(() => {
-  const stored = sessionStorage.getItem(ADDED_COUNT_KEY)
+  const stored = sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount)
   if (stored !== null) {
     const parsed = Number.parseInt(stored, 10)
     if (Number.isFinite(parsed) && parsed >= 0) addedCount.value = parsed
   }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      listVisible.value = true
-      visible.value = true
-    })
+  nextFrame(() => {
+    listVisible.value = true
   })
 
   if (import.meta.env.DEV) {
@@ -388,10 +380,6 @@ onMounted(() => {
   }
 })
 
-function go(action: () => void) {
-  exiting.value = true
-  setTimeout(action, 175)
-}
 </script>
 
 <template>
@@ -454,13 +442,13 @@ function go(action: () => void) {
       >
         <button
           class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="go(prevStep)"
+          @click="leave(prevStep)"
         >
           {{ t('onboarding.prev') }}
         </button>
         <button
           class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="go(nextStep)"
+          @click="leave(nextStep)"
         >
           {{ ctaLabel }}
         </button>

@@ -30,30 +30,21 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
+import { useStepTransition, nextFrame } from '../useStepTransition'
+import { ONBOARDING_KEYS } from '../constants'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const queryCache = useQueryCache()
 const capabilities = useCapabilitiesStore()
+const { visible, exiting, leave } = useStepTransition()
 
-const visible = ref(false)
-const exiting = ref(false)
 const workspaceVisible = ref(false)
 const submitting = ref(false)
 
 onMounted(() => {
   void capabilities.load()
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      visible.value = true
-    })
-  })
 })
-
-function go(action: () => void) {
-  exiting.value = true
-  setTimeout(action, 175)
-}
 
 const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
 
@@ -71,10 +62,8 @@ watch(localWorkspaceEnabled, (enabled) => {
   }
   form.workspace_backend = 'local'
   workspaceVisible.value = false
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      workspaceVisible.value = true
-    })
+  nextFrame(() => {
+    workspaceVisible.value = true
   })
 }, { immediate: true })
 
@@ -137,7 +126,7 @@ async function handleSubmit() {
 
     const botId = bot?.id
     if (botId) {
-      sessionStorage.setItem('memoh:onboarding-created-bot-id', botId)
+      sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
     }
     if (botId && form.memory_provider_id) {
       try {
@@ -151,7 +140,7 @@ async function handleSubmit() {
       }
     }
 
-    go(nextStep)
+    leave(nextStep)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
@@ -300,7 +289,7 @@ async function handleSubmit() {
         >
           <button
             class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            @click="go(prevStep)"
+            @click="leave(prevStep)"
           >
             {{ t('onboarding.prev') }}
           </button>

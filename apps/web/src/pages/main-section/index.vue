@@ -19,10 +19,11 @@ import { ref, onMounted } from 'vue'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
+import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 
-const shouldAnimateEntry = sessionStorage.getItem('memoh:onboarding-entry-animation') === '1'
+const shouldAnimateEntry = sessionStorage.getItem(ONBOARDING_KEYS.entryAnimation) === '1'
 if (shouldAnimateEntry) {
-  sessionStorage.removeItem('memoh:onboarding-entry-animation')
+  sessionStorage.removeItem(ONBOARDING_KEYS.entryAnimation)
 }
 
 const entering = ref(shouldAnimateEntry)

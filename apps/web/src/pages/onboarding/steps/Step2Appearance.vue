@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/store/settings'
@@ -8,28 +7,14 @@ import { Button, Label, Select, SelectContent, SelectItem, SelectTrigger, Select
 import { Check, Moon, Sun } from 'lucide-vue-next'
 import { colorSchemes } from '@/constants/color-schemes'
 import type { Locale } from '@/i18n'
+import { useStepTransition } from '../useStepTransition'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme } = settingsStore
 const { nextStep, prevStep } = useOnboarding()
-
-const visible = ref(false)
-const exiting = ref(false)
-
-onMounted(() => {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      visible.value = true
-    })
-  })
-})
-
-function go(action: () => void) {
-  exiting.value = true
-  setTimeout(action, 175)
-}
+const { visible, exiting, leave } = useStepTransition()
 </script>
 
 <template>
@@ -160,13 +145,13 @@ function go(action: () => void) {
       >
         <button
           class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          @click="go(prevStep)"
+          @click="leave(prevStep)"
         >
           {{ t('onboarding.prev') }}
         </button>
         <button
           class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="go(nextStep)"
+          @click="leave(nextStep)"
         >
           {{ t('onboarding.next') }}
         </button>

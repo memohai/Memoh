@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plug, AudioLines, Globe } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
+import { nextFrame } from '../useStepTransition'
+import { ONBOARDING_KEYS } from '../constants'
 
 const { t } = useI18n()
 const { complete, completing } = useOnboarding()
@@ -17,21 +19,19 @@ const cards = [
 ] as const
 
 onMounted(() => {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      visible.value = true
-    })
+  nextFrame(() => {
+    visible.value = true
   })
 })
 
 async function handleComplete() {
   if (completing.value) return
   exiting.value = true
-  sessionStorage.setItem('memoh:onboarding-entry-animation', '1')
+  sessionStorage.setItem(ONBOARDING_KEYS.entryAnimation, '1')
   const ok = await complete(175)
   if (!ok) {
     exiting.value = false
-    sessionStorage.removeItem('memoh:onboarding-entry-animation')
+    sessionStorage.removeItem(ONBOARDING_KEYS.entryAnimation)
   }
 }
 </script>

@@ -6,6 +6,7 @@ import { useQueryCache } from '@pinia/colada'
 import { getUsersMe } from '@memohai/sdk'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
 import { resetOnboardingState } from '@/composables/useOnboarding'
+import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 
 export interface UserInfo {
   id: string;
@@ -103,7 +104,7 @@ export const useUserStore = defineStore(
       onboardingCompleted.value = false
       _meChecked = false
       _pendingFetch = null
-      localStorage.removeItem('memoh:onboarding:intro-seen')
+      localStorage.removeItem(ONBOARDING_KEYS.introSeen)
       resetOnboardingState()
     }
 

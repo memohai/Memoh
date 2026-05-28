@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOnboarding } from '@/composables/useOnboarding'
+import { nextFrame } from '../useStepTransition'
+import { ONBOARDING_KEYS } from '../constants'
 
 const { t } = useI18n()
 const { nextStep, introTextVisible } = useOnboarding()
@@ -42,12 +44,10 @@ onMounted(() => {
     skipAnimation()
     return
   }
-  if (localStorage.getItem('memoh:onboarding:intro-seen') === '1') {
+  if (localStorage.getItem(ONBOARDING_KEYS.introSeen) === '1') {
     isSkipped.value = true
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        showContent.value = true
-      })
+    nextFrame(() => {
+      showContent.value = true
     })
     return
   }
@@ -122,7 +122,7 @@ const animate = () => {
   })
 
   if (allFinished && elapsed > 4000) {
-    localStorage.setItem('memoh:onboarding:intro-seen', '1')
+    localStorage.setItem(ONBOARDING_KEYS.introSeen, '1')
     if (!showContent.value) showContent.value = true
     setTimeout(() => { isSkipped.value = true }, 600)
   } else {
@@ -134,7 +134,7 @@ const animate = () => {
 }
 
 const skipAnimation = () => {
-  localStorage.setItem('memoh:onboarding:intro-seen', '1')
+  localStorage.setItem(ONBOARDING_KEYS.introSeen, '1')
   isSkipped.value = true
   showContent.value = true
   cancelAnimationFrame(animationFrameId)
