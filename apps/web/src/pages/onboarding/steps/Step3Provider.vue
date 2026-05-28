@@ -1,17 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, provide, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import {
-  postProviders,
-  postProvidersByIdImportModels,
-  deleteModelsById,
-  getProvidersByIdModels,
-  getProvidersNameByName,
-  putProvidersById,
-  type ProvidersCreateRequest,
-  type ModelsGetResponse,
-} from '@memohai/sdk'
 import {
   Input,
   Label,
@@ -28,9 +17,9 @@ import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import { providerPresets, type ProviderPreset } from '@/constants/provider-presets'
-import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
+import { useProviderSetup } from './useProviderSetup'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
@@ -41,128 +30,34 @@ const mode = ref<'list' | 'form'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
 const selectedPreset = ref<ProviderPreset | null>(null)
-const formError = ref('')
 const addedCount = ref(0)
 
-const formValues = ref({
-  name: '',
-  api_key: '',
-  base_url: '',
-  client_type: 'openai-completions',
+function advanceWithCount() {
+  addedCount.value++
+  sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+  leave(nextStep)
+}
+
+const {
+  formValues, formError,
+  createdProviderId, errorState, manualMode,
+  importing, submitting, deleteModelLoading,
+  providerModels,
+  availableClientTypes, baseUrlPlaceholder,
+  formCtaLabel, formCtaDisabled,
+  resetFormState, initFormValues, clearSuppressDirtyReset,
+  saveAndNext, onRetry, onEnterManual, openAddDialog,
+  handleEditModel, handleDeleteModel,
+} = useProviderSetup({
+  selectedPreset: () => selectedPreset.value,
+  onProviderReady: advanceWithCount,
 })
-
-const createdProviderId = ref<string | null>(null)
-const errorState = ref<'http' | 'noModels' | null>(null)
-const manualMode = ref(false)
-const suppressDirtyReset = ref(false)
-
-const openModelState = ref(false)
-const openModelTitle = ref<'edit' | 'title'>('title')
-const openModelEdit = ref<ModelsGetResponse | null>(null)
-
-provide('openModel', openModelState)
-provide('openModelTitle', openModelTitle)
-provide('openModelState', openModelEdit)
-
-const { state: providerModelsState, refresh: refreshProviderModels } = useQuery({
-  key: () => ['provider-models', createdProviderId.value ?? 'none'],
-  query: async () => {
-    if (!createdProviderId.value) return [] as ModelsGetResponse[]
-    const { data } = await getProvidersByIdModels({
-      path: { id: createdProviderId.value },
-      throwOnError: true,
-    })
-    return data ?? []
-  },
-  enabled: () => !!createdProviderId.value && manualMode.value,
-})
-
-const providerModels = computed<ModelsGetResponse[]>(() => providerModelsState.value.data ?? [])
-
-const availableClientTypes = computed(() =>
-  LLM_CLIENT_TYPE_LIST.filter(ct => !['openai-codex', 'github-copilot'].includes(ct.value)),
-)
-
-const baseUrlPlaceholder = computed(() => {
-  switch (formValues.value.client_type) {
-    case 'anthropic-messages':
-      return 'https://api.anthropic.com'
-    case 'google-generative-ai':
-      return 'https://generativelanguage.googleapis.com/v1beta'
-    default:
-      return 'https://api.example.com/v1'
-  }
-})
-
-const queryCache = useQueryCache()
-
-const { mutateAsync: createProvider } = useMutation({
-  mutation: async (payload: ProvidersCreateRequest) => {
-    const { data } = await postProviders({ body: payload, throwOnError: true })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['providers'] })
-  },
-})
-
-const { mutateAsync: importModels, isLoading: importing } = useMutation({
-  mutation: async (providerId: string) => {
-    const { data } = await postProvidersByIdImportModels({
-      path: { id: providerId },
-      throwOnError: true,
-    })
-    return data
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['models'] })
-    queryCache.invalidateQueries({ key: ['provider-models'] })
-  },
-})
-
-const { mutateAsync: deleteModel, isLoading: deleteModelLoading } = useMutation({
-  mutation: async (id: string) => {
-    await deleteModelsById({ path: { id }, throwOnError: true })
-  },
-  onSettled: () => {
-    queryCache.invalidateQueries({ key: ['models'] })
-    queryCache.invalidateQueries({ key: ['provider-models'] })
-  },
-})
-
-const submitting = computed(() => importing.value)
 
 const ctaLabel = computed(() => addedCount.value > 0 ? t('onboarding.next') : t('onboarding.skip'))
 
-const formCtaLabel = computed(() => {
-  if (importing.value) return t('onboarding.provider.form.importing')
-  return t('onboarding.next')
-})
-
-const formCtaDisabled = computed(() => {
-  if (importing.value) return true
-  if (manualMode.value) return providerModels.value.length === 0
-  if (errorState.value) return true
-  return false
-})
-
-function resetFormState() {
-  createdProviderId.value = null
-  errorState.value = null
-  manualMode.value = false
-  openModelState.value = false
-  openModelTitle.value = 'title'
-  openModelEdit.value = null
-}
-
 function openForm(preset: ProviderPreset | null) {
   selectedPreset.value = preset
-  suppressDirtyReset.value = true
-  formValues.value = preset
-    ? { name: preset.name, api_key: '', base_url: preset.baseUrl, client_type: preset.clientType }
-    : { name: '', api_key: '', base_url: '', client_type: 'openai-completions' }
-  formError.value = ''
-  resetFormState()
+  initFormValues(preset)
   listVisible.value = false
   setTimeout(() => {
     mode.value = 'form'
@@ -171,7 +66,7 @@ function openForm(preset: ProviderPreset | null) {
     nextFrame(() => {
       formVisible.value = true
       formContentVisible.value = true
-      suppressDirtyReset.value = false
+      clearSuppressDirtyReset()
     })
   }, 175)
 }
@@ -192,145 +87,13 @@ function backToList() {
   }, 175)
 }
 
-async function ensureProviderCreated(): Promise<string | null> {
-  if (createdProviderId.value) return createdProviderId.value
-
-  const name = formValues.value.name.trim()
-  const apiKey = formValues.value.api_key.trim()
-  const baseUrl = formValues.value.base_url.trim()
-  if (!name || !apiKey || !baseUrl) {
-    formError.value = t('onboarding.provider.form.requiredError')
-    return null
-  }
-  formError.value = ''
-
-  try {
-    const lookupName = selectedPreset.value?.registryName ?? name
-    const { data: existing } = await getProvidersNameByName({
-      path: { name: lookupName },
-    })
-
-    if (existing?.id) {
-      await putProvidersById({
-        path: { id: existing.id },
-        body: { config: { base_url: baseUrl, api_key: apiKey }, enable: true },
-        throwOnError: true,
-      })
-      createdProviderId.value = existing.id
-      return existing.id
-    }
-
-    const result = await createProvider({
-      name,
-      client_type: formValues.value.client_type,
-      config: { base_url: baseUrl, api_key: apiKey },
-    } as ProvidersCreateRequest)
-    if (!result?.id) {
-      errorState.value = 'http'
-      return null
-    }
-    createdProviderId.value = result.id
-    return result.id
-  }
-  catch (e) {
-    formError.value = (e as Error).message || t('onboarding.provider.form.saveFailed')
-    return null
-  }
-}
-
-async function runImport(providerId: string) {
-  errorState.value = null
-  let importFailed = false
-  try {
-    await importModels(providerId)
-  } catch {
-    importFailed = true
-  }
-
-  try {
-    const { data: models } = await getProvidersByIdModels({
-      path: { id: providerId },
-    })
-    if (models && models.length > 0) {
-      addedCount.value++
-      sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
-      leave(nextStep)
-      return
-    }
-  } catch {
-    errorState.value = 'http'
-    return
-  }
-
-  errorState.value = importFailed ? 'http' : 'noModels'
-}
-
-async function saveAndNext() {
-  if (manualMode.value) {
-    if (providerModels.value.length === 0) return
-    addedCount.value++
-    sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
-    leave(nextStep)
-    return
-  }
-
-  const providerId = await ensureProviderCreated()
-  if (!providerId) return
-  await runImport(providerId)
-}
-
-async function onRetry() {
-  if (!createdProviderId.value) {
-    await saveAndNext()
-    return
-  }
-  await runImport(createdProviderId.value)
-}
-
-async function onEnterManual() {
-  if (!createdProviderId.value) return
-  errorState.value = null
-  manualMode.value = true
-  await refreshProviderModels()
-  await nextTick()
-  openModelEdit.value = null
-  openModelTitle.value = 'title'
-  openModelState.value = true
-}
-
 function onSkipStep() {
   if (createdProviderId.value) {
-    addedCount.value++
-    sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+    advanceWithCount()
+  } else {
+    leave(nextStep)
   }
-  leave(nextStep)
 }
-
-function handleEditModel(model: ModelsGetResponse) {
-  openModelEdit.value = { ...model }
-  openModelTitle.value = 'edit'
-  openModelState.value = true
-}
-
-async function handleDeleteModel(id: string) {
-  if (!id) return
-  await deleteModel(id)
-  await refreshProviderModels()
-}
-
-watch(
-  () => [formValues.value.name, formValues.value.api_key, formValues.value.base_url, formValues.value.client_type],
-  () => {
-    if (suppressDirtyReset.value) return
-    if (manualMode.value) return
-    if (createdProviderId.value) {
-      createdProviderId.value = null
-    }
-    if (errorState.value) {
-      errorState.value = null
-    }
-  },
-)
 
 onMounted(() => {
   const stored = sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount)
@@ -356,11 +119,7 @@ onMounted(() => {
         manualMode.value = true
         console.info('[step3] manual mode (use real API for adds, models won\'t persist with mock id)')
       },
-      openAddDialog() {
-        openModelEdit.value = null
-        openModelTitle.value = 'title'
-        openModelState.value = true
-      },
+      openAddDialog: openAddDialog,
       reset() {
         resetFormState()
         console.info('[step3] reset')
@@ -379,7 +138,6 @@ onMounted(() => {
     console.info('[step3] dev helpers: __step3.showError("http"|"noModels"), __step3.showManual(), __step3.openAddDialog(), __step3.reset()')
   }
 })
-
 </script>
 
 <template>
