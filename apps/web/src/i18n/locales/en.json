@@ -1013,7 +1013,7 @@
     },
     "localWorkspacePath": "Local workspace folder",
     "localWorkspacePathPlaceholder": "Choose a folder on this computer",
-    "localWorkspaceWarning": "Local workspaces run directly on the host using the server's permissions, giving them full access to local files and commands.",
+    "localWorkspaceWarning": "Local workspaces run with host user permissions and have full access to host files and commands",
     "editBot": "Edit Bot",
     "deleteConfirm": "Are you sure you want to delete this bot?",
     "renameSuccess": "Bot name updated",
@@ -2114,10 +2114,23 @@
       "placeholder": "IM integration coming soon."
     },
     "complete": {
-      "title": "You're All Set!",
-      "subtitle": "Your workspace is ready.",
-      "hint": "You can always configure more channels and settings later.",
-      "action": "Start Using",
+      "title": "You're All Set",
+      "subtitle": "Open Memoh and start your first conversation",
+      "action": "Open Memoh",
+      "cards": {
+        "im": {
+          "title": "IM channels",
+          "desc": "Deploy your bot to Telegram and beyond"
+        },
+        "voice": {
+          "title": "Voice chat",
+          "desc": "TTS and STT give your bot a voice"
+        },
+        "search": {
+          "title": "Web search",
+          "desc": "Plug in search engines for real-time info"
+        }
+      },
       "saveFailed": "Failed to save, please try again"
     }
   }

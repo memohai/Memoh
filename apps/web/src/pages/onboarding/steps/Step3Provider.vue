@@ -20,6 +20,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Spinner,
 } from '@memohai/ui'
 import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
@@ -687,7 +688,20 @@ function go(action: () => void) {
           :disabled="formCtaDisabled"
           @click="saveAndNext"
         >
-          {{ formCtaLabel }}
+          <Transition
+            mode="out-in"
+            enter-active-class="transition-all duration-[160ms] ease-out"
+            enter-from-class="opacity-0 translate-y-1"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition-all duration-[140ms] ease-in"
+            leave-from-class="opacity-100 translate-y-0"
+            leave-to-class="opacity-0 -translate-y-1"
+          >
+            <span :key="formCtaLabel" class="inline-flex items-center gap-2">
+              <Spinner v-if="importing" />
+              {{ formCtaLabel }}
+            </span>
+          </Transition>
         </button>
       </div>
     </div>

@@ -1002,14 +1002,14 @@
     },
     "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
     "workspaceBackend": "工作区",
-    "workspaceBackendHint": "容器工作区提供隔离；Local 工作区会直接在这台电脑上运行。",
+    "workspaceBackendHint": "容器工作区提供隔离；本地文件夹会直接在宿主机上运行。",
     "workspaceBackends": {
       "container": "容器",
       "local": "本地文件夹"
     },
     "localWorkspacePath": "本地工作区文件夹",
     "localWorkspacePathPlaceholder": "选择这台电脑上的文件夹",
-    "localWorkspaceWarning": "Local 工作区将直接以服务器用户权限运行，具有操作宿主机文件与执行命令的完整权限。",
+    "localWorkspaceWarning": "本地工作区将以宿主用户权限运行，具有操作宿主机文件与执行命令的完整权限",
     "editBot": "编辑 Bot",
     "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",
@@ -2110,10 +2110,23 @@
       "placeholder": "IM 接入即将推出。"
     },
     "complete": {
-      "title": "一切就绪！",
-      "subtitle": "你的工作空间已配置完成。",
-      "hint": "之后仍可在设置中接入更多渠道和服务。",
-      "action": "开始使用",
+      "title": "一切就绪",
+      "subtitle": "进入 Memoh，开始你的第一段对话",
+      "action": "打开 Memoh",
+      "cards": {
+        "im": {
+          "title": "IM 接入",
+          "desc": "把 Bot 部署到 Telegram 等渠道"
+        },
+        "voice": {
+          "title": "语音对话",
+          "desc": "语音合成与转写让 Bot 开口"
+        },
+        "search": {
+          "title": "网络搜索",
+          "desc": "接入搜索引擎，让 Bot 获取实时信息"
+        }
+      },
       "saveFailed": "保存失败，请重试"
     }
   }
