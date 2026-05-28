@@ -247,6 +247,8 @@
     "readonlyPlaceholder": "This chat is read-only. Sending messages is disabled.",
     "send": "Send",
     "sendFailed": "Message failed to send",
+    "timelineAnswer": "Answer",
+    "timelineMessage": "Message",
     "startChat": "Start Chat",
     "noBot": "No bots available, please create a bot first",
     "newChat": "New Chat",
