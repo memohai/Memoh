@@ -1,29 +1,29 @@
 <script setup lang="ts">
 import { onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useOnboarding, STEP_COUNT } from '@/composables/useOnboarding'
+import { useOnboarding, STEP_COUNT, LAST_STEP_INDEX } from '@/composables/useOnboarding'
 
-import PlaceholderStep from './steps/PlaceholderStep.vue'
 import Step1Intro from './steps/Step1Intro.vue'
 import Step2Appearance from './steps/Step2Appearance.vue'
 import Step3Provider from './steps/Step3Provider.vue'
+import Step4Bot from './steps/Step4Bot.vue'
 import Step6Complete from './steps/Step6Complete.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { currentStep, introTextVisible, goToStep } = useOnboarding()
+const { currentStep, completing, introTextVisible, goToStep } = useOnboarding()
 
-const dotsVisible = computed(() => currentStep.value > 0 || introTextVisible.value)
+const dotsVisible = computed(() => !completing.value && (currentStep.value > 0 || introTextVisible.value))
 
 const stepComponents = [
   { component: Step1Intro, props: {} },
   { component: Step2Appearance, props: {} },
   { component: Step3Provider, props: {} },
-  { component: PlaceholderStep, props: { titleKey: 'onboarding.bot.title', descKey: 'onboarding.bot.placeholder' } },
-  { component: PlaceholderStep, props: { titleKey: 'onboarding.im.title', descKey: 'onboarding.im.placeholder' } },
-  { component: PlaceholderStep, props: { titleKey: 'onboarding.welcome.title', descKey: 'onboarding.welcome.description' } },
+  { component: Step4Bot, props: {} },
   { component: Step6Complete, props: {} },
 ]
+
+
 
 function readStepFromQuery(): number | null {
   const raw = route.query.step
@@ -50,7 +50,10 @@ watch(currentStep, (step) => {
 <template>
   <div class="min-h-screen flex flex-col bg-background p-4">
     <div class="flex-1 flex items-center justify-center">
-      <div class="w-full max-w-lg">
+      <div
+        class="w-full"
+        :class="currentStep === LAST_STEP_INDEX ? 'max-w-3xl' : 'max-w-lg'"
+      >
         <component
           :is="stepComponents[currentStep].component"
           v-bind="stepComponents[currentStep].props"

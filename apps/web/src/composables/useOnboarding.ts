@@ -5,8 +5,8 @@ import { putUsersMe } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useUserStore } from '@/store/user'
 
-export const LAST_STEP_INDEX = 6
-export const STEP_COUNT = 7
+export const LAST_STEP_INDEX = 4
+export const STEP_COUNT = 5
 
 const currentStep = ref(0)
 const completing = ref(false)
@@ -47,8 +47,9 @@ export function useOnboarding() {
     currentStep.value = LAST_STEP_INDEX
   }
 
-  async function complete() {
+  async function complete(minTransitionMs = 0) {
     completing.value = true
+    const minWait = new Promise<void>((resolve) => setTimeout(resolve, minTransitionMs))
     try {
       await putUsersMe({
         body: { metadata: { onboarding_completed: true } },
@@ -61,9 +62,12 @@ export function useOnboarding() {
       completing.value = false
       return
     }
+    await minWait
+    const createdBotId = sessionStorage.getItem('memoh:onboarding-created-bot-id')
+    sessionStorage.removeItem('memoh:onboarding-created-bot-id')
     sessionStorage.removeItem('onboarding.provider.addedCount')
     localStorage.removeItem('memoh:dev:force-onboarding')
-    await router.replace('/')
+    await router.replace(createdBotId ? `/chat/${createdBotId}` : '/')
     completing.value = false
   }
 
