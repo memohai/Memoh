@@ -53,7 +53,7 @@ export const useUserStore = defineStore(
           }
           _meChecked = true
         } catch {
-          onboardingCompleted.value = true
+          _meChecked = true
         } finally {
           _pendingFetch = null
         }
