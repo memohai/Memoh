@@ -1156,7 +1156,7 @@ watch([activeTab, botId], ([tab]) => {
                 </div>
               </div>
 
-              <div class="shrink-0 flex items-center justify-end">
+              <div class="shrink-0 min-w-10 flex items-center justify-end">
                 <ConfirmPopover
                   v-if="canRollbackSnapshot(item)"
                   :message="$t('bots.container.rollbackConfirm')"
