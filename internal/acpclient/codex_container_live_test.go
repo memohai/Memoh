@@ -14,16 +14,16 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
-func TestCodexACPLiveContainerManaged(t *testing.T) {
+func TestCodexACPLiveContainerAPIKey(t *testing.T) {
 	if os.Getenv("MEMOH_LIVE_CODEX_ACP_CONTAINER") != "1" {
-		t.Skip("set MEMOH_LIVE_CODEX_ACP_CONTAINER=1 to run the live Codex ACP container managed smoke test")
+		t.Skip("set MEMOH_LIVE_CODEX_ACP_CONTAINER=1 to run the live Codex ACP container api_key smoke test")
 	}
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
-		t.Skip("OPENAI_API_KEY is required for the live Codex ACP container managed smoke test")
+		t.Skip("OPENAI_API_KEY is required for the live Codex ACP container api_key smoke test")
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skipf("docker is required for the live Codex ACP container managed smoke test: %v", err)
+		t.Skipf("docker is required for the live Codex ACP container api_key smoke test: %v", err)
 	}
 
 	root := t.TempDir()
@@ -56,19 +56,19 @@ func TestCodexACPLiveContainerManaged(t *testing.T) {
 		Task:        "Reply with exactly this text and do not modify files: memoh-acp-container-live-ok",
 		ProjectPath: "/data/project",
 		Command:     "codex-acp",
-		SetupMode:   SetupModeManaged,
+		SetupMode:   SetupModeAPIKey,
 		Timeout:     2 * time.Minute,
 	})
 	if err != nil {
 		skipIfExternalCodexLimit(t, err)
-		t.Fatalf("live container managed Codex ACP run failed: %v", err)
+		t.Fatalf("live container api_key Codex ACP run failed: %v", err)
 	}
 	if !strings.Contains(strings.ToLower(result.Text), "memoh-acp-container-live-ok") {
-		t.Fatalf("live container managed Codex ACP text = %q, want marker memoh-acp-container-live-ok", result.Text)
+		t.Fatalf("live container api_key Codex ACP text = %q, want marker memoh-acp-container-live-ok", result.Text)
 	}
 }
 
-func TestACPContainerManagedCredentialNotInPSEF(t *testing.T) {
+func TestACPContainerAPIKeyCredentialNotInPSEF(t *testing.T) {
 	if os.Getenv("MEMOH_LIVE_CODEX_ACP_CONTAINER") != "1" {
 		t.Skip("set MEMOH_LIVE_CODEX_ACP_CONTAINER=1 to run the live ACP container ps smoke test")
 	}
@@ -84,7 +84,7 @@ func TestACPContainerManagedCredentialNotInPSEF(t *testing.T) {
 	proc, err := startBridgeProcess(context.Background(), client, "sh", []string{"-c", "sleep 30"}, "/data", time.Minute, processOptions{
 		Backend:   WorkspaceBackendContainer,
 		AgentID:   "codex",
-		SetupMode: SetupModeManaged,
+		SetupMode: SetupModeAPIKey,
 		NoTimeout: true,
 	})
 	if err != nil {

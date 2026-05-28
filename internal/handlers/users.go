@@ -588,19 +588,23 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if req.Metadata != nil {
-		if err := h.prepareACPManagedWorkspaceConfig(c.Request().Context(), resp); err != nil {
+		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(resp))
 }
 
-func (h *UsersHandler) prepareACPManagedWorkspaceConfig(ctx context.Context, bot bots.Bot) error {
+func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.Bot) error {
 	if h.acpWorkspace == nil {
 		return nil
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, acpprofile.AgentCodexID)
-	if !setup.Enabled || acpclient.SetupMode(setup.Mode) == acpclient.SetupModeSelf {
+	mode := acpclient.SetupMode(setup.Mode)
+	if mode == "" {
+		mode = acpclient.SetupModeAPIKey
+	}
+	if !setup.Enabled || mode == acpclient.SetupModeSelf {
 		return nil
 	}
 	info, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
@@ -610,11 +614,17 @@ func (h *UsersHandler) prepareACPManagedWorkspaceConfig(ctx context.Context, bot
 	if info.Backend == bridge.WorkspaceBackendLocal {
 		return nil
 	}
+	if mode == acpclient.SetupModeOAuth {
+		return nil
+	}
 	client, err := h.acpWorkspace.MCPClient(ctx, bot.ID)
 	if err != nil {
 		return err
 	}
-	return acpclient.WriteCodexManagedConfig(ctx, client, setup.Managed)
+	return acpclient.WriteCodexManagedConfigWithAuth(ctx, client, acpclient.CodexManagedConfig{
+		Mode:    acpclient.SetupModeAPIKey,
+		Managed: setup.Managed,
+	})
 }
 
 // TransferBotOwner godoc

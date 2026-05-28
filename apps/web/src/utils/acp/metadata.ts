@@ -40,7 +40,7 @@ export function readACPConfig(metadata: Record<string, unknown> | undefined, pro
     const managed = isRecord(record.managed) ? record.managed : {}
     out.agents[id] = {
       enabled: typeof record.enabled === 'boolean' ? record.enabled : legacyEnabled(acp, id),
-      setup_mode: typeof record.setup_mode === 'string' && record.setup_mode.trim() ? record.setup_mode.trim() : defaults.setup_mode,
+      setup_mode: normalizeSetupMode(typeof record.setup_mode === 'string' ? record.setup_mode : defaults.setup_mode, managed),
       managed: fieldsFromProfile(profile, managed),
     }
   }
@@ -55,7 +55,7 @@ export function normalizeACPForm(source: ACPForm, profiles: AcpprofilePublicProf
     const agent = source.agents[id] ?? emptyACPAgentForm(profile)
     out.agents[id] = {
       enabled: !!agent.enabled,
-      setup_mode: agent.setup_mode || defaultSetupMode(profile),
+      setup_mode: normalizeSetupMode(agent.setup_mode || defaultSetupMode(profile), agent.managed),
       managed: fieldsFromProfile(profile, agent.managed),
     }
   }
@@ -83,7 +83,7 @@ export function findMissingRequiredACPField(value: ACPForm, profiles: Acpprofile
     const id = normalizeACPAgentID(profile.id)
     if (!id) continue
     const agent = value.agents[id]
-    if (!agent?.enabled || agent.setup_mode !== 'managed') continue
+    if (!agent?.enabled || normalizeSetupMode(agent.setup_mode, agent.managed) === 'self') continue
     const field = findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode)
     if (field) return { profile, field }
   }
@@ -91,7 +91,17 @@ export function findMissingRequiredACPField(value: ACPForm, profiles: Acpprofile
 }
 
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
-  if (!profile || setupMode !== 'managed') return null
+  const mode = normalizeSetupMode(setupMode, managed)
+  if (!profile || mode === 'self') return null
+  if (normalizeACPAgentID(profile.id) === 'codex') {
+    if (mode === 'oauth') {
+      return null
+    }
+    if (!String(managed.api_key ?? '').trim()) {
+      return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === 'api_key')
+        ?? { id: 'api_key', label: 'OpenAI API key', type: 'password', required: true, sensitive: true }
+    }
+  }
   for (const field of profile.managed_fields ?? []) {
     const id = normalizeACPAgentID(field.id)
     if (!id || !field.required) continue
@@ -106,9 +116,10 @@ export function readACPAgentConfig(metadata: Record<string, unknown> | undefined
   const agents = isRecord(acp.agents) ? acp.agents : {}
   const raw = agentID ? agents[agentID] : undefined
   const record = isRecord(raw) ? raw : {}
+  const managed = isRecord(record.managed) ? record.managed : {}
   return {
-    setupMode: typeof record.setup_mode === 'string' && record.setup_mode.trim() ? record.setup_mode.trim().toLowerCase() : 'managed',
-    managed: isRecord(record.managed) ? record.managed : {},
+    setupMode: normalizeSetupMode(typeof record.setup_mode === 'string' ? record.setup_mode : '', managed),
+    managed,
   }
 }
 
@@ -160,7 +171,8 @@ export function fieldsFromProfile(profile: AcpprofilePublicProfile, source: Reco
 }
 
 export function defaultSetupMode(profile: AcpprofilePublicProfile): string {
-  return profile.setup_modes?.includes('managed') ? 'managed' : (profile.setup_modes?.[0] ?? 'managed')
+  const mode = profile.setup_modes?.includes('api_key') ? 'api_key' : (profile.setup_modes?.[0] ?? 'api_key')
+  return normalizeSetupMode(mode)
 }
 
 export function normalizeACPAgentID(value: unknown): string {
@@ -171,6 +183,17 @@ function legacyEnabled(acp: Record<string, unknown>, id: string): boolean {
   if (Array.isArray(acp.enabled_agents) && acp.enabled_agents.some((item) => normalizeACPAgentID(item) === id)) return true
   if (id === 'codex' && typeof acp.codex_enabled === 'boolean') return acp.codex_enabled
   return false
+}
+
+function normalizeSetupMode(mode: string, managed: Record<string, unknown> = {}): string {
+  const value = normalizeACPAgentID(mode)
+  if (value === 'oauth' || value === 'self') return value
+  if (value === 'managed') {
+    const legacyAuthType = normalizeACPAgentID(managed.auth_type)
+    return legacyAuthType === 'provider_oauth' || legacyAuthType === 'oauth' ? 'oauth' : 'api_key'
+  }
+  if (value === 'api_key') return value
+  return value || 'api_key'
 }
 
 function serializeACPAgents(metadata: Record<string, unknown> | undefined, acpForm: ACPForm, profiles: AcpprofilePublicProfile[]): Record<string, unknown> {
@@ -194,7 +217,7 @@ function serializeACPAgents(metadata: Record<string, unknown> | undefined, acpFo
     }
     out[agentID || rawAgentID] = {
       enabled: !!agent.enabled,
-      setup_mode: agent.setup_mode,
+      setup_mode: normalizeSetupMode(agent.setup_mode, managed),
       managed,
     }
   }

@@ -31,7 +31,7 @@ const (
 	defaultOpenAIAuthorizeURL     = "https://auth.openai.com/oauth/authorize"
 	defaultOpenAITokenURL         = "https://auth.openai.com/oauth/token" //nolint:gosec // OAuth endpoint URL, not a credential
 	defaultOpenAICallbackURL      = "http://localhost:1455/auth/callback"
-	defaultOpenAIOAuthScopes      = "openid profile email offline_access"
+	defaultOpenAIOAuthScopes      = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 	defaultGitHubDeviceCodeURL    = "https://github.com/login/device/code"        //nolint:gosec // OAuth endpoint URL, not a credential
 	defaultGitHubTokenURL         = "https://github.com/login/oauth/access_token" //nolint:gosec // OAuth endpoint URL, not a credential
 	defaultGitHubUserURL          = "https://api.github.com/user"                 //nolint:gosec // OAuth endpoint URL, not a credential
@@ -253,6 +253,81 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 	}, nil
 }
 
+func (*Service) StartOpenAICodexACPAuthorization(_ context.Context, redirectURI, state string) (*OAuthAuthorizeResponse, string, error) {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return nil, "", errors.New("oauth state is required")
+	}
+	cfg := openAICodexACPOAuthConfig(redirectURI)
+	codeVerifier, err := generateCodeVerifier()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate code verifier: %w", err)
+	}
+
+	params := url.Values{
+		"response_type":             {"code"},
+		"client_id":                 {cfg.ClientID},
+		"redirect_uri":              {cfg.RedirectURI},
+		"state":                     {state},
+		"scope":                     {cfg.Scopes},
+		"code_challenge":            {computeCodeChallenge(codeVerifier)},
+		"code_challenge_method":     {"S256"},
+		"codex_cli_simplified_flow": {"true"},
+	}
+	if cfg.Audience != "" {
+		params.Set("audience", cfg.Audience)
+	}
+	if cfg.IDTokenAddOrganizations {
+		params.Set("id_token_add_organizations", "true")
+	}
+
+	return &OAuthAuthorizeResponse{
+		Mode:    "web",
+		AuthURL: cfg.AuthorizeURL + "?" + params.Encode(),
+	}, codeVerifier, nil
+}
+
+func (s *Service) ExchangeOpenAICodexACPCode(ctx context.Context, redirectURI, code, codeVerifier string) (OpenAICodexOAuthCredentials, error) {
+	code = strings.TrimSpace(code)
+	codeVerifier = strings.TrimSpace(codeVerifier)
+	if code == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth code is required")
+	}
+	if codeVerifier == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth code verifier is required")
+	}
+
+	cfg := openAICodexACPOAuthConfig(redirectURI)
+	resp, err := s.exchangeCode(ctx, cfg, code, codeVerifier)
+	if err != nil {
+		return OpenAICodexOAuthCredentials{}, err
+	}
+	accessToken := strings.TrimSpace(resp.AccessToken)
+	idToken := strings.TrimSpace(resp.IDToken)
+	refreshToken := strings.TrimSpace(resp.RefreshToken)
+	if accessToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing access token")
+	}
+	if idToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing id token")
+	}
+	if refreshToken == "" {
+		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing refresh token")
+	}
+	accountID, err := codexAccountIDFromToken(accessToken)
+	if err != nil {
+		return OpenAICodexOAuthCredentials{}, err
+	}
+	return OpenAICodexOAuthCredentials{
+		AccessToken:  accessToken,
+		IDToken:      idToken,
+		RefreshToken: refreshToken,
+		AccountID:    accountID,
+		ExpiresAt:    expiresAtFromNow(resp.ExpiresIn),
+		LastRefresh:  time.Now().UTC(),
+	}, nil
+}
+
 func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (string, error) {
 	if userToken, err := s.getUserOAuthTokenByState(ctx, state); err == nil {
 		return s.handleUserScopedOAuthCallback(ctx, userToken, code)
@@ -294,6 +369,23 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 		return "", err
 	}
 	return provider.ID.String(), nil
+}
+
+func openAICodexACPOAuthConfig(redirectURI string) oauthConfig {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		redirectURI = defaultOpenAICallbackURL
+	}
+	return oauthConfig{
+		ClientType:              models.ClientTypeOpenAICodex,
+		ClientID:                defaultOpenAICodexClientID,
+		AuthorizeURL:            defaultOpenAIAuthorizeURL,
+		TokenURL:                defaultOpenAITokenURL,
+		RedirectURI:             redirectURI,
+		Scopes:                  defaultOpenAIOAuthScopes,
+		UsePKCE:                 true,
+		IDTokenAddOrganizations: true,
+	}
 }
 
 func (s *Service) handleUserScopedOAuthCallback(ctx context.Context, token *oauthTokenRecord, code string) (string, error) {
@@ -790,6 +882,7 @@ func toUserProviderOAuthToken(row sqlc.UserProviderOauthToken) *oauthTokenRecord
 
 type oauthTokenResponse struct {
 	AccessToken  string `json:"access_token"`  //nolint:gosec // OAuth response payload carries runtime access token
+	IDToken      string `json:"id_token"`      //nolint:gosec // OAuth response payload carries runtime ID token
 	RefreshToken string `json:"refresh_token"` //nolint:gosec // OAuth response payload carries runtime refresh token
 	TokenType    string `json:"token_type"`
 	Scope        string `json:"scope"`

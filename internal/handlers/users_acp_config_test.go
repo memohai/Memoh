@@ -18,7 +18,7 @@ import (
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
 
-func TestPrepareACPManagedWorkspaceConfigWritesCodexConfig(t *testing.T) {
+func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfig(t *testing.T) {
 	client, recorder := newUsersACPConfigBridgeClient(t)
 	handler := &UsersHandler{
 		acpWorkspace: &usersACPConfigWorkspace{
@@ -27,14 +27,14 @@ func TestPrepareACPManagedWorkspaceConfigWritesCodexConfig(t *testing.T) {
 		},
 	}
 
-	err := handler.prepareACPManagedWorkspaceConfig(context.Background(), bots.Bot{
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
 		ID: "bot-1",
 		Metadata: map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
 					acpprofile.AgentCodexID: map[string]any{
 						"enabled":    true,
-						"setup_mode": "managed",
+						"setup_mode": "api_key",
 						"managed": map[string]any{
 							"api_key":  "sk-secret",
 							"base_url": "https://proxy.example.com/v1",
@@ -45,7 +45,7 @@ func TestPrepareACPManagedWorkspaceConfigWritesCodexConfig(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPManagedWorkspaceConfig() error = %v", err)
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
 	}
 
 	writes := recorder.writes()
@@ -81,7 +81,37 @@ func TestPrepareACPManagedWorkspaceConfigWritesCodexConfig(t *testing.T) {
 	}
 }
 
-func TestPrepareACPManagedWorkspaceConfigSkipsSelfAndLocal(t *testing.T) {
+func TestPrepareACPWorkspaceConfigSkipsCodexOAuthConfig(t *testing.T) {
+	client, recorder := newUsersACPConfigBridgeClient(t)
+	handler := &UsersHandler{
+		acpWorkspace: &usersACPConfigWorkspace{
+			backend: bridge.WorkspaceBackendContainer,
+			client:  client,
+		},
+	}
+
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{
+						"enabled":    true,
+						"setup_mode": "oauth",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
+	}
+	if writes := recorder.writes(); len(writes) != 0 {
+		t.Fatalf("OAuth setup should be written only by ACP Codex OAuth callback, got writes: %#v", writes)
+	}
+}
+
+func TestPrepareACPWorkspaceConfigSkipsSelfAndLocal(t *testing.T) {
 	handler := &UsersHandler{acpWorkspace: &usersACPConfigWorkspace{backend: bridge.WorkspaceBackendLocal}}
 	selfBot := bots.Bot{
 		ID: "bot-1",
@@ -96,22 +126,22 @@ func TestPrepareACPManagedWorkspaceConfigSkipsSelfAndLocal(t *testing.T) {
 			},
 		},
 	}
-	if err := handler.prepareACPManagedWorkspaceConfig(context.Background(), selfBot); err != nil {
+	if err := handler.prepareACPWorkspaceConfig(context.Background(), selfBot); err != nil {
 		t.Fatalf("self setup should be skipped: %v", err)
 	}
 
-	managedLocalBot := selfBot
-	managedLocalBot.Metadata = map[string]any{
+	apiKeyLocalBot := selfBot
+	apiKeyLocalBot.Metadata = map[string]any{
 		acpprofile.MetadataKeyACP: map[string]any{
 			"agents": map[string]any{
 				acpprofile.AgentCodexID: map[string]any{
 					"enabled":    true,
-					"setup_mode": "managed",
+					"setup_mode": "api_key",
 				},
 			},
 		},
 	}
-	if err := handler.prepareACPManagedWorkspaceConfig(context.Background(), managedLocalBot); err != nil {
+	if err := handler.prepareACPWorkspaceConfig(context.Background(), apiKeyLocalBot); err != nil {
 		t.Fatalf("local backend should be skipped: %v", err)
 	}
 }

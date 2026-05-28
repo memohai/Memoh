@@ -33,8 +33,9 @@ const (
 type SetupMode string
 
 const (
-	SetupModeManaged SetupMode = "managed"
-	SetupModeSelf    SetupMode = "self"
+	SetupModeAPIKey SetupMode = "api_key"
+	SetupModeOAuth  SetupMode = "oauth"
+	SetupModeSelf   SetupMode = "self"
 )
 
 type processOptions struct {
@@ -162,14 +163,11 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		return nil, nil, nil
 	}
 
-	mode := opts.SetupMode
-	if mode == "" {
-		mode = SetupModeManaged
-	}
+	mode := normalizeSetupMode(opts.SetupMode)
 
 	env := withoutEnvKeys(opts.Env, "HOME", "PATH", "CODEX_HOME")
 	switch mode {
-	case SetupModeManaged:
+	case SetupModeAPIKey, SetupModeOAuth:
 		homeDir := dataMountPath
 		tempHomeDir := "/tmp/memoh-acp/" + uuid.NewString()
 		if !isCodexAgent(opts.AgentID) {
@@ -201,6 +199,17 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		return env, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported ACP setup mode %q", mode)
+	}
+}
+
+func normalizeSetupMode(mode SetupMode) SetupMode {
+	switch SetupMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
+	case SetupModeOAuth:
+		return SetupModeOAuth
+	case SetupModeSelf:
+		return SetupModeSelf
+	default:
+		return SetupModeAPIKey
 	}
 }
 

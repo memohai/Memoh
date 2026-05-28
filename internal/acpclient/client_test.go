@@ -428,7 +428,7 @@ func TestRunnerRunContainerWorkspaceFakeAgent(t *testing.T) {
 		Task:        "touch the project",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
-		SetupMode:   SetupModeManaged,
+		SetupMode:   SetupModeAPIKey,
 		Timeout:     10 * time.Second,
 	})
 	if err != nil {

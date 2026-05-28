@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -44,22 +45,47 @@ type codexManagedConfigData struct {
 	BaseURL      string
 }
 
+type CodexManagedConfig struct {
+	Mode    SetupMode
+	Managed map[string]string
+	OAuth   *CodexOAuthCredentials
+}
+
+type CodexOAuthCredentials struct {
+	AccessToken  string //nolint:gosec // runtime credential material used to construct Codex auth.json
+	IDToken      string
+	RefreshToken string //nolint:gosec // runtime credential material used to construct Codex auth.json
+	AccountID    string
+	BaseURL      string
+	ExpiresAt    time.Time
+	LastRefresh  time.Time
+}
+
 // WriteCodexManagedConfig writes the fixed Codex config.toml and auth.json
 // used by Memoh-managed Codex ACP sessions.
 func WriteCodexManagedConfig(ctx context.Context, client *bridge.Client, managed map[string]string) error {
+	return WriteCodexManagedConfigWithAuth(ctx, client, CodexManagedConfig{
+		Mode:    SetupModeAPIKey,
+		Managed: managed,
+	})
+}
+
+func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client, cfg CodexManagedConfig) error {
 	if client == nil {
 		return errors.New("workspace bridge client is required")
 	}
-	content, err := renderCodexManagedConfig(managed)
-	if err != nil {
-		return fmt.Errorf("render Codex config: %w", err)
-	}
-	auth, err := renderCodexManagedAuth(managed)
+	auth, err := renderCodexManagedAuth(cfg)
 	if err != nil {
 		return fmt.Errorf("render Codex auth: %w", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
-		return fmt.Errorf("write Codex config: %w", err)
+	if normalizeSetupMode(cfg.Mode) != SetupModeOAuth {
+		content, err := renderCodexManagedConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("render Codex config: %w", err)
+		}
+		if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "config.toml"), content); err != nil {
+			return fmt.Errorf("write Codex config: %w", err)
+		}
 	}
 	if err := client.WriteFile(ctx, path.Join(CodexManagedConfigDir, "auth.json"), auth); err != nil {
 		return fmt.Errorf("write Codex auth: %w", err)
@@ -67,8 +93,8 @@ func WriteCodexManagedConfig(ctx context.Context, client *bridge.Client, managed
 	return nil
 }
 
-func renderCodexManagedConfig(managed map[string]string) ([]byte, error) {
-	baseURL := strings.TrimSpace(managed["base_url"])
+func renderCodexManagedConfig(cfg CodexManagedConfig) ([]byte, error) {
+	baseURL := strings.TrimSpace(cfg.Managed["base_url"])
 	if baseURL == "" {
 		baseURL = codexDefaultOpenAIBaseURL
 	}
@@ -84,13 +110,58 @@ func renderCodexManagedConfig(managed map[string]string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-func renderCodexManagedAuth(managed map[string]string) ([]byte, error) {
+func renderCodexManagedAuth(cfg CodexManagedConfig) ([]byte, error) {
+	switch normalizeSetupMode(cfg.Mode) {
+	case SetupModeOAuth:
+		return renderCodexManagedOAuthAuth(cfg.OAuth)
+	default:
+		return renderCodexManagedAPIKeyAuth(cfg.Managed)
+	}
+}
+
+func renderCodexManagedAPIKeyAuth(managed map[string]string) ([]byte, error) {
 	apiKey := strings.TrimSpace(managed["api_key"])
 	if apiKey == "" {
 		return nil, errors.New("api_key is required")
 	}
 	content, err := json.MarshalIndent(map[string]string{
 		"OPENAI_API_KEY": apiKey,
+	}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(content, '\n'), nil
+}
+
+func renderCodexManagedOAuthAuth(creds *CodexOAuthCredentials) ([]byte, error) {
+	if creds == nil {
+		return nil, errors.New("oauth credentials are required")
+	}
+	accessToken := strings.TrimSpace(creds.AccessToken)
+	if accessToken == "" {
+		return nil, errors.New("oauth access token is required")
+	}
+	idToken := strings.TrimSpace(creds.IDToken)
+	if idToken == "" {
+		return nil, errors.New("oauth id token is required")
+	}
+	accountID := strings.TrimSpace(creds.AccountID)
+	if accountID == "" {
+		return nil, errors.New("oauth account id is required")
+	}
+	lastRefresh := creds.LastRefresh
+	if lastRefresh.IsZero() {
+		lastRefresh = time.Now().UTC()
+	}
+	content, err := json.MarshalIndent(map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens": map[string]string{
+			"id_token":      idToken,
+			"access_token":  accessToken,
+			"refresh_token": strings.TrimSpace(creds.RefreshToken),
+			"account_id":    accountID,
+		},
+		"last_refresh": lastRefresh.UTC().Format(time.RFC3339Nano),
 	}, "", "  ")
 	if err != nil {
 		return nil, err

@@ -365,7 +365,7 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 	} else {
 		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command) //nolint:gosec // G204: intentional agent command execution.
 	}
-	configureCommandCancellation(cmd)
+	configurePTYCommandCancellation(cmd)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), firstMsg.GetEnv()...)
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")

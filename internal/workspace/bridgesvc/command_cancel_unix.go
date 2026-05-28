@@ -15,6 +15,19 @@ func configureCommandCancellation(cmd *exec.Cmd) {
 		return
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureProcessGroupCancel(cmd)
+}
+
+func configurePTYCommandCancellation(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	// creack/pty sets SysProcAttr.Setsid/Setctty before start. Setting
+	// Setpgid here makes that session setup fail with EPERM on Linux.
+	configureProcessGroupCancel(cmd)
+}
+
+func configureProcessGroupCancel(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return os.ErrProcessDone

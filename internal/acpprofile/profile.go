@@ -12,8 +12,9 @@ const (
 
 	MetadataKeyACP = "acp"
 
-	setupModeManaged = "managed"
-	setupModeSelf    = "self"
+	setupModeAPIKey = "api_key"
+	setupModeOAuth  = "oauth"
+	setupModeSelf   = "self"
 )
 
 type Profile struct {
@@ -96,10 +97,9 @@ func codexProfile() Profile {
 				ID:          "api_key",
 				Label:       "OpenAI API key",
 				Type:        "password",
-				Required:    true,
 				Sensitive:   true,
 				Placeholder: "sk-...",
-				Help:        "Used by container managed mode to authenticate Codex.",
+				Help:        "Used by API key setup to authenticate Codex.",
 			},
 			{
 				ID:          "base_url",
@@ -110,7 +110,7 @@ func codexProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"local", "container"},
-		SetupModes:        []string{setupModeManaged, setupModeSelf},
+		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
 	}
 }
 
@@ -170,7 +170,7 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 	}
 	setup := AgentSetup{
 		AgentID: agentID,
-		Mode:    setupModeManaged,
+		Mode:    setupModeAPIKey,
 		Managed: map[string]string{},
 	}
 	acpConfig, ok := metadataRecord(metadata[MetadataKeyACP])
@@ -197,6 +197,7 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 					}
 				}
 			}
+			setup.Mode = normalizeSetupMode(setup.Mode, setup.Managed)
 			return setup
 		}
 	}
@@ -213,6 +214,23 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 		}
 	}
 	return setup
+}
+
+func normalizeSetupMode(mode string, managed map[string]string) string {
+	mode = NormalizeAgentID(mode)
+	switch mode {
+	case setupModeOAuth, setupModeSelf:
+		return mode
+	case "managed":
+		if NormalizeAgentID(managed["auth_type"]) == "provider_oauth" || NormalizeAgentID(managed["auth_type"]) == setupModeOAuth {
+			return setupModeOAuth
+		}
+		return setupModeAPIKey
+	case setupModeAPIKey, "":
+		return setupModeAPIKey
+	default:
+		return mode
+	}
 }
 
 func NormalizeAgentID(agentID string) string {

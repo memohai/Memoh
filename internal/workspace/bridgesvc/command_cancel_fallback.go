@@ -13,6 +13,13 @@ func configureCommandCancellation(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
+	configurePTYCommandCancellation(cmd)
+}
+
+func configurePTYCommandCancellation(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
 	cmd.Cancel = func() error {
 		return killProcess(cmd)
 	}

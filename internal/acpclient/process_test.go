@@ -2,6 +2,7 @@ package acpclient
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"strings"
 	"sync"
@@ -44,12 +45,12 @@ func TestPrepareProcessEnvLocalPassThrough(t *testing.T) {
 	}
 }
 
-func TestPrepareProcessEnvContainerManaged(t *testing.T) {
+func TestPrepareProcessEnvContainerAPIKey(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
 		Backend:   WorkspaceBackendContainer,
 		AgentID:   "codex",
-		SetupMode: SetupModeManaged,
+		SetupMode: SetupModeAPIKey,
 		Env:       []string{"CUSTOM_FLAG=enabled", "HOME=/profile-home", "PATH=/profile-bin"},
 	})
 	if err != nil {
@@ -61,7 +62,7 @@ func TestPrepareProcessEnvContainerManaged(t *testing.T) {
 	assertEnvHas(t, env, "CUSTOM_FLAG=enabled")
 	home := envValue(env, "HOME")
 	if home != dataMountPath {
-		t.Fatalf("managed Codex HOME = %q, want %q", home, dataMountPath)
+		t.Fatalf("api_key Codex HOME = %q, want %q", home, dataMountPath)
 	}
 	if got := envValue(env, "PATH"); got != defaultContainerPath {
 		t.Fatalf("PATH = %q, want %q", got, defaultContainerPath)
@@ -70,7 +71,7 @@ func TestPrepareProcessEnvContainerManaged(t *testing.T) {
 		t.Fatalf("container runtime HOME/PATH must not be overridden by profile env: %v", env)
 	}
 	if envHasKey(env, "CODEX_HOME") {
-		t.Fatalf("managed Codex runtime must not set CODEX_HOME: %v", env)
+		t.Fatalf("api_key Codex runtime must not set CODEX_HOME: %v", env)
 	}
 	if writes := server.writes(); len(writes) != 0 {
 		t.Fatalf("runtime prepare writes = %#v, want no config writes", writes)
@@ -186,12 +187,66 @@ func TestWriteCodexManagedConfigWritesFixedContainerConfig(t *testing.T) {
 	}
 }
 
+func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec // test fixture validates token-shaped Codex auth JSON.
+	client, server := newRecordingBridgeClient(t)
+	lastRefresh := time.Date(2026, 5, 28, 1, 2, 3, 0, time.UTC)
+	err := WriteCodexManagedConfigWithAuth(context.Background(), client, CodexManagedConfig{
+		Mode: SetupModeOAuth,
+		OAuth: &CodexOAuthCredentials{ //nolint:gosec // test fixture token-shaped values
+			AccessToken:  "access.jwt.token",
+			IDToken:      "id.jwt.token",
+			RefreshToken: "refresh-token",
+			AccountID:    "account-123",
+			BaseURL:      "https://chatgpt.com/backend-api",
+			LastRefresh:  lastRefresh,
+		},
+	})
+	if err != nil {
+		t.Fatalf("WriteCodexManagedConfigWithAuth() error = %v", err)
+	}
+	writes := server.writes()
+	if len(writes) != 1 {
+		t.Fatalf("managed writes len = %d, want auth.json only for oauth: %#v", len(writes), writes)
+	}
+	if _, ok := findWrite(writes, CodexManagedConfigDir+"/config.toml"); ok {
+		t.Fatalf("OAuth setup should not write Codex config.toml: %#v", writes)
+	}
+	authWrite, ok := findWrite(writes, CodexManagedConfigDir+"/auth.json")
+	if !ok {
+		t.Fatalf("missing Codex auth.json write: %#v", writes)
+	}
+	var auth map[string]any
+	if err := json.Unmarshal(authWrite.Content, &auth); err != nil {
+		t.Fatalf("invalid auth json: %v\n%s", err, string(authWrite.Content))
+	}
+	if auth["auth_mode"] != "chatgpt" {
+		t.Fatalf("auth_mode = %#v, want chatgpt", auth["auth_mode"])
+	}
+	tokens, ok := auth["tokens"].(map[string]any)
+	if !ok {
+		t.Fatalf("tokens missing from auth json: %#v", auth)
+	}
+	for key, want := range map[string]string{ //nolint:gosec // test fixture token-shaped values
+		"id_token":      "id.jwt.token",
+		"access_token":  "access.jwt.token",
+		"refresh_token": "refresh-token",
+		"account_id":    "account-123",
+	} {
+		if got := tokens[key]; got != want {
+			t.Fatalf("tokens[%s] = %#v, want %q", key, got, want)
+		}
+	}
+	if auth["last_refresh"] != lastRefresh.Format(time.RFC3339Nano) {
+		t.Fatalf("last_refresh = %#v, want %q", auth["last_refresh"], lastRefresh.Format(time.RFC3339Nano))
+	}
+}
+
 func TestStartBridgeProcessCanRunWithoutBridgeHardTimeout(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	proc, err := startBridgeProcess(context.Background(), client, "codex-acp", nil, "/data", time.Minute, processOptions{
 		Backend:   WorkspaceBackendContainer,
 		AgentID:   "codex",
-		SetupMode: SetupModeManaged,
+		SetupMode: SetupModeAPIKey,
 		Env:       []string{"TRACE_ID=trace-1"},
 		NoTimeout: true,
 	})
@@ -232,7 +287,7 @@ func TestStartBridgeProcessUsesContainerToolkitFallback(t *testing.T) {
 	proc, err := startBridgeProcess(context.Background(), client, "codex-acp", nil, "/data", time.Minute, processOptions{
 		Backend:   WorkspaceBackendContainer,
 		AgentID:   "codex",
-		SetupMode: SetupModeManaged,
+		SetupMode: SetupModeAPIKey,
 	})
 	if err != nil {
 		t.Fatalf("startBridgeProcess() error = %v", err)
@@ -258,7 +313,7 @@ func TestStartBridgeProcessReportsToolkitFallbackFailure(t *testing.T) {
 	_, err := startBridgeProcess(context.Background(), client, "codex-acp", nil, "/data", time.Minute, processOptions{
 		Backend:   WorkspaceBackendContainer,
 		AgentID:   "codex",
-		SetupMode: SetupModeManaged,
+		SetupMode: SetupModeAPIKey,
 	})
 	if err == nil {
 		t.Fatalf("startBridgeProcess() error = nil, want missing command error")

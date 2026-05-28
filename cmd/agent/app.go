@@ -666,6 +666,20 @@ func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, bot
 	return handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelLifecycle, channelManager, registry, workspaceManager)
 }
 
+func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
+	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+}
+
+func provideACPCodexOAuthServerHandler(handler *handlers.ACPCodexOAuthHandler) *handlers.ACPCodexOAuthHandler {
+	return handler
+}
+
+func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOAuthHandler *handlers.ACPCodexOAuthHandler) *handlers.ProviderOAuthHandler {
+	handler := handlers.NewProviderOAuthHandler(providersService)
+	handler.SetACPCodexOAuthHandler(acpCodexOAuthHandler)
+	return handler
+}
+
 func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, chatService *conversation.Service, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, resolver *flow.Resolver, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, chatService, hub, botService, accountService)
 	h.SetResolver(resolver)
@@ -806,6 +820,10 @@ func provideProvidersService(log *slog.Logger, queries dbstore.Queries, _ config
 
 func defaultProviderOAuthCallbackURL() string {
 	return "http://localhost:1455/auth/callback"
+}
+
+func defaultACPCodexOAuthCallbackURL() string {
+	return defaultProviderOAuthCallbackURL()
 }
 
 func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, cfg config.Config) *handlers.EmailOAuthHandler {

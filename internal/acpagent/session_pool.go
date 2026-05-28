@@ -507,10 +507,10 @@ func (p *SessionPool) getOrStart(ctx context.Context, input PromptInput) (*acpcl
 
 	mode := acpclient.SetupMode(setup.Mode)
 	if mode == "" {
-		mode = acpclient.SetupModeManaged
+		mode = acpclient.SetupModeAPIKey
 	}
-	if workspaceInfo.Backend != "local" && mode == acpclient.SetupModeManaged {
-		if err := validateManagedFields(profile, setup.Managed); err != nil {
+	if workspaceInfo.Backend != "local" && mode != acpclient.SetupModeSelf {
+		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
 			p.dropSession(sessionID, nil)
 			return nil, err
 		}
@@ -551,13 +551,24 @@ func (p *SessionPool) getOrStart(ctx context.Context, input PromptInput) (*acpcl
 	return sess, nil
 }
 
-func validateManagedFields(profile acpprofile.Profile, values map[string]string) error {
+func validateManagedFields(profile acpprofile.Profile, values map[string]string, mode acpclient.SetupMode) error {
+	if profile.ID == acpprofile.AgentCodexID {
+		switch mode {
+		case acpclient.SetupModeOAuth:
+			return nil
+		default:
+			if strings.TrimSpace(values["api_key"]) == "" {
+				return fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
+			}
+			return nil
+		}
+	}
 	for _, field := range profile.ManagedFields {
 		if !field.Required {
 			continue
 		}
 		if strings.TrimSpace(values[field.ID]) == "" {
-			return fmt.Errorf("%s required for %s managed setup", field.ID, profile.DisplayName)
+			return fmt.Errorf("%s required for %s %s setup", field.ID, profile.DisplayName, mode)
 		}
 	}
 	return nil

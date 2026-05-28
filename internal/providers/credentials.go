@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -20,8 +21,14 @@ type ModelCredentials struct {
 	CodexAccountID string
 }
 
-func SupportsOpenAICodexOAuth(provider sqlc.Provider) bool {
-	return supportsOAuth(provider)
+type OpenAICodexOAuthCredentials struct {
+	AccessToken  string //nolint:gosec // runtime credential material used to construct Codex auth.json
+	IDToken      string //nolint:gosec // runtime credential material used to construct Codex auth.json
+	RefreshToken string //nolint:gosec // runtime credential material used to construct Codex auth.json
+	AccountID    string
+	BaseURL      string
+	ExpiresAt    time.Time
+	LastRefresh  time.Time
 }
 
 func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Provider) (ModelCredentials, error) {

@@ -15,7 +15,7 @@ import {
 const codexProfile: AcpprofilePublicProfile = {
   id: 'codex',
   display_name: 'Codex',
-  setup_modes: ['managed', 'self'],
+  setup_modes: ['api_key', 'oauth', 'self'],
   managed_fields: [
     {
       id: 'api_key',
@@ -45,7 +45,7 @@ describe('acp-metadata', () => {
       agents: {
         codex: {
           enabled: true,
-          setup_mode: 'managed',
+          setup_mode: 'api_key',
           managed: {
             api_key: '',
             base_url: '',
@@ -61,7 +61,7 @@ describe('acp-metadata', () => {
         agents: {
           codex: {
             enabled: true,
-            setup_mode: 'managed',
+            setup_mode: 'api_key',
             managed: {
               api_key: 'sk-...cret',
               base_url: 'https://api.example.test/v1',
@@ -76,7 +76,7 @@ describe('acp-metadata', () => {
       agents: {
         codex: {
           enabled: true,
-          setup_mode: 'managed',
+          setup_mode: 'api_key',
           managed: {
             api_key: 'sk-...cret',
             base_url: 'https://api.example.test/v1',
@@ -95,7 +95,7 @@ describe('acp-metadata', () => {
 
     expect(form.agents.codex).toEqual({
       enabled: true,
-      setup_mode: 'managed',
+      setup_mode: 'api_key',
       managed: {
         api_key: 'sk-test',
         base_url: '',
@@ -103,12 +103,12 @@ describe('acp-metadata', () => {
     })
   })
 
-  it('finds required managed fields and skips local/self modes', () => {
+  it('finds required setup fields and skips local/self modes', () => {
     const value: ACPForm = {
       agents: {
         codex: {
           enabled: true,
-          setup_mode: 'managed',
+          setup_mode: 'api_key',
           managed: {
             api_key: '',
             base_url: 'https://api.example.test/v1',
@@ -120,6 +120,31 @@ describe('acp-metadata', () => {
     expect(findMissingRequiredACPField(value, [codexProfile])?.field.id).toBe('api_key')
     expect(findMissingRequiredACPField(value, [codexProfile], true)).toBeNull()
     expect(findMissingRequiredManagedField(codexProfile, {}, 'self')).toBeNull()
+  })
+
+  it('validates Codex setup mode required fields', () => {
+    expect(findMissingRequiredManagedField(codexProfile, {}, 'oauth')).toBeNull()
+    expect(findMissingRequiredManagedField(codexProfile, {
+      api_key: '',
+    }, 'api_key')?.id).toBe('api_key')
+  })
+
+  it('maps legacy managed OAuth metadata to oauth setup mode', () => {
+    const form = readACPConfig({
+      acp: {
+        agents: {
+          codex: {
+            enabled: true,
+            setup_mode: 'managed',
+            managed: {
+              auth_type: 'provider_oauth',
+            },
+          },
+        },
+      },
+    }, [codexProfile])
+
+    expect(form.agents.codex?.setup_mode).toBe('oauth')
   })
 
   it('writes ACP metadata without carrying old compatibility flags', () => {
@@ -165,7 +190,7 @@ describe('acp-metadata', () => {
         agents: {
           codex: {
             enabled: true,
-            setup_mode: 'managed',
+            setup_mode: 'api_key',
             managed: {
               api_key: 'sk-...cret',
               base_url: 'https://api.example.test/v1',
@@ -208,7 +233,7 @@ describe('acp-metadata', () => {
         agents: {
           codex: {
             enabled: true,
-            setup_mode: 'managed',
+            setup_mode: 'api_key',
             managed: {
               api_key: 'sk-...cret',
               base_url: 'https://api.example.test/v1',
@@ -250,7 +275,7 @@ describe('acp-metadata', () => {
       acp: {
         agents: {
           codex: {
-            setup_mode: 'managed',
+            setup_mode: 'api_key',
             managed: {
               api_key: 'sk-...cret',
             },
@@ -260,7 +285,7 @@ describe('acp-metadata', () => {
     }, 'CODEX')
 
     expect(config).toEqual({
-      setupMode: 'managed',
+      setupMode: 'api_key',
       managed: {
         api_key: 'sk-...cret',
       },

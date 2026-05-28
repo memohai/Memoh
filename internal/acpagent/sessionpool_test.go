@@ -436,10 +436,10 @@ func TestSessionPoolSerializesColdStartForSameSessionID(t *testing.T) {
 }
 
 func TestSessionPoolSetupModeResolution(t *testing.T) {
-	missingManaged := newSessionPool(nil, &recordingRunner{
+	missingAPIKey := newSessionPool(nil, &recordingRunner{
 		info: bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-	}, fakeBotGetter{bot: enabledACPBot("bot-1", "managed", nil)})
-	_, err := missingManaged.Prompt(context.Background(), PromptInput{
+	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	_, err := missingAPIKey.Prompt(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
 		AgentID:     "codex",
@@ -447,15 +447,15 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:      "run",
 	})
 	if err == nil || !strings.Contains(err.Error(), "api_key required") {
-		t.Fatalf("container managed missing key error = %v", err)
+		t.Fatalf("container api_key missing key error = %v", err)
 	}
 
-	managedRunner := &recordingRunner{
+	apiKeyRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
 	}
-	managedPool := newSessionPool(nil, managedRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "managed", map[string]any{"api_key": "sk-test", "base_url": "https://proxy.example.com/v1"})})
-	_, err = managedPool.Prompt(context.Background(), PromptInput{
+	apiKeyPool := newSessionPool(nil, apiKeyRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test", "base_url": "https://proxy.example.com/v1"})})
+	_, err = apiKeyPool.Prompt(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
 		AgentID:     "codex",
@@ -463,13 +463,32 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:      "run",
 	})
 	if err == nil || err.Error() != "started" {
-		t.Fatalf("container managed error = %v, want runner start error", err)
+		t.Fatalf("container api_key error = %v, want runner start error", err)
 	}
-	if managedRunner.req.SetupMode != acpclient.SetupModeManaged {
-		t.Fatalf("managed setup mode = %q", managedRunner.req.SetupMode)
+	if apiKeyRunner.req.SetupMode != acpclient.SetupModeAPIKey {
+		t.Fatalf("api_key setup mode = %q", apiKeyRunner.req.SetupMode)
 	}
-	if len(managedRunner.req.Env) != 0 {
-		t.Fatalf("managed mode must use Codex files, not credential env: %v", managedRunner.req.Env)
+	if len(apiKeyRunner.req.Env) != 0 {
+		t.Fatalf("api_key mode must use Codex files, not credential env: %v", apiKeyRunner.req.Env)
+	}
+
+	oauthRunner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	oauthPool := newSessionPool(nil, oauthRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "oauth", map[string]any{"provider_id": "provider-1"})})
+	_, err = oauthPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     "codex",
+		ProjectPath: "/data/project",
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("container oauth error = %v, want runner start error", err)
+	}
+	if oauthRunner.req.SetupMode != acpclient.SetupModeOAuth {
+		t.Fatalf("oauth setup mode = %q", oauthRunner.req.SetupMode)
 	}
 
 	selfRunner := &recordingRunner{
@@ -501,7 +520,7 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
 		startErr: errors.New("started"),
 	}
-	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "managed", nil)})
+	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
 	_, err = localPool.Prompt(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",

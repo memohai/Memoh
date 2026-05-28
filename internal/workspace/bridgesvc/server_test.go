@@ -4,6 +4,7 @@ package bridgesvc
 
 import (
 	"context"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -113,6 +114,34 @@ func TestExecPipeCancellationKillsChildProcessGroup(t *testing.T) {
 		return
 	}
 	t.Fatalf("child process %d is still alive after exec stream cancellation", pid)
+}
+
+func TestExecPTYStartsWithCancellationConfigured(t *testing.T) {
+	stream := newCancelOnStdoutExecStream()
+	srv := New(Options{DefaultWorkDir: "/tmp", AllowHostAbsolute: true})
+
+	err := srv.execPTY(stream, &pb.ExecInput{
+		Command:        "printf PTY_OK",
+		WorkDir:        "/tmp",
+		TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("execPTY returned error: %v", err)
+	}
+	if stdout := collectStdout(stream.outputs); !strings.Contains(stdout, "PTY_OK") {
+		t.Fatalf("stdout = %q, want PTY_OK", stdout)
+	}
+}
+
+func TestPTYCancellationDoesNotPreconfigureProcessGroup(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", "true") //nolint:gosec // G204: test fixture executing a known shell snippet.
+	configurePTYCommandCancellation(cmd)
+	if cmd.SysProcAttr != nil {
+		t.Fatalf("PTY command SysProcAttr = %#v, want nil so pty can configure session", cmd.SysProcAttr)
+	}
+	if cmd.Cancel == nil {
+		t.Fatalf("PTY command Cancel is nil")
+	}
 }
 
 func TestValidateTunnelAddressRequiresLoopback(t *testing.T) {

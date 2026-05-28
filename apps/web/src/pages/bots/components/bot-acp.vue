@@ -39,6 +39,7 @@
     </div>
 
     <SettingsAcpCard
+      :bot-id="botId"
       :profiles="profiles"
       :form="form"
       :loading="profilesLoading"
