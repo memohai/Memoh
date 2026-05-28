@@ -2089,6 +2089,8 @@
         "saveFailed": "保存失败",
         "errorHttpTitle": "连接失败",
         "errorHttpDescription": "请检查 API 密钥与接口地址是否正确。",
+        "errorUnreachableTitle": "无法连接服务商",
+        "errorUnreachableDescription": "无法连接到该服务商，请确认 API 密钥和接口地址是否正确。",
         "errorNoModelsTitle": "未获取到模型",
         "errorNoModelsDescription": "服务商可能不提供模型列表接口，你可以重试或手动添加模型。",
         "retry": "重试",

@@ -40,7 +40,7 @@ function advanceWithCount() {
 
 const {
   formValues, formError,
-  createdProviderId, errorState, manualMode,
+  createdProviderId, errorState, errorDetail, manualMode,
   importing, submitting, deleteModelLoading,
   providerModels,
   availableClientTypes, baseUrlPlaceholder,
@@ -107,7 +107,7 @@ onMounted(() => {
 
   if (import.meta.env.DEV) {
     ;(window as unknown as Record<string, unknown>).__step3 = {
-      showError(kind: 'http' | 'noModels' = 'noModels') {
+      showError(kind: 'http' | 'unreachable' | 'noModels' = 'noModels') {
         createdProviderId.value = 'mock-provider-id'
         errorState.value = kind
         manualMode.value = false
@@ -326,14 +326,24 @@ onMounted(() => {
             <AlertCircle class="size-5 shrink-0 text-destructive mt-0.5" />
             <div class="flex-1">
               <p class="text-sm font-medium text-destructive">
-                {{ errorState === 'http'
-                  ? t('onboarding.provider.form.errorHttpTitle')
-                  : t('onboarding.provider.form.errorNoModelsTitle') }}
+                {{ errorState === 'unreachable'
+                  ? t('onboarding.provider.form.errorUnreachableTitle')
+                  : errorState === 'noModels'
+                    ? t('onboarding.provider.form.errorNoModelsTitle')
+                    : t('onboarding.provider.form.errorHttpTitle') }}
               </p>
               <p class="mt-1 text-xs text-muted-foreground leading-relaxed">
-                {{ errorState === 'http'
-                  ? t('onboarding.provider.form.errorHttpDescription')
-                  : t('onboarding.provider.form.errorNoModelsDescription') }}
+                {{ errorState === 'unreachable'
+                  ? t('onboarding.provider.form.errorUnreachableDescription')
+                  : errorState === 'noModels'
+                    ? t('onboarding.provider.form.errorNoModelsDescription')
+                    : t('onboarding.provider.form.errorHttpDescription') }}
+              </p>
+              <p
+                v-if="errorDetail"
+                class="mt-1 text-xs text-muted-foreground/70 font-mono"
+              >
+                {{ errorDetail }}
               </p>
               <div class="mt-3 flex items-center gap-2">
                 <button
@@ -345,6 +355,7 @@ onMounted(() => {
                   {{ t('onboarding.provider.form.retry') }}
                 </button>
                 <button
+                  v-if="errorState !== 'unreachable'"
                   type="button"
                   class="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-xs font-medium transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
                   :disabled="importing || !createdProviderId"

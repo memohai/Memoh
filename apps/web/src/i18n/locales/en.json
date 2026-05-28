@@ -2093,6 +2093,8 @@
         "saveFailed": "Failed to save provider",
         "errorHttpTitle": "Connection failed",
         "errorHttpDescription": "Please check your API key and base URL.",
+        "errorUnreachableTitle": "Provider unreachable",
+        "errorUnreachableDescription": "Could not connect to this provider. Please verify your API key and base URL are correct.",
         "errorNoModelsTitle": "No models received",
         "errorNoModelsDescription": "This provider may not expose a model list. You can retry or add models manually.",
         "retry": "Retry",

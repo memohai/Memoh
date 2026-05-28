@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
   postProviders,
   postProvidersByIdImportModels,
+  postProvidersByIdTest,
   deleteModelsById,
   getProvidersByIdModels,
   getProvidersNameByName,
@@ -30,7 +31,8 @@ export function useProviderSetup(options: {
 
   const formError = ref('')
   const createdProviderId = ref<string | null>(null)
-  const errorState = ref<'http' | 'noModels' | null>(null)
+  const errorState = ref<'http' | 'unreachable' | 'noModels' | null>(null)
+  const errorDetail = ref('')
   const manualMode = ref(false)
   const suppressDirtyReset = ref(false)
 
@@ -123,6 +125,7 @@ export function useProviderSetup(options: {
   function resetFormState() {
     createdProviderId.value = null
     errorState.value = null
+    errorDetail.value = ''
     manualMode.value = false
     openModelState.value = false
     openModelTitle.value = 'title'
@@ -191,6 +194,23 @@ export function useProviderSetup(options: {
 
   async function runImport(providerId: string) {
     errorState.value = null
+    errorDetail.value = ''
+
+    try {
+      const { data: testResult } = await postProvidersByIdTest({
+        path: { id: providerId },
+        throwOnError: true,
+      })
+      if (!testResult?.reachable) {
+        errorState.value = 'unreachable'
+        errorDetail.value = testResult?.message ?? ''
+        return
+      }
+    } catch {
+      errorState.value = 'unreachable'
+      return
+    }
+
     let importFailed = false
     try {
       await importModels(providerId)
@@ -273,6 +293,7 @@ export function useProviderSetup(options: {
       }
       if (errorState.value) {
         errorState.value = null
+        errorDetail.value = ''
       }
     },
   )
@@ -282,6 +303,7 @@ export function useProviderSetup(options: {
     formError,
     createdProviderId,
     errorState,
+    errorDetail,
     manualMode,
     importing,
     submitting,
