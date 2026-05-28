@@ -2107,7 +2107,8 @@
     },
     "bot": {
       "title": "创建你的第一个 Bot",
-      "placeholder": "Bot 创建即将推出。"
+      "placeholder": "Bot 创建即将推出。",
+      "preparingEnvironment": "正在准备环境..."
     },
     "im": {
       "title": "接入 IM 渠道",

@@ -395,9 +395,7 @@ func toAccount(row dbstore.AccountRecord) Account {
 	timezone := strings.TrimSpace(row.Timezone)
 	var metadata map[string]any
 	if row.Metadata != "" {
-		if err := json.Unmarshal([]byte(row.Metadata), &metadata); err != nil {
-			slog.Warn("failed to unmarshal user metadata", "user_id", row.ID, "error", err)
-		}
+		_ = json.Unmarshal([]byte(row.Metadata), &metadata)
 	}
 	return Account{
 		ID:          row.ID,

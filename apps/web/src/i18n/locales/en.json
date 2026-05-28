@@ -2111,7 +2111,8 @@
     },
     "bot": {
       "title": "Create Your First Bot",
-      "placeholder": "Bot creation coming soon."
+      "placeholder": "Bot creation coming soon.",
+      "preparingEnvironment": "Preparing environment..."
     },
     "im": {
       "title": "Connect IM Channels",

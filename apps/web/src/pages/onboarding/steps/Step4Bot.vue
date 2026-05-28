@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
+  Spinner,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -90,6 +91,13 @@ watch(memoryProviders, (list) => {
 
 const canSubmit = computed(() => {
   return !!form.display_name.trim()
+})
+
+const isContainerSubmitting = computed(() => submitting.value && form.workspace_backend !== 'local')
+
+const ctaLabel = computed(() => {
+  if (isContainerSubmitting.value) return t('onboarding.bot.preparingEnvironment')
+  return t('onboarding.next')
 })
 
 const { mutateAsync: createBot } = useMutation({
@@ -298,7 +306,23 @@ async function handleSubmit() {
             :disabled="!canSubmit || submitting"
             @click="handleSubmit"
           >
-            {{ t('onboarding.next') }}
+            <Transition
+              mode="out-in"
+              enter-active-class="transition-all duration-[160ms] ease-out"
+              enter-from-class="opacity-0 translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition-all duration-[140ms] ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
+            >
+              <span
+                :key="ctaLabel"
+                class="inline-flex items-center gap-2"
+              >
+                <Spinner v-if="isContainerSubmitting" />
+                {{ ctaLabel }}
+              </span>
+            </Transition>
           </button>
         </div>
 

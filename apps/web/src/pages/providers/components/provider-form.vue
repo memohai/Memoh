@@ -290,9 +290,9 @@
       class="mt-4 rounded-lg border p-4 space-y-3 text-xs"
     >
       <div class="flex items-center gap-2">
-        <StatusDot :status="testResult.reachable ? 'success' : 'error'" />
+        <StatusDot :status="testResult.status === 'ok' ? 'success' : 'error'" />
         <span class="font-medium">
-          {{ testResult.reachable ? $t('provider.reachable') : $t('provider.unreachable') }}
+          {{ testResult.status === 'ok' ? $t('provider.reachable') : $t('provider.unreachable') }}
         </span>
         <span
           v-if="testResult.latency_ms"

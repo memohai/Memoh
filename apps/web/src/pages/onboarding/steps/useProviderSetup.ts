@@ -150,8 +150,6 @@ export function useProviderSetup(options: {
   }
 
   async function ensureProviderCreated(): Promise<string | null> {
-    if (createdProviderId.value) return createdProviderId.value
-
     const name = formValues.value.name.trim()
     const apiKey = formValues.value.api_key.trim()
     const baseUrl = formValues.value.base_url.trim()
@@ -162,6 +160,15 @@ export function useProviderSetup(options: {
     formError.value = ''
 
     try {
+      if (createdProviderId.value) {
+        await putProvidersById({
+          path: { id: createdProviderId.value },
+          body: { name, config: { base_url: baseUrl, api_key: apiKey }, enable: true },
+          throwOnError: true,
+        })
+        return createdProviderId.value
+      }
+
       const preset = options.selectedPreset()
       const lookupName = preset?.registryName ?? name
       const { data: existing } = await getProvidersNameByName({
@@ -303,9 +310,6 @@ export function useProviderSetup(options: {
     () => {
       if (suppressDirtyReset.value) return
       if (manualMode.value) return
-      if (createdProviderId.value) {
-        createdProviderId.value = null
-      }
       if (errorState.value) {
         errorState.value = null
         errorDetail.value = ''

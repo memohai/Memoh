@@ -37,6 +37,7 @@ export const useUserStore = defineStore(
 
     async function fetchMe() {
       if (_meChecked) return
+      if (onboardingCompleted.value) { _meChecked = true; return }
       if (_pendingFetch) { await _pendingFetch; return }
       _pendingFetch = (async () => {
         try {
