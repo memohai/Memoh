@@ -33,32 +33,38 @@ export const useUserStore = defineStore(
     const onboardingCompleted = ref(false)
 
     let _meChecked = false
-    let _pendingFetch: Promise<void> | null = null
+    let _pendingFetch: Promise<boolean> | null = null
 
-    async function fetchMe() {
-      if (_meChecked) return
-      if (onboardingCompleted.value) { _meChecked = true; return }
-      if (_pendingFetch) { await _pendingFetch; return }
-      _pendingFetch = (async () => {
+    async function fetchMe(): Promise<boolean> {
+      if (_meChecked) return true
+      if (onboardingCompleted.value) {
+        _meChecked = true
+        return true
+      }
+      if (_pendingFetch) return await _pendingFetch
+      _pendingFetch = (async (): Promise<boolean> => {
         try {
           const { data } = await getUsersMe({ throwOnError: true })
-          if (data) {
-            userInfo.id = data.id ?? ''
-            userInfo.username = data.username ?? ''
-            userInfo.role = data.role ?? ''
-            userInfo.displayName = data.display_name ?? ''
-            userInfo.avatarUrl = data.avatar_url ?? ''
-            userInfo.timezone = data.timezone || 'UTC'
-            onboardingCompleted.value = data.metadata?.onboarding_completed === true
+          if (!data) {
+            return false
           }
+          userInfo.id = data.id ?? ''
+          userInfo.username = data.username ?? ''
+          userInfo.role = data.role ?? ''
+          userInfo.displayName = data.display_name ?? ''
+          userInfo.avatarUrl = data.avatar_url ?? ''
+          userInfo.timezone = data.timezone || 'UTC'
+          onboardingCompleted.value = data.metadata?.onboarding_completed === true
           _meChecked = true
-        } catch {
-          _meChecked = true
+          return true
+        } catch (error) {
+          console.warn('Failed to fetch current user:', error)
+          return false
         } finally {
           _pendingFetch = null
         }
       })()
-      await _pendingFetch
+      return await _pendingFetch
     }
 
     const resetUserInfo = () => {

@@ -9,6 +9,7 @@ export async function ensureOnboarding(): Promise<boolean> {
   if (shouldForceOnboarding()) return false
   const store = useUserStore()
   if (store.onboardingCompleted) return true
-  await store.fetchMe()
+  const fetched = await store.fetchMe()
+  if (!fetched) return true
   return store.onboardingCompleted
 }
