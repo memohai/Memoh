@@ -118,6 +118,12 @@ export const useUserStore = defineStore(
       _meChecked = false
       _pendingFetch = null
       localStorage.removeItem(ONBOARDING_KEYS.introSeen)
+      // Clear per-session onboarding artifacts too: createdBotId / providerAddedCount
+      // live in sessionStorage and survive logout within the same tab, so without
+      // this the next user to onboard in this tab would be redirected to the previous
+      // user's bot (complete() consumes createdBotId) and see stale provider state.
+      sessionStorage.removeItem(ONBOARDING_KEYS.createdBotId)
+      sessionStorage.removeItem(ONBOARDING_KEYS.providerAddedCount)
       resetOnboardingState()
     }
 
