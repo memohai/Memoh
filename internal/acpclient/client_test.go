@@ -880,7 +880,12 @@ func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.Ini
 	}, nil
 }
 
-func (*fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error { return nil }
+func (*fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error {
+	if path := os.Getenv("MEMOH_ACP_PROMPT_CANCELLED_FILE"); path != "" {
+		_ = os.WriteFile(path, []byte("cancelled"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
+	}
+	return nil
+}
 
 func (*fakeACPAgent) CloseSession(context.Context, acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	return acp.CloseSessionResponse{}, nil

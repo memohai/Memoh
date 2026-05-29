@@ -57,6 +57,7 @@ type Session struct {
 	promptMu     sync.Mutex
 	mu           sync.Mutex
 	promptCancel context.CancelFunc
+	promptDone   <-chan struct{}
 	promptToken  *struct{}
 	closed       bool
 }
@@ -382,13 +383,16 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	defer cancelPrompt()
 	promptToken := &struct{}{}
+	promptDone := make(chan struct{})
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		close(promptDone)
 		return PromptResult{}, ErrSessionClosed
 	}
 	s.promptCancel = cancelPrompt
+	s.promptDone = promptDone
 	s.promptToken = promptToken
 	conn := s.conn
 	sessionID := s.sessionID
@@ -397,9 +401,11 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 	defaultSink := s.defaultSink
 	s.mu.Unlock()
 	defer func() {
+		close(promptDone)
 		s.mu.Lock()
 		if s.promptToken == promptToken {
 			s.promptCancel = nil
+			s.promptDone = nil
 			s.promptToken = nil
 		}
 		s.mu.Unlock()
@@ -458,10 +464,24 @@ func (s *Session) Close() error {
 	cancel := s.cancel
 	reverseHTTPStop := s.reverseHTTPStop
 	promptCancel := s.promptCancel
+	promptDone := s.promptDone
 	s.mu.Unlock()
 
 	if promptCancel != nil {
 		promptCancel()
+	}
+	if promptDone != nil {
+		timer := time.NewTimer(500 * time.Millisecond)
+		select {
+		case <-promptDone:
+		case <-timer.C:
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
 	}
 	if conn != nil && sessionID != "" {
 		ctx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
