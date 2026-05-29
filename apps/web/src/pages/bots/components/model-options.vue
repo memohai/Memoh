@@ -5,13 +5,19 @@
     />
     <input
       v-model="searchTerm"
+      role="combobox"
+      :aria-controls="listboxId"
+      :aria-expanded="open"
+      :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
       :placeholder="$t('bots.settings.searchModel')"
       aria-label="Search models"
       class="flex h-10 w-full bg-transparent py-3 text-xs outline-none placeholder:text-muted-foreground"
+      @keydown="onKeydown"
     >
   </div>
 
   <div
+    :id="listboxId"
     ref="scrollEl"
     class="max-h-64 overflow-y-auto px-1"
     role="listbox"
@@ -44,13 +50,17 @@
 
         <button
           v-else
+          :id="`${listboxId}-${vRow.virtual.index}`"
           type="button"
           role="option"
           :aria-selected="modelValue === vRow.row.option.value"
           :aria-setsize="optionCount"
           :aria-posinset="vRow.row.posinset"
           class="relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
-          :class="{ 'bg-accent': modelValue === vRow.row.option.value }"
+          :class="{
+            'bg-accent': modelValue === vRow.row.option.value,
+            'bg-accent text-accent-foreground': activeIndex === vRow.virtual.index,
+          }"
           @click="$emit('update:modelValue', vRow.row.option.value)"
         >
           <Check
@@ -90,12 +100,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Search, Check } from 'lucide-vue-next'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import ModelCapabilities from '@/components/model-capabilities/index.vue'
 import ContextWindowBadge from '@/components/context-window-badge/index.vue'
+import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
 
 export interface ModelOption {
   value: string
@@ -134,7 +145,7 @@ const props = defineProps<{
   showIcons?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
@@ -259,9 +270,19 @@ const measureRow = (el: unknown) => {
   if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
 }
 
+const listboxId = useId()
+const { activeIndex, onKeydown, reset: resetActive } = useListboxKeyboard<Row>({
+  rows,
+  scrollToIndex: (index) => virtualizer.value.scrollToIndex(index),
+  onSelect: (row) => {
+    if (row.type === 'item') emit('update:modelValue', row.option.value)
+  },
+})
+
 watch(() => props.open, (v) => {
   if (v) {
     searchTerm.value = ''
+    resetActive()
     nextTick(() => virtualizer.value.scrollToOffset(0))
   }
 })
