@@ -92,6 +92,12 @@ export const useUserStore = defineStore(
 
     const login = (userData: UserInfo, token: string) => {
       clearFrontendSessionState('login')
+      // A new login must not inherit the previous user's onboarding state. The
+      // flag is no longer persisted, but an in-memory value from a prior user
+      // could otherwise leak across a switch that skips logout — force a fresh
+      // server check.
+      onboardingCompleted.value = false
+      _meChecked = false
       localToken.value = token
       for (const key of Object.keys(userData) as (keyof UserInfo)[]) {
         userInfo[key] = userData[key]
@@ -157,7 +163,11 @@ export const useUserStore = defineStore(
   },
   {
     persist: {
-      pick: ['userInfo', 'onboardingCompleted'],
+      // Do NOT persist `onboardingCompleted`: a localStorage value can be stale
+      // across user switches or pushed between machines by browser sync, which
+      // would skip onboarding for the wrong user. It is verified against the
+      // server once per session via fetchMe() and cached in memory (_meChecked).
+      pick: ['userInfo'],
     },
   },
 )
