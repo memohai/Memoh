@@ -9864,6 +9864,14 @@ const docTemplate = `{
                 }
             }
         },
+        "accounts.UpdateProfileMetadata": {
+            "type": "object",
+            "properties": {
+                "onboarding_completed": {
+                    "type": "boolean"
+                }
+            }
+        },
         "accounts.UpdateProfileRequest": {
             "type": "object",
             "properties": {
@@ -9874,7 +9882,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "metadata": {
-                    "type": "object"
+                    "$ref": "#/definitions/accounts.UpdateProfileMetadata"
                 },
                 "timezone": {
                     "type": "string"

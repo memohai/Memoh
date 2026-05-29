@@ -283,7 +283,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req UpdatePr
 	if tzName == "" {
 		tzName = "UTC"
 	}
-	metadata := mergeMetadata(existing.Metadata, req.Metadata)
+	metadata := s.mergeMetadata(existing.Metadata, req.Metadata)
 	row, err := s.store.UpdateProfile(ctx, dbstore.UpdateAccountProfileInput{
 		UserID:      userID,
 		DisplayName: displayName,
@@ -413,11 +413,12 @@ func toAccount(row dbstore.AccountRecord) Account {
 	}
 }
 
-// mergeMetadata shallow-merges incoming JSON keys into existing metadata.
-// Top-level keys in incoming replace those in existing; nested objects are
-// replaced wholesale, not deep-merged.
-func mergeMetadata(existing string, incoming json.RawMessage) string {
-	if len(incoming) == 0 {
+// mergeMetadata applies the allowlisted fields from an update request onto the
+// user's existing metadata, preserving any other existing keys. Only keys
+// enumerated in UpdateProfileMetadata can be written — arbitrary client keys are
+// impossible because incoming is a typed struct, not free-form JSON.
+func (s *Service) mergeMetadata(existing string, incoming *UpdateProfileMetadata) string {
+	if incoming == nil {
 		if existing == "" {
 			return "{}"
 		}
@@ -426,15 +427,16 @@ func mergeMetadata(existing string, incoming json.RawMessage) string {
 	base := map[string]any{}
 	if existing != "" {
 		if err := json.Unmarshal([]byte(existing), &base); err != nil {
+			// Existing metadata is not valid JSON, so we can't safely merge into
+			// it. Log loudly and heal with a clean object holding only the
+			// allowlisted fields, rather than locking the user out of profile
+			// updates. Safe because nothing but allowlisted keys is written here.
+			s.logger.Error("existing user metadata is not valid JSON; healing with allowlisted fields", slog.Any("error", err))
 			base = map[string]any{}
 		}
 	}
-	var overlay map[string]any
-	if err := json.Unmarshal(incoming, &overlay); err != nil {
-		overlay = map[string]any{}
-	}
-	for k, v := range overlay {
-		base[k] = v
+	if incoming.OnboardingCompleted != nil {
+		base["onboarding_completed"] = *incoming.OnboardingCompleted
 	}
 	result, err := json.Marshal(base)
 	if err != nil {

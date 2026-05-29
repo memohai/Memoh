@@ -51,12 +51,14 @@ export type AccountsUpdatePasswordRequest = {
     new_password?: string;
 };
 
+export type AccountsUpdateProfileMetadata = {
+    onboarding_completed?: boolean;
+};
+
 export type AccountsUpdateProfileRequest = {
     avatar_url?: string;
     display_name?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
+    metadata?: AccountsUpdateProfileMetadata;
     timezone?: string;
 };
 

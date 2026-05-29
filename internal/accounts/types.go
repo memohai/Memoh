@@ -1,7 +1,6 @@
 package accounts
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -42,10 +41,19 @@ type UpdateAccountRequest struct {
 
 // UpdateProfileRequest is the input for self-service profile updates.
 type UpdateProfileRequest struct {
-	DisplayName *string         `json:"display_name,omitempty"`
-	AvatarURL   *string         `json:"avatar_url,omitempty"`
-	Timezone    *string         `json:"timezone,omitempty"`
-	Metadata    json.RawMessage `json:"metadata,omitempty" swaggertype:"object"`
+	DisplayName *string                `json:"display_name,omitempty"`
+	AvatarURL   *string                `json:"avatar_url,omitempty"`
+	Timezone    *string                `json:"timezone,omitempty"`
+	Metadata    *UpdateProfileMetadata `json:"metadata,omitempty"`
+}
+
+// UpdateProfileMetadata enumerates the user-writable keys of user.metadata.
+// Only fields listed here can be set via PUT /users/me. Never widen this to
+// accept arbitrary JSON: user.metadata may later drive server-side decisions
+// (feature flags, quotas, roles), so client-writable keys must stay an explicit
+// allowlist.
+type UpdateProfileMetadata struct {
+	OnboardingCompleted *bool `json:"onboarding_completed,omitempty"`
 }
 
 // UpdatePasswordRequest is the input for password change.

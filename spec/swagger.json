@@ -9855,6 +9855,14 @@
                 }
             }
         },
+        "accounts.UpdateProfileMetadata": {
+            "type": "object",
+            "properties": {
+                "onboarding_completed": {
+                    "type": "boolean"
+                }
+            }
+        },
         "accounts.UpdateProfileRequest": {
             "type": "object",
             "properties": {
@@ -9865,7 +9873,7 @@
                     "type": "string"
                 },
                 "metadata": {
-                    "type": "object"
+                    "$ref": "#/definitions/accounts.UpdateProfileMetadata"
                 },
                 "timezone": {
                     "type": "string"

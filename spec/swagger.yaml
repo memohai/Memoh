@@ -74,6 +74,11 @@ definitions:
       new_password:
         type: string
     type: object
+  accounts.UpdateProfileMetadata:
+    properties:
+      onboarding_completed:
+        type: boolean
+    type: object
   accounts.UpdateProfileRequest:
     properties:
       avatar_url:
@@ -81,7 +86,7 @@ definitions:
       display_name:
         type: string
       metadata:
-        type: object
+        $ref: '#/definitions/accounts.UpdateProfileMetadata'
       timezone:
         type: string
     type: object
