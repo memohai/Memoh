@@ -256,3 +256,52 @@ func TestFetchRemoteModelsFromAnthropicUsesAnthropicHeaders(t *testing.T) {
 		t.Fatalf("expected Anthropic model type to import as chat, got %q", remoteModels[0].Type)
 	}
 }
+
+func TestFetchRemoteModelsViaSDKImportsGemini(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("expected /models path, got %q", r.URL.Path)
+		}
+		// Gemini authenticates with x-goog-api-key, NOT Authorization: Bearer.
+		if got := r.Header.Get("x-goog-api-key"); got != "gm-test" {
+			t.Fatalf("expected x-goog-api-key header, got %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected no Authorization header for Gemini, got %q", got)
+		}
+
+		// Gemini returns models under "models" (not "data"), with names like
+		// "models/gemini-2.0-flash" that the SDK strips down to the bare id.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"name":        "models/gemini-2.0-flash",
+					"displayName": "Gemini 2.0 Flash",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	remoteModels, err := fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeGoogleGenerativeAI),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models via sdk: %v", err)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(remoteModels))
+	}
+	if remoteModels[0].ID != "gemini-2.0-flash" {
+		t.Fatalf("expected \"models/\" prefix stripped, got %q", remoteModels[0].ID)
+	}
+	if remoteModels[0].Name != "Gemini 2.0 Flash" {
+		t.Fatalf("expected display name mapped, got %q", remoteModels[0].Name)
+	}
+	if remoteModels[0].Type != string(models.ModelTypeChat) {
+		t.Fatalf("expected Gemini model type to import as chat, got %q", remoteModels[0].Type)
+	}
+}

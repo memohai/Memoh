@@ -344,7 +344,40 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return remoteModels, nil
 	}
 
+	if models.ClientType(provider.ClientType) == models.ClientTypeGoogleGenerativeAI {
+		return fetchRemoteModelsViaSDK(ctx, provider)
+	}
+
 	return fetchRemoteModelsFromProvider(ctx, provider)
+}
+
+// fetchRemoteModelsViaSDK lists a provider's models through the twilight SDK
+// instead of the hand-rolled OpenAI-style HTTP path. It is required for
+// providers whose model-listing API diverges from the OpenAI contract — e.g.
+// Google Gemini, which authenticates with x-goog-api-key (not Bearer) and
+// returns models under "models" rather than "data". The SDK provider already
+// implements this correctly and is the same one Test()/inference use.
+func fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
+	cfg := providerConfig(provider.Config)
+	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
+	apiKey := configString(cfg, "api_key")
+	clientType := models.ClientType(provider.ClientType)
+
+	sdkProvider := models.NewSDKProvider(baseURL, apiKey, "", clientType, probeTimeout, nil)
+	sdkModels, err := sdkProvider.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list models via sdk: %w", err)
+	}
+
+	remoteModels := make([]RemoteModel, 0, len(sdkModels))
+	for _, m := range sdkModels {
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:   m.ID,
+			Name: m.DisplayName,
+			Type: string(models.ModelTypeChat),
+		})
+	}
+	return remoteModels, nil
 }
 
 func fetchRemoteModelsFromProvider(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
