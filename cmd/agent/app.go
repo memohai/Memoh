@@ -28,6 +28,7 @@ import (
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
@@ -572,6 +573,25 @@ func provideChannelLifecycleService(channelStore *channel.Store, channelManager 
 
 func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
 	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
+}
+
+func provideBotBackupService(log *slog.Logger, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
+	return botbackup.New(botbackup.Params{
+		Logger:          log,
+		Queries:         queries,
+		Bots:            botService,
+		Settings:        settingsService,
+		ACL:             aclService,
+		Channels:        channelStore,
+		MCP:             mcpService,
+		Schedules:       scheduleService,
+		Email:           emailService,
+		Providers:       providerService,
+		Models:          modelsService,
+		SearchProviders: searchProviderService,
+		MemoryProviders: memoryProviderService,
+		Workspace:       manager,
+	})
 }
 
 func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {

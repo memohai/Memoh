@@ -153,6 +153,32 @@ func (s *Store) UpdateConfigDisabled(ctx context.Context, botID string, channelT
 	return normalizeChannelConfigFromRow(row)
 }
 
+// ListConfigs returns all persisted channel configurations for a bot.
+func (s *Store) ListConfigs(ctx context.Context, botID string) ([]ChannelConfig, error) {
+	if s.queries == nil {
+		return nil, errors.New("channel queries not configured")
+	}
+	types := s.registry.Types()
+	items := make([]ChannelConfig, 0, len(types))
+	for _, channelType := range types {
+		if s.registry.IsConfigless(channelType) {
+			continue
+		}
+		item, err := s.ResolveEffectiveConfig(ctx, botID, channelType)
+		if err != nil {
+			if errors.Is(err, ErrChannelConfigNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ChannelType < items[j].ChannelType
+	})
+	return items, nil
+}
+
 // SaveMatrixSyncSinceToken persists the Matrix /sync cursor without mutating channel config updated_at.
 func (s *Store) SaveMatrixSyncSinceToken(ctx context.Context, configID string, since string) error {
 	if s.queries == nil {

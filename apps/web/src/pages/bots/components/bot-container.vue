@@ -11,8 +11,6 @@ import {
   getBotsByBotIdContainerMetrics,
   getBotsByBotIdContainerSnapshots,
   getBotsById,
-  postBotsByBotIdContainerDataExport,
-  postBotsByBotIdContainerDataImport,
   postBotsByBotIdContainerDataRestore,
   postBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerSnapshotsRollback,
@@ -50,8 +48,6 @@ type ContainerAction =
   | 'delete'
   | 'delete-preserve'
   | 'snapshot'
-  | 'export'
-  | 'import'
   | 'restore'
   | 'rollback'
   | 'recreate'
@@ -67,7 +63,6 @@ const createGPUEnabled = ref(false)
 const createGPUDevices = ref('')
 const createGPUPrefilled = ref(false)
 const newSnapshotName = ref('')
-const importInputRef = ref<HTMLInputElement | null>(null)
 
 interface CreateProgress {
   phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
@@ -460,64 +455,6 @@ async function handleDeleteContainer(preserveData: boolean) {
     },
     successMessage,
   )
-}
-
-function buildExportFilename() {
-  const timestamp = new Date().toISOString().replaceAll(':', '-')
-  return `bot-${botId.value}-data-${timestamp}.tar.gz`
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-async function handleExportData() {
-  if (botLifecyclePending.value || !containerInfo.value) return
-
-  await runContainerAction(
-    'export',
-    async () => {
-      const response = await postBotsByBotIdContainerDataExport({
-        path: { bot_id: botId.value },
-        parseAs: 'blob',
-        throwOnError: true,
-      })
-      downloadBlob(response.data as unknown as Blob, buildExportFilename())
-    },
-    t('bots.container.exportSuccess'),
-  )
-}
-
-function triggerImportData() {
-  importInputRef.value?.click()
-}
-
-async function handleImportData(event: Event) {
-  if (botLifecyclePending.value || !containerInfo.value) return
-
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-
-  await runContainerAction(
-    'import',
-    async () => {
-      await postBotsByBotIdContainerDataImport({
-        path: { bot_id: botId.value },
-        body: { file },
-        throwOnError: true,
-      })
-      await loadContainerData(false)
-    },
-    t('bots.container.importSuccess'),
-  )
-
-  input.value = ''
 }
 
 async function handleRestorePreservedData() {

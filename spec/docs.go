@@ -199,6 +199,134 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/backup/import": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Import a bot backup",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Bot backup zip",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Import mode",
+                        "name": "mode",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target bot ID for overwrite mode",
+                        "name": "target_bot_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "JSON object mapping section to strategy (skip|merge|replace), e.g. {\\",
+                        "name": "sections",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botbackup.ImportResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/backup/import/preview": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Preview a bot backup import",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Bot backup zip",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Import mode",
+                        "name": "mode",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target bot ID for overwrite mode",
+                        "name": "target_bot_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "JSON object mapping section to strategy (skip|merge|replace), e.g. {\\",
+                        "name": "sections",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botbackup.PreviewResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acl/channel-identities": {
             "get": {
                 "description": "Search locally observed channel identities for building ACL rules",
@@ -633,6 +761,104 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/backup/export": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Export a full bot backup",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Export options",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botbackup.ExportOptions"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/backup/summary": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Summarize what a bot would export",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botbackup.SummaryResult"
                         }
                     },
                     "403": {
@@ -11105,6 +11331,256 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "botbackup.ExportOptions": {
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "description": "Sections lists which sections to include. nil/empty ⇒ all sections.\nprofile is always exported regardless.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botbackup.Section"
+                    }
+                }
+            }
+        },
+        "botbackup.ImportMode": {
+            "type": "string",
+            "enum": [
+                "create",
+                "overwrite"
+            ],
+            "x-enum-varnames": [
+                "ImportModeCreate",
+                "ImportModeOverwrite"
+            ]
+        },
+        "botbackup.ImportResult": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "botbackup.Manifest": {
+            "type": "object",
+            "properties": {
+                "app": {
+                    "type": "string"
+                },
+                "checksums": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botbackup.ManifestEntry"
+                    }
+                },
+                "exported_at": {
+                    "type": "string"
+                },
+                "options": {
+                    "$ref": "#/definitions/botbackup.ManifestOptions"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "source_bot_id": {
+                    "type": "string"
+                },
+                "source_bot_name": {
+                    "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "botbackup.ManifestEntry": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "botbackup.ManifestOptions": {
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botbackup.Section"
+                    }
+                }
+            }
+        },
+        "botbackup.PreviewResult": {
+            "type": "object",
+            "properties": {
+                "conflicts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "manifest": {
+                    "$ref": "#/definitions/botbackup.Manifest"
+                },
+                "missing": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "profile": {
+                    "$ref": "#/definitions/botbackup.ProfilePreview"
+                },
+                "restore_plan": {
+                    "$ref": "#/definitions/botbackup.RestorePlan"
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botbackup.SectionSummary"
+                    }
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "botbackup.ProfilePreview": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "timezone": {
+                    "type": "string"
+                }
+            }
+        },
+        "botbackup.RestorePlan": {
+            "type": "object",
+            "properties": {
+                "dependency_matches": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "mode": {
+                    "$ref": "#/definitions/botbackup.ImportMode"
+                },
+                "target_bot_id": {
+                    "type": "string"
+                },
+                "will_create_bot": {
+                    "type": "boolean"
+                },
+                "will_restore_workspace": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "botbackup.Section": {
+            "type": "string",
+            "enum": [
+                "profile",
+                "settings",
+                "models",
+                "acl",
+                "channels",
+                "mcp",
+                "schedules",
+                "email",
+                "history",
+                "assets",
+                "workspace"
+            ],
+            "x-enum-varnames": [
+                "SectionProfile",
+                "SectionSettings",
+                "SectionModels",
+                "SectionACL",
+                "SectionChannels",
+                "SectionMCP",
+                "SectionSchedules",
+                "SectionEmail",
+                "SectionHistory",
+                "SectionAssets",
+                "SectionWorkspace"
+            ]
+        },
+        "botbackup.SectionSummary": {
+            "type": "object",
+            "properties": {
+                "conflict": {
+                    "type": "boolean"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "key": {
+                    "$ref": "#/definitions/botbackup.Section"
+                },
+                "sensitive": {
+                    "type": "boolean"
+                },
+                "target_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "botbackup.SummaryResult": {
+            "type": "object",
+            "properties": {
+                "profile": {
+                    "$ref": "#/definitions/botbackup.ProfilePreview"
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botbackup.SectionSummary"
+                    }
                 }
             }
         },

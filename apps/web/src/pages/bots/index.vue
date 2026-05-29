@@ -14,6 +14,13 @@
           />
         </div>
         <Button
+          variant="outline"
+          @click="router.push({ name: 'bot-new', query: { mode: 'import' } })"
+        >
+          <Upload class="mr-1.5" />
+          {{ $t('bots.backup.importBot') }}
+        </Button>
+        <Button
           variant="default"
           @click="router.push({ name: 'bot-new' })"
         >
@@ -63,7 +70,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@memohai/ui'
-import { Search, Bot, Plus } from 'lucide-vue-next'
+import { Search, Bot, Plus, Upload } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BotCard from './components/bot-card.vue'

@@ -1,6 +1,33 @@
 <template>
   <section class="relative px-4 pt-2 pb-10 lg:px-6 md:pt-4 md:pb-12 max-w-2xl">
+    <Tabs
+      v-model="mode"
+      class="mb-6"
+    >
+      <TabsList class="grid w-full grid-cols-2">
+        <TabsTrigger value="create">
+          {{ $t('bots.backup.createMode') }}
+        </TabsTrigger>
+        <TabsTrigger value="import">
+          {{ $t('bots.backup.importMode') }}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+
+    <!-- Import from backup -->
+    <div v-if="mode === 'import'">
+      <p class="text-xs text-muted-foreground mb-4">
+        {{ $t('bots.backup.importDescription') }}
+      </p>
+      <BotImportPanel
+        show-cancel
+        @imported="handleImported"
+        @cancel="router.back()"
+      />
+    </div>
+
     <form
+      v-else
       :aria-busy="isCreateFlowBlocked"
       :class="{ 'pointer-events-none select-none opacity-60': isCreateFlowBlocked }"
       @submit.prevent="handleSubmit"
@@ -285,13 +312,16 @@ import {
   SelectValue,
   Separator,
   Spinner,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@memohai/ui'
 import { SquarePen, CircleHelp } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
@@ -306,11 +336,15 @@ import TimezoneSelect from '@/components/timezone-select/index.vue'
 import ModelSelect from './components/model-select.vue'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
+import BotImportPanel from './components/bot-import-panel.vue'
 
 const router = useRouter()
+const route = useRoute()
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const capabilities = useCapabilitiesStore()
+
+const mode = ref<'create' | 'import'>(route.query.mode === 'import' ? 'import' : 'create')
 
 onMounted(() => {
   void capabilities.load()
@@ -417,6 +451,15 @@ const { mutateAsync: createBot, isLoading: submitLoading } = useMutation({
 })
 
 const isCreateFlowBlocked = computed(() => submitLoading.value)
+
+// Import from backup
+function handleImported(botId: string) {
+  if (botId) {
+    router.push({ name: 'bot-detail', params: { botId } })
+  } else {
+    router.push({ name: 'bots' })
+  }
+}
 
 async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return

@@ -108,7 +108,7 @@ const memoryMetrics = computed(() => props.metrics?.metrics?.memory)
 const storageMetrics = computed(() => props.metrics?.metrics?.storage)
 
 const backendUnsupported = computed(() =>
-  props.backend !== 'containerd' || props.metrics?.supported === false,
+  props.metrics?.supported === false,
 )
 const taskRunning = computed(() => status.value?.task_running)
 const hasAnyMetric = computed(() =>

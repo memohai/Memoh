@@ -68,6 +68,25 @@
       />
     </div>
 
+    <!-- Bot Backup -->
+    <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="space-y-0.5">
+          <h4 class="text-xs font-medium text-foreground">
+            {{ $t('bots.backup.cardTitle') }}
+          </h4>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.backup.cardSubtitle') }}
+          </p>
+        </div>
+        <BotBackupActions
+          :bot-id="botId"
+          :bot-name="bot?.display_name"
+          @imported="handleBackupImported"
+        />
+      </div>
+    </div>
+
     <!-- Danger Zone: Isolated with top margin -->
     <div class="pt-4">
       <SettingsDangerZone
@@ -92,6 +111,7 @@ import SettingsInteractionCard from './settings-interaction-card.vue'
 import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
+import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
@@ -358,6 +378,16 @@ async function handleMemorySync() {
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.settings.memorySyncFailed')))
   }
+}
+
+function handleBackupImported(botId: string) {
+  queryCache.invalidateQueries({ key: ['bots'] })
+  if (botId && botId !== props.botId) {
+    router.push({ name: 'bot-detail', params: { botId } })
+    return
+  }
+  queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+  queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
 }
 
 async function handleDeleteBot() {
