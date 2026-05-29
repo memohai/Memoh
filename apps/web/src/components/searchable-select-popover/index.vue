@@ -28,7 +28,8 @@
       </slot>
     </PopoverTrigger>
     <PopoverContent
-      class="w-[--reka-popover-trigger-width] p-0"
+      class="p-0"
+      :style="{ width: 'calc(var(--reka-popover-trigger-width) * 0.55)' }"
       align="start"
     >
       <div class="flex items-center border-b px-3">
@@ -44,79 +45,89 @@
       </div>
 
       <div
-        class="max-h-64 overflow-y-auto"
+        ref="scrollEl"
+        class="max-h-64 overflow-y-auto px-1"
         role="listbox"
       >
         <div
-          v-if="filteredGroups.length === 0"
+          v-if="rows.length === 0"
           class="py-6 text-center text-xs text-muted-foreground"
         >
           {{ emptyText }}
         </div>
 
         <div
-          v-for="group in filteredGroups"
-          :key="group.key"
-          class="p-1 *:mt-1 overflow-hidden"
+          v-else
+          :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
         >
           <div
-            v-if="showGroupHeaders && group.label"
-            class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+            v-for="vRow in virtualRows"
+            :key="vRow.key"
+            :ref="measureRow"
+            :data-index="vRow.virtual.index"
+            class="py-0.5"
+            :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
           >
-            <slot
-              name="group-label"
-              :group="group"
+            <div
+              v-if="vRow.row.type === 'header'"
+              class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
             >
-              {{ group.label }}
-            </slot>
-          </div>
+              <slot
+                name="group-label"
+                :group="vRow.row.group"
+              >
+                {{ vRow.row.group.label }}
+              </slot>
+            </div>
 
-          <button
-            v-for="option in group.items"
-            :key="option.value"
-            type="button"
-            role="option"
-            :aria-selected="selected === option.value"
-            class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
-            :class="{ 'bg-accent': selected === option.value }"
-            @click="selectOption(option.value)"
-          >
-            <Check
-              v-if="selected === option.value"
-              class="size-3.5 shrink-0"
-            />
-            <span
+            <button
               v-else
-              class="size-3.5 shrink-0"
-            />
-            <slot
-              name="option-icon"
-              :option="option"
-            />
-            <span class="flex min-w-0 flex-1 items-center gap-2">
+              type="button"
+              role="option"
+              :aria-selected="selected === vRow.row.option.value"
+              :aria-setsize="optionCount"
+              :aria-posinset="vRow.row.posinset"
+              class="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+              :class="{ 'bg-accent': selected === vRow.row.option.value }"
+              @click="selectOption(vRow.row.option.value)"
+            >
+              <Check
+                v-if="selected === vRow.row.option.value"
+                class="size-3.5 shrink-0"
+              />
+              <span
+                v-else
+                class="size-3.5 shrink-0"
+              />
               <slot
-                name="option-label"
-                :option="option"
-              >
-                <span
-                  class="truncate flex-1 text-left"
-                  :title="option.label"
-                >{{ option.label }}</span>
-              </slot>
-              <slot
-                name="option-suffix"
-                :option="option"
-              >
-                <span
-                  v-if="option.description"
-                  class="ml-auto text-xs text-muted-foreground truncate max-w-[80%] text-right"
-                  :title="option.description"
+                name="option-icon"
+                :option="vRow.row.option"
+              />
+              <span class="flex min-w-0 flex-1 items-center gap-2">
+                <slot
+                  name="option-label"
+                  :option="vRow.row.option"
                 >
-                  {{ option.description }}
-                </span>
-              </slot>
-            </span>
-          </button>
+                  <span
+                    class="truncate flex-1 text-left"
+                    :title="vRow.row.option.label"
+                  >{{ vRow.row.option.label }}</span>
+                </slot>
+                <slot
+                  name="option-suffix"
+                  :option="vRow.row.option"
+                >
+                  <span
+                    v-if="vRow.row.option.description"
+                    class="ml-auto text-xs text-muted-foreground truncate max-w-[80%] text-right"
+                    :title="vRow.row.option.description"
+                  >
+                    {{ vRow.row.option.description }}
+                  </span>
+                </slot>
+              </span>
+            </button>
+          </div>
         </div>
       </div>
     </PopoverContent>
@@ -131,7 +142,8 @@ import {
   PopoverContent,
   Button,
 } from '@memohai/ui'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 
 export interface SearchableSelectOption {
   value: string
@@ -142,6 +154,28 @@ export interface SearchableSelectOption {
   keywords?: string[]
   meta?: unknown
 }
+
+interface SearchableSelectGroup {
+  key: string
+  label: string
+  items: SearchableSelectOption[]
+}
+
+interface HeaderRow {
+  type: 'header'
+  key: string
+  group: SearchableSelectGroup
+}
+
+interface ItemRow {
+  type: 'item'
+  key: string
+  option: SearchableSelectOption
+  // 1-based position among option rows (excludes headers), for aria-posinset
+  posinset: number
+}
+
+type Row = HeaderRow | ItemRow
 
 const props = withDefaults(defineProps<{
   options: SearchableSelectOption[]
@@ -163,12 +197,7 @@ const props = withDefaults(defineProps<{
 const selected = defineModel<string>({ default: '' })
 const searchTerm = ref('')
 const open = ref(false)
-
-watch(open, (value) => {
-  if (value) {
-    searchTerm.value = ''
-  }
-})
+const scrollEl = ref<HTMLElement | null>(null)
 
 const selectedOption = computed(() =>
   props.options.find((option) => option.value === selected.value),
@@ -192,8 +221,8 @@ const filteredOptions = computed(() => {
   })
 })
 
-const filteredGroups = computed(() => {
-  const groups = new Map<string, { key: string, label: string, items: SearchableSelectOption[] }>()
+const filteredGroups = computed<SearchableSelectGroup[]>(() => {
+  const groups = new Map<string, SearchableSelectGroup>()
   for (const option of filteredOptions.value) {
     const key = option.group ?? '__ungrouped__'
     if (!groups.has(key)) {
@@ -207,6 +236,64 @@ const filteredGroups = computed(() => {
   }
   return Array.from(groups.values())
 })
+
+// Flatten groups into a single list so the dropdown can be virtualized:
+// some consumers (e.g. timezone-select) feed hundreds of options, and
+// rendering them all at once on open janks the main thread. Row heights are
+// measured at runtime, so nothing here is hard-coded.
+const rows = computed<Row[]>(() => {
+  const result: Row[] = []
+  let posinset = 0
+  for (const group of filteredGroups.value) {
+    if (props.showGroupHeaders && group.label) {
+      result.push({ type: 'header', key: `header:${group.key}`, group })
+    }
+    for (const option of group.items) {
+      posinset += 1
+      result.push({ type: 'item', key: option.value, option, posinset })
+    }
+  }
+  return result
+})
+
+// Total option count (excludes headers) for aria-setsize: virtualization drops
+// off-screen options from the DOM, so screen readers need the real set size.
+const optionCount = computed(() => filteredOptions.value.length)
+
+const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scrollEl.value,
+    // Rows are single-line (~32px); this seed keeps the scroll size close to
+    // real so the scrollbar tracks. measureRow measures the true height at
+    // runtime, so an off estimate only causes minor jitter, never misalignment.
+    estimateSize: () => 32,
+    overscan: 8,
+    getItemKey: (index: number) => rows.value[index]?.key ?? index,
+  })),
+)
+
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+const virtualRows = computed(() =>
+  virtualizer.value.getVirtualItems().flatMap((vi) => {
+    const row = rows.value[vi.index]
+    return row ? [{ key: String(vi.key), virtual: vi, row }] : []
+  }),
+)
+
+const measureRow = (el: unknown) => {
+  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
+
+watch(open, (value) => {
+  if (value) {
+    searchTerm.value = ''
+    nextTick(() => virtualizer.value.scrollToOffset(0))
+  }
+})
+
+watch(searchTerm, () => virtualizer.value.scrollToOffset(0))
 
 function selectOption(value: string) {
   selected.value = value

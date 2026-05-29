@@ -12,75 +12,86 @@
   </div>
 
   <div
-    class="max-h-64 overflow-y-auto"
+    ref="scrollEl"
+    class="max-h-64 overflow-y-auto px-1"
     role="listbox"
   >
     <div
-      v-if="filteredGroups.length === 0"
+      v-if="rows.length === 0"
       class="py-6 text-center text-xs text-muted-foreground"
     >
       {{ $t('bots.settings.noModel') }}
     </div>
 
     <div
-      v-for="group in filteredGroups"
-      :key="group.key"
-      class="p-1"
+      v-else
+      :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
     >
       <div
-        v-if="group.label"
-        class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+        v-for="vRow in virtualRows"
+        :key="vRow.key"
+        :ref="measureRow"
+        :data-index="vRow.virtual.index"
+        class="py-0.5"
+        :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.virtual.start}px)` }"
       >
-        {{ group.label }}
-      </div>
+        <div
+          v-if="vRow.row.type === 'header'"
+          class="px-2 py-1.5 text-xs font-medium text-muted-foreground"
+        >
+          {{ vRow.row.label }}
+        </div>
 
-      <button
-        v-for="option in group.items"
-        :key="option.value"
-        type="button"
-        role="option"
-        :aria-selected="modelValue === option.value"
-        class="relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground [&_+button]:mt-1"
-        :class="{ 'bg-accent': modelValue === option.value }"
-        @click="$emit('update:modelValue', option.value)"
-      >
-        <Check
-          v-if="modelValue === option.value"
-          class="size-3.5 shrink-0 mt-0.5"
-        />
-        <span
+        <button
           v-else
-          class="size-3.5 shrink-0"
-        />
-        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span class="flex min-w-0 items-center gap-2">
+          type="button"
+          role="option"
+          :aria-selected="modelValue === vRow.row.option.value"
+          :aria-setsize="optionCount"
+          :aria-posinset="vRow.row.posinset"
+          class="relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+          :class="{ 'bg-accent': modelValue === vRow.row.option.value }"
+          @click="$emit('update:modelValue', vRow.row.option.value)"
+        >
+          <Check
+            v-if="modelValue === vRow.row.option.value"
+            class="size-3.5 shrink-0 mt-0.5"
+          />
+          <span
+            v-else
+            class="size-3.5 shrink-0"
+          />
+          <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span class="flex min-w-0 items-center gap-2">
+              <span
+                class="truncate flex-1 text-left"
+                :title="vRow.row.option.label"
+              >{{ vRow.row.option.label }}</span>
+              <span class="flex items-center gap-1.5 shrink-0">
+                <ModelCapabilities
+                  v-if="vRow.row.option.compatibilities?.length"
+                  :compatibilities="vRow.row.option.compatibilities"
+                />
+                <ContextWindowBadge :context-window="vRow.row.option.contextWindow" />
+              </span>
+            </span>
             <span
-              class="truncate flex-1 text-left"
-              :title="option.label"
-            >{{ option.label }}</span>
-            <span class="flex items-center gap-1.5 shrink-0">
-              <ModelCapabilities
-                v-if="option.compatibilities?.length"
-                :compatibilities="option.compatibilities"
-              />
-              <ContextWindowBadge :context-window="option.contextWindow" />
+              v-if="vRow.row.hasDescription"
+              class="text-xs text-muted-foreground truncate text-left"
+              :title="vRow.row.option.description"
+            >
+              {{ vRow.row.option.description }}
             </span>
           </span>
-          <span
-            v-if="option.description && option.description !== option.label"
-            class="text-xs text-muted-foreground truncate text-left"
-            :title="option.description"
-          >
-            {{ option.description }}
-          </span>
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Search, Check } from 'lucide-vue-next'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import ModelCapabilities from '@/components/model-capabilities/index.vue'
@@ -96,6 +107,23 @@ export interface ModelOption {
   compatibilities?: string[]
   contextWindow?: number
 }
+
+interface HeaderRow {
+  type: 'header'
+  key: string
+  label: string
+}
+
+interface ItemRow {
+  type: 'item'
+  key: string
+  option: ModelOption
+  hasDescription: boolean
+  // 1-based position among option rows (excludes headers), for aria-posinset
+  posinset: number
+}
+
+type Row = HeaderRow | ItemRow
 
 const props = defineProps<{
   models: ModelsGetResponse[]
@@ -113,10 +141,7 @@ defineEmits<{
 const modelValue = defineModel<string>({ default: '' })
 
 const searchTerm = ref('')
-
-watch(() => props.open, (v) => {
-  if (v) searchTerm.value = ''
-})
+const scrollEl = ref<HTMLElement | null>(null)
 
 const providerMap = computed(() => {
   const map = new Map<string, string>()
@@ -169,4 +194,77 @@ const filteredGroups = computed(() => {
   }
   return Array.from(groups.values())
 })
+
+// Flatten the grouped options into one linear list so the dropdown can be
+// virtualized: rendering every row at once instantiates hundreds of buttons
+// (each with capability-icon sub-components) synchronously and freezes the
+// main thread when a provider exposes hundreds of models. Heights are measured
+// at runtime by the virtualizer, so no row heights are hard-coded here.
+const rows = computed<Row[]>(() => {
+  const result: Row[] = []
+  let posinset = 0
+  for (const group of filteredGroups.value) {
+    if (group.label) {
+      result.push({ type: 'header', key: `header:${group.key}`, label: group.label })
+    }
+    for (const option of group.items) {
+      posinset += 1
+      result.push({
+        type: 'item',
+        key: option.value,
+        option,
+        hasDescription: Boolean(option.description && option.description !== option.label),
+        posinset,
+      })
+    }
+  }
+  return result
+})
+
+// Total option count (excludes group headers) for aria-setsize: virtualization
+// drops off-screen options from the DOM, so screen readers need this to know the
+// real set size rather than only the rendered window.
+const optionCount = computed(() => filteredOptions.value.length)
+
+const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scrollEl.value,
+    // Per-row size estimate, kept close to the real rendered heights so the
+    // total scroll size barely shifts as rows get measured — otherwise the
+    // scrollbar drifts (estimate vs. measured mismatch). These are only seeds:
+    // measureRow measures the true height at runtime, so being slightly off
+    // causes minor jitter at worst, never clipping/misalignment.
+    estimateSize: (index) => {
+      const row = rows.value[index]
+      if (!row) return 44
+      if (row.type === 'header') return 32
+      return row.hasDescription ? 54 : 36
+    },
+    overscan: 8,
+    getItemKey: (index: number) => rows.value[index]?.key ?? index,
+  })),
+)
+
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+const virtualRows = computed(() =>
+  virtualizer.value.getVirtualItems().flatMap((vi) => {
+    const row = rows.value[vi.index]
+    return row ? [{ key: String(vi.key), virtual: vi, row }] : []
+  }),
+)
+
+const measureRow = (el: unknown) => {
+  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
+}
+
+watch(() => props.open, (v) => {
+  if (v) {
+    searchTerm.value = ''
+    nextTick(() => virtualizer.value.scrollToOffset(0))
+  }
+})
+
+watch(searchTerm, () => virtualizer.value.scrollToOffset(0))
 </script>
