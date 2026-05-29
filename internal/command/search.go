@@ -12,37 +12,34 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all search providers",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.searchProvService == nil {
-				return "Search provider service is not available.", nil
+				return &Result{Text: "Search provider service is not available."}, nil
 			}
 			items, err := h.searchProvService.List(cc.Ctx, "")
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			if len(items) == 0 {
-				return "No search providers found.", nil
+				return &Result{Text: "No search providers found."}, nil
 			}
 			settingsResp, _ := h.getBotSettings(cc)
-			currentRecords := make([][]kv, 0, 1)
-			otherRecords := make([][]kv, 0, len(items))
+			currentRecords := make([]listRecord, 0, 1)
+			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				label := item.Name
-				record := []kv{
-					{"Name", label},
-					{"Provider", item.Provider},
-				}
 				if item.ID == settingsResp.SearchProviderID {
-					label += " [current]"
-					record[0].value = label
-					currentRecords = append(currentRecords, record)
+					currentRecords = append(currentRecords, listRecord{
+						selected: true,
+						fields:   []kv{{"Name", item.Name + " [current]"}, {"Provider", item.Provider}},
+					})
 					continue
 				}
-				otherRecords = append(otherRecords, record)
+				otherRecords = append(otherRecords, listRecord{
+					fields: []kv{{"Name", item.Name}, {"Provider", item.Provider}},
+				})
 			}
 			currentRecords = append(currentRecords, otherRecords...)
-			records := currentRecords
-			return formatLimitedItems(records, defaultListLimit, "Use /search current to inspect the active provider."), nil
+			return buildListResult("Search Providers", "search", "list", nil, currentRecords, cc.Page, defaultListLimit, "Use /search current to inspect the active provider."), nil
 		},
 	})
 	g.Register(SubCommand{

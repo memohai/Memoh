@@ -3,7 +3,6 @@ package command
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/memohai/memoh/internal/models"
@@ -12,51 +11,15 @@ import (
 
 func (h *Handler) buildModelGroup() *CommandGroup {
 	g := newCommandGroup("model", "Manage bot models")
+	g.DefaultAction = "list"
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list [provider_name] - List available chat models",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.modelsService == nil {
-				return "Model service is not available.", nil
+				return &Result{Text: "Model service is not available."}, nil
 			}
-			items, err := h.modelsService.ListByType(cc.Ctx, models.ModelTypeChat)
-			if err != nil {
-				return "", err
-			}
-			filterProvider := ""
-			if len(cc.Args) > 0 {
-				filterProvider = strings.TrimSpace(strings.Join(cc.Args, " "))
-			}
-			items = h.filterModelsByProvider(cc, items, filterProvider)
-			if len(items) == 0 {
-				if filterProvider != "" {
-					return fmt.Sprintf("No chat models found for provider %q.", filterProvider), nil
-				}
-				return "No chat models found.", nil
-			}
-			settingsResp, _ := h.getBotSettings(cc)
-			sort.SliceStable(items, func(i, j int) bool {
-				return modelSortRank(items[i], settingsResp) < modelSortRank(items[j], settingsResp)
-			})
-			records := make([][]kv, 0, len(items))
-			for _, item := range items {
-				provName := h.resolveProviderName(cc, item.ProviderID)
-				label := item.Name
-				markers := modelMarkers(item.ID, settingsResp)
-				if len(markers) > 0 {
-					label += " [" + strings.Join(markers, ", ") + "]"
-				}
-				records = append(records, []kv{
-					{"Model", label},
-					{"Provider", provName},
-					{"Model ID", item.ModelID},
-				})
-			}
-			hint := "Use /model current to inspect active selections."
-			if filterProvider == "" {
-				hint = "Use /model list <provider_name> to narrow results."
-			}
-			return formatLimitedItems(records, defaultListLimit, hint), nil
+			return h.buildModelPickerResult(cc)
 		},
 	})
 	g.Register(SubCommand{
@@ -81,24 +44,39 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage:   "set <model_id> | <provider_name> <model_name> - Set the chat model",
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
-			if len(cc.Args) < 1 {
-				return "Usage: /model set <model_id> | <provider_name> <model_name>", nil
+			var selectedID string
+			if cc.Flat >= 0 {
+				// Selection from a picker button: resolve the flat index against
+				// the canonical model list. Out-of-range means the list changed
+				// between render and tap.
+				cand, ok, err := h.modelCandidateByFlat(cc, cc.Flat)
+				if err != nil {
+					return "", err
+				}
+				if !ok {
+					return "Model list changed — reopen /model to pick again.", nil
+				}
+				selectedID = cand.dbID
+			} else {
+				if len(cc.Args) < 1 {
+					return "Usage: /model set <model_id> | <provider_name> <model_name>", nil
+				}
+				modelResp, err := h.findModelForSelection(cc, cc.Args)
+				if err != nil {
+					return "", err
+				}
+				selectedID = modelResp.ID
 			}
 			if h.settingsService == nil {
 				return "Settings service is not available.", nil
 			}
 			before, _ := h.getBotSettings(cc)
-			modelResp, err := h.findModelForSelection(cc, cc.Args)
-			if err != nil {
+			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
+				ChatModelID: selectedID,
+			}); err != nil {
 				return "", err
 			}
-			_, err = h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
-				ChatModelID: modelResp.ID,
-			})
-			if err != nil {
-				return "", err
-			}
-			return formatChangedValue("Chat model", h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, modelResp.ID)), nil
+			return formatChangedValue("Chat model", h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, selectedID)), nil
 		},
 	})
 	g.Register(SubCommand{

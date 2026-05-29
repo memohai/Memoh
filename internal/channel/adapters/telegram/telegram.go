@@ -20,6 +20,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/common"
+	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/textutil"
 )
@@ -56,6 +57,10 @@ type TelegramAdapter struct {
 	seenUpdatesMu sync.Mutex
 	seenUpdates   map[string]time.Time
 }
+
+// TelegramAdapter edits and deletes messages in place for interactive
+// pagination/selection (channel.MessageEditor).
+var _ channel.MessageEditor = (*TelegramAdapter)(nil)
 
 // NewTelegramAdapter creates a TelegramAdapter with the given logger.
 func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
@@ -185,6 +190,8 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			Media:          true,
 			Streaming:      true,
 			BlockStreaming: true,
+			Edit:           true,
+			Unsend:         true,
 		},
 		ConfigSchema: channel.ConfigSchema{
 			Version: 1,
@@ -383,11 +390,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 					continue
 				}
 				if update.CallbackQuery != nil {
-					if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
-						_, _ = bot.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, "OK"))
-						_ = clearTelegramCallbackButtons(bot, update.CallbackQuery)
-						a.dispatchInbound(connCtx, cfg, handler, msg)
-					}
+					a.handleTelegramCallback(connCtx, cfg, handler, bot, update)
 					continue
 				}
 				if update.Message == nil {
@@ -475,24 +478,78 @@ func (a *TelegramAdapter) buildTelegramInboundMessage(bot *tgbotapi.BotAPI, cfg 
 	})
 }
 
+// handleTelegramCallback acknowledges and routes an inline-keyboard callback.
+// Interactive callbacks (namespace "m~") re-render the originating message in
+// place: pagination/selection re-dispatch a synthetic command, dismiss strips
+// the keyboard, and the page-indicator noop is ignored. Legacy approval
+// callbacks keep their prior behavior (clear buttons, then dispatch).
+func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	cb := update.CallbackQuery
+	if cb == nil {
+		return
+	}
+	// Acknowledge immediately so the client stops showing a spinner.
+	_, _ = bot.Request(tgbotapi.NewCallback(cb.ID, "OK"))
+
+	if command.IsInteractiveCallback(strings.TrimSpace(cb.Data)) {
+		parsed, ok := command.DecodeCallback(strings.TrimSpace(cb.Data))
+		if !ok {
+			return
+		}
+		switch {
+		case parsed.IsNoop():
+			return
+		case parsed.IsDismiss():
+			_ = clearTelegramCallbackButtons(bot, cb)
+			return
+		default:
+			// Pagination/selection: re-dispatch a synthetic command that
+			// re-renders the message in place. Do NOT clear the keyboard.
+			if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
+				a.dispatchInbound(ctx, cfg, handler, msg)
+			}
+			return
+		}
+	}
+
+	// Legacy tool-approval callbacks.
+	if msg, ok := a.buildTelegramCallbackInboundMessage(cfg, update); ok {
+		_ = clearTelegramCallbackButtons(bot, cb)
+		a.dispatchInbound(ctx, cfg, handler, msg)
+	}
+}
+
 func (a *TelegramAdapter) buildTelegramCallbackInboundMessage(cfg channel.ChannelConfig, update tgbotapi.Update) (channel.InboundMessage, bool) {
 	cb := update.CallbackQuery
 	if cb == nil || cb.Message == nil {
 		return channel.InboundMessage{}, false
 	}
-	action, approvalID, ok := parseTelegramApprovalCallback(cb.Data)
-	if !ok {
+	extraMeta := map[string]any{
+		"update_id":         update.UpdateID,
+		"callback_query_id": cb.ID,
+	}
+	var text string
+	if action, approvalID, ok := parseTelegramApprovalCallback(cb.Data); ok {
+		text = "/" + action + " " + approvalID
+	} else if parsed, ok := command.DecodeCallback(strings.TrimSpace(cb.Data)); ok {
+		syntheticCmd := parsed.SyntheticCommand()
+		if syntheticCmd == "" {
+			return channel.InboundMessage{}, false
+		}
+		text = syntheticCmd
+		// Re-render the existing message in place rather than posting a new one.
+		extraMeta["edit_message_id"] = strconv.Itoa(cb.Message.MessageID)
+		// A tap on the bot's own keyboard is by definition directed at the bot,
+		// so the command path runs even in group chats.
+		extraMeta["is_mentioned"] = true
+	} else {
 		return channel.InboundMessage{}, false
 	}
-	text := "/" + action + " " + approvalID
 	raw := cb.Message
 	raw.Text = text
 	raw.From = cb.From
 	replyID := strconv.Itoa(cb.Message.MessageID)
-	msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, text, nil, map[string]any{
-		"update_id":         update.UpdateID,
-		"callback_query_id": cb.ID,
-	})
+	msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, text, nil, extraMeta)
 	if !ok {
 		return channel.InboundMessage{}, false
 	}
@@ -762,6 +819,60 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	return sendTelegramText(bot, to, text, replyTo, parseMode)
 }
 
+// Update edits an already-sent message in place (text + inline keyboard),
+// satisfying channel.MessageEditor. It powers interactive pagination/selection:
+// passing empty Actions removes the keyboard. Channel-username targets are not
+// supported (edits require a numeric chat ID).
+func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, msg channel.PreparedMessage) error {
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return err
+	}
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	if err != nil {
+		return err
+	}
+	chatID, channelUsername, err := parseTelegramTarget(strings.TrimSpace(target))
+	if err != nil {
+		return err
+	}
+	if channelUsername != "" {
+		return errors.New("telegram: editing channel-username targets is not supported")
+	}
+	mid, err := strconv.Atoi(strings.TrimSpace(messageID))
+	if err != nil {
+		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
+	}
+	text := strings.TrimSpace(msg.Message.PlainText())
+	text, parseMode := formatTelegramOutput(text, msg.Message.Format)
+	return editTelegramMessageTextWithActions(bot, chatID, mid, text, parseMode, msg.Message.Actions)
+}
+
+// Unsend deletes a previously-sent message, satisfying channel.MessageEditor.
+func (a *TelegramAdapter) Unsend(_ context.Context, cfg channel.ChannelConfig, target string, messageID string) error {
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return err
+	}
+	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	if err != nil {
+		return err
+	}
+	chatID, channelUsername, err := parseTelegramTarget(strings.TrimSpace(target))
+	if err != nil {
+		return err
+	}
+	if channelUsername != "" {
+		return errors.New("telegram: deleting channel-username targets is not supported")
+	}
+	mid, err := strconv.Atoi(strings.TrimSpace(messageID))
+	if err != nil {
+		return fmt.Errorf("telegram: invalid message id %q: %w", messageID, err)
+	}
+	_, err = bot.Request(tgbotapi.NewDeleteMessage(chatID, mid))
+	return err
+}
+
 // OpenStream opens a Telegram streaming session.
 // For private chats, uses sendMessageDraft to stream partial content with smooth
 // animation, then sends a final permanent message via sendMessage.
@@ -988,16 +1099,24 @@ func editTelegramMessageTextWithActions(bot *tgbotapi.BotAPI, chatID int64, mess
 }
 
 func telegramInlineKeyboard(actions []channel.Action) tgbotapi.InlineKeyboardMarkup {
-	keyboard := make([]tgbotapi.InlineKeyboardButton, 0, len(actions))
+	rowOrder := make([]int, 0, len(actions))
+	rowButtons := make(map[int][]tgbotapi.InlineKeyboardButton, len(actions))
 	for _, action := range actions {
 		label := strings.TrimSpace(action.Label)
 		value := strings.TrimSpace(action.Value)
 		if label == "" || value == "" {
 			continue
 		}
-		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardButtonData(label, value))
+		if _, ok := rowButtons[action.Row]; !ok {
+			rowOrder = append(rowOrder, action.Row)
+		}
+		rowButtons[action.Row] = append(rowButtons[action.Row], tgbotapi.NewInlineKeyboardButtonData(label, value))
 	}
-	return tgbotapi.NewInlineKeyboardMarkup(keyboard)
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(rowOrder))
+	for _, r := range rowOrder {
+		rows = append(rows, rowButtons[r])
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
 var sendDraftForTest func(bot *tgbotapi.BotAPI, chatID int64, draftID int, text string, parseMode string) error

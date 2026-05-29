@@ -13,24 +13,24 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all schedules",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			items, err := h.scheduleService.List(cc.Ctx, cc.BotID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			if len(items) == 0 {
-				return "No schedules found.", nil
+				return &Result{Text: "No schedules found."}, nil
 			}
-			records := make([][]kv, 0, len(items))
+			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				records = append(records, []kv{
+				records = append(records, listRecord{fields: []kv{
 					{"Name", item.Name},
 					{"Pattern", item.Pattern},
 					{"Enabled", boolStr(item.Enabled)},
 					{"Description", truncate(item.Description, 30)},
-				})
+				}})
 			}
-			return formatItems(records), nil
+			return buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, ""), nil
 		},
 	})
 	g.Register(SubCommand{

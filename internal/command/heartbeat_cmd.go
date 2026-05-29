@@ -10,15 +10,16 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "logs",
 		Usage: "logs - List recent heartbeat logs",
-		Handler: func(cc CommandContext) (string, error) {
-			items, _, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, 10, 0)
+		ResultHandler: func(cc CommandContext) (*Result, error) {
+			const pageSize = 10
+			items, total, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, pageSize, cc.Page*pageSize)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			if len(items) == 0 {
-				return "No heartbeat logs found.", nil
+			if total == 0 {
+				return &Result{Text: "No heartbeat logs found."}, nil
 			}
-			records := make([][]kv, 0, len(items))
+			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				dur := ""
 				if item.CompletedAt != nil {
@@ -38,9 +39,9 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 				if errMsg != "" {
 					rec = append(rec, kv{"Error", errMsg})
 				}
-				records = append(records, rec)
+				records = append(records, listRecord{fields: rec})
 			}
-			return formatLimitedItems(records, 10, "Use the Web UI for older heartbeat logs."), nil
+			return buildPagedListResult("Heartbeat Logs", "heartbeat", "logs", nil, records, cc.Page, pageSize, int(total), "Use the Web UI for older heartbeat logs."), nil
 		},
 	})
 	return g

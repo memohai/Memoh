@@ -10,24 +10,24 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all MCP connections",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			items, err := h.mcpConnService.ListByBot(cc.Ctx, cc.BotID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			if len(items) == 0 {
-				return "No MCP connections found.", nil
+				return &Result{Text: "No MCP connections found."}, nil
 			}
-			records := make([][]kv, 0, len(items))
+			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				records = append(records, []kv{
+				records = append(records, listRecord{fields: []kv{
 					{"Name", item.Name},
 					{"Type", item.Type},
 					{"Active", boolStr(item.Active)},
 					{"Status", item.Status},
-				})
+				}})
 			}
-			return formatLimitedItems(records, defaultListLimit, "Use /mcp get <name> for full details."), nil
+			return buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "Use /mcp get <name> for full details."), nil
 		},
 	})
 	g.Register(SubCommand{

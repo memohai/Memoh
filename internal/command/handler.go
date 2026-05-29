@@ -130,6 +130,23 @@ func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries)
 	h.sqlcQueries = q
 }
 
+// CurrentContext resolves the bot's current model/heartbeat/reasoning state for
+// enriching command output (e.g. the /new confirmation). It is a read-only view
+// over existing bot settings and makes no changes.
+func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentContext, error) {
+	cc := CommandContext{Ctx: ctx, BotID: strings.TrimSpace(botID)}
+	s, err := h.getBotSettings(cc)
+	if err != nil {
+		return CurrentContext{}, err
+	}
+	return CurrentContext{
+		ChatModel:        h.resolveModelName(cc, s.ChatModelID),
+		HeartbeatModel:   h.resolveModelName(cc, s.HeartbeatModelID),
+		ReasoningEnabled: s.ReasoningEnabled,
+		ReasoningEffort:  s.ReasoningEffort,
+	}, nil
+}
+
 // topLevelCommands are standalone commands (no sub-actions) that are
 // recognised by IsCommand and listed in /help. They are handled outside
 // the regular resource-group dispatch (e.g. in the channel inbound
@@ -172,15 +189,31 @@ func (h *Handler) Execute(ctx context.Context, botID, channelIdentityID, text st
 	})
 }
 
-// ExecuteWithInput parses and runs a slash command with channel/session context.
+// ExecuteWithInput parses and runs a slash command with channel/session
+// context, returning the plain-text reply. It delegates to ExecuteResult and
+// flattens the structured result to its text form.
 func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (string, error) {
+	res, err := h.ExecuteResult(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	if res == nil {
+		return "", nil
+	}
+	return res.Text, nil
+}
+
+// ExecuteResult parses and runs a slash command, returning a neutral Result.
+// The Result always carries complete Text; Interactive is set only by commands
+// that opt into rich rendering via SubCommand.ResultHandler.
+func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Result, error) {
 	cmdText := ExtractCommandText(input.Text)
 	if cmdText == "" {
-		return h.registry.GlobalHelp(), nil
+		return &Result{Text: h.registry.GlobalHelp()}, nil
 	}
 	parsed, err := Parse(cmdText)
 	if err != nil {
-		return h.registry.GlobalHelp(), nil
+		return &Result{Text: h.registry.GlobalHelp()}, nil
 	}
 
 	// Resolve the user's role in this bot.
@@ -217,53 +250,68 @@ func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (str
 		ThreadID:          strings.TrimSpace(input.ThreadID),
 		RouteID:           strings.TrimSpace(input.RouteID),
 		SessionID:         strings.TrimSpace(input.SessionID),
+		Page:              parsed.Page,
+		Prov:              parsed.Prov,
+		Flat:              parsed.Flat,
 	}
 
 	// /help
 	if parsed.Resource == "help" {
-		if parsed.Action == "" {
-			return h.registry.GlobalHelp(), nil
+		switch {
+		case parsed.Action == "":
+			return &Result{Text: h.registry.GlobalHelp()}, nil
+		case len(parsed.Args) == 0:
+			return &Result{Text: h.registry.GroupHelp(parsed.Action)}, nil
+		default:
+			return &Result{Text: h.registry.ActionHelp(parsed.Action, parsed.Args[0])}, nil
 		}
-		if len(parsed.Args) == 0 {
-			return h.registry.GroupHelp(parsed.Action), nil
-		}
-		return h.registry.ActionHelp(parsed.Action, parsed.Args[0]), nil
 	}
 
 	// Top-level commands (e.g. /new) are handled by the channel inbound
 	// processor which has the required routing context. If Execute is
 	// called for one of these, return a short usage hint.
 	if desc, ok := topLevelCommands[parsed.Resource]; ok {
-		return fmt.Sprintf("/%s - %s", parsed.Resource, desc), nil
+		return &Result{Text: fmt.Sprintf("/%s - %s", parsed.Resource, desc)}, nil
 	}
 
 	group, ok := h.registry.groups[parsed.Resource]
 	if !ok {
-		return fmt.Sprintf("Unknown command: /%s\n\n%s", parsed.Resource, h.registry.GlobalHelp()), nil
+		return &Result{Text: fmt.Sprintf("Unknown command: /%s\n\n%s", parsed.Resource, h.registry.GlobalHelp())}, nil
 	}
 
 	if parsed.Action == "" {
 		if group.DefaultAction != "" {
 			parsed.Action = group.DefaultAction
 		} else {
-			return group.Usage(), nil
+			return &Result{Text: group.Usage()}, nil
 		}
 	}
 
 	sub, ok := group.commands[parsed.Action]
 	if !ok {
-		return fmt.Sprintf("Unknown action \"%s\" for /%s.\n\n%s", parsed.Action, parsed.Resource, group.Usage()), nil
+		return &Result{Text: fmt.Sprintf("Unknown action \"%s\" for /%s.\n\n%s", parsed.Action, parsed.Resource, group.Usage())}, nil
 	}
 
 	if sub.IsWrite && !writeAccess {
-		return "Permission denied: only the bot owner can execute this command.", nil
+		return &Result{Text: "Permission denied: only the bot owner can execute this command."}, nil
 	}
 
-	result, handlerErr := safeExecute(sub.Handler, cc)
-	if handlerErr != nil {
-		return fmt.Sprintf("Error: %s", handlerErr.Error()), nil
+	if sub.ResultHandler != nil {
+		res, handlerErr := safeExecuteResult(sub.ResultHandler, cc)
+		if handlerErr != nil {
+			return &Result{Text: fmt.Sprintf("Error: %s", handlerErr.Error())}, nil
+		}
+		if res == nil {
+			res = &Result{}
+		}
+		return res, nil
 	}
-	return result, nil
+
+	text, handlerErr := safeExecute(sub.Handler, cc)
+	if handlerErr != nil {
+		return &Result{Text: fmt.Sprintf("Error: %s", handlerErr.Error())}, nil
+	}
+	return &Result{Text: text}, nil
 }
 
 func allowsUnboundWriteCommands(input ExecuteInput) bool {
@@ -285,6 +333,16 @@ func allowsUnboundWriteCommands(input ExecuteInput) bool {
 
 // safeExecute runs a sub-command handler and recovers from panics.
 func safeExecute(fn func(CommandContext) (string, error), cc CommandContext) (result string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+	return fn(cc)
+}
+
+// safeExecuteResult runs a structured sub-command handler and recovers from panics.
+func safeExecuteResult(fn func(CommandContext) (*Result, error), cc CommandContext) (result *Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("internal error: %v", r)

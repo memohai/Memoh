@@ -21,14 +21,22 @@ type CommandContext struct {
 	ThreadID          string
 	RouteID           string
 	SessionID         string
+	Page              int // zero-based page offset for paginated list commands
+	Prov              int // provider index for the model picker (-1 if absent)
+	Flat              int // flat model index for picker selection (-1 if absent)
 }
 
 // SubCommand describes a single sub-command within a resource group.
+//
+// A sub-command provides either Handler (plain text) or ResultHandler
+// (structured Result for rich rendering). When both are set, ResultHandler
+// takes precedence.
 type SubCommand struct {
-	Name    string
-	Usage   string
-	IsWrite bool
-	Handler func(cc CommandContext) (string, error)
+	Name          string
+	Usage         string
+	IsWrite       bool
+	Handler       func(cc CommandContext) (string, error)
+	ResultHandler func(cc CommandContext) (*Result, error)
 }
 
 // CommandGroup groups sub-commands under a resource name.

@@ -381,7 +381,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
 	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {
-		reply, err := p.commandHandler.ExecuteWithInput(ctx, command.ExecuteInput{
+		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
 			UserID:            strings.TrimSpace(identity.UserID),
@@ -391,12 +391,25 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
 		})
+		var caps channel.ChannelCapabilities
+		if p.registry != nil {
+			caps, _ = p.registry.GetCapabilities(msg.Channel)
+		}
+		var outMsg channel.Message
 		if err != nil {
-			reply = "Error: " + err.Error()
+			outMsg = channel.Message{Text: "Error: " + err.Error()}
+		} else {
+			outMsg = renderResult(result, caps)
+		}
+		// A command re-dispatched from an interactive button carries the id of
+		// the message to edit in place, so navigation/selection updates the
+		// existing message instead of posting a new one.
+		if editID, ok := msg.Metadata["edit_message_id"].(string); ok && strings.TrimSpace(editID) != "" && caps.Edit {
+			outMsg.ID = strings.TrimSpace(editID)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: channel.Message{Text: reply},
+			Message: outMsg,
 		})
 	}
 
@@ -3164,9 +3177,15 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			slog.String("channel", msg.Channel.String()),
 		)
 	}
+	text := fmt.Sprintf("New %s conversation started.", modeLabel)
+	if p.commandHandler != nil {
+		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
+			text = formatNewSessionMessage(modeLabel, cc)
+		}
+	}
 	return sender.Send(ctx, channel.OutboundMessage{
 		Target:  target,
-		Message: channel.Message{Text: fmt.Sprintf("New %s conversation started.", modeLabel)},
+		Message: channel.Message{Text: text},
 	})
 }
 

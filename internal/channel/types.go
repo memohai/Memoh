@@ -290,6 +290,11 @@ type Action struct {
 	Label string `json:"label,omitempty"`
 	Value string `json:"value,omitempty"`
 	URL   string `json:"url,omitempty"`
+	// Row groups buttons into keyboard rows for renderers that support grids
+	// (e.g. Telegram inline keyboards). Buttons sharing a Row render together;
+	// rows appear in ascending first-seen order. Renderers without grid support
+	// ignore this field. 0 is the default (single row, prior behavior).
+	Row int `json:"row,omitempty"`
 }
 
 // ThreadRef references a conversation thread by ID.
