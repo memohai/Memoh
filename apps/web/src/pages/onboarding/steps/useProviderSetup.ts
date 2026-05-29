@@ -161,9 +161,14 @@ export function useProviderSetup(options: {
 
     try {
       if (createdProviderId.value) {
+        // Include client_type so a corrected protocol selection on retry takes
+        // effect: a custom provider first created with the wrong client_type
+        // would otherwise keep the stale value here and keep probing/importing
+        // with the wrong protocol, leaving the user unable to recover without
+        // starting over. The backend re-normalizes config for the new protocol.
         await putProvidersById({
           path: { id: createdProviderId.value },
-          body: { name, config: { base_url: baseUrl, api_key: apiKey }, enable: true },
+          body: { name, client_type: formValues.value.client_type, config: { base_url: baseUrl, api_key: apiKey }, enable: true },
           throwOnError: true,
         })
         return createdProviderId.value
