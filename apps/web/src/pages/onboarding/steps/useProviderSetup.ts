@@ -178,10 +178,12 @@ export function useProviderSetup(options: {
 
       if (existing?.id) {
         // Reuse (dedup) onto an existing provider only when the protocol matches.
-        // Overwriting credentials on a provider whose client_type differs would
-        // silently write them onto the wrong API format and break every later
-        // call — refuse and ask the user to pick a different name instead.
-        if (existing.client_type && existing.client_type !== intendedClientType) {
+        // A differing — or missing — client_type means overwriting credentials
+        // would land them on the wrong/undefined API format and break every later
+        // call, so refuse and ask the user to rename. intendedClientType is always
+        // concrete (formValues defaults to a real type), so a blank existing
+        // client_type is correctly treated as a mismatch here.
+        if (existing.client_type !== intendedClientType) {
           formError.value = t('onboarding.provider.form.typeConflict')
           return null
         }
