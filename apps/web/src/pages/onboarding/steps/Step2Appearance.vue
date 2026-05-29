@@ -22,7 +22,7 @@ const { visible, exiting, leave } = useStepTransition()
     class="transition-all duration-[175ms] ease-out"
     :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
   >
-    <div class="text-left min-h-[542px] flex flex-col">
+    <div class="text-left h-[560px] max-h-[calc(100vh-7rem)] flex flex-col">
       <h2
         class="text-3xl font-semibold mb-8 transition-all duration-[350ms] ease-out"
         :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
@@ -30,7 +30,7 @@ const { visible, exiting, leave } = useStepTransition()
         {{ t('onboarding.appearance.title') }}
       </h2>
 
-      <div class="space-y-6">
+      <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1 space-y-6">
         <div
           class="transition-all duration-[350ms] ease-out delay-[80ms]"
           :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"

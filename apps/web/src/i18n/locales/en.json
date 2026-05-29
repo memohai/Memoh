@@ -2113,7 +2113,11 @@
     "bot": {
       "title": "Create Your First Bot",
       "placeholder": "Bot creation coming soon.",
-      "preparingEnvironment": "Preparing environment..."
+      "preparingEnvironment": "Preparing environment...",
+      "model": {
+        "selectPlaceholder": "Select a model",
+        "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings."
+      }
     },
     "im": {
       "title": "Connect IM Channels",

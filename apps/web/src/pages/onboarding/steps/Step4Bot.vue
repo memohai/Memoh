@@ -23,7 +23,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
 import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -31,6 +31,7 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
+import ModelSelect from '@/pages/bots/components/model-select.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 
@@ -52,6 +53,7 @@ const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
 const form = reactive({
   display_name: '',
   avatar_url: '',
+  chat_model_id: '',
   memory_provider_id: '',
   workspace_backend: 'container',
 })
@@ -88,6 +90,25 @@ watch(memoryProviders, (list) => {
     form.memory_provider_id = builtin.id
   }
 }, { immediate: true })
+
+const { data: modelData } = useQuery({
+  key: ['models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: providerData } = useQuery({
+  key: ['providers'],
+  query: async () => {
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const models = computed(() => modelData.value ?? [])
+const providers = computed(() => providerData.value ?? [])
 
 const canSubmit = computed(() => {
   return !!form.display_name.trim()
@@ -136,11 +157,14 @@ async function handleSubmit() {
     if (botId) {
       sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
     }
-    if (botId && form.memory_provider_id) {
+    if (botId && (form.chat_model_id || form.memory_provider_id)) {
       try {
         await putBotsByBotIdSettings({
           path: { bot_id: botId },
-          body: { memory_provider_id: form.memory_provider_id },
+          body: {
+            ...(form.chat_model_id ? { chat_model_id: form.chat_model_id } : {}),
+            ...(form.memory_provider_id ? { memory_provider_id: form.memory_provider_id } : {}),
+          },
           throwOnError: true,
         })
       } catch {
@@ -163,7 +187,7 @@ async function handleSubmit() {
       class="transition-all duration-[175ms] ease-out"
       :class="exiting ? 'scale-[0.88] opacity-0' : 'scale-100 opacity-100'"
     >
-      <div class="text-left min-h-[542px] max-h-[calc(100vh-7rem)] flex flex-col pt-32">
+      <div class="text-left pt-16 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col">
         <h2
           class="text-3xl font-semibold mb-6 transition-all duration-[350ms] ease-out"
           :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
@@ -231,9 +255,40 @@ async function handleSubmit() {
               <Separator class="my-6" />
             </div>
 
+            <div
+              class="transition-all duration-[350ms] ease-out delay-[120ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              <div class="mb-2 flex items-center gap-2">
+                <Label>{{ $t('bots.settings.chatModel') }}</Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      class="size-5 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleHelp class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
+                    {{ $t('onboarding.bot.model.hint') }}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <ModelSelect
+                v-model="form.chat_model_id"
+                :models="models"
+                :providers="providers"
+                model-type="chat"
+                :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
+              />
+            </div>
+
             <template v-if="localWorkspaceEnabled">
               <div
-                class="transition-all duration-[350ms] ease-out delay-[140ms]"
+                class="transition-all duration-[350ms] ease-out delay-[140ms] mt-6"
                 :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
               >
                 <div class="flex flex-col gap-4">

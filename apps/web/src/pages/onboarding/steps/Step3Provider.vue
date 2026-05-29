@@ -147,7 +147,7 @@ onMounted(() => {
   >
     <div
       v-if="mode === 'list'"
-      class="text-left pt-24 min-h-[542px] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="listVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <h2
@@ -215,7 +215,7 @@ onMounted(() => {
 
     <div
       v-else
-      class="text-left pt-24 min-h-[542px] flex flex-col transition-all duration-[175ms] ease-out"
+      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
       <div
