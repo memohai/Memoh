@@ -2087,6 +2087,7 @@
         "cancel": "取消",
         "requiredError": "请填写所有字段",
         "saveFailed": "保存失败",
+        "typeConflict": "已存在同名但 API 格式不同的服务商，请换一个名称。",
         "errorHttpTitle": "连接失败",
         "errorHttpDescription": "请检查 API 密钥与接口地址是否正确。",
         "errorAuthTitle": "API 密钥无效",

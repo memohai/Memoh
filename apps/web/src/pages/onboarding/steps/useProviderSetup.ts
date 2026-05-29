@@ -171,11 +171,20 @@ export function useProviderSetup(options: {
 
       const preset = options.selectedPreset()
       const lookupName = preset?.registryName ?? name
+      const intendedClientType = preset?.clientType ?? formValues.value.client_type
       const { data: existing } = await getProvidersNameByName({
         path: { name: lookupName },
       })
 
       if (existing?.id) {
+        // Reuse (dedup) onto an existing provider only when the protocol matches.
+        // Overwriting credentials on a provider whose client_type differs would
+        // silently write them onto the wrong API format and break every later
+        // call — refuse and ask the user to pick a different name instead.
+        if (existing.client_type && existing.client_type !== intendedClientType) {
+          formError.value = t('onboarding.provider.form.typeConflict')
+          return null
+        }
         await putProvidersById({
           path: { id: existing.id },
           body: { config: { base_url: baseUrl, api_key: apiKey }, enable: true },
@@ -310,6 +319,7 @@ export function useProviderSetup(options: {
     () => {
       if (suppressDirtyReset.value) return
       if (manualMode.value) return
+      if (formError.value) formError.value = ''
       if (errorState.value) {
         errorState.value = null
         errorDetail.value = ''

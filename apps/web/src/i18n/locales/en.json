@@ -2091,6 +2091,7 @@
         "cancel": "Cancel",
         "requiredError": "Please fill in all fields",
         "saveFailed": "Failed to save provider",
+        "typeConflict": "A provider with this name already exists with a different API format. Please use a different name.",
         "errorHttpTitle": "Connection failed",
         "errorHttpDescription": "Please check your API key and base URL.",
         "errorAuthTitle": "Invalid API key",
