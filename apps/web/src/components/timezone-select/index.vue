@@ -8,6 +8,7 @@
     search-aria-label="Search timezones"
     :empty-text="$t('common.noTimezoneFound')"
     :show-group-headers="false"
+    :width-ratio="0.55"
   />
 </template>
 

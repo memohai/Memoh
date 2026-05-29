@@ -29,7 +29,7 @@
     </PopoverTrigger>
     <PopoverContent
       class="p-0"
-      :style="{ width: 'calc(var(--reka-popover-trigger-width) * 0.55)' }"
+      :style="{ width: `calc(var(--reka-popover-trigger-width) * ${widthRatio})` }"
       align="start"
     >
       <div class="flex items-center border-b px-3">
@@ -185,6 +185,9 @@ const props = withDefaults(defineProps<{
   searchAriaLabel?: string
   emptyText?: string
   showGroupHeaders?: boolean
+  // Popover width as a fraction of the trigger width. Defaults to full width;
+  // consumers with short labels (e.g. timezone) can narrow it.
+  widthRatio?: number
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -192,6 +195,7 @@ const props = withDefaults(defineProps<{
   searchAriaLabel: 'Search options',
   emptyText: 'No results.',
   showGroupHeaders: true,
+  widthRatio: 1,
 })
 
 const selected = defineModel<string>({ default: '' })
