@@ -105,7 +105,7 @@ func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {
 		manifest: &manifest,
 		checksum: map[string]string{},
 	}
-	if err := writer.writeStream(workspaceArchivePath, bytes.NewReader(original), 0o640, time.Time{}); err != nil {
+	if err := writer.writeStream(workspaceArchivePath, bytes.NewReader(original), 0o640, time.Time{}, zip.Store); err != nil {
 		t.Fatalf("writeStream() error = %v", err)
 	}
 	if err := writer.zw.Close(); err != nil {
@@ -122,6 +122,12 @@ func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {
 	}
 	if !hasWorkspaceEntries(entries) {
 		t.Fatal("hasWorkspaceEntries should be true")
+	}
+
+	// The already-gzipped blob must be stored (not deflated again) to avoid
+	// pointless double compression.
+	if method := workspaceEntryMethod(t, backup.Bytes()); method != zip.Store {
+		t.Fatalf("workspace entry method = %d, want zip.Store (%d)", method, zip.Store)
 	}
 
 	// The blob round-trips byte-for-byte (no re-packing).
@@ -149,6 +155,23 @@ func TestWorkspaceStoredVerbatimAsTarGz(t *testing.T) {
 	if string(plain) != string(body) {
 		t.Fatalf("workspace file = %q, want %q", plain, body)
 	}
+}
+
+// workspaceEntryMethod returns the zip compression method used for the
+// workspace archive entry within a backup zip.
+func workspaceEntryMethod(t *testing.T, raw []byte) uint16 {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("zip.NewReader() error = %v", err)
+	}
+	for _, file := range zr.File {
+		if file.Name == workspaceArchivePath {
+			return file.Method
+		}
+	}
+	t.Fatalf("workspace entry %q not found in zip", workspaceArchivePath)
+	return 0
 }
 
 func readTarGzFile(raw []byte, name string) ([]byte, error) {

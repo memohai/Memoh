@@ -445,7 +445,9 @@ func (w *zipBackupWriter) writeWorkspace(ctx context.Context, botID string, work
 	defer func() { _ = rc.Close() }()
 	// Store the container's tar.gz verbatim as a single entry. This preserves
 	// Unix permissions/symlinks and avoids re-packing the archive on import.
-	if err := w.writeStream(workspaceArchivePath, rc, 0o640, time.Time{}); err != nil {
+	// Use zip.Store (no compression): the blob is already gzip-compressed, so
+	// re-deflating it only burns CPU without shrinking the bundle.
+	if err := w.writeStream(workspaceArchivePath, rc, 0o640, time.Time{}, zip.Store); err != nil {
 		return err
 	}
 	w.manifest.Entries = append(w.manifest.Entries, ManifestEntry{
@@ -464,15 +466,18 @@ func (w *zipBackupWriter) writeManifest() error {
 }
 
 func (w *zipBackupWriter) writeRaw(path string, raw []byte) error {
-	return w.writeStream(path, bytes.NewReader(raw), 0o640, time.Time{})
+	return w.writeStream(path, bytes.NewReader(raw), 0o640, time.Time{}, zip.Deflate)
 }
 
-func (w *zipBackupWriter) writeStream(path string, r io.Reader, mode os.FileMode, modTime time.Time) error {
+// writeStream copies r into a zip entry. method selects the zip compression:
+// zip.Deflate for compressible payloads (JSON), zip.Store for content that is
+// already compressed (e.g. the workspace tar.gz) to avoid double compression.
+func (w *zipBackupWriter) writeStream(path string, r io.Reader, mode os.FileMode, modTime time.Time, method uint16) error {
 	clean := filepath.ToSlash(filepath.Clean(path))
 	if clean == "." || clean == "" || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
 		return fmt.Errorf("unsafe backup path: %s", path)
 	}
-	header := &zip.FileHeader{Name: clean, Method: zip.Deflate}
+	header := &zip.FileHeader{Name: clean, Method: method}
 	if !modTime.IsZero() {
 		header.Modified = modTime
 	}
