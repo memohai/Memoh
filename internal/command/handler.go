@@ -353,13 +353,6 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 	}
 
 	if parsed.Action == "" {
-		// Groups that opt into an action menu show their sub-actions as buttons on
-		// a bare invocation (e.g. /schedule), so the user discovers and taps them
-		// instead of typing. Button-capable channels render the menu; the text
-		// fallback (Usage) lists the same actions tap-to-copy.
-		if group.actionMenu {
-			return group.actionMenuResult(), nil
-		}
 		if group.DefaultAction != "" {
 			parsed.Action = group.DefaultAction
 		} else {

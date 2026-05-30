@@ -137,6 +137,30 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 		row++
 	}
 
+	// Contextual entry buttons below the data rows (e.g. "All commands").
+	if len(lv.ExtraActions) > 0 {
+		col := 0
+		for _, ea := range lv.ExtraActions {
+			if ea.Action == nil {
+				continue
+			}
+			actions = append(actions, channel.Action{
+				Type:  actionTypeCallback,
+				Label: ea.Label,
+				Value: command.EncodeListCallback(ea.Action.Resource, ea.Action.Action, ea.Action.Args, 0),
+				Row:   row,
+			})
+			col++
+			if col == 2 {
+				col = 0
+				row++
+			}
+		}
+		if col != 0 {
+			row++
+		}
+	}
+
 	if totalPages <= 1 && len(actions) == 0 {
 		return msg
 	}

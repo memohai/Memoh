@@ -38,14 +38,15 @@ type Interactive struct {
 // originating command with a page offset, so Resource/Action/Args round-trip
 // through the callback data of pagination buttons.
 type ListView struct {
-	Title    string
-	Resource string   // command resource (e.g. "mcp"), round-trips in callback data
-	Action   string   // command action (e.g. "list")
-	Args     []string // narrowing args (e.g. a provider filter) that round-trip
-	Items    []ListItem
-	Total    int // total items across all pages
-	Page     int // zero-based page index of this view
-	PageSize int // items per page
+	Title        string
+	Resource     string   // command resource (e.g. "mcp"), round-trips in callback data
+	Action       string   // command action (e.g. "list")
+	Args         []string // narrowing args (e.g. a provider filter) that round-trip
+	Items        []ListItem
+	Total        int        // total items across all pages
+	Page         int        // zero-based page index of this view
+	PageSize     int        // items per page
+	ExtraActions []ListItem // contextual action buttons below the list rows (e.g. "All commands")
 }
 
 // ListItem is one row in a ListView. Action is nil for display-only rows.

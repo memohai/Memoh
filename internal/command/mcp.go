@@ -8,7 +8,6 @@ import (
 func (h *Handler) buildMCPGroup() *CommandGroup {
 	g := newCommandGroup("mcp", "Manage MCP connections")
 	g.DefaultAction = "list" // bare /mcp lands on the connection list
-	g.EnableActionMenu()     // bare /mcp shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all MCP connections",
@@ -32,7 +31,10 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					action: &ItemAction{Resource: "mcp", Action: "get", Args: []string{item.Name}},
 				})
 			}
-			return buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "See full details with "+CmdRef("mcp get <name>")+"."), nil
+			result := buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "See full details with "+CmdRef("mcp get <name>")+".")
+			return WithExtraActions(result,
+				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+			), nil
 		},
 	})
 	g.Register(SubCommand{

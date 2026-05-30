@@ -259,6 +259,17 @@ func assembleListResult(title, resource, action string, args []string, pageRecor
 	}
 }
 
+// WithExtraActions attaches contextual entry buttons below the list rows of a
+// Result (e.g. "All commands", "Create new"). Only meaningful when the Result
+// carries an InteractiveList. Nil/non-list Results pass through unchanged.
+func WithExtraActions(r *Result, extras ...ListItem) *Result {
+	if r == nil || r.Interactive == nil || r.Interactive.List == nil {
+		return r
+	}
+	r.Interactive.List.ExtraActions = append(r.Interactive.List.ExtraActions, extras...)
+	return r
+}
+
 func listItemFromRecord(r listRecord) ListItem {
 	item := ListItem{Selected: r.selected, Action: r.action}
 	if len(r.fields) == 0 {

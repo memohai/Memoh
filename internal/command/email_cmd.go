@@ -7,7 +7,6 @@ import (
 func (h *Handler) buildEmailGroup() *CommandGroup {
 	g := newCommandGroup("email", "View email configuration")
 	g.DefaultAction = "outbox" // bare /email lands on recent sends
-	g.EnableActionMenu()       // bare /email shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "providers",
 		Usage: "providers - List email providers",
@@ -27,7 +26,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				}
 				records = append(records, listRecord{fields: fields})
 			}
-			return buildListResult("Email Providers", "email", "providers", nil, records, cc.Page, defaultListLimit, "Inspect access with "+CmdRef("email bindings")+"."), nil
+			result := buildListResult("Email Providers", "email", "providers", nil, records, cc.Page, defaultListLimit, "")
+			return WithExtraActions(result,
+				ListItem{Label: "Bindings", Action: &ItemAction{Resource: "email", Action: "bindings"}},
+				ListItem{Label: "Outbox", Action: &ItemAction{Resource: "email", Action: "outbox"}},
+			), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -49,7 +52,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 					{"Permissions", perms},
 				}})
 			}
-			return buildListResult("Email Bindings", "email", "bindings", nil, records, cc.Page, defaultListLimit, "See recent sends with "+CmdRef("email outbox")+"."), nil
+			result := buildListResult("Email Bindings", "email", "bindings", nil, records, cc.Page, defaultListLimit, "")
+			return WithExtraActions(result,
+				ListItem{Label: "Providers", Action: &ItemAction{Resource: "email", Action: "providers"}},
+				ListItem{Label: "Outbox", Action: &ItemAction{Resource: "email", Action: "outbox"}},
+			), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -84,7 +91,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				fields = append(fields, kv{"To", truncate(to, 40)}, kv{"Sent", humanizeTime(item.SentAt)})
 				records = append(records, listRecord{fields: fields, note: note})
 			}
-			return buildPagedListResult("Outbox", "email", "outbox", nil, records, cc.Page, pageSize, int(total), "Use the Web UI for older outbox entries."), nil
+			result := buildPagedListResult("Outbox", "email", "outbox", nil, records, cc.Page, pageSize, int(total), "")
+			return WithExtraActions(result,
+				ListItem{Label: "Providers", Action: &ItemAction{Resource: "email", Action: "providers"}},
+				ListItem{Label: "Bindings", Action: &ItemAction{Resource: "email", Action: "bindings"}},
+			), nil
 		},
 	})
 	return g

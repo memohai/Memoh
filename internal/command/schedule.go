@@ -12,7 +12,6 @@ import (
 func (h *Handler) buildScheduleGroup() *CommandGroup {
 	g := newCommandGroup("schedule", "Manage scheduled tasks")
 	g.DefaultAction = "list" // bare /schedule lands on the live schedule list
-	g.EnableActionMenu()     // bare /schedule shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all schedules",
@@ -47,7 +46,10 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 					action: &ItemAction{Resource: "schedule", Action: "get", Args: []string{item.Name}},
 				})
 			}
-			return buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, ""), nil
+			result := buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, "")
+			return WithExtraActions(result,
+				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+			), nil
 		},
 	})
 	g.Register(SubCommand{
