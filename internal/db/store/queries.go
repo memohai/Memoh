@@ -22,6 +22,8 @@ type Queries interface {
 	CountEmailOutboxByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountMemoryProvidersByDefault(ctx context.Context) (int64, error)
+	CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
+	CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error)
 	CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CountModels(ctx context.Context) (int64, error)
 	CountModelsByType(ctx context.Context, type_ string) (int64, error)

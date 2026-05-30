@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
@@ -37,10 +38,14 @@ import (
 type WorkspaceData interface {
 	ExportData(ctx context.Context, botID string) (io.ReadCloser, error)
 	ImportData(ctx context.Context, botID string, r io.Reader) error
+	// CountData returns the number of files in the bot's workspace /data. It is
+	// best-effort context for the export dialog; an error means "unknown".
+	CountData(ctx context.Context, botID string) (int, error)
 }
 
 type Service struct {
 	logger          *slog.Logger
+	db              *pgxpool.Pool
 	queries         dbstore.Queries
 	bots            *bots.Service
 	settings        *settings.Service
@@ -58,6 +63,7 @@ type Service struct {
 
 type Params struct {
 	Logger          *slog.Logger
+	DB              *pgxpool.Pool
 	Queries         dbstore.Queries
 	Bots            *bots.Service
 	Settings        *settings.Service
@@ -80,6 +86,7 @@ func New(params Params) *Service {
 	}
 	return &Service{
 		logger:          log.With(slog.String("service", "bot_backup")),
+		db:              params.DB,
 		queries:         params.Queries,
 		bots:            params.Bots,
 		settings:        params.Settings,

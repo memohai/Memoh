@@ -575,9 +575,10 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 }
 
-func provideBotBackupService(log *slog.Logger, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
+		DB:              conn,
 		Queries:         queries,
 		Bots:            botService,
 		Settings:        settingsService,

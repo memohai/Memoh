@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/auth"
 	"github.com/memohai/memoh/internal/botbackup"
+	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
 )
 
@@ -67,7 +70,7 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 // @Accept json
 // @Produce application/zip
 // @Param bot_id path string true "Bot ID"
-// @Param payload body botbackup.ExportOptions true "Export options"
+// @Param payload body botbackup.ExportRequest true "Export options"
 // @Success 200 {file} file
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -86,17 +89,49 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var req botbackup.ExportOptions
+	var req botbackup.ExportRequest
 	if c.Request().Body != nil {
 		if err := c.Bind(&req); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
+
+	// Build the bundle into a temp file first. The whole export can fail (e.g.
+	// the workspace stream errors) and that must surface as a proper HTTP error
+	// rather than a truncated body after a misleading "200 OK".
+	tmp, err := os.CreateTemp("", "memoh-backup-*.zip")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to allocate temp file")
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := h.service.Export(c.Request().Context(), botID, botbackup.ExportOptions{Sections: req.Sections}, tmp); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "export failed: "+err.Error())
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
 	filename := fmt.Sprintf("bot-%s-backup-%s.memoh.zip", safeFilename(bot.DisplayName, bot.ID), time.Now().UTC().Format("20060102T150405Z"))
 	c.Response().Header().Set(echo.HeaderContentType, "application/zip")
 	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="`+filename+`"`)
+
+	// No passphrase: stream the plaintext bundle with a known length.
+	if req.Passphrase == "" {
+		if info, statErr := tmp.Stat(); statErr == nil {
+			c.Response().Header().Set(echo.HeaderContentLength, strconv.FormatInt(info.Size(), 10))
+		}
+		c.Response().WriteHeader(http.StatusOK)
+		_, err = io.Copy(c.Response(), tmp)
+		return err
+	}
+	// Passphrase set: wrap the bundle in an encrypted, length-unknown stream.
 	c.Response().WriteHeader(http.StatusOK)
-	return h.service.Export(c.Request().Context(), botID, req, c.Response())
+	return secure.Encrypt(c.Response(), tmp, req.Passphrase)
 }
 
 // PreviewImport godoc
@@ -108,6 +143,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 // @Param mode formData string false "Import mode"
 // @Param target_bot_id formData string false "Target bot ID for overwrite mode"
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
+// @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.PreviewResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -123,7 +159,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	preview, err := h.service.Preview(c.Request().Context(), raw, importOptionsFromForm(c))
+	preview, err := h.service.Preview(c.Request().Context(), raw, importOptionsFromForm(c), c.FormValue("passphrase"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -139,6 +175,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 // @Param mode formData string false "Import mode"
 // @Param target_bot_id formData string false "Target bot ID for overwrite mode"
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
+// @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.ImportResult
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -162,7 +199,7 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	result, err := h.service.Import(c.Request().Context(), userID, raw, opts)
+	result, err := h.service.Import(c.Request().Context(), userID, raw, opts, c.FormValue("passphrase"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}

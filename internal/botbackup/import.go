@@ -8,14 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -34,6 +37,12 @@ type importState struct {
 	manifest Manifest
 	idMap    map[string]string
 	warnings []string
+	// counts records how many items each section restored, surfaced to the UI.
+	counts map[Section]int
+	// createMode is true for a fresh-bot import. In create mode any restore
+	// failure is fatal (the caller compensates by deleting the bot); in
+	// overwrite mode item failures degrade to warnings.
+	createMode bool
 }
 
 const (
@@ -41,16 +50,55 @@ const (
 	workspaceRestoreRetryInterval = 2 * time.Second
 )
 
-func (s *Service) Preview(ctx context.Context, raw []byte, opts ImportOptions) (PreviewResult, error) {
-	entries, manifest, err := loadManifest(raw)
+// decodeBundle returns the plaintext bundle bytes, transparently decrypting an
+// encrypted bundle with the passphrase. The bool reports whether the input was
+// encrypted, so callers can prompt for a passphrase when one is missing or wrong.
+func decodeBundle(raw []byte, passphrase string) (plaintext []byte, encrypted bool, err error) {
+	if !secure.IsEncrypted(raw) {
+		return raw, false, nil
+	}
+	if passphrase == "" {
+		return nil, true, secure.ErrPassphraseRequired
+	}
+	var out bytes.Buffer
+	if err := secure.Decrypt(&out, bytes.NewReader(raw), passphrase); err != nil {
+		return nil, true, err
+	}
+	return out.Bytes(), true, nil
+}
+
+// itemErr decides how a per-item restore failure is handled: fatal in create
+// mode (so the caller rolls back the whole bot), a warning in overwrite mode so
+// one bad row does not abort an otherwise-good restore.
+func (st *importState) itemErr(label string, err error) error {
+	if st.createMode {
+		return err
+	}
+	st.warnings = append(st.warnings, label+" skipped: "+err.Error())
+	return nil
+}
+
+func (s *Service) Preview(ctx context.Context, raw []byte, opts ImportOptions, passphrase string) (PreviewResult, error) {
+	plain, encrypted, decErr := decodeBundle(raw, passphrase)
+	if decErr != nil {
+		// Encrypted but no/wrong passphrase: return a soft result so the UI can
+		// (re-)prompt instead of surfacing a hard error.
+		res := PreviewResult{Encrypted: true, RequiresPassphrase: true}
+		if !errors.Is(decErr, secure.ErrPassphraseRequired) {
+			res.Conflicts = []string{"passphrase incorrect or bundle corrupted"}
+		}
+		return res, nil
+	}
+	entries, manifest, err := loadManifest(plain)
 	if err != nil {
 		return PreviewResult{}, err
 	}
 	result := PreviewResult{
-		Manifest: manifest,
-		Profile:  profilePreview(entries),
-		Warnings: append([]string(nil), manifest.Warnings...),
-		Sections: summarizeSections(entries),
+		Manifest:  manifest,
+		Profile:   profilePreview(entries),
+		Warnings:  append([]string(nil), manifest.Warnings...),
+		Sections:  summarizeSections(entries),
+		Encrypted: encrypted,
 		RestorePlan: RestorePlan{
 			Mode:                 normalizeImportMode(opts.Mode),
 			TargetBotID:          strings.TrimSpace(opts.TargetBotID),
@@ -386,8 +434,15 @@ func readTarGzNames(raw []byte, limit int) ([]string, int) {
 	return out, count
 }
 
-func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, opts ImportOptions) (ImportResult, error) {
-	entries, manifest, err := loadManifest(raw)
+func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, opts ImportOptions, passphrase string) (ImportResult, error) {
+	plain, _, decErr := decodeBundle(raw, passphrase)
+	if decErr != nil {
+		if errors.Is(decErr, secure.ErrPassphraseRequired) {
+			return ImportResult{}, errors.New("this backup is encrypted; a passphrase is required")
+		}
+		return ImportResult{}, fmt.Errorf("decrypt backup: %w", decErr)
+	}
+	entries, manifest, err := loadManifest(plain)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -399,6 +454,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		manifest: manifest,
 		idMap:    map[string]string{},
 		warnings: append([]string(nil), manifest.Warnings...),
+		counts:   map[Section]int{},
 	}
 
 	profile, err := readEntry[bots.Bot](state, "bot/profile.json")
@@ -409,6 +465,9 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	if err != nil {
 		return ImportResult{}, err
 	}
+	// Dependencies (providers/models/...) are global, idempotent resources; they
+	// are created before the bot and are intentionally NOT rolled back, so a
+	// retry reuses them by name.
 	var deps dependencyMap
 	if opts.wants(SectionModels) || opts.wants(SectionEmail) {
 		deps, err = s.importDependencies(ctx, state)
@@ -421,60 +480,118 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, err
 	}
 	state.idMap[profile.ID] = targetBotID
+	state.createMode = created
+
+	// Compensation: in create mode, undo a partially-imported bot on any fatal
+	// failure. Deleting the bot cascades to all its child rows (settings, acl,
+	// channels, mcp, schedules, email bindings, sessions, messages, assets,
+	// container), leaving no trace. Overwrite mode keeps skip/merge/replace
+	// semantics and is not rolled back.
+	committed := false
+	if created {
+		defer func() {
+			if !committed {
+				if delErr := s.bots.Delete(context.WithoutCancel(ctx), targetBotID); delErr != nil {
+					s.logger.Warn("import compensation: delete bot failed",
+						slog.String("bot_id", targetBotID), slog.Any("error", delErr))
+				}
+			}
+		}()
+	}
+
+	if err := s.applyRestore(ctx, actorUserID, targetBotID, cfg, deps, opts, state); err != nil {
+		return ImportResult{}, err
+	}
+
+	committed = true
+	return ImportResult{BotID: targetBotID, Created: created, Warnings: state.warnings, Imported: state.counts}, nil
+}
+
+// applyRestore runs every selected section in order. A returned error is fatal
+// (create mode) and triggers compensation in the caller; restore steps that are
+// only meaningful in overwrite mode degrade their own item failures to warnings.
+func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID string, cfg settings.Settings, deps dependencyMap, opts ImportOptions, state *importState) error {
+	// restore wraps a section step: fatal in create mode, a warning otherwise.
+	restore := func(label string, fn func() error) error {
+		if err := fn(); err != nil {
+			if state.createMode {
+				return fmt.Errorf("%s: %w", label, err)
+			}
+			state.warnings = append(state.warnings, label+": "+err.Error())
+		}
+		return nil
+	}
+
 	if opts.wants(SectionSettings) || opts.wants(SectionModels) {
-		if err := s.restoreSettings(ctx, targetBotID, cfg, deps, opts.wants(SectionSettings), opts.wants(SectionModels)); err != nil {
-			state.warnings = append(state.warnings, "settings import failed: "+err.Error())
+		if err := restore("settings import failed", func() error {
+			return s.restoreSettings(ctx, targetBotID, cfg, deps, opts.wants(SectionSettings), opts.wants(SectionModels))
+		}); err != nil {
+			return err
 		}
 	}
 	if opts.wants(SectionACL) {
 		if opts.strategyFor(SectionACL) == StrategyReplace {
 			s.clearACL(ctx, targetBotID)
 		}
-		s.restoreACL(ctx, targetBotID, actorUserID, state)
+		if err := restore("acl import failed", func() error { return s.restoreACL(ctx, targetBotID, actorUserID, state) }); err != nil {
+			return err
+		}
 	}
 	if opts.wants(SectionChannels) {
 		if opts.strategyFor(SectionChannels) == StrategyReplace {
 			s.clearChannels(ctx, targetBotID)
 		}
-		s.restoreChannels(ctx, targetBotID, state)
+		if err := restore("channels import failed", func() error { return s.restoreChannels(ctx, targetBotID, state) }); err != nil {
+			return err
+		}
 	}
 	if opts.wants(SectionMCP) {
 		if opts.strategyFor(SectionMCP) == StrategyReplace {
 			s.clearMCP(ctx, targetBotID)
 		}
-		s.restoreMCP(ctx, targetBotID, state)
+		if err := restore("mcp import failed", func() error { return s.restoreMCP(ctx, targetBotID, state) }); err != nil {
+			return err
+		}
 	}
 	if opts.wants(SectionSchedules) {
 		if opts.strategyFor(SectionSchedules) == StrategyReplace {
 			s.clearSchedules(ctx, targetBotID)
 		}
-		s.restoreSchedules(ctx, targetBotID, state)
+		if err := restore("schedules import failed", func() error { return s.restoreSchedules(ctx, targetBotID, state) }); err != nil {
+			return err
+		}
 	}
 	if opts.wants(SectionEmail) {
 		if opts.strategyFor(SectionEmail) == StrategyReplace {
 			s.clearEmailBindings(ctx, targetBotID)
 		}
-		s.restoreEmailBindings(ctx, targetBotID, state, deps)
+		if err := restore("email import failed", func() error { return s.restoreEmailBindings(ctx, targetBotID, state, deps) }); err != nil {
+			return err
+		}
 	}
 	if opts.wants(SectionHistory) {
-		if opts.strategyFor(SectionHistory) == StrategyReplace && s.queries != nil {
-			_ = s.queries.DeleteMessagesByBot(ctx, optionalUUID(targetBotID))
+		replace := opts.strategyFor(SectionHistory) == StrategyReplace
+		if err := restore("history import failed", func() error {
+			return s.restoreHistory(ctx, targetBotID, state, opts.wants(SectionAssets), replace)
+		}); err != nil {
+			return err
 		}
-		s.restoreHistory(ctx, targetBotID, state, opts.wants(SectionAssets))
 	}
-	if opts.wants(SectionWorkspace) && hasWorkspaceEntries(entries) {
+	// Workspace files are auxiliary: a transfer failure (e.g. container not yet
+	// reachable, despite retries) is recorded as a warning rather than discarding
+	// an otherwise-complete bot import, even in create mode.
+	if opts.wants(SectionWorkspace) && hasWorkspaceEntries(state.entries) {
 		if s.workspace == nil {
 			state.warnings = append(state.warnings, "workspace restore skipped: workspace manager not configured")
+		} else if archive, err := workspaceArchive(state.entries); err != nil {
+			state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
+		} else if err := s.restoreWorkspaceData(ctx, targetBotID, archive, state.createMode); err != nil {
+			state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
 		} else {
-			raw, err := workspaceArchive(entries)
-			if err != nil {
-				state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
-			} else if err := s.restoreWorkspaceData(ctx, targetBotID, raw, created); err != nil {
-				state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
-			}
+			state.counts[SectionWorkspace] = countWorkspaceFiles(state.entries)
 		}
 	}
-	return ImportResult{BotID: targetBotID, Created: created, Warnings: state.warnings}, nil
+	return nil
 }
 
 func (s *Service) restoreWorkspaceData(ctx context.Context, botID string, raw []byte, waitForContainer bool) error {
@@ -738,13 +855,13 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	return err
 }
 
-func (s *Service) restoreACL(ctx context.Context, botID, actorUserID string, state *importState) {
+func (s *Service) restoreACL(ctx context.Context, botID, actorUserID string, state *importState) error {
 	if s.acl == nil {
-		return
+		return nil
 	}
 	rules, err := readEntry[[]acl.Rule](state, "bot/acl_rules.json")
 	if err != nil {
-		return
+		return err
 	}
 	for _, rule := range rules {
 		sourceScope := rule.SourceScope
@@ -760,18 +877,23 @@ func (s *Service) restoreACL(ctx context.Context, botID, actorUserID string, sta
 			SourceScope:        sourceScope,
 		})
 		if err != nil {
-			state.warnings = append(state.warnings, "acl rule skipped: "+err.Error())
+			if e := state.itemErr("acl rule", err); e != nil {
+				return e
+			}
+			continue
 		}
+		state.counts[SectionACL]++
 	}
+	return nil
 }
 
-func (s *Service) restoreChannels(ctx context.Context, botID string, state *importState) {
+func (s *Service) restoreChannels(ctx context.Context, botID string, state *importState) error {
 	if s.channels == nil {
-		return
+		return nil
 	}
 	configs, err := readEntry[[]channel.ChannelConfig](state, "bot/channel_configs.json")
 	if err != nil {
-		return
+		return err
 	}
 	for _, cfg := range configs {
 		disabled := cfg.Disabled
@@ -785,34 +907,44 @@ func (s *Service) restoreChannels(ctx context.Context, botID string, state *impo
 			VerifiedAt:       &verifiedAt,
 		})
 		if err != nil {
-			state.warnings = append(state.warnings, "channel config skipped: "+err.Error())
+			if e := state.itemErr("channel config", err); e != nil {
+				return e
+			}
+			continue
 		}
+		state.counts[SectionChannels]++
 	}
+	return nil
 }
 
-func (s *Service) restoreMCP(ctx context.Context, botID string, state *importState) {
+func (s *Service) restoreMCP(ctx context.Context, botID string, state *importState) error {
 	if s.mcp == nil {
-		return
+		return nil
 	}
 	items, err := readEntry[[]mcp.Connection](state, "bot/mcp_connections.json")
 	if err != nil {
-		return
+		return err
 	}
 	for _, item := range items {
 		req := mcpRequestFromConnection(item)
 		if _, err := s.mcp.Create(ctx, botID, req); err != nil {
-			state.warnings = append(state.warnings, "mcp connection skipped: "+err.Error())
+			if e := state.itemErr("mcp connection", err); e != nil {
+				return e
+			}
+			continue
 		}
+		state.counts[SectionMCP]++
 	}
+	return nil
 }
 
-func (s *Service) restoreSchedules(ctx context.Context, botID string, state *importState) {
+func (s *Service) restoreSchedules(ctx context.Context, botID string, state *importState) error {
 	if s.schedules == nil {
-		return
+		return nil
 	}
 	items, err := readEntry[[]schedule.Schedule](state, "bot/schedules.json")
 	if err != nil {
-		return
+		return err
 	}
 	for _, item := range items {
 		enabled := item.Enabled
@@ -825,18 +957,23 @@ func (s *Service) restoreSchedules(ctx context.Context, botID string, state *imp
 			Enabled:     &enabled,
 		})
 		if err != nil {
-			state.warnings = append(state.warnings, "schedule skipped: "+err.Error())
+			if e := state.itemErr("schedule", err); e != nil {
+				return e
+			}
+			continue
 		}
+		state.counts[SectionSchedules]++
 	}
+	return nil
 }
 
-func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state *importState, deps dependencyMap) {
+func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state *importState, deps dependencyMap) error {
 	if s.email == nil {
-		return
+		return nil
 	}
 	items, err := readEntry[[]emailpkg.BindingResponse](state, "bot/email_bindings.json")
 	if err != nil {
-		return
+		return err
 	}
 	for _, item := range items {
 		providerID := deps.emailProviders[item.EmailProviderID]
@@ -854,24 +991,52 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 			CanDelete:       &canDelete,
 			Config:          item.Config,
 		}); err != nil {
-			state.warnings = append(state.warnings, "email binding skipped: "+err.Error())
+			if e := state.itemErr("email binding", err); e != nil {
+				return e
+			}
+			continue
 		}
+		state.counts[SectionEmail]++
 	}
+	return nil
 }
 
-func (s *Service) restoreHistory(ctx context.Context, botID string, state *importState, includeAssets bool) {
+// restoreHistory recreates sessions, messages and (optionally) assets. The whole
+// batch runs inside a single transaction on PostgreSQL so a failure leaves no
+// partial history (on SQLite the pool is nil and writes degrade to best-effort,
+// matching the rest of the codebase). When replace is set, existing messages are
+// deleted inside the same transaction so the swap is atomic.
+func (s *Service) restoreHistory(ctx context.Context, botID string, state *importState, includeAssets, replace bool) error {
 	if s.queries == nil {
-		return
+		return nil
 	}
+	q := s.queries
+	var tx pgx.Tx
+	if s.db != nil {
+		begun, err := s.db.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin history tx: %w", err)
+		}
+		tx = begun
+		defer func() { _ = tx.Rollback(ctx) }()
+		q = s.queries.WithTx(tx)
+	}
+
+	pgBotID := optionalUUID(botID)
+	if replace {
+		if err := q.DeleteMessagesByBot(ctx, pgBotID); err != nil {
+			return fmt.Errorf("clear history: %w", err)
+		}
+	}
+
+	sessionMap := map[string]pgtype.UUID{}
 	sessions, err := readEntry[[]sqlc.ListSessionsByBotRow](state, "history/sessions.json")
 	if err != nil {
-		return
+		return err
 	}
-	pgBotID := optionalUUID(botID)
-	sessionMap := map[string]pgtype.UUID{}
 	for i := len(sessions) - 1; i >= 0; i-- {
 		item := sessions[i]
-		created, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
+		created, err := q.CreateSession(ctx, sqlc.CreateSessionParams{
 			BotID:       pgBotID,
 			ChannelType: item.ChannelType,
 			Type:        item.Type,
@@ -879,14 +1044,14 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 			Metadata:    item.Metadata,
 		})
 		if err != nil {
-			state.warnings = append(state.warnings, "session skipped: "+err.Error())
-			continue
+			return fmt.Errorf("session: %w", err)
 		}
 		sessionMap[item.ID.String()] = created.ID
 	}
+
 	messages, err := readEntry[[]sqlc.ListMessagesRow](state, "history/messages.json")
 	if err != nil {
-		return
+		return err
 	}
 	messageMap := map[string]pgtype.UUID{}
 	for _, item := range messages {
@@ -894,7 +1059,7 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 		if item.SessionID.Valid {
 			sessionID = sessionMap[item.SessionID.String()]
 		}
-		created, err := s.queries.CreateMessage(ctx, sqlc.CreateMessageParams{
+		created, err := q.CreateMessage(ctx, sqlc.CreateMessageParams{
 			BotID:                  pgBotID,
 			SessionID:              sessionID,
 			ExternalMessageID:      item.ExternalMessageID,
@@ -906,34 +1071,42 @@ func (s *Service) restoreHistory(ctx context.Context, botID string, state *impor
 			DisplayText:            item.DisplayText,
 		})
 		if err != nil {
-			state.warnings = append(state.warnings, "message skipped: "+err.Error())
-			continue
+			return fmt.Errorf("message: %w", err)
 		}
 		messageMap[item.ID.String()] = created.ID
+		state.counts[SectionHistory]++
 	}
-	if !includeAssets {
-		return
-	}
-	assets, err := readEntry[[]sqlc.ListMessageAssetsBatchRow](state, "assets/message_assets.json")
-	if err != nil {
-		return
-	}
-	for _, asset := range assets {
-		messageID := messageMap[asset.MessageID.String()]
-		if !messageID.Valid {
-			continue
+
+	if includeAssets {
+		assets, err := readEntry[[]sqlc.ListMessageAssetsBatchRow](state, "assets/message_assets.json")
+		if err != nil {
+			return err
 		}
-		if _, err := s.queries.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
-			MessageID:   messageID,
-			Role:        asset.Role,
-			Ordinal:     asset.Ordinal,
-			ContentHash: asset.ContentHash,
-			Name:        asset.Name,
-			Metadata:    asset.Metadata,
-		}); err != nil {
-			state.warnings = append(state.warnings, "message asset skipped: "+err.Error())
+		for _, asset := range assets {
+			messageID := messageMap[asset.MessageID.String()]
+			if !messageID.Valid {
+				continue
+			}
+			if _, err := q.CreateMessageAsset(ctx, sqlc.CreateMessageAssetParams{
+				MessageID:   messageID,
+				Role:        asset.Role,
+				Ordinal:     asset.Ordinal,
+				ContentHash: asset.ContentHash,
+				Name:        asset.Name,
+				Metadata:    asset.Metadata,
+			}); err != nil {
+				return fmt.Errorf("message asset: %w", err)
+			}
+			state.counts[SectionAssets]++
 		}
 	}
+
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit history tx: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) ensureProvider(ctx context.Context, item providerpkg.GetResponse) (string, error) {

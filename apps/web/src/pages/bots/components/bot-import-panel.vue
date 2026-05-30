@@ -7,19 +7,21 @@ import {
   AvatarFallback,
   AvatarImage,
   Button,
+  Input,
   Spinner,
   Tabs,
   TabsList,
   TabsTrigger,
 } from '@memohai/ui'
-import { Check, FileArchive, Upload, X } from 'lucide-vue-next'
+import { Check, FileArchive, Lock, Upload, X } from 'lucide-vue-next'
 import {
-  postBotsBackupImport,
   postBotsBackupImportPreview,
+  type BotbackupImportResult,
   type BotbackupPreviewResult,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatFileSize } from '@/components/file-manager/utils'
+import { uploadWithProgress } from '@/lib/upload-with-progress'
 import BackupSectionCards from './backup-section-cards.vue'
 
 type SectionState = 'skip' | 'merge' | 'replace'
@@ -44,6 +46,8 @@ const importing = ref(false)
 const selectedFile = ref<File | null>(null)
 const preview = ref<BotbackupPreviewResult | null>(null)
 const previewError = ref('')
+const passphrase = ref('')
+const uploadPercent = ref(0)
 
 const allowOverwrite = computed(() => !!props.targetBotId)
 const importMode = ref<'create' | 'overwrite'>('create')
@@ -79,7 +83,13 @@ const sectionItems = computed(() => {
 
 const hasAvailableSection = computed(() => sectionItems.value.some(s => s.available))
 
-const blocked = computed(() => !!previewError.value || (preview.value?.conflicts?.length ?? 0) > 0)
+// The bundle is encrypted and still locked: we have no readable preview until a
+// correct passphrase is supplied.
+const needsPassphrase = computed(() => preview.value?.requires_passphrase === true)
+
+const blocked = computed(
+  () => !!previewError.value || needsPassphrase.value || (preview.value?.conflicts?.length ?? 0) > 0,
+)
 const canImport = computed(
   () => !!selectedFile.value && !busy.value && !props.disabled && !!preview.value && !blocked.value,
 )
@@ -95,6 +105,8 @@ function setFile(file: File | null) {
   selectedFile.value = file
   preview.value = null
   previewError.value = ''
+  passphrase.value = ''
+  uploadPercent.value = 0
   for (const key of Object.keys(sectionStates)) delete sectionStates[key]
   if (file) void loadPreview()
 }
@@ -122,7 +134,20 @@ function baseBody() {
     file: selectedFile.value,
     mode: isOverwrite.value ? ('overwrite' as const) : ('create' as const),
     target_bot_id: isOverwrite.value ? props.targetBotId : undefined,
+    passphrase: passphrase.value || undefined,
   }
+}
+
+// Build a multipart form for the XHR upload path (which reports progress).
+function buildFormData(sections?: string): FormData {
+  if (!selectedFile.value) throw new Error('file required')
+  const form = new FormData()
+  form.append('file', selectedFile.value)
+  form.append('mode', isOverwrite.value ? 'overwrite' : 'create')
+  if (isOverwrite.value && props.targetBotId) form.append('target_bot_id', props.targetBotId)
+  if (sections !== undefined) form.append('sections', sections)
+  if (passphrase.value) form.append('passphrase', passphrase.value)
+  return form
 }
 
 // Re-preview when the create/overwrite mode changes so target conflict counts
@@ -152,17 +177,33 @@ async function loadPreview() {
   }
 }
 
+// importedSummary turns the per-section counts into a short, human-readable
+// list, e.g. "3 Channels, 120 Chat history, 5 Attachments".
+function importedSummary(imported?: Record<string, number>): string {
+  if (!imported) return ''
+  return ALL_SECTIONS
+    .filter(key => (imported[key] ?? 0) > 0)
+    .map(key => `${imported[key]} ${t(`bots.backup.sections.${key}`)}`)
+    .join(', ')
+}
+
 async function handleImport() {
   if (!canImport.value) return
   const map: Record<string, SectionState> = { ...sectionStates }
   if (isOverwrite.value && overwriteProfile.value) map.profile = 'merge'
   importing.value = true
+  uploadPercent.value = 0
   try {
-    const { data } = await postBotsBackupImport({
-      body: { ...baseBody(), sections: JSON.stringify(map) },
-      throwOnError: true,
+    const data = await uploadWithProgress<BotbackupImportResult>({
+      url: '/bots/backup/import',
+      formData: buildFormData(JSON.stringify(map)),
+      onProgress: p => (uploadPercent.value = p.percent),
     })
-    toast.success(t('bots.backup.importSuccess'))
+    const summary = importedSummary(data.imported)
+    toast.success(summary ? t('bots.backup.importedSummary', { summary }) : t('bots.backup.importedNothing'))
+    if (data.warnings?.length) {
+      toast.warning(t('bots.backup.importWarnings', { count: data.warnings.length }))
+    }
     clearFile()
     if (data.bot_id) emit('imported', data.bot_id)
   } catch (error) {
@@ -266,9 +307,45 @@ async function handleImport() {
           {{ conflict }}
         </div>
 
+        <!-- Encrypted bundle: prompt for the passphrase before anything else -->
+        <div
+          v-if="needsPassphrase"
+          class="space-y-2 rounded-md border border-border/60 bg-background p-3"
+        >
+          <div class="flex items-center gap-2 text-xs font-medium">
+            <Lock class="size-3.5 text-muted-foreground" />
+            {{ t('bots.backup.encryptedTitle') }}
+          </div>
+          <p class="text-[11px] text-muted-foreground">
+            {{ t('bots.backup.encryptedHint') }}
+          </p>
+          <div class="flex items-center gap-2">
+            <Input
+              v-model="passphrase"
+              type="password"
+              autocomplete="off"
+              class="h-8 flex-1 text-xs"
+              :placeholder="t('bots.backup.passphraseImportPlaceholder')"
+              :disabled="previewing"
+              @keyup.enter="loadPreview"
+            />
+            <Button
+              size="sm"
+              :disabled="!passphrase || previewing"
+              @click="loadPreview"
+            >
+              <Spinner
+                v-if="previewing"
+                class="mr-1.5"
+              />
+              {{ previewing ? t('bots.backup.unlocking') : t('bots.backup.unlock') }}
+            </Button>
+          </div>
+        </div>
+
         <!-- Create vs overwrite -->
         <Tabs
-          v-if="allowOverwrite"
+          v-if="!needsPassphrase && allowOverwrite"
           v-model="importMode"
         >
           <TabsList class="grid w-full grid-cols-2">
@@ -283,7 +360,7 @@ async function handleImport() {
 
         <!-- Section selection (profile identity card is the first entry) -->
         <div
-          v-if="hasAvailableSection || sectionItems.length"
+          v-if="!needsPassphrase && (hasAvailableSection || sectionItems.length)"
           class="space-y-2"
         >
           <p class="text-[11px] font-medium text-muted-foreground">
@@ -343,27 +420,46 @@ async function handleImport() {
     </div>
 
     <!-- Actions -->
-    <div class="flex shrink-0 justify-end gap-2 border-t pt-3">
-      <Button
-        v-if="showCancel"
-        variant="ghost"
-        size="sm"
-        :disabled="busy"
-        @click="emit('cancel')"
+    <div class="shrink-0 space-y-2 border-t pt-3">
+      <!-- Upload / import progress -->
+      <div
+        v-if="importing"
+        class="space-y-1"
       >
-        {{ t('common.cancel') }}
-      </Button>
-      <Button
-        size="sm"
-        :disabled="!canImport"
-        @click="handleImport"
-      >
-        <Spinner
-          v-if="importing"
-          class="mr-1.5"
-        />
-        {{ t('common.import') }}
-      </Button>
+        <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{{ uploadPercent < 100 ? t('bots.backup.uploading', { percent: uploadPercent }) : t('bots.backup.importingProgress') }}</span>
+        </div>
+        <div class="h-1 overflow-hidden rounded-full bg-muted">
+          <div
+            class="h-full rounded-full bg-primary transition-all duration-200"
+            :class="{ 'animate-pulse': uploadPercent >= 100 }"
+            :style="{ width: `${Math.max(uploadPercent, uploadPercent >= 100 ? 100 : 4)}%` }"
+          />
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2">
+        <Button
+          v-if="showCancel"
+          variant="ghost"
+          size="sm"
+          :disabled="busy"
+          @click="emit('cancel')"
+        >
+          {{ t('common.cancel') }}
+        </Button>
+        <Button
+          size="sm"
+          :disabled="!canImport"
+          @click="handleImport"
+        >
+          <Spinner
+            v-if="importing"
+            class="mr-1.5"
+          />
+          {{ t('common.import') }}
+        </Button>
+      </div>
     </div>
   </div>
 </template>

@@ -11,6 +11,18 @@ import (
 	"strings"
 )
 
+const countMessagesByBot = `-- name: CountMessagesByBot :one
+SELECT COUNT(*) FROM bot_history_messages
+WHERE bot_id = ?1
+`
+
+func (q *Queries) CountMessagesByBot(ctx context.Context, botID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countMessagesByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   id, bot_id, session_id, sender_channel_identity_id, sender_account_user_id,

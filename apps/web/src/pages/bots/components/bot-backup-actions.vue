@@ -11,6 +11,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Input,
+  Label,
   Spinner,
 } from '@memohai/ui'
 import {
@@ -39,6 +41,7 @@ const importOpen = ref(false)
 const exporting = ref(false)
 const summarizing = ref(false)
 const summary = ref<BotbackupSummaryResult | null>(null)
+const exportPassphrase = ref('')
 
 const EXPORT_SECTIONS = [
   'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'email', 'history', 'assets', 'workspace',
@@ -69,7 +72,10 @@ const canExport = computed(() => {
 })
 
 watch(exportOpen, (open) => {
-  if (open) void loadSummary()
+  if (open) {
+    exportPassphrase.value = ''
+    void loadSummary()
+  }
 })
 
 async function loadSummary() {
@@ -113,7 +119,7 @@ async function handleExport() {
     const sections = EXPORT_SECTIONS.filter(key => exportSections[key] && exportSections[key] !== 'skip')
     const response = await postBotsByBotIdBackupExport({
       path: { bot_id: props.botId },
-      body: { sections },
+      body: { sections, passphrase: exportPassphrase.value || undefined },
       parseAs: 'blob',
       throwOnError: true,
     })
@@ -183,6 +189,29 @@ function handleImported(botId: string) {
               :empty-text="t('bots.backup.noData')"
               @update:model-value="(v) => Object.assign(exportSections, v)"
             />
+          </div>
+
+          <div
+            v-if="!summarizing"
+            class="mt-3 space-y-1.5 border-t pt-3"
+          >
+            <Label
+              for="export-passphrase"
+              class="text-[11px] font-medium text-muted-foreground"
+            >
+              {{ t('bots.backup.passphraseLabel') }}
+            </Label>
+            <Input
+              id="export-passphrase"
+              v-model="exportPassphrase"
+              type="password"
+              autocomplete="new-password"
+              class="h-8 text-xs"
+              :placeholder="t('bots.backup.passphrasePlaceholder')"
+            />
+            <p class="text-[10px] text-muted-foreground">
+              {{ t('bots.backup.passphraseExportHint') }}
+            </p>
           </div>
         </div>
 

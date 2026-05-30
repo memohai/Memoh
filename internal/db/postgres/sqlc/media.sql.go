@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMessageAssetsByBot = `-- name: CountMessageAssetsByBot :one
+SELECT COUNT(*)
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+WHERE m.bot_id = $1
+`
+
+func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessageAssetsByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessageAsset = `-- name: CreateMessageAsset :one
 INSERT INTO bot_history_message_assets (message_id, role, ordinal, content_hash, name, metadata)
 VALUES (

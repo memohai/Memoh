@@ -64,6 +64,14 @@ type ExportOptions struct {
 	Sections []Section `json:"sections,omitempty"`
 }
 
+// ExportRequest is the export endpoint body. Passphrase is kept out of
+// ExportOptions on purpose so it can never leak into the bundle manifest: when
+// set, the resulting bundle is encrypted with it.
+type ExportRequest struct {
+	Sections   []Section `json:"sections,omitempty"`
+	Passphrase string    `json:"passphrase,omitempty"`
+}
+
 // wants reports whether the section should be included in the export.
 func (o ExportOptions) wants(section Section) bool {
 	if section == SectionProfile {
@@ -145,6 +153,12 @@ type PreviewResult struct {
 	Warnings    []string         `json:"warnings"`
 	Sections    []SectionSummary `json:"sections"`
 	RestorePlan RestorePlan      `json:"restore_plan"`
+	// Encrypted reports that the uploaded bundle is passphrase-encrypted. When
+	// true and no (or a wrong) passphrase was supplied, the other fields are
+	// empty and the UI should prompt for the passphrase. RequiresPassphrase
+	// distinguishes "needs a passphrase" from "passphrase was wrong".
+	Encrypted          bool `json:"encrypted"`
+	RequiresPassphrase bool `json:"requires_passphrase"`
 }
 
 // ProfilePreview surfaces the backup's bot identity so the UI can show an
@@ -186,6 +200,9 @@ type ImportResult struct {
 	BotID    string   `json:"bot_id"`
 	Created  bool     `json:"created"`
 	Warnings []string `json:"warnings,omitempty"`
+	// Imported reports how many items were restored per section, powering the
+	// post-import summary in the UI.
+	Imported map[Section]int `json:"imported,omitempty"`
 }
 
 type backupData struct {

@@ -241,6 +241,10 @@ WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at ASC
 LIMIT sqlc.arg(max_count);
 
+-- name: CountMessagesByBot :one
+SELECT COUNT(*) FROM bot_history_messages
+WHERE bot_id = sqlc.arg(bot_id);
+
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);

@@ -236,6 +236,12 @@ const docTemplate = `{
                         "description": "JSON object mapping section to strategy (skip|merge|replace), e.g. {\\",
                         "name": "sections",
                         "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Passphrase to decrypt an encrypted backup",
+                        "name": "passphrase",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -302,6 +308,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "JSON object mapping section to strategy (skip|merge|replace), e.g. {\\",
                         "name": "sections",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Passphrase to decrypt an encrypted backup",
+                        "name": "passphrase",
                         "in": "formData"
                     }
                 ],
@@ -804,7 +816,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/botbackup.ExportOptions"
+                            "$ref": "#/definitions/botbackup.ExportRequest"
                         }
                     }
                 ],
@@ -1067,87 +1079,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/container/data/export": {
-            "post": {
-                "produces": [
-                    "application/gzip"
-                ],
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Export container /data as a tar.gz archive",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/container/data/import": {
-            "post": {
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Import a tar.gz archive into container /data",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "file",
-                        "description": "tar.gz archive",
-                        "name": "file",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -11334,11 +11265,13 @@ const docTemplate = `{
                 }
             }
         },
-        "botbackup.ExportOptions": {
+        "botbackup.ExportRequest": {
             "type": "object",
             "properties": {
+                "passphrase": {
+                    "type": "string"
+                },
                 "sections": {
-                    "description": "Sections lists which sections to include. nil/empty ⇒ all sections.\nprofile is always exported regardless.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/botbackup.Section"
@@ -11365,6 +11298,13 @@ const docTemplate = `{
                 },
                 "created": {
                     "type": "boolean"
+                },
+                "imported": {
+                    "description": "Imported reports how many items were restored per section, powering the\npost-import summary in the UI.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
                 },
                 "warnings": {
                     "type": "array",
@@ -11446,6 +11386,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "encrypted": {
+                    "description": "Encrypted reports that the uploaded bundle is passphrase-encrypted. When\ntrue and no (or a wrong) passphrase was supplied, the other fields are\nempty and the UI should prompt for the passphrase. RequiresPassphrase\ndistinguishes \"needs a passphrase\" from \"passphrase was wrong\".",
+                    "type": "boolean"
+                },
                 "manifest": {
                     "$ref": "#/definitions/botbackup.Manifest"
                 },
@@ -11457,6 +11401,9 @@ const docTemplate = `{
                 },
                 "profile": {
                     "$ref": "#/definitions/botbackup.ProfilePreview"
+                },
+                "requires_passphrase": {
+                    "type": "boolean"
                 },
                 "restore_plan": {
                     "$ref": "#/definitions/botbackup.RestorePlan"

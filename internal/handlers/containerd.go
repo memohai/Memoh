@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -223,8 +222,6 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.POST("/snapshots", h.CreateSnapshot)
 	group.GET("/snapshots", h.ListSnapshots)
 	group.POST("/snapshots/rollback", h.RollbackSnapshot)
-	group.POST("/data/export", h.ExportContainerData)
-	group.POST("/data/import", h.ImportContainerData)
 	group.POST("/data/restore", h.RestorePreservedData)
 	group.GET("/skills", h.ListSkills)
 	group.POST("/skills", h.UpsertSkills)
@@ -714,71 +711,6 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]any{"rolled_back_to": req.Version})
-}
-
-// ExportContainerData godoc
-// @Summary Export container /data as a tar.gz archive
-// @Tags containerd
-// @Param bot_id path string true "Bot ID"
-// @Produce application/gzip
-// @Success 200 {file} file
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/data/export [post].
-func (h *ContainerdHandler) ExportContainerData(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
-	if err != nil {
-		return err
-	}
-	if h.manager == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
-	}
-
-	reader, err := h.manager.ExportData(c.Request().Context(), botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	defer func() { _ = reader.Close() }()
-
-	c.Response().Header().Set("Content-Type", "application/gzip")
-	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+botID+`-data.tar.gz"`)
-	c.Response().WriteHeader(http.StatusOK)
-	_, err = io.Copy(c.Response(), reader)
-	return err
-}
-
-// ImportContainerData godoc
-// @Summary Import a tar.gz archive into container /data
-// @Tags containerd
-// @Param bot_id path string true "Bot ID"
-// @Accept multipart/form-data
-// @Param file formData file true "tar.gz archive"
-// @Success 200 {object} object
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/container/data/import [post].
-func (h *ContainerdHandler) ImportContainerData(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
-	if err != nil {
-		return err
-	}
-	if h.manager == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "manager not configured")
-	}
-
-	file, err := c.FormFile("file")
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
-	}
-	src, err := file.Open()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "failed to open uploaded file")
-	}
-	defer func() { _ = src.Close() }()
-
-	if err := h.manager.ImportData(c.Request().Context(), botID, src); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	return c.JSON(http.StatusOK, map[string]bool{"imported": true})
 }
 
 // RestorePreservedData godoc

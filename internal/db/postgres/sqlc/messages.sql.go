@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMessagesByBot = `-- name: CountMessagesByBot :one
+SELECT COUNT(*) FROM bot_history_messages
+WHERE bot_id = $1
+`
+
+func (q *Queries) CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMessagesByBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO bot_history_messages (
   bot_id,

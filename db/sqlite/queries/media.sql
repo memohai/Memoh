@@ -76,5 +76,11 @@ FROM bot_history_message_assets
 WHERE message_id IN (sqlc.slice(message_ids))
 ORDER BY message_id, ordinal ASC;
 
+-- name: CountMessageAssetsByBot :one
+SELECT COUNT(*)
+FROM bot_history_message_assets a
+JOIN bot_history_messages m ON m.id = a.message_id
+WHERE m.bot_id = sqlc.arg(bot_id);
+
 -- name: DeleteMessageAssets :exec
 DELETE FROM bot_history_message_assets WHERE message_id = sqlc.arg(message_id);

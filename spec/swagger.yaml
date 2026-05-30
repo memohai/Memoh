@@ -777,12 +777,11 @@ definitions:
       name:
         type: string
     type: object
-  botbackup.ExportOptions:
+  botbackup.ExportRequest:
     properties:
+      passphrase:
+        type: string
       sections:
-        description: |-
-          Sections lists which sections to include. nil/empty ⇒ all sections.
-          profile is always exported regardless.
         items:
           $ref: '#/definitions/botbackup.Section'
         type: array
@@ -801,6 +800,13 @@ definitions:
         type: string
       created:
         type: boolean
+      imported:
+        additionalProperties:
+          type: integer
+        description: |-
+          Imported reports how many items were restored per section, powering the
+          post-import summary in the UI.
+        type: object
       warnings:
         items:
           type: string
@@ -853,6 +859,13 @@ definitions:
         items:
           type: string
         type: array
+      encrypted:
+        description: |-
+          Encrypted reports that the uploaded bundle is passphrase-encrypted. When
+          true and no (or a wrong) passphrase was supplied, the other fields are
+          empty and the UI should prompt for the passphrase. RequiresPassphrase
+          distinguishes "needs a passphrase" from "passphrase was wrong".
+        type: boolean
       manifest:
         $ref: '#/definitions/botbackup.Manifest'
       missing:
@@ -861,6 +874,8 @@ definitions:
         type: array
       profile:
         $ref: '#/definitions/botbackup.ProfilePreview'
+      requires_passphrase:
+        type: boolean
       restore_plan:
         $ref: '#/definitions/botbackup.RestorePlan'
       sections:
@@ -3903,7 +3918,7 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/botbackup.ExportOptions'
+          $ref: '#/definitions/botbackup.ExportRequest'
       produces:
       - application/zip
       responses:
@@ -4085,59 +4100,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create and start MCP container for bot
-      tags:
-      - containerd
-  /bots/{bot_id}/container/data/export:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      produces:
-      - application/gzip
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: file
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Export container /data as a tar.gz archive
-      tags:
-      - containerd
-  /bots/{bot_id}/container/data/import:
-    post:
-      consumes:
-      - multipart/form-data
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: tar.gz archive
-        in: formData
-        name: file
-        required: true
-        type: file
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import a tar.gz archive into container /data
       tags:
       - containerd
   /bots/{bot_id}/container/data/restore:
@@ -7769,6 +7731,10 @@ paths:
         in: formData
         name: sections
         type: string
+      - description: Passphrase to decrypt an encrypted backup
+        in: formData
+        name: passphrase
+        type: string
       produces:
       - application/json
       responses:
@@ -7813,6 +7779,10 @@ paths:
           e.g. {\
         in: formData
         name: sections
+        type: string
+      - description: Passphrase to decrypt an encrypted backup
+        in: formData
+        name: passphrase
         type: string
       produces:
       - application/json

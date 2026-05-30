@@ -4,14 +4,25 @@ import (
 	"context"
 
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/db"
 )
+
+// summaryLightSections is the section set collected in full for the export
+// dialog. History and assets are intentionally excluded: their counts/samples
+// are fetched cheaply via dedicated COUNT queries instead of loading every
+// message and asset row just to display a number.
+var summaryLightSections = []Section{
+	SectionSettings, SectionModels, SectionACL, SectionChannels,
+	SectionMCP, SectionSchedules, SectionEmail,
+}
 
 // Summary reports what a live bot would export: per-section item counts and a
 // sample of item labels. It powers the export dialog so users see counts and
 // details (and skip empty sections) before exporting. Unlike Export it does not
-// pause the bot or stream the workspace.
+// pause the bot or stream the workspace, and it counts history/assets/workspace
+// without loading them in full.
 func (s *Service) Summary(ctx context.Context, botID string) (SummaryResult, error) {
-	data, _, err := s.collect(ctx, botID, NormalizeExportOptions(ExportOptions{}))
+	data, _, err := s.collect(ctx, botID, ExportOptions{Sections: summaryLightSections})
 	if err != nil {
 		return SummaryResult{}, err
 	}
@@ -52,17 +63,58 @@ func (s *Service) Summary(ctx context.Context, botID string) (SummaryResult, err
 	add(SectionMCP, data.MCP, "name")
 	add(SectionSchedules, data.Schedules, "name")
 	add(SectionEmail, data.EmailBindings, "email_address")
-	// History count is messages; the detail lists session titles.
-	historyMsgRaw, _ := marshalJSON(data.History.Messages)
-	historySessRaw, _ := marshalJSON(data.History.Sessions)
-	res.Sections = append(res.Sections, SectionSummary{
-		Key:   SectionHistory,
-		Count: jsonArrayLen(historyMsgRaw),
-		Items: jsonArrayLabels(historySessRaw, sectionItemLimit, "title", "type"),
-	})
-	add(SectionAssets, data.History.Assets, "name")
-	// The workspace file count isn't known without building the archive; mark it
-	// available with an unknown count (-1) so the dialog still offers it.
-	res.Sections = append(res.Sections, SectionSummary{Key: SectionWorkspace, Count: -1})
+	res.Sections = append(res.Sections, s.summarizeHistory(ctx, botID))
+	res.Sections = append(res.Sections, s.summarizeAssets(ctx, botID))
+	res.Sections = append(res.Sections, s.summarizeWorkspace(ctx, botID))
 	return res, nil
+}
+
+// summarizeHistory counts messages with a COUNT query and lists session titles
+// (sessions are bounded) as the sample, avoiding a full message load.
+func (s *Service) summarizeHistory(ctx context.Context, botID string) SectionSummary {
+	out := SectionSummary{Key: SectionHistory}
+	if s.queries == nil {
+		return out
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return out
+	}
+	if n, err := s.queries.CountMessagesByBot(ctx, pgBotID); err == nil {
+		out.Count = int(n)
+	}
+	if sessions, err := s.queries.ListSessionsByBot(ctx, pgBotID); err == nil {
+		raw, _ := marshalJSON(sessions)
+		out.Items = jsonArrayLabels(raw, sectionItemLimit, "title", "type")
+	}
+	return out
+}
+
+// summarizeAssets counts message assets with a COUNT query.
+func (s *Service) summarizeAssets(ctx context.Context, botID string) SectionSummary {
+	out := SectionSummary{Key: SectionAssets}
+	if s.queries == nil {
+		return out
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return out
+	}
+	if n, err := s.queries.CountMessageAssetsByBot(ctx, pgBotID); err == nil {
+		out.Count = int(n)
+	}
+	return out
+}
+
+// summarizeWorkspace reports the live workspace file count. When the container
+// is stopped or unreachable the count is unknown (-1) so the dialog still
+// offers the section without a misleading zero.
+func (s *Service) summarizeWorkspace(ctx context.Context, botID string) SectionSummary {
+	count := -1
+	if s.workspace != nil {
+		if n, err := s.workspace.CountData(ctx, botID); err == nil {
+			count = n
+		}
+	}
+	return SectionSummary{Key: SectionWorkspace, Count: count}
 }

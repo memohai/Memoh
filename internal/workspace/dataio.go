@@ -383,6 +383,28 @@ func (m *Manager) archiveSnapshotPath(key string) string {
 // gRPC fallback (Apple backend / no mount support)
 // ---------------------------------------------------------------------------
 
+// CountData returns the number of regular files under the container's /data
+// directory, read live over the gRPC bridge so it never stops the container.
+// It is best-effort context for the export dialog; callers should treat an
+// error (e.g. a stopped or unreachable container) as "unknown".
+func (m *Manager) CountData(ctx context.Context, botID string) (int, error) {
+	client, err := m.MCPClient(ctx, botID)
+	if err != nil {
+		return 0, fmt.Errorf("grpc connect: %w", err)
+	}
+	entries, err := client.ListDirAll(ctx, containerDataDir, true)
+	if err != nil {
+		return 0, fmt.Errorf("list dir: %w", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.GetIsDir() {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadCloser, error) {
 	client, err := m.MCPClient(ctx, botID)
 	if err != nil {
