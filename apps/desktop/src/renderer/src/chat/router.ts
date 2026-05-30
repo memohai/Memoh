@@ -44,9 +44,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@memohai/web/pages/home/index.vue'),
       },
       {
-        name: 'chat',
-        path: '/chat/:botId?/:sessionId?',
+        name: 'bot',
+        path: '/bot/:botName?/:sessionId?',
         component: () => import('@memohai/web/pages/home/index.vue'),
+      },
+      {
+        // Backwards-compatible redirect for legacy UUID-based chat links.
+        path: '/chat/:botName?/:sessionId?',
+        redirect: (to: RouteLocationNormalized) => {
+          const botName = (to.params.botName as string) ?? ''
+          return botName
+            ? { name: 'bot', params: { botName, sessionId: to.params.sessionId } }
+            : { name: 'home' }
+        },
       },
     ],
   },

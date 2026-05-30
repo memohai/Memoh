@@ -298,6 +298,11 @@
       "approve": "允许",
       "reject": "拒绝",
       "pendingApproval": "等待审核",
+      "pending": {
+        "generic": "处理中…",
+        "write": "正在写入文件…",
+        "edit": "正在编辑…"
+      },
       "detail": {
         "openInFiles": "在文件中打开",
         "input": "输入",
@@ -1030,6 +1035,16 @@
     "emptyDescription": "点击右上角按钮创建你的第一个 Bot",
     "displayName": "名称",
     "displayNamePlaceholder": "给你的 Bot 起个名字",
+    "name": "URL 名称",
+    "namePlaceholder": "例如 my-assistant",
+    "nameHint": "小写字母、数字和连字符，用于 Bot 的 URL。",
+    "nameStatus": {
+      "checking": "正在检测可用性…",
+      "available": "名称可用",
+      "taken": "该名称已被占用",
+      "invalid": "请使用小写字母、数字和连字符（2-63 个字符）",
+      "reserved": "该名称为保留字"
+    },
     "avatarUrl": "头像链接",
     "avatarUrlPlaceholder": "输入头像图片地址",
     "timezone": "时区",

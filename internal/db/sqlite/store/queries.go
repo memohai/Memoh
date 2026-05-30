@@ -1321,6 +1321,21 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (pgsqlc.GetBot
 	return result, nil
 }
 
+func (q *Queries) GetBotByName(ctx context.Context, name string) (pgsqlc.GetBotByNameRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetBotByNameRow{}, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.GetBotByName(ctx, name)
+	if err != nil {
+		return pgsqlc.GetBotByNameRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetBotByNameRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetBotByNameRow{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetBotChannelConfig(ctx context.Context, arg pgsqlc.GetBotChannelConfigParams) (pgsqlc.BotChannelConfig, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotChannelConfig{}, errSQLiteQueriesNotConfigured

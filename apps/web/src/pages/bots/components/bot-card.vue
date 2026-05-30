@@ -87,6 +87,6 @@ const { hasIssue, isPending, issueTitle, statusLabel, statusVariant } = useBotSt
 
 function onOpenDetail() {
   if (isPending.value) return
-  router.push({ name: 'bot-detail', params: { botId: props.bot.id } })
+  router.push({ name: 'bot-detail', params: { botName: props.bot.name ?? props.bot.id } })
 }
 </script>

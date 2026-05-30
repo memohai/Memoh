@@ -197,7 +197,7 @@ function statusText(item: McpItem): string {
 function goToSettings(mcpId?: string) {
   void router.push({
     name: 'bot-detail',
-    params: { botId: props.botId },
+    params: { botName: props.botId },
     query: { tab: 'mcp', ...(mcpId ? { mcpId } : {}) },
   })
 }

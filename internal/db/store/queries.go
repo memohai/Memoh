@@ -92,6 +92,7 @@ type Queries interface {
 	GetActiveSessionForRoute(ctx context.Context, routeID pgtype.UUID) (dbsqlc.BotSession, error)
 	GetBotACLDefaultEffect(ctx context.Context, id pgtype.UUID) (string, error)
 	GetBotByID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotByIDRow, error)
+	GetBotByName(ctx context.Context, name string) (dbsqlc.GetBotByNameRow, error)
 	GetBotChannelConfig(ctx context.Context, arg dbsqlc.GetBotChannelConfigParams) (dbsqlc.BotChannelConfig, error)
 	GetBotChannelConfigByExternalIdentity(ctx context.Context, arg dbsqlc.GetBotChannelConfigByExternalIdentityParams) (dbsqlc.BotChannelConfig, error)
 	GetBotEmailBindingByBotAndProvider(ctx context.Context, arg dbsqlc.GetBotEmailBindingByBotAndProviderParams) (dbsqlc.BotEmailBinding, error)

@@ -96,6 +96,6 @@ const parsed = computed<ScheduleInfo>(() => {
 
 function navigateToSchedule() {
   if (!props.botId) return
-  router.push({ name: 'bot-detail', params: { botId: props.botId }, query: { tab: 'schedule' } })
+  router.push({ name: 'bot-detail', params: { botName: props.botId }, query: { tab: 'schedule' } })
 }
 </script>

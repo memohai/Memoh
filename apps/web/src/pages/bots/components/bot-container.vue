@@ -90,7 +90,10 @@ const createProgressPercent = computed(() => {
 })
 
 const capabilitiesStore = useCapabilitiesStore()
-const botId = computed(() => route.params.botId as string)
+// The route param may be a name slug or UUID; resolve it to the canonical UUID
+// (via the fetched bot) so container sub-resource calls keep using the UUID.
+const routeIdentifier = computed(() => route.params.botName as string)
+const botId = computed(() => bot.value?.id ?? '')
 const containerBusy = computed(() => containerLoading.value || containerAction.value !== '')
 
 type BotContainerInfo = HandlersGetContainerResponse
@@ -211,12 +214,12 @@ async function handleRefreshContainer() {
 }
 
 const { data: bot, refetch: refetchBot } = useQuery({
-  key: () => ['bot', botId.value],
+  key: () => ['bot', routeIdentifier.value],
   query: async () => {
-    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
     return data
   },
-  enabled: () => !!botId.value,
+  enabled: () => !!routeIdentifier.value,
 })
 
 function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {

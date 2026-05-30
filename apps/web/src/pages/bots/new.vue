@@ -44,6 +44,49 @@
             />
           </div>
         </div>
+
+        <div class="mt-4">
+          <Label class="mb-2">
+            {{ $t('bots.name') }}
+            <span class="text-destructive">*</span>
+          </Label>
+          <div class="relative">
+            <Input
+              v-model="form.name"
+              type="text"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              class="pr-9"
+              :placeholder="$t('bots.namePlaceholder')"
+              @input="handleNameInput"
+            />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2">
+              <LoaderCircle
+                v-if="nameStatus === 'checking'"
+                class="size-4 animate-spin text-muted-foreground"
+              />
+              <Check
+                v-else-if="nameStatus === 'available'"
+                class="size-4 text-success-foreground"
+              />
+              <X
+                v-else-if="nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved'"
+                class="size-4 text-destructive"
+              />
+            </span>
+          </div>
+          <p
+            class="mt-1 text-xs"
+            :class="nameStatus === 'available'
+              ? 'text-success-foreground'
+              : (nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved')
+                ? 'text-destructive'
+                : 'text-muted-foreground'"
+          >
+            {{ nameStatusMessage || $t('bots.nameHint') }}
+          </p>
+        </div>
       </div>
 
       <Separator class="my-6" />
@@ -289,13 +332,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@memohai/ui'
-import { SquarePen, CircleHelp } from 'lucide-vue-next'
+import { SquarePen, CircleHelp, Check, X, LoaderCircle } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability, putBotsByBotIdSettings } from '@memohai/sdk'
 import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -319,6 +363,7 @@ onMounted(() => {
 const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
 
 const form = reactive({
+  name: '',
   display_name: '',
   avatar_url: '',
   acl_preset: defaultAclPreset as string,
@@ -327,6 +372,75 @@ const form = reactive({
   timezone: emptyTimezoneValue,
   workspace_backend: 'container',
   local_workspace_path: '',
+})
+
+// Client-side slugify mirroring the backend rules: lowercase, dashes for
+// non-alphanumerics, trimmed, clamped to 48 chars.
+function slugifyName(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return slug.replace(/^-+|-+$/g, '')
+}
+
+const nameTouched = ref(false)
+type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
+const nameStatus = ref<NameStatus>('idle')
+
+// Auto-derive name from display name until the user edits the name field.
+watch(() => form.display_name, (displayName) => {
+  if (nameTouched.value) return
+  form.name = slugifyName(displayName ?? '')
+})
+
+const checkNameAvailability = useDebounceFn(async (candidate: string) => {
+  const normalized = candidate.trim()
+  if (!normalized) {
+    nameStatus.value = 'idle'
+    return
+  }
+  try {
+    const { data } = await getBotsNameAvailability({
+      query: { name: normalized },
+      throwOnError: true,
+    })
+    if (data?.available) {
+      nameStatus.value = 'available'
+    } else {
+      nameStatus.value = (data?.reason as NameStatus) || 'taken'
+    }
+  } catch {
+    nameStatus.value = 'idle'
+  }
+}, 400)
+
+watch(() => form.name, (candidate) => {
+  const normalized = (candidate ?? '').trim()
+  nameStatus.value = normalized ? 'checking' : 'idle'
+  void checkNameAvailability(normalized)
+})
+
+function handleNameInput() {
+  nameTouched.value = true
+}
+
+const nameStatusMessage = computed(() => {
+  switch (nameStatus.value) {
+    case 'checking':
+      return t('bots.nameStatus.checking')
+    case 'available':
+      return t('bots.nameStatus.available')
+    case 'taken':
+      return t('bots.nameStatus.taken')
+    case 'invalid':
+      return t('bots.nameStatus.invalid')
+    case 'reserved':
+      return t('bots.nameStatus.reserved')
+    default:
+      return ''
+  }
 })
 
 watch(localWorkspaceEnabled, (enabled) => {
@@ -405,6 +519,7 @@ const aclDescription = computed(() => {
 // Validation
 const canSubmit = computed(() => {
   if (!form.display_name.trim()) return false
+  if (!form.name.trim() || nameStatus.value !== 'available') return false
   if (!form.acl_preset) return false
   if (localWorkspaceEnabled.value && form.workspace_backend === 'local' && !form.local_workspace_path.trim()) return false
   return true
@@ -417,6 +532,14 @@ const { mutateAsync: createBot, isLoading: submitLoading } = useMutation({
 })
 
 const isCreateFlowBlocked = computed(() => submitLoading.value)
+
+// Detect a name-uniqueness conflict (HTTP 409) from the create request, used as
+// a fallback when the realtime check raced with submission.
+function isNameConflict(error: unknown): boolean {
+  const e = error as { status?: number, response?: { status?: number } } | null
+  if (e?.status === 409 || e?.response?.status === 409) return true
+  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
+}
 
 async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
@@ -435,6 +558,7 @@ async function handleSubmit() {
   try {
     const bot = await createBot({
       body: {
+        name: form.name.trim(),
         display_name: form.display_name.trim(),
         avatar_url: form.avatar_url.trim() || undefined,
         timezone: tz,
@@ -446,6 +570,7 @@ async function handleSubmit() {
     })
 
     const botId = bot?.id
+    const botName = bot?.name ?? botId
     if (botId && (form.chat_model_id || form.memory_provider_id)) {
       try {
         await putBotsByBotIdSettings({
@@ -462,12 +587,17 @@ async function handleSubmit() {
     }
 
     toast.success(t('bots.createBotSuccess'))
-    if (botId) {
-      router.push({ name: 'bot-detail', params: { botId } })
+    if (botName) {
+      router.push({ name: 'bot-detail', params: { botName } })
     } else {
       router.push({ name: 'bots' })
     }
   } catch (error) {
+    if (isNameConflict(error)) {
+      nameStatus.value = 'taken'
+      toast.error(t('bots.nameStatus.taken'))
+      return
+    }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
 }

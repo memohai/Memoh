@@ -38,9 +38,9 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
       },
       {
         name: 'bot-detail',
-        path: ':botId',
+        path: ':botName',
         loader: () => import('@memohai/web/pages/bots/detail.vue'),
-        meta: { breadcrumb: (route: { params: { botId?: string } }) => route.params.botId }
+        meta: { breadcrumb: (route: { params: { botName?: string } }) => route.params.botName }
       },
     ]
   },

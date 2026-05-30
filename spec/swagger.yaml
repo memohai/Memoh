@@ -796,6 +796,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       owner_user_id:
         type: string
       status:
@@ -838,6 +840,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       timezone:
         type: string
       wait_for_ready:
@@ -857,6 +861,13 @@ definitions:
           $ref: '#/definitions/bots.BotCheck'
         type: array
     type: object
+  bots.NameAvailability:
+    properties:
+      available:
+        type: boolean
+      reason:
+        type: string
+    type: object
   bots.TransferBotRequest:
     properties:
       owner_user_id:
@@ -873,6 +884,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       timezone:
         type: string
     type: object
@@ -7507,6 +7520,31 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Transfer bot owner (admin only)
+      tags:
+      - bots
+  /bots/name-availability:
+    get:
+      description: Validate a candidate bot name and report whether it is available
+      parameters:
+      - description: Candidate bot name
+        in: query
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.NameAvailability'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check bot name availability
       tags:
       - bots
   /channels:

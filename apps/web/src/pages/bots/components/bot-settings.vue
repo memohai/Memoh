@@ -24,7 +24,7 @@
 
         <Button
           size="sm"
-          :disabled="!hasChanges || saveLoading"
+          :disabled="!hasChanges || saveLoading || !nameValid"
           class="h-8 text-xs font-medium min-w-24 shadow-none"
           @click="handleSave"
         >
@@ -39,6 +39,51 @@
 
     <!-- Standardized Card Container -->
     <div class="space-y-4">
+      <div class="space-y-3 rounded-md border border-border bg-background p-4 shadow-none">
+        <div class="space-y-0.5">
+          <h4 class="text-xs font-medium text-foreground">
+            {{ $t('bots.name') }}
+          </h4>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.nameHint') }}
+          </p>
+        </div>
+        <div class="relative">
+          <Input
+            v-model="nameInput"
+            type="text"
+            autocapitalize="off"
+            autocomplete="off"
+            spellcheck="false"
+            class="h-8 pr-9 text-xs"
+            :placeholder="$t('bots.namePlaceholder')"
+          />
+          <span class="absolute right-3 top-1/2 -translate-y-1/2">
+            <LoaderCircle
+              v-if="nameStatus === 'checking'"
+              class="size-4 animate-spin text-muted-foreground"
+            />
+            <Check
+              v-else-if="nameStatus === 'available'"
+              class="size-4 text-success-foreground"
+            />
+            <X
+              v-else-if="nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved'"
+              class="size-4 text-destructive"
+            />
+          </span>
+        </div>
+        <p
+          v-if="nameStatusMessage"
+          class="text-xs"
+          :class="nameStatus === 'available'
+            ? 'text-success-foreground'
+            : 'text-destructive'"
+        >
+          {{ nameStatusMessage }}
+        </p>
+      </div>
+
       <SettingsGlobalCard :form="form" />
       
       <SettingsInteractionCard
@@ -81,9 +126,12 @@
 <script setup lang="ts">
 import {
   Button,
+  Input,
   Spinner,
 } from '@memohai/ui'
-import { reactive, computed, watch } from 'vue'
+import { Check, X, LoaderCircle } from 'lucide-vue-next'
+import { reactive, ref, computed, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -93,7 +141,7 @@ import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -205,10 +253,10 @@ const { mutateAsync: updateSettings, isLoading } = useMutation({
 })
 
 const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
-  mutation: async (timezone: string) => {
+  mutation: async (body: { timezone?: string, name?: string }) => {
     const { data } = await putBotsById({
       path: { id: botIdRef.value },
-      body: { timezone },
+      body,
       throwOnError: true,
     })
     return data
@@ -218,6 +266,63 @@ const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
     queryCache.invalidateQueries({ key: ['bots'] })
   },
 })
+
+// ---- URL name (slug) editing ----
+type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
+const nameInput = ref('')
+const nameStatus = ref<NameStatus>('idle')
+
+watch(bot, (val) => {
+  nameInput.value = val?.name ?? ''
+  nameStatus.value = 'idle'
+}, { immediate: true })
+
+const hasNameChange = computed(() => nameInput.value.trim() !== (bot.value?.name ?? ''))
+
+const checkNameAvailability = useDebounceFn(async (candidate: string) => {
+  const normalized = candidate.trim()
+  if (!normalized || !hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  try {
+    const { data } = await getBotsNameAvailability({
+      query: { name: normalized, exclude_bot_id: botIdRef.value },
+      throwOnError: true,
+    })
+    nameStatus.value = data?.available ? 'available' : ((data?.reason as NameStatus) || 'taken')
+  } catch {
+    nameStatus.value = 'idle'
+  }
+}, 400)
+
+watch(nameInput, (candidate) => {
+  if (!hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  nameStatus.value = 'checking'
+  void checkNameAvailability(candidate)
+})
+
+const nameStatusMessage = computed(() => {
+  switch (nameStatus.value) {
+    case 'checking':
+      return t('bots.nameStatus.checking')
+    case 'available':
+      return t('bots.nameStatus.available')
+    case 'taken':
+      return t('bots.nameStatus.taken')
+    case 'invalid':
+      return t('bots.nameStatus.invalid')
+    case 'reserved':
+      return t('bots.nameStatus.reserved')
+    default:
+      return ''
+  }
+})
+
+const nameValid = computed(() => !hasNameChange.value || nameStatus.value === 'available')
 
 const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
@@ -329,20 +434,38 @@ const hasSettingsChanges = computed(() => {
 })
 
 const hasTimezoneChanges = computed(() => form.timezone !== (bot.value?.timezone ?? ''))
-const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value)
+const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value || hasNameChange.value)
 const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
 
+function isNameConflict(error: unknown): boolean {
+  const e = error as { status?: number, response?: { status?: number } } | null
+  if (e?.status === 409 || e?.response?.status === 409) return true
+  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
+}
+
 async function handleSave() {
+  if (!nameValid.value) {
+    toast.error(nameStatusMessage.value || t('bots.nameStatus.invalid'))
+    return
+  }
   try {
     if (hasSettingsChanges.value) {
       const { timezone: _timezone, ...settingsPayload } = form
       await updateSettings(settingsPayload)
     }
-    if (hasTimezoneChanges.value) {
-      await updateBot(form.timezone)
+    if (hasTimezoneChanges.value || hasNameChange.value) {
+      await updateBot({
+        ...(hasTimezoneChanges.value ? { timezone: form.timezone } : {}),
+        ...(hasNameChange.value ? { name: nameInput.value.trim() } : {}),
+      })
     }
     toast.success(t('bots.settings.saveSuccess'))
   } catch (error) {
+    if (isNameConflict(error)) {
+      nameStatus.value = 'taken'
+      toast.error(t('bots.nameStatus.taken'))
+      return
+    }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
 }

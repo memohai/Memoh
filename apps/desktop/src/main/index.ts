@@ -168,7 +168,8 @@ function openBotWorkspace(botId: string): void {
   if (!id) return
   const window = ensureWindow('chat')
   focusWindow(window)
-  const target = `/chat/${encodeURIComponent(id)}`
+  // The identifier may be a bot name or UUID; both resolve on the chat page.
+  const target = `/bot/${encodeURIComponent(id)}`
   if (window.webContents.isLoading()) {
     window.webContents.once('did-finish-load', () => {
       if (window.isDestroyed()) return

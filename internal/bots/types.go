@@ -9,6 +9,7 @@ import (
 type Bot struct {
 	ID              string         `json:"id"`
 	OwnerUserID     string         `json:"owner_user_id"`
+	Name            string         `json:"name"`
 	DisplayName     string         `json:"display_name"`
 	AvatarURL       string         `json:"avatar_url,omitempty"`
 	Timezone        string         `json:"timezone,omitempty"`
@@ -35,6 +36,7 @@ type BotCheck struct {
 
 // CreateBotRequest is the input for creating a bot.
 type CreateBotRequest struct {
+	Name         string         `json:"name,omitempty"`
 	DisplayName  string         `json:"display_name,omitempty"`
 	AvatarURL    string         `json:"avatar_url,omitempty"`
 	Timezone     *string        `json:"timezone,omitempty"`
@@ -46,11 +48,18 @@ type CreateBotRequest struct {
 
 // UpdateBotRequest is the input for updating a bot.
 type UpdateBotRequest struct {
+	Name        *string        `json:"name,omitempty"`
 	DisplayName *string        `json:"display_name,omitempty"`
 	AvatarURL   *string        `json:"avatar_url,omitempty"`
 	Timezone    *string        `json:"timezone,omitempty"`
 	IsActive    *bool          `json:"is_active,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// NameAvailability describes whether a bot name can be used.
+type NameAvailability struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // TransferBotRequest is the input for transferring bot ownership.

@@ -30,7 +30,7 @@ async function bootstrap() {
     onUnauthorized: () => router.replace({ name: 'Login' }),
   })
   window.api.window.onChatNavigate((target) => {
-    if (!target.startsWith('/chat')) return
+    if (!target.startsWith('/bot') && !target.startsWith('/chat')) return
     if (router.currentRoute.value.fullPath === target) return
     void router.push(target)
   })

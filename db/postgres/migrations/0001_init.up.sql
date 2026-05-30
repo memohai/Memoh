@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS bots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
+  name TEXT NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
   timezone TEXT,
@@ -181,10 +182,12 @@ CREATE TABLE IF NOT EXISTS bots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high'))
+  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high')),
+  CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
 CREATE TABLE IF NOT EXISTS bot_acl_rules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

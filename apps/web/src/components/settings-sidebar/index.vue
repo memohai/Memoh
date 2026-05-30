@@ -65,6 +65,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info, Palette, Users } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
+import { useChatStore } from '@/store/chat-list'
 import { useUserStore } from '@/store/user'
 import {
   Sidebar,
@@ -99,15 +100,20 @@ const route = useRoute()
 const { t } = useI18n()
 const selectionStore = useChatSelectionStore()
 const { currentBotId } = storeToRefs(selectionStore)
+const chatStore = useChatStore()
+const { bots } = storeToRefs(chatStore)
 const userStore = useUserStore()
 const { userInfo } = storeToRefs(userStore)
 
 const backToChatRoute = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
   if (!botId) return { name: 'home' as const }
+  // Prefer the bot's name slug so the URL stays name-oriented. Fall back to the
+  // UUID (the chat page canonicalizes it to the name on load).
+  const botName = bots.value.find((b) => b.id === botId)?.name ?? botId
   return {
-    name: 'chat' as const,
-    params: { botId },
+    name: 'bot' as const,
+    params: { botName },
   }
 })
 

@@ -302,6 +302,11 @@
       "approve": "Allow",
       "reject": "Reject",
       "pendingApproval": "pending approval",
+      "pending": {
+        "generic": "Working…",
+        "write": "Writing file…",
+        "edit": "Editing…"
+      },
       "detail": {
         "openInFiles": "Open in files",
         "input": "Input",
@@ -1034,6 +1039,16 @@
     "emptyDescription": "Click the button above to create your first bot",
     "displayName": "Name",
     "displayNamePlaceholder": "Give your bot a name",
+    "name": "URL Name",
+    "namePlaceholder": "e.g. my-assistant",
+    "nameHint": "Lowercase letters, numbers, and dashes. Used in the bot URL.",
+    "nameStatus": {
+      "checking": "Checking availability…",
+      "available": "Name is available",
+      "taken": "This name is already taken",
+      "invalid": "Use lowercase letters, numbers, and dashes (2-63 chars)",
+      "reserved": "This name is reserved"
+    },
     "avatarUrl": "Avatar URL",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",

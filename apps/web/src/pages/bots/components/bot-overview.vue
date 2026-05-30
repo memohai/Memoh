@@ -282,7 +282,7 @@ const expandedIds = ref<Set<string>>(new Set())
 const lastSyncTime = ref('--:--')
 
 const route = useRoute()
-const botId = computed(() => route.params.botId as string)
+const botId = computed(() => route.params.botName as string)
 const activeTab = useSyncedQueryParam('tab', 'overview')
 const { t } = useI18n()
 

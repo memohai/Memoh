@@ -281,19 +281,23 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 
 const route = useRoute()
 const { t } = useI18n()
-const botId = computed(() => {
-  const id = route.params.botId
+// The route param may be a name slug or a UUID; resolve it to the canonical
+// bot UUID so child tabs keep operating on UUIDs.
+const routeIdentifier = computed(() => {
+  const id = route.params.botName
   return typeof id === 'string' ? id : ''
 })
 
 const { data: bot } = useQuery({
-  key: () => ['bot', botId.value],
+  key: () => ['bot', routeIdentifier.value],
   query: async () => {
-    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
     return data
   },
-  enabled: () => !!botId.value,
+  enabled: () => !!routeIdentifier.value,
 })
+
+const botId = computed(() => bot.value?.id ?? '')
 
 const containerInfo = ref<BotContainerInfo | null>(null)
 

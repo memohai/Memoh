@@ -12,6 +12,7 @@ type Bot struct {
 	ID                     string         `json:"id"`
 	OwnerUserID            string         `json:"owner_user_id"`
 	Type                   string         `json:"type"`
+	Name                   string         `json:"name"`
 	DisplayName            sql.NullString `json:"display_name"`
 	AvatarUrl              sql.NullString `json:"avatar_url"`
 	Timezone               sql.NullString `json:"timezone"`

@@ -28,11 +28,21 @@ const routes = [
         },
       },
       {
-        name: 'chat',
-        path: '/chat/:botId?',
+        name: 'bot',
+        path: '/bot/:botName?',
         component: () => import('@/pages/home/index.vue'),
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
+        },
+      },
+      {
+        // Backwards-compatible redirect for legacy UUID-based chat links.
+        path: '/chat/:botName?',
+        redirect: (to: RouteLocationNormalized) => {
+          const botName = (to.params.botName as string) ?? ''
+          return botName
+            ? { name: 'bot', params: { botName } }
+            : { name: 'home' }
         },
       },
     ],
@@ -64,10 +74,10 @@ const routes = [
           },
           {
             name: 'bot-detail',
-            path: ':botId',
+            path: ':botName',
             component: () => import('@/pages/bots/detail.vue'),
             meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.botId,
+              breadcrumb: (route: RouteLocationNormalized) => route.params.botName,
             },
           },
         ],

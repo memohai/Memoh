@@ -199,6 +199,44 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/name-availability": {
+            "get": {
+                "description": "Validate a candidate bot name and report whether it is available",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Check bot name availability",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Candidate bot name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/bots.NameAvailability"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acl/channel-identities": {
             "get": {
                 "description": "Search locally observed channel identities for building ACL rules",
@@ -11136,6 +11174,9 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "name": {
+                    "type": "string"
+                },
                 "owner_user_id": {
                     "type": "string"
                 },
@@ -11199,6 +11240,9 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "name": {
+                    "type": "string"
+                },
                 "timezone": {
                     "type": "string"
                 },
@@ -11229,6 +11273,17 @@ const docTemplate = `{
                 }
             }
         },
+        "bots.NameAvailability": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "bots.TransferBotRequest": {
             "type": "object",
             "properties": {
@@ -11252,6 +11307,9 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
                 },
                 "timezone": {
                     "type": "string"

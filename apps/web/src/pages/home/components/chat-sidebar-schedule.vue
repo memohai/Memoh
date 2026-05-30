@@ -181,7 +181,7 @@ function reload() {
 function goToSettings() {
   void router.push({
     name: 'bot-detail',
-    params: { botId: props.botId },
+    params: { botName: props.botId },
     query: { tab: 'schedule' },
   })
 }
