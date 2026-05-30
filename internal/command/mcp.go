@@ -8,6 +8,7 @@ import (
 func (h *Handler) buildMCPGroup() *CommandGroup {
 	g := newCommandGroup("mcp", "Manage MCP connections")
 	g.DefaultAction = "list" // bare /mcp lands on the connection list
+	g.EnableActionMenu()     // bare /mcp shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all MCP connections",

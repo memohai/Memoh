@@ -45,8 +45,32 @@ type CommandGroup struct {
 	Name          string
 	Description   string
 	DefaultAction string
+	actionMenu    bool // bare invocation shows sub-actions as buttons (see EnableActionMenu)
 	commands      map[string]SubCommand
 	order         []string // preserves registration order for help output
+}
+
+// EnableActionMenu makes a bare invocation of this group (e.g. /schedule) render
+// its sub-actions as tappable buttons instead of running a default action — for
+// groups with several actions worth discovering by tapping rather than typing.
+func (g *CommandGroup) EnableActionMenu() { g.actionMenu = true }
+
+// actionMenuResult builds the bare-invocation action menu: one button per
+// sub-action (tap re-dispatches "/group action"), with the textual Usage as the
+// fallback for non-button channels.
+func (g *CommandGroup) actionMenuResult() *Result {
+	title := MdBold("/"+g.Name) + " — " + g.Description + "\n\nChoose an action:"
+	choices := make([]ListItem, 0, len(g.order))
+	for _, name := range g.order {
+		choices = append(choices, ListItem{
+			Label:  name,
+			Action: &ItemAction{Resource: g.Name, Action: name},
+		})
+	}
+	return &Result{
+		Text:        g.Usage(),
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: title, Choices: choices}},
+	}
 }
 
 func newCommandGroup(name, description string) *CommandGroup {

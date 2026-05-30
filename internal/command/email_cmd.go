@@ -7,6 +7,7 @@ import (
 func (h *Handler) buildEmailGroup() *CommandGroup {
 	g := newCommandGroup("email", "View email configuration")
 	g.DefaultAction = "outbox" // bare /email lands on recent sends
+	g.EnableActionMenu()       // bare /email shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "providers",
 		Usage: "providers - List email providers",

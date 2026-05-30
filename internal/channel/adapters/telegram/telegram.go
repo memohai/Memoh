@@ -524,11 +524,11 @@ func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channe
 		case parsed.IsNoop():
 			return
 		case parsed.IsDismiss():
-			// Close: delete the whole transient picker/list message. Deleting is
-			// cleaner than stripping the keyboard, which would leave dangling text
-			// like "Select a provider:" with no buttons beneath it.
+			// Close: collapse the card to its title line and drop the keyboard,
+			// rather than deleting the whole message — the user keeps a short
+			// breadcrumb of what was opened instead of having it vanish.
 			if cb.Message != nil && cb.Message.Chat != nil {
-				_, _ = bot.Request(tgbotapi.NewDeleteMessage(cb.Message.Chat.ID, cb.Message.MessageID))
+				_ = editTelegramMessageText(bot, cb.Message.Chat.ID, cb.Message.MessageID, collapseToTitle(cb.Message.Text), "")
 			}
 			return
 		default:
@@ -1104,6 +1104,17 @@ var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConf
 
 // editTelegramMessageText sends an edit request. It handles "message is not modified"
 // silently but returns 429 and other errors to the caller for higher-level retry decisions.
+// collapseToTitle returns the first non-empty line of a message, used to shrink
+// an interactive card to a short breadcrumb when the user taps Close.
+func collapseToTitle(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			return s
+		}
+	}
+	return "Closed."
+}
+
 func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)

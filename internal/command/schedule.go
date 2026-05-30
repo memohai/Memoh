@@ -12,6 +12,7 @@ import (
 func (h *Handler) buildScheduleGroup() *CommandGroup {
 	g := newCommandGroup("schedule", "Manage scheduled tasks")
 	g.DefaultAction = "list" // bare /schedule lands on the live schedule list
+	g.EnableActionMenu()     // bare /schedule shows its sub-actions as buttons
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all schedules",
