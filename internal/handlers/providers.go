@@ -336,7 +336,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			modelType = models.ModelTypeEmbedding
 		}
 		compatibilities := m.Compatibilities
-		if len(compatibilities) == 0 {
+		if len(compatibilities) == 0 && modelType != models.ModelTypeEmbedding {
 			compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
 		}
 		name := strings.TrimSpace(m.Name)
