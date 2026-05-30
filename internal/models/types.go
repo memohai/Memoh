@@ -99,7 +99,7 @@ func (m *Model) Validate() error {
 		return errors.New("invalid model type")
 	}
 	if m.Type == ModelTypeEmbedding {
-		if m.Config.Dimensions != nil && *m.Config.Dimensions <= 0 {
+		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
 			return errors.New("dimensions must be greater than 0 for embedding models")
 		}
 	}

@@ -85,21 +85,11 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "embedding model without dimensions is valid",
+			name: "embedding model missing dimensions",
 			model: models.Model{
 				ModelID:    "text-embedding-ada-002",
 				ProviderID: "11111111-1111-1111-1111-111111111111",
 				Type:       models.ModelTypeEmbedding,
-			},
-			wantErr: false,
-		},
-		{
-			name: "embedding model with zero dimensions is invalid",
-			model: models.Model{
-				ModelID:    "text-embedding-ada-002",
-				ProviderID: "11111111-1111-1111-1111-111111111111",
-				Type:       models.ModelTypeEmbedding,
-				Config:     models.ModelConfig{Dimensions: intPtr(0)},
 			},
 			wantErr: true,
 		},

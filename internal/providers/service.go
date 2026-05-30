@@ -369,18 +369,17 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
+		if m.Type != "" && m.Type != sdk.ModelTypeChat {
+			continue
+		}
 		name := m.DisplayName
 		if name == "" {
 			name = m.ID
 		}
-		modelType := string(m.Type)
-		if modelType == "" {
-			modelType = string(models.ModelTypeChat)
-		}
 		remoteModels = append(remoteModels, RemoteModel{
 			ID:   m.ID,
 			Name: name,
-			Type: modelType,
+			Type: string(models.ModelTypeChat),
 		})
 	}
 	return remoteModels, nil
