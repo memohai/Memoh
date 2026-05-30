@@ -110,12 +110,6 @@ type RemoteModel struct {
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 }
 
-// FetchModelsResponse represents the response from the provider's /v1/models endpoint.
-type FetchModelsResponse struct {
-	Object string        `json:"object"`
-	Data   []RemoteModel `json:"data"`
-}
-
 // ImportModelsResponse represents the response for importing models.
 type ImportModelsResponse struct {
 	Created int      `json:"created"`

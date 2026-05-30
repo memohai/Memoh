@@ -292,7 +292,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 
 // ImportModels godoc
 // @Summary Import models from provider
-// @Description Fetch models from provider's /v1/models endpoint and import them
+// @Description Fetch models from provider and import them
 // @Tags providers
 // @Accept json
 // @Produce json
