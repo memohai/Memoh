@@ -161,11 +161,11 @@
         "amber": "Amber"
       },
       "colorSchemeDescriptions": {
-        "memoh": "Standard purple palette.",
-        "ocean": "Cool blues with high visibility.",
-        "forest": "Subtle green tones.",
-        "rose": "Warm accents and soft contrast.",
-        "amber": "Golden highlights with clear status indicators."
+        "memoh": "Standard purple palette",
+        "ocean": "Cool blues with high visibility",
+        "forest": "Subtle green tones",
+        "rose": "Warm accents and soft contrast",
+        "amber": "Golden highlights with clear status indicators"
       }
     },
     "langZh": "中文",

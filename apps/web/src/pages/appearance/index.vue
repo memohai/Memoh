@@ -78,38 +78,15 @@
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <button
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ColorSchemeCard
               v-for="scheme in colorSchemes"
               :key="scheme.id"
-              type="button"
-              class="rounded-lg border bg-background p-3 text-left transition-colors hover:bg-accent"
-              :class="colorScheme === scheme.id ? 'border-foreground' : 'border-border'"
-              @click="setColorScheme(scheme.id)"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-xs font-medium">
-                    {{ t(scheme.labelKey) }}
-                  </p>
-                  <p class="mt-1 text-[11px] text-muted-foreground">
-                    {{ t(scheme.descriptionKey) }}
-                  </p>
-                </div>
-                <Check
-                  v-if="colorScheme === scheme.id"
-                  class="size-4 shrink-0"
-                />
-              </div>
-              <div class="mt-3 flex gap-1.5">
-                <span
-                  v-for="swatch in scheme.swatches"
-                  :key="swatch"
-                  class="size-5 rounded-full border border-border"
-                  :style="{ backgroundColor: swatch }"
-                />
-              </div>
-            </button>
+              :scheme="scheme"
+              :selected="colorScheme === scheme.id"
+              show-description
+              @select="setColorScheme(scheme.id)"
+            />
           </div>
         </CardContent>
       </Card>
@@ -132,10 +109,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { Check, Moon, Sun } from 'lucide-vue-next'
+import { Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import type { Locale } from '@/i18n'
+import ColorSchemeCard from '@/components/color-scheme-card/index.vue'
 import { colorSchemes } from '@/constants/color-schemes'
 import { useSettingsStore } from '@/store/settings'
 
