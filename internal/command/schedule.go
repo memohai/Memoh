@@ -58,13 +58,13 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "get",
 		Usage: "get <name> - Get schedule details",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /schedule get <name>", nil
+				return &Result{Text: "Usage: " + CmdRef("schedule get <name>")}, nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			status := "Active"
 			if !item.Enabled {
@@ -78,7 +78,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if d := strings.TrimSpace(desc); d == "" ||
 				strings.EqualFold(d, strings.TrimSpace(item.Name)) ||
 				strings.EqualFold(d, strings.TrimSpace(item.Command)) {
-				desc = "" // don't echo the name/command back as a description
+				desc = ""
 			}
 			pairs := []kv{
 				{"Description", desc},
@@ -91,7 +91,11 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if !item.UpdatedAt.Truncate(time.Second).Equal(item.CreatedAt.Truncate(time.Second)) {
 				pairs = append(pairs, kv{"Updated", humanizeTime(item.UpdatedAt)})
 			}
-			return formatKVTitled(item.Name, pairs), nil
+			return WithButtons(
+				&Result{Text: formatKVTitled(item.Name, pairs)},
+				ListItem{Label: "◀ Schedule", Action: &ItemAction{Resource: "schedule", Action: "list"}},
+				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+			), nil
 		},
 	})
 	g.Register(SubCommand{

@@ -43,14 +43,14 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "get",
 		Usage: "get <name> - Get MCP connection details",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /mcp get <name>", nil
+				return &Result{Text: "Usage: " + CmdRef("mcp get <name>")}, nil
 			}
 			name := cc.Args[0]
 			items, err := h.mcpConnService.ListByBot(cc.Ctx, cc.BotID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			for _, item := range items {
 				if strings.EqualFold(item.Name, name) {
@@ -64,23 +64,25 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					}
 					authType := item.AuthType
 					if strings.EqualFold(strings.TrimSpace(authType), "none") {
-						authType = "" // default for every server; omit rather than print noise
+						authType = ""
 					}
-					// Lead with Status (what the user opened this view to check); show
-					// Reason only on failure (formatKV skips blank values).
-					return formatKVTitled(item.Name, []kv{
-						{"Status", humanizeStatus(item.Status)},
-						{"Reason", item.StatusMessage},
-						{"Type", item.Type},
-						{"Active", boolStr(item.Active)},
-						{"Auth", authType},
-						{"Tools", toolsStr},
-						{"Created", humanizeTime(item.CreatedAt)},
-						{"Updated", humanizeTime(item.UpdatedAt)},
-					}), nil
+					return WithButtons(
+						&Result{Text: formatKVTitled(item.Name, []kv{
+							{"Status", humanizeStatus(item.Status)},
+							{"Reason", item.StatusMessage},
+							{"Type", item.Type},
+							{"Active", boolStr(item.Active)},
+							{"Auth", authType},
+							{"Tools", toolsStr},
+							{"Created", humanizeTime(item.CreatedAt)},
+							{"Updated", humanizeTime(item.UpdatedAt)},
+						})},
+						ListItem{Label: "◀ MCP", Action: &ItemAction{Resource: "mcp", Action: "list"}},
+						ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+					), nil
 				}
 			}
-			return fmt.Sprintf("No MCP connection named %q. Run /mcp list to see connections.", name), nil
+			return &Result{Text: fmt.Sprintf("No MCP connection named %q. See connections with %s.", name, CmdRef("mcp list"))}, nil
 		},
 	})
 	g.Register(SubCommand{

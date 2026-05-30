@@ -334,7 +334,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 		case parsed.Action == "":
 			return &Result{Text: h.registry.GlobalHelp()}, nil
 		case len(parsed.Args) == 0:
-			return &Result{Text: h.registry.GroupHelp(parsed.Action)}, nil
+			return h.registry.GroupHelpResult(parsed.Action), nil
 		default:
 			return &Result{Text: h.registry.ActionHelp(parsed.Action, parsed.Args[0])}, nil
 		}

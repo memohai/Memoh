@@ -146,6 +146,50 @@ func (r *Registry) GroupHelp(name string) string {
 	return group.Usage()
 }
 
+// GroupHelpResult returns an interactive version of GroupHelp: each sub-action
+// is a tappable button that dispatches "/{group} {action}" in place, plus a
+// "◀ Back" button that returns to the group's default content view. Text-only
+// channels fall back to the textual Usage listing.
+func (r *Registry) GroupHelpResult(name string) *Result {
+	group, ok := r.groups[name]
+	if !ok {
+		return &Result{Text: fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(name), CmdRef("help"))}
+	}
+	title := MdBold("/"+group.Name) + " — " + group.Description + "\n\nTap an action:"
+	choices := make([]ListItem, 0, len(group.order)+1)
+	for _, subName := range group.order {
+		sub := group.commands[subName]
+		_, summary := splitUsage(sub.Usage)
+		label := subName
+		if summary != "" {
+			label += " — " + summary
+		}
+		if sub.IsWrite {
+			label += " 🔒"
+		}
+		choices = append(choices, ListItem{
+			Label:  label,
+			Action: &ItemAction{Resource: group.Name, Action: subName},
+		})
+	}
+	// "◀ Back" returns to the group's content (bare /{group}).
+	back := group.DefaultAction
+	if back == "" {
+		back = "list"
+	}
+	choices = append(choices, ListItem{
+		Label:  "◀ " + group.Name,
+		Action: &ItemAction{Resource: group.Name, Action: back},
+	})
+	return &Result{
+		Text: group.Usage(),
+		Interactive: &Interactive{
+			Kind:    InteractiveChoices,
+			Choices: &ChoicesView{Title: title, Choices: choices},
+		},
+	}
+}
+
 func (r *Registry) ActionHelp(groupName, action string) string {
 	group, ok := r.groups[groupName]
 	if !ok {
