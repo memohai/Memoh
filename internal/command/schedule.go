@@ -21,7 +21,10 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No schedules yet.\n\nSchedules run a command on a recurring timer. Create one, for example:\n" + CmdRef(`schedule create daily "0 9 * * *" "Send the report"`)}, nil
+				return WithButtons(
+					&Result{Text: "No schedules yet.\n\nSchedules run a command on a recurring timer. Create one, for example:\n" + CmdRef(`schedule create daily "0 9 * * *" "Send the report"`)},
+					ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {

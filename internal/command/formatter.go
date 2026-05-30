@@ -270,6 +270,21 @@ func WithExtraActions(r *Result, extras ...ListItem) *Result {
 	return r
 }
 
+// WithButtons attaches tappable action buttons to any Result (including plain
+// text / empty states). Button channels render a ChoicesView; text-only channels
+// see only the text. Use this for empty-state guidance buttons ("All commands ▸")
+// where there is no list to attach ExtraActions to.
+func WithButtons(r *Result, buttons ...ListItem) *Result {
+	if r == nil || len(buttons) == 0 {
+		return r
+	}
+	r.Interactive = &Interactive{
+		Kind:    InteractiveChoices,
+		Choices: &ChoicesView{Title: r.Text, Choices: buttons},
+	}
+	return r
+}
+
 func listItemFromRecord(r listRecord) ListItem {
 	item := ListItem{Selected: r.selected, Action: r.action}
 	if len(r.fields) == 0 {

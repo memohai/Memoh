@@ -16,7 +16,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No email providers yet.\n\nEmail providers let the bot send and receive mail. Add one in the web dashboard."}, nil
+				return WithButtons(
+					&Result{Text: "No email providers yet.\n\nEmail providers let the bot send and receive mail. Add one in the web dashboard."},
+					ListItem{Label: "Bindings", Action: &ItemAction{Resource: "email", Action: "bindings"}},
+					ListItem{Label: "Outbox", Action: &ItemAction{Resource: "email", Action: "outbox"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
@@ -42,7 +46,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No email bindings yet.\n\nA binding gives this bot an email address it can send from. Add one in the web dashboard."}, nil
+				return WithButtons(
+					&Result{Text: "No email bindings yet.\n\nA binding gives this bot an email address it can send from. Add one in the web dashboard."},
+					ListItem{Label: "Providers", Action: &ItemAction{Resource: "email", Action: "providers"}},
+					ListItem{Label: "Outbox", Action: &ItemAction{Resource: "email", Action: "outbox"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
@@ -73,7 +81,11 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				return nil, err
 			}
 			if total == 0 {
-				return &Result{Text: "No emails sent yet.\n\nEmails the bot sends will appear here."}, nil
+				return WithButtons(
+					&Result{Text: "No emails sent yet.\n\nEmails the bot sends will appear here."},
+					ListItem{Label: "Providers", Action: &ItemAction{Resource: "email", Action: "providers"}},
+					ListItem{Label: "Bindings", Action: &ItemAction{Resource: "email", Action: "bindings"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {

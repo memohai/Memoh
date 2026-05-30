@@ -17,7 +17,10 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard."}, nil
+				return WithButtons(
+					&Result{Text: "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard."},
+					ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {

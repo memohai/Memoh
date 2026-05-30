@@ -16,7 +16,10 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 				return nil, err
 			}
 			if total == 0 {
-				return &Result{Text: "No heartbeat logs yet.\n\nHeartbeats are periodic autonomous check-ins. Runs appear here once heartbeat is enabled."}, nil
+				return WithButtons(
+					&Result{Text: "No heartbeat logs yet.\n\nHeartbeats are periodic autonomous check-ins. Runs appear here once heartbeat is enabled."},
+					ListItem{Label: "Settings ▸", Action: &ItemAction{Resource: "settings", Action: "get"}},
+				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
