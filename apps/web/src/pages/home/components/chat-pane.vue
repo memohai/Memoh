@@ -332,33 +332,30 @@
                       >
                         {{ $t('chat.noModels') }}
                       </div>
-                      <Tooltip
+                      <button
                         v-for="model in acpModels"
                         v-else
                         :key="model.id || model.name"
+                        type="button"
+                        class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        @click="onACPModelSelected(model)"
                       >
-                        <TooltipTrigger as-child>
-                          <button
-                            type="button"
-                            class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted"
-                            @click="onACPModelSelected(model)"
+                        <span class="min-w-0 flex-1">
+                          <span class="block truncate">
+                            {{ model.name || model.id }}
+                          </span>
+                          <span
+                            v-if="model.description"
+                            class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
                           >
-                            <span class="min-w-0 flex-1 truncate">
-                              {{ model.name || model.id }}
-                            </span>
-                            <Check
-                              v-if="model.id === currentACPModelId"
-                              class="size-3 text-muted-foreground"
-                            />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent
-                          v-if="model.description"
-                          class="max-w-80 text-left leading-relaxed"
-                        >
-                          {{ model.description }}
-                        </TooltipContent>
-                      </Tooltip>
+                            {{ model.description }}
+                          </span>
+                        </span>
+                        <Check
+                          v-if="model.id === currentACPModelId"
+                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                        />
+                      </button>
                     </div>
                     <ModelOptions
                       v-else
@@ -472,7 +469,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, ChevronUp, Lightbulb, CircleAlert, ArrowDown, MessageSquare, Check, FolderOpen } from 'lucide-vue-next'
-import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger, Tooltip, TooltipContent, TooltipTrigger } from '@memohai/ui'
+import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 import { useScroll, useElementBounding, useIntersectionObserver, useStorage } from '@vueuse/core'
