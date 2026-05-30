@@ -108,6 +108,7 @@ type RemoteModel struct {
 	Type             string   `json:"type,omitempty"`
 	Compatibilities  []string `json:"compatibilities,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	Dimensions       *int     `json:"dimensions,omitempty"`
 }
 
 // ImportModelsResponse represents the response for importing models.

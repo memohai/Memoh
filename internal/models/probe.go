@@ -51,7 +51,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 
 	if model.Type == string(ModelTypeEmbedding) {
-		return s.testEmbeddingModel(ctx, baseURL, creds.APIKey, model.ModelID, nil)
+		return s.testEmbeddingModel(ctx, string(clientType), baseURL, creds.APIKey, model.ModelID, nil)
 	}
 
 	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
@@ -108,15 +108,12 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 // testEmbeddingModel probes an embedding model by performing a minimal
 // embedding request via the Twilight SDK, verifying that the model is
 // reachable and functional rather than merely checking HTTP connectivity.
-func (*Service) testEmbeddingModel(ctx context.Context, baseURL, apiKey, modelID string, httpClient *http.Client) (TestResponse, error) {
+func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, apiKey, modelID string, httpClient *http.Client) (TestResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	model := NewSDKEmbeddingModel(string(ClientTypeOpenAICompletions), baseURL, apiKey, modelID, probeTimeout, httpClient)
-	client := sdk.NewClient()
-
 	start := time.Now()
-	_, err := client.Embed(ctx, "hello", sdk.WithEmbeddingModel(model))
+	_, err := InferEmbeddingDimensions(ctx, clientType, baseURL, apiKey, modelID, probeTimeout, httpClient)
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {

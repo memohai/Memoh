@@ -256,18 +256,90 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 		t.Parallel()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/models" {
-				t.Fatalf("expected /models path, got %q", r.URL.Path)
-			}
-
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"models": []map[string]any{
-					{
-						"name":        "models/gemini-2.0-flash",
-						"displayName": "Gemini 2.0 Flash",
+			switch r.URL.Path {
+			case "/models":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"models": []map[string]any{
+						{
+							"name":                       "models/gemini-2.0-flash",
+							"displayName":                "Gemini 2.0 Flash",
+							"supportedGenerationMethods": []string{"generateContent", "countTokens"},
+						},
+						{
+							"name":                       "models/gemini-embedding-001",
+							"displayName":                "Gemini Embedding 001",
+							"supportedGenerationMethods": []string{"embedContent", "countTokens"},
+						},
 					},
-				},
-			})
+				})
+			case "/models/gemini-embedding-001:embedContent":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"embedding": map[string]any{
+						"values": []float64{0.1, 0.2, 0.3, 0.4, 0.5},
+					},
+				})
+			default:
+				t.Fatalf("unexpected path %q", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		s := &Service{}
+		remoteModels, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeGoogleGenerativeAI),
+			Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+		})
+		if err != nil {
+			t.Fatalf("fetch remote models: %v", err)
+		}
+		if len(remoteModels) != 2 {
+			t.Fatalf("expected 2 models, got %d", len(remoteModels))
+		}
+		if remoteModels[0].ID != "gemini-2.0-flash" {
+			t.Fatalf("expected models/ prefix stripped, got %q", remoteModels[0].ID)
+		}
+		if remoteModels[0].Name != "Gemini 2.0 Flash" {
+			t.Fatalf("expected display name, got %q", remoteModels[0].Name)
+		}
+		if remoteModels[0].Type != string(models.ModelTypeChat) {
+			t.Fatalf("expected chat type, got %q", remoteModels[0].Type)
+		}
+		if remoteModels[1].ID != "gemini-embedding-001" {
+			t.Fatalf("expected embedding model imported, got %q", remoteModels[1].ID)
+		}
+		if remoteModels[1].Type != string(models.ModelTypeEmbedding) {
+			t.Fatalf("expected embedding type, got %q", remoteModels[1].Type)
+		}
+		if remoteModels[1].Dimensions == nil || *remoteModels[1].Dimensions != 5 {
+			t.Fatalf("expected inferred embedding dimensions 5, got %v", remoteModels[1].Dimensions)
+		}
+	})
+
+	t.Run("google skips embedding when dimensions probe fails", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/models":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"models": []map[string]any{
+						{
+							"name":                       "models/gemini-2.0-flash",
+							"displayName":                "Gemini 2.0 Flash",
+							"supportedGenerationMethods": []string{"generateContent", "countTokens"},
+						},
+						{
+							"name":                       "models/gemini-embedding-001",
+							"displayName":                "Gemini Embedding 001",
+							"supportedGenerationMethods": []string{"embedContent", "countTokens"},
+						},
+					},
+				})
+			case "/models/gemini-embedding-001:embedContent":
+				http.Error(w, `{"error":{"message":"quota exceeded"}}`, http.StatusTooManyRequests)
+			default:
+				t.Fatalf("unexpected path %q", r.URL.Path)
+			}
 		}))
 		defer server.Close()
 
@@ -280,13 +352,10 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 			t.Fatalf("fetch remote models: %v", err)
 		}
 		if len(remoteModels) != 1 {
-			t.Fatalf("expected 1 model, got %d", len(remoteModels))
+			t.Fatalf("expected only chat model after failed embedding probe, got %d", len(remoteModels))
 		}
 		if remoteModels[0].ID != "gemini-2.0-flash" {
-			t.Fatalf("expected models/ prefix stripped, got %q", remoteModels[0].ID)
-		}
-		if remoteModels[0].Name != "Gemini 2.0 Flash" {
-			t.Fatalf("expected display name, got %q", remoteModels[0].Name)
+			t.Fatalf("expected chat model to still import, got %q", remoteModels[0].ID)
 		}
 	})
 

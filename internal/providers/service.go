@@ -369,17 +369,35 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
-		if m.Type != "" && m.Type != sdk.ModelTypeChat {
+		modelType := m.Type
+		if modelType == "" {
+			modelType = sdk.ModelTypeChat
+		}
+		if modelType != sdk.ModelTypeChat && modelType != sdk.ModelTypeEmbedding {
 			continue
 		}
 		name := m.DisplayName
 		if name == "" {
 			name = m.ID
 		}
+		var dimensions *int
+		if modelType == sdk.ModelTypeEmbedding {
+			dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
+			if err != nil {
+				logger := s.logger
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
+				continue
+			}
+			dimensions = &dim
+		}
 		remoteModels = append(remoteModels, RemoteModel{
-			ID:   m.ID,
-			Name: name,
-			Type: string(models.ModelTypeChat),
+			ID:         m.ID,
+			Name:       name,
+			Type:       string(modelType),
+			Dimensions: dimensions,
 		})
 	}
 	return remoteModels, nil

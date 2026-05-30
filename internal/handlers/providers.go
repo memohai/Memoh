@@ -336,7 +336,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			modelType = models.ModelTypeEmbedding
 		}
 		compatibilities := m.Compatibilities
-		if len(compatibilities) == 0 {
+		if len(compatibilities) == 0 && modelType == models.ModelTypeChat {
 			compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
 		}
 		name := strings.TrimSpace(m.Name)
@@ -351,6 +351,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			Config: models.ModelConfig{
 				Compatibilities:  compatibilities,
 				ReasoningEfforts: m.ReasoningEfforts,
+				Dimensions:       m.Dimensions,
 			},
 		})
 		if err != nil {
