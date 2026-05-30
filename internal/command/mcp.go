@@ -21,11 +21,15 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				records = append(records, listRecord{fields: []kv{
-					{"Name", item.Name},
-					{"Status", humanizeStatus(item.Status)},
-					{"Type", item.Type},
-				}})
+				records = append(records, listRecord{
+					fields: []kv{
+						{"Name", item.Name},
+						{"Status", humanizeStatus(item.Status)},
+						{"Type", item.Type},
+					},
+					// Tap a connection to open its details — no typing of /mcp get.
+					action: &ItemAction{Resource: "mcp", Action: "get", Args: []string{item.Name}},
+				})
 			}
 			return buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "See full details with "+CmdRef("mcp get <name>")+"."), nil
 		},

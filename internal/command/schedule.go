@@ -39,7 +39,12 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				if d := strings.TrimSpace(item.Description); d != "" && !strings.EqualFold(d, strings.TrimSpace(item.Name)) {
 					note = truncate(d, 60)
 				}
-				records = append(records, listRecord{fields: fields, note: note})
+				records = append(records, listRecord{
+					fields: fields,
+					note:   note,
+					// Tap a schedule to open its details — no typing of /schedule get.
+					action: &ItemAction{Resource: "schedule", Action: "get", Args: []string{item.Name}},
+				})
 			}
 			return buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, ""), nil
 		},

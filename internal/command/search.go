@@ -29,6 +29,8 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				rec := providerListRecord(item.Name, item.Provider, false, item.ID == settingsResp.SearchProviderID)
+				// Tap a provider to switch to it — no typing of /search set.
+				rec.action = &ItemAction{Resource: "search", Action: "set", Args: []string{item.Name}}
 				if item.ID == settingsResp.SearchProviderID {
 					currentRecords = append(currentRecords, rec)
 					continue

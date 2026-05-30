@@ -121,18 +121,20 @@ func (r *Registry) RegisterGroup(group *CommandGroup) {
 	r.order = append(r.order, group.Name)
 }
 
-// GlobalHelp returns the top-level help text listing all commands.
+// GlobalHelp returns the top-level help text listing all commands. Single-token
+// commands are rendered as plain "/cmd" (not code spans) so Telegram linkifies
+// them as tap-to-send; multi-word sub-actions stay tap-to-copy in GroupHelp.
 func (r *Registry) GlobalHelp() string {
 	var b strings.Builder
 	b.WriteString(MdBold("Available commands") + "\n\n")
-	b.WriteString("- " + CmdRef("help") + " — show this help\n")
-	b.WriteString("- " + CmdRef("new") + " — start a new conversation\n")
-	b.WriteString("- " + CmdRef("stop") + " — stop the current reply\n")
+	b.WriteString("- /help — show this help\n")
+	b.WriteString("- /new — start a new conversation\n")
+	b.WriteString("- /stop — stop the current reply\n")
 	for _, name := range r.order {
 		group := r.groups[name]
-		fmt.Fprintf(&b, "- %s — %s\n", CmdRef(group.Name), group.Description)
+		fmt.Fprintf(&b, "- /%s — %s\n", group.Name, group.Description)
 	}
-	b.WriteString("\nTap a command to copy it. Run " + CmdRef("help <group>") + " for actions, e.g. " + CmdRef("help model") + ".")
+	b.WriteString("\nTap any command to run it. For a group's actions, send /help <group> — e.g. /help model.")
 	return strings.TrimRight(b.String(), "\n")
 }
 

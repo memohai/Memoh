@@ -267,6 +267,26 @@ func (*TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]an
 }
 
 // Connect starts long-polling for Telegram updates and forwards messages to the handler.
+// registerCommandMenu publishes the curated slash-command list to Telegram via
+// setMyCommands, so the bot's "/" menu is populated automatically (no per-bot
+// setup). Best-effort: errors are logged, never fatal.
+func (a *TelegramAdapter) registerCommandMenu(bot *tgbotapi.BotAPI, configID string) {
+	menu := command.MenuCommands()
+	cmds := make([]tgbotapi.BotCommand, 0, len(menu))
+	for _, m := range menu {
+		cmds = append(cmds, tgbotapi.BotCommand{Command: m.Command, Description: m.Description})
+	}
+	if _, err := bot.Request(tgbotapi.NewSetMyCommands(cmds...)); err != nil {
+		if a.logger != nil {
+			a.logger.Warn("register command menu failed", slog.String("config_id", configID), slog.Any("error", err))
+		}
+		return
+	}
+	if a.logger != nil {
+		a.logger.Info("registered command menu", slog.String("config_id", configID), slog.Int("count", len(cmds)))
+	}
+}
+
 func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
 		a.logger.Info("start", slog.String("config_id", cfg.ID))
@@ -285,6 +305,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		}
 		return nil, err
 	}
+	// Advertise the slash-command menu so users discover and tap commands from
+	// Telegram's native "/" menu without any per-bot configuration. Non-blocking
+	// and best-effort — a failure here must not stop the bot from connecting.
+	go a.registerCommandMenu(bot, cfg.ID)
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
 	updates := bot.GetUpdatesChan(updateConfig)

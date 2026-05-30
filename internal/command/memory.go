@@ -70,6 +70,8 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				rec := providerListRecord(item.Name, item.Provider, item.IsDefault, item.ID == settingsResp.MemoryProviderID)
+				// Tap a provider to switch to it — no typing of /memory set.
+				rec.action = &ItemAction{Resource: "memory", Action: "set", Args: []string{item.Name}}
 				if item.ID == settingsResp.MemoryProviderID {
 					currentRecords = append(currentRecords, rec)
 					continue
