@@ -12,7 +12,7 @@
 - 跨会话保留状态
 - 可选地运行桌面显示和有头浏览器
 
-底层容器 runtime 由 `config.toml` 的 `[container].backend` 决定，trusted local workspace 另行控制。官方 Docker Compose Server Deploy 使用 `containerd`；Docker Engine、Kubernetes、Apple 和 local workspace 的差异见 [Workspace backend](/zh/installation/workspace-backends)。
+底层容器 runtime 由 `config.toml` 的 `[container].backend` 决定，trusted local workspace 另行控制。官方 Docker Compose Server Deploy 使用 `containerd`；Docker Engine、Apple 和 local workspace 的差异见 [Workspace backend](/zh/installation/workspace-backends)。
 
 ## Workspace 相关 tab
 

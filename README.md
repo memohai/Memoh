@@ -34,7 +34,7 @@ Memoh is distributed in two forms:
 
 ### ⚙️ Deploy Version
 
-The self-hosted server stack for always-on, multi-user or multi-tenant usage. Use this when you want Memoh running on a server, VM, NAS, or Kubernetes cluster, with bots available through Web UI and external channels such as Telegram, Discord, Lark, WeChat, Email, and more.
+The self-hosted server stack for always-on, multi-user or multi-tenant usage. Use this when you want Memoh running on a server, VM, or NAS, with bots available through Web UI and external channels such as Telegram, Discord, Lark, WeChat, Email, and more.
 
 <details>
 <summary><strong>🐳 Deploy Memoh Server</strong></summary>
@@ -57,12 +57,6 @@ cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml
 docker compose up -d
-```
-
-Kubernetes deployment (**uses Kubernetes workspaces by default**):
-
-```bash
-kubectl apply -k deploy/kubernetes
 ```
 
 > **Install a specific version:**
@@ -150,7 +144,7 @@ Memoh is built for **always-on continuity** — an AI that stays online, and a m
 - 🔐 **Access Control**: Priority-based ACL rules with presets, allow/deny effects, and scope by channel identity, channel type, or conversation.
 - 🧪 **Multi-Model**: OpenAI-compatible, Anthropic, Google, OpenAI Codex, GitHub Copilot, and Edge TTS providers. Per-bot model assignment, provider OAuth, and automatic model import.
 - 🎙️ **Speech & Transcription**: Bots can speak through 10+ TTS providers (Edge, OpenAI, ElevenLabs, Deepgram, Azure, Google, MiniMax, Volcengine, Alibaba, OpenRouter) and listen — voice messages received from Telegram, Discord, etc. are auto-transcribed via STT models (OpenAI / OpenRouter), and bots can transcribe any audio file on demand through a built-in tool.
-- 🚀 **Server Deploy**: Docker Compose and Kubernetes deployment paths for always-on server usage, with automatic migration, container runtime setup, and supporting services for workspace containers.
+- 🚀 **Server Deploy**: Docker Compose deployment for always-on server usage, with automatic migration, container runtime setup, and supporting services for workspace containers.
 
 ## Memory System
 

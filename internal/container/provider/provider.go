@@ -10,7 +10,6 @@ import (
 	appleadapter "github.com/memohai/memoh/internal/container/apple"
 	containerdadapter "github.com/memohai/memoh/internal/container/containerd"
 	dockeradapter "github.com/memohai/memoh/internal/container/docker"
-	k8sadapter "github.com/memohai/memoh/internal/container/k8s"
 )
 
 // ProvideService creates the appropriate Service based on the backend type.
@@ -32,8 +31,6 @@ func ProvideService(ctx context.Context, log *slog.Logger, cfg config.Config, ba
 			return nil, nil, err
 		}
 		return svc, func() { _ = svc.Close() }, nil
-	case containerapi.BackendKubernetes, containerapi.BackendK8s:
-		return k8sadapter.NewService(cfg), func() {}, nil
 	case containerapi.BackendContainerd:
 		client, err := containerdadapter.NewClient(ctx, cfg.Containerd.SocketPath)
 		if err != nil {

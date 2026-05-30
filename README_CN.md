@@ -34,7 +34,7 @@ Memoh 提供两种形态：
 
 ### ⚙️ Deploy Version
 
-面向长期在线、多人或多租户使用的自托管服务端栈。适合把 Memoh 跑在服务器、VM、NAS 或 Kubernetes 集群上，让机器人通过 Web UI 以及 Telegram、Discord、飞书、微信、邮件等外部渠道持续可用。
+面向长期在线、多人或多租户使用的自托管服务端栈。适合把 Memoh 跑在服务器、VM 或 NAS 上，让机器人通过 Web UI 以及 Telegram、Discord、飞书、微信、邮件等外部渠道持续可用。
 
 <details>
 <summary><strong>🐳 部署 Memoh Server</strong></summary>
@@ -57,12 +57,6 @@ cd Memoh
 cp conf/app.docker.toml config.toml
 # 编辑 config.toml
 docker compose up -d
-```
-
-Kubernetes 部署（**默认使用 Kubernetes workspace**）：
-
-```bash
-kubectl apply -k deploy/kubernetes
 ```
 
 > **安装指定版本：**
@@ -148,7 +142,7 @@ kubectl apply -k deploy/kubernetes
 - 🔐 **访问控制**：基于优先级的 ACL，有预设、允许/拒绝、可按渠道身份、渠道类型或会话作用域配置。
 - 🧪 **多模型**：OpenAI 兼容、Anthropic、Google、OpenAI Codex、GitHub Copilot、Edge TTS 等。可按机器人选模型、提供方 OAuth、自动拉模型列表。
 - 🎙️ **语音与转写**：机器人可经 10+ 家 TTS（Edge、OpenAI、ElevenLabs、Deepgram、Azure、Google、MiniMax、火山、阿里、OpenRouter 等）发声；从 Telegram、Discord 等收到语音会可用 STT（OpenAI / OpenRouter）自动转写，也可用内置工具按需转任意音频。
-- 🚀 **Server Deploy**：面向长期在线服务端使用的 Docker Compose 与 Kubernetes 部署路径，包含自动迁移、容器运行时配置，以及 workspace 容器所需的配套服务。
+- 🚀 **Server Deploy**：面向长期在线服务端使用的 Docker Compose 部署路径，包含自动迁移、容器运行时配置，以及 workspace 容器所需的配套服务。
 
 ## 记忆系统
 

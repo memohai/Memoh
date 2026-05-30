@@ -26,8 +26,8 @@ timezone = "UTC"
 driver = "postgres"
 
 [container]
-# Windows template uses containerd by default. Docker and Kubernetes backends are
-# available for custom deployments, but their runtime paths must match the host.
+# Windows template uses containerd by default. The Docker backend is
+# available for custom deployments, but its runtime paths must match the host.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
 default_image = "debian:bookworm-slim"

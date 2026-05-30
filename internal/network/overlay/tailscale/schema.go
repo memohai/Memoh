@@ -20,11 +20,6 @@ func schema() netctl.ConfigSchema {
 			{Key: "http_proxy_port", Type: netctl.FieldTypeNumber, Title: "HTTP Proxy Port", Collapsed: true, Default: float64(1056), Order: 18},
 			{Key: "state_dir", Type: netctl.FieldTypeString, Title: "State Directory", Collapsed: true, Default: "/var/lib/tailscale", Order: 19},
 			{Key: "extra_args", Type: netctl.FieldTypeTextarea, Title: "Extra Args", Collapsed: true, Order: 20},
-			{Key: "k8s_mode", Type: netctl.FieldTypeBool, Title: "Kubernetes Operator Mode", Collapsed: true, Default: true, Order: 30},
-			{Key: "tags", Type: netctl.FieldTypeString, Title: "Tags", Collapsed: true, Order: 31},
-			{Key: "proxy_class", Type: netctl.FieldTypeString, Title: "Proxy Class", Collapsed: true, Order: 32},
-			{Key: "connector_routes", Type: netctl.FieldTypeTextarea, Title: "Connector Routes", Collapsed: true, Order: 33},
-			{Key: "expose_service", Type: netctl.FieldTypeBool, Title: "Expose Service", Collapsed: true, Default: true, Order: 34},
 		},
 	}
 }

@@ -50,7 +50,6 @@ type Config struct {
 	Container   ContainerConfig   `toml:"container"`
 	Containerd  ContainerdConfig  `toml:"containerd"`
 	Docker      DockerConfig      `toml:"docker"`
-	Kubernetes  KubernetesConfig  `toml:"kubernetes"`
 	Apple       AppleConfig       `toml:"apple"`
 	Local       LocalConfig       `toml:"local"`
 	Workspace   WorkspaceConfig   `toml:"workspace"`
@@ -136,38 +135,6 @@ func (c LocalConfig) MetadataPath(dataRoot string) string {
 		root = DefaultDataRoot
 	}
 	return filepath.Join(absPath(root), "local", "containers")
-}
-
-type KubernetesConfig struct {
-	Namespace          string `toml:"namespace"`
-	Kubeconfig         string `toml:"kubeconfig"`
-	InCluster          bool   `toml:"in_cluster"`
-	ServiceAccountName string `toml:"service_account_name"`
-	ImagePullSecret    string `toml:"image_pull_secret"`
-	PVCStorageClass    string `toml:"pvc_storage_class"`
-	PVCSize            string `toml:"pvc_size"`
-	BridgePort         int    `toml:"bridge_port"`
-}
-
-func (c KubernetesConfig) EffectiveNamespace() string {
-	if strings.TrimSpace(c.Namespace) != "" {
-		return strings.TrimSpace(c.Namespace)
-	}
-	return DefaultNamespace
-}
-
-func (c KubernetesConfig) EffectivePVCSize() string {
-	if strings.TrimSpace(c.PVCSize) != "" {
-		return strings.TrimSpace(c.PVCSize)
-	}
-	return "10Gi"
-}
-
-func (c KubernetesConfig) EffectiveBridgePort() int {
-	if c.BridgePort > 0 {
-		return c.BridgePort
-	}
-	return 9090
 }
 
 type WorkspaceConfig struct {
@@ -374,12 +341,6 @@ func Load(path string) (Config, error) {
 		Containerd: ContainerdConfig{
 			SocketPath: DefaultSocketPath,
 			Namespace:  DefaultNamespace,
-		},
-		Kubernetes: KubernetesConfig{
-			Namespace:  DefaultNamespace,
-			InCluster:  true,
-			PVCSize:    "10Gi",
-			BridgePort: 9090,
 		},
 		Workspace: defaultWorkspace,
 		Postgres: PostgresConfig{

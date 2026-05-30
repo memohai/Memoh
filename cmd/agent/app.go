@@ -81,7 +81,6 @@ import (
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/network/kubeapi"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
@@ -178,13 +177,8 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
 	registry := netctl.NewRegistry()
 	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	var kubeRuntime kubeapi.Runtime
-	if rt, ok := service.(kubeapi.Runtime); ok {
-		kubeRuntime = rt
-	}
 	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
 		SidecarRuntime: service,
-		KubeRuntime:    kubeRuntime,
 		Runtime:        runtime.Descriptor(),
 		StateRoot:      cfg.Workspace.DataRoot,
 	}); err != nil {

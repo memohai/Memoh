@@ -8,19 +8,16 @@ Configure container workspaces in `config.toml`:
 
 ```toml
 [container]
-backend = "containerd" # containerd, docker, kubernetes, or apple
+backend = "containerd" # containerd, docker, or apple
 ```
 
 | Backend | Best fit | Notes |
 |---------|----------|-------|
 | `containerd` | Docker Compose server deploys, Linux servers, development | Default for the official server image. Supports CNI networking, snapshots, CDI devices, provider sidecars, and the broadest local workspace feature set. |
 | `docker` | Host/binary deployments with Docker Engine | Uses the host Docker API. Runtime bind-mount paths such as `container.runtime_dir` must exist on the Docker host. |
-| `kubernetes` | Cluster deployments | Creates one Pod/PVC per bot workspace. Uses Kubernetes-native networking and storage. |
 | `apple` | macOS local testing | Uses socktainer and Apple Containerization. Overlay provider sidecars are not supported. |
 
-The one-click Docker Compose server deploy uses `containerd`. That is intentional: the server image starts an embedded containerd and mounts the runtime files needed by bot workspaces. Use the other backends for manual deployments where you control the host or cluster runtime paths.
-
-For a ready-to-edit Kubernetes starter deployment, see [Kubernetes deployment](/installation/kubernetes).
+The one-click Docker Compose server deploy uses `containerd`. That is intentional: the server image starts an embedded containerd and mounts the runtime files needed by bot workspaces. Use the other backends for manual deployments where you control the host runtime paths.
 
 ## Trusted local workspaces
 
@@ -74,27 +71,6 @@ The Docker backend talks to Docker Engine through the standard Docker environmen
 
 Avoid switching a stock Docker Compose install from `containerd` to `docker` unless you also provide host-valid paths for `runtime_dir` and Docker socket access. Otherwise the workspace containers can be created without the bridge runtime files they need.
 
-## Kubernetes
-
-```toml
-[container]
-backend = "kubernetes"
-
-[kubernetes]
-namespace = "memoh"
-in_cluster = true
-kubeconfig = ""
-service_account_name = ""
-image_pull_secret = ""
-pvc_storage_class = ""
-pvc_size = "10Gi"
-bridge_port = 9090
-```
-
-When `in_cluster = true`, Memoh uses the pod ServiceAccount. For external control, set `in_cluster = false` and provide `kubeconfig`.
-
-Kubernetes workspaces use Pods and PVCs. Make sure the namespace, RBAC, storage class, and image pull access are ready before starting Memoh.
-
 ## Apple
 
 ```toml
@@ -125,12 +101,11 @@ Bot networking has two layers:
 
 Runtime capabilities differ by backend:
 
-| Backend | Runtime network | Overlay sidecars | Kubernetes-native overlay | CDI devices | Container display |
-|---------|-----------------|------------------|---------------------------|-------------|-------------------|
-| `containerd` | CNI | Yes | No | Yes | Yes |
-| `docker` | Join Docker container network | Limited by Docker runtime capabilities | No | No | Yes, when runtime files and image packages are available |
-| `kubernetes` | Pod network | Provider-dependent | Yes | No | Backend-dependent |
-| `apple` | Basic local runtime | No | No | No | Limited |
-| `local` | Host network | No | No | Host-level only | No container desktop |
+| Backend | Runtime network | Overlay sidecars | CDI devices | Container display |
+|---------|-----------------|------------------|-------------|-------------------|
+| `containerd` | CNI | Yes | Yes | Yes |
+| `docker` | Join Docker container network | Limited by Docker runtime capabilities | No | Yes, when runtime files and image packages are available |
+| `apple` | Basic local runtime | No | No | Limited |
+| `local` | Host network | No | Host-level only | No container desktop |
 
 Overlay provider settings are configured per bot in the web UI, not in the global TOML file. The global backend still matters because it decides which overlay driver can run.

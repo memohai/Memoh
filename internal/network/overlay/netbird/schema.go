@@ -15,12 +15,6 @@ func schema() netctl.ConfigSchema {
 			{Key: "userspace", Type: netctl.FieldTypeBool, Title: "Userspace Networking", Collapsed: true, Default: false, Order: 13},
 			{Key: "state_dir", Type: netctl.FieldTypeString, Title: "State Directory", Collapsed: true, Default: "/var/lib/netbird", Order: 14},
 			{Key: "extra_args", Type: netctl.FieldTypeTextarea, Title: "Extra Args", Collapsed: true, Order: 15},
-			{Key: "groups", Type: netctl.FieldTypeString, Title: "Groups", Collapsed: true, Order: 30},
-			{Key: "resource_name", Type: netctl.FieldTypeString, Title: "Resource Name", Collapsed: true, Order: 31},
-			{Key: "policy", Type: netctl.FieldTypeString, Title: "Policy", Collapsed: true, Order: 32},
-			{Key: "policy_ports", Type: netctl.FieldTypeString, Title: "Policy Ports", Collapsed: true, Order: 33},
-			{Key: "routing_peer_enabled", Type: netctl.FieldTypeBool, Title: "Routing Peer Enabled", Collapsed: true, Default: false, Order: 34},
-			{Key: "routing_peer_replicas", Type: netctl.FieldTypeNumber, Title: "Routing Peer Replicas", Collapsed: true, Default: float64(1), Order: 35},
 		},
 	}
 }

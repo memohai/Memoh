@@ -6,13 +6,11 @@ import (
 	"path/filepath"
 
 	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/network/kubeapi"
 	"github.com/memohai/memoh/internal/network/overlay/internal/sidecar"
 )
 
 type Deps struct {
 	SidecarRuntime sidecar.Runtime
-	KubeRuntime    kubeapi.Runtime
 	Runtime        netctl.RuntimeDescriptor
 	StateRoot      string
 }
@@ -34,13 +32,12 @@ func (p *Provider) Descriptor() netctl.ProviderDescriptor {
 		Description:  "NetBird overlay for workspace networking.",
 		ConfigSchema: schema(),
 		Capabilities: netctl.ProviderCapabilities{
-			Mesh:             true,
-			PrivateDNS:       true,
-			Userspace:        true,
-			KernelTUN:        true,
-			NativeClient:     true,
-			SidecarWorker:    true,
-			KubernetesNative: true,
+			Mesh:          true,
+			PrivateDNS:    true,
+			Userspace:     true,
+			KernelTUN:     true,
+			NativeClient:  true,
+			SidecarWorker: true,
 		},
 		Actions: []netctl.ProviderAction{
 			{
@@ -113,17 +110,10 @@ func (p *Provider) BuildDriver(cfg netctl.BotOverlayConfig) (netctl.OverlayDrive
 		return nil, err
 	}
 	cfg.Config = config
-	if p.useKubernetesDriver() {
-		return newKubernetesDriver(cfg, p.deps.KubeRuntime), nil
-	}
 	if p.deps.Runtime.Capabilities.SidecarWorker {
 		return newNativeDriver(cfg, p.deps.SidecarRuntime, filepath.Join(p.deps.StateRoot, "network")), nil
 	}
 	return unsupportedDriver{kind: p.Kind(), message: "NetBird overlay is not supported by the current runtime backend."}, nil
-}
-
-func (p *Provider) useKubernetesDriver() bool {
-	return p.deps.KubeRuntime != nil && p.deps.Runtime.Capabilities.KubernetesNative
 }
 
 type unsupportedDriver struct {

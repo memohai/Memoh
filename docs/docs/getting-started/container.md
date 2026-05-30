@@ -12,7 +12,7 @@ The workspace acts as the bot's private computer. Within it, the bot can:
 - keep state across sessions
 - optionally run a desktop display and headed browser
 
-The underlying runtime is selected globally with `[container].backend` in `config.toml`, with trusted local workspace support controlled separately. The official Docker Compose server deploy uses `containerd`; Docker Engine, Kubernetes, Apple, and local workspace modes are documented in [Workspace Backends](/installation/workspace-backends).
+The underlying runtime is selected globally with `[container].backend` in `config.toml`, with trusted local workspace support controlled separately. The official Docker Compose server deploy uses `containerd`; Docker Engine, Apple, and local workspace modes are documented in [Workspace Backends](/installation/workspace-backends).
 
 ## Workspace tabs
 

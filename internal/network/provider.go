@@ -44,5 +44,4 @@ type ProviderCapabilities struct {
 	KernelTUN        bool `json:"kernel_tun"`
 	NativeClient     bool `json:"native_client"`
 	SidecarWorker    bool `json:"sidecar_worker"`
-	KubernetesNative bool `json:"kubernetes_native"`
 }

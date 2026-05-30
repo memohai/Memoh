@@ -10,10 +10,8 @@ func TestDescriptorForBackendCapabilities(t *testing.T) {
 		wantJoinNamespace bool
 		wantJoinContainer bool
 		wantCNI           bool
-		wantKubernetes    bool
 		wantSidecar       bool
 		wantRuntimeSetup  bool
-		wantClusterNative bool
 	}{
 		{
 			name:              "containerd",
@@ -29,13 +27,6 @@ func TestDescriptorForBackendCapabilities(t *testing.T) {
 			backend:           "docker",
 			wantKind:          "docker",
 			wantJoinContainer: true,
-		},
-		{
-			name:              "kubernetes",
-			backend:           "kubernetes",
-			wantKind:          "kubernetes",
-			wantKubernetes:    true,
-			wantClusterNative: true,
 		},
 		{
 			name:     "apple",
@@ -60,17 +51,11 @@ func TestDescriptorForBackendCapabilities(t *testing.T) {
 			if caps.CNI != tt.wantCNI {
 				t.Fatalf("CNI = %v, want %v", caps.CNI, tt.wantCNI)
 			}
-			if caps.KubernetesNative != tt.wantKubernetes {
-				t.Fatalf("KubernetesNative = %v, want %v", caps.KubernetesNative, tt.wantKubernetes)
-			}
 			if caps.SidecarWorker != tt.wantSidecar {
 				t.Fatalf("SidecarWorker = %v, want %v", caps.SidecarWorker, tt.wantSidecar)
 			}
 			if caps.RuntimeNetworkSetup != tt.wantRuntimeSetup {
 				t.Fatalf("RuntimeNetworkSetup = %v, want %v", caps.RuntimeNetworkSetup, tt.wantRuntimeSetup)
-			}
-			if caps.ClusterNative != tt.wantClusterNative {
-				t.Fatalf("ClusterNative = %v, want %v", caps.ClusterNative, tt.wantClusterNative)
 			}
 		})
 	}
