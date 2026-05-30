@@ -99,6 +99,11 @@
               <Input
                 v-model="searchQuery"
                 type="text"
+                name="bot-settings-search"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
                 class="pl-8 h-8 text-xs bg-transparent shadow-none focus-visible:ring-0"
                 :placeholder="$t('common.search')"
               />

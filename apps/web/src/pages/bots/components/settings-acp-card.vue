@@ -129,6 +129,11 @@
                 <Input
                   :model-value="agentForm(profile).managed[field.id || ''] || ''"
                   :type="inputType(field.type)"
+                  :name="managedFieldName(profile, field)"
+                  :autocomplete="managedFieldAutocomplete(field)"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck="false"
                   :placeholder="field.placeholder"
                   class="h-8 text-xs shadow-none"
                   @update:model-value="(val) => setManagedField(profile, field.id, String(val ?? ''))"
@@ -220,6 +225,14 @@ function inputType(type: string | undefined): string {
   if (type === 'password') return 'password'
   if (type === 'url') return 'url'
   return 'text'
+}
+
+function managedFieldName(profile: AcpprofilePublicProfile, field: AcpprofileManagedField): string {
+  return `acp-${normalizeACPAgentID(profile.id) || 'agent'}-${normalizeACPAgentID(field.id) || 'field'}`
+}
+
+function managedFieldAutocomplete(field: AcpprofileManagedField): string {
+  return field.type === 'password' ? 'new-password' : 'off'
 }
 
 function setManagedField(profile: AcpprofilePublicProfile, fieldID: string | undefined, value: string) {
