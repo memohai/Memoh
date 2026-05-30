@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode"
 
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/compaction"
@@ -144,6 +145,7 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 		HeartbeatModel:   h.resolveModelName(cc, s.HeartbeatModelID),
 		ReasoningEnabled: s.ReasoningEnabled,
 		ReasoningEffort:  s.ReasoningEffort,
+		ContextWindow:    h.resolveContextWindow(cc),
 	}, nil
 }
 
@@ -158,6 +160,27 @@ var topLevelCommands = map[string]string{
 	"reject":  "Reject the latest or specified pending tool call",
 }
 
+// resourceAliases maps alternate spellings to the canonical command resource so
+// that common variants all resolve (e.g. /setting, /reason, /effort, /think,
+// /commands). Keys and values are lowercase (Parse lowercases the resource).
+var resourceAliases = map[string]string{
+	"setting":   "settings",
+	"commands":  "help",
+	"cmds":      "help",
+	"reason":    "reasoning",
+	"reasoning": "reasoning",
+	"effort":    "reasoning",
+	"think":     "reasoning",
+}
+
+// canonicalResource resolves a parsed resource through resourceAliases.
+func canonicalResource(resource string) string {
+	if c, ok := resourceAliases[resource]; ok {
+		return c
+	}
+	return resource
+}
+
 // IsCommand reports whether the text contains a slash command.
 // Handles both direct commands ("/help") and mention-prefixed commands ("@bot /help").
 func (h *Handler) IsCommand(text string) bool {
@@ -170,14 +193,61 @@ func (h *Handler) IsCommand(text string) bool {
 	if err != nil {
 		return false
 	}
-	if parsed.Resource == "help" {
+	resource := canonicalResource(parsed.Resource)
+	if resource == "help" {
 		return true
 	}
-	if _, ok := topLevelCommands[parsed.Resource]; ok {
+	if _, ok := topLevelCommands[resource]; ok {
 		return true
 	}
-	_, ok := h.registry.groups[parsed.Resource]
+	_, ok := h.registry.groups[resource]
 	return ok
+}
+
+// IsCommandShaped reports whether text looks like a slash command (a leading
+// slash followed by a command-name token), whether or not it is registered. It
+// lets the channel layer reply with a helpful "unknown command" hint instead of
+// forwarding a mistyped command to the model. Paths/URLs (e.g. "/a/b") are
+// rejected so they are not mistaken for commands.
+func (*Handler) IsCommandShaped(text string) bool {
+	cmdText := ExtractCommandText(text)
+	if cmdText == "" || len(cmdText) < 2 {
+		return false
+	}
+	parsed, err := Parse(cmdText)
+	if err != nil {
+		return false
+	}
+	return isCommandName(parsed.Resource)
+}
+
+// isCommandName reports whether r is a plausible command name: a letter followed
+// by letters/digits/_/-, at most 32 chars. This excludes paths ("path/to/file"),
+// which contain a slash, and other non-command slashes.
+func isCommandName(r string) bool {
+	if r == "" || len(r) > 32 {
+		return false
+	}
+	for i := 0; i < len(r); i++ {
+		c := r[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case (c >= '0' && c <= '9' || c == '_' || c == '-') && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// UnknownCommandMessage is the reply for slash-command-shaped input that is not a
+// known command. It points the user at /commands and offers the no-slash escape.
+func UnknownCommandMessage(text string) string {
+	parsed, _ := Parse(ExtractCommandText(text))
+	return fmt.Sprintf(
+		"Unknown command %s. Run %s to see what's available, or resend without the leading slash to send it as a regular message.",
+		CmdRef(parsed.Resource), CmdRef("commands"),
+	)
 }
 
 // Execute parses and runs a slash command, returning the text reply.
@@ -253,10 +323,13 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 		Page:              parsed.Page,
 		Prov:              parsed.Prov,
 		Flat:              parsed.Flat,
+		Range:             parsed.Range,
 	}
 
-	// /help
-	if parsed.Resource == "help" {
+	resource := canonicalResource(parsed.Resource)
+
+	// /help (and its alias /commands)
+	if resource == "help" {
 		switch {
 		case parsed.Action == "":
 			return &Result{Text: h.registry.GlobalHelp()}, nil
@@ -270,13 +343,13 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 	// Top-level commands (e.g. /new) are handled by the channel inbound
 	// processor which has the required routing context. If Execute is
 	// called for one of these, return a short usage hint.
-	if desc, ok := topLevelCommands[parsed.Resource]; ok {
-		return &Result{Text: fmt.Sprintf("/%s - %s", parsed.Resource, desc)}, nil
+	if desc, ok := topLevelCommands[resource]; ok {
+		return &Result{Text: fmt.Sprintf("/%s - %s", resource, desc)}, nil
 	}
 
-	group, ok := h.registry.groups[parsed.Resource]
+	group, ok := h.registry.groups[resource]
 	if !ok {
-		return &Result{Text: fmt.Sprintf("Unknown command: /%s\n\n%s", parsed.Resource, h.registry.GlobalHelp())}, nil
+		return &Result{Text: fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(parsed.Resource), CmdRef("help"))}, nil
 	}
 
 	if parsed.Action == "" {
@@ -289,17 +362,17 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 
 	sub, ok := group.commands[parsed.Action]
 	if !ok {
-		return &Result{Text: fmt.Sprintf("Unknown action \"%s\" for /%s.\n\n%s", parsed.Action, parsed.Resource, group.Usage())}, nil
+		return &Result{Text: fmt.Sprintf("Unknown action %s for %s. Run %s to see its actions.", MdCode(parsed.Action), CmdRef(parsed.Resource), CmdRef("help "+parsed.Resource))}, nil
 	}
 
 	if sub.IsWrite && !writeAccess {
-		return &Result{Text: "Permission denied: only the bot owner can execute this command."}, nil
+		return &Result{Text: fmt.Sprintf("⚠️ Only the bot owner can run %s. You can still chat normally.", CmdRef(parsed.Resource))}, nil
 	}
 
 	if sub.ResultHandler != nil {
 		res, handlerErr := safeExecuteResult(sub.ResultHandler, cc)
 		if handlerErr != nil {
-			return &Result{Text: fmt.Sprintf("Error: %s", handlerErr.Error())}, nil
+			return &Result{Text: h.friendlyCommandError(parsed.Resource, handlerErr)}, nil
 		}
 		if res == nil {
 			res = &Result{}
@@ -309,9 +382,71 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 
 	text, handlerErr := safeExecute(sub.Handler, cc)
 	if handlerErr != nil {
-		return &Result{Text: fmt.Sprintf("Error: %s", handlerErr.Error())}, nil
+		return &Result{Text: h.friendlyCommandError(parsed.Resource, handlerErr)}, nil
 	}
 	return &Result{Text: text}, nil
+}
+
+// friendlyCommandError converts a service/handler error into user-facing text.
+// Clean domain errors (e.g. `schedule "x" not found`, `model "x" is ambiguous`)
+// are surfaced sentence-cased, with a discovery pointer appended for not-found
+// cases. Errors that look like infra/transport leaks (raw Go wrap chains,
+// "dial tcp", IPs, deadlines, SQL/driver text) are replaced with a generic
+// retry line so internals never reach chat.
+func (h *Handler) friendlyCommandError(resource string, err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	res := strings.TrimSpace(resource)
+	if msg != "" && !looksLikeInternalError(msg) {
+		out := capitalizeFirst(msg)
+		if !strings.HasSuffix(out, ".") {
+			out += "."
+		}
+		if res != "" && strings.Contains(strings.ToLower(msg), "not found") {
+			out += fmt.Sprintf(" Run %s to see what's available.", CmdRef(res+" list"))
+		}
+		return out
+	}
+	// Sanitized path: keep the raw error in logs, show the user a clean retry line.
+	if h.logger != nil {
+		h.logger.Warn("command failed", slog.String("resource", res), slog.Any("error", err))
+	}
+	if res == "" {
+		return "⚠️ Something went wrong. Try again in a moment."
+	}
+	return fmt.Sprintf("⚠️ Couldn't complete %s right now. Try again in a moment.", CmdRef(res))
+}
+
+// looksLikeInternalError reports whether an error message carries infra/transport
+// internals that must not reach chat (Go wrap chains, network/SQL/TLS details).
+// It keys on content markers only — a length cap was removed because legitimate
+// domain messages (e.g. an ambiguous-model list of provider-qualified IDs) can
+// be long, and capping by length wrongly replaced them with a dead retry line.
+func looksLikeInternalError(msg string) bool {
+	lower := strings.ToLower(msg)
+	markers := []string{
+		"failed to ", "dial tcp", "connection refused", "context deadline",
+		"i/o timeout", "no such host", "://", "pq:", "sql", "x509",
+		"panic:", "goroutine", "invalid memory", "nil pointer",
+	}
+	for _, m := range markers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// capitalizeFirst upper-cases the first rune of s, leaving the rest untouched.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 func allowsUnboundWriteCommands(input ExecuteInput) bool {

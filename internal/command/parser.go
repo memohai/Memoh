@@ -14,6 +14,7 @@ type ParsedCommand struct {
 	Page     int      // zero-based page offset from a "--page N" flag (0 if absent)
 	Prov     int      // provider index from a "--prov N" flag (-1 if absent)
 	Flat     int      // flat model index from a "--flat N" flag (-1 if absent)
+	Range    string   // time-window key from a "--range V" flag ("" if absent)
 }
 
 // Parse parses a raw command string into its components.
@@ -45,6 +46,7 @@ func Parse(text string) (ParsedCommand, error) {
 		Page:     flags.page,
 		Prov:     flags.prov,
 		Flat:     flags.flat,
+		Range:    flags.rangeKey,
 	}
 	if len(tokens) > 1 {
 		cmd.Action = strings.ToLower(tokens[1])
@@ -56,18 +58,24 @@ func Parse(text string) (ParsedCommand, error) {
 }
 
 type parsedFlags struct {
-	page int
-	prov int
-	flat int
+	page     int
+	prov     int
+	flat     int
+	rangeKey string
 }
 
-// extractFlags pulls "--page N", "--prov N" and "--flat N" out of the token
-// stream so they do not leak into positional Args. Absent integer flags default
-// to 0 for page and -1 for prov/flat.
+// extractFlags pulls "--page N", "--prov N", "--flat N" (ints) and "--range V"
+// (string) out of the token stream so they do not leak into positional Args.
+// Absent integer flags default to 0 for page and -1 for prov/flat; range to "".
 func extractFlags(tokens []string) ([]string, parsedFlags) {
 	out := make([]string, 0, len(tokens))
 	flags := parsedFlags{page: 0, prov: -1, flat: -1}
 	for i := 0; i < len(tokens); i++ {
+		if tokens[i] == "--range" && i+1 < len(tokens) {
+			flags.rangeKey = tokens[i+1]
+			i++ // skip the value token
+			continue
+		}
 		var target *int
 		minVal := 0
 		switch tokens[i] {

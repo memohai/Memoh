@@ -7,6 +7,7 @@ import (
 
 func (h *Handler) buildMCPGroup() *CommandGroup {
 	g := newCommandGroup("mcp", "Manage MCP connections")
+	g.DefaultAction = "list" // bare /mcp lands on the connection list
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all MCP connections",
@@ -16,18 +17,17 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No MCP connections found."}, nil
+				return &Result{Text: "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard."}, nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				records = append(records, listRecord{fields: []kv{
 					{"Name", item.Name},
+					{"Status", humanizeStatus(item.Status)},
 					{"Type", item.Type},
-					{"Active", boolStr(item.Active)},
-					{"Status", item.Status},
 				}})
 			}
-			return buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "Use /mcp get <name> for full details."), nil
+			return buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "See full details with "+CmdRef("mcp get <name>")+"."), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -52,20 +52,25 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					if len(toolNames) > 0 {
 						toolsStr = strings.Join(toolNames, ", ")
 					}
-					return formatKV([]kv{
-						{"Name", item.Name},
+					authType := item.AuthType
+					if strings.EqualFold(strings.TrimSpace(authType), "none") {
+						authType = "" // default for every server; omit rather than print noise
+					}
+					// Lead with Status (what the user opened this view to check); show
+					// Reason only on failure (formatKV skips blank values).
+					return formatKVTitled(item.Name, []kv{
+						{"Status", humanizeStatus(item.Status)},
+						{"Reason", item.StatusMessage},
 						{"Type", item.Type},
 						{"Active", boolStr(item.Active)},
-						{"Status", item.Status},
-						{"Status Message", item.StatusMessage},
-						{"Auth Type", item.AuthType},
+						{"Auth", authType},
 						{"Tools", toolsStr},
-						{"Created", item.CreatedAt.Format("2006-01-02 15:04:05")},
-						{"Updated", item.UpdatedAt.Format("2006-01-02 15:04:05")},
+						{"Created", humanizeTime(item.CreatedAt)},
+						{"Updated", humanizeTime(item.UpdatedAt)},
 					}), nil
 				}
 			}
-			return fmt.Sprintf("MCP connection %q not found.", name), nil
+			return fmt.Sprintf("No MCP connection named %q. Run /mcp list to see connections.", name), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -86,10 +91,10 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					if err := h.mcpConnService.Delete(cc.Ctx, cc.BotID, item.ID); err != nil {
 						return "", err
 					}
-					return fmt.Sprintf("MCP connection %q deleted.", name), nil
+					return fmt.Sprintf("✅ MCP connection %s deleted.", MdCode(item.Name)), nil
 				}
 			}
-			return fmt.Sprintf("MCP connection %q not found.", name), nil
+			return fmt.Sprintf("No MCP connection named %q. Run /mcp list to see connections.", name), nil
 		},
 	})
 	return g

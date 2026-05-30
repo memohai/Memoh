@@ -21,9 +21,10 @@ type CommandContext struct {
 	ThreadID          string
 	RouteID           string
 	SessionID         string
-	Page              int // zero-based page offset for paginated list commands
-	Prov              int // provider index for the model picker (-1 if absent)
-	Flat              int // flat model index for picker selection (-1 if absent)
+	Page              int    // zero-based page offset for paginated list commands
+	Prov              int    // provider index for the model picker (-1 if absent)
+	Flat              int    // flat model index for picker selection (-1 if absent)
+	Range             string // time-window key for time-series commands ("" = default)
 }
 
 // SubCommand describes a single sub-command within a resource group.
@@ -64,38 +65,42 @@ func (g *CommandGroup) Register(sub SubCommand) {
 // Usage returns the usage text for this resource group.
 func (g *CommandGroup) Usage() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "/%s - %s\n", g.Name, g.Description)
+	b.WriteString(MdBold("/"+g.Name) + " — " + g.Description + "\n\n")
 	for _, name := range g.order {
 		sub := g.commands[name]
-		desc := subSummary(sub)
-		if sub.IsWrite {
-			desc += " [owner]"
+		_, summary := splitUsage(sub.Usage)
+		line := CmdRef(g.Name + " " + sub.Name)
+		if summary != "" {
+			line += " — " + summary
 		}
-		fmt.Fprintf(&b, "- %s\n", desc)
+		if sub.IsWrite {
+			line += " (owner)"
+		}
+		fmt.Fprintf(&b, "- %s\n", line)
 	}
-	fmt.Fprintf(&b, "\nUse /help %s <action> for details.", g.Name)
-	return b.String()
+	fmt.Fprintf(&b, "\nRun %s for details.", CmdRef("help "+g.Name+" <action>"))
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (g *CommandGroup) ActionHelp(action string) string {
 	sub, ok := g.commands[action]
 	if !ok {
-		return fmt.Sprintf("Unknown action %q for /%s.\n\n%s", action, g.Name, g.Usage())
+		return fmt.Sprintf("Unknown action %s for %s. Run %s to see its actions.", MdCode(action), CmdRef(g.Name), CmdRef("help "+g.Name))
 	}
 	usage, summary := splitUsage(sub.Usage)
 	var b strings.Builder
-	fmt.Fprintf(&b, "/%s %s\n", g.Name, sub.Name)
+	b.WriteString(MdBold("/"+g.Name+" "+sub.Name) + "\n")
 	if summary != "" {
 		fmt.Fprintf(&b, "- Summary: %s\n", summary)
 	}
 	if usage == "" {
 		usage = sub.Name
 	}
-	fmt.Fprintf(&b, "- Usage: /%s %s\n", g.Name, usage)
+	fmt.Fprintf(&b, "- Usage: %s\n", CmdRef(g.Name+" "+usage))
 	if sub.IsWrite {
 		b.WriteString("- Access: owner only\n")
 	}
-	fmt.Fprintf(&b, "- Tip: use /help %s to view sibling actions.", g.Name)
+	fmt.Fprintf(&b, "- See sibling actions: %s", CmdRef("help "+g.Name))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -119,22 +124,22 @@ func (r *Registry) RegisterGroup(group *CommandGroup) {
 // GlobalHelp returns the top-level help text listing all commands.
 func (r *Registry) GlobalHelp() string {
 	var b strings.Builder
-	b.WriteString("Available commands:\n\n")
-	b.WriteString("/help - Show this help message\n")
-	b.WriteString("/new - Start a new conversation (resets session context)\n")
-	b.WriteString("/stop - Stop the current generation\n\n")
+	b.WriteString(MdBold("Available commands") + "\n\n")
+	b.WriteString("- " + CmdRef("help") + " — show this help\n")
+	b.WriteString("- " + CmdRef("new") + " — start a new conversation\n")
+	b.WriteString("- " + CmdRef("stop") + " — stop the current reply\n")
 	for _, name := range r.order {
 		group := r.groups[name]
-		fmt.Fprintf(&b, "- /%s - %s\n", group.Name, group.Description)
+		fmt.Fprintf(&b, "- %s — %s\n", CmdRef(group.Name), group.Description)
 	}
-	b.WriteString("\nUse /help <group> to view actions, e.g. /help model")
+	b.WriteString("\nTap a command to copy it. Run " + CmdRef("help <group>") + " for actions, e.g. " + CmdRef("help model") + ".")
 	return strings.TrimRight(b.String(), "\n")
 }
 
 func (r *Registry) GroupHelp(name string) string {
 	group, ok := r.groups[name]
 	if !ok {
-		return fmt.Sprintf("Unknown command group: /%s\n\n%s", name, r.GlobalHelp())
+		return fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(name), CmdRef("help"))
 	}
 	return group.Usage()
 }
@@ -142,7 +147,7 @@ func (r *Registry) GroupHelp(name string) string {
 func (r *Registry) ActionHelp(groupName, action string) string {
 	group, ok := r.groups[groupName]
 	if !ok {
-		return fmt.Sprintf("Unknown command group: /%s\n\n%s", groupName, r.GlobalHelp())
+		return fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(groupName), CmdRef("help"))
 	}
 	return group.ActionHelp(action)
 }
@@ -158,12 +163,4 @@ func splitUsage(usage string) (commandUsage string, summary string) {
 		summary = strings.TrimSpace(parts[1])
 	}
 	return commandUsage, summary
-}
-
-func subSummary(sub SubCommand) string {
-	usage, summary := splitUsage(sub.Usage)
-	if summary == "" {
-		return usage
-	}
-	return fmt.Sprintf("%s - %s", sub.Name, summary)
 }

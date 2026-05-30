@@ -10,8 +10,19 @@ import (
 
 const actionTypeCallback = "callback"
 
-// formatNewSessionMessage builds the /new confirmation enriched with the bot's
-// current model, heartbeat model, and reasoning effort.
+// friendlyOps renders a blame-free, recovery-oriented line for an operational
+// failure on a user-command path. The raw cause belongs in logs; the user never
+// sees infra nouns ("route resolver", "session service", etc.).
+func friendlyOps(verb string) string {
+	return "⚠️ Couldn't " + verb + " right now. Try again in a moment."
+}
+
+// formatNewSessionMessage builds the /new confirmation card. A fresh start is an
+// orientation moment, so it confirms the full setup the user is departing with —
+// which model (and its provider) will answer, whether reasoning is on, and how
+// much context budget they have. These are not "defaults to hide"; on this
+// surface they reassure and inform. Markdown markers are authored unconditionally
+// and stripped later for non-markdown channels.
 func formatNewSessionMessage(modeLabel string, cc command.CurrentContext) string {
 	reasoning := "off"
 	if cc.ReasoningEnabled {
@@ -21,32 +32,69 @@ func formatNewSessionMessage(modeLabel string, cc command.CurrentContext) string
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "New %s conversation started.", modeLabel)
-	fmt.Fprintf(&b, "\n- Model: %s", cc.ChatModel)
-	fmt.Fprintf(&b, "\n- Heartbeat: %s", cc.HeartbeatModel)
+	b.WriteString(command.MdBold(fmt.Sprintf("✨ New %s started.", modeLabel)))
+	// Display names / enums read better as plain text than monospace.
+	fmt.Fprintf(&b, "\n\n- Model: %s", cc.ChatModel)
+	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != "(none)" {
+		fmt.Fprintf(&b, "\n- Heartbeat: %s", hb)
+	}
 	fmt.Fprintf(&b, "\n- Reasoning: %s", reasoning)
+	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
+		fmt.Fprintf(&b, "\n- Context: %s tokens", cw)
+	}
+	// One guiding line: how to change the setup they're departing with.
+	fmt.Fprintf(&b, "\n\nTip: adjust anytime with %s or %s.", command.CmdRef("model"), command.CmdRef("reasoning"))
 	return b.String()
 }
 
 // renderResult converts a neutral command.Result into a channel.Message,
 // upgrading to interactive inline-keyboard buttons when the channel advertises
 // button support. Channels without button support (or results without
-// structured data) degrade to the complete fallback Text.
+// structured data) degrade to the complete fallback Text. The final message
+// format (Markdown vs Plain) is decided once, capability-gated.
 func renderResult(result *command.Result, caps channel.ChannelCapabilities) channel.Message {
 	if result == nil {
 		return channel.Message{}
 	}
+	var msg channel.Message
 	if result.Interactive == nil || !caps.Buttons {
-		return channel.Message{Text: result.Text}
+		msg = channel.Message{Text: result.Text}
+	} else {
+		switch result.Interactive.Kind {
+		case command.InteractiveList:
+			msg = renderListView(result.Text, result.Interactive.List)
+		case command.InteractiveModelPicker:
+			msg = renderModelPicker(result.Interactive.Picker)
+		case command.InteractiveChoices:
+			msg = renderChoicesView(result.Interactive.Choices)
+		case command.InteractiveRange:
+			msg = renderRangeView(result.Text, result.Interactive.Range)
+		default:
+			msg = channel.Message{Text: result.Text}
+		}
 	}
-	switch result.Interactive.Kind {
-	case command.InteractiveList:
-		return renderListView(result.Text, result.Interactive.List)
-	case command.InteractiveModelPicker:
-		return renderModelPicker(result.Interactive.Picker)
-	default:
-		return channel.Message{Text: result.Text}
+	return applyMessageFormat(msg, caps)
+}
+
+// applyMessageFormat sets the message format from the channel's capabilities:
+// Markdown when supported (Telegram renders it, others degrade client-side),
+// otherwise the inline markup authored upstream is stripped so text-only
+// channels stay clean. This is the single place command-reply format is decided.
+func applyMessageFormat(msg channel.Message, caps channel.ChannelCapabilities) channel.Message {
+	if caps.Markdown || caps.RichText {
+		msg.Format = channel.MessageFormatMarkdown
+	} else {
+		msg.Text = stripInlineMarkup(msg.Text)
 	}
+	return msg
+}
+
+// stripInlineMarkup removes the inline Markdown markers (** and `) authored for
+// capable channels, leaving clean text for plain-text-only channels.
+func stripInlineMarkup(s string) string {
+	s = strings.ReplaceAll(s, "**", "")
+	s = strings.ReplaceAll(s, "`", "")
+	return s
 }
 
 // renderListView renders a paginated list. The list content lives in the
@@ -251,7 +299,7 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 // modelPickerHeader builds the compact status header shown above the keyboard.
 func modelPickerHeader(p *command.ModelPickerView, start, end int) string {
 	var b strings.Builder
-	b.WriteString("⚙ Model Configuration\n\n")
+	b.WriteString(command.MdBold("⚙ Model Configuration") + "\n\n")
 	if p.Level == command.LevelModels {
 		provider := p.ProviderName
 		if provider == "" {
@@ -271,6 +319,7 @@ func modelPickerHeader(p *command.ModelPickerView, start, end int) string {
 	if strings.TrimSpace(current) == "" {
 		current = "(none)"
 	}
+	// Display names / enums read better plain than monospace.
 	fmt.Fprintf(&b, "Current model: %s\n", current)
 	if r := strings.TrimSpace(p.Reasoning); r != "" {
 		fmt.Fprintf(&b, "Reasoning: %s\n", r)
@@ -297,4 +346,81 @@ func truncateButtonLabel(s string) string {
 		return s
 	}
 	return string(r[:maxLen-1]) + "…"
+}
+
+// renderChoicesView renders a flat set of one-tap choices (e.g. /effort levels,
+// /think on/off, /settings toggles): choice buttons laid out 2 per row (current
+// marked ✓) plus a Close row. Each tap re-dispatches "/{resource} {action}
+// {args}" and edits in place.
+func renderChoicesView(cv *command.ChoicesView) channel.Message {
+	if cv == nil {
+		return channel.Message{}
+	}
+	msg := channel.Message{Text: cv.Title}
+	var actions []channel.Action
+	col, row := 0, 0
+	for _, item := range cv.Choices {
+		if item.Action == nil {
+			continue
+		}
+		label := item.Label
+		if item.Selected {
+			label = "✓ " + label
+		}
+		actions = append(actions, channel.Action{
+			Type:  actionTypeCallback,
+			Label: label,
+			Value: command.EncodeListCallback(item.Action.Resource, item.Action.Action, item.Action.Args, 0),
+			Row:   row,
+		})
+		col++
+		if col == 2 {
+			col = 0
+			row++
+		}
+	}
+	if col != 0 {
+		row++
+	}
+	actions = append(actions, channel.Action{
+		Type: actionTypeCallback, Label: "✕ Close", Value: command.DismissCallback(), Row: row,
+	})
+	msg.Actions = actions
+	return msg
+}
+
+// renderRangeView renders a time-window selector: one row of preset buttons
+// (the active preset marked ●) plus Close. Tapping a preset re-runs the command
+// with that --range and edits the message in place.
+func renderRangeView(text string, rv *command.RangeView) channel.Message {
+	msg := channel.Message{Text: text}
+	if rv == nil {
+		return msg
+	}
+	var actions []channel.Action
+	for _, preset := range rv.Presets {
+		label := rangePresetLabel(preset)
+		if preset == rv.Current {
+			label += " ●"
+		}
+		actions = append(actions, channel.Action{
+			Type:  actionTypeCallback,
+			Label: label,
+			Value: command.EncodeRangeCallback(rv.Resource, rv.Action, preset),
+			Row:   0,
+		})
+	}
+	actions = append(actions, channel.Action{
+		Type: actionTypeCallback, Label: "✕ Close",
+		Value: command.DismissCallback(), Row: 1,
+	})
+	msg.Actions = actions
+	return msg
+}
+
+func rangePresetLabel(preset string) string {
+	if preset == "all" {
+		return "All"
+	}
+	return preset
 }

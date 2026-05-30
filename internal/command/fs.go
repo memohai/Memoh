@@ -8,12 +8,13 @@ import (
 
 func (h *Handler) buildFSGroup() *CommandGroup {
 	g := newCommandGroup("fs", "Browse container filesystem")
+	g.DefaultAction = "list" // bare /fs lands on the container root listing
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list [path] - List files in the container",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
-				return "Container filesystem is not available.", nil
+				return "The file browser isn't available right now.", nil
 			}
 			dir := "/"
 			if len(cc.Args) > 0 {
@@ -26,15 +27,18 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 			if len(entries) == 0 {
 				return fmt.Sprintf("Directory %q is empty.", dir), nil
 			}
+			// Wrap in a code fence so the proportional font doesn't collapse the
+			// indentation and columns stay aligned.
 			var b strings.Builder
-			fmt.Fprintf(&b, "%s:\n", dir)
+			fmt.Fprintf(&b, "```\n%s:\n", dir)
 			for _, e := range entries {
 				if e.IsDir {
 					fmt.Fprintf(&b, "  %s/\n", e.Name)
 				} else {
-					fmt.Fprintf(&b, "  %s (%d bytes)\n", e.Name, e.Size)
+					fmt.Fprintf(&b, "  %s (%s)\n", e.Name, humanizeBytes(e.Size))
 				}
 			}
+			b.WriteString("```")
 			return b.String(), nil
 		},
 	})
@@ -43,7 +47,7 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 		Usage: "read <path> - Read a file from the container",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
-				return "Container filesystem is not available.", nil
+				return "The file browser isn't available right now.", nil
 			}
 			if len(cc.Args) < 1 {
 				return "Usage: /fs read <path>", nil
@@ -53,10 +57,21 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 				return "", err
 			}
 			const maxRunes = 2000
+			truncated := false
 			if utf8.RuneCountInString(content) > maxRunes {
-				content = string([]rune(content)[:maxRunes]) + "\n... (truncated)"
+				content = string([]rune(content)[:maxRunes])
+				truncated = true
 			}
-			return fmt.Sprintf("```\n%s\n```", content), nil
+			if strings.TrimSpace(content) == "" {
+				return "(empty file)", nil
+			}
+			out := fmt.Sprintf("```\n%s\n```", content)
+			if truncated {
+				// The marker is a system note, not file content — keep it outside
+				// the fence so it doesn't read as part of the file.
+				out += "\n_Showing the first 2000 characters. Use the web UI for the full file._"
+			}
+			return out, nil
 		},
 	})
 	return g

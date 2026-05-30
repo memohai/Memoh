@@ -500,7 +500,12 @@ func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channe
 		case parsed.IsNoop():
 			return
 		case parsed.IsDismiss():
-			_ = clearTelegramCallbackButtons(bot, cb)
+			// Close: delete the whole transient picker/list message. Deleting is
+			// cleaner than stripping the keyboard, which would leave dangling text
+			// like "Select a provider:" with no buttons beneath it.
+			if cb.Message != nil && cb.Message.Chat != nil {
+				_, _ = bot.Request(tgbotapi.NewDeleteMessage(cb.Message.Chat.ID, cb.Message.MessageID))
+			}
 			return
 		default:
 			// Pagination/selection: re-dispatch a synthetic command that
@@ -574,10 +579,14 @@ func clearTelegramCallbackButtons(bot *tgbotapi.BotAPI, cb *tgbotapi.CallbackQue
 	if bot == nil || cb == nil || cb.Message == nil || cb.Message.Chat == nil {
 		return nil
 	}
+	// Telegram requires inline_keyboard to be an array. An empty
+	// InlineKeyboardMarkup{} marshals its nil slice to {"inline_keyboard":null}
+	// and is rejected, leaving the keyboard in place; a non-nil empty rows slice
+	// marshals to {"inline_keyboard":[]}, which removes the keyboard.
 	edit := tgbotapi.NewEditMessageReplyMarkup(
 		cb.Message.Chat.ID,
 		cb.Message.MessageID,
-		tgbotapi.InlineKeyboardMarkup{},
+		tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}},
 	)
 	_, err := bot.Request(edit)
 	return err
@@ -1087,6 +1096,15 @@ func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, 
 }
 
 func editTelegramMessageTextWithActions(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string, actions []channel.Action) error {
+	// With no actions, omit reply_markup entirely. NewEditMessageTextAndMarkup
+	// with an empty keyboard marshals reply_markup to {"inline_keyboard":null},
+	// which Telegram rejects (it must be an array) — the edit then silently fails,
+	// so a plain-text confirmation (e.g. after picking a model) never lands and the
+	// stale keyboard stays. editTelegramMessageText sends no reply_markup, which
+	// both updates the text AND removes the old keyboard.
+	if len(actions) == 0 {
+		return editTelegramMessageText(bot, chatID, messageID, text, parseMode)
+	}
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	markup := telegramInlineKeyboard(actions)
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, markup)

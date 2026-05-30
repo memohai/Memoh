@@ -21,6 +21,8 @@ const (
 	callbackKindListPage      = "list_page"
 	callbackKindModelProvider = "model_provider"
 	callbackKindModelSelect   = "model_select"
+	callbackKindRange         = "range"
+	callbackKindConfirmNew    = "confirm_new"
 	callbackKindDismiss       = "dismiss"
 	callbackKindNoop          = "noop"
 )
@@ -34,6 +36,7 @@ type ParsedCallback struct {
 	Page          int
 	ProviderIndex int
 	FlatIndex     int
+	Range         string
 }
 
 // IsInteractiveCallback reports whether data is one of our interactive
@@ -85,6 +88,19 @@ func EncodeModelSelectCallback(flatIndex int) string {
 	return fmt.Sprintf("%sms~%d", callbackNamespace, flatIndex)
 }
 
+// EncodeRangeCallback builds the callback_data for a time-window preset button.
+// Layout: "m~rg~{resource}~{action}~{rangeKey}".
+func EncodeRangeCallback(resource, action, rangeKey string) string {
+	return fmt.Sprintf("%srg~%s~%s~%s", callbackNamespace, resource, action, rangeKey)
+}
+
+// EncodeConfirmNewCallback builds the callback_data for confirming a /new reset.
+// Layout: "m~cn~{mode}" where mode is chat|discuss. Tapping re-dispatches
+// "/new {mode} --confirm", which performs the actual session reset.
+func EncodeConfirmNewCallback(mode string) string {
+	return fmt.Sprintf("%scn~%s", callbackNamespace, mode)
+}
+
 // DecodeCallback parses an interactive callback_data string. The bool is false
 // for data that is not one of our interactive callbacks.
 func DecodeCallback(data string) (ParsedCallback, bool) {
@@ -134,6 +150,18 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 			return ParsedCallback{}, false
 		}
 		return ParsedCallback{Kind: callbackKindModelSelect, FlatIndex: flat}, true
+	case strings.HasPrefix(body, "rg~"):
+		parts := strings.SplitN(strings.TrimPrefix(body, "rg~"), "~", 3)
+		if len(parts) != 3 || parts[2] == "" {
+			return ParsedCallback{}, false
+		}
+		return ParsedCallback{Kind: callbackKindRange, Resource: parts[0], Action: parts[1], Range: parts[2]}, true
+	case strings.HasPrefix(body, "cn~"):
+		mode := strings.TrimPrefix(body, "cn~")
+		if mode == "" {
+			return ParsedCallback{}, false
+		}
+		return ParsedCallback{Kind: callbackKindConfirmNew, Action: mode}, true
 	}
 	return ParsedCallback{}, false
 }
@@ -159,6 +187,10 @@ func (p ParsedCallback) SyntheticCommand() string {
 		return fmt.Sprintf("/model list --prov %d --page %d", p.ProviderIndex, p.Page)
 	case callbackKindModelSelect:
 		return fmt.Sprintf("/model set --flat %d", p.FlatIndex)
+	case callbackKindRange:
+		return fmt.Sprintf("/%s %s --range %s", p.Resource, p.Action, p.Range)
+	case callbackKindConfirmNew:
+		return fmt.Sprintf("/new %s --confirm", p.Action)
 	default:
 		return ""
 	}

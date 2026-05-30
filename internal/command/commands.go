@@ -7,6 +7,7 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildMCPGroup())
 	r.RegisterGroup(h.buildSettingsGroup())
 	r.RegisterGroup(h.buildModelGroup())
+	r.RegisterGroup(h.buildReasoningGroup())
 	r.RegisterGroup(h.buildMemoryGroup())
 	r.RegisterGroup(h.buildSearchGroup())
 	r.RegisterGroup(h.buildUsageGroup())
@@ -15,6 +16,7 @@ func (h *Handler) buildRegistry() *Registry {
 	r.RegisterGroup(h.buildSkillGroup())
 	r.RegisterGroup(h.buildFSGroup())
 	r.RegisterGroup(h.buildStatusGroup())
+	r.RegisterGroup(h.buildContextGroup())
 	r.RegisterGroup(h.buildAccessGroup())
 	r.RegisterGroup(h.buildCompactGroup())
 	return r

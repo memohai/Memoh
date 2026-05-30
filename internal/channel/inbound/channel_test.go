@@ -225,13 +225,16 @@ type fakeCommandQueries struct {
 	usage        int64
 	cacheRow     dbsqlc.GetSessionCacheStatsRow
 	skills       []string
+
+	gotCountSession pgtype.UUID // captures the session passed to CountMessagesBySession
 }
 
 func (*fakeCommandQueries) GetLatestSessionIDByBot(_ context.Context, _ pgtype.UUID) (pgtype.UUID, error) {
 	return pgtype.UUID{}, errors.New("unexpected latest session lookup")
 }
 
-func (f *fakeCommandQueries) CountMessagesBySession(_ context.Context, _ pgtype.UUID) (int64, error) {
+func (f *fakeCommandQueries) CountMessagesBySession(_ context.Context, sessionID pgtype.UUID) (int64, error) {
+	f.gotCountSession = sessionID
 	return f.messageCount, nil
 }
 
@@ -671,6 +674,15 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 	processor.SetSessionEnsurer(&fakeSessionEnsurer{
 		activeSession: SessionResult{ID: "11111111-1111-1111-1111-111111111111", Type: "chat"},
 	})
+	cmdQueries := &fakeCommandQueries{
+		messageCount: 9,
+		usage:        512,
+		cacheRow: dbsqlc.GetSessionCacheStatsRow{
+			CacheReadTokens:  64,
+			TotalInputTokens: 512,
+		},
+		skills: []string{"search"},
+	}
 	processor.SetCommandHandler(command.NewHandler(
 		nil,
 		nil,
@@ -684,15 +696,7 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		&fakeCommandQueries{
-			messageCount: 9,
-			usage:        512,
-			cacheRow: dbsqlc.GetSessionCacheStatsRow{
-				CacheReadTokens:  64,
-				TotalInputTokens: 512,
-			},
-			skills: []string{"search"},
-		},
+		cmdQueries,
 		nil,
 		nil,
 		nil,
@@ -718,11 +722,13 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("expected one status reply, got %d", len(sender.sent))
 	}
-	if !strings.Contains(sender.sent[0].Message.Text, "- Scope: current conversation") {
+	if !strings.Contains(sender.sent[0].Message.Text, "Session Status — current conversation") {
 		t.Fatalf("expected current conversation scope, got %q", sender.sent[0].Message.Text)
 	}
-	if !strings.Contains(sender.sent[0].Message.Text, "- Session ID: 11111111-1111-1111-1111-111111111111") {
-		t.Fatalf("expected active route session in reply, got %q", sender.sent[0].Message.Text)
+	// Session ID is no longer echoed into user-facing output; assert directly that
+	// the route's active session drove the status query.
+	if got, _ := cmdQueries.gotCountSession.Value(); got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("expected active route session to drive status query, got %v", got)
 	}
 }
 

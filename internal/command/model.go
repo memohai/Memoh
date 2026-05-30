@@ -17,7 +17,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage: "list [provider_name] - List available chat models",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.modelsService == nil {
-				return &Result{Text: "Model service is not available."}, nil
+				return &Result{Text: "Models aren't available right now."}, nil
 			}
 			return h.buildModelPickerResult(cc)
 		},
@@ -27,13 +27,13 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage: "current - Show current chat and heartbeat models",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.settingsService == nil {
-				return "Settings service is not available.", nil
+				return "Models aren't available right now.", nil
 			}
 			settingsResp, err := h.getBotSettings(cc)
 			if err != nil {
 				return "", err
 			}
-			return formatKV([]kv{
+			return formatKVTitled("Current Models", []kv{
 				{"Chat Model", h.resolveModelName(cc, settingsResp.ChatModelID)},
 				{"Heartbeat Model", h.resolveModelName(cc, settingsResp.HeartbeatModelID)},
 			}), nil
@@ -68,7 +68,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 				selectedID = modelResp.ID
 			}
 			if h.settingsService == nil {
-				return "Settings service is not available.", nil
+				return "Models aren't available right now.", nil
 			}
 			before, _ := h.getBotSettings(cc)
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
@@ -88,7 +88,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 				return "Usage: /model set-heartbeat <model_id> | <provider_name> <model_name>", nil
 			}
 			if h.settingsService == nil {
-				return "Settings service is not available.", nil
+				return "Models aren't available right now.", nil
 			}
 			before, _ := h.getBotSettings(cc)
 			modelResp, err := h.findModelForSelection(cc, cc.Args)

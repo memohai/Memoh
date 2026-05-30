@@ -29,7 +29,7 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 		Usage: "latest - Show the latest session status for this bot",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.queries == nil {
-				return "Session info is not available.", nil
+				return "Session info isn't available right now.", nil
 			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
@@ -50,7 +50,7 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 
 func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope string) (string, error) {
 	if h.queries == nil {
-		return "Session info is not available.", nil
+		return "Session info isn't available right now.", nil
 	}
 	pgSessionID, err := parseCommandUUID(sessionID)
 	if err != nil {
@@ -87,33 +87,60 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 		contextUsage = contextUsage + " / " + contextWindow
 	}
 
-	pairs := []kv{
-		{"Scope", scope},
-		{"Session ID", sessionID},
-		{"Messages", strconv.FormatInt(msgCount, 10)},
-		{"Context", contextUsage},
-		{"Cache Hit Rate", fmt.Sprintf("%.1f%%", cacheHitRate)},
-		{"Cache Read", formatTokens(cacheRow.CacheReadTokens)},
+	pairs := make([]kv, 0, 6)
+	// Lead with the model — the single most load-bearing "where am I" fact.
+	if s, err := h.getBotSettings(cc); err == nil {
+		if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != "(none)" {
+			pairs = append(pairs, kv{"Model", m})
+		}
+	}
+	pairs = append(pairs,
+		kv{"Messages", strconv.FormatInt(msgCount, 10)},
+		kv{"Context", contextUsage},
+	)
+	// On a brand-new session, cache stats are forced to 0 and read as a
+	// measured-bad result rather than "no data" — show them only once there is
+	// input to measure.
+	if cacheRow.TotalInputTokens > 0 {
+		pairs = append(pairs,
+			kv{"Cache hit rate", fmt.Sprintf("%.1f%%", cacheHitRate)},
+			kv{"Cache read", formatTokens(cacheRow.CacheReadTokens)},
+		)
 	}
 	if len(skills) > 0 {
 		pairs = append(pairs, kv{"Skills", strings.Join(skills, ", ")})
 	}
-	return formatKV(pairs), nil
+	title := "🧵 Session Status"
+	if s := strings.TrimSpace(scope); s != "" {
+		title += " — " + s
+	}
+	return formatKVTitled(title, pairs), nil
 }
 
 func (h *Handler) resolveContextWindow(cc CommandContext) string {
-	if h.settingsService == nil || h.modelsService == nil {
+	w := h.resolveContextWindowTokens(cc)
+	if w == 0 {
 		return ""
+	}
+	return formatTokens(w)
+}
+
+// resolveContextWindowTokens returns the chat model's context window in tokens
+// (0 if unknown), the raw value behind resolveContextWindow — used by /context
+// to compute a percentage and bar.
+func (h *Handler) resolveContextWindowTokens(cc CommandContext) int64 {
+	if h.settingsService == nil || h.modelsService == nil {
+		return 0
 	}
 	s, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
 	if err != nil || s.ChatModelID == "" {
-		return ""
+		return 0
 	}
 	m, err := h.modelsService.GetByID(cc.Ctx, s.ChatModelID)
 	if err != nil || m.Config.ContextWindow == nil {
-		return ""
+		return 0
 	}
-	return formatTokens(int64(*m.Config.ContextWindow))
+	return int64(*m.Config.ContextWindow)
 }
 
 func parseCommandUUID(id string) (pgtype.UUID, error) {
@@ -122,14 +149,4 @@ func parseCommandUUID(id string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, fmt.Errorf("invalid uuid: %w", err)
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
-}
-
-func formatTokens(n int64) string {
-	if n >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1_000)
-	}
-	return strconv.FormatInt(n, 10)
 }

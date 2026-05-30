@@ -15,38 +15,27 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 	g.Register(SubCommand{
 		Name:  "get",
 		Usage: "get - View current settings",
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			s, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			return formatKV([]kv{
-				{"Language", s.Language},
-				{"ACL Default Effect", s.AclDefaultEffect},
-				{"Reasoning Enabled", boolStr(s.ReasoningEnabled)},
-				{"Reasoning Effort", s.ReasoningEffort},
-				{"Heartbeat Enabled", boolStr(s.HeartbeatEnabled)},
-				{"Heartbeat Interval", fmt.Sprintf("%d min", s.HeartbeatInterval)},
-				{"Chat Model", h.resolveModelName(cc, s.ChatModelID)},
-				{"Heartbeat Model", h.resolveModelName(cc, s.HeartbeatModelID)},
-				{"Search Provider", h.resolveSearchProviderName(cc, s.SearchProviderID)},
-				{"Memory Provider", h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
-			}), nil
+			return h.settingsResult(cc, s), nil
 		},
 	})
 	g.Register(SubCommand{
 		Name:    "update",
 		Usage:   "update [--language L] [--acl_default_effect allow|deny] ... - Update settings",
 		IsWrite: true,
-		Handler: func(cc CommandContext) (string, error) {
+		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) == 0 {
-				return settingsUpdateUsage(), nil
+				return &Result{Text: settingsUpdateUsage()}, nil
 			}
 			req := settings.UpsertRequest{}
 			args := cc.Args
 			for i := 0; i < len(args); i++ {
 				if i+1 >= len(args) {
-					return fmt.Sprintf("Missing value for %s.\n\n%s", args[i], settingsUpdateUsage()), nil
+					return &Result{Text: fmt.Sprintf("Missing value for %s.\n\n%s", args[i], settingsUpdateUsage())}, nil
 				}
 				switch args[i] {
 				case "--language":
@@ -70,7 +59,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					i++
 					val, err := strconv.Atoi(args[i])
 					if err != nil {
-						return fmt.Sprintf("Invalid heartbeat_interval: %s", args[i]), nil
+						return &Result{Text: fmt.Sprintf("Invalid heartbeat_interval: %s", args[i])}, nil
 					}
 					req.HeartbeatInterval = &val
 				case "--chat_model_id":
@@ -80,17 +69,71 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					i++
 					req.HeartbeatModelID = args[i]
 				default:
-					return fmt.Sprintf("Unknown option: %s\n\n%s", args[i], settingsUpdateUsage()), nil
+					return &Result{Text: fmt.Sprintf("Unknown option: %s\n\n%s", args[i], settingsUpdateUsage())}, nil
 				}
 			}
-			_, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req)
-			if err != nil {
-				return "", err
+			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
+				return nil, err
 			}
-			return "Settings updated.", nil
+			s, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
+			if err != nil {
+				return nil, err
+			}
+			return h.settingsResult(cc, s), nil
 		},
 	})
 	return g
+}
+
+// settingsResult renders the settings card (the same KV detail as before) and,
+// for button-capable channels, a set of one-tap controls: inline toggles for the
+// booleans/ACL (re-dispatch /settings update, which re-renders this card in
+// place) and drill-downs to the /effort and /model pickers. Reuses
+// settingsService.UpsertBot — no backend changes.
+func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result {
+	reasoning := "off"
+	if s.ReasoningEnabled {
+		reasoning = strings.TrimSpace(s.ReasoningEffort)
+		if reasoning == "" {
+			reasoning = "on"
+		}
+	}
+	heartbeat := "off"
+	if s.HeartbeatEnabled {
+		heartbeat = fmt.Sprintf("on · every %d min", s.HeartbeatInterval)
+	}
+	// Teach the ACL enum in plain English on this orienting surface.
+	aclLine := strings.TrimSpace(s.AclDefaultEffect)
+	switch strings.ToLower(aclLine) {
+	case "deny":
+		aclLine = "deny — tools ask before running"
+	case "allow":
+		aclLine = "allow — tools run without asking"
+	}
+	card := formatKVTitled("⚙️ Bot Settings", []kv{
+		{"Reasoning", reasoning},
+		{"Heartbeat", heartbeat},
+		{"ACL default", aclLine},
+		{"Chat Model", h.resolveModelName(cc, s.ChatModelID)},
+		{"Heartbeat Model", h.resolveModelName(cc, s.HeartbeatModelID)},
+		{"Search Provider", h.resolveSearchProviderName(cc, s.SearchProviderID)},
+		{"Memory Provider", h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
+	})
+	aclNext := "deny"
+	if strings.EqualFold(strings.TrimSpace(s.AclDefaultEffect), "deny") {
+		aclNext = "allow"
+	}
+	choices := []ListItem{
+		{Label: "Reasoning: " + onOff(s.ReasoningEnabled), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--reasoning_enabled", strconv.FormatBool(!s.ReasoningEnabled)}}},
+		{Label: "Effort ▸", Action: &ItemAction{Resource: "effort", Action: "show"}},
+		{Label: "Heartbeat: " + onOff(s.HeartbeatEnabled), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
+		{Label: "ACL: " + fallbackValue(s.AclDefaultEffect), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
+		{Label: "Model ▸", Action: &ItemAction{Resource: "model", Action: "list"}},
+	}
+	return &Result{
+		Text:        card,
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: card, Choices: choices}},
+	}
 }
 
 func settingsUpdateUsage() string {
@@ -119,11 +162,11 @@ func (h *Handler) resolveModelName(cc CommandContext, modelID string) string {
 		return "(none)"
 	}
 	if h.modelsService == nil {
-		return modelID
+		return "(unavailable)"
 	}
 	m, err := h.modelsService.GetByID(cc.Ctx, modelID)
 	if err != nil {
-		return modelID
+		return "(unavailable)"
 	}
 	provName := ""
 	if h.providersService != nil {
@@ -144,11 +187,11 @@ func (h *Handler) resolveSearchProviderName(cc CommandContext, id string) string
 		return "(none)"
 	}
 	if h.searchProvService == nil {
-		return id
+		return "(unavailable)"
 	}
 	p, err := h.searchProvService.Get(cc.Ctx, id)
 	if err != nil {
-		return id
+		return "(unavailable)"
 	}
 	return p.Name
 }
@@ -159,11 +202,11 @@ func (h *Handler) resolveMemoryProviderName(cc CommandContext, id string) string
 		return "(none)"
 	}
 	if h.memProvService == nil {
-		return id
+		return "(unavailable)"
 	}
 	p, err := h.memProvService.Get(cc.Ctx, id)
 	if err != nil {
-		return id
+		return "(unavailable)"
 	}
 	return p.Name
 }

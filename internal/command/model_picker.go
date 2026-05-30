@@ -116,24 +116,25 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	textModels := h.filterModelsByProvider(cc, items, filterProvider)
 	if len(textModels) == 0 {
 		if filterProvider != "" {
-			return &Result{Text: fmt.Sprintf("No chat models found for provider %q.", filterProvider)}, nil
+			return &Result{Text: fmt.Sprintf("No chat models under provider %q. Run /model list to see all providers.", filterProvider)}, nil
 		}
-		return &Result{Text: "No chat models found."}, nil
+		return &Result{Text: "No chat models yet.\n\nAdd a model in the web dashboard."}, nil
 	}
 	sort.SliceStable(textModels, func(i, j int) bool {
 		return modelSortRank(textModels[i], settingsResp) < modelSortRank(textModels[j], settingsResp)
 	})
 	records := make([]listRecord, 0, len(textModels))
 	for _, item := range textModels {
-		label := item.Name
-		if markers := modelMarkers(item.ID, settingsResp); len(markers) > 0 {
-			label += " [" + strings.Join(markers, ", ") + "]"
-		}
-		records = append(records, listRecord{fields: []kv{
-			{"Model", label},
+		fields := []kv{
+			{"Model", item.Name},
 			{"Provider", h.resolveProviderName(cc, item.ProviderID)},
-			{"Model ID", item.ModelID},
-		}})
+		}
+		// Active-role markers (chat/heartbeat) are a chip, not bracketed into the
+		// name — brackets would force the whole name into a monospace code span.
+		if markers := modelMarkers(item.ID, settingsResp); len(markers) > 0 {
+			fields = append(fields, kv{"", strings.Join(markers, ", ")})
+		}
+		records = append(records, listRecord{fields: fields})
 	}
 	hint := "Use /model current to inspect active selections."
 	if filterProvider == "" {

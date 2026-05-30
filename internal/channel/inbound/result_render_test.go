@@ -36,6 +36,34 @@ func TestRenderResultTextFallbackWhenNoButtons(t *testing.T) {
 	}
 }
 
+func TestRenderResultFormatGate(t *testing.T) {
+	res := &command.Result{Text: "**Title**\n- `value`"}
+	// Markdown-capable channel: format set, markup preserved.
+	md := renderResult(res, channel.ChannelCapabilities{Markdown: true})
+	if md.Format != channel.MessageFormatMarkdown {
+		t.Errorf("markdown channel: Format = %q, want markdown", md.Format)
+	}
+	if md.Text != "**Title**\n- `value`" {
+		t.Errorf("markdown channel should preserve markup, got %q", md.Text)
+	}
+	// RichText-only channel (e.g. feishu): also markdown.
+	rich := renderResult(res, channel.ChannelCapabilities{RichText: true})
+	if rich.Format != channel.MessageFormatMarkdown {
+		t.Errorf("richtext channel: Format = %q, want markdown", rich.Format)
+	}
+	// Text-only channel: markers stripped, format stays plain.
+	plain := renderResult(res, channel.ChannelCapabilities{})
+	if plain.Format == channel.MessageFormatMarkdown {
+		t.Error("text-only channel should not be markdown")
+	}
+	if strings.Contains(plain.Text, "**") || strings.Contains(plain.Text, "`") {
+		t.Errorf("text-only channel should strip markup, got %q", plain.Text)
+	}
+	if !strings.Contains(plain.Text, "Title") || !strings.Contains(plain.Text, "value") {
+		t.Errorf("text-only strip lost content: %q", plain.Text)
+	}
+}
+
 func TestRenderResultTextFallbackWhenNoInteractive(t *testing.T) {
 	msg := renderResult(&command.Result{Text: "plain"}, channel.ChannelCapabilities{Buttons: true})
 	if msg.Text != "plain" || len(msg.Actions) != 0 {
@@ -108,6 +136,52 @@ func TestRenderListLastPageHasPrevNotNext(t *testing.T) {
 	}
 }
 
+func TestRenderRangeView(t *testing.T) {
+	res := &command.Result{
+		Text: "Token usage (7 days)",
+		Interactive: &command.Interactive{
+			Kind:  command.InteractiveRange,
+			Range: &command.RangeView{Resource: "usage", Action: "summary", Current: "7d", Presets: []string{"24h", "7d", "30d", "all"}},
+		},
+	}
+	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true, Markdown: true})
+
+	var labels []string
+	var hasClose, currentMarked bool
+	for _, a := range msg.Actions {
+		labels = append(labels, a.Label)
+		if a.Label == "✕ Close" {
+			hasClose = true
+			continue
+		}
+		if strings.Contains(a.Label, "●") {
+			currentMarked = true
+			if !strings.HasPrefix(a.Label, "7d") {
+				t.Errorf("active preset marker on wrong button: %q", a.Label)
+			}
+		}
+	}
+	if !hasClose {
+		t.Error("expected a Close button")
+	}
+	if !currentMarked {
+		t.Errorf("expected ● on the active preset, labels=%v", labels)
+	}
+	// "all" renders as "All".
+	var hasAll bool
+	for _, a := range msg.Actions {
+		if a.Label == "All" {
+			hasAll = true
+			if a.Value != command.EncodeRangeCallback("usage", "summary", "all") {
+				t.Errorf("All button callback = %q", a.Value)
+			}
+		}
+	}
+	if !hasAll {
+		t.Errorf("expected an 'All' preset button, labels=%v", labels)
+	}
+}
+
 func TestRenderModelPickerProviderGrid(t *testing.T) {
 	res := &command.Result{
 		Text: "models",
@@ -153,20 +227,49 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage("chat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
-		ReasoningEnabled: true, ReasoningEffort: "medium",
+		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
 	})
-	for _, want := range []string{"New chat conversation started.", "Model: Claude Opus 4.7 (Anthropic)", "Heartbeat: DeepSeek V4 (DeepSeek)", "Reasoning: medium"} {
+	// A fresh-start card confirms the full setup: model (+provider), reasoning,
+	// and context budget. Header is bold; values are plain (display names/enums).
+	for _, want := range []string{
+		"**✨ New chat started.**",
+		"Model: Claude Opus 4.7 (Anthropic)",
+		"Heartbeat: DeepSeek V4 (DeepSeek)",
+		"Reasoning: medium",
+		"Context: 128.0K tokens",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("message missing %q:\n%s", want, got)
 		}
 	}
-
-	off := formatNewSessionMessage("discuss", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
-	if !strings.Contains(off, "Reasoning: off") {
-		t.Errorf("disabled reasoning should show 'off': %s", off)
+	// Setup values are plain; only the closing tip carries tap-to-copy command
+	// refs (`/model`, `/reasoning`), so check the value lines specifically.
+	if strings.Contains(got, "`Claude Opus 4.7 (Anthropic)`") {
+		t.Errorf("model value should be plain, not code-spanned:\n%s", got)
 	}
-	if !strings.Contains(off, "New discuss conversation started.") {
+	if !strings.Contains(got, "Tip: adjust anytime with `/model` or `/reasoning`.") {
+		t.Errorf("expected tap-to-copy tip:\n%s", got)
+	}
+	// Markup strips cleanly for plain-text channels.
+	plain := stripInlineMarkup(got)
+	if strings.Contains(plain, "**") || strings.Contains(plain, "`") {
+		t.Errorf("stripInlineMarkup left markers: %q", plain)
+	}
+
+	// Reasoning off is still shown (it sets expectations on a fresh start); no
+	// heartbeat and no known context window are omitted.
+	off := formatNewSessionMessage("discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
+	if !strings.Contains(off, "Reasoning: off") {
+		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
+	}
+	if !strings.Contains(off, "**✨ New discussion started.**") {
 		t.Errorf("mode label not reflected: %s", off)
+	}
+	if strings.Contains(off, "Heartbeat:") {
+		t.Errorf("'(none)' heartbeat should be omitted: %s", off)
+	}
+	if strings.Contains(off, "Context:") {
+		t.Errorf("unknown context window should be omitted: %s", off)
 	}
 }
 

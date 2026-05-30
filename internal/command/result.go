@@ -10,6 +10,8 @@ const (
 	InteractiveModelPicker InteractiveKind = "model_picker"
 	// InteractiveChoices is a flat one-shot set of selectable choices.
 	InteractiveChoices InteractiveKind = "choices"
+	// InteractiveRange is a time-window selector for time-series commands.
+	InteractiveRange InteractiveKind = "range"
 )
 
 // Result is the neutral, platform-independent output of a command.
@@ -29,6 +31,7 @@ type Interactive struct {
 	List    *ListView
 	Picker  *ModelPickerView
 	Choices *ChoicesView
+	Range   *RangeView
 }
 
 // ListView is a generic paginated list. It is re-derivable by re-running the
@@ -111,6 +114,15 @@ type ChoicesView struct {
 	Choices []ListItem
 }
 
+// RangeView is a time-window selector for a time-series command. Selecting a
+// preset re-runs "/{Resource} {Action} --range <preset>" in place.
+type RangeView struct {
+	Resource string
+	Action   string
+	Current  string   // the active preset key (normalized), for the ● marker
+	Presets  []string // ordered preset keys, e.g. ["24h","7d","30d","all"]
+}
+
 // CurrentContext is the resolved current-state summary used to enrich /new and
 // bare /model output. All fields are display-ready strings.
 type CurrentContext struct {
@@ -118,4 +130,5 @@ type CurrentContext struct {
 	HeartbeatModel   string
 	ReasoningEnabled bool
 	ReasoningEffort  string
+	ContextWindow    string // resolved chat-model context window (e.g. "128.0K"), "" if unknown
 }

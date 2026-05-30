@@ -115,13 +115,16 @@ func TestParse_Flags(t *testing.T) {
 		resource, action string
 		args             []string
 		page, prov, flat int
+		rangeKey         string
 	}{
-		{"/mcp list", "mcp", "list", nil, 0, -1, -1},
-		{"/mcp list --page 3", "mcp", "list", nil, 3, -1, -1},
-		{"/model list --prov 2 --page 1", "model", "list", nil, 1, 2, -1},
-		{"/model set --flat 17", "model", "set", nil, 0, -1, 17},
-		{"/model list openrouter --page 2", "model", "list", []string{"openrouter"}, 2, -1, -1},
-		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, -1},
+		{"/mcp list", "mcp", "list", nil, 0, -1, -1, ""},
+		{"/mcp list --page 3", "mcp", "list", nil, 3, -1, -1, ""},
+		{"/model list --prov 2 --page 1", "model", "list", nil, 1, 2, -1, ""},
+		{"/model set --flat 17", "model", "set", nil, 0, -1, 17, ""},
+		{"/model list openrouter --page 2", "model", "list", []string{"openrouter"}, 2, -1, -1, ""},
+		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, -1, ""},
+		{"/usage summary --range 30d", "usage", "summary", nil, 0, -1, -1, "30d"},
+		{"/usage --range all", "usage", "", nil, 0, -1, -1, "all"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -135,6 +138,9 @@ func TestParse_Flags(t *testing.T) {
 			}
 			if p.Page != tt.page || p.Prov != tt.prov || p.Flat != tt.flat {
 				t.Errorf("page/prov/flat = %d/%d/%d, want %d/%d/%d", p.Page, p.Prov, p.Flat, tt.page, tt.prov, tt.flat)
+			}
+			if p.Range != tt.rangeKey {
+				t.Errorf("range = %q, want %q", p.Range, tt.rangeKey)
 			}
 			if len(p.Args) != len(tt.args) {
 				t.Fatalf("args = %v, want %v", p.Args, tt.args)

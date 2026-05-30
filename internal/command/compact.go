@@ -21,7 +21,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if h.compactionService == nil {
-				return "Compaction service is not available.", nil
+				return "Compaction isn't available right now.", nil
 			}
 			sessionID := cc.SessionID
 			if sessionID == "" {
@@ -44,7 +44,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 			if err := h.compactionService.RunCompactionSync(cc.Ctx, cfg); err != nil {
 				return "", fmt.Errorf("compaction failed: %w", err)
 			}
-			return "Context compaction completed successfully.", nil
+			return "✅ Context compacted.", nil
 		},
 	})
 	return g

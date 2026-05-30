@@ -8,31 +8,57 @@ import (
 
 const defaultListLimit = 12
 
-// formatItems renders a list of records as a Markdown-style list.
-// Each record is rendered on a single line so long lists stay readable in IM.
+// formatItems renders records in the compact list layout (see formatRow),
+// without per-record notes. Retained for direct callers and tests.
 func formatItems(items [][]kv) string {
-	if len(items) == 0 {
-		return ""
+	records := make([]listRecord, 0, len(items))
+	for _, fields := range items {
+		records = append(records, listRecord{fields: fields})
 	}
+	return formatRecords(records)
+}
+
+// formatRecords renders list rows in the compact layout:
+//
+//   - label — chip · chip
+//     note
+//
+// The first field is the row label; remaining non-empty fields become a
+// " · "-separated run of chips after an em dash; an optional record note flows
+// onto an indented second line. Field keys are intentionally dropped — the
+// values carry the meaning and omitting "Key:" prefixes keeps rows scannable on
+// narrow IM screens. Code-spanning is per-value via renderValue.
+func formatRecords(records []listRecord) string {
 	var b strings.Builder
-	for i, record := range items {
-		if len(record) == 0 {
+	first := true
+	for _, r := range records {
+		if len(r.fields) == 0 {
 			continue
 		}
-		if i > 0 {
+		if !first {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "- %s", record[0].value)
-		extras := make([]string, 0, len(record)-1)
-		for _, pair := range record[1:] {
-			if strings.TrimSpace(pair.value) == "" {
-				continue
-			}
-			extras = append(extras, fmt.Sprintf("%s: %s", pair.key, pair.value))
+		first = false
+		b.WriteString(formatRow(r))
+	}
+	return b.String()
+}
+
+func formatRow(r listRecord) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "- %s", renderValue(r.fields[0].value))
+	chips := make([]string, 0, len(r.fields)-1)
+	for _, pair := range r.fields[1:] {
+		if strings.TrimSpace(pair.value) == "" {
+			continue
 		}
-		if len(extras) > 0 {
-			fmt.Fprintf(&b, " | %s", strings.Join(extras, " | "))
-		}
+		chips = append(chips, renderValue(pair.value))
+	}
+	if len(chips) > 0 {
+		fmt.Fprintf(&b, " — %s", strings.Join(chips, " · "))
+	}
+	if note := strings.TrimSpace(r.note); note != "" {
+		fmt.Fprintf(&b, "\n  %s", note)
 	}
 	return b.String()
 }
@@ -46,9 +72,22 @@ func formatItems(items [][]kv) string {
 func formatKV(pairs []kv) string {
 	var b strings.Builder
 	for _, p := range pairs {
-		fmt.Fprintf(&b, "- %s: %s\n", p.key, p.value)
+		if strings.TrimSpace(p.value) == "" {
+			continue // omit blank fields rather than print a dangling "Key: "
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", p.key, renderValue(p.value))
 	}
 	return b.String()
+}
+
+// formatKVTitled prefixes a bold title above a key-value detail block, giving
+// detail views the same bold header that list views carry ("Title (N)").
+func formatKVTitled(title string, pairs []kv) string {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return formatKV(pairs)
+	}
+	return MdBold(t) + "\n\n" + formatKV(pairs)
 }
 
 type kv struct {
@@ -56,11 +95,80 @@ type kv struct {
 	value string
 }
 
-// listRecord is one row destined for a paginated list: the kv fields drive both
-// the text fallback (via formatItems) and the structured ListItem. selected and
-// action are optional enrichments for interactive renderers.
+// renderValue formats a value for Markdown text, wrapping it in a code span
+// only when it reads as a machine token (see isMachineToken). The same rule
+// feeds formatItems and formatKV so every text surface is styled consistently:
+// short words, enums, booleans, and humanized scalars stay plain; IDs, paths,
+// cron, slugs, and markup-bearing values become monospace.
+func renderValue(value string) string {
+	if isMachineToken(value) {
+		return MdCode(value)
+	}
+	return value
+}
+
+// isMachineToken reports whether a value reads as a machine token (ID, path,
+// cron, slug, handle) that benefits from a monospace code span — rather than a
+// human word, enum, number, or phrase that reads better as plain text.
+//
+// It is also a correctness guard: the Telegram Markdown→HTML pass runs an italic
+// regex after bold, so a bare value containing * _ ` [ ] would be mangled (e.g.
+// cron "0 9 * * *" -> "0 9 <i> </i> *"). Such values are always code-wrapped.
+func isMachineToken(v string) bool {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return false
+	}
+	// Inline-markdown metachars must live inside a code span to survive the
+	// Telegram renderer verbatim (also a strong "this is a token" signal). This
+	// stays first so cron ("0 9 * * *") is always code-wrapped.
+	if strings.ContainsAny(s, "*_`[]") {
+		return true
+	}
+	// Whitespace => human phrase / prose / ratio ("12.4K / 1.0M"), not a token.
+	// Checked before the slash rule so a spaced ratio is not mistaken for a path.
+	if strings.ContainsAny(s, " \t\n\r") {
+		return false
+	}
+	// Paths and namespaced slugs ("anthropic/claude-opus", "/srv/data").
+	if strings.Contains(s, "/") {
+		return true
+	}
+	// Email addresses read as tokens.
+	if strings.Contains(s, "@") {
+		return true
+	}
+	// Known no-space human words (booleans, enums, placeholders) stay plain.
+	if isHumanWord(s) {
+		return false
+	}
+	// Long opaque identifiers (UUIDs, hashes, long slugs) read as tokens; short
+	// bare words and humanized scalars ("42", "12.4K", "820ms") stay plain.
+	return utf8.RuneCountInString(s) >= 12
+}
+
+// isHumanWord matches single-token, space-free values that are human-facing
+// words (booleans, status enums, roles, placeholders) and must stay plain.
+func isHumanWord(s string) bool {
+	switch strings.ToLower(s) {
+	case "yes", "no", "on", "off", "none", "(none)", "true", "false", "unlimited", "unknown",
+		"ok", "success", "failed", "fail", "error", "errored", "active", "inactive",
+		"enabled", "disabled", "connected", "disconnected", "pending", "running", "stopped",
+		"idle", "ready", "allow", "deny", "allowed", "denied", "owner", "admin", "member",
+		"guest", "read", "write", "delete", "stdio", "http", "https", "sse",
+		"sent", "queued", "sending", "bounced", "draft", "default":
+		return true
+	}
+	return false
+}
+
+// listRecord is one row destined for a paginated list: fields drives both the
+// text rendering (via formatRecords) and the structured ListItem (fields[0] is
+// the label). note is optional prose shown on an indented second line in text
+// output. selected and action are optional enrichments for interactive renderers.
 type listRecord struct {
 	fields   []kv
+	note     string
 	selected bool
 	action   *ItemAction
 }
@@ -107,26 +215,30 @@ func buildPagedListResult(title, resource, action string, args []string, pageRec
 }
 
 func assembleListResult(title, resource, action string, args []string, pageRecords []listRecord, page, pageSize, total int, hint string) *Result {
-	textItems := make([][]kv, 0, len(pageRecords))
 	items := make([]ListItem, 0, len(pageRecords))
 	for _, r := range pageRecords {
-		textItems = append(textItems, r.fields)
 		items = append(items, listItemFromRecord(r))
 	}
 
-	text := formatItems(textItems)
+	text := formatRecords(pageRecords)
+	// Footer: pagination count (only when paginated) + the cross-reference hint
+	// (always, when set) — previously the hint only rendered inside the
+	// pagination branch, so small config lists never showed their next-step.
+	var suffixParts []string
 	if total > len(pageRecords) {
-		suffix := fmt.Sprintf("Showing %d of %d items.", len(pageRecords), total)
-		if strings.TrimSpace(hint) != "" {
-			suffix += " " + strings.TrimSpace(hint)
-		}
+		suffixParts = append(suffixParts, fmt.Sprintf("Showing %d of %d items.", len(pageRecords), total))
+	}
+	if h := strings.TrimSpace(hint); h != "" {
+		suffixParts = append(suffixParts, h)
+	}
+	if len(suffixParts) > 0 {
 		if text != "" {
 			text += "\n\n"
 		}
-		text += suffix
+		text += strings.Join(suffixParts, " ")
 	}
 	if t := strings.TrimSpace(title); t != "" && len(pageRecords) > 0 {
-		text = fmt.Sprintf("%s (%d)\n\n%s", t, total, text)
+		text = fmt.Sprintf("%s\n\n%s", MdBold(fmt.Sprintf("%s (%d)", t, total)), text)
 	}
 
 	return &Result{
@@ -181,4 +293,13 @@ func boolStr(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// onOff returns "on" or "off" — preferred over boolStr for enable/active flags
+// in compact list rows.
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
 }

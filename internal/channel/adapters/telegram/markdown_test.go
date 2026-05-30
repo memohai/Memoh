@@ -23,6 +23,12 @@ func TestMarkdownToTelegramHTML(t *testing.T) {
 			absent:   []string{"**"},
 		},
 		{
+			name:     "backticked model id with special chars renders as safe code",
+			input:    "Current model: `deepseek/deepseek-v4-flash:free_x` and `a<b*c`",
+			contains: []string{"<code>deepseek/deepseek-v4-flash:free_x</code>", "<code>a&lt;b*c</code>"},
+			absent:   []string{"<i>", "<b>", "&lt;b&gt;"},
+		},
+		{
 			name:     "italic",
 			input:    "this is *italic* text",
 			contains: []string{"<i>italic</i>"},

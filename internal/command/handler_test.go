@@ -129,7 +129,7 @@ func TestExecute_Help(t *testing.T) {
 	if strings.Contains(result, "set-heartbeat") {
 		t.Errorf("top-level help should not expand nested actions, got: %s", result)
 	}
-	if !strings.Contains(result, "- /model - Manage bot models") {
+	if !strings.Contains(result, "Manage bot models") {
 		t.Errorf("expected top-level model entry, got: %s", result)
 	}
 }
@@ -141,10 +141,10 @@ func TestExecute_HelpGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "/model - Manage bot models") {
+	if !strings.Contains(result, "Manage bot models") {
 		t.Errorf("expected group help, got: %s", result)
 	}
-	if !strings.Contains(result, "- set - Set the chat model [owner]") {
+	if !strings.Contains(result, "Set the chat model") || !strings.Contains(result, "(owner)") {
 		t.Errorf("expected compact action summary, got: %s", result)
 	}
 }
@@ -156,7 +156,7 @@ func TestExecute_HelpAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Usage: /model set <model_id> | <provider_name> <model_name>") {
+	if !strings.Contains(result, "/model set <model_id> | <provider_name> <model_name>") {
 		t.Errorf("expected action usage, got: %s", result)
 	}
 	if !strings.Contains(result, "Access: owner only") {
@@ -222,7 +222,7 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Permission denied") {
+	if !strings.Contains(result, "Only the bot owner") {
 		t.Errorf("expected permission denied, got: %s", result)
 	}
 }
@@ -279,7 +279,7 @@ func TestExecute_WritePermissionStillDeniedForOtherUnlinkedChannels(t *testing.T
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Permission denied") {
+	if !strings.Contains(result, "Only the bot owner") {
 		t.Fatalf("unlinked discord write command should still be denied, got: %s", result)
 	}
 }
@@ -308,7 +308,7 @@ func TestExecute_MissingArgs(t *testing.T) {
 		{"/schedule delete", "Usage:"},
 		{"/mcp get", "Usage:"},
 		{"/mcp delete", "Usage:"},
-		{"/fs read", "not available"},
+		{"/fs read", "isn't available"},
 		{"/model set", "Usage:"},
 		{"/model set-heartbeat", "Usage:"},
 		{"/memory set", "Usage:"},
@@ -332,16 +332,32 @@ func TestFormatItems(t *testing.T) {
 	t.Parallel()
 	result := formatItems([][]kv{
 		{{"Name", "foo"}, {"Type", "bar"}},
-		{{"Name", "longname"}, {"Type", "x"}},
+		{{"Model", "anthropic/claude-opus"}, {"Active", "yes"}},
 	})
-	if !strings.Contains(result, "- foo") {
-		t.Errorf("expected '- foo' bullet, got: %s", result)
+	// Compact layout: "- label — chip · chip", keys dropped, human words plain.
+	if !strings.Contains(result, "- foo — bar") {
+		t.Errorf("expected compact '- foo — bar' line, got: %s", result)
 	}
-	if !strings.Contains(result, "- foo | Type: bar") {
-		t.Errorf("expected compact line entry, got: %s", result)
+	if strings.Contains(result, "`yes`") {
+		t.Errorf("boolean should stay plain, got: %s", result)
 	}
-	if !strings.Contains(result, "- longname") {
-		t.Errorf("expected '- longname' bullet, got: %s", result)
+	// Machine tokens (namespaced slug) render as code spans even as the label.
+	if !strings.Contains(result, "- `anthropic/claude-opus` — yes") {
+		t.Errorf("expected code-spanned model id label, got: %s", result)
+	}
+}
+
+func TestFormatRecordsNote(t *testing.T) {
+	t.Parallel()
+	result := formatRecords([]listRecord{
+		{fields: []kv{{"Name", "daily-report"}, {"Enabled", "on"}}, note: "daily at 09:00 · Send the morning summary"},
+	})
+	// Label and a chip on line 1; prose note indented on line 2.
+	if !strings.Contains(result, "- `daily-report` — on") {
+		t.Errorf("expected label + chip line, got: %s", result)
+	}
+	if !strings.Contains(result, "\n  daily at 09:00 · Send the morning summary") {
+		t.Errorf("expected indented note line, got: %s", result)
 	}
 }
 
@@ -357,13 +373,42 @@ func TestFormatKV(t *testing.T) {
 	t.Parallel()
 	result := formatKV([]kv{
 		{"Name", "test"},
-		{"ID", "123"},
+		{"Count", "123"},
+		{"Session ID", "9f3ec7a2-1b2c-4d5e"},
 	})
-	if !strings.Contains(result, "- Name: test") {
-		t.Errorf("expected '- Name: test', got: %s", result)
+	// Short words and numbers render plain.
+	if !strings.Contains(result, "- Name: test") || strings.Contains(result, "`test`") {
+		t.Errorf("expected plain name, got: %s", result)
 	}
-	if !strings.Contains(result, "- ID: 123") {
-		t.Errorf("expected '- ID: 123', got: %s", result)
+	if !strings.Contains(result, "- Count: 123") {
+		t.Errorf("expected plain count, got: %s", result)
+	}
+	// Long opaque identifiers render as code spans.
+	if !strings.Contains(result, "- Session ID: `9f3ec7a2-1b2c-4d5e`") {
+		t.Errorf("expected code-spanned id, got: %s", result)
+	}
+}
+
+func TestBareInvocationLandings(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+	// Groups that previously dumped Usage() help now land on a useful read view.
+	want := map[string]string{
+		"schedule": "list", "mcp": "list", "memory": "list",
+		"search": "list", "email": "outbox", "fs": "list",
+	}
+	for name, action := range want {
+		g, ok := h.registry.groups[name]
+		if !ok {
+			t.Errorf("group /%s not registered", name)
+			continue
+		}
+		if g.DefaultAction != action {
+			t.Errorf("/%s DefaultAction = %q, want %q", name, g.DefaultAction, action)
+		}
+		if _, ok := g.commands[action]; !ok {
+			t.Errorf("/%s default action %q is not a registered sub-command", name, action)
+		}
 	}
 }
 
@@ -411,11 +456,11 @@ func TestExecuteWithInput_Access(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "- Channel Identity: channel-id-1") {
-		t.Errorf("expected channel identity in access output, got: %s", result)
+	if !strings.Contains(result, "- Channel Identity: `channel-id-1`") {
+		t.Errorf("expected code-spanned channel identity, got: %s", result)
 	}
-	if !strings.Contains(result, "- Write Commands: yes") {
-		t.Errorf("expected write access in access output, got: %s", result)
+	if !strings.Contains(result, "- Write Commands: yes") || strings.Contains(result, "`yes`") {
+		t.Errorf("expected plain 'yes' write access, got: %s", result)
 	}
 }
 
@@ -438,8 +483,8 @@ func TestExecute_StatusLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "- Scope: latest bot session") {
-		t.Errorf("expected latest scope, got: %s", result)
+	if !strings.Contains(result, "Session Status — latest bot session") {
+		t.Errorf("expected latest scope in title, got: %s", result)
 	}
 	if !strings.Contains(result, "- Messages: 42") {
 		t.Errorf("expected message count, got: %s", result)
@@ -472,7 +517,7 @@ func TestExecute_StatusShowWithoutSession(t *testing.T) {
 	}
 }
 
-// Verify write commands are tagged with [owner] in usage.
+// Verify write commands are tagged with (owner) in usage.
 func TestUsage_OwnerTag(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
@@ -481,8 +526,8 @@ func TestUsage_OwnerTag(t *testing.T) {
 		usage := group.Usage()
 		for _, subName := range group.order {
 			sub := group.commands[subName]
-			if sub.IsWrite && !strings.Contains(usage, "[owner]") {
-				t.Errorf("/%s %s is a write command but usage missing [owner] tag", name, subName)
+			if sub.IsWrite && !strings.Contains(usage, "(owner)") {
+				t.Errorf("/%s %s is a write command but usage missing (owner) tag", name, subName)
 			}
 		}
 	}

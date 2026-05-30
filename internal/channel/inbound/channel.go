@@ -397,19 +397,42 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		var outMsg channel.Message
 		if err != nil {
-			outMsg = channel.Message{Text: "Error: " + err.Error()}
+			if p.logger != nil {
+				p.logger.Warn("command execution failed", slog.Any("error", err))
+			}
+			outMsg = channel.Message{Text: friendlyOps("complete that command")}
 		} else {
 			outMsg = renderResult(result, caps)
 		}
 		// A command re-dispatched from an interactive button carries the id of
 		// the message to edit in place, so navigation/selection updates the
-		// existing message instead of posting a new one.
+		// existing message instead of posting a new one. A freshly-typed command
+		// instead replies to (quotes) the triggering command message.
 		if editID, ok := msg.Metadata["edit_message_id"].(string); ok && strings.TrimSpace(editID) != "" && caps.Edit {
 			outMsg.ID = strings.TrimSpace(editID)
+		} else if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+			outMsg.Reply = &channel.ReplyRef{MessageID: mid}
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
 			Message: outMsg,
+		})
+	}
+
+	// Slash-command-shaped input that is NOT a known command (and not a mode
+	// command like /btw, a tool-approval, or /new//stop//status handled above):
+	// reply with a hint instead of forwarding the mistyped command to the model.
+	if isDirectedAtBot(msg) && p.commandHandler != nil &&
+		p.commandHandler.IsCommandShaped(cmdText) &&
+		!p.commandHandler.IsCommand(cmdText) &&
+		!IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) {
+		out := applyMessageFormat(channel.Message{Text: command.UnknownCommandMessage(cmdText)}, p.channelCaps(msg.Channel))
+		if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+			out.Reply = &channel.ReplyRef{MessageID: mid}
+		}
+		return sender.Send(ctx, channel.OutboundMessage{
+			Target:  strings.TrimSpace(msg.ReplyTarget),
+			Message: out,
 		})
 	}
 
@@ -1143,6 +1166,16 @@ func isDirectedAtBot(msg channel.InboundMessage) bool {
 		return true
 	}
 	return metadataBool(msg.Metadata, "is_mentioned") || metadataBool(msg.Metadata, "is_reply_to_bot")
+}
+
+// channelCaps returns the capability matrix for a channel type, or the zero
+// value when no registry is configured.
+func (p *ChannelInboundProcessor) channelCaps(channelType channel.ChannelType) channel.ChannelCapabilities {
+	if p.registry == nil {
+		return channel.ChannelCapabilities{}
+	}
+	caps, _ := p.registry.GetCapabilities(channelType)
+	return caps
 }
 
 // rawTextForCommand returns the original user text (without prepended
@@ -2777,7 +2810,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: route resolver not configured."},
+			Message: channel.Message{Text: friendlyOps("stop the current reply")},
 		})
 	}
 
@@ -2801,7 +2834,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+			Message: channel.Message{Text: friendlyOps("stop the current reply")},
 		})
 	}
 
@@ -2842,6 +2875,8 @@ func isNewSessionCommand(cmdText string) bool {
 	return parsed.Resource == "new"
 }
 
+// isStatusCommand matches the session-scoped read commands (/status, /context)
+// that need the active session resolved before dispatch.
 func isStatusCommand(cmdText string) bool {
 	extracted := command.ExtractCommandText(cmdText)
 	if extracted == "" {
@@ -2851,7 +2886,7 @@ func isStatusCommand(cmdText string) bool {
 	if err != nil {
 		return false
 	}
-	return parsed.Resource == "status"
+	return parsed.Resource == "status" || parsed.Resource == "context"
 }
 
 func isToolApprovalCommand(cmdText string) bool {
@@ -2871,7 +2906,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 	if !ok {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: channel.Message{Text: "Tool approval is not configured."},
+			Message: channel.Message{Text: "⚠️ Approvals aren't available here right now."},
 		})
 	}
 	extracted := command.ExtractCommandText(cmdText)
@@ -2879,7 +2914,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: channel.Message{Text: "Invalid approval command."},
+			Message: channel.Message{Text: "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."},
 		})
 	}
 	explicitID := ""
@@ -3112,20 +3147,33 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: " + err.Error()},
+			Message: channel.Message{Text: "Couldn't read that — use /new for a chat, or /new discuss for a discussion."},
 		})
+	}
+
+	// /new discards history, so on button-capable channels gate it behind a
+	// Confirm/Cancel keyboard. Tapping Confirm re-dispatches "/new <mode>
+	// --confirm" which lands back here with newCommandConfirmed == true and
+	// performs the reset. Non-button channels reset immediately (unchanged).
+	modeText := "chat"
+	if sessType == sessionpkg.TypeDiscuss {
+		modeText = "discuss"
+	}
+	caps := p.channelCaps(msg.Channel)
+	if caps.Buttons && !newCommandConfirmed(cmdText) {
+		return p.sendNewConfirmation(ctx, msg, sender, modeText, caps)
 	}
 
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: route resolver not configured."},
+			Message: channel.Message{Text: friendlyOps("start a new session")},
 		})
 	}
 	if p.sessionEnsurer == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: session service not configured."},
+			Message: channel.Message{Text: friendlyOps("start a new session")},
 		})
 	}
 
@@ -3149,7 +3197,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+			Message: channel.Message{Text: friendlyOps("start a new session")},
 		})
 	}
 
@@ -3160,13 +3208,13 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: failed to create new session."},
+			Message: channel.Message{Text: friendlyOps("start a new session")},
 		})
 	}
 
 	modeLabel := "chat"
 	if sess.Type == sessionpkg.TypeDiscuss {
-		modeLabel = "discuss"
+		modeLabel = "discussion"
 	}
 	if p.logger != nil {
 		p.logger.Info("new session created via /new command",
@@ -3177,16 +3225,59 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			slog.String("channel", msg.Channel.String()),
 		)
 	}
-	text := fmt.Sprintf("New %s conversation started.", modeLabel)
+	text := fmt.Sprintf("New %s started.", modeLabel)
 	if p.commandHandler != nil {
 		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
 			text = formatNewSessionMessage(modeLabel, cc)
 		}
 	}
-	return sender.Send(ctx, channel.OutboundMessage{
-		Target:  target,
-		Message: channel.Message{Text: text},
-	})
+	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
+	// When confirmed via the inline button, edit the confirmation message into
+	// the result card; otherwise reply to (quote) the /new command.
+	if editID, ok := msg.Metadata["edit_message_id"].(string); ok && strings.TrimSpace(editID) != "" && p.channelCaps(msg.Channel).Edit {
+		out.ID = strings.TrimSpace(editID)
+	} else if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		out.Reply = &channel.ReplyRef{MessageID: mid}
+	}
+	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
+}
+
+// newCommandConfirmed reports whether a /new command carries the "--confirm"
+// marker added when the user taps the confirmation button.
+func newCommandConfirmed(cmdText string) bool {
+	parsed, err := command.Parse(command.ExtractCommandText(cmdText))
+	if err != nil {
+		return false
+	}
+	for _, a := range parsed.Args {
+		if a == "--confirm" {
+			return true
+		}
+	}
+	return false
+}
+
+// sendNewConfirmation posts the Confirm/Cancel gate for /new. Confirm carries a
+// callback that re-dispatches "/new <mode> --confirm"; Cancel dismisses (deletes)
+// the prompt.
+func (*ChannelInboundProcessor) sendNewConfirmation(
+	ctx context.Context,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	modeText string,
+	caps channel.ChannelCapabilities,
+) error {
+	text := command.MdBold("⚠️ Confirm /new") +
+		"\n\nThis starts a fresh " + modeText + " session and discards the current conversation history."
+	out := applyMessageFormat(channel.Message{Text: text}, caps)
+	out.Actions = []channel.Action{
+		{Type: actionTypeCallback, Label: "✅ Confirm", Value: command.EncodeConfirmNewCallback(modeText), Row: 0},
+		{Type: actionTypeCallback, Label: "✕ Cancel", Value: command.DismissCallback(), Row: 0},
+	}
+	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		out.Reply = &channel.ReplyRef{MessageID: mid}
+	}
+	return sender.Send(ctx, channel.OutboundMessage{Target: strings.TrimSpace(msg.ReplyTarget), Message: out})
 }
 
 func (p *ChannelInboundProcessor) handleStatusCommand(
@@ -3203,13 +3294,13 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: route resolver not configured."},
+			Message: channel.Message{Text: friendlyOps("load your status")},
 		})
 	}
 	if p.commandHandler == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: command handler not configured."},
+			Message: channel.Message{Text: friendlyOps("load your status")},
 		})
 	}
 
@@ -3233,7 +3324,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Error: failed to resolve conversation route."},
+			Message: channel.Message{Text: friendlyOps("load your status")},
 		})
 	}
 
@@ -3260,11 +3351,18 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		SessionID:         sessionID,
 	})
 	if execErr != nil {
-		reply = "Error: " + execErr.Error()
+		if p.logger != nil {
+			p.logger.Warn("execute /status command failed", slog.Any("error", execErr))
+		}
+		reply = friendlyOps("load your status")
 	}
 
+	statusOut := applyMessageFormat(channel.Message{Text: reply}, p.channelCaps(msg.Channel))
+	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		statusOut.Reply = &channel.ReplyRef{MessageID: mid}
+	}
 	return sender.Send(ctx, channel.OutboundMessage{
 		Target:  target,
-		Message: channel.Message{Text: reply},
+		Message: statusOut,
 	})
 }

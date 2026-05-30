@@ -178,3 +178,28 @@ func TestModelSelectCallbackRoundTrip(t *testing.T) {
 		t.Errorf("synthetic re-parse = %+v, want model/set flat=17", reparsed)
 	}
 }
+
+func TestRangeCallbackRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ action, key string }{
+		{"summary", "30d"}, {"by-model", "all"}, {"summary", "24h"},
+	} {
+		data := EncodeRangeCallback("usage", tc.action, tc.key)
+		if len(data) > telegramCallbackLimit {
+			t.Fatalf("callback %q exceeds limit", data)
+		}
+		parsed, ok := DecodeCallback(data)
+		if !ok || parsed.Kind != callbackKindRange {
+			t.Fatalf("decode %q -> %+v ok=%v", data, parsed, ok)
+		}
+		if parsed.Resource != "usage" || parsed.Action != tc.action || parsed.Range != tc.key {
+			t.Errorf("decoded = %+v, want usage/%s/%s", parsed, tc.action, tc.key)
+		}
+		reparsed, err := Parse(parsed.SyntheticCommand())
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", parsed.SyntheticCommand(), err)
+		}
+		if reparsed.Resource != "usage" || reparsed.Action != tc.action || reparsed.Range != tc.key {
+			t.Errorf("synthetic re-parse = %+v, want usage/%s range=%s", reparsed, tc.action, tc.key)
+		}
+	}
+}

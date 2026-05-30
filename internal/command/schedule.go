@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/schedule"
 )
 
 func (h *Handler) buildScheduleGroup() *CommandGroup {
 	g := newCommandGroup("schedule", "Manage scheduled tasks")
+	g.DefaultAction = "list" // bare /schedule lands on the live schedule list
 	g.Register(SubCommand{
 		Name:  "list",
 		Usage: "list - List all schedules",
@@ -19,16 +21,25 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No schedules found."}, nil
+				return &Result{Text: "No schedules yet.\n\nSchedules run a command on a recurring timer. Create one, for example:\n" + CmdRef(`schedule create daily "0 9 * * *" "Send the report"`)}, nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				records = append(records, listRecord{fields: []kv{
+				// The cron phrase is the identifying fact, so it leads as the chip;
+				// a status chip appears only when the schedule is paused (an
+				// enabled schedule is the expected state and needs no flag).
+				fields := []kv{
 					{"Name", item.Name},
-					{"Pattern", item.Pattern},
-					{"Enabled", boolStr(item.Enabled)},
-					{"Description", truncate(item.Description, 30)},
-				}})
+					{"", humanizeCron(item.Pattern)},
+				}
+				if !item.Enabled {
+					fields = append(fields, kv{"", "paused"})
+				}
+				note := ""
+				if d := strings.TrimSpace(item.Description); d != "" && !strings.EqualFold(d, strings.TrimSpace(item.Name)) {
+					note = truncate(d, 60)
+				}
+				records = append(records, listRecord{fields: fields, note: note})
 			}
 			return buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, ""), nil
 		},
@@ -44,21 +55,32 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			maxCalls := "unlimited"
-			if item.MaxCalls != nil {
-				maxCalls = strconv.Itoa(*item.MaxCalls)
+			status := "Active"
+			if !item.Enabled {
+				status = "Paused"
 			}
-			return formatKV([]kv{
-				{"Name", item.Name},
-				{"Description", item.Description},
-				{"Pattern", item.Pattern},
+			runs := strconv.Itoa(item.CurrentCalls)
+			if item.MaxCalls != nil {
+				runs = fmt.Sprintf("%d of %d", item.CurrentCalls, *item.MaxCalls)
+			}
+			desc := item.Description
+			if d := strings.TrimSpace(desc); d == "" ||
+				strings.EqualFold(d, strings.TrimSpace(item.Name)) ||
+				strings.EqualFold(d, strings.TrimSpace(item.Command)) {
+				desc = "" // don't echo the name/command back as a description
+			}
+			pairs := []kv{
+				{"Description", desc},
+				{"Schedule", humanizeCron(item.Pattern)},
 				{"Command", item.Command},
-				{"Enabled", boolStr(item.Enabled)},
-				{"Max Calls", maxCalls},
-				{"Current Calls", strconv.Itoa(item.CurrentCalls)},
-				{"Created", item.CreatedAt.Format("2006-01-02 15:04:05")},
-				{"Updated", item.UpdatedAt.Format("2006-01-02 15:04:05")},
-			}), nil
+				{"Status", status},
+				{"Runs", runs},
+				{"Created", humanizeTime(item.CreatedAt)},
+			}
+			if !item.UpdatedAt.Truncate(time.Second).Equal(item.CreatedAt.Truncate(time.Second)) {
+				pairs = append(pairs, kv{"Updated", humanizeTime(item.UpdatedAt)})
+			}
+			return formatKVTitled(item.Name, pairs), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -81,7 +103,10 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Schedule %q created.", item.Name), nil
+			// Echo the humanized cron + command so the user can confirm the
+			// pattern was parsed as intended ("did 0 9 * * * mean 9am?").
+			return fmt.Sprintf("✅ Schedule %s created.\n\n- Runs: %s\n- Command: %s",
+				MdCode(item.Name), renderValue(humanizeCron(item.Pattern)), renderValue(item.Command)), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -124,7 +149,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Schedule %q updated.", updated.Name), nil
+			return fmt.Sprintf("✅ Schedule %s updated.", MdCode(updated.Name)), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -142,7 +167,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err := h.scheduleService.Delete(cc.Ctx, item.ID); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Schedule %q deleted.", cc.Args[0]), nil
+			return fmt.Sprintf("✅ Schedule %s deleted.", MdCode(item.Name)), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -162,7 +187,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Schedule %q enabled.", cc.Args[0]), nil
+			return fmt.Sprintf("✅ Schedule %s enabled.", MdCode(item.Name)), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -182,7 +207,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("Schedule %q disabled.", cc.Args[0]), nil
+			return fmt.Sprintf("✅ Schedule %s paused.", MdCode(item.Name)), nil
 		},
 	})
 	return g
