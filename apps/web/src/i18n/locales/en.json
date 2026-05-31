@@ -1387,8 +1387,6 @@
       "deleteSuccess": "Container deleted",
       "deletePreserveSuccess": "Container deleted and data preserved",
       "snapshotSuccess": "Snapshot created",
-      "exportSuccess": "Data exported",
-      "importSuccess": "Data imported",
       "restoreSuccess": "Data restored",
       "rollbackSuccess": "Snapshot rolled back",
       "pullingImage": "Pulling image...",
@@ -1456,8 +1454,6 @@
         "delete": "Delete",
         "deletePreserve": "Preserve & Delete",
         "snapshot": "Create",
-        "exportData": "Export",
-        "importData": "Import",
         "restoreData": "Restore",
         "rollback": "Rollback"
       }

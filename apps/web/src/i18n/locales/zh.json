@@ -1383,8 +1383,6 @@
       "deleteSuccess": "容器删除成功",
       "deletePreserveSuccess": "容器已删除，数据已保留",
       "snapshotSuccess": "快照创建成功",
-      "exportSuccess": "数据导出成功",
-      "importSuccess": "数据导入成功",
       "restoreSuccess": "数据恢复成功",
       "rollbackSuccess": "快照回滚成功",
       "pullingImage": "正在拉取镜像...",
@@ -1452,8 +1450,6 @@
         "delete": "删除",
         "deletePreserve": "保留并删除",
         "snapshot": "创建",
-        "exportData": "导出",
-        "importData": "导入",
         "restoreData": "恢复",
         "rollback": "回滚"
       }

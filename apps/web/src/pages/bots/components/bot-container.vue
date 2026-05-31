@@ -956,24 +956,6 @@ watch([activeTab, botId], ([tab]) => {
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0 sm:justify-end">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="containerBusy || botLifecyclePending"
-                  class="h-8 text-xs shadow-none font-medium border border-border"
-                  @click="handleExportData"
-                >
-                  {{ $t('bots.container.actions.exportData') }}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="containerBusy || botLifecyclePending"
-                  class="h-8 text-xs shadow-none font-medium border border-border"
-                  @click="triggerImportData"
-                >
-                  {{ $t('bots.container.actions.importData') }}
-                </Button>
                 <ConfirmPopover
                   :message="$t('bots.container.restoreConfirm')"
                   :loading="containerAction === 'restore'"
@@ -1035,13 +1017,6 @@ watch([activeTab, botId], ([tab]) => {
             </div>
           </div>
         </div>
-        <input
-          ref="importInputRef"
-          type="file"
-          accept=".tar.gz,.tgz,application/gzip,application/x-gzip,application/x-tar"
-          class="hidden"
-          @change="handleImportData"
-        >
       </div>
 
       <!-- Danger Zone - Exact replica from ?tab=channels -->
