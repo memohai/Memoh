@@ -6,50 +6,49 @@
 <div align="center">
   <img src="./assets/logo.png" alt="Memoh" height="80">
   <h1>Memoh</h1>
-  <p>Self hosted, always-on AI agent orchestrator in containers.</p>
+  <p>The open-source multi-agent platform.<br>
+  Every agent gets its own computer, desktop, network, and long-term memory.</p>
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
-    <img src="https://img.shields.io/github/license/memohai/Memoh" alt="License" />
     <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
     <img src="https://img.shields.io/github/forks/memohai/Memoh?style=social" alt="Forks" />
-    <img src="https://img.shields.io/github/last-commit/memohai/Memoh" alt="Last Commit" />
-    <img src="https://img.shields.io/github/issues/memohai/Memoh" alt="Issues" />
     <a href="https://deepwiki.com/memohai/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
     <a href="https://t.me/memohai">
       <img src="https://img.shields.io/badge/Telegram-Group-26A5E4?logo=telegram&logoColor=white" alt="Telegram" />
     </a>
-    <a href="https://docs.memoh.ai">
-      <img src="https://img.shields.io/badge/Docs-memoh.ai-3eaf7c?logo=readthedocs&logoColor=white" alt="Documentation" />
-    </a>
   </div>
+  <h3>
+    <a href="https://memoh.ai/desktop">Download Memoh Desktop</a> · <a href="#deploy-to-server">Deploy to Server</a> · <a href="https://memoh.ai">Website</a> · <a href="https://x.com/memoh_ai">X</a> · <a href="https://docs.memoh.ai">Docs</a>
+  </h3>
+  <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
-**Memoh(/ˈmemoʊ/)** is an always-on, containerized AI agent orchestrator. Create multiple AI bots, each running in its own isolated container with persistent memory, and interact with them across Telegram, Discord and so on. Bots can execute commands, edit files, browse the web, call external tools via MCP, and remember everything — like giving each bot its own computer and brain.
+## What is Memoh?
+
+Memoh lets you run multiple AI agents on a single machine. Each agent gets its own container, filesystem, desktop, browser, network, and long-term memory — like a real computer that belongs to it.
+
+Talk to them through Telegram, Discord, Lark, WeChat, Web UI, and more. They remember context, drive a browser, call MCP tools, and run scheduled tasks.
+
+Run one for yourself, assign one to each team member, or spin up a fleet of dedicated agents on a single machine.
 
 ## Quick Start
 
-Memoh is distributed in two forms:
+### Desktop
 
-### ⚙️ Deploy Version
+[Download Memoh Desktop](https://memoh.ai/desktop)
 
-The self-hosted server stack for always-on, multi-user or multi-tenant usage. Use this when you want Memoh running on a server, VM, or NAS, with bots available through Web UI and external channels such as Telegram, Discord, Lark, WeChat, Email, and more.
-
-<details>
-<summary><strong>🐳 Deploy Memoh Server</strong></summary>
-
-Use the deploy version when Memoh should be reachable by multiple users, run bots continuously, or connect to public/private messaging channels. The default Docker deployment starts the server, Web UI, database migrations, container runtime support, and the services needed for workspace containers.
-
-One-click install (**requires [Docker](https://www.docker.com/get-started/)**):
+### Deploy to Server
 
 ```bash
 curl -fsSL https://memoh.sh | sh
 ```
 
-*Silent install with all defaults: `curl -fsSL ... | sh -s -- -y`*
+<details>
+<summary><strong>More deployment options</strong></summary>
 
-Or manually:
+Manual deployment:
 
 ```bash
 git clone --depth 1 https://github.com/memohai/Memoh.git
@@ -59,153 +58,54 @@ cp conf/app.docker.toml config.toml
 docker compose up -d
 ```
 
-> **Install a specific version:**
-> ```bash
-> curl -fsSL https://memoh.sh | MEMOH_VERSION=v0.6.0 sh
-> ```
->
 > **Use CN mirror for slow image pulls:**
 > ```bash
 > curl -fsSL https://memoh.sh | USE_CN_MIRROR=true sh
 > ```
 >
 > Do not run the whole installer with `sudo`. The installer will use `sudo docker`
-> internally if Docker requires it. On macOS or if your user is in the `docker`
-> group, `sudo` is not required for Docker either.
-
-Visit <http://localhost:8082> after startup. Default login: `admin` / `admin123`.
+> internally if Docker requires it.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup.
 
 </details>
 
-### 🖥️ Desktop Version
-
-The native client for personal/local use. It starts and manages a local Memoh server on your computer, bundles the CLI and local runtime resources, and is the easiest way to try Memoh without maintaining a separate server deployment.
-
-<details>
-<summary><strong>⏬ Install Memoh Desktop</strong></summary>
-
-Use the desktop version when you want a local app that manages Memoh for you. It is designed for single-user desktop workflows, local memory, and local/Docker-backed workspaces. The desktop app runs its own local server, so it is separate from the deploy version above.
-
-1. Download the installer for your platform from the [Memoh Desktop download page](https://memoh.ai/desktop).
-2. Open Memoh. The app starts the local server, prepares local storage, and connects the UI automatically.
-3. Optional: install the bundled `memoh` CLI from the app menu if you want terminal access to the same local server.
-
-Choose the deploy version instead if you need a shared server, remote access, production uptime, or channel integrations that should keep running while your desktop is offline.
-
-</details>
-
-Documentation entry points:
-
-- [About Memoh](https://docs.memoh.ai/about)
-- [Providers & Models](https://docs.memoh.ai/getting-started/provider-and-model)
-- [Bot Setup](https://docs.memoh.ai/getting-started/bot)
-- [Sessions & Discuss Mode](https://docs.memoh.ai/getting-started/sessions)
-- [Channels](https://docs.memoh.ai/getting-started/channels)
-- [Skills](https://docs.memoh.ai/getting-started/skills)
-- [Supermarket](https://docs.memoh.ai/getting-started/supermarket)
-- [Slash Commands](https://docs.memoh.ai/getting-started/slash-commands)
-
 ## Why Memoh?
 
-Memoh is built for **always-on continuity** — an AI that stays online, and a memory that stays yours.
-
-- **Lightweight & Fast**: Built with Go as home/studio infrastructure, runs efficiently on edge devices.
-- **Containerized by default**: Each bot gets an isolated container with its own filesystem, network, and tools.
-- **Hybrid split**: Cloud inference for frontier model capability, local-first memory and indexing for privacy.
-- **Multi-user first**: Explicit sharing and privacy boundaries across users and bots.
-- **Full graphical configuration**: Configure bots, channels, MCP, skills, and all settings through a modern web UI — no coding required.
+- **Every agent gets its own computer**: An isolated container with its own filesystem, network, desktop, and browser.
+- **Multi-user, multi-bot**: Run one for yourself, deploy one for each family member, run a fleet on a single machine.
+- **Lightweight**: Runs on edge devices. Inference in the cloud, data stays local.
 
 ## Features
 
 ### Core
 
-- 🤖 **Multi-Bot & Multi-User**: Create multiple bots that chat privately, in groups, or with each other. Bots distinguish individual users in group chats and remember each person's context.
-- 📦 **Containerized Workspaces**: Each bot can run in its own isolated workspace container with a dedicated filesystem, network, tools, snapshots, data export/import, and versioning.
-- 🖥️ **Desktop Environment in Containers**: Give a bot a full graphical desktop inside its workspace container, including VNC access and a headed browser for sites and workflows that need a real GUI session.
-- 🗂️ **Persistent File System**: Every bot has a writable home directory that survives restarts, upgrades, and migrations. Bots can read, write, and organize files freely; you can browse, upload, download, and edit them visually through the web UI's file manager.
-- 🧠 **Memory Engineering**: LLM-driven fact extraction, hybrid retrieval (dense + sparse + BM25), provider-based long-term memory, memory compaction, and separate session-level context compaction. Pluggable backends: Built-in (off / sparse / dense), [Mem0](https://mem0.ai), OpenViking.
-- 💬 **Broad Channel Coverage**: Telegram, Discord, Lark (Feishu), QQ, Matrix, Misskey, DingTalk, WeCom, WeChat, WeChat Official Account, Email (Mailgun / SMTP / Gmail OAuth), and built-in Web UI.
+- **Multi-bot & multi-user**: Multiple bots that chat privately, in groups, or with each other. Cross-platform identity binding.
+- **Containerized workspaces**: Each bot runs in its own container with a dedicated filesystem, network, tools, and desktop.
+- **Built-in memory**: Long-term memory across sessions and platforms, out of the box. Also supports [Mem0](https://mem0.ai), OpenViking.
+- **10+ channels**: Telegram, Discord, Lark, WeChat, QQ, Email, and more.
 
 ### Agent Capabilities
 
-- 🔧 **MCP (Model Context Protocol)**: Full MCP support (HTTP / SSE / Stdio / OAuth). Connect external tool servers for extensibility; each bot manages its own independent MCP connections.
-- 🌐 **Browser Use**: Drive Chromium/Firefox through Playwright for navigation, form filling, screenshots, accessibility trees, and tab control. When headless mode is not enough, run a headed browser in the workspace desktop.
-- 🖱️ **Computer Use**: Observe and operate the bot's workspace desktop through visual state and input events, including clicking, typing, scrolling, and recovering from GUI flows that cannot be handled headlessly.
-- 🎭 **Skills, Supermarket & Subagents**: Define bot behavior through modular skills, install curated skills and MCP templates from Supermarket, and delegate complex tasks to sub-agents with independent context.
-- 💭 **Sessions & Discuss Mode**: Use chat, discuss, schedule, heartbeat, and subagent sessions with slash-command control and session status inspection.
-- ⏰ **Automation**: Cron-based scheduled tasks and periodic heartbeat for autonomous bot activity.
+- **MCP**: Connect external tool servers. Each bot manages its own connections.
+- **Browser Use**: Drive a browser inside the container.
+- **Computer Use**: Operate the container desktop for GUI workflows.
+- **Skills & Supermarket**: Modular skills, install curated templates from Supermarket, delegate to sub-agents.
+- **Automation**: Scheduled tasks and periodic heartbeat.
 
-### Management
+## Memory
 
-- 🖥️ **Web UI**: Modern dashboard (Vue 3 + Tailwind CSS) — streaming chat, tool call visualization, file manager, visual configuration for all settings. Dark/light theme, i18n.
-- 💻 **Desktop App**: Native Memoh client for personal/local use, with a self-managed local server, embedded Qdrant, bundled CLI, local workspace support, and system tray lifecycle controls.
-- 🔐 **Access Control**: Priority-based ACL rules with presets, allow/deny effects, and scope by channel identity, channel type, or conversation.
-- 🧪 **Multi-Model**: OpenAI-compatible, Anthropic, Google, OpenAI Codex, GitHub Copilot, and Edge TTS providers. Per-bot model assignment, provider OAuth, and automatic model import.
-- 🎙️ **Speech & Transcription**: Bots can speak through 10+ TTS providers (Edge, OpenAI, ElevenLabs, Deepgram, Azure, Google, MiniMax, Volcengine, Alibaba, OpenRouter) and listen — voice messages received from Telegram, Discord, etc. are auto-transcribed via STT models (OpenAI / OpenRouter), and bots can transcribe any audio file on demand through a built-in tool.
-- 🚀 **Server Deploy**: Docker Compose deployment for always-on server usage, with automatic migration, container runtime setup, and supporting services for workspace containers.
+Ships with a fully self-hosted memory engine. Every bot remembers what you've told it across sessions, days, and platforms.
 
-## Memory System
+Also supports [**Mem0**](https://mem0.ai) and **OpenViking** as drop-in alternatives. See the [documentation](https://docs.memoh.ai/memory-providers/).
 
-Memoh ships with a **fully self-hosted memory engine** out of the box — no external API, no SaaS dependency. Every bot remembers what you've told it across sessions, days, and platforms; in group chats, each user's memories are kept separately so the bot doesn't mix you up with the rest.
+## Sub-projects
 
-### Built-in Memory (default)
+- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go, inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP, and embeddings.
 
-Three modes, switchable per bot from the web UI:
+## Project Status
 
-| Mode | Backend | When to use |
-|------|---------|-------------|
-| **Off** | Plain file storage, no vector search | Small bots, debugging, or when you want minimal moving parts |
-| **Sparse** | Neural sparse vectors via a local model + BM25 | Zero API cost, runs entirely on your machine, strong recall for short factual memories |
-| **Dense** | Embedding model + Qdrant vector DB | Best semantic recall — finds memories by meaning, not just keywords |
-
-Under the hood:
-
-- **LLM-driven fact extraction** — every conversation turn is parsed, deduplicated, and stored as structured memories rather than raw transcripts.
-- **Hybrid retrieval** — dense vectors, sparse vectors and BM25 are combined and re-ranked, so both "what was that API key" (lexical) and "the project I told you about last week" (semantic) hit reliably.
-- **Memory compaction** — redundant or stale entries are periodically merged by an LLM, keeping the index small and recall sharp.
-- **Inspect & edit anything** — browse, search, manually create/edit memories, rebuild the whole index, and visualize the vector manifold (Top-K distribution & CDF curves) from the web UI.
-
-### Other providers
-
-If you'd rather plug into an existing memory service, Memoh also supports [**Mem0**](https://mem0.ai) (SaaS) and **OpenViking** (self-hosted or SaaS) as drop-in alternatives — same bot binding, same chat experience, just a different backend.
-
-See the [documentation](https://docs.memoh.ai/memory-providers/) for full setup details.
-
-## Gallery
-
-<table>
-  <tr>
-    <td><img src="./assets/gallery/01.png" alt="Gallery 1" width="100%"></td>
-    <td><img src="./assets/gallery/02.png" alt="Gallery 2" width="100%"></td>
-  </tr>
-  <tr>
-    <td><strong text-align="center">Chat</strong></td>
-    <td><strong text-align="center">Container</strong></td>
-  </tr>
-  <tr>
-    <td><img src="./assets/gallery/03.png" alt="Gallery 3" width="100%"></td>
-    <td><img src="./assets/gallery/04.png" alt="Gallery 4" width="100%"></td>
-  </tr>
-  <tr>
-    <td><strong text-align="center">Providers</strong></td>
-    <td><strong text-align="center">File Manager</strong></td>
-  </tr>
-  <tr>
-    <td><img src="./assets/gallery/05.png" alt="Gallery 5" width="100%"></td>
-    <td><img src="./assets/gallery/06.png" alt="Gallery 6" width="100%"></td>
-  </tr>
-  <tr>
-    <td><strong text-align="center">Scheduled Tasks</strong></td>
-    <td><strong text-align="center">Token Usage</strong></td>
-  </tr>
-</table>
-
-
-## Sub-projects Born for This Project
-
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP support, and embeddings.
+![License](https://img.shields.io/github/license/memohai/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/memohai/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/memohai/Memoh) ![Issues](https://img.shields.io/github/issues/memohai/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/memohai/Memoh)
 
 ## Star History
 
@@ -220,10 +120,10 @@ See the [documentation](https://docs.memoh.ai/memory-providers/) for full setup 
 ## Community
 
 - 🌐 [**Website**](https://memoh.ai)
-- 📚 [**Documentation**](https://docs.memoh.ai) — setup, concepts, and guides
+- 📚 [**Documentation**](https://docs.memoh.ai)
+- 💬 [**Telegram Group**](https://t.me/memohai)
+- 🛒 [**Supermarket**](https://github.com/memohai/supermarket)
 - 🤝 [**Cooperation**](mailto:business@memoh.net) — business@memoh.net
-- 💬 [**Telegram Group**](https://t.me/memohai) — community chat & support
-- 🛒 [**Supermarket**](https://github.com/memohai/supermarket) — curated skills & MCP templates
 
 ---
 
