@@ -21,12 +21,13 @@ import router from './chat/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
+  const status = await window.api.desktop.getServerStatus()
   const token = await window.api.desktop.authToken()
   if (token) {
     localStorage.setItem('token', token)
   }
   setupApiClient({
-    baseUrl: await window.api.desktop.apiBaseUrl(),
+    baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     onUnauthorized: () => router.replace({ name: 'Login' }),
   })
   window.api.window.onChatNavigate((target) => {

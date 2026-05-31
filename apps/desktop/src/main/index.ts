@@ -1,6 +1,6 @@
 import { app, dialog, Menu, shell, BrowserWindow, ipcMain, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
-import { existsSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
@@ -23,6 +23,16 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
+
+type DesktopRuntimeMode = 'local' | 'remote'
+
+const DESKTOP_FLAVOR = __MEMOH_DESKTOP_FLAVOR__ === 'online' ? 'online' : 'offline'
+const DESKTOP_RUNTIME_MODE: DesktopRuntimeMode = DESKTOP_FLAVOR === 'online' ? 'remote' : 'local'
+const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? 'Memoh Online' : 'Memoh'
+
+interface RemoteProfile {
+  baseUrl?: string
+}
 
 // Migration: prior to v0.8.x productName was implicitly the package `name`
 // (`@memohai/desktop`), so userData lived at `~/Library/Application
@@ -64,11 +74,14 @@ function migrateLegacyUserDataDirectory(): void {
 }
 
 // Must run before anything resolves `app.getPath('userData')`.
-app.setName('Memoh')
-migrateLegacyUserDataDirectory()
+app.setName(DESKTOP_PRODUCT_NAME)
+if (DESKTOP_RUNTIME_MODE === 'local') {
+  migrateLegacyUserDataDirectory()
+}
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
+const CONNECTION_DEFAULTS = { width: 520, height: 360, minWidth: 460, minHeight: 320 }
 
 type WindowKind = 'chat' | 'settings'
 type TrayBot = {
@@ -82,6 +95,7 @@ type TraySettingsItem = {
 
 let chatWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
+let connectionWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 
 // Pending settings-navigate target keyed by webContents id. Set by the
@@ -93,7 +107,118 @@ let appTray: Tray | null = null
 const pendingSettingsNavigate = new Map<number, string>()
 let stoppingLocalProcesses = false
 
+function isRemoteMode(): boolean {
+  return DESKTOP_RUNTIME_MODE === 'remote'
+}
+
+function remoteProfilePath(): string {
+  return join(app.getPath('userData'), 'remote-profile.json')
+}
+
+function readRemoteProfile(): RemoteProfile {
+  if (!isRemoteMode()) return {}
+  const path = remoteProfilePath()
+  if (!existsSync(path)) return {}
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as RemoteProfile
+    return {
+      baseUrl: typeof parsed.baseUrl === 'string' ? normalizeRemoteBaseUrl(parsed.baseUrl) : undefined,
+    }
+  } catch (error) {
+    console.error('failed to read remote desktop profile', error)
+    return {}
+  }
+}
+
+function writeRemoteProfile(profile: RemoteProfile): void {
+  mkdirSync(app.getPath('userData'), { recursive: true })
+  writeFileSync(remoteProfilePath(), `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 })
+}
+
+function getDesktopApiBaseUrl(): string {
+  if (!isRemoteMode()) {
+    return getLocalServerStatus().baseUrl
+  }
+  return readRemoteProfile().baseUrl ?? ''
+}
+
+function normalizeRemoteBaseUrl(raw: string): string {
+  let value = raw.trim()
+  if (!value) {
+    throw new Error('Server URL is required')
+  }
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
+    const localHost = /^(localhost|127\.|0\.0\.0\.0|\[::1\])(?::|\/|$)/i.test(value)
+    value = `${localHost ? 'http' : 'https'}://${value}`
+  }
+  const url = new URL(value)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Server URL must use http or https')
+  }
+  url.hash = ''
+  url.search = ''
+  return url.toString().replace(/\/$/, '')
+}
+
+async function probeRemoteBaseUrl(baseUrl: string): Promise<void> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch(`${baseUrl}/ping`, { signal: controller.signal })
+    if (!response.ok) {
+      throw new Error(`GET /ping failed with HTTP ${response.status}`)
+    }
+    const payload = await response.json().catch(() => null) as { status?: string } | null
+    if (payload?.status !== 'ok') {
+      throw new Error('GET /ping did not return a Memoh server response')
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function getDesktopServerStatus() {
+  if (!isRemoteMode()) {
+    return {
+      mode: DESKTOP_RUNTIME_MODE,
+      ...getLocalServerStatus(),
+    }
+  }
+  const baseUrl = getDesktopApiBaseUrl()
+  return {
+    mode: DESKTOP_RUNTIME_MODE,
+    baseUrl,
+    ready: baseUrl !== '',
+    managed: false,
+  }
+}
+
+async function clearRendererAuthState(): Promise<void> {
+  const script = `
+    window.localStorage.removeItem('token');
+    window.localStorage.removeItem('user');
+    window.sessionStorage.clear();
+  `
+  await Promise.all(BrowserWindow.getAllWindows().map(async (window) => {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return
+    try {
+      await window.webContents.executeJavaScript(script, true)
+    } catch (error) {
+      console.warn('failed to clear renderer auth state after server switch', error)
+    }
+  }))
+}
+
+function reloadRendererWindowsExcept(webContentsId: number): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) continue
+    if (window.webContents.id === webContentsId) continue
+    window.webContents.reload()
+  }
+}
+
 async function stopLocalProcesses(): Promise<void> {
+  if (isRemoteMode()) return
   await stopProviderOAuthCallbackProxy()
   await stopManagedServer()
   await stopEmbeddedQdrant()
@@ -139,7 +264,7 @@ function applyExternalLinkHandler(window: BrowserWindow): void {
   })
 }
 
-function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings'): void {
+function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings' | 'connection'): void {
   const base = process.env.ELECTRON_RENDERER_URL
   if (is.dev && base) {
     window.loadURL(`${base}/${entry}.html`)
@@ -202,6 +327,10 @@ function openSettingsWindow(target?: string): void {
   }
 }
 
+function openMemohSettings(): void {
+  focusWindow(ensureConnectionWindow())
+}
+
 function quitFromTray(): void {
   app.quit()
 }
@@ -216,7 +345,7 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
 
   return Menu.buildFromTemplate([
     {
-      label: 'Show Memoh',
+      label: `Show ${DESKTOP_PRODUCT_NAME}`,
       click: revealChatWindow,
     },
     { type: 'separator' },
@@ -242,7 +371,7 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
     },
     { type: 'separator' },
     {
-      label: 'Quit Memoh',
+      label: `Quit ${DESKTOP_PRODUCT_NAME}`,
       click: quitFromTray,
     },
   ])
@@ -266,7 +395,9 @@ function normalizeTrayBots(payload: unknown): TrayBot[] {
 }
 
 async function fetchTrayBots(): Promise<TrayBot[]> {
-  const { baseUrl } = getLocalServerStatus()
+  if (isRemoteMode()) return []
+  const baseUrl = getDesktopApiBaseUrl()
+  if (!baseUrl) return []
   const token = await getDesktopAuthToken()
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/bots`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -308,7 +439,7 @@ function createAppTray(): void {
   if (appTray) return
 
   appTray = new Tray(createTrayIcon())
-  appTray.setToolTip('Memoh')
+  appTray.setToolTip(DESKTOP_PRODUCT_NAME)
   setTrayMenu()
   appTray.on('click', () => {
     void showTrayMenu()
@@ -345,7 +476,7 @@ function createChatWindow(): BrowserWindow {
     ...macWindowChromeOptions('memoh-chat'),
     show: false,
     autoHideMenuBar: true,
-    title: 'Memoh',
+    title: DESKTOP_PRODUCT_NAME,
     icon: iconPng,
     webPreferences: {
       preload: join(__dirname, PRELOAD_FILE),
@@ -378,7 +509,7 @@ function createSettingsWindow(): BrowserWindow {
     ...macWindowChromeOptions('memoh-settings'),
     show: false,
     autoHideMenuBar: true,
-    title: 'Memoh · Settings',
+    title: `${DESKTOP_PRODUCT_NAME} · Settings`,
     icon: iconPng,
     webPreferences: {
       preload: join(__dirname, PRELOAD_FILE),
@@ -416,6 +547,38 @@ function createSettingsWindow(): BrowserWindow {
   return window
 }
 
+function createConnectionWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    ...CONNECTION_DEFAULTS,
+    show: false,
+    autoHideMenuBar: true,
+    title: 'Memoh Settings',
+    icon: iconPng,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    parent: chatWindow && !chatWindow.isDestroyed() ? chatWindow : undefined,
+    webPreferences: {
+      preload: join(__dirname, PRELOAD_FILE),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  window.on('ready-to-show', () => {
+    if (window.isDestroyed()) return
+    window.show()
+  })
+  window.on('closed', () => {
+    connectionWindow = null
+  })
+
+  applyExternalLinkHandler(window)
+  loadRendererEntry(window, 'connection')
+  return window
+}
+
 function ensureWindow(kind: WindowKind): BrowserWindow {
   if (kind === 'chat') {
     if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
@@ -425,6 +588,13 @@ function ensureWindow(kind: WindowKind): BrowserWindow {
     settingsWindow = createSettingsWindow()
   }
   return settingsWindow
+}
+
+function ensureConnectionWindow(): BrowserWindow {
+  if (!connectionWindow || connectionWindow.isDestroyed()) {
+    connectionWindow = createConnectionWindow()
+  }
+  return connectionWindow
 }
 
 function focusWindow(window: BrowserWindow): void {
@@ -449,6 +619,7 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
 // Promise chain can call them without forward-declaration noise.
 
 async function runCliInstallCheck(): Promise<void> {
+  if (isRemoteMode()) return
   // In dev (mise run desktop:dev / electron-vite dev) we skip the
   // auto-prompt entirely. The CLI binary is built lazily by
   // `installCli()` via `go build ./cmd/memoh`, so it works if the
@@ -515,6 +686,68 @@ async function runCliInstallCheck(): Promise<void> {
 }
 
 async function rebuildAppMenu(): Promise<void> {
+  if (isRemoteMode()) {
+    const template: MenuItemConstructorOptions[] = []
+    if (process.platform === 'darwin') {
+      template.push({
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          {
+            label: 'Memoh Settings…',
+            click: openMemohSettings,
+          },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      })
+    }
+    template.push(
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' },
+        ],
+      },
+      {
+        label: 'Window',
+        submenu: [
+          { role: 'minimize' },
+          { role: 'close' },
+        ],
+      },
+    )
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+    return
+  }
+
   let cliStatus: CliStatus | null = null
   try {
     cliStatus = await detectCliState()
@@ -625,9 +858,11 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('ai.memoh.desktop')
-  await ensureLocalServer()
-  await ensureProviderOAuthCallbackProxy()
+  electronApp.setAppUserModelId(isRemoteMode() ? 'ai.memoh.desktop.online' : 'ai.memoh.desktop')
+  if (!isRemoteMode()) {
+    await ensureLocalServer()
+    await ensureProviderOAuthCallbackProxy()
+  }
 
   if (process.platform === 'darwin' && app.dock && is.dev) {
     app.dock.setIcon(iconPng)
@@ -651,10 +886,29 @@ app.whenReady().then(async () => {
     const sender = BrowserWindow.fromWebContents(event.sender)
     sender?.close()
   })
-  ipcMain.handle('desktop:server-status', () => getLocalServerStatus())
-  ipcMain.handle('desktop:api-base-url', () => getLocalServerStatus().baseUrl)
-  ipcMain.handle('desktop:auth-token', () => getDesktopAuthToken())
+  ipcMain.handle('desktop:server-status', () => getDesktopServerStatus())
+  ipcMain.handle('desktop:api-base-url', () => getDesktopApiBaseUrl())
+  ipcMain.handle('desktop:auth-token', () => isRemoteMode() ? '' : getDesktopAuthToken())
+  ipcMain.handle('desktop:save-remote-base-url', async (event, rawBaseUrl: unknown) => {
+    if (!isRemoteMode()) {
+      throw new Error('Remote server URL can only be configured in online mode')
+    }
+    const previousBaseUrl = getDesktopApiBaseUrl()
+    const baseUrl = normalizeRemoteBaseUrl(typeof rawBaseUrl === 'string' ? rawBaseUrl : '')
+    await probeRemoteBaseUrl(baseUrl)
+    const changed = baseUrl !== previousBaseUrl
+    writeRemoteProfile({ baseUrl })
+    if (changed) {
+      await clearRendererAuthState()
+      reloadRendererWindowsExcept(event.sender.id)
+    }
+    return {
+      ...getDesktopServerStatus(),
+      changed,
+    }
+  })
   ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
+    if (isRemoteMode()) return ''
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')
   })
   ipcMain.handle('desktop:cli-status', () => detectCliState())

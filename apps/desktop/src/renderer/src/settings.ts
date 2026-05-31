@@ -21,12 +21,17 @@ import router from './settings/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
+  const status = await window.api.desktop.getServerStatus()
+  if (status.mode === 'remote' && !status.baseUrl) {
+    await window.api.window.closeSelf()
+    return
+  }
   const token = await window.api.desktop.authToken()
   if (token) {
     localStorage.setItem('token', token)
   }
   setupApiClient({
-    baseUrl: await window.api.desktop.apiBaseUrl(),
+    baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     // Settings is a satellite window — it doesn't host the login screen.
     // On 401 we close ourselves and let the chat window route to login.
     onUnauthorized: () => {

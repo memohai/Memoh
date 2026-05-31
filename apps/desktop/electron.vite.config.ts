@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url)
 const defaultPort = 8082
 const defaultHost = '127.0.0.1'
 const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
+const desktopFlavor = process.env.MEMOH_DESKTOP_FLAVOR === 'online' ? 'online' : 'offline'
 
 function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: string; baseUrl: string } {
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
@@ -50,12 +51,21 @@ export default defineConfig(({ command }) => {
   return {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
+      define: {
+        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+      },
     },
     preload: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
+      define: {
+        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+      },
     },
     renderer: {
       root: resolve(__dirname, 'src/renderer'),
+      define: {
+        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+      },
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
       publicDir: resolve(__dirname, '../web/public'),
@@ -80,6 +90,7 @@ export default defineConfig(({ command }) => {
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
             settings: resolve(__dirname, 'src/renderer/settings.html'),
+            connection: resolve(__dirname, 'src/renderer/connection.html'),
           },
         },
       },

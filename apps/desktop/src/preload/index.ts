@@ -24,12 +24,15 @@ export interface CliStatusPayload {
   error?: string
 }
 
+export type DesktopRuntimeMode = 'local' | 'remote'
+
 // Renderer-facing API surface. Keep this intentionally small — it is the
 // full security boundary between chromium renderer processes and the
 // node-privileged main process.
 const api = {
   desktop: {
     getServerStatus: (): Promise<{
+      mode: DesktopRuntimeMode
       baseUrl: string
       ready: boolean
       managed: boolean
@@ -43,6 +46,8 @@ const api = {
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
+    saveRemoteBaseUrl: (baseUrl: string): Promise<{ mode: DesktopRuntimeMode, baseUrl: string, ready: boolean, changed: boolean }> =>
+      ipcRenderer.invoke('desktop:save-remote-base-url', baseUrl),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
     getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),
