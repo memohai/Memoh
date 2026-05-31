@@ -220,43 +220,68 @@ func assembleListResult(title, resource, action string, args []string, pageRecor
 		items = append(items, listItemFromRecord(r))
 	}
 
-	text := formatRecords(pageRecords)
+	bodyText := formatRecords(pageRecords)
 	// Footer: pagination count (only when paginated) + the cross-reference hint
 	// (always, when set) — previously the hint only rendered inside the
 	// pagination branch, so small config lists never showed their next-step.
-	var suffixParts []string
+	var pageSuffixParts []string
 	if total > len(pageRecords) {
-		suffixParts = append(suffixParts, fmt.Sprintf("Showing %d of %d items.", len(pageRecords), total))
+		pageSuffixParts = append(pageSuffixParts, fmt.Sprintf("Showing %d of %d items.", len(pageRecords), total))
 	}
+	textSuffixParts := append([]string{}, pageSuffixParts...)
 	if h := strings.TrimSpace(hint); h != "" {
-		suffixParts = append(suffixParts, h)
+		textSuffixParts = append(textSuffixParts, h)
 	}
-	if len(suffixParts) > 0 {
-		if text != "" {
-			text += "\n\n"
+	text := listTextWithSuffix(title, total, len(pageRecords), bodyText, textSuffixParts)
+
+	buttonSuffixParts := pageSuffixParts
+	if !listHasActions(items) {
+		if h := strings.TrimSpace(hint); h != "" {
+			buttonSuffixParts = append(buttonSuffixParts, h)
 		}
-		text += strings.Join(suffixParts, " ")
 	}
-	if t := strings.TrimSpace(title); t != "" && len(pageRecords) > 0 {
-		text = fmt.Sprintf("%s\n\n%s", MdBold(fmt.Sprintf("%s (%d)", t, total)), text)
-	}
+	buttonText := listTextWithSuffix(title, total, len(pageRecords), bodyText, buttonSuffixParts)
 
 	return &Result{
 		Text: text,
 		Interactive: &Interactive{
 			Kind: InteractiveList,
 			List: &ListView{
-				Title:    title,
-				Resource: resource,
-				Action:   action,
-				Args:     args,
-				Items:    items,
-				Total:    total,
-				Page:     page,
-				PageSize: pageSize,
+				Title:      title,
+				ButtonText: buttonText,
+				Resource:   resource,
+				Action:     action,
+				Args:       args,
+				Items:      items,
+				Total:      total,
+				Page:       page,
+				PageSize:   pageSize,
 			},
 		},
 	}
+}
+
+func listTextWithSuffix(title string, total, visible int, body string, suffixParts []string) string {
+	text := body
+	if len(suffixParts) > 0 {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += strings.Join(suffixParts, " ")
+	}
+	if t := strings.TrimSpace(title); t != "" && visible > 0 {
+		text = fmt.Sprintf("%s\n\n%s", MdBold(fmt.Sprintf("%s (%d)", t, total)), text)
+	}
+	return text
+}
+
+func listHasActions(items []ListItem) bool {
+	for _, item := range items {
+		if item.Action != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // WithExtraActions attaches contextual entry buttons below the list rows of a
@@ -319,13 +344,4 @@ func boolStr(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-// onOff returns "on" or "off" — preferred over boolStr for enable/active flags
-// in compact list rows.
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
 }

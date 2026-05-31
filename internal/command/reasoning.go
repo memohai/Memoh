@@ -4,17 +4,24 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
 
 // reasoningChoices are the selectable reasoning levels. "off" disables thinking;
-// the rest enable it at that effort. (The effort ladder is low/medium/high in
-// the current backend.)
-var reasoningChoices = []string{"off", "low", "medium", "high"}
+// the rest enable it at that effort.
+var reasoningChoices = []string{
+	"off",
+	models.ReasoningEffortNone,
+	models.ReasoningEffortLow,
+	models.ReasoningEffortMedium,
+	models.ReasoningEffortHigh,
+	models.ReasoningEffortXHigh,
+}
 
 func validEffort(v string) bool {
 	switch v {
-	case "low", "medium", "high":
+	case models.ReasoningEffortNone, models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh, models.ReasoningEffortXHigh:
 		return true
 	}
 	return false
@@ -22,10 +29,10 @@ func validEffort(v string) bool {
 
 // buildReasoningGroup registers /reasoning — a first-class sibling of /model.
 // Aliases /reason, /effort, /think all resolve here (see resourceAliases). It
-// shows the current reasoning level and lets the user pick off/low/medium/high
+// shows the current reasoning level and lets the user pick the reasoning effort
 // in one tap, reusing settingsService.UpsertBot (no backend changes).
 func (h *Handler) buildReasoningGroup() *CommandGroup {
-	g := newCommandGroup("reasoning", "View or set reasoning level (off/low/medium/high)")
+	g := newCommandGroup("reasoning", "View or set reasoning level")
 	g.DefaultAction = "show"
 	g.Register(SubCommand{
 		Name:  "show",
@@ -40,11 +47,11 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:    "set",
-		Usage:   "set <off|low|medium|high> - Set the reasoning level",
+		Usage:   "set <off|none|low|medium|high|xhigh> - Set the reasoning level",
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return &Result{Text: "Usage: /reasoning set <off|low|medium|high>"}, nil
+				return &Result{Text: "Usage: /reasoning set <off|none|low|medium|high|xhigh>"}, nil
 			}
 			level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
 			if h.settingsService == nil {
@@ -60,7 +67,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 				req.ReasoningEnabled = &on
 				req.ReasoningEffort = &level
 			default:
-				return &Result{Text: fmt.Sprintf("Unknown level %q — choose off, low, medium, or high.", cc.Args[0])}, nil
+				return &Result{Text: fmt.Sprintf("Unknown level %q — choose off, none, low, medium, high, or xhigh.", cc.Args[0])}, nil
 			}
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
 				return nil, err

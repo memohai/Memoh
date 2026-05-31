@@ -39,6 +39,7 @@ type Interactive struct {
 // through the callback data of pagination buttons.
 type ListView struct {
 	Title        string
+	ButtonText   string   // optional compact text for button-capable channels
 	Resource     string   // command resource (e.g. "mcp"), round-trips in callback data
 	Action       string   // command action (e.g. "list")
 	Args         []string // narrowing args (e.g. a provider filter) that round-trip
@@ -113,6 +114,7 @@ type PickerModel struct {
 type ChoicesView struct {
 	Title   string
 	Choices []ListItem
+	Columns int // optional keyboard columns; 0 lets renderers pick
 }
 
 // RangeView is a time-window selector for a time-series command. Selecting a

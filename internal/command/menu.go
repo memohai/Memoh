@@ -20,7 +20,7 @@ func MenuCommands() []MenuCommand {
 		{"status", "Show session status"},
 		{"context", "Show context window usage"},
 		{"model", "Switch the chat model"},
-		{"reasoning", "Set reasoning level (off/low/medium/high)"},
+		{"reasoning", "Set reasoning level"},
 		{"settings", "View and update bot settings"},
 		{"memory", "Choose the memory provider"},
 		{"search", "Choose the search provider"},

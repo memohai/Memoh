@@ -59,6 +59,25 @@ func TestBuildListResultSinglePageNoSuffix(t *testing.T) {
 	}
 }
 
+func TestBuildListResultButtonTextOmitsCommandHintForActionRows(t *testing.T) {
+	records := sampleRecords(2)
+	records[0].action = &ItemAction{Resource: "search", Action: "set", Args: []string{"a"}}
+	res := buildListResult("T", "search", "list", nil, records, 0, 12, "Switch with "+CmdRef("search set <name>")+".")
+	if !strings.Contains(res.Text, "/search set <name>") {
+		t.Fatalf("fallback text should keep copyable command hint: %q", res.Text)
+	}
+	if strings.Contains(res.Interactive.List.ButtonText, "/search set <name>") {
+		t.Fatalf("button text should not repeat command hint for tappable rows: %q", res.Interactive.List.ButtonText)
+	}
+}
+
+func TestBuildListResultButtonTextKeepsPlainHintForDisplayRows(t *testing.T) {
+	res := buildListResult("T", "heartbeat", "logs", nil, sampleRecords(2), 0, 12, "Use the Web UI for older heartbeat logs.")
+	if !strings.Contains(res.Interactive.List.ButtonText, "Use the Web UI") {
+		t.Fatalf("button text should keep non-action guidance: %q", res.Interactive.List.ButtonText)
+	}
+}
+
 func TestListItemFromRecord(t *testing.T) {
 	item := listItemFromRecord(listRecord{
 		fields:   []kv{{"Name", "Foo"}, {"Type", "bar"}, {"Empty", ""}},

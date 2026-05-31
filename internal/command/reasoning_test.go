@@ -34,6 +34,17 @@ func TestReasoningResultMarksCurrent(t *testing.T) {
 	assertReasoningMarked(t, reasoningResult(false, "high"), "off")
 }
 
+func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
+	t.Parallel()
+	res := reasoningResult(true, "xhigh")
+	assertReasoningMarked(t, res, "xhigh")
+	for _, want := range []string{"off", "none", "low", "medium", "high", "xhigh"} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("reasoning fallback missing %q: %s", want, res.Text)
+		}
+	}
+}
+
 func assertReasoningMarked(t *testing.T, res *Result, want string) {
 	t.Helper()
 	var marked string

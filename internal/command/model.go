@@ -119,16 +119,13 @@ func (h *Handler) resolveProviderName(cc CommandContext, providerID string) stri
 }
 
 func (h *Handler) findModelByProviderAndName(cc CommandContext, providerName, modelName string) (models.GetResponse, error) {
-	provider, err := h.providersService.GetByName(cc.Ctx, providerName)
-	if err != nil {
-		return models.GetResponse{}, fmt.Errorf("provider %q not found", providerName)
-	}
-	chatModels, err := h.modelsService.ListByProviderIDAndType(cc.Ctx, provider.ID, models.ModelTypeChat)
+	chatModels, err := h.selectableChatModels(cc)
 	if err != nil {
 		return models.GetResponse{}, err
 	}
 	for _, m := range chatModels {
-		if strings.EqualFold(m.Name, modelName) || strings.EqualFold(m.ModelID, modelName) {
+		if strings.EqualFold(h.resolveProviderName(cc, m.ProviderID), providerName) &&
+			(strings.EqualFold(m.Name, modelName) || strings.EqualFold(m.ModelID, modelName)) {
 			return m, nil
 		}
 	}
@@ -149,7 +146,7 @@ func (h *Handler) findModelForSelection(cc CommandContext, args []string) (model
 }
 
 func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.GetResponse, error) {
-	items, err := h.modelsService.ListByType(cc.Ctx, models.ModelTypeChat)
+	items, err := h.selectableChatModels(cc)
 	if err != nil {
 		return models.GetResponse{}, err
 	}
@@ -180,6 +177,13 @@ func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.
 		}
 		return models.GetResponse{}, fmt.Errorf("model %q is ambiguous; use a model ID or provider-qualified name (%s)", target, strings.Join(choices, ", "))
 	}
+}
+
+func (h *Handler) selectableChatModels(cc CommandContext) ([]models.GetResponse, error) {
+	if h.modelsService == nil {
+		return nil, errors.New("model service is not available")
+	}
+	return h.modelsService.ListEnabledByType(cc.Ctx, models.ModelTypeChat)
 }
 
 func (h *Handler) filterModelsByProvider(cc CommandContext, items []models.GetResponse, providerName string) []models.GetResponse {

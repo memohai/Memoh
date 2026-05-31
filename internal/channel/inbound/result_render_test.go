@@ -27,12 +27,26 @@ func listResult(total, page, pageSize int) *command.Result {
 
 func TestRenderResultTextFallbackWhenNoButtons(t *testing.T) {
 	res := listResult(50, 0, 12)
+	res.Interactive.List.ButtonText = "button list text"
 	msg := renderResult(res, channel.ChannelCapabilities{Buttons: false})
 	if msg.Text != "list text" {
 		t.Errorf("Text = %q, want 'list text'", msg.Text)
 	}
 	if len(msg.Actions) != 0 {
 		t.Errorf("expected no actions for non-button channel, got %d", len(msg.Actions))
+	}
+}
+
+func TestRenderListUsesButtonTextWhenButtonsAreAvailable(t *testing.T) {
+	res := listResult(5, 0, 12)
+	res.Interactive.List.ButtonText = "button list text"
+	res.Interactive.List.Items[0].Action = &command.ItemAction{Resource: "search", Action: "set", Args: []string{"one"}}
+	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	if msg.Text != "button list text" {
+		t.Errorf("Text = %q, want button text", msg.Text)
+	}
+	if len(msg.Actions) == 0 {
+		t.Fatal("expected row action buttons")
 	}
 }
 
@@ -179,6 +193,29 @@ func TestRenderRangeView(t *testing.T) {
 	}
 	if !hasAll {
 		t.Errorf("expected an 'All' preset button, labels=%v", labels)
+	}
+}
+
+func TestRenderChoicesViewUsesSingleColumnForLongLabels(t *testing.T) {
+	res := &command.Result{
+		Text: "settings",
+		Interactive: &command.Interactive{
+			Kind: command.InteractiveChoices,
+			Choices: &command.ChoicesView{
+				Title: "settings",
+				Choices: []command.ListItem{
+					{Label: "Turn heartbeat off now", Action: &command.ItemAction{Resource: "settings", Action: "update"}},
+					{Label: "Ask before tools", Action: &command.ItemAction{Resource: "settings", Action: "update"}},
+				},
+			},
+		},
+	}
+	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	if len(msg.Actions) < 2 {
+		t.Fatalf("expected actions, got %d", len(msg.Actions))
+	}
+	if msg.Actions[0].Row == msg.Actions[1].Row {
+		t.Fatalf("long labels should use one column, rows: %+v", msg.Actions)
 	}
 }
 

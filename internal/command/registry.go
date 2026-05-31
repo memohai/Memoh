@@ -155,15 +155,30 @@ func (r *Registry) GroupHelpResult(name string) *Result {
 	if !ok {
 		return &Result{Text: fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(name), CmdRef("help"))}
 	}
-	title := MdBold("/"+group.Name) + " — " + group.Description + "\n\nTap an action:"
-	choices := make([]ListItem, 0, len(group.order)+1)
+	var b strings.Builder
+	b.WriteString(MdBold("/" + group.Name))
+	b.WriteString(" — ")
+	b.WriteString(group.Description)
+	b.WriteString("\n\n")
 	for _, subName := range group.order {
 		sub := group.commands[subName]
 		_, summary := splitUsage(sub.Usage)
-		label := subName
+		line := "- " + subName
 		if summary != "" {
-			label += " — " + summary
+			line += " — " + summary
 		}
+		if sub.IsWrite {
+			line += " (owner)"
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nTap an action:")
+	title := strings.TrimRight(b.String(), "\n")
+	choices := make([]ListItem, 0, len(group.order)+1)
+	for _, subName := range group.order {
+		sub := group.commands[subName]
+		label := subName
 		if sub.IsWrite {
 			label += " 🔒"
 		}

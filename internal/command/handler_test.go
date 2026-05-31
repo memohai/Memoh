@@ -149,6 +149,43 @@ func TestExecute_HelpGroup(t *testing.T) {
 	}
 }
 
+func TestExecuteResult_HelpGroupUsesShortButtonLabels(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(&fakeRoleResolver{role: "owner"})
+	result, err := h.ExecuteResult(context.Background(), ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "user-1",
+		Text:              "/help schedule",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Interactive == nil || result.Interactive.Choices == nil {
+		t.Fatal("expected interactive choices for group help")
+	}
+	if !strings.Contains(result.Interactive.Choices.Title, "list — List all schedules") {
+		t.Errorf("expected action descriptions in interactive title, got: %s", result.Interactive.Choices.Title)
+	}
+	for _, item := range result.Interactive.Choices.Choices {
+		if strings.HasPrefix(item.Label, "◀ ") {
+			continue
+		}
+		if strings.Contains(item.Label, "—") || strings.Contains(item.Label, "schedule") {
+			t.Errorf("button label should stay short, got %q", item.Label)
+		}
+	}
+	var sawLockedCreate bool
+	for _, item := range result.Interactive.Choices.Choices {
+		if item.Label == "create 🔒" {
+			sawLockedCreate = true
+			break
+		}
+	}
+	if !sawLockedCreate {
+		t.Errorf("expected owner-only action to be marked on the short button labels: %#v", result.Interactive.Choices.Choices)
+	}
+}
+
 func TestExecute_HelpAction(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: "owner"})
@@ -293,6 +330,38 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 	}
 	if strings.Contains(result, "Unknown action") {
 		t.Errorf("expected settings get attempt, not unknown action, got: %s", result)
+	}
+}
+
+func TestSettingsResultUsesFocusedActions(t *testing.T) {
+	t.Parallel()
+	h := &Handler{}
+	result := h.settingsResult(CommandContext{}, settings.Settings{AclDefaultEffect: "allow"})
+	if result.Interactive == nil || result.Interactive.Choices == nil {
+		t.Fatal("expected settings choices")
+	}
+	var labels []string
+	for _, item := range result.Interactive.Choices.Choices {
+		labels = append(labels, item.Label)
+	}
+	for _, forbidden := range []string{"Reasoning: off", "Effort ▸", "ACL: allow", "Heartbeat: off"} {
+		for _, label := range labels {
+			if label == forbidden {
+				t.Fatalf("settings should not expose redundant state button %q; labels=%v", forbidden, labels)
+			}
+		}
+	}
+	for _, want := range []string{"Reasoning ▸", "Models ▸", "Turn heartbeat on", "Ask before tools", "Search ▸", "Memory ▸"} {
+		var found bool
+		for _, label := range labels {
+			if label == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("settings labels missing %q: %v", want, labels)
+		}
 	}
 }
 

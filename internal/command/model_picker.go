@@ -84,7 +84,7 @@ func groupCandidatesByProvider(cands []modelCandidate) []providerGroup {
 // candidate at the given flat index. ok is false when the index is out of range
 // (e.g. the model set changed between render and tap).
 func (h *Handler) modelCandidateByFlat(cc CommandContext, flat int) (modelCandidate, bool, error) {
-	items, err := h.modelsService.ListByType(cc.Ctx, models.ModelTypeChat)
+	items, err := h.selectableChatModels(cc)
 	if err != nil {
 		return modelCandidate{}, false, err
 	}
@@ -100,7 +100,7 @@ func (h *Handler) modelCandidateByFlat(cc CommandContext, flat int) (modelCandid
 // ModelPickerView for interactive channels. Provider grid is shown unless a
 // provider is selected (via --prov or a positional provider arg).
 func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
-	items, err := h.modelsService.ListByType(cc.Ctx, models.ModelTypeChat)
+	items, err := h.selectableChatModels(cc)
 	if err != nil {
 		return nil, err
 	}

@@ -103,6 +103,9 @@ func stripInlineMarkup(s string) string {
 // A single-page, action-free list renders as plain text (no keyboard), matching
 // prior behavior.
 func renderListView(text string, lv *command.ListView) channel.Message {
+	if lv != nil && strings.TrimSpace(lv.ButtonText) != "" {
+		text = lv.ButtonText
+	}
 	msg := channel.Message{Text: text}
 	if lv == nil {
 		return msg
@@ -130,7 +133,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 		}
 		actions = append(actions, channel.Action{
 			Type:  actionTypeCallback,
-			Label: label,
+			Label: truncateButtonLabel(label),
 			Value: command.EncodeListCallback(item.Action.Resource, item.Action.Action, item.Action.Args, 0),
 			Row:   row,
 		})
@@ -146,7 +149,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 			}
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
-				Label: ea.Label,
+				Label: truncateButtonLabel(ea.Label),
 				Value: command.EncodeListCallback(ea.Action.Resource, ea.Action.Action, ea.Action.Args, 0),
 				Row:   row,
 			})
@@ -372,16 +375,17 @@ func truncateButtonLabel(s string) string {
 	return string(r[:maxLen-1]) + "…"
 }
 
-// renderChoicesView renders a flat set of one-tap choices (e.g. /effort levels,
-// /think on/off, /settings toggles): choice buttons laid out 2 per row (current
-// marked ✓) plus a Close row. Each tap re-dispatches "/{resource} {action}
-// {args}" and edits in place.
+// renderChoicesView renders a flat set of one-tap choices (e.g. reasoning
+// levels or settings toggles). Short labels share two columns; long labels fall
+// back to one column so Telegram does not crush the text. Each tap re-dispatches
+// "/{resource} {action} {args}" and edits in place.
 func renderChoicesView(cv *command.ChoicesView) channel.Message {
 	if cv == nil {
 		return channel.Message{}
 	}
 	msg := channel.Message{Text: cv.Title}
 	var actions []channel.Action
+	columns := choiceColumns(cv)
 	col, row := 0, 0
 	for _, item := range cv.Choices {
 		if item.Action == nil {
@@ -393,12 +397,12 @@ func renderChoicesView(cv *command.ChoicesView) channel.Message {
 		}
 		actions = append(actions, channel.Action{
 			Type:  actionTypeCallback,
-			Label: label,
+			Label: truncateButtonLabel(label),
 			Value: command.EncodeListCallback(item.Action.Resource, item.Action.Action, item.Action.Args, 0),
 			Row:   row,
 		})
 		col++
-		if col == 2 {
+		if col == columns {
 			col = 0
 			row++
 		}
@@ -411,6 +415,21 @@ func renderChoicesView(cv *command.ChoicesView) channel.Message {
 	})
 	msg.Actions = actions
 	return msg
+}
+
+func choiceColumns(cv *command.ChoicesView) int {
+	if cv == nil {
+		return 1
+	}
+	if cv.Columns == 1 || cv.Columns == 2 {
+		return cv.Columns
+	}
+	for _, item := range cv.Choices {
+		if len([]rune(item.Label)) > 18 {
+			return 1
+		}
+	}
+	return 2
 }
 
 // renderRangeView renders a time-window selector: one row of preset buttons

@@ -87,8 +87,8 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 
 // settingsResult renders the settings card (the same KV detail as before) and,
 // for button-capable channels, a set of one-tap controls: inline toggles for the
-// booleans/ACL (re-dispatch /settings update, which re-renders this card in
-// place) and drill-downs to the /effort and /model pickers. Reuses
+// heartbeat/ACL (re-dispatch /settings update, which re-renders this card in
+// place) and drill-downs to the /reasoning and /model pickers. Reuses
 // settingsService.UpsertBot — no backend changes.
 func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result {
 	reasoning := "off"
@@ -120,15 +120,22 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 		{"Memory Provider", h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
 	})
 	aclNext := "deny"
+	aclAction := "Ask before tools"
 	if strings.EqualFold(strings.TrimSpace(s.AclDefaultEffect), "deny") {
 		aclNext = "allow"
+		aclAction = "Allow tools"
+	}
+	heartbeatAction := "Turn heartbeat on"
+	if s.HeartbeatEnabled {
+		heartbeatAction = "Turn heartbeat off"
 	}
 	choices := []ListItem{
-		{Label: "Reasoning: " + onOff(s.ReasoningEnabled), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--reasoning_enabled", strconv.FormatBool(!s.ReasoningEnabled)}}},
-		{Label: "Effort ▸", Action: &ItemAction{Resource: "effort", Action: "show"}},
-		{Label: "Heartbeat: " + onOff(s.HeartbeatEnabled), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
-		{Label: "ACL: " + fallbackValue(s.AclDefaultEffect), Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
-		{Label: "Model ▸", Action: &ItemAction{Resource: "model", Action: "list"}},
+		{Label: "Reasoning ▸", Action: &ItemAction{Resource: "reasoning", Action: "show"}},
+		{Label: "Models ▸", Action: &ItemAction{Resource: "model", Action: "list"}},
+		{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
+		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
+		{Label: "Search ▸", Action: &ItemAction{Resource: "search", Action: "list"}},
+		{Label: "Memory ▸", Action: &ItemAction{Resource: "memory", Action: "list"}},
 	}
 	return &Result{
 		Text:        card,
@@ -142,7 +149,7 @@ func settingsUpdateUsage() string {
 		"- --language <value>\n" +
 		"- --acl_default_effect <allow|deny>\n" +
 		"- --reasoning_enabled <true|false>\n" +
-		"- --reasoning_effort <low|medium|high>\n" +
+		"- --reasoning_effort <none|low|medium|high|xhigh>\n" +
 		"- --heartbeat_enabled <true|false>\n" +
 		"- --heartbeat_interval <minutes>\n" +
 		"- --chat_model_id <id>\n" +
