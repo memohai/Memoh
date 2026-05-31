@@ -1,5 +1,5 @@
 appId: ai.memoh.desktop.online
-productName: Memoh Online
+productName: Memoh
 copyright: Copyright © 2026 Memoh
 directories:
   buildResources: build

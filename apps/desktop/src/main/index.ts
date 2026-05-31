@@ -28,55 +28,115 @@ type DesktopRuntimeMode = 'local' | 'remote'
 
 const DESKTOP_FLAVOR = __MEMOH_DESKTOP_FLAVOR__ === 'online' ? 'online' : 'offline'
 const DESKTOP_RUNTIME_MODE: DesktopRuntimeMode = DESKTOP_FLAVOR === 'online' ? 'remote' : 'local'
-const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? 'Memoh Online' : 'Memoh'
+const ONLINE_PRODUCT_NAME = 'Memoh'
+const LOCAL_PRODUCT_NAME = 'Memoh Local'
+const LEGACY_REMOTE_PRODUCT_NAME = 'Memoh Online'
+const LEGACY_LOCAL_PRODUCT_NAME = 'Memoh'
+const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? ONLINE_PRODUCT_NAME : LOCAL_PRODUCT_NAME
 
 interface RemoteProfile {
   baseUrl?: string
 }
 
-// Migration: prior to v0.8.x productName was implicitly the package `name`
-// (`@memohai/desktop`), so userData lived at `~/Library/Application
-// Support/@memohai/desktop/` on macOS (and analogous paths on other OSes).
-// Pinning productName to `Memoh` switches the userData root to `…/Memoh/`.
-// We rename the old directory in place once, before Electron caches the path.
-// CLI shipped alongside desktop relies on this stable layout.
-function migrateLegacyUserDataDirectory(): void {
+const LOCAL_USER_DATA_ENTRIES = [
+  'config.toml',
+  'local-server',
+  'local-server.log',
+  'local-server.pid.json',
+  'qdrant',
+  'gstreamer',
+  'cli-token.json',
+  'cli-prefs.json',
+]
+
+function platformUserDataBaseDirectory(): string {
   const home = app.getPath('home')
-  let legacy: string | null = null
-  let modern: string | null = null
   switch (process.platform) {
     case 'darwin': {
-      const base = join(home, 'Library', 'Application Support')
-      legacy = join(base, '@memohai', 'desktop')
-      modern = join(base, 'Memoh')
-      break
+      return join(home, 'Library', 'Application Support')
     }
     case 'win32': {
-      const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming')
-      legacy = join(appData, '@memohai', 'desktop')
-      modern = join(appData, 'Memoh')
-      break
+      return process.env.APPDATA || join(home, 'AppData', 'Roaming')
     }
     default: {
-      const xdg = process.env.XDG_CONFIG_HOME || join(home, '.config')
-      legacy = join(xdg, '@memohai', 'desktop')
-      modern = join(xdg, 'Memoh')
-      break
+      return process.env.XDG_CONFIG_HOME || join(home, '.config')
     }
   }
-  if (!legacy || !modern) return
-  if (existsSync(modern) || !existsSync(legacy)) return
+}
+
+function productUserDataDirectory(productName: string): string {
+  return join(platformUserDataBaseDirectory(), productName)
+}
+
+function legacyPackageUserDataDirectory(): string {
+  return join(platformUserDataBaseDirectory(), '@memohai', 'desktop')
+}
+
+function moveUserDataEntries(source: string, target: string, entries: string[]): void {
+  if (!existsSync(source)) return
+  mkdirSync(target, { recursive: true })
+  for (const entry of entries) {
+    const sourcePath = join(source, entry)
+    const targetPath = join(target, entry)
+    if (!existsSync(sourcePath) || existsSync(targetPath)) continue
+    renameSync(sourcePath, targetPath)
+  }
+}
+
+function hasLocalUserData(source: string): boolean {
+  return LOCAL_USER_DATA_ENTRIES.some((entry) => existsSync(join(source, entry)))
+}
+
+function migrateWholeUserDataDirectory(source: string, target: string): boolean {
+  if (!existsSync(source) || existsSync(target)) return false
   try {
-    renameSync(legacy, modern)
+    renameSync(source, target)
+    return true
   } catch (error) {
-    console.error('failed to migrate userData directory', { from: legacy, to: modern, error })
+    console.error('failed to migrate userData directory', { from: source, to: target, error })
+    return false
+  }
+}
+
+function migrateRemoteUserDataDirectory(): void {
+  const legacy = productUserDataDirectory(LEGACY_REMOTE_PRODUCT_NAME)
+  const modern = productUserDataDirectory(ONLINE_PRODUCT_NAME)
+  if (migrateWholeUserDataDirectory(legacy, modern)) return
+  try {
+    moveUserDataEntries(legacy, modern, ['remote-profile.json'])
+  } catch (error) {
+    console.error('failed to migrate remote userData entries', { from: legacy, to: modern, error })
+  }
+}
+
+function migrateLocalUserDataDirectory(): void {
+  const modern = productUserDataDirectory(LOCAL_PRODUCT_NAME)
+  const legacyPackage = legacyPackageUserDataDirectory()
+  const legacyLocal = productUserDataDirectory(LEGACY_LOCAL_PRODUCT_NAME)
+
+  if (!migrateWholeUserDataDirectory(legacyPackage, modern)) {
+    try {
+      moveUserDataEntries(legacyPackage, modern, LOCAL_USER_DATA_ENTRIES)
+    } catch (error) {
+      console.error('failed to migrate package userData entries', { from: legacyPackage, to: modern, error })
+    }
+  }
+
+  if (!existsSync(legacyLocal) || !hasLocalUserData(legacyLocal)) return
+  if (!existsSync(join(legacyLocal, 'remote-profile.json')) && migrateWholeUserDataDirectory(legacyLocal, modern)) return
+  try {
+    moveUserDataEntries(legacyLocal, modern, LOCAL_USER_DATA_ENTRIES)
+  } catch (error) {
+    console.error('failed to migrate local userData entries', { from: legacyLocal, to: modern, error })
   }
 }
 
 // Must run before anything resolves `app.getPath('userData')`.
 app.setName(DESKTOP_PRODUCT_NAME)
-if (DESKTOP_RUNTIME_MODE === 'local') {
-  migrateLegacyUserDataDirectory()
+if (DESKTOP_RUNTIME_MODE === 'remote') {
+  migrateRemoteUserDataDirectory()
+} else {
+  migrateLocalUserDataDirectory()
 }
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }

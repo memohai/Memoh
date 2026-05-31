@@ -3,9 +3,8 @@
 // (cmd/memoh). The two cooperate purely through files under the same
 // userData directory: config.toml, local-server.pid.json, qdrant/, etc.
 //
-// Path rules mirror Electron's app.getPath('userData') with productName
-// pinned to "Memoh" (see apps/desktop/package.json and the call to
-// app.setName('Memoh') in apps/desktop/src/main/index.ts).
+// Path rules mirror Electron's app.getPath('userData') with the local
+// desktop product name pinned to "Memoh Local" in apps/desktop.
 package local
 
 import (
@@ -16,7 +15,7 @@ import (
 	"runtime"
 )
 
-const productName = "Memoh"
+const productName = "Memoh Local"
 
 // LocalServerPort is the fixed port the desktop-managed server binds to.
 // Mirrors LOCAL_SERVER_PORT in apps/desktop/src/main/local-server.ts.
@@ -63,7 +62,7 @@ func MustUserDataDir() string {
 	return dir
 }
 
-// ConfigPath returns the path where a packaged Memoh.app writes
+// ConfigPath returns the path where a packaged Memoh Local app writes
 // config.toml. Use ResolveConfigPath when you need to read it — that
 // helper also recognizes the dev-mode location.
 func ConfigPath() (string, error) {
@@ -105,7 +104,7 @@ func ResolveConfigPath() (string, error) {
 	if _, statErr := os.Stat(dev); statErr == nil {
 		return dev, nil
 	}
-	return "", fmt.Errorf("config.toml not found in either %q or %q; open Memoh.app once to initialize", packaged, dev)
+	return "", fmt.Errorf("config.toml not found in either %q or %q; open Memoh Local once to initialize", packaged, dev)
 }
 
 // PidPath returns the path to the desktop-managed server's pid file.
@@ -167,10 +166,10 @@ func QdrantPortsPath() (string, error) {
 // BundledServerBinary returns the absolute path to the memoh-server
 // binary shipped alongside the CLI inside the desktop app bundle.
 //
-// Layout inside a packaged Memoh.app on macOS:
+// Layout inside a packaged Memoh Local.app on macOS:
 //
-//	Memoh.app/Contents/Resources/cli/memoh        <- the CLI itself
-//	Memoh.app/Contents/Resources/server/memoh-server
+//	Memoh Local.app/Contents/Resources/cli/memoh        <- the CLI itself
+//	Memoh Local.app/Contents/Resources/server/memoh-server
 //
 // Layout in dev (running `go run ./cmd/memoh`): no bundled binary; the
 // returned error gives callers a chance to fail gracefully with a
@@ -190,7 +189,7 @@ func BundledServerBinary() (string, error) {
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
 	}
-	return "", errors.New("bundled memoh-server binary not found; CLI must run from a packaged Memoh app")
+	return "", errors.New("bundled memoh-server binary not found; CLI must run from a packaged Memoh Local app")
 }
 
 func serverBinaryName() string {

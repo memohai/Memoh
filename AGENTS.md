@@ -61,7 +61,7 @@ Memoh/
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh.app, talks to the local 18731 server
+│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh Local.app, talks to the local 18731 server
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -322,7 +322,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
 - Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.
 - The Memoh CLI (`cmd/memoh/`) is bundled into the app at `Resources/cli/memoh` next to `Resources/server/memoh-server`. On first launch (and via the `Install Command Line Tool…` menu item) the main process offers to add `memoh` to PATH (`/usr/local/bin/memoh` symlink on macOS, `~/.local/bin/memoh` on Linux, HKCU PATH on Windows). The CLI talks to the local server at `127.0.0.1:18731`, self-logs in with the `[admin]` credentials in `userData/config.toml`, and shares the same pid file (`local-server.pid.json`) so either side can `start`/`stop` the server. See `apps/desktop/AGENTS.md` § Bundled CLI.
-- `productName` is pinned to `Memoh` so userData lives at `~/Library/Application Support/Memoh/` (macOS), `%APPDATA%\Memoh\` (Windows), `~/.config/Memoh/` (Linux). The Go CLI hard-codes the same product name in `internal/tui/local/paths.go`; if you ever rename, both sides must change together.
+- The online desktop product name is `Memoh`; the local/offline desktop product name is `Memoh Local`, so local userData lives at `~/Library/Application Support/Memoh Local/` (macOS), `%APPDATA%\Memoh Local\` (Windows), `~/.config/Memoh Local/` (Linux). The Go CLI hard-codes the local product name in `internal/tui/local/paths.go`; if you ever rename the local app, both sides must change together.
 - When desktop needs to diverge from the web experience, extend the desktop bootstrap or add explicit `@memohai/web` subpath exports plus desktop type stubs. Do **not** fork `apps/web` itself.
 
 ### Container / Workspace Management

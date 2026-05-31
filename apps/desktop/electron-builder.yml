@@ -1,5 +1,5 @@
 appId: ai.memoh.desktop
-productName: Memoh
+productName: Memoh Local
 copyright: Copyright © 2026 Memoh
 directories:
   buildResources: build
@@ -41,7 +41,7 @@ mac:
   target:
     - dmg
   icon: build/icon.icon
-  artifactName: ${productName}-Desktop-${version}-mac-${arch}.${ext}
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
   notarize: true
 dmg:
   icon: build/icon.icns
@@ -57,13 +57,13 @@ linux:
       arch: [x64]
   maintainer: Memoh
   icon: build/icon.png
-  artifactName: ${productName}-Desktop-${version}-linux-${arch}.${ext}
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
 win:
   target:
     - target: nsis
       arch: [x64]
   icon: build/icon.ico
-  artifactName: ${productName}-Desktop-${version}-win-${arch}-setup.${ext}
+  artifactName: ${productName}-${version}-win-${arch}-setup.${ext}
 nsis:
   oneClick: false
   perMachine: false

@@ -83,9 +83,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="$(find apps/desktop/dist -name 'Memoh Online.app' -type d | head -n 1)"
+          app_path="$(find apps/desktop/dist -name 'Memoh.app' -type d | head -n 1)"
           if [[ -z "$app_path" ]]; then
-            echo "Memoh Online.app not found in apps/desktop/dist" >&2
+            echo "Memoh.app not found in apps/desktop/dist" >&2
             exit 1
           fi
           codesign --verify --deep --strict --verbose=2 "$app_path"

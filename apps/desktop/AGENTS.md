@@ -518,7 +518,7 @@ operates on the local server the desktop already manages.
 ### Layout in the packaged app
 
 ```
-Memoh.app/Contents/Resources/
+Memoh Local.app/Contents/Resources/
 ├── server/memoh-server     # backend binary spawned by main process or `memoh start`
 ├── cli/memoh               # CLI binary; PATH symlink resolves here
 ├── runtime/                # bridge binary + templates
@@ -544,7 +544,7 @@ of the app bundle.
 ### Shared filesystem contract
 
 CLI and main process cooperate purely through files under
-`app.getPath('userData')` (= `~/Library/Application Support/Memoh` on
+`app.getPath('userData')` (= `~/Library/Application Support/Memoh Local` on
 macOS — see `productName` pinning below):
 
 | File | Owner | Used by |
@@ -567,13 +567,13 @@ that desktop spawned and vice versa.
 
 ### productName pinning
 
-`apps/desktop/package.json` sets `"productName": "Memoh"`, and
-`src/main/index.ts` calls `app.setName('Memoh')` *and* runs a
-one-shot `migrateLegacyUserDataDirectory()` before any path is
-resolved (older builds defaulted to `@memohai/desktop`). The Go CLI
-hard-codes the same product name in
+`electron-builder.online.yml` names the online app `Memoh`, while
+`electron-builder.yml` names the local/offline app `Memoh Local`.
+`src/main/index.ts` mirrors those names through `app.setName(...)` and
+migrates legacy userData before any userData path is resolved. The Go CLI
+hard-codes the local product name in
 `internal/tui/local/paths.go::productName`. **If you ever rename the
-app, both sides must change in lockstep** — otherwise CLI and
+local app, both sides must change in lockstep** — otherwise CLI and
 desktop will read/write different userData directories and silently
 diverge.
 
@@ -582,7 +582,7 @@ diverge.
 `detectCliState()` runs `which memoh` (`where` on Windows) plus
 `fs.realpathSync` to bucket the install into one of:
 `installed-current` (symlink resolves to this app's `Resources/cli`),
-`installed-stale` (resolves to a different `Memoh.app`), `installed-foreign`
+`installed-stale` (resolves to a different `Memoh Local.app` or old `Memoh.app`), `installed-foreign`
 (resolves to some other `memoh` — homebrew, manual go build, etc.),
 or `not-installed`.
 

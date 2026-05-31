@@ -133,7 +133,7 @@ func StartServer(opts SpawnOptions) (*ManagedPid, error) {
 		}
 		configPath = resolved
 	} else if _, err := os.Stat(configPath); err != nil {
-		return nil, fmt.Errorf("config not found at %s; open Memoh.app once to initialize: %w", configPath, err)
+		return nil, fmt.Errorf("config not found at %s; open Memoh Local once to initialize: %w", configPath, err)
 	}
 	workDir := opts.WorkingDir
 	if workDir == "" {

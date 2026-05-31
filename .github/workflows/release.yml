@@ -132,19 +132,8 @@ jobs:
         with:
           node-version: lts/*
           cache: pnpm
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
-      - name: Cache desktop GStreamer runtime
-        uses: actions/cache@v4
-        with:
-          path: apps/desktop/resources/gstreamer
-          key: ${{ runner.os }}-desktop-gstreamer-${{ hashFiles('apps/desktop/scripts/prepare-gstreamer.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-desktop-gstreamer-
       - name: Require macOS signing and notarization secrets
         if: ${{ startsWith(matrix.platform, 'macos-') }}
         shell: bash
@@ -182,6 +171,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
+          MEMOH_DESKTOP_FLAVOR: online
         run: pnpm --filter @memohai/desktop ${{ matrix.build_cmd }}
       - name: Notarize macOS DMGs
         if: ${{ startsWith(matrix.platform, 'macos-') && steps.mac-signing.outputs.has_cert == 'true' }}
@@ -190,7 +180,7 @@ jobs:
           set -euo pipefail
 
           shopt -s nullglob
-          dmg_artifacts=(apps/desktop/dist/Memoh-Desktop-*-mac-arm64.dmg apps/desktop/dist/Memoh-Desktop-*-mac-x64.dmg)
+          dmg_artifacts=(apps/desktop/dist/Memoh-[0-9]*-mac-arm64.dmg apps/desktop/dist/Memoh-[0-9]*-mac-x64.dmg)
           if (( ${#dmg_artifacts[@]} != 2 )); then
             echo "Expected mac arm64/x64 dmg artifacts." >&2
             ls -lh apps/desktop/dist || true
@@ -212,32 +202,24 @@ jobs:
           set -euo pipefail
 
           declare -a bundles=(
-            "arm64:darwin-arm64:apps/desktop/dist/mac-arm64/Memoh.app"
-            "x64:darwin-x64:apps/desktop/dist/mac/Memoh.app"
+            "arm64:apps/desktop/dist/mac-arm64/Memoh.app"
+            "x64:apps/desktop/dist/mac/Memoh.app"
           )
 
           for bundle in "${bundles[@]}"; do
-            IFS=: read -r arch qdrant_target app_path <<<"$bundle"
+            IFS=: read -r arch app_path <<<"$bundle"
 
             if [[ ! -d "$app_path" ]]; then
               echo "Missing $arch app bundle: $app_path" >&2
               exit 1
             fi
 
-            qdrant_root="$app_path/Contents/Resources/qdrant"
-            qdrant_bin="$qdrant_root/$qdrant_target/qdrant"
-            if [[ ! -x "$qdrant_bin" ]]; then
-              echo "Missing $arch qdrant binary: $qdrant_bin" >&2
-              find "$qdrant_root" -maxdepth 3 -type f -print || true
-              exit 1
-            fi
-
-            extra_qdrant_dirs="$(find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d ! -name "$qdrant_target" -print -quit)"
-            if [[ -n "$extra_qdrant_dirs" ]]; then
-              echo "Unexpected qdrant resource in $arch app: $extra_qdrant_dirs" >&2
-              find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d -print
-              exit 1
-            fi
+            for local_resource in server cli runtime config providers qdrant gstreamer; do
+              if [[ -e "$app_path/Contents/Resources/$local_resource" ]]; then
+                echo "Unexpected local-only resource in online $arch app: $local_resource" >&2
+                exit 1
+              fi
+            done
 
             codesign --verify --deep --strict --verbose=2 "$app_path"
             codesign -dv --verbose=4 "$app_path" 2>&1 | grep -F "Developer ID Application"
@@ -245,7 +227,7 @@ jobs:
           done
 
           shopt -s nullglob
-          dmg_artifacts=(apps/desktop/dist/Memoh-Desktop-*-mac-arm64.dmg apps/desktop/dist/Memoh-Desktop-*-mac-x64.dmg)
+          dmg_artifacts=(apps/desktop/dist/Memoh-[0-9]*-mac-arm64.dmg apps/desktop/dist/Memoh-[0-9]*-mac-x64.dmg)
           if (( ${#dmg_artifacts[@]} != 2 )); then
             echo "Expected mac arm64/x64 dmg artifacts." >&2
             ls -lh apps/desktop/dist || true

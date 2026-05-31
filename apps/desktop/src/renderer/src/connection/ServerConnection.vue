@@ -100,7 +100,7 @@ onMounted(async () => {
     serverUrl.value = status.baseUrl
     currentServerUrl.value = status.baseUrl
     if (status.mode !== 'remote') {
-      error.value = 'Server connection can only be changed in Memoh Online.'
+      error.value = 'Server connection can only be changed in Memoh.'
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)

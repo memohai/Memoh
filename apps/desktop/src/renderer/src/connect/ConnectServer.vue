@@ -3,7 +3,7 @@
     <section class="m-auto w-full max-w-sm flex flex-col gap-8">
       <header class="space-y-2 text-center">
         <h1 class="text-3xl font-semibold tracking-wide">
-          Memoh Online
+          Memoh
         </h1>
         <p class="text-sm text-muted-foreground">
           Connect to your Memoh server.
