@@ -310,7 +310,15 @@ const isLocalWorkspace = computed(() =>
   isLocalWorkspaceBot(bot.value?.metadata, containerInfo.value?.workspace_backend),
 )
 
-const canManageBot = computed(() => (bot.value?.current_user_permissions ?? []).includes('manage'))
+const canManageBot = computed(() => {
+  const perms = bot.value?.current_user_permissions
+  // Only restrict management when the backend explicitly reports a permission
+  // set without "manage". When the field is absent (older backend, cache, etc.)
+  // default to allowing management so owners are never locked out of their own
+  // bot; the backend still enforces access on every management endpoint.
+  if (!perms || perms.length === 0) return true
+  return perms.includes('manage')
+})
 
 const tabList = computed(() => {
   const bot_id = toValue(botId)
