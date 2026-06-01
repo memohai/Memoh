@@ -2,10 +2,12 @@ import type { Component } from 'vue'
 import {
   AudioLines,
   Brain,
+  Cable,
   Calendar,
   CalendarCog,
   CalendarMinus,
   CalendarPlus,
+  Eye,
   FilePen,
   FilePlus2,
   FileText,
@@ -18,6 +20,9 @@ import {
   MailOpen,
   MailPlus,
   MessagesSquare,
+  Monitor,
+  MousePointer2,
+  MousePointerClick,
   Search,
   SearchCheck,
   Send,
@@ -30,6 +35,8 @@ import {
   Wrench,
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
+import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
+import ToolCallDetailComputer from './tool-call-detail-computer.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
 import ToolCallDetailEmailAccounts from './tool-call-detail-email-accounts.vue'
@@ -38,6 +45,7 @@ import ToolCallDetailEmailRead from './tool-call-detail-email-read.vue'
 import ToolCallDetailExec from './tool-call-detail-exec.vue'
 import ToolCallDetailImage from './tool-call-detail-image.vue'
 import ToolCallDetailMemory from './tool-call-detail-memory.vue'
+import ToolCallDetailRemoteSession from './tool-call-detail-remote-session.vue'
 import ToolCallDetailSchedule from './tool-call-detail-schedule.vue'
 import ToolCallDetailSend from './tool-call-detail-send.vue'
 import ToolCallDetailSpawn from './tool-call-detail-spawn.vue'
@@ -376,6 +384,59 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         actionKey: 'use_skill',
         target: pickString(input, 'skillName'),
       }
+    case 'browser_action': {
+      const action = pickString(input, 'action')
+      const target = pickString(input, 'url', 'ref', 'selector')
+      return {
+        icon: MousePointerClick,
+        actionKey: 'browser_action',
+        actionParams: { action },
+        target,
+        fullTarget: pickString(input, 'url') || target,
+        detail: ToolCallDetailBrowser,
+      }
+    }
+    case 'browser_observe': {
+      const observe = pickString(input, 'observe')
+      return {
+        icon: Eye,
+        actionKey: 'browser_observe',
+        target: observe,
+        detail: ToolCallDetailBrowser,
+      }
+    }
+    case 'computer_observe': {
+      const observe = pickString(input, 'observe')
+      return {
+        icon: Monitor,
+        actionKey: 'computer_observe',
+        target: observe,
+        detail: ToolCallDetailComputer,
+      }
+    }
+    case 'computer_action': {
+      const action = pickString(input, 'action')
+      const x = input.x
+      const y = input.y
+      const coords = typeof x === 'number' && typeof y === 'number' ? `${x}, ${y}` : ''
+      return {
+        icon: MousePointer2,
+        actionKey: 'computer_action',
+        actionParams: { action },
+        target: pickString(input, 'ref') || coords,
+        detail: ToolCallDetailComputer,
+      }
+    }
+    case 'browser_remote_session': {
+      const action = pickString(input, 'action')
+      return {
+        icon: Cable,
+        actionKey: 'browser_remote_session',
+        actionParams: { action },
+        target: pickString(input, 'session_id'),
+        detail: ToolCallDetailRemoteSession,
+      }
+    }
     default:
       return {
         icon: Wrench,
