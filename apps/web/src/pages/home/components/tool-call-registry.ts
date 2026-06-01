@@ -1,20 +1,32 @@
 import type { Component } from 'vue'
 import {
+  Activity,
+  AppWindow,
+  ArrowLeft,
+  ArrowRight,
   AudioLines,
+  Braces,
   Brain,
   Cable,
   Calendar,
   CalendarCog,
   CalendarMinus,
   CalendarPlus,
+  Camera,
+  ChevronDown,
+  Code,
   Eye,
   FilePen,
   FilePlus2,
   FileText,
   FolderOpen,
+  Focus,
   Globe,
+  Heading,
   ImagePlus,
   Inbox,
+  Keyboard,
+  Link,
   ListChecks,
   Mail,
   MailOpen,
@@ -23,16 +35,29 @@ import {
   Monitor,
   MousePointer2,
   MousePointerClick,
+  Move,
+  MoveVertical,
+  Plug,
+  Plus,
+  RotateCw,
+  ScanEye,
   Search,
   SearchCheck,
   Send,
   Smile,
   Sparkles,
+  Square,
+  SquareCheck,
   SquareTerminal,
+  TextCursorInput,
+  Timer,
+  Unplug,
+  Upload,
   Users,
   Volume2,
   Workflow,
   Wrench,
+  X,
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
 import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
@@ -147,6 +172,98 @@ function hostnameOrUrl(url: string): string {
   catch {
     return url
   }
+}
+
+// Compatibility aliases accepted by the backend browser/computer tools.
+const GUI_ACTION_ALIASES: Record<string, string> = {
+  dblclick: 'double_click',
+  scrollintoview: 'scroll_into_view',
+}
+
+function normalizeGuiAction(raw: string): string {
+  const key = raw.trim().toLowerCase()
+  return GUI_ACTION_ALIASES[key] ?? key
+}
+
+const BROWSER_ACTION_ICONS: Record<string, Component> = {
+  navigate: Globe,
+  click: MousePointerClick,
+  double_click: MousePointerClick,
+  focus: Focus,
+  type: Keyboard,
+  fill: TextCursorInput,
+  press: Keyboard,
+  hover: MousePointer2,
+  select: ChevronDown,
+  check: SquareCheck,
+  uncheck: Square,
+  scroll: MoveVertical,
+  scroll_into_view: MoveVertical,
+  drag: Move,
+  upload: Upload,
+  wait: Timer,
+  go_back: ArrowLeft,
+  go_forward: ArrowRight,
+  reload: RotateCw,
+  tab_new: Plus,
+  tab_select: AppWindow,
+  tab_close: X,
+}
+
+const BROWSER_OBSERVE_ICONS: Record<string, Component> = {
+  snapshot: ScanEye,
+  get_content: FileText,
+  screenshot_annotate: Camera,
+  screenshot: Camera,
+  get_html: Code,
+  evaluate: Braces,
+  get_url: Link,
+  get_title: Heading,
+  pdf: FileText,
+  tab_list: AppWindow,
+}
+
+const COMPUTER_OBSERVE_ICONS: Record<string, Component> = {
+  snapshot: ScanEye,
+  screenshot: Camera,
+}
+
+const COMPUTER_ACTION_ICONS: Record<string, Component> = {
+  click: MousePointerClick,
+  double_click: MousePointerClick,
+  type: Keyboard,
+  fill: TextCursorInput,
+  key: Keyboard,
+  scroll: MoveVertical,
+  drag: Move,
+  wait: Timer,
+  mouse_move: MousePointer2,
+  pointer: MousePointer2,
+}
+
+const REMOTE_SESSION_ICONS: Record<string, Component> = {
+  create: Plug,
+  close: Unplug,
+  status: Activity,
+}
+
+// Resolves a per-action icon and i18n action key. When the action is known the
+// label comes from a nested namespace key (e.g. chat.tools.browserAction.click);
+// unknown actions fall back to the tool's generic label with the raw action as
+// a parameter.
+function resolveGuiAction(
+  icons: Record<string, Component>,
+  namespace: string,
+  fallbackIcon: Component,
+  fallbackKey: string,
+  rawAction: string,
+): { icon: Component; actionKey: string; actionParams?: Record<string, unknown> } {
+  const action = normalizeGuiAction(rawAction)
+  const icon = icons[action]
+  if (icon) {
+    return { icon, actionKey: `${namespace}.${action}` }
+  }
+  return { icon: fallbackIcon, actionKey: fallbackKey, actionParams: { action: rawAction } }
 }
 
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
@@ -385,54 +502,46 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: pickString(input, 'skillName'),
       }
     case 'browser_action': {
-      const action = pickString(input, 'action')
+      const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'))
       const target = pickString(input, 'url', 'ref', 'selector')
       return {
-        icon: MousePointerClick,
-        actionKey: 'browser_action',
-        actionParams: { action },
+        ...resolved,
         target,
         fullTarget: pickString(input, 'url') || target,
         detail: ToolCallDetailBrowser,
       }
     }
     case 'browser_observe': {
-      const observe = pickString(input, 'observe')
+      const resolved = resolveGuiAction(BROWSER_OBSERVE_ICONS, 'browserObserve', Eye, 'browser_observe', pickString(input, 'observe'))
       return {
-        icon: Eye,
-        actionKey: 'browser_observe',
-        target: observe,
+        ...resolved,
+        target: pickString(input, 'ref', 'selector'),
         detail: ToolCallDetailBrowser,
       }
     }
     case 'computer_observe': {
-      const observe = pickString(input, 'observe')
+      const resolved = resolveGuiAction(COMPUTER_OBSERVE_ICONS, 'computerObserve', Monitor, 'computer_observe', pickString(input, 'observe'))
       return {
-        icon: Monitor,
-        actionKey: 'computer_observe',
-        target: observe,
+        ...resolved,
+        target: '',
         detail: ToolCallDetailComputer,
       }
     }
     case 'computer_action': {
-      const action = pickString(input, 'action')
+      const resolved = resolveGuiAction(COMPUTER_ACTION_ICONS, 'computerAction', MousePointer2, 'computer_action', pickString(input, 'action'))
       const x = input.x
       const y = input.y
       const coords = typeof x === 'number' && typeof y === 'number' ? `${x}, ${y}` : ''
       return {
-        icon: MousePointer2,
-        actionKey: 'computer_action',
-        actionParams: { action },
+        ...resolved,
         target: pickString(input, 'ref') || coords,
         detail: ToolCallDetailComputer,
       }
     }
     case 'browser_remote_session': {
-      const action = pickString(input, 'action')
+      const resolved = resolveGuiAction(REMOTE_SESSION_ICONS, 'remoteSession', Cable, 'browser_remote_session', pickString(input, 'action'))
       return {
-        icon: Cable,
-        actionKey: 'browser_remote_session',
-        actionParams: { action },
+        ...resolved,
         target: pickString(input, 'session_id'),
         detail: ToolCallDetailRemoteSession,
       }
