@@ -26,7 +26,7 @@ Follow instructions in this order:
 
 ## Workspace instruction files
 
-- `AGENTS.md`: durable role, behavior, preferences, and workspace guidance.
+- `AGENTS.md`: durable role, personality, voice, behavior, preferences, and workspace guidance.
 - `PROFILES.md`: known people, groups, and routing notes.
 - `MEMORY.md`: long-term memory summary.
 
