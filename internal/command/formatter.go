@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 const defaultListLimit = 12
@@ -177,7 +179,7 @@ type listRecord struct {
 // produces a Result carrying complete fallback Text (preserving the existing
 // "Showing N of M items." wording) plus a structured ListView. Text-only
 // channels only ever see page 0, matching prior behavior.
-func buildListResult(title, resource, action string, args []string, records []listRecord, page, pageSize int, hint string) *Result {
+func buildListResult(title, resource, action string, args []string, records []listRecord, page, pageSize int, hint string, localizers ...*i18n.Localizer) *Result {
 	if pageSize <= 0 {
 		pageSize = defaultListLimit
 	}
@@ -198,23 +200,24 @@ func buildListResult(title, resource, action string, args []string, records []li
 	if start < total {
 		pageRecords = records[start:end]
 	}
-	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, hint)
+	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, hint, localizers...)
 }
 
 // buildPagedListResult builds a list Result when the caller has already fetched
 // a single page from a server-paginated source (records IS the page, total is
 // the full count). Used by commands whose service supports limit/offset.
-func buildPagedListResult(title, resource, action string, args []string, pageRecords []listRecord, page, pageSize, total int, hint string) *Result {
+func buildPagedListResult(title, resource, action string, args []string, pageRecords []listRecord, page, pageSize, total int, hint string, localizers ...*i18n.Localizer) *Result {
 	if pageSize <= 0 {
 		pageSize = defaultListLimit
 	}
 	if page < 0 {
 		page = 0
 	}
-	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, hint)
+	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, hint, localizers...)
 }
 
-func assembleListResult(title, resource, action string, args []string, pageRecords []listRecord, page, pageSize, total int, hint string) *Result {
+func assembleListResult(title, resource, action string, args []string, pageRecords []listRecord, page, pageSize, total int, hint string, localizers ...*i18n.Localizer) *Result {
+	loc := helpLocalizer(localizers...)
 	items := make([]ListItem, 0, len(pageRecords))
 	for _, r := range pageRecords {
 		items = append(items, listItemFromRecord(r))
@@ -226,7 +229,7 @@ func assembleListResult(title, resource, action string, args []string, pageRecor
 	// pagination branch, so small config lists never showed their next-step.
 	var pageSuffixParts []string
 	if total > len(pageRecords) {
-		pageSuffixParts = append(pageSuffixParts, fmt.Sprintf("Showing %d of %d items.", len(pageRecords), total))
+		pageSuffixParts = append(pageSuffixParts, loc.T("cmd.common.showingItems", map[string]any{"shown": len(pageRecords), "total": total}))
 	}
 	textSuffixParts := append([]string{}, pageSuffixParts...)
 	if h := strings.TrimSpace(hint); h != "" {
@@ -321,7 +324,7 @@ func listItemFromRecord(r listRecord) ListItem {
 		if strings.TrimSpace(pair.value) == "" {
 			continue
 		}
-		extras = append(extras, fmt.Sprintf("%s: %s", pair.key, pair.value))
+		extras = append(extras, pair.value)
 	}
 	item.Detail = strings.Join(extras, " | ")
 	return item
@@ -338,10 +341,9 @@ func truncate(s string, maxLen int) string {
 	return string([]rune(s)[:maxLen-3]) + "..."
 }
 
-// boolStr returns "yes" or "no".
-func boolStr(b bool) string {
+func boolStrT(cc CommandContext, b bool) string {
 	if b {
-		return "yes"
+		return cc.T("cmd.common.yes")
 	}
-	return "no"
+	return cc.T("cmd.common.no")
 }

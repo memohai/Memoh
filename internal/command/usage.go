@@ -16,17 +16,17 @@ var usageRangePresets = []string{"24h", "7d", "30d", "all"}
 // resolveUsageRange maps a --range key to a query window. Unknown/empty keys
 // default to the last 7 days. Returns the normalized key (for ●-marking the
 // active preset), the window start, and a human label.
-func resolveUsageRange(key string) (norm string, from time.Time, label string) {
+func resolveUsageRange(cc CommandContext, key string) (norm string, from time.Time, label string) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "24h":
-		return "24h", now.Add(-24 * time.Hour), "24 hours"
+		return "24h", now.Add(-24 * time.Hour), cc.T("cmd.usage.range24h")
 	case "30d":
-		return "30d", now.AddDate(0, 0, -30), "30 days"
+		return "30d", now.AddDate(0, 0, -30), cc.T("cmd.usage.range30d")
 	case "all":
-		return "all", time.Unix(0, 0).UTC(), "all time"
+		return "all", time.Unix(0, 0).UTC(), cc.T("cmd.usage.rangeAll")
 	default:
-		return "7d", now.AddDate(0, 0, -7), "7 days"
+		return "7d", now.AddDate(0, 0, -7), cc.T("cmd.usage.range7d")
 	}
 }
 
@@ -45,13 +45,13 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 		Usage: "summary [--range 24h|7d|30d|all] - Token usage summary",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.queries == nil {
-				return &Result{Text: "Token usage isn't available right now."}, nil
+				return &Result{Text: cc.T("cmd.usage.unavailable")}, nil
 			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
 				return nil, err
 			}
-			norm, from, label := resolveUsageRange(cc.Range)
+			norm, from, label := resolveUsageRange(cc, cc.Range)
 			now := time.Now().UTC()
 			fromTS := pgtype.Timestamptz{Time: from, Valid: true}
 			toTS := pgtype.Timestamptz{Time: now, Valid: true}
@@ -65,7 +65,7 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 			}
 			if len(rows) == 0 {
 				return &Result{
-					Text:        "No token usage recorded yet.\n\nUsage appears here after the bot answers a message.",
+					Text:        cc.T("cmd.usage.empty"),
 					Interactive: usageRangeView("summary", norm),
 				}, nil
 			}
@@ -74,7 +74,7 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 				label string
 				rows  []dbsqlc.GetTokenUsageByDayAndTypeRow
 			}
-			buckets := []bucket{{label: "Chat"}, {label: "Heartbeat"}, {label: "Schedule"}}
+			buckets := []bucket{{label: cc.T("cmd.usage.bucketChat")}, {label: cc.T("cmd.usage.bucketHeartbeat")}, {label: cc.T("cmd.usage.bucketSchedule")}}
 			for _, r := range rows {
 				switch r.SessionType {
 				case "heartbeat":
@@ -87,7 +87,7 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 			}
 
 			var b strings.Builder
-			b.WriteString(MdBold(fmt.Sprintf("Token usage (%s)", label)) + "\n\n")
+			b.WriteString(MdBold(cc.T("cmd.usage.summaryTitle", map[string]any{"range": label})) + "\n\n")
 			first := true
 			for _, bk := range buckets {
 				if len(bk.rows) == 0 {
@@ -101,11 +101,11 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 				var totalIn, totalOut int64
 				for _, r := range bk.rows {
 					day := r.Day.Time.Format("Jan 02")
-					fmt.Fprintf(&b, "  %s  %s in · %s out\n", day, formatTokens(r.InputTokens), formatTokens(r.OutputTokens))
+					fmt.Fprintf(&b, "  %s  %s\n", day, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
 					totalIn += r.InputTokens
 					totalOut += r.OutputTokens
 				}
-				fmt.Fprintf(&b, "  Total  %s in · %s out\n", formatTokens(totalIn), formatTokens(totalOut))
+				fmt.Fprintf(&b, "  %s  %s\n", cc.T("cmd.usage.total"), cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(totalIn), "out": formatTokens(totalOut)}))
 			}
 
 			return &Result{
@@ -119,13 +119,13 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 		Usage: "by-model [--range 24h|7d|30d|all] - Token usage grouped by model",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.queries == nil {
-				return &Result{Text: "Token usage isn't available right now."}, nil
+				return &Result{Text: cc.T("cmd.usage.unavailable")}, nil
 			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
 				return nil, err
 			}
-			norm, from, label := resolveUsageRange(cc.Range)
+			norm, from, label := resolveUsageRange(cc, cc.Range)
 			now := time.Now().UTC()
 			fromTS := pgtype.Timestamptz{Time: from, Valid: true}
 			toTS := pgtype.Timestamptz{Time: now, Valid: true}
@@ -138,25 +138,25 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 			}
 			if len(rows) == 0 {
 				return &Result{
-					Text:        "No token usage recorded yet.\n\nUsage appears here after the bot answers a message.",
+					Text:        cc.T("cmd.usage.empty"),
 					Interactive: usageRangeView("by-model", norm),
 				}, nil
 			}
 
 			var b strings.Builder
-			b.WriteString(MdBold(fmt.Sprintf("Token usage by model (%s)", label)) + "\n\n")
+			b.WriteString(MdBold(cc.T("cmd.usage.byModelTitle", map[string]any{"range": label})) + "\n\n")
 			for _, r := range rows {
 				name := r.ModelName
 				switch {
 				case strings.EqualFold(strings.TrimSpace(name), "unknown"):
 					// The SQL COALESCEs missing model/provider joins to "Unknown".
-					name = "Other models"
+					name = cc.T("cmd.usage.otherModels")
 				case strings.TrimSpace(r.ProviderName) != "" &&
 					!strings.EqualFold(strings.TrimSpace(r.ProviderName), "unknown") &&
 					!strings.Contains(strings.ToLower(name), strings.ToLower(r.ProviderName)):
 					name = fmt.Sprintf("%s (%s)", name, r.ProviderName)
 				}
-				fmt.Fprintf(&b, "  %s — %s in · %s out\n", name, formatTokens(r.InputTokens), formatTokens(r.OutputTokens))
+				fmt.Fprintf(&b, "  %s — %s\n", name, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
 			}
 
 			return &Result{

@@ -74,44 +74,40 @@ func (g *CommandGroup) Register(sub SubCommand) {
 }
 
 // Usage returns the usage text for this resource group.
-func (g *CommandGroup) Usage() string {
+func (g *CommandGroup) Usage(localizers ...*i18n.Localizer) string {
+	t := helpLocalizer(localizers...)
 	var b strings.Builder
-	b.WriteString(MdBold("/"+g.Name) + " — " + g.Description + "\n\n")
+	b.WriteString(MdBold("/"+g.Name) + " — " + commandDescription(t, g) + "\n\n")
 	for _, name := range g.order {
 		sub := g.commands[name]
-		_, summary := splitUsage(sub.Usage)
-		line := CmdRef(g.Name + " " + sub.Name)
+		_, summary := localizedActionUsage(t, g.Name, sub)
+		line := localizedActionLabel(t, sub.Name)
 		if summary != "" {
 			line += " — " + summary
 		}
-		if sub.IsWrite {
-			line += " (owner)"
-		}
 		fmt.Fprintf(&b, "- %s\n", line)
 	}
-	fmt.Fprintf(&b, "\nRun %s for details.", CmdRef("help "+g.Name+" <action>"))
+	fmt.Fprintf(&b, "\n%s", t.T("cmd.help.runForDetails", map[string]any{"command": CmdRef("help " + g.Name + " <action>")}))
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (g *CommandGroup) ActionHelp(action string) string {
+func (g *CommandGroup) ActionHelp(action string, localizers ...*i18n.Localizer) string {
+	t := helpLocalizer(localizers...)
 	sub, ok := g.commands[action]
 	if !ok {
-		return fmt.Sprintf("Unknown action %s for %s. Run %s to see its actions.", MdCode(action), CmdRef(g.Name), CmdRef("help "+g.Name))
+		return t.T("cmd.error.unknownAction", map[string]any{"action": MdCode(action), "command": CmdRef(g.Name), "help": CmdRef("help " + g.Name)})
 	}
-	usage, summary := splitUsage(sub.Usage)
+	usage, summary := localizedActionUsage(t, g.Name, sub)
 	var b strings.Builder
 	b.WriteString(MdBold("/"+g.Name+" "+sub.Name) + "\n")
 	if summary != "" {
-		fmt.Fprintf(&b, "- Summary: %s\n", summary)
+		fmt.Fprintf(&b, "- %s: %s\n", t.T("cmd.help.summaryLabel"), summary)
 	}
 	if usage == "" {
 		usage = sub.Name
 	}
-	fmt.Fprintf(&b, "- Usage: %s\n", CmdRef(g.Name+" "+usage))
-	if sub.IsWrite {
-		b.WriteString("- Access: owner only\n")
-	}
-	fmt.Fprintf(&b, "- See sibling actions: %s", CmdRef("help "+g.Name))
+	fmt.Fprintf(&b, "- %s: %s\n", t.T("cmd.help.usageLabel"), CmdRef(g.Name+" "+usage))
+	fmt.Fprintf(&b, "- %s: %s", t.T("cmd.help.siblingActionsLabel"), CmdRef("help "+g.Name))
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -135,66 +131,61 @@ func (r *Registry) RegisterGroup(group *CommandGroup) {
 // GlobalHelp returns the top-level help text listing all commands. Single-token
 // commands are rendered as plain "/cmd" (not code spans) so Telegram linkifies
 // them as tap-to-send; multi-word sub-actions stay tap-to-copy in GroupHelp.
-func (r *Registry) GlobalHelp() string {
+func (r *Registry) GlobalHelp(localizers ...*i18n.Localizer) string {
+	t := helpLocalizer(localizers...)
 	var b strings.Builder
-	b.WriteString(MdBold("Available commands") + "\n\n")
-	b.WriteString("- /help — show this help\n")
-	b.WriteString("- /new — start a new conversation\n")
-	b.WriteString("- /stop — stop the current reply\n")
+	b.WriteString(MdBold(t.T("cmd.help.availableCommands")) + "\n\n")
+	b.WriteString("- /help — " + t.T("cmd.help.top.help") + "\n")
+	b.WriteString("- /new — " + t.T("cmd.help.top.new") + "\n")
+	b.WriteString("- /stop — " + t.T("cmd.help.top.stop") + "\n")
 	for _, name := range r.order {
 		group := r.groups[name]
-		fmt.Fprintf(&b, "- /%s — %s\n", group.Name, group.Description)
+		fmt.Fprintf(&b, "- /%s — %s\n", group.Name, commandDescription(t, group))
 	}
-	b.WriteString("\nTap any command to run it. For a group's actions, send /help <group> — e.g. /help model.")
+	b.WriteString("\n" + t.T("cmd.help.globalHint"))
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (r *Registry) GroupHelp(name string) string {
+func (r *Registry) GroupHelp(name string, localizers ...*i18n.Localizer) string {
+	t := helpLocalizer(localizers...)
 	group, ok := r.groups[name]
 	if !ok {
-		return fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(name), CmdRef("help"))
+		return t.T("cmd.error.unknownCommandShort", map[string]any{"command": CmdRef(name), "help": CmdRef("help")})
 	}
-	return group.Usage()
+	return group.Usage(t)
 }
 
 // GroupHelpResult returns an interactive version of GroupHelp: each sub-action
 // is a tappable button that dispatches "/{group} {action}" in place, plus a
 // "◀ Back" button that returns to the group's default content view. Text-only
 // channels fall back to the textual Usage listing.
-func (r *Registry) GroupHelpResult(name string) *Result {
+func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *Result {
+	t := helpLocalizer(localizers...)
 	group, ok := r.groups[name]
 	if !ok {
-		return &Result{Text: fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(name), CmdRef("help"))}
+		return &Result{Text: t.T("cmd.error.unknownCommandShort", map[string]any{"command": CmdRef(name), "help": CmdRef("help")})}
 	}
 	var b strings.Builder
 	b.WriteString(MdBold("/" + group.Name))
 	b.WriteString(" — ")
-	b.WriteString(group.Description)
+	b.WriteString(commandDescription(t, group))
 	b.WriteString("\n\n")
 	for _, subName := range group.order {
 		sub := group.commands[subName]
-		_, summary := splitUsage(sub.Usage)
-		line := "- " + subName
+		_, summary := localizedActionUsage(t, group.Name, sub)
+		line := "- " + localizedActionLabel(t, subName)
 		if summary != "" {
 			line += " — " + summary
-		}
-		if sub.IsWrite {
-			line += " (owner)"
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	b.WriteString("\nTap an action:")
+	b.WriteString("\n" + t.T("cmd.help.tapAction"))
 	title := strings.TrimRight(b.String(), "\n")
 	choices := make([]ListItem, 0, len(group.order)+1)
 	for _, subName := range group.order {
-		sub := group.commands[subName]
-		label := subName
-		if sub.IsWrite {
-			label += " 🔒"
-		}
 		choices = append(choices, ListItem{
-			Label:  label,
+			Label:  localizedActionLabel(t, subName),
 			Action: &ItemAction{Resource: group.Name, Action: subName},
 		})
 	}
@@ -204,24 +195,25 @@ func (r *Registry) GroupHelpResult(name string) *Result {
 		back = "list"
 	}
 	choices = append(choices, ListItem{
-		Label:  "◀ " + group.Name,
+		Label:  t.T("cmd.help.backToGroup", map[string]any{"group": commandDescription(t, group)}),
 		Action: &ItemAction{Resource: group.Name, Action: back},
 	})
 	return &Result{
-		Text: group.Usage(),
+		Text: group.Usage(t),
 		Interactive: &Interactive{
 			Kind:    InteractiveChoices,
-			Choices: &ChoicesView{Title: title, Choices: choices},
+			Choices: &ChoicesView{Title: title, Choices: choices, Columns: 1},
 		},
 	}
 }
 
-func (r *Registry) ActionHelp(groupName, action string) string {
+func (r *Registry) ActionHelp(groupName, action string, localizers ...*i18n.Localizer) string {
+	t := helpLocalizer(localizers...)
 	group, ok := r.groups[groupName]
 	if !ok {
-		return fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(groupName), CmdRef("help"))
+		return t.T("cmd.error.unknownCommandShort", map[string]any{"command": CmdRef(groupName), "help": CmdRef("help")})
 	}
-	return group.ActionHelp(action)
+	return group.ActionHelp(action, t)
 }
 
 func splitUsage(usage string) (commandUsage string, summary string) {
@@ -235,4 +227,39 @@ func splitUsage(usage string) (commandUsage string, summary string) {
 		summary = strings.TrimSpace(parts[1])
 	}
 	return commandUsage, summary
+}
+
+func helpLocalizer(localizers ...*i18n.Localizer) *i18n.Localizer {
+	if len(localizers) > 0 && localizers[0] != nil {
+		return localizers[0]
+	}
+	return i18n.New("")
+}
+
+func commandDescription(t *i18n.Localizer, group *CommandGroup) string {
+	if group == nil {
+		return ""
+	}
+	key := "menu." + group.Name
+	if v := t.T(key); v != key {
+		return v
+	}
+	return group.Description
+}
+
+func localizedActionUsage(t *i18n.Localizer, groupName string, sub SubCommand) (usage string, summary string) {
+	usage, summary = splitUsage(sub.Usage)
+	key := "cmd.help.actions." + groupName + "." + sub.Name
+	if v := t.T(key); v != key {
+		summary = v
+	}
+	return usage, summary
+}
+
+func localizedActionLabel(t *i18n.Localizer, action string) string {
+	key := "cmd.help.actionLabel." + action
+	if v := t.T(key); v != key {
+		return v
+	}
+	return action
 }

@@ -130,7 +130,7 @@ func TestExecute_Help(t *testing.T) {
 	if strings.Contains(result, "set-heartbeat") {
 		t.Errorf("top-level help should not expand nested actions, got: %s", result)
 	}
-	if !strings.Contains(result, "Manage bot models") {
+	if !strings.Contains(result, "Switch the chat model") {
 		t.Errorf("expected top-level model entry, got: %s", result)
 	}
 }
@@ -142,11 +142,14 @@ func TestExecute_HelpGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Manage bot models") {
+	if !strings.Contains(result, "Switch the chat model") {
 		t.Errorf("expected group help, got: %s", result)
 	}
-	if !strings.Contains(result, "Set the chat model") || !strings.Contains(result, "(owner)") {
+	if !strings.Contains(result, "Set the chat model") {
 		t.Errorf("expected compact action summary, got: %s", result)
+	}
+	if strings.Contains(result, "(owner)") || strings.Contains(result, "owner only") || strings.Contains(result, "🔒") {
+		t.Errorf("help should not expose owner-only decoration, got: %s", result)
 	}
 }
 
@@ -167,23 +170,21 @@ func TestExecuteResult_HelpGroupUsesShortButtonLabels(t *testing.T) {
 	if !strings.Contains(result.Interactive.Choices.Title, "list — List all schedules") {
 		t.Errorf("expected action descriptions in interactive title, got: %s", result.Interactive.Choices.Title)
 	}
+	if result.Interactive.Choices.Columns != 1 {
+		t.Errorf("help buttons should render as one large button per row, got columns=%d", result.Interactive.Choices.Columns)
+	}
 	for _, item := range result.Interactive.Choices.Choices {
 		if strings.HasPrefix(item.Label, "◀ ") {
 			continue
 		}
-		if strings.Contains(item.Label, "—") || strings.Contains(item.Label, "schedule") {
+		if strings.Contains(item.Label, "—") || strings.Contains(item.Label, "schedule") || strings.Contains(item.Label, "🔒") {
 			t.Errorf("button label should stay short, got %q", item.Label)
 		}
 	}
-	var sawLockedCreate bool
 	for _, item := range result.Interactive.Choices.Choices {
-		if item.Label == "create 🔒" {
-			sawLockedCreate = true
-			break
+		if strings.Contains(item.Label, "owner") || strings.Contains(item.Label, "🔒") {
+			t.Errorf("help button label should not expose permission decoration: %#v", result.Interactive.Choices.Choices)
 		}
-	}
-	if !sawLockedCreate {
-		t.Errorf("expected owner-only action to be marked on the short button labels: %#v", result.Interactive.Choices.Choices)
 	}
 }
 
@@ -197,8 +198,8 @@ func TestExecute_HelpAction(t *testing.T) {
 	if !strings.Contains(result, "/model set <model_id> | <provider_name> <model_name>") {
 		t.Errorf("expected action usage, got: %s", result)
 	}
-	if !strings.Contains(result, "Access: owner only") {
-		t.Errorf("expected owner hint, got: %s", result)
+	if strings.Contains(result, "Access:") || strings.Contains(result, "owner only") || strings.Contains(result, "(owner)") {
+		t.Errorf("action help should not expose owner-only decoration, got: %s", result)
 	}
 }
 
@@ -587,18 +588,15 @@ func TestExecute_StatusShowWithoutSession(t *testing.T) {
 	}
 }
 
-// Verify write commands are tagged with (owner) in usage.
-func TestUsage_OwnerTag(t *testing.T) {
+// Verify help usage does not leak permission decorations into user-facing text.
+func TestUsage_DoesNotShowOwnerDecoration(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
 	for _, name := range h.registry.order {
 		group := h.registry.groups[name]
 		usage := group.Usage()
-		for _, subName := range group.order {
-			sub := group.commands[subName]
-			if sub.IsWrite && !strings.Contains(usage, "(owner)") {
-				t.Errorf("/%s %s is a write command but usage missing (owner) tag", name, subName)
-			}
+		if strings.Contains(usage, "(owner)") || strings.Contains(usage, "owner only") || strings.Contains(usage, "🔒") {
+			t.Errorf("/%s usage leaked owner decoration: %s", name, usage)
 		}
 	}
 }

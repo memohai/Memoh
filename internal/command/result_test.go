@@ -86,8 +86,8 @@ func TestListItemFromRecord(t *testing.T) {
 	if item.Label != "Foo" {
 		t.Errorf("Label = %q, want Foo", item.Label)
 	}
-	if item.Detail != "Type: bar" {
-		t.Errorf("Detail = %q, want 'Type: bar'", item.Detail)
+	if item.Detail != "bar" {
+		t.Errorf("Detail = %q, want 'bar'", item.Detail)
 	}
 	if !item.Selected {
 		t.Error("Selected = false, want true")

@@ -19,9 +19,9 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 		Usage: "show - Show current session status",
 		Handler: func(cc CommandContext) (string, error) {
 			if strings.TrimSpace(cc.SessionID) == "" {
-				return "No active session found for this conversation.", nil
+				return cc.T("cmd.session.noActive"), nil
 			}
-			return h.renderSessionStatus(cc, cc.SessionID, "current conversation")
+			return h.renderSessionStatus(cc, cc.SessionID, cc.T("cmd.status.scopeCurrent"))
 		},
 	})
 	g.Register(SubCommand{
@@ -29,7 +29,7 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 		Usage: "latest - Show the latest session status for this bot",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.queries == nil {
-				return "Session info isn't available right now.", nil
+				return cc.T("cmd.session.unavailable"), nil
 			}
 			botUUID, err := parseBotUUID(cc.BotID)
 			if err != nil {
@@ -38,11 +38,11 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 			sessionID, err := h.queries.GetLatestSessionIDByBot(cc.Ctx, botUUID)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
-					return "No session found for this bot.", nil
+					return cc.T("cmd.session.noneForBot"), nil
 				}
 				return "", err
 			}
-			return h.renderSessionStatus(cc, sessionID.String(), "latest bot session")
+			return h.renderSessionStatus(cc, sessionID.String(), cc.T("cmd.status.scopeLatest"))
 		},
 	})
 	return g
@@ -50,7 +50,7 @@ func (h *Handler) buildStatusGroup() *CommandGroup {
 
 func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope string) (string, error) {
 	if h.queries == nil {
-		return "Session info isn't available right now.", nil
+		return cc.T("cmd.session.unavailable"), nil
 	}
 	pgSessionID, err := parseCommandUUID(sessionID)
 	if err != nil {
@@ -91,26 +91,26 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 	// Lead with the model — the single most load-bearing "where am I" fact.
 	if s, err := h.getBotSettings(cc); err == nil {
 		if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != cc.T("cmd.common.none") {
-			pairs = append(pairs, kv{"Model", m})
+			pairs = append(pairs, kv{cc.T("cmd.status.fieldModel"), m})
 		}
 	}
 	pairs = append(pairs,
-		kv{"Messages", strconv.FormatInt(msgCount, 10)},
-		kv{"Context", contextUsage},
+		kv{cc.T("cmd.status.fieldMessages"), strconv.FormatInt(msgCount, 10)},
+		kv{cc.T("cmd.status.fieldContext"), contextUsage},
 	)
 	// On a brand-new session, cache stats are forced to 0 and read as a
 	// measured-bad result rather than "no data" — show them only once there is
 	// input to measure.
 	if cacheRow.TotalInputTokens > 0 {
 		pairs = append(pairs,
-			kv{"Cache hit rate", fmt.Sprintf("%.1f%%", cacheHitRate)},
-			kv{"Cache read", formatTokens(cacheRow.CacheReadTokens)},
+			kv{cc.T("cmd.status.fieldCacheHitRate"), fmt.Sprintf("%.1f%%", cacheHitRate)},
+			kv{cc.T("cmd.status.fieldCacheRead"), formatTokens(cacheRow.CacheReadTokens)},
 		)
 	}
 	if len(skills) > 0 {
-		pairs = append(pairs, kv{"Skills", strings.Join(skills, ", ")})
+		pairs = append(pairs, kv{cc.T("cmd.status.fieldSkills"), strings.Join(skills, ", ")})
 	}
-	title := "🧵 Session Status"
+	title := cc.T("cmd.status.title")
 	if s := strings.TrimSpace(scope); s != "" {
 		title += " — " + s
 	}

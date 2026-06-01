@@ -129,6 +129,10 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 // (auto/en/zh) are canonical args and stay untranslated; only the labels are
 // localized.
 func commandLanguageResult(cc CommandContext, current string) *Result {
+	return commandLanguageResultFor(cc, current, "settings", "language")
+}
+
+func commandLanguageResultFor(cc CommandContext, current, resource, action string) *Result {
 	cur := strings.ToLower(strings.TrimSpace(current))
 	if cur == "" {
 		cur = "auto"
@@ -146,13 +150,13 @@ func commandLanguageResult(cc CommandContext, current string) *Result {
 		choices = append(choices, ListItem{
 			Label:    o.label,
 			Selected: cur == o.key,
-			Action:   &ItemAction{Resource: "settings", Action: "language", Args: []string{o.key}},
+			Action:   &ItemAction{Resource: resource, Action: action, Args: []string{o.key}},
 		})
 	}
 	title := MdBold(cc.T("cmd.settings.langPickerTitle"))
 	return &Result{
 		Text:        title,
-		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: title, Choices: choices}},
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: title, Choices: choices, Columns: 1}},
 	}
 }
 

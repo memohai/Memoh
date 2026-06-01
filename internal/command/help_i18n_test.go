@@ -1,0 +1,64 @@
+package command
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+func TestHelpUsesCommandUILocale(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+
+	res, err := h.ExecuteResult(context.Background(), ExecuteInput{Text: "/help", Locale: "zh"})
+	if err != nil {
+		t.Fatalf("ExecuteResult /help: %v", err)
+	}
+	if res == nil {
+		t.Fatal("nil result")
+	}
+	for _, want := range []string{"可用命令", "/model — 切换对话模型", "/settings — 查看并修改机器人设置"} {
+		if !strings.Contains(res.Text, want) {
+			t.Fatalf("zh global help missing %q:\n%s", want, res.Text)
+		}
+	}
+	if strings.Contains(res.Text, "Available commands") || strings.Contains(res.Text, "Manage bot models") {
+		t.Fatalf("zh global help leaked English help chrome:\n%s", res.Text)
+	}
+}
+
+func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+
+	group, err := h.ExecuteResult(context.Background(), ExecuteInput{Text: "/help model", Locale: "zh"})
+	if err != nil {
+		t.Fatalf("ExecuteResult /help model: %v", err)
+	}
+	if group == nil || group.Interactive == nil || group.Interactive.Choices == nil {
+		t.Fatalf("expected interactive group help, got %+v", group)
+	}
+	for _, want := range []string{"**/model** — 切换对话模型", "列出 — 列出可用对话模型", "心跳 — 设置心跳模型", "点按一个操作："} {
+		if !strings.Contains(group.Interactive.Choices.Title, want) {
+			t.Fatalf("zh group help missing %q:\n%s", want, group.Interactive.Choices.Title)
+		}
+	}
+	if group.Interactive.Choices.Columns != 1 {
+		t.Fatalf("zh group help buttons should be one per row, got columns=%d", group.Interactive.Choices.Columns)
+	}
+	for _, choice := range group.Interactive.Choices.Choices {
+		if choice.Label == "set-heartbeat" || choice.Label == "list" || strings.Contains(choice.Label, "🔒") || strings.Contains(choice.Label, "所有者") {
+			t.Fatalf("zh group help leaked raw or permission label: %#v", group.Interactive.Choices.Choices)
+		}
+	}
+
+	action, err := h.ExecuteResult(context.Background(), ExecuteInput{Text: "/help model current", Locale: "zh"})
+	if err != nil {
+		t.Fatalf("ExecuteResult /help model current: %v", err)
+	}
+	for _, want := range []string{"说明: 查看当前对话模型和心跳模型", "用法:", "查看同组操作"} {
+		if action == nil || !strings.Contains(action.Text, want) {
+			t.Fatalf("zh action help missing %q:\n%v", want, action)
+		}
+	}
+}

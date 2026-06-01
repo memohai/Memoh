@@ -17,8 +17,8 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 			}
 			if total == 0 {
 				return WithButtons(
-					&Result{Text: "No heartbeat logs yet.\n\nHeartbeats are periodic autonomous check-ins. Runs appear here once heartbeat is enabled."},
-					ListItem{Label: "Settings ▸", Action: &ItemAction{Resource: "settings", Action: "get"}},
+					&Result{Text: cc.T("cmd.heartbeat.empty")},
+					ListItem{Label: cc.T("cmd.heartbeat.btnSettings"), Action: &ItemAction{Resource: "settings", Action: "get"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
@@ -33,16 +33,16 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 				}
 				// Success is the common, expected outcome — flag only failures so
 				// the eye lands on the run that needs attention.
-				rec := []kv{{"Time", humanizeTime(item.StartedAt)}}
+				rec := []kv{{cc.T("cmd.heartbeat.fieldTime"), humanizeTimeT(cc, item.StartedAt)}}
 				if !isSuccessStatus(item.Status) {
-					rec = append(rec, kv{"Status", humanizeStatus(item.Status)})
+					rec = append(rec, kv{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)})
 				}
 				if dur != "" {
-					rec = append(rec, kv{"Duration", dur})
+					rec = append(rec, kv{cc.T("cmd.heartbeat.fieldDuration"), dur})
 				}
 				records = append(records, listRecord{fields: rec, note: note})
 			}
-			return buildPagedListResult("Heartbeat Logs", "heartbeat", "logs", nil, records, cc.Page, pageSize, int(total), "Use the Web UI for older heartbeat logs."), nil
+			return buildPagedListResult(cc.T("cmd.heartbeat.title"), "heartbeat", "logs", nil, records, cc.Page, pageSize, int(total), cc.T("cmd.heartbeat.olderHint"), cc.L), nil
 		},
 	})
 	return g

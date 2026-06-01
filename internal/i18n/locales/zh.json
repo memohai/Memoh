@@ -44,8 +44,208 @@
     "common": {
       "on": "开",
       "off": "关",
+      "yes": "是",
+      "no": "否",
       "none": "（无）",
-      "unavailable": "（不可用）"
+      "unavailable": "（不可用）",
+      "error": "错误",
+      "allowed": "允许",
+      "denied": "拒绝",
+      "active": "启用",
+      "current": "当前",
+      "default": "默认",
+      "fieldName": "名称",
+      "allCommands": "全部命令 ▸",
+      "showingItems": "显示 {shown} / {total} 项。",
+      "alreadySet": "{label} 已经是 {value}。",
+      "changedTo": "✅ {label} 已改为 {value}。"
+    },
+    "session": {
+      "noActive": "当前对话没有活跃会话。",
+      "unavailable": "会话信息暂不可用。",
+      "noneForBot": "这个机器人还没有会话。"
+    },
+    "time": {
+      "justNow": "刚刚",
+      "secondsAgo": "{n} 秒前",
+      "minutesAgo": "{n} 分钟前",
+      "hoursAgo": "{n} 小时前",
+      "daysAgo": "{n} 天前"
+    },
+    "cron": {
+      "everyMinute": "每分钟",
+      "everyNMinutes": "每 {n} 分钟",
+      "hourly": "每小时",
+      "dailyAt": "每天 {time}",
+      "weekdayAt": "每周{weekday} {time}",
+      "weekday": {
+        "sunday": "日",
+        "monday": "一",
+        "tuesday": "二",
+        "wednesday": "三",
+        "thursday": "四",
+        "friday": "五",
+        "saturday": "六"
+      }
+    },
+    "statusValue": {
+      "success": "成功",
+      "failed": "失败",
+      "notChecked": "未检查",
+      "connected": "已连接",
+      "disconnected": "未连接",
+      "inactive": "未启用",
+      "pending": "等待中",
+      "running": "运行中",
+      "sent": "已发送",
+      "queued": "排队中",
+      "bounced": "退信"
+    },
+    "status": {
+      "title": "🧵 会话状态",
+      "scopeCurrent": "当前对话",
+      "scopeLatest": "机器人最近会话",
+      "fieldModel": "模型",
+      "fieldMessages": "消息数",
+      "fieldContext": "上下文",
+      "fieldCacheHitRate": "缓存命中率",
+      "fieldCacheRead": "缓存读取",
+      "fieldSkills": "技能"
+    },
+    "context": {
+      "title": "上下文",
+      "usedWithWindow": "{percent} · 已用 {used} / {window}",
+      "tokensUsed": "已用 {used} tokens",
+      "fieldCacheHit": "缓存命中"
+    },
+    "access": {
+      "title": "权限",
+      "fieldBotRole": "机器人角色",
+      "fieldWriteCommands": "写命令权限",
+      "fieldChannel": "渠道",
+      "fieldConversationType": "对话类型",
+      "fieldChannelIdentity": "渠道身份",
+      "fieldLinkedUser": "绑定用户",
+      "fieldConversationID": "对话 ID",
+      "fieldThreadID": "线程 ID",
+      "fieldRouteID": "路由 ID",
+      "fieldSessionID": "会话 ID",
+      "fieldChatACL": "聊天 ACL"
+    },
+    "help": {
+      "availableCommands": "可用命令",
+      "top": {
+        "help": "查看这份帮助",
+        "new": "开启新对话",
+        "stop": "停止当前回复"
+      },
+      "globalHint": "点按任意命令即可运行。要查看某组命令的操作，发送 /help <group>，例如 /help model。",
+      "runForDetails": "运行 {command} 查看详情。",
+      "summaryLabel": "说明",
+      "usageLabel": "用法",
+      "siblingActionsLabel": "查看同组操作",
+      "tapAction": "点按一个操作：",
+      "backToGroup": "◀ {group}",
+      "actionLabel": {
+        "list": "列出",
+        "get": "查看",
+        "create": "创建",
+        "update": "更新",
+        "delete": "删除",
+        "enable": "启用",
+        "disable": "禁用",
+        "show": "查看",
+        "latest": "最近",
+        "current": "当前",
+        "set": "设置",
+        "set-heartbeat": "心跳",
+        "language": "语言",
+        "providers": "服务商",
+        "bindings": "绑定",
+        "outbox": "发件箱",
+        "summary": "汇总",
+        "by-model": "按模型",
+        "logs": "日志",
+        "read": "读取",
+        "run": "运行"
+      },
+      "actions": {
+        "schedule": {
+          "list": "列出全部定时任务",
+          "get": "查看定时任务详情",
+          "create": "创建定时任务",
+          "update": "更新定时任务",
+          "delete": "删除定时任务",
+          "enable": "启用定时任务",
+          "disable": "禁用定时任务"
+        },
+        "mcp": {
+          "list": "列出全部 MCP 连接",
+          "get": "查看 MCP 连接详情",
+          "delete": "删除 MCP 连接"
+        },
+        "settings": {
+          "get": "查看当前设置",
+          "update": "更新设置",
+          "language": "查看或设置命令界面语言"
+        },
+        "language": {
+          "show": "查看或设置命令界面语言",
+          "set": "设置命令界面语言"
+        },
+        "model": {
+          "list": "列出可用对话模型",
+          "current": "查看当前对话模型和心跳模型",
+          "set": "设置对话模型",
+          "set-heartbeat": "设置心跳模型"
+        },
+        "reasoning": {
+          "show": "查看推理级别并选择新级别",
+          "set": "设置推理级别"
+        },
+        "memory": {
+          "list": "列出全部记忆服务商",
+          "current": "查看当前记忆服务商",
+          "set": "设置此机器人的记忆服务商"
+        },
+        "search": {
+          "list": "列出全部搜索服务商",
+          "current": "查看当前搜索服务商",
+          "set": "设置此机器人的搜索服务商"
+        },
+        "usage": {
+          "summary": "Token 用量汇总",
+          "by-model": "按模型查看 token 用量"
+        },
+        "email": {
+          "providers": "列出邮箱服务商",
+          "bindings": "列出机器人邮箱绑定",
+          "outbox": "列出最近发送的邮件"
+        },
+        "heartbeat": {
+          "logs": "列出最近的心跳日志"
+        },
+        "skill": {
+          "list": "列出全部技能"
+        },
+        "fs": {
+          "list": "列出容器中的文件",
+          "read": "读取容器中的文件"
+        },
+        "status": {
+          "show": "查看当前会话状态",
+          "latest": "查看此机器人最近的会话状态"
+        },
+        "context": {
+          "show": "查看当前会话的上下文窗口用量"
+        },
+        "access": {
+          "show": "查看当前身份、写入权限和聊天 ACL 上下文"
+        },
+        "compact": {
+          "run": "立即压缩当前会话上下文"
+        }
+      }
     },
     "settings": {
       "title": "⚙️ 机器人设置",
@@ -77,7 +277,149 @@
       "invalidHeartbeatInterval": "无效的 heartbeat_interval：{value}",
       "unknownOption": "未知选项：{option}\n\n{usage}",
       "unknownLanguage": "未知语言 {value}。请选择 auto、en 或 zh。",
+      "unavailable": "设置暂不可用。",
       "updateUsage": "用法：/settings update [选项]\n\n选项：\n- --language <值>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <分钟>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n（命令界面语言：/settings language <auto|en|zh>）"
+    },
+    "language": {
+      "setUsage": "用法：/language <auto|en|zh>"
+    },
+    "model": {
+      "title": "对话模型",
+      "currentTitle": "当前模型",
+      "fieldProvider": "服务商",
+      "unavailable": "模型功能暂不可用。",
+      "listChanged": "模型列表已变化，请重新打开 /model 再选择。",
+      "setUsage": "用法：/model set <model_id> | <provider_name> <model_name>",
+      "setHeartbeatUsage": "用法：/model set-heartbeat <model_id> | <provider_name> <model_name>",
+      "noneUnderProvider": "服务商 {provider} 下没有对话模型。运行 {command} 查看全部服务商。",
+      "empty": "还没有对话模型。\n\n请在 Web 控制台添加模型。",
+      "currentHint": "使用 {command} 查看当前选择。",
+      "narrowHint": "使用 {command} 缩小结果范围。",
+      "marker": {
+        "chat": "对话",
+        "heartbeat": "心跳"
+      }
+    },
+    "memory": {
+      "title": "记忆服务商",
+      "label": "记忆服务商",
+      "unavailable": "记忆功能暂不可用。",
+      "empty": "还没有记忆服务商。\n\n记忆服务商让机器人在多次对话之间保留长期记忆。请在 Web 控制台添加。",
+      "switchHint": "使用 {command} 切换。",
+      "noneSet": "还没有设置记忆服务商。用 {list} 查看选项，然后用 {set} 选择。",
+      "active": "当前记忆服务商：{name}",
+      "setUsage": "用法：/memory set <name>",
+      "notFound": "没有名为 {name} 的记忆服务商。用 {command} 查看选项。"
+    },
+    "search": {
+      "title": "搜索服务商",
+      "label": "搜索服务商",
+      "unavailable": "搜索功能暂不可用。",
+      "empty": "还没有搜索服务商。\n\n搜索服务商让机器人查询网页信息。请在 Web 控制台添加。",
+      "switchHint": "使用 {command} 切换。",
+      "noneSet": "还没有设置搜索服务商。用 {list} 查看选项，然后用 {set} 选择。",
+      "active": "当前搜索服务商：{name}",
+      "setUsage": "用法：/search set <name>",
+      "notFound": "没有名为 {name} 的搜索服务商。用 {command} 查看选项。"
+    },
+    "skill": {
+      "title": "技能",
+      "unavailable": "此机器人暂不可用技能。",
+      "empty": "还没有技能。\n\n技能是机器人可调用的可复用工具。请在 Web 控制台添加。"
+    },
+    "schedule": {
+      "title": "定时任务",
+      "paused": "已暂停",
+      "back": "◀ 定时任务",
+      "empty": "还没有定时任务。\n\n定时任务会按周期运行一条命令。可以这样创建：\n{command}",
+      "getUsage": "用法：{command}",
+      "createUsage": "用法：/schedule create <name> <pattern> <command>\n示例：/schedule create daily-report \"0 9 * * *\" \"Send daily report\"",
+      "updateUsage": "用法：/schedule update <name> [--pattern P] [--command C]",
+      "deleteUsage": "用法：/schedule delete <name>",
+      "enableUsage": "用法：/schedule enable <name>",
+      "disableUsage": "用法：/schedule disable <name>",
+      "fieldDescription": "描述",
+      "fieldSchedule": "计划",
+      "fieldCommand": "命令",
+      "fieldStatus": "状态",
+      "fieldRuns": "运行次数",
+      "runsOf": "{current} / {max}",
+      "fieldCreated": "创建时间",
+      "fieldUpdated": "更新时间",
+      "created": "✅ 定时任务 {name} 已创建。\n\n- 运行：{runs}\n- 命令：{command}",
+      "updated": "✅ 定时任务 {name} 已更新。",
+      "deleted": "✅ 定时任务 {name} 已删除。",
+      "enabled": "✅ 定时任务 {name} 已启用。",
+      "pausedDone": "✅ 定时任务 {name} 已暂停。"
+    },
+    "mcp": {
+      "title": "MCP 连接",
+      "empty": "还没有 MCP 连接。\n\nMCP 连接会给机器人提供外部服务器上的额外工具。请在 Web 控制台添加。",
+      "detailsHint": "使用 {command} 查看完整详情。",
+      "getUsage": "用法：{command}",
+      "deleteUsage": "用法：/mcp delete <name>",
+      "fieldStatus": "状态",
+      "fieldReason": "原因",
+      "fieldType": "类型",
+      "fieldActive": "启用",
+      "fieldAuth": "认证",
+      "fieldTools": "工具",
+      "notFound": "没有名为 {name} 的 MCP 连接。用 {command} 查看连接。",
+      "deleted": "✅ MCP 连接 {name} 已删除。"
+    },
+    "email": {
+      "providersTitle": "邮箱服务商",
+      "bindingsTitle": "邮箱绑定",
+      "outboxTitle": "发件箱",
+      "providersEmpty": "还没有邮箱服务商。\n\n邮箱服务商让机器人收发邮件。请在 Web 控制台添加。",
+      "bindingsEmpty": "还没有邮箱绑定。\n\n绑定会给这个机器人一个可用于发信的邮箱地址。请在 Web 控制台添加。",
+      "outboxEmpty": "还没有发送过邮件。\n\n机器人发送的邮件会显示在这里。",
+      "btnProviders": "服务商",
+      "btnBindings": "绑定",
+      "btnOutbox": "发件箱",
+      "fieldAddress": "地址",
+      "fieldPermissions": "权限",
+      "fieldSubject": "主题",
+      "fieldTo": "收件人",
+      "fieldSent": "发送时间",
+      "permRead": "读取",
+      "permWrite": "写入",
+      "permDelete": "删除"
+    },
+    "heartbeat": {
+      "title": "心跳日志",
+      "empty": "还没有心跳日志。\n\n心跳是定期自主检查；启用心跳后，运行记录会显示在这里。",
+      "btnSettings": "设置 ▸",
+      "fieldTime": "时间",
+      "fieldDuration": "耗时",
+      "olderHint": "请在 Web UI 查看更早的心跳日志。"
+    },
+    "usage": {
+      "unavailable": "Token 用量暂不可用。",
+      "empty": "还没有 token 用量记录。\n\n机器人回复消息后，用量会显示在这里。",
+      "range24h": "24 小时",
+      "range7d": "7 天",
+      "range30d": "30 天",
+      "rangeAll": "全部时间",
+      "summaryTitle": "Token 用量（{range}）",
+      "byModelTitle": "按模型统计 token 用量（{range}）",
+      "bucketChat": "对话",
+      "bucketHeartbeat": "心跳",
+      "bucketSchedule": "定时任务",
+      "inOut": "输入 {in} · 输出 {out}",
+      "total": "合计",
+      "otherModels": "其他模型"
+    },
+    "fs": {
+      "unavailable": "文件浏览器暂不可用。",
+      "emptyDir": "目录 {path} 为空。",
+      "readUsage": "用法：/fs read <path>",
+      "emptyFile": "（空文件）",
+      "truncated": "仅显示前 2000 个字符。请在 Web UI 查看完整文件。"
+    },
+    "compact": {
+      "unavailable": "上下文压缩暂不可用。",
+      "done": "✅ 上下文已压缩。"
     },
     "reasoning": {
       "header": "🧠 推理",
@@ -107,6 +449,7 @@
     "model": "切换对话模型",
     "reasoning": "设置推理级别",
     "settings": "查看并修改机器人设置",
+    "language": "切换命令界面语言",
     "memory": "选择记忆服务商",
     "search": "选择搜索服务商",
     "schedule": "管理定时任务",

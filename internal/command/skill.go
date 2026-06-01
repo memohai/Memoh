@@ -10,14 +10,14 @@ func (h *Handler) buildSkillGroup() *CommandGroup {
 		Usage: "list - List all skills",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.skillLoader == nil {
-				return &Result{Text: "Skills aren't available for this bot."}, nil
+				return &Result{Text: cc.T("cmd.skill.unavailable")}, nil
 			}
 			items, err := h.skillLoader.LoadSkills(cc.Ctx, cc.BotID)
 			if err != nil {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No skills yet.\n\nSkills are reusable tools the bot can call. Add them in the web dashboard."}, nil
+				return &Result{Text: cc.T("cmd.skill.empty")}, nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
@@ -26,11 +26,11 @@ func (h *Handler) buildSkillGroup() *CommandGroup {
 					note = "" // description repeats the name; don't print it twice
 				}
 				records = append(records, listRecord{
-					fields: []kv{{"Name", item.Name}},
+					fields: []kv{{cc.T("cmd.common.fieldName"), item.Name}},
 					note:   note,
 				})
 			}
-			return buildListResult("Skills", "skill", "list", nil, records, cc.Page, defaultListLimit, ""), nil
+			return buildListResult(cc.T("cmd.skill.title"), "skill", "list", nil, records, cc.Page, defaultListLimit, "", cc.L), nil
 		},
 	})
 	return g

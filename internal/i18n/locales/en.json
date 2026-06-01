@@ -44,8 +44,208 @@
     "common": {
       "on": "on",
       "off": "off",
+      "yes": "yes",
+      "no": "no",
       "none": "(none)",
-      "unavailable": "(unavailable)"
+      "unavailable": "(unavailable)",
+      "error": "Error",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "active": "Active",
+      "current": "current",
+      "default": "default",
+      "fieldName": "Name",
+      "allCommands": "All commands ▸",
+      "showingItems": "Showing {shown} of {total} items.",
+      "alreadySet": "{label} is already set to {value}.",
+      "changedTo": "✅ {label} changed to {value}."
+    },
+    "session": {
+      "noActive": "No active session found for this conversation.",
+      "unavailable": "Session info isn't available right now.",
+      "noneForBot": "No session found for this bot."
+    },
+    "time": {
+      "justNow": "just now",
+      "secondsAgo": "{n}s ago",
+      "minutesAgo": "{n}m ago",
+      "hoursAgo": "{n}h ago",
+      "daysAgo": "{n}d ago"
+    },
+    "cron": {
+      "everyMinute": "every minute",
+      "everyNMinutes": "every {n} minutes",
+      "hourly": "hourly",
+      "dailyAt": "daily at {time}",
+      "weekdayAt": "{weekday}s at {time}",
+      "weekday": {
+        "sunday": "Sunday",
+        "monday": "Monday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday",
+        "thursday": "Thursday",
+        "friday": "Friday",
+        "saturday": "Saturday"
+      }
+    },
+    "statusValue": {
+      "success": "Success",
+      "failed": "Failed",
+      "notChecked": "Not checked",
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "inactive": "Inactive",
+      "pending": "Pending",
+      "running": "Running",
+      "sent": "Sent",
+      "queued": "Queued",
+      "bounced": "Bounced"
+    },
+    "status": {
+      "title": "🧵 Session Status",
+      "scopeCurrent": "current conversation",
+      "scopeLatest": "latest bot session",
+      "fieldModel": "Model",
+      "fieldMessages": "Messages",
+      "fieldContext": "Context",
+      "fieldCacheHitRate": "Cache hit rate",
+      "fieldCacheRead": "Cache read",
+      "fieldSkills": "Skills"
+    },
+    "context": {
+      "title": "Context",
+      "usedWithWindow": "{percent} · {used} / {window} used",
+      "tokensUsed": "{used} tokens used",
+      "fieldCacheHit": "Cache hit"
+    },
+    "access": {
+      "title": "Access",
+      "fieldBotRole": "Bot Role",
+      "fieldWriteCommands": "Write Commands",
+      "fieldChannel": "Channel",
+      "fieldConversationType": "Conversation Type",
+      "fieldChannelIdentity": "Channel Identity",
+      "fieldLinkedUser": "Linked User",
+      "fieldConversationID": "Conversation ID",
+      "fieldThreadID": "Thread ID",
+      "fieldRouteID": "Route ID",
+      "fieldSessionID": "Session ID",
+      "fieldChatACL": "Chat ACL"
+    },
+    "help": {
+      "availableCommands": "Available commands",
+      "top": {
+        "help": "show this help",
+        "new": "start a new conversation",
+        "stop": "stop the current reply"
+      },
+      "globalHint": "Tap any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
+      "runForDetails": "Run {command} for details.",
+      "summaryLabel": "Summary",
+      "usageLabel": "Usage",
+      "siblingActionsLabel": "See sibling actions",
+      "tapAction": "Tap an action:",
+      "backToGroup": "◀ {group}",
+      "actionLabel": {
+        "list": "list",
+        "get": "get",
+        "create": "create",
+        "update": "update",
+        "delete": "delete",
+        "enable": "enable",
+        "disable": "disable",
+        "show": "show",
+        "latest": "latest",
+        "current": "current",
+        "set": "set",
+        "set-heartbeat": "heartbeat",
+        "language": "language",
+        "providers": "providers",
+        "bindings": "bindings",
+        "outbox": "outbox",
+        "summary": "summary",
+        "by-model": "by model",
+        "logs": "logs",
+        "read": "read",
+        "run": "run"
+      },
+      "actions": {
+        "schedule": {
+          "list": "List all schedules",
+          "get": "Get schedule details",
+          "create": "Create a schedule",
+          "update": "Update a schedule",
+          "delete": "Delete a schedule",
+          "enable": "Enable a schedule",
+          "disable": "Disable a schedule"
+        },
+        "mcp": {
+          "list": "List all MCP connections",
+          "get": "Get MCP connection details",
+          "delete": "Delete an MCP connection"
+        },
+        "settings": {
+          "get": "View current settings",
+          "update": "Update settings",
+          "language": "View or set the command UI language"
+        },
+        "language": {
+          "show": "View or set the command UI language",
+          "set": "Set the command UI language"
+        },
+        "model": {
+          "list": "List available chat models",
+          "current": "Show current chat and heartbeat models",
+          "set": "Set the chat model",
+          "set-heartbeat": "Set the heartbeat model"
+        },
+        "reasoning": {
+          "show": "Show the reasoning level and pick a new one",
+          "set": "Set the reasoning level"
+        },
+        "memory": {
+          "list": "List all memory providers",
+          "current": "Show the current memory provider",
+          "set": "Set the memory provider for this bot"
+        },
+        "search": {
+          "list": "List all search providers",
+          "current": "Show the current search provider",
+          "set": "Set the search provider for this bot"
+        },
+        "usage": {
+          "summary": "Token usage summary",
+          "by-model": "Token usage grouped by model"
+        },
+        "email": {
+          "providers": "List email providers",
+          "bindings": "List bot email bindings",
+          "outbox": "List recently sent emails"
+        },
+        "heartbeat": {
+          "logs": "List recent heartbeat logs"
+        },
+        "skill": {
+          "list": "List all skills"
+        },
+        "fs": {
+          "list": "List files in the container",
+          "read": "Read a file from the container"
+        },
+        "status": {
+          "show": "Show current session status",
+          "latest": "Show the latest session status for this bot"
+        },
+        "context": {
+          "show": "Show context window usage for the current session"
+        },
+        "access": {
+          "show": "Show current identity, write access, and chat ACL context"
+        },
+        "compact": {
+          "run": "Compact the current session's context immediately"
+        }
+      }
     },
     "settings": {
       "title": "⚙️ Bot Settings",
@@ -77,7 +277,149 @@
       "invalidHeartbeatInterval": "Invalid heartbeat_interval: {value}",
       "unknownOption": "Unknown option: {option}\n\n{usage}",
       "unknownLanguage": "Unknown language {value}. Choose auto, en, or zh.",
+      "unavailable": "Settings aren't available right now.",
       "updateUsage": "Usage: /settings update [options]\n\nOptions:\n- --language <value>\n- --acl_default_effect <allow|deny>\n- --reasoning_enabled <true|false>\n- --reasoning_effort <none|low|medium|high|xhigh>\n- --heartbeat_enabled <true|false>\n- --heartbeat_interval <minutes>\n- --chat_model_id <id>\n- --heartbeat_model_id <id>\n\n(Command UI language: /settings language <auto|en|zh>)"
+    },
+    "language": {
+      "setUsage": "Usage: /language <auto|en|zh>"
+    },
+    "model": {
+      "title": "Chat Models",
+      "currentTitle": "Current Models",
+      "fieldProvider": "Provider",
+      "unavailable": "Models aren't available right now.",
+      "listChanged": "Model list changed — reopen /model to pick again.",
+      "setUsage": "Usage: /model set <model_id> | <provider_name> <model_name>",
+      "setHeartbeatUsage": "Usage: /model set-heartbeat <model_id> | <provider_name> <model_name>",
+      "noneUnderProvider": "No chat models under provider {provider}. Run {command} to see all providers.",
+      "empty": "No chat models yet.\n\nAdd a model in the web dashboard.",
+      "currentHint": "Use {command} to inspect active selections.",
+      "narrowHint": "Use {command} to narrow results.",
+      "marker": {
+        "chat": "chat",
+        "heartbeat": "heartbeat"
+      }
+    },
+    "memory": {
+      "title": "Memory Providers",
+      "label": "Memory provider",
+      "unavailable": "Memory isn't available right now.",
+      "empty": "No memory providers yet.\n\nMemory providers give the bot long-term memory across conversations. Add one in the web dashboard.",
+      "switchHint": "Switch with {command}.",
+      "noneSet": "No memory provider is set. See options with {list}, then choose one with {set}.",
+      "active": "Active memory provider: {name}",
+      "setUsage": "Usage: /memory set <name>",
+      "notFound": "No memory provider named {name}. See options with {command}."
+    },
+    "search": {
+      "title": "Search Providers",
+      "label": "Search provider",
+      "unavailable": "Search isn't available right now.",
+      "empty": "No search providers yet.\n\nSearch providers let the bot look things up on the web. Add one in the web dashboard.",
+      "switchHint": "Switch with {command}.",
+      "noneSet": "No search provider is set. See options with {list}, then choose one with {set}.",
+      "active": "Active search provider: {name}",
+      "setUsage": "Usage: /search set <name>",
+      "notFound": "No search provider named {name}. See options with {command}."
+    },
+    "skill": {
+      "title": "Skills",
+      "unavailable": "Skills aren't available for this bot.",
+      "empty": "No skills yet.\n\nSkills are reusable tools the bot can call. Add them in the web dashboard."
+    },
+    "schedule": {
+      "title": "Schedules",
+      "paused": "paused",
+      "back": "◀ Schedule",
+      "empty": "No schedules yet.\n\nSchedules run a command on a recurring timer. Create one, for example:\n{command}",
+      "getUsage": "Usage: {command}",
+      "createUsage": "Usage: /schedule create <name> <pattern> <command>\nExample: /schedule create daily-report \"0 9 * * *\" \"Send daily report\"",
+      "updateUsage": "Usage: /schedule update <name> [--pattern P] [--command C]",
+      "deleteUsage": "Usage: /schedule delete <name>",
+      "enableUsage": "Usage: /schedule enable <name>",
+      "disableUsage": "Usage: /schedule disable <name>",
+      "fieldDescription": "Description",
+      "fieldSchedule": "Schedule",
+      "fieldCommand": "Command",
+      "fieldStatus": "Status",
+      "fieldRuns": "Runs",
+      "runsOf": "{current} of {max}",
+      "fieldCreated": "Created",
+      "fieldUpdated": "Updated",
+      "created": "✅ Schedule {name} created.\n\n- Runs: {runs}\n- Command: {command}",
+      "updated": "✅ Schedule {name} updated.",
+      "deleted": "✅ Schedule {name} deleted.",
+      "enabled": "✅ Schedule {name} enabled.",
+      "pausedDone": "✅ Schedule {name} paused."
+    },
+    "mcp": {
+      "title": "MCP Connections",
+      "empty": "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard.",
+      "detailsHint": "See full details with {command}.",
+      "getUsage": "Usage: {command}",
+      "deleteUsage": "Usage: /mcp delete <name>",
+      "fieldStatus": "Status",
+      "fieldReason": "Reason",
+      "fieldType": "Type",
+      "fieldActive": "Active",
+      "fieldAuth": "Auth",
+      "fieldTools": "Tools",
+      "notFound": "No MCP connection named {name}. See connections with {command}.",
+      "deleted": "✅ MCP connection {name} deleted."
+    },
+    "email": {
+      "providersTitle": "Email Providers",
+      "bindingsTitle": "Email Bindings",
+      "outboxTitle": "Outbox",
+      "providersEmpty": "No email providers yet.\n\nEmail providers let the bot send and receive mail. Add one in the web dashboard.",
+      "bindingsEmpty": "No email bindings yet.\n\nA binding gives this bot an email address it can send from. Add one in the web dashboard.",
+      "outboxEmpty": "No emails sent yet.\n\nEmails the bot sends will appear here.",
+      "btnProviders": "Providers",
+      "btnBindings": "Bindings",
+      "btnOutbox": "Outbox",
+      "fieldAddress": "Address",
+      "fieldPermissions": "Permissions",
+      "fieldSubject": "Subject",
+      "fieldTo": "To",
+      "fieldSent": "Sent",
+      "permRead": "read",
+      "permWrite": "write",
+      "permDelete": "delete"
+    },
+    "heartbeat": {
+      "title": "Heartbeat Logs",
+      "empty": "No heartbeat logs yet.\n\nHeartbeats are periodic autonomous check-ins. Runs appear here once heartbeat is enabled.",
+      "btnSettings": "Settings ▸",
+      "fieldTime": "Time",
+      "fieldDuration": "Duration",
+      "olderHint": "Use the Web UI for older heartbeat logs."
+    },
+    "usage": {
+      "unavailable": "Token usage isn't available right now.",
+      "empty": "No token usage recorded yet.\n\nUsage appears here after the bot answers a message.",
+      "range24h": "24 hours",
+      "range7d": "7 days",
+      "range30d": "30 days",
+      "rangeAll": "all time",
+      "summaryTitle": "Token usage ({range})",
+      "byModelTitle": "Token usage by model ({range})",
+      "bucketChat": "Chat",
+      "bucketHeartbeat": "Heartbeat",
+      "bucketSchedule": "Schedule",
+      "inOut": "{in} in · {out} out",
+      "total": "Total",
+      "otherModels": "Other models"
+    },
+    "fs": {
+      "unavailable": "The file browser isn't available right now.",
+      "emptyDir": "Directory {path} is empty.",
+      "readUsage": "Usage: /fs read <path>",
+      "emptyFile": "(empty file)",
+      "truncated": "Showing the first 2000 characters. Use the web UI for the full file."
+    },
+    "compact": {
+      "unavailable": "Compaction isn't available right now.",
+      "done": "✅ Context compacted."
     },
     "reasoning": {
       "header": "🧠 Reasoning",
@@ -107,6 +449,7 @@
     "model": "Switch the chat model",
     "reasoning": "Set reasoning level",
     "settings": "View and update bot settings",
+    "language": "Change command UI language",
     "memory": "Choose the memory provider",
     "search": "Choose the search provider",
     "schedule": "Manage scheduled tasks",

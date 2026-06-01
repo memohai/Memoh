@@ -22,8 +22,8 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			}
 			if len(items) == 0 {
 				return WithButtons(
-					&Result{Text: "No schedules yet.\n\nSchedules run a command on a recurring timer. Create one, for example:\n" + CmdRef(`schedule create daily "0 9 * * *" "Send the report"`)},
-					ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+					&Result{Text: cc.T("cmd.schedule.empty", map[string]any{"command": CmdRef(`schedule create daily "0 9 * * *" "Send the report"`)})},
+					ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "schedule"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
@@ -32,11 +32,11 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				// a status chip appears only when the schedule is paused (an
 				// enabled schedule is the expected state and needs no flag).
 				fields := []kv{
-					{"Name", item.Name},
-					{"", humanizeCron(item.Pattern)},
+					{cc.T("cmd.common.fieldName"), item.Name},
+					{"", humanizeCronT(cc, item.Pattern)},
 				}
 				if !item.Enabled {
-					fields = append(fields, kv{"", "paused"})
+					fields = append(fields, kv{"", cc.T("cmd.schedule.paused")})
 				}
 				note := ""
 				if d := strings.TrimSpace(item.Description); d != "" && !strings.EqualFold(d, strings.TrimSpace(item.Name)) {
@@ -49,9 +49,9 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 					action: &ItemAction{Resource: "schedule", Action: "get", Args: []string{item.Name}},
 				})
 			}
-			result := buildListResult("Schedules", "schedule", "list", nil, records, cc.Page, defaultListLimit, "")
+			result := buildListResult(cc.T("cmd.schedule.title"), "schedule", "list", nil, records, cc.Page, defaultListLimit, "", cc.L)
 			return WithExtraActions(result,
-				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+				ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "schedule"}},
 			), nil
 		},
 	})
@@ -60,19 +60,19 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		Usage: "get <name> - Get schedule details",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return &Result{Text: "Usage: " + CmdRef("schedule get <name>")}, nil
+				return &Result{Text: cc.T("cmd.schedule.getUsage", map[string]any{"command": CmdRef("schedule get <name>")})}, nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
 				return nil, err
 			}
-			status := "Active"
+			status := cc.T("cmd.common.active")
 			if !item.Enabled {
-				status = "Paused"
+				status = cc.T("cmd.schedule.paused")
 			}
 			runs := strconv.Itoa(item.CurrentCalls)
 			if item.MaxCalls != nil {
-				runs = fmt.Sprintf("%d of %d", item.CurrentCalls, *item.MaxCalls)
+				runs = cc.T("cmd.schedule.runsOf", map[string]any{"current": item.CurrentCalls, "max": *item.MaxCalls})
 			}
 			desc := item.Description
 			if d := strings.TrimSpace(desc); d == "" ||
@@ -81,20 +81,20 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				desc = ""
 			}
 			pairs := []kv{
-				{"Description", desc},
-				{"Schedule", humanizeCron(item.Pattern)},
-				{"Command", item.Command},
-				{"Status", status},
-				{"Runs", runs},
-				{"Created", humanizeTime(item.CreatedAt)},
+				{cc.T("cmd.schedule.fieldDescription"), desc},
+				{cc.T("cmd.schedule.fieldSchedule"), humanizeCronT(cc, item.Pattern)},
+				{cc.T("cmd.schedule.fieldCommand"), item.Command},
+				{cc.T("cmd.schedule.fieldStatus"), status},
+				{cc.T("cmd.schedule.fieldRuns"), runs},
+				{cc.T("cmd.schedule.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
 			}
 			if !item.UpdatedAt.Truncate(time.Second).Equal(item.CreatedAt.Truncate(time.Second)) {
-				pairs = append(pairs, kv{"Updated", humanizeTime(item.UpdatedAt)})
+				pairs = append(pairs, kv{cc.T("cmd.schedule.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)})
 			}
 			return WithButtons(
 				&Result{Text: formatKVTitled(item.Name, pairs)},
-				ListItem{Label: "◀ Schedule", Action: &ItemAction{Resource: "schedule", Action: "list"}},
-				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "schedule"}},
+				ListItem{Label: cc.T("cmd.schedule.back"), Action: &ItemAction{Resource: "schedule", Action: "list"}},
+				ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "schedule"}},
 			), nil
 		},
 	})
@@ -104,7 +104,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 3 {
-				return "Usage: /schedule create <name> <pattern> <command>\nExample: /schedule create daily-report \"0 9 * * *\" \"Send daily report\"", nil
+				return cc.T("cmd.schedule.createUsage"), nil
 			}
 			name := cc.Args[0]
 			pattern := cc.Args[1]
@@ -120,8 +120,11 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			}
 			// Echo the humanized cron + command so the user can confirm the
 			// pattern was parsed as intended ("did 0 9 * * * mean 9am?").
-			return fmt.Sprintf("✅ Schedule %s created.\n\n- Runs: %s\n- Command: %s",
-				MdCode(item.Name), renderValue(humanizeCron(item.Pattern)), renderValue(item.Command)), nil
+			return cc.T("cmd.schedule.created", map[string]any{
+				"name":    MdCode(item.Name),
+				"runs":    renderValue(humanizeCronT(cc, item.Pattern)),
+				"command": renderValue(item.Command),
+			}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -130,7 +133,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /schedule update <name> [--pattern P] [--command C]", nil
+				return cc.T("cmd.schedule.updateUsage"), nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
@@ -164,7 +167,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("✅ Schedule %s updated.", MdCode(updated.Name)), nil
+			return cc.T("cmd.schedule.updated", map[string]any{"name": MdCode(updated.Name)}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -173,7 +176,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /schedule delete <name>", nil
+				return cc.T("cmd.schedule.deleteUsage"), nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
@@ -182,7 +185,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err := h.scheduleService.Delete(cc.Ctx, item.ID); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("✅ Schedule %s deleted.", MdCode(item.Name)), nil
+			return cc.T("cmd.schedule.deleted", map[string]any{"name": MdCode(item.Name)}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -191,7 +194,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /schedule enable <name>", nil
+				return cc.T("cmd.schedule.enableUsage"), nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
@@ -202,7 +205,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("✅ Schedule %s enabled.", MdCode(item.Name)), nil
+			return cc.T("cmd.schedule.enabled", map[string]any{"name": MdCode(item.Name)}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -211,7 +214,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /schedule disable <name>", nil
+				return cc.T("cmd.schedule.disableUsage"), nil
 			}
 			item, err := h.findScheduleByName(cc, cc.Args[0])
 			if err != nil {
@@ -222,7 +225,7 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("✅ Schedule %s paused.", MdCode(item.Name)), nil
+			return cc.T("cmd.schedule.pausedDone", map[string]any{"name": MdCode(item.Name)}), nil
 		},
 	})
 	return g

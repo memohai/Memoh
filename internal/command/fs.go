@@ -14,7 +14,7 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 		Usage: "list [path] - List files in the container",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
-				return "The file browser isn't available right now.", nil
+				return cc.T("cmd.fs.unavailable"), nil
 			}
 			dir := "/"
 			if len(cc.Args) > 0 {
@@ -25,7 +25,7 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 				return "", err
 			}
 			if len(entries) == 0 {
-				return fmt.Sprintf("Directory %q is empty.", dir), nil
+				return cc.T("cmd.fs.emptyDir", map[string]any{"path": fmt.Sprintf("%q", dir)}), nil
 			}
 			// Wrap in a code fence so the proportional font doesn't collapse the
 			// indentation and columns stay aligned.
@@ -47,10 +47,10 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 		Usage: "read <path> - Read a file from the container",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.containerFS == nil {
-				return "The file browser isn't available right now.", nil
+				return cc.T("cmd.fs.unavailable"), nil
 			}
 			if len(cc.Args) < 1 {
-				return "Usage: /fs read <path>", nil
+				return cc.T("cmd.fs.readUsage"), nil
 			}
 			content, err := h.containerFS.ReadFile(cc.Ctx, cc.BotID, cc.Args[0])
 			if err != nil {
@@ -63,13 +63,13 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 				truncated = true
 			}
 			if strings.TrimSpace(content) == "" {
-				return "(empty file)", nil
+				return cc.T("cmd.fs.emptyFile"), nil
 			}
 			out := fmt.Sprintf("```\n%s\n```", content)
 			if truncated {
 				// The marker is a system note, not file content — keep it outside
 				// the fence so it doesn't read as part of the file.
-				out += "\n_Showing the first 2000 characters. Use the web UI for the full file._"
+				out += "\n_" + cc.T("cmd.fs.truncated") + "_"
 			}
 			return out, nil
 		},

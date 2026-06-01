@@ -20,7 +20,7 @@ func (h *Handler) buildContextGroup() *CommandGroup {
 		Usage: "show - Show context window usage for the current session",
 		Handler: func(cc CommandContext) (string, error) {
 			if strings.TrimSpace(cc.SessionID) == "" {
-				return "No active session found for this conversation.", nil
+				return cc.T("cmd.session.noActive"), nil
 			}
 			return h.renderContextUsage(cc, cc.SessionID)
 		},
@@ -30,7 +30,7 @@ func (h *Handler) buildContextGroup() *CommandGroup {
 
 func (h *Handler) renderContextUsage(cc CommandContext, sessionID string) (string, error) {
 	if h.queries == nil {
-		return "Session info isn't available right now.", nil
+		return cc.T("cmd.session.unavailable"), nil
 	}
 	pgSessionID, err := parseCommandUUID(sessionID)
 	if err != nil {
@@ -52,17 +52,21 @@ func (h *Handler) renderContextUsage(cc CommandContext, sessionID string) (strin
 	window := h.resolveContextWindowTokens(cc)
 
 	var b strings.Builder
-	b.WriteString(MdBold("Context"))
+	b.WriteString(MdBold(cc.T("cmd.context.title")))
 	b.WriteString("\n\n")
 	if window > 0 {
 		frac := float64(used) / float64(window)
-		fmt.Fprintf(&b, "%s  %.0f%% · %s / %s used", renderProgressBar(frac, 12), frac*100, formatTokens(used), formatTokens(window))
+		fmt.Fprintf(&b, "%s  %s", renderProgressBar(frac, 12), cc.T("cmd.context.usedWithWindow", map[string]any{
+			"percent": fmt.Sprintf("%.0f%%", frac*100),
+			"used":    formatTokens(used),
+			"window":  formatTokens(window),
+		}))
 	} else {
-		fmt.Fprintf(&b, "%s tokens used", formatTokens(used))
+		fmt.Fprintf(&b, "%s", cc.T("cmd.context.tokensUsed", map[string]any{"used": formatTokens(used)}))
 	}
-	fmt.Fprintf(&b, "\n\n- Messages: %d", msgCount)
+	fmt.Fprintf(&b, "\n\n- %s: %d", cc.T("cmd.status.fieldMessages"), msgCount)
 	if cacheRow.TotalInputTokens > 0 {
-		fmt.Fprintf(&b, "\n- Cache hit: %.1f%%", cacheHit)
+		fmt.Fprintf(&b, "\n- %s: %.1f%%", cc.T("cmd.context.fieldCacheHit"), cacheHit)
 	}
 	return b.String(), nil
 }

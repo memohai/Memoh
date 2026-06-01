@@ -17,7 +17,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage: "list [provider_name] - List available chat models",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.modelsService == nil {
-				return &Result{Text: "Models aren't available right now."}, nil
+				return &Result{Text: cc.T("cmd.model.unavailable")}, nil
 			}
 			return h.buildModelPickerResult(cc)
 		},
@@ -27,15 +27,15 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage: "current - Show current chat and heartbeat models",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.settingsService == nil {
-				return "Models aren't available right now.", nil
+				return cc.T("cmd.model.unavailable"), nil
 			}
 			settingsResp, err := h.getBotSettings(cc)
 			if err != nil {
 				return "", err
 			}
-			return formatKVTitled("Current Models", []kv{
-				{"Chat Model", h.resolveModelName(cc, settingsResp.ChatModelID)},
-				{"Heartbeat Model", h.resolveModelName(cc, settingsResp.HeartbeatModelID)},
+			return formatKVTitled(cc.T("cmd.model.currentTitle"), []kv{
+				{cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, settingsResp.ChatModelID)},
+				{cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, settingsResp.HeartbeatModelID)},
 			}), nil
 		},
 	})
@@ -54,12 +54,12 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 					return "", err
 				}
 				if !ok {
-					return "Model list changed — reopen /model to pick again.", nil
+					return cc.T("cmd.model.listChanged"), nil
 				}
 				selectedID = cand.dbID
 			} else {
 				if len(cc.Args) < 1 {
-					return "Usage: /model set <model_id> | <provider_name> <model_name>", nil
+					return cc.T("cmd.model.setUsage"), nil
 				}
 				modelResp, err := h.findModelForSelection(cc, cc.Args)
 				if err != nil {
@@ -68,7 +68,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 				selectedID = modelResp.ID
 			}
 			if h.settingsService == nil {
-				return "Models aren't available right now.", nil
+				return cc.T("cmd.model.unavailable"), nil
 			}
 			before, _ := h.getBotSettings(cc)
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
@@ -76,7 +76,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 			}); err != nil {
 				return "", err
 			}
-			return formatChangedValue("Chat model", h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, selectedID)), nil
+			return formatChangedValueT(cc, cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, selectedID)), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -85,10 +85,10 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /model set-heartbeat <model_id> | <provider_name> <model_name>", nil
+				return cc.T("cmd.model.setHeartbeatUsage"), nil
 			}
 			if h.settingsService == nil {
-				return "Models aren't available right now.", nil
+				return cc.T("cmd.model.unavailable"), nil
 			}
 			before, _ := h.getBotSettings(cc)
 			modelResp, err := h.findModelForSelection(cc, cc.Args)
@@ -101,7 +101,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 			if err != nil {
 				return "", err
 			}
-			return formatChangedValue("Heartbeat model", h.resolveModelName(cc, before.HeartbeatModelID), h.resolveModelName(cc, modelResp.ID)), nil
+			return formatChangedValueT(cc, cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, before.HeartbeatModelID), h.resolveModelName(cc, modelResp.ID)), nil
 		},
 	})
 	return g

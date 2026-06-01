@@ -15,20 +15,20 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 		Usage: "list - List all search providers",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.searchProvService == nil {
-				return &Result{Text: "Search isn't available right now."}, nil
+				return &Result{Text: cc.T("cmd.search.unavailable")}, nil
 			}
 			items, err := h.searchProvService.List(cc.Ctx, "")
 			if err != nil {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No search providers yet.\n\nSearch providers let the bot look things up on the web. Add one in the web dashboard."}, nil
+				return &Result{Text: cc.T("cmd.search.empty")}, nil
 			}
 			settingsResp, _ := h.getBotSettings(cc)
 			currentRecords := make([]listRecord, 0, 1)
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				rec := providerListRecord(item.Name, item.Provider, false, item.ID == settingsResp.SearchProviderID)
+				rec := providerListRecord(cc, item.Name, item.Provider, false, item.ID == settingsResp.SearchProviderID)
 				// Tap a provider to switch to it — no typing of /search set.
 				rec.action = &ItemAction{Resource: "search", Action: "set", Args: []string{item.Name}}
 				if item.ID == settingsResp.SearchProviderID {
@@ -38,7 +38,7 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 				otherRecords = append(otherRecords, rec)
 			}
 			currentRecords = append(currentRecords, otherRecords...)
-			return buildListResult("Search Providers", "search", "list", nil, currentRecords, cc.Page, defaultListLimit, "Switch with "+CmdRef("search set <name>")+"."), nil
+			return buildListResult(cc.T("cmd.search.title"), "search", "list", nil, currentRecords, cc.Page, defaultListLimit, cc.T("cmd.search.switchHint", map[string]any{"command": CmdRef("search set <name>")}), cc.L), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -46,16 +46,16 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 		Usage: "current - Show the current search provider",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.settingsService == nil {
-				return "Search isn't available right now.", nil
+				return cc.T("cmd.search.unavailable"), nil
 			}
 			settingsResp, err := h.getBotSettings(cc)
 			if err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(settingsResp.SearchProviderID) == "" {
-				return "No search provider is set. See options with " + CmdRef("search list") + ", then choose one with " + CmdRef("search set <name>") + ".", nil
+				return cc.T("cmd.search.noneSet", map[string]any{"list": CmdRef("search list"), "set": CmdRef("search set <name>")}), nil
 			}
-			return "Active search provider: " + h.resolveSearchProviderName(cc, settingsResp.SearchProviderID), nil
+			return cc.T("cmd.search.active", map[string]any{"name": h.resolveSearchProviderName(cc, settingsResp.SearchProviderID)}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -64,10 +64,10 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /search set <name>", nil
+				return cc.T("cmd.search.setUsage"), nil
 			}
 			if h.settingsService == nil {
-				return "Search isn't available right now.", nil
+				return cc.T("cmd.search.unavailable"), nil
 			}
 			name := cc.Args[0]
 			before, _ := h.getBotSettings(cc)
@@ -83,10 +83,10 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 					if err != nil {
 						return "", err
 					}
-					return formatChangedValue("Search provider", h.resolveSearchProviderName(cc, before.SearchProviderID), item.Name), nil
+					return formatChangedValueT(cc, cc.T("cmd.search.label"), h.resolveSearchProviderName(cc, before.SearchProviderID), item.Name), nil
 				}
 			}
-			return fmt.Sprintf("No search provider named %q. See options with %s.", name, CmdRef("search list")), nil
+			return cc.T("cmd.search.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("search list")}), nil
 		},
 	})
 	return g

@@ -314,11 +314,11 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 
 	cmdText := ExtractCommandText(input.Text)
 	if cmdText == "" {
-		return &Result{Text: h.registry.GlobalHelp()}, nil
+		return &Result{Text: h.registry.GlobalHelp(loc)}, nil
 	}
 	parsed, err := Parse(cmdText)
 	if err != nil {
-		return &Result{Text: h.registry.GlobalHelp()}, nil
+		return &Result{Text: h.registry.GlobalHelp(loc)}, nil
 	}
 
 	// Resolve the user's role in this bot.
@@ -364,16 +364,20 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	}
 
 	resource := canonicalResource(parsed.Resource)
+	if resource == "language" && parsed.Action != "" && parsed.Action != "show" && parsed.Action != "set" {
+		parsed.Args = append([]string{parsed.Action}, parsed.Args...)
+		parsed.Action = "set"
+	}
 
 	// /help (and its alias /commands)
 	if resource == "help" {
 		switch {
 		case parsed.Action == "":
-			return &Result{Text: h.registry.GlobalHelp()}, nil
+			return &Result{Text: h.registry.GlobalHelp(cc.L)}, nil
 		case len(parsed.Args) == 0:
-			return h.registry.GroupHelpResult(parsed.Action), nil
+			return h.registry.GroupHelpResult(parsed.Action, cc.L), nil
 		default:
-			return &Result{Text: h.registry.ActionHelp(parsed.Action, parsed.Args[0])}, nil
+			return &Result{Text: h.registry.ActionHelp(parsed.Action, parsed.Args[0], cc.L)}, nil
 		}
 	}
 
@@ -393,7 +397,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		if group.DefaultAction != "" {
 			parsed.Action = group.DefaultAction
 		} else {
-			return &Result{Text: group.Usage()}, nil
+			return &Result{Text: group.Usage(cc.L)}, nil
 		}
 	}
 

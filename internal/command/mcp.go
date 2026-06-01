@@ -18,25 +18,25 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 			}
 			if len(items) == 0 {
 				return WithButtons(
-					&Result{Text: "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard."},
-					ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+					&Result{Text: cc.T("cmd.mcp.empty")},
+					ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "mcp"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				records = append(records, listRecord{
 					fields: []kv{
-						{"Name", item.Name},
-						{"Status", humanizeStatus(item.Status)},
-						{"Type", item.Type},
+						{cc.T("cmd.common.fieldName"), item.Name},
+						{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)},
+						{cc.T("cmd.mcp.fieldType"), item.Type},
 					},
 					// Tap a connection to open its details — no typing of /mcp get.
 					action: &ItemAction{Resource: "mcp", Action: "get", Args: []string{item.Name}},
 				})
 			}
-			result := buildListResult("MCP Connections", "mcp", "list", nil, records, cc.Page, defaultListLimit, "See full details with "+CmdRef("mcp get <name>")+".")
+			result := buildListResult(cc.T("cmd.mcp.title"), "mcp", "list", nil, records, cc.Page, defaultListLimit, cc.T("cmd.mcp.detailsHint", map[string]any{"command": CmdRef("mcp get <name>")}), cc.L)
 			return WithExtraActions(result,
-				ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+				ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "mcp"}},
 			), nil
 		},
 	})
@@ -45,7 +45,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 		Usage: "get <name> - Get MCP connection details",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return &Result{Text: "Usage: " + CmdRef("mcp get <name>")}, nil
+				return &Result{Text: cc.T("cmd.mcp.getUsage", map[string]any{"command": CmdRef("mcp get <name>")})}, nil
 			}
 			name := cc.Args[0]
 			items, err := h.mcpConnService.ListByBot(cc.Ctx, cc.BotID)
@@ -58,7 +58,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					for _, t := range item.ToolsCache {
 						toolNames = append(toolNames, t.Name)
 					}
-					toolsStr := "none"
+					toolsStr := cc.T("cmd.common.none")
 					if len(toolNames) > 0 {
 						toolsStr = strings.Join(toolNames, ", ")
 					}
@@ -68,21 +68,21 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					}
 					return WithButtons(
 						&Result{Text: formatKVTitled(item.Name, []kv{
-							{"Status", humanizeStatus(item.Status)},
-							{"Reason", item.StatusMessage},
-							{"Type", item.Type},
-							{"Active", boolStr(item.Active)},
-							{"Auth", authType},
-							{"Tools", toolsStr},
-							{"Created", humanizeTime(item.CreatedAt)},
-							{"Updated", humanizeTime(item.UpdatedAt)},
+							{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)},
+							{cc.T("cmd.mcp.fieldReason"), item.StatusMessage},
+							{cc.T("cmd.mcp.fieldType"), item.Type},
+							{cc.T("cmd.mcp.fieldActive"), boolStrT(cc, item.Active)},
+							{cc.T("cmd.mcp.fieldAuth"), authType},
+							{cc.T("cmd.mcp.fieldTools"), toolsStr},
+							{cc.T("cmd.schedule.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
+							{cc.T("cmd.schedule.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)},
 						})},
 						ListItem{Label: "◀ MCP", Action: &ItemAction{Resource: "mcp", Action: "list"}},
-						ListItem{Label: "All commands ▸", Action: &ItemAction{Resource: "help", Action: "mcp"}},
+						ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "mcp"}},
 					), nil
 				}
 			}
-			return &Result{Text: fmt.Sprintf("No MCP connection named %q. See connections with %s.", name, CmdRef("mcp list"))}, nil
+			return &Result{Text: cc.T("cmd.mcp.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("mcp list")})}, nil
 		},
 	})
 	g.Register(SubCommand{
@@ -91,7 +91,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /mcp delete <name>", nil
+				return cc.T("cmd.mcp.deleteUsage"), nil
 			}
 			name := cc.Args[0]
 			items, err := h.mcpConnService.ListByBot(cc.Ctx, cc.BotID)
@@ -103,10 +103,10 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					if err := h.mcpConnService.Delete(cc.Ctx, cc.BotID, item.ID); err != nil {
 						return "", err
 					}
-					return fmt.Sprintf("✅ MCP connection %s deleted.", MdCode(item.Name)), nil
+					return cc.T("cmd.mcp.deleted", map[string]any{"name": MdCode(item.Name)}), nil
 				}
 			}
-			return fmt.Sprintf("No MCP connection named %q. Run /mcp list to see connections.", name), nil
+			return cc.T("cmd.mcp.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("mcp list")}), nil
 		},
 	})
 	return g

@@ -27,6 +27,7 @@ func MenuCommands(t *i18n.Localizer) []MenuCommand {
 		{"model", t.T("menu.model")},
 		{"reasoning", t.T("menu.reasoning")},
 		{"settings", t.T("menu.settings")},
+		{"language", t.T("menu.language")},
 		{"memory", t.T("menu.memory")},
 		{"search", t.T("menu.search")},
 		{"schedule", t.T("menu.schedule")},

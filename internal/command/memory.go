@@ -11,13 +11,13 @@ import (
 // chips for current/default and the engine slug — but the engine chip is shown
 // only when it adds information the name doesn't already convey, so e.g.
 // "Built-in Memory" does not get a redundant "builtin" chip.
-func providerListRecord(name, provider string, isDefault, isCurrent bool) listRecord {
-	fields := []kv{{"Name", name}}
+func providerListRecord(cc CommandContext, name, provider string, isDefault, isCurrent bool) listRecord {
+	fields := []kv{{cc.T("cmd.common.fieldName"), name}}
 	if isCurrent {
-		fields = append(fields, kv{"", "current"})
+		fields = append(fields, kv{"", cc.T("cmd.common.current")})
 	}
 	if isDefault {
-		fields = append(fields, kv{"", "default"})
+		fields = append(fields, kv{"", cc.T("cmd.common.default")})
 	}
 	if engine := distinctProviderEngine(name, provider); engine != "" {
 		fields = append(fields, kv{"", engine})
@@ -56,20 +56,20 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 		Usage: "list - List all memory providers",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if h.memProvService == nil {
-				return &Result{Text: "Memory isn't available right now."}, nil
+				return &Result{Text: cc.T("cmd.memory.unavailable")}, nil
 			}
 			items, err := h.memProvService.List(cc.Ctx)
 			if err != nil {
 				return nil, err
 			}
 			if len(items) == 0 {
-				return &Result{Text: "No memory providers yet.\n\nMemory providers give the bot long-term memory across conversations. Add one in the web dashboard."}, nil
+				return &Result{Text: cc.T("cmd.memory.empty")}, nil
 			}
 			settingsResp, _ := h.getBotSettings(cc)
 			currentRecords := make([]listRecord, 0, 1)
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
-				rec := providerListRecord(item.Name, item.Provider, item.IsDefault, item.ID == settingsResp.MemoryProviderID)
+				rec := providerListRecord(cc, item.Name, item.Provider, item.IsDefault, item.ID == settingsResp.MemoryProviderID)
 				// Tap a provider to switch to it — no typing of /memory set.
 				rec.action = &ItemAction{Resource: "memory", Action: "set", Args: []string{item.Name}}
 				if item.ID == settingsResp.MemoryProviderID {
@@ -79,7 +79,7 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 				otherRecords = append(otherRecords, rec)
 			}
 			currentRecords = append(currentRecords, otherRecords...)
-			return buildListResult("Memory Providers", "memory", "list", nil, currentRecords, cc.Page, defaultListLimit, "Switch with "+CmdRef("memory set <name>")+"."), nil
+			return buildListResult(cc.T("cmd.memory.title"), "memory", "list", nil, currentRecords, cc.Page, defaultListLimit, cc.T("cmd.memory.switchHint", map[string]any{"command": CmdRef("memory set <name>")}), cc.L), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -87,16 +87,16 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 		Usage: "current - Show the current memory provider",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.settingsService == nil {
-				return "Memory isn't available right now.", nil
+				return cc.T("cmd.memory.unavailable"), nil
 			}
 			settingsResp, err := h.getBotSettings(cc)
 			if err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(settingsResp.MemoryProviderID) == "" {
-				return "No memory provider is set. See options with " + CmdRef("memory list") + ", then choose one with " + CmdRef("memory set <name>") + ".", nil
+				return cc.T("cmd.memory.noneSet", map[string]any{"list": CmdRef("memory list"), "set": CmdRef("memory set <name>")}), nil
 			}
-			return "Active memory provider: " + h.resolveMemoryProviderName(cc, settingsResp.MemoryProviderID), nil
+			return cc.T("cmd.memory.active", map[string]any{"name": h.resolveMemoryProviderName(cc, settingsResp.MemoryProviderID)}), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -105,10 +105,10 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if len(cc.Args) < 1 {
-				return "Usage: /memory set <name>", nil
+				return cc.T("cmd.memory.setUsage"), nil
 			}
 			if h.settingsService == nil {
-				return "Memory isn't available right now.", nil
+				return cc.T("cmd.memory.unavailable"), nil
 			}
 			name := cc.Args[0]
 			before, _ := h.getBotSettings(cc)
@@ -124,10 +124,10 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 					if err != nil {
 						return "", err
 					}
-					return formatChangedValue("Memory provider", h.resolveMemoryProviderName(cc, before.MemoryProviderID), item.Name), nil
+					return formatChangedValueT(cc, cc.T("cmd.memory.label"), h.resolveMemoryProviderName(cc, before.MemoryProviderID), item.Name), nil
 				}
 			}
-			return fmt.Sprintf("No memory provider named %q. See options with %s.", name, CmdRef("memory list")), nil
+			return cc.T("cmd.memory.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("memory list")}), nil
 		},
 	})
 	return g

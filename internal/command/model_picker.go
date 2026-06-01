@@ -116,9 +116,9 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	textModels := h.filterModelsByProvider(cc, items, filterProvider)
 	if len(textModels) == 0 {
 		if filterProvider != "" {
-			return &Result{Text: fmt.Sprintf("No chat models under provider %q. Run /model list to see all providers.", filterProvider)}, nil
+			return &Result{Text: cc.T("cmd.model.noneUnderProvider", map[string]any{"provider": fmt.Sprintf("%q", filterProvider), "command": CmdRef("model list")})}, nil
 		}
-		return &Result{Text: "No chat models yet.\n\nAdd a model in the web dashboard."}, nil
+		return &Result{Text: cc.T("cmd.model.empty")}, nil
 	}
 	sort.SliceStable(textModels, func(i, j int) bool {
 		return modelSortRank(textModels[i], settingsResp) < modelSortRank(textModels[j], settingsResp)
@@ -126,27 +126,30 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	records := make([]listRecord, 0, len(textModels))
 	for _, item := range textModels {
 		fields := []kv{
-			{"Model", item.Name},
-			{"Provider", h.resolveProviderName(cc, item.ProviderID)},
+			{cc.T("cmd.status.fieldModel"), item.Name},
+			{cc.T("cmd.model.fieldProvider"), h.resolveProviderName(cc, item.ProviderID)},
 		}
 		// Active-role markers (chat/heartbeat) are a chip, not bracketed into the
 		// name — brackets would force the whole name into a monospace code span.
 		if markers := modelMarkers(item.ID, settingsResp); len(markers) > 0 {
+			for i, marker := range markers {
+				markers[i] = cc.T("cmd.model.marker." + marker)
+			}
 			fields = append(fields, kv{"", strings.Join(markers, ", ")})
 		}
 		records = append(records, listRecord{fields: fields})
 	}
-	hint := "Use /model current to inspect active selections."
+	hint := cc.T("cmd.model.currentHint", map[string]any{"command": CmdRef("model current")})
 	if filterProvider == "" {
-		hint = "Use /model list <provider_name> to narrow results."
+		hint = cc.T("cmd.model.narrowHint", map[string]any{"command": CmdRef("model list <provider_name>")})
 	}
-	res := buildListResult("Chat Models", "model", "list", nil, records, cc.Page, defaultListLimit, hint)
+	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, hint, cc.L)
 
 	// Interactive picker. Resolve the drill-down level.
 	cands := h.buildModelCandidates(cc, items)
 	groups := groupCandidatesByProvider(cands)
 	currentDisplay := h.resolveModelName(cc, settingsResp.ChatModelID)
-	reasoning := formatReasoningLabel(settingsResp)
+	reasoning := formatReasoningLabel(cc, settingsResp)
 	provIdx := cc.Prov
 	if provIdx < 0 && filterProvider != "" {
 		for i, g := range groups {
@@ -167,14 +170,14 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 }
 
 // formatReasoningLabel renders the current reasoning state for picker headers.
-func formatReasoningLabel(s settings.Settings) string {
+func formatReasoningLabel(cc CommandContext, s settings.Settings) string {
 	if !s.ReasoningEnabled {
-		return "off"
+		return cc.T("cmd.common.off")
 	}
 	if e := strings.TrimSpace(s.ReasoningEffort); e != "" {
 		return e
 	}
-	return "on"
+	return cc.T("cmd.common.on")
 }
 
 func buildProvidersPickerView(groups []providerGroup, cands []modelCandidate, currentDBID, currentDisplay, reasoning string, page int) *ModelPickerView {

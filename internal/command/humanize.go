@@ -19,6 +19,13 @@ func humanizeTime(t time.Time) string {
 	return relativeSince(t, time.Now())
 }
 
+func humanizeTimeT(cc CommandContext, t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return relativeSinceT(cc, t, time.Now())
+}
+
 func relativeSince(t, now time.Time) string {
 	d := now.Sub(t)
 	switch {
@@ -35,6 +42,26 @@ func relativeSince(t, now time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	case d < 7*24*time.Hour:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("2006-01-02 15:04")
+	}
+}
+
+func relativeSinceT(cc CommandContext, t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < 0:
+		return t.Format("2006-01-02 15:04")
+	case d < 5*time.Second:
+		return cc.T("cmd.time.justNow")
+	case d < time.Minute:
+		return cc.T("cmd.time.secondsAgo", map[string]any{"n": int(d.Seconds())})
+	case d < time.Hour:
+		return cc.T("cmd.time.minutesAgo", map[string]any{"n": int(d.Minutes())})
+	case d < 24*time.Hour:
+		return cc.T("cmd.time.hoursAgo", map[string]any{"n": int(d.Hours())})
+	case d < 7*24*time.Hour:
+		return cc.T("cmd.time.daysAgo", map[string]any{"n": int(d.Hours() / 24)})
 	default:
 		return t.Format("2006-01-02 15:04")
 	}
@@ -144,6 +171,41 @@ func humanizeCron(pattern string) string {
 	return pattern
 }
 
+func humanizeCronT(cc CommandContext, pattern string) string {
+	f := strings.Fields(strings.TrimSpace(pattern))
+	if len(f) != 5 {
+		return pattern
+	}
+	minute, hour, dom, mon, dow := f[0], f[1], f[2], f[3], f[4]
+
+	allStar := hour == "*" && dom == "*" && mon == "*" && dow == "*"
+	if minute == "*" && allStar {
+		return cc.T("cmd.cron.everyMinute")
+	}
+	if strings.HasPrefix(minute, "*/") && allStar {
+		if n, err := strconv.Atoi(minute[2:]); err == nil && n > 0 {
+			return cc.T("cmd.cron.everyNMinutes", map[string]any{"n": n})
+		}
+	}
+	if minute == "0" && allStar {
+		return cc.T("cmd.cron.hourly")
+	}
+
+	clock, ok := cronClock(minute, hour)
+	if !ok || mon != "*" {
+		return pattern
+	}
+	switch {
+	case dom == "*" && dow == "*":
+		return cc.T("cmd.cron.dailyAt", map[string]any{"time": clock})
+	case dom == "*" && dow != "*":
+		if wd, ok := cronWeekday(dow); ok {
+			return cc.T("cmd.cron.weekdayAt", map[string]any{"weekday": cc.T("cmd.cron.weekday." + strings.ToLower(wd)), "time": clock})
+		}
+	}
+	return pattern
+}
+
 func cronClock(minute, hour string) (string, bool) {
 	m, err1 := strconv.Atoi(minute)
 	h, err2 := strconv.Atoi(hour)
@@ -217,6 +279,48 @@ func humanizeStatus(s string) string {
 		return "Queued"
 	case "bounced":
 		return "Bounced"
+	}
+	r := []rune(t)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
+
+func humanizeStatusT(cc CommandContext, s string) string {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return ""
+	}
+	switch strings.ToLower(t) {
+	case "ok", "success", "succeeded":
+		return cc.T("cmd.statusValue.success")
+	case "failed", "fail":
+		return cc.T("cmd.statusValue.failed")
+	case "error", "errored":
+		return cc.T("cmd.common.error")
+	case "unknown":
+		return cc.T("cmd.statusValue.notChecked")
+	case "connected":
+		return cc.T("cmd.statusValue.connected")
+	case "disconnected":
+		return cc.T("cmd.statusValue.disconnected")
+	case "active":
+		return cc.T("cmd.common.active")
+	case "inactive":
+		return cc.T("cmd.statusValue.inactive")
+	case "pending":
+		return cc.T("cmd.statusValue.pending")
+	case "running":
+		return cc.T("cmd.statusValue.running")
+	case "allow", "allowed":
+		return cc.T("cmd.common.allowed")
+	case "deny", "denied":
+		return cc.T("cmd.common.denied")
+	case "sent":
+		return cc.T("cmd.statusValue.sent")
+	case "queued":
+		return cc.T("cmd.statusValue.queued")
+	case "bounced":
+		return cc.T("cmd.statusValue.bounced")
 	}
 	r := []rune(t)
 	r[0] = unicode.ToUpper(r[0])

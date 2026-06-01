@@ -21,7 +21,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			if h.compactionService == nil {
-				return "Compaction isn't available right now.", nil
+				return cc.T("cmd.compact.unavailable"), nil
 			}
 			sessionID := cc.SessionID
 			if sessionID == "" {
@@ -31,7 +31,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 				}
 				latestUUID, err := h.queries.GetLatestSessionIDByBot(cc.Ctx, botUUID)
 				if err != nil {
-					return "No active session found.", nil
+					return cc.T("cmd.session.noActive"), nil
 				}
 				sessionID = uuid.UUID(latestUUID.Bytes).String()
 			}
@@ -44,7 +44,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 			if err := h.compactionService.RunCompactionSync(cc.Ctx, cfg); err != nil {
 				return "", fmt.Errorf("compaction failed: %w", err)
 			}
-			return "✅ Context compacted.", nil
+			return cc.T("cmd.compact.done"), nil
 		},
 	})
 	return g
