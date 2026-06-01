@@ -4,6 +4,7 @@
 package weixin
 
 import (
+	"bytes"
 	"crypto/aes"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -166,7 +166,7 @@ func uploadToCDN(cdnBaseURL, uploadParam, filekey string, plaintext, aesKey []by
 	}
 	u := buildCDNUploadURL(cdnBaseURL, uploadParam, filekey)
 
-	req, err := http.NewRequest(http.MethodPost, u, io.NopCloser(strings.NewReader(string(ciphertext)))) //nolint:noctx
+	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(ciphertext)) //nolint:noctx
 	if err != nil {
 		return "", err
 	}

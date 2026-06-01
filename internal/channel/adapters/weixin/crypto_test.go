@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -94,5 +97,40 @@ func TestParseAESKey_Invalid(t *testing.T) {
 	_, err := parseAESKey(b64)
 	if err == nil {
 		t.Error("expected error for invalid key length")
+	}
+}
+
+func TestUploadToCDNSendsContentLength(t *testing.T) {
+	plaintext := []byte("hello")
+	aesKey := []byte("0123456789abcdef")
+	wantCiphertext, err := encryptAESECB(plaintext, aesKey)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		if !bytes.Equal(body, wantCiphertext) {
+			t.Errorf("body = %x, want %x", body, wantCiphertext)
+		}
+		if r.ContentLength != int64(len(wantCiphertext)) {
+			t.Errorf("content length = %d, want %d", r.ContentLength, len(wantCiphertext))
+		}
+		if len(r.TransferEncoding) > 0 {
+			t.Errorf("transfer encoding = %v, want none", r.TransferEncoding)
+		}
+		w.Header().Set("x-encrypted-param", "download-param")
+	}))
+	defer server.Close()
+
+	got, err := uploadToCDN(server.URL, "upload-param", "file-key", plaintext, aesKey)
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if got != "download-param" {
+		t.Errorf("download param = %q, want %q", got, "download-param")
 	}
 }
