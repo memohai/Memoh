@@ -10,10 +10,10 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
 
+import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
 import './desktop-shell.css'
 import 'animate.css'
-import 'markstream-vue/index.css'
 import 'katex/dist/katex.min.css'
 
 import App from './chat/App.vue'
