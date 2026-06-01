@@ -1391,6 +1391,8 @@ WHERE m.bot_id = ?1
   AND (?6 IS NULL OR m.role = ?6)
   AND (?7 IS NULL OR (
     CASE
+      WHEN NOT json_valid(m.content)
+        THEN CASE WHEN m.content LIKE '%' || ?7 || '%' THEN m.content ELSE '' END
       WHEN json_type(json_extract(m.content, '$.content')) = 'text'
         THEN json_extract(m.content, '$.content')
       WHEN json_type(json_extract(m.content, '$.content')) = 'array'
