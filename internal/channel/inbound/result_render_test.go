@@ -6,6 +6,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 func listResult(total, page, pageSize int) *command.Result {
@@ -28,7 +29,7 @@ func listResult(total, page, pageSize int) *command.Result {
 func TestRenderResultTextFallbackWhenNoButtons(t *testing.T) {
 	res := listResult(50, 0, 12)
 	res.Interactive.List.ButtonText = "button list text"
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: false})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: false}, T: i18n.New("en")})
 	if msg.Text != "list text" {
 		t.Errorf("Text = %q, want 'list text'", msg.Text)
 	}
@@ -41,7 +42,7 @@ func TestRenderListUsesButtonTextWhenButtonsAreAvailable(t *testing.T) {
 	res := listResult(5, 0, 12)
 	res.Interactive.List.ButtonText = "button list text"
 	res.Interactive.List.Items[0].Action = &command.ItemAction{Resource: "search", Action: "set", Args: []string{"one"}}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	if msg.Text != "button list text" {
 		t.Errorf("Text = %q, want button text", msg.Text)
 	}
@@ -53,7 +54,7 @@ func TestRenderListUsesButtonTextWhenButtonsAreAvailable(t *testing.T) {
 func TestRenderResultFormatGate(t *testing.T) {
 	res := &command.Result{Text: "**Title**\n- `value`"}
 	// Markdown-capable channel: format set, markup preserved.
-	md := renderResult(res, channel.ChannelCapabilities{Markdown: true})
+	md := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Markdown: true}, T: i18n.New("en")})
 	if md.Format != channel.MessageFormatMarkdown {
 		t.Errorf("markdown channel: Format = %q, want markdown", md.Format)
 	}
@@ -61,12 +62,12 @@ func TestRenderResultFormatGate(t *testing.T) {
 		t.Errorf("markdown channel should preserve markup, got %q", md.Text)
 	}
 	// RichText-only channel (e.g. feishu): also markdown.
-	rich := renderResult(res, channel.ChannelCapabilities{RichText: true})
+	rich := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{RichText: true}, T: i18n.New("en")})
 	if rich.Format != channel.MessageFormatMarkdown {
 		t.Errorf("richtext channel: Format = %q, want markdown", rich.Format)
 	}
 	// Text-only channel: markers stripped, format stays plain.
-	plain := renderResult(res, channel.ChannelCapabilities{})
+	plain := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{}, T: i18n.New("en")})
 	if plain.Format == channel.MessageFormatMarkdown {
 		t.Error("text-only channel should not be markdown")
 	}
@@ -79,14 +80,14 @@ func TestRenderResultFormatGate(t *testing.T) {
 }
 
 func TestRenderResultTextFallbackWhenNoInteractive(t *testing.T) {
-	msg := renderResult(&command.Result{Text: "plain"}, channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(&command.Result{Text: "plain"}, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	if msg.Text != "plain" || len(msg.Actions) != 0 {
 		t.Errorf("got Text=%q actions=%d, want 'plain'/0", msg.Text, len(msg.Actions))
 	}
 }
 
 func TestRenderListSinglePageNoButtons(t *testing.T) {
-	msg := renderResult(listResult(5, 0, 12), channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(listResult(5, 0, 12), RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	if len(msg.Actions) != 0 {
 		t.Errorf("single page should render no buttons, got %d", len(msg.Actions))
 	}
@@ -94,7 +95,7 @@ func TestRenderListSinglePageNoButtons(t *testing.T) {
 
 func TestRenderListMultiPageNavButtons(t *testing.T) {
 	// 50 items, 12/page => 5 pages. Page 0 should have: indicator, Next, Close.
-	msg := renderResult(listResult(50, 0, 12), channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(listResult(50, 0, 12), RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	if len(msg.Actions) == 0 {
 		t.Fatal("expected nav buttons on a multi-page list")
 	}
@@ -132,7 +133,7 @@ func TestRenderListMultiPageNavButtons(t *testing.T) {
 
 func TestRenderListLastPageHasPrevNotNext(t *testing.T) {
 	// 50 items, 12/page, last page index = 4.
-	msg := renderResult(listResult(50, 4, 12), channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(listResult(50, 4, 12), RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	var hasNext, hasPrev bool
 	for _, a := range msg.Actions {
 		switch a.Label {
@@ -158,7 +159,7 @@ func TestRenderRangeView(t *testing.T) {
 			Range: &command.RangeView{Resource: "usage", Action: "summary", Current: "7d", Presets: []string{"24h", "7d", "30d", "all"}},
 		},
 	}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true, Markdown: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true, Markdown: true}, T: i18n.New("en")})
 
 	var labels []string
 	var hasClose, currentMarked bool
@@ -210,7 +211,7 @@ func TestRenderChoicesViewUsesSingleColumnForLongLabels(t *testing.T) {
 			},
 		},
 	}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 	if len(msg.Actions) < 2 {
 		t.Fatalf("expected actions, got %d", len(msg.Actions))
 	}
@@ -235,7 +236,7 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 			},
 		},
 	}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 
 	// Provider buttons are 2 per row.
 	provByRow := map[int]int{}
@@ -262,7 +263,7 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 }
 
 func TestFormatNewSessionMessage(t *testing.T) {
-	got := formatNewSessionMessage("chat", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "newSession.modeChat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
 		ReasoningEnabled: true, ReasoningEffort: "medium", ContextWindow: "128.0K",
 	})
@@ -295,7 +296,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
 	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage("discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
+	off := formatNewSessionMessage(i18n.New("en"), "newSession.modeDiscussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEnabled: false})
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
@@ -327,7 +328,7 @@ func TestRenderModelPickerModelLevel(t *testing.T) {
 			},
 		},
 	}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true}, T: i18n.New("en")})
 
 	var hasPrev, hasNext, hasBack, hasClose, hasSelected bool
 	for _, a := range msg.Actions {

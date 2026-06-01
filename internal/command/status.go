@@ -90,7 +90,7 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 	pairs := make([]kv, 0, 6)
 	// Lead with the model — the single most load-bearing "where am I" fact.
 	if s, err := h.getBotSettings(cc); err == nil {
-		if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != "(none)" {
+		if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != cc.T("cmd.common.none") {
 			pairs = append(pairs, kv{"Model", m})
 		}
 	}

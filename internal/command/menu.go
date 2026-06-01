@@ -1,5 +1,7 @@
 package command
 
+import "github.com/memohai/memoh/internal/i18n"
+
 // MenuCommand is one entry for a channel's native slash-command menu (e.g.
 // Telegram's setMyCommands), so users discover and tap commands without typing.
 type MenuCommand struct {
@@ -8,30 +10,33 @@ type MenuCommand struct {
 }
 
 // MenuCommands returns the curated slash-command list to advertise in a
-// channel's native command menu. It is the single source for that menu; order
-// roughly follows everyday usefulness. Only single-token commands belong here —
-// the native menu cannot express sub-actions like "schedule list" (those are
-// discovered via /help or in-message buttons).
-func MenuCommands() []MenuCommand {
+// channel's native command menu, with descriptions localized via t. It is the
+// single source for that menu; order roughly follows everyday usefulness. Only
+// single-token commands belong here — the native menu cannot express sub-actions
+// like "schedule list" (those are discovered via /help or in-message buttons).
+//
+// A nil Localizer renders English (the safe default), which is what transport
+// adapters that register the menu without per-bot locale context currently pass.
+func MenuCommands(t *i18n.Localizer) []MenuCommand {
 	return []MenuCommand{
-		{"help", "Show available commands"},
-		{"new", "Start a new conversation"},
-		{"stop", "Stop the current reply"},
-		{"status", "Show session status"},
-		{"context", "Show context window usage"},
-		{"model", "Switch the chat model"},
-		{"reasoning", "Set reasoning level"},
-		{"settings", "View and update bot settings"},
-		{"memory", "Choose the memory provider"},
-		{"search", "Choose the search provider"},
-		{"schedule", "Manage scheduled tasks"},
-		{"mcp", "Manage MCP connections"},
-		{"usage", "View token usage"},
-		{"email", "View email configuration"},
-		{"heartbeat", "View heartbeat logs"},
-		{"skill", "View bot skills"},
-		{"fs", "Browse container files"},
-		{"access", "Inspect identity and permissions"},
-		{"compact", "Compact conversation context"},
+		{"help", t.T("menu.help")},
+		{"new", t.T("menu.new")},
+		{"stop", t.T("menu.stop")},
+		{"status", t.T("menu.status")},
+		{"context", t.T("menu.context")},
+		{"model", t.T("menu.model")},
+		{"reasoning", t.T("menu.reasoning")},
+		{"settings", t.T("menu.settings")},
+		{"memory", t.T("menu.memory")},
+		{"search", t.T("menu.search")},
+		{"schedule", t.T("menu.schedule")},
+		{"mcp", t.T("menu.mcp")},
+		{"usage", t.T("menu.usage")},
+		{"email", t.T("menu.email")},
+		{"heartbeat", t.T("menu.heartbeat")},
+		{"skill", t.T("menu.skill")},
+		{"fs", t.T("menu.fs")},
+		{"access", t.T("menu.access")},
+		{"compact", t.T("menu.compact")},
 	}
 }

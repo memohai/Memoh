@@ -19,9 +19,15 @@ const (
 // Text is always a complete rendering usable by channels without rich UI.
 // Interactive is optional structured data that capable renderers (e.g. the
 // Telegram inline keyboard) may upgrade into buttons and pagination.
+//
+// Locale is the resolved command-UI locale ("en", "zh", …) the Text/Interactive
+// labels were rendered in. Channels use it to localize their own renderer chrome
+// (Close/Prev/Next/…) so the whole reply stays in one language. Empty means the
+// server default (English).
 type Result struct {
 	Text        string
 	Interactive *Interactive
+	Locale      string
 }
 
 // Interactive carries optional structured data for rich rendering. Exactly one

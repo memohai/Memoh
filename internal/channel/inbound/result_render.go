@@ -1,20 +1,33 @@
 package inbound
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 const actionTypeCallback = "callback"
 
+// RenderContext bundles everything the renderer needs to turn a neutral
+// command.Result into a channel.Message: the target channel's capability matrix
+// and a Localizer for the renderer's own chrome (Close/Prev/Next/…). Business
+// copy is already localized by the command layer; the renderer only localizes
+// the chrome it owns.
+type RenderContext struct {
+	Caps channel.ChannelCapabilities
+	T    *i18n.Localizer
+}
+
 // friendlyOps renders a blame-free, recovery-oriented line for an operational
 // failure on a user-command path. The raw cause belongs in logs; the user never
-// sees infra nouns ("route resolver", "session service", etc.).
-func friendlyOps(verb string) string {
-	return "⚠️ Couldn't " + verb + " right now. Try again in a moment."
+// sees infra nouns ("route resolver", "session service", etc.). verbKey is an
+// i18n key under "ops.verb.*"; t localizes both the verb and the template.
+func friendlyOps(t *i18n.Localizer, verbKey string) string {
+	return t.T("ops.template", map[string]any{"verb": t.T(verbKey)})
 }
 
 // formatNewSessionMessage builds the /new confirmation card. A fresh start is an
@@ -22,58 +35,92 @@ func friendlyOps(verb string) string {
 // which model (and its provider) will answer, whether reasoning is on, and how
 // much context budget they have. These are not "defaults to hide"; on this
 // surface they reassure and inform. Markdown markers are authored unconditionally
-// and stripped later for non-markdown channels.
-func formatNewSessionMessage(modeLabel string, cc command.CurrentContext) string {
-	reasoning := "off"
+// and stripped later for non-markdown channels. modeKey is an i18n key under
+// "newSession.*" naming the session mode (e.g. newSession.modeChat).
+func formatNewSessionMessage(t *i18n.Localizer, modeKey string, cc command.CurrentContext) string {
+	reasoning := t.T("cmd.common.off")
 	if cc.ReasoningEnabled {
 		reasoning = strings.TrimSpace(cc.ReasoningEffort)
 		if reasoning == "" {
-			reasoning = "on"
+			reasoning = t.T("cmd.common.on")
 		}
 	}
 	var b strings.Builder
-	b.WriteString(command.MdBold(fmt.Sprintf("✨ New %s started.", modeLabel)))
+	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": t.T(modeKey)})))
 	// Display names / enums read better as plain text than monospace.
-	fmt.Fprintf(&b, "\n\n- Model: %s", cc.ChatModel)
-	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != "(none)" {
-		fmt.Fprintf(&b, "\n- Heartbeat: %s", hb)
+	fmt.Fprintf(&b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
+	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != t.T("cmd.common.none") {
+		fmt.Fprintf(&b, "\n- %s: %s", t.T("newSession.labelHeartbeat"), hb)
 	}
-	fmt.Fprintf(&b, "\n- Reasoning: %s", reasoning)
+	fmt.Fprintf(&b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoning)
 	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
-		fmt.Fprintf(&b, "\n- Context: %s tokens", cw)
+		fmt.Fprintf(&b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
 	}
 	// One guiding line: how to change the setup they're departing with.
-	fmt.Fprintf(&b, "\n\nTip: adjust anytime with %s or %s.", command.CmdRef("model"), command.CmdRef("reasoning"))
+	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
+		"model":     command.CmdRef("model"),
+		"reasoning": command.CmdRef("reasoning"),
+	}))
 	return b.String()
+}
+
+// localizer resolves the command-UI Localizer for a bot, used for renderer
+// chrome and operational-failure messages outside the command handler (e.g.
+// /new, /stop, /status). It mirrors the locale the command handler resolves, so
+// a bot's whole command surface stays in one language. Falls back to the default
+// locale when the command handler or bot is unavailable.
+func (p *ChannelInboundProcessor) localizer(ctx context.Context, botID string) *i18n.Localizer {
+	if p == nil || p.commandHandler == nil {
+		return i18n.New("")
+	}
+	return i18n.New(p.commandHandler.ResolveLocale(ctx, strings.TrimSpace(botID)))
+}
+
+// localizerFor returns the Localizer the renderer should use for chrome. The
+// command layer stamps Result.Locale with the locale its text/labels were
+// rendered in (including an in-place language switch, where it differs from the
+// pre-command locale), so chrome must follow Result.Locale to keep the whole
+// reply in one language. RenderContext.T is only a fallback for results that
+// carry no locale.
+func (rc RenderContext) localizerFor(result *command.Result) *i18n.Localizer {
+	if result != nil && result.Locale != "" {
+		return i18n.New(result.Locale)
+	}
+	if rc.T != nil {
+		return rc.T
+	}
+	return i18n.New("")
 }
 
 // renderResult converts a neutral command.Result into a channel.Message,
 // upgrading to interactive inline-keyboard buttons when the channel advertises
 // button support. Channels without button support (or results without
 // structured data) degrade to the complete fallback Text. The final message
-// format (Markdown vs Plain) is decided once, capability-gated.
-func renderResult(result *command.Result, caps channel.ChannelCapabilities) channel.Message {
+// format (Markdown vs Plain) is decided once, capability-gated. The renderer's
+// own chrome (Close/Prev/Next/…) is localized to Result.Locale.
+func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	if result == nil {
 		return channel.Message{}
 	}
+	t := rc.localizerFor(result)
 	var msg channel.Message
-	if result.Interactive == nil || !caps.Buttons {
+	if result.Interactive == nil || !rc.Caps.Buttons {
 		msg = channel.Message{Text: result.Text}
 	} else {
 		switch result.Interactive.Kind {
 		case command.InteractiveList:
-			msg = renderListView(result.Text, result.Interactive.List)
+			msg = renderListView(result.Text, result.Interactive.List, t)
 		case command.InteractiveModelPicker:
-			msg = renderModelPicker(result.Interactive.Picker)
+			msg = renderModelPicker(result.Interactive.Picker, t)
 		case command.InteractiveChoices:
-			msg = renderChoicesView(result.Interactive.Choices)
+			msg = renderChoicesView(result.Interactive.Choices, t)
 		case command.InteractiveRange:
-			msg = renderRangeView(result.Text, result.Interactive.Range)
+			msg = renderRangeView(result.Text, result.Interactive.Range, t)
 		default:
 			msg = channel.Message{Text: result.Text}
 		}
 	}
-	return applyMessageFormat(msg, caps)
+	return applyMessageFormat(msg, rc.Caps)
 }
 
 // applyMessageFormat sets the message format from the channel's capabilities:
@@ -102,7 +149,7 @@ func stripInlineMarkup(s string) string {
 // there is more than one page, or for rows that carry an explicit ItemAction.
 // A single-page, action-free list renders as plain text (no keyboard), matching
 // prior behavior.
-func renderListView(text string, lv *command.ListView) channel.Message {
+func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channel.Message {
 	if lv != nil && strings.TrimSpace(lv.ButtonText) != "" {
 		text = lv.ButtonText
 	}
@@ -173,7 +220,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 		if lv.Page > 0 {
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
-				Label: "◀ Prev",
+				Label: t.T("chrome.prev"),
 				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, lv.Page-1),
 				Row:   navRow,
 			})
@@ -187,7 +234,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 		if lv.Page < totalPages-1 {
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
-				Label: "Next ▶",
+				Label: t.T("chrome.next"),
 				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, lv.Page+1),
 				Row:   navRow,
 			})
@@ -197,7 +244,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 
 	actions = append(actions, channel.Action{
 		Type:  actionTypeCallback,
-		Label: "✕ Close",
+		Label: t.T("chrome.close"),
 		Value: command.DismissCallback(),
 		Row:   row,
 	})
@@ -212,7 +259,7 @@ func renderListView(text string, lv *command.ListView) channel.Message {
 // a 2-column grid (● marks the provider holding the current model, with its
 // model count); the model level shows one model per row (✓ marks the selected
 // model) with a back button. Both levels paginate and carry a Close button.
-func renderModelPicker(p *command.ModelPickerView) channel.Message {
+func renderModelPicker(p *command.ModelPickerView, t *i18n.Localizer) channel.Message {
 	if p == nil {
 		return channel.Message{}
 	}
@@ -234,7 +281,7 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 	start := page * pageSize
 	end := start + pageSize
 
-	msg := channel.Message{Text: modelPickerHeader(p, start, end)}
+	msg := channel.Message{Text: modelPickerHeader(p, start, end, t)}
 
 	var actions []channel.Action
 	row := 0
@@ -290,7 +337,7 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 		navRow := row
 		if page > 0 {
 			actions = append(actions, channel.Action{
-				Type: actionTypeCallback, Label: "◀ Prev",
+				Type: actionTypeCallback, Label: t.T("chrome.prev"),
 				Value: pickerPageCallback(p, page-1), Row: navRow,
 			})
 		}
@@ -300,7 +347,7 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 		})
 		if page < totalPages-1 {
 			actions = append(actions, channel.Action{
-				Type: actionTypeCallback, Label: "Next ▶",
+				Type: actionTypeCallback, Label: t.T("chrome.next"),
 				Value: pickerPageCallback(p, page+1), Row: navRow,
 			})
 		}
@@ -309,13 +356,13 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 
 	if p.Level == command.LevelModels {
 		actions = append(actions, channel.Action{
-			Type: actionTypeCallback, Label: "◀ Providers",
+			Type: actionTypeCallback, Label: t.T("chrome.providers"),
 			Value: command.EncodeListCallback("model", "list", nil, 0), Row: row,
 		})
 		row++
 	}
 	actions = append(actions, channel.Action{
-		Type: actionTypeCallback, Label: "✕ Close",
+		Type: actionTypeCallback, Label: t.T("chrome.close"),
 		Value: command.DismissCallback(), Row: row,
 	})
 
@@ -324,34 +371,36 @@ func renderModelPicker(p *command.ModelPickerView) channel.Message {
 }
 
 // modelPickerHeader builds the compact status header shown above the keyboard.
-func modelPickerHeader(p *command.ModelPickerView, start, end int) string {
+func modelPickerHeader(p *command.ModelPickerView, start, end int, t *i18n.Localizer) string {
 	var b strings.Builder
-	b.WriteString(command.MdBold("⚙ Model Configuration") + "\n\n")
+	b.WriteString(command.MdBold(t.T("chrome.modelConfiguration")) + "\n\n")
 	if p.Level == command.LevelModels {
 		provider := p.ProviderName
 		if provider == "" {
-			provider = "models"
+			provider = t.T("chrome.models")
 		}
 		if p.Total > 0 && end > p.Total {
 			end = p.Total
 		}
 		if p.Total > end-start {
-			fmt.Fprintf(&b, "Provider: %s (%d–%d of %d)\n\nSelect a model:", provider, start+1, end, p.Total)
+			fmt.Fprintf(&b, "%s\n\n%s", t.T("chrome.providerRange", map[string]any{
+				"provider": provider, "start": start + 1, "end": end, "total": p.Total,
+			}), t.T("chrome.selectModel"))
 		} else {
-			fmt.Fprintf(&b, "Provider: %s\n\nSelect a model:", provider)
+			fmt.Fprintf(&b, "%s\n\n%s", t.T("chrome.provider", map[string]any{"provider": provider}), t.T("chrome.selectModel"))
 		}
 		return b.String()
 	}
 	current := p.CurrentDisplay
 	if strings.TrimSpace(current) == "" {
-		current = "(none)"
+		current = t.T("chrome.none")
 	}
 	// Display names / enums read better plain than monospace.
-	fmt.Fprintf(&b, "Current model: %s\n", current)
+	fmt.Fprintf(&b, "%s\n", t.T("chrome.currentModel", map[string]any{"model": current}))
 	if r := strings.TrimSpace(p.Reasoning); r != "" {
-		fmt.Fprintf(&b, "Reasoning: %s\n", r)
+		fmt.Fprintf(&b, "%s\n", t.T("chrome.reasoningLine", map[string]any{"effort": r}))
 	}
-	b.WriteString("\nSelect a provider:")
+	b.WriteString("\n" + t.T("chrome.selectProvider"))
 	return b.String()
 }
 
@@ -379,7 +428,7 @@ func truncateButtonLabel(s string) string {
 // levels or settings toggles). Short labels share two columns; long labels fall
 // back to one column so Telegram does not crush the text. Each tap re-dispatches
 // "/{resource} {action} {args}" and edits in place.
-func renderChoicesView(cv *command.ChoicesView) channel.Message {
+func renderChoicesView(cv *command.ChoicesView, t *i18n.Localizer) channel.Message {
 	if cv == nil {
 		return channel.Message{}
 	}
@@ -411,7 +460,7 @@ func renderChoicesView(cv *command.ChoicesView) channel.Message {
 		row++
 	}
 	actions = append(actions, channel.Action{
-		Type: actionTypeCallback, Label: "✕ Close", Value: command.DismissCallback(), Row: row,
+		Type: actionTypeCallback, Label: t.T("chrome.close"), Value: command.DismissCallback(), Row: row,
 	})
 	msg.Actions = actions
 	return msg
@@ -435,14 +484,14 @@ func choiceColumns(cv *command.ChoicesView) int {
 // renderRangeView renders a time-window selector: one row of preset buttons
 // (the active preset marked ●) plus Close. Tapping a preset re-runs the command
 // with that --range and edits the message in place.
-func renderRangeView(text string, rv *command.RangeView) channel.Message {
+func renderRangeView(text string, rv *command.RangeView, t *i18n.Localizer) channel.Message {
 	msg := channel.Message{Text: text}
 	if rv == nil {
 		return msg
 	}
 	var actions []channel.Action
 	for _, preset := range rv.Presets {
-		label := rangePresetLabel(preset)
+		label := rangePresetLabel(preset, t)
 		if preset == rv.Current {
 			label += " ●"
 		}
@@ -454,16 +503,16 @@ func renderRangeView(text string, rv *command.RangeView) channel.Message {
 		})
 	}
 	actions = append(actions, channel.Action{
-		Type: actionTypeCallback, Label: "✕ Close",
+		Type: actionTypeCallback, Label: t.T("chrome.close"),
 		Value: command.DismissCallback(), Row: 1,
 	})
 	msg.Actions = actions
 	return msg
 }
 
-func rangePresetLabel(preset string) string {
+func rangePresetLabel(preset string, t *i18n.Localizer) string {
 	if preset == "all" {
-		return "All"
+		return t.T("chrome.rangeAll")
 	}
 	return preset
 }

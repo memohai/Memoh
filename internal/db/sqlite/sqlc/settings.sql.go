@@ -13,6 +13,7 @@ import (
 const deleteSettingsByBotID = `-- name: DeleteSettingsByBotID :exec
 UPDATE bots
 SET language = 'auto',
+    command_ui_language = 'auto',
     reasoning_enabled = false,
     reasoning_effort = 'medium',
     heartbeat_enabled = false,
@@ -74,7 +75,8 @@ SELECT
   bots.display_enabled,
   bots.overlay_provider,
   bots.overlay_enabled,
-  bots.overlay_config
+  bots.overlay_config,
+  bots.command_ui_language
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
@@ -116,6 +118,7 @@ type GetSettingsByBotIDRow struct {
 	OverlayProvider        string         `json:"overlay_provider"`
 	OverlayEnabled         int64          `json:"overlay_enabled"`
 	OverlayConfig          string         `json:"overlay_config"`
+	CommandUiLanguage      string         `json:"command_ui_language"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSettingsByBotIDRow, error) {
@@ -149,6 +152,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id string) (GetSetting
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,
+		&i.CommandUiLanguage,
 	)
 	return i, err
 }
@@ -181,8 +185,9 @@ SET language = ?1,
     overlay_provider = ?24,
     overlay_enabled = ?25,
     overlay_config = ?26,
+    command_ui_language = ?27,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?27
+WHERE id = ?28
 RETURNING
   id AS bot_id,
   language,
@@ -210,7 +215,8 @@ RETURNING
   display_enabled,
   overlay_provider,
   overlay_enabled,
-  overlay_config
+  overlay_config,
+  command_ui_language
 `
 
 type UpsertBotSettingsParams struct {
@@ -240,6 +246,7 @@ type UpsertBotSettingsParams struct {
 	OverlayProvider        string         `json:"overlay_provider"`
 	OverlayEnabled         int64          `json:"overlay_enabled"`
 	OverlayConfig          string         `json:"overlay_config"`
+	CommandUiLanguage      string         `json:"command_ui_language"`
 	ID                     string         `json:"id"`
 }
 
@@ -271,6 +278,7 @@ type UpsertBotSettingsRow struct {
 	OverlayProvider        string         `json:"overlay_provider"`
 	OverlayEnabled         int64          `json:"overlay_enabled"`
 	OverlayConfig          string         `json:"overlay_config"`
+	CommandUiLanguage      string         `json:"command_ui_language"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -301,6 +309,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.OverlayProvider,
 		arg.OverlayEnabled,
 		arg.OverlayConfig,
+		arg.CommandUiLanguage,
 		arg.ID,
 	)
 	var i UpsertBotSettingsRow
@@ -332,6 +341,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.OverlayProvider,
 		&i.OverlayEnabled,
 		&i.OverlayConfig,
+		&i.CommandUiLanguage,
 	)
 	return i, err
 }

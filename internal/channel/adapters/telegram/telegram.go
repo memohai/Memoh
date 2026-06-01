@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/common"
 	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
 	"github.com/memohai/memoh/internal/textutil"
 )
@@ -271,7 +272,11 @@ func (*TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]an
 // setMyCommands, so the bot's "/" menu is populated automatically (no per-bot
 // setup). Best-effort: errors are logged, never fatal.
 func (a *TelegramAdapter) registerCommandMenu(bot *tgbotapi.BotAPI, configID string) {
-	menu := command.MenuCommands()
+	// The native command menu is registered once per connection, before any
+	// per-bot command-UI locale is available at this transport layer, so it is
+	// rendered in the server default locale. TODO: thread the bot's
+	// command_ui_language here to localize the native "/" menu per bot.
+	menu := command.MenuCommands(i18n.New(""))
 	cmds := make([]tgbotapi.BotCommand, 0, len(menu))
 	for _, m := range menu {
 		cmds = append(cmds, tgbotapi.BotCommand{Command: m.Command, Description: m.Description})

@@ -2,6 +2,7 @@ package settings
 
 const (
 	DefaultLanguage          = "auto"
+	DefaultCommandUILanguage = "auto"
 	DefaultReasoningEffort   = "medium"
 	DefaultHeartbeatInterval = 30
 )
@@ -14,6 +15,7 @@ type Settings struct {
 	TtsModelID             string             `json:"tts_model_id"`
 	TranscriptionModelID   string             `json:"transcription_model_id"`
 	Language               string             `json:"language"`
+	CommandUILanguage      string             `json:"command_ui_language"`
 	AclDefaultEffect       string             `json:"acl_default_effect"`
 	Timezone               string             `json:"timezone"`
 	ReasoningEnabled       bool               `json:"reasoning_enabled"`
@@ -44,6 +46,7 @@ type UpsertRequest struct {
 	TtsModelID             string              `json:"tts_model_id,omitempty"`
 	TranscriptionModelID   string              `json:"transcription_model_id,omitempty"`
 	Language               string              `json:"language,omitempty"`
+	CommandUILanguage      string              `json:"command_ui_language,omitempty"`
 	AclDefaultEffect       string              `json:"acl_default_effect,omitempty"`
 	Timezone               *string             `json:"timezone,omitempty"`
 	ReasoningEnabled       *bool               `json:"reasoning_enabled,omitempty"`

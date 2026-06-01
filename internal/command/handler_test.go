@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/settings"
@@ -336,7 +337,7 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 func TestSettingsResultUsesFocusedActions(t *testing.T) {
 	t.Parallel()
 	h := &Handler{}
-	result := h.settingsResult(CommandContext{}, settings.Settings{AclDefaultEffect: "allow"})
+	result := h.settingsResult(CommandContext{L: i18n.New("en")}, settings.Settings{AclDefaultEffect: "allow"})
 	if result.Interactive == nil || result.Interactive.Choices == nil {
 		t.Fatal("expected settings choices")
 	}

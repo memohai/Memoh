@@ -42,6 +42,33 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 	}
 }
 
+func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
+	t.Parallel()
+
+	// Explicit value propagates from the read row.
+	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
+		Language:          "en",
+		CommandUiLanguage: "zh",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 60,
+		CompactionRatio:   80,
+	})
+	if got.CommandUILanguage != "zh" {
+		t.Fatalf("CommandUILanguage = %q, want zh", got.CommandUILanguage)
+	}
+
+	// Empty value defaults to "auto" (mirrors the DB column default).
+	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
+		Language:          "en",
+		ReasoningEffort:   "medium",
+		HeartbeatInterval: 60,
+		CompactionRatio:   80,
+	})
+	if def.CommandUILanguage != DefaultCommandUILanguage {
+		t.Fatalf("default CommandUILanguage = %q, want %q", def.CommandUILanguage, DefaultCommandUILanguage)
+	}
+}
+
 func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 	t.Parallel()
 

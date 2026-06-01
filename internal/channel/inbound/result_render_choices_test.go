@@ -6,6 +6,7 @@ import (
 
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 func TestRenderChoicesView(t *testing.T) {
@@ -23,7 +24,7 @@ func TestRenderChoicesView(t *testing.T) {
 			},
 		},
 	}
-	msg := renderResult(res, channel.ChannelCapabilities{Buttons: true, Markdown: true})
+	msg := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{Buttons: true, Markdown: true}, T: i18n.New("en")})
 
 	var hasClose, marked bool
 	for _, a := range msg.Actions {
@@ -50,7 +51,7 @@ func TestRenderChoicesView(t *testing.T) {
 	}
 
 	// Text-only channel: no buttons, markup stripped, fallback text retained.
-	plain := renderResult(res, channel.ChannelCapabilities{})
+	plain := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{}, T: i18n.New("en")})
 	if len(plain.Actions) != 0 {
 		t.Errorf("text-only channel should have no buttons, got %d", len(plain.Actions))
 	}

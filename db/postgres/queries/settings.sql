@@ -26,7 +26,8 @@ SELECT
   bots.display_enabled,
   bots.overlay_provider,
   bots.overlay_enabled,
-  bots.overlay_config
+  bots.overlay_config,
+  bots.command_ui_language
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id
@@ -68,9 +69,10 @@ WITH updated AS (
       overlay_provider = sqlc.arg(overlay_provider),
       overlay_enabled = sqlc.arg(overlay_enabled),
       overlay_config = sqlc.arg(overlay_config),
+      command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -99,7 +101,8 @@ SELECT
   updated.display_enabled,
   updated.overlay_provider,
   updated.overlay_enabled,
-  updated.overlay_config
+  updated.overlay_config,
+  updated.command_ui_language
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id
 LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id
@@ -114,6 +117,7 @@ LEFT JOIN models AS transcription_models ON transcription_models.id = updated.tr
 -- name: DeleteSettingsByBotID :exec
 UPDATE bots
 SET language = 'auto',
+    command_ui_language = 'auto',
     reasoning_enabled = false,
     reasoning_effort = 'medium',
     heartbeat_enabled = false,

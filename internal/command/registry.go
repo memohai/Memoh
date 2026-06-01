@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 // CommandContext carries execution context for a sub-command.
@@ -25,6 +27,15 @@ type CommandContext struct {
 	Prov              int    // provider index for the model picker (-1 if absent)
 	Flat              int    // flat model index for picker selection (-1 if absent)
 	Range             string // time-window key for time-series commands ("" = default)
+	Locale            string // resolved command-UI locale ("en", "zh", …)
+	L                 *i18n.Localizer
+}
+
+// T localizes key for this context's command-UI locale, substituting named
+// "{placeholder}" params. Safe on a nil Localizer (returns the key), so handlers
+// and tests that omit L degrade gracefully.
+func (cc CommandContext) T(key string, params ...map[string]any) string {
+	return cc.L.T(key, params...)
 }
 
 // SubCommand describes a single sub-command within a resource group.

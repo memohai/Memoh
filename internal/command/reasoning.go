@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/models"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -42,7 +43,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -51,11 +52,11 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) < 1 {
-				return &Result{Text: "Usage: /reasoning set <off|none|low|medium|high|xhigh>"}, nil
+				return &Result{Text: cc.T("cmd.reasoning.setUsage")}, nil
 			}
 			level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
 			if h.settingsService == nil {
-				return &Result{Text: "Reasoning isn't available right now."}, nil
+				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
 			}
 			req := settings.UpsertRequest{}
 			switch {
@@ -67,7 +68,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 				req.ReasoningEnabled = &on
 				req.ReasoningEffort = &level
 			default:
-				return &Result{Text: fmt.Sprintf("Unknown level %q — choose off, none, low, medium, high, or xhigh.", cc.Args[0])}, nil
+				return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{"level": fmt.Sprintf("%q", cc.Args[0])})}, nil
 			}
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
 				return nil, err
@@ -76,7 +77,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
 		},
 	})
 	return g
@@ -84,17 +85,18 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 
 // reasoningResult builds the picker: a header with the current level plus one
 // button per level (current marked ✓). Tapping re-dispatches "/reasoning set X"
-// which edits the message in place.
-func reasoningResult(enabled bool, effort string) *Result {
+// which edits the message in place. Level tokens (off/none/low/…) are canonical
+// args and stay untranslated; only the surrounding prose is localized via t.
+func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
 	effort = strings.ToLower(strings.TrimSpace(effort))
-	current := "off"
+	current := t.T("cmd.common.off")
 	if enabled {
 		current = effort
 		if current == "" {
-			current = "on"
+			current = t.T("cmd.common.on")
 		}
 	}
-	header := MdBold("🧠 Reasoning") + "\nCurrent: " + current
+	header := MdBold(t.T("cmd.reasoning.header")) + "\n" + t.T("cmd.reasoning.current", map[string]any{"level": current})
 	choices := make([]ListItem, 0, len(reasoningChoices))
 	for _, lvl := range reasoningChoices {
 		selected := false
@@ -111,8 +113,11 @@ func reasoningResult(enabled bool, effort string) *Result {
 	}
 	// Button channels get the tradeoff + a tap prompt; text-only channels get a
 	// copyable set command instead of a list that just restates the buttons.
-	buttonTitle := header + "\n\nHigher effort means more careful thinking, but slower replies. Tap a level:"
-	fallback := header + "\n\nLevels: " + strings.Join(reasoningChoices, " · ") + ".\nSet with " + CmdRef("reasoning set <level>") + "."
+	buttonTitle := header + "\n\n" + t.T("cmd.reasoning.tapPrompt")
+	fallback := header + "\n\n" + t.T("cmd.reasoning.levelsFallback", map[string]any{
+		"levels":  strings.Join(reasoningChoices, " · "),
+		"command": CmdRef("reasoning set <level>"),
+	})
 	return &Result{
 		Text: fallback,
 		Interactive: &Interactive{

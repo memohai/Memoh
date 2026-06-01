@@ -24,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
@@ -381,6 +382,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Skip generic command handler for mode-prefix commands (/btw, /now, /next)
 	// so they pass through to mode detection below.
 	if p.commandHandler != nil && p.commandHandler.IsCommand(cmdText) && !IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) && isDirectedAtBot(msg) {
+		loc := p.localizer(ctx, identity.BotID)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -390,6 +392,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
+			Locale:            loc.Locale(),
 		})
 		var caps channel.ChannelCapabilities
 		if p.registry != nil {
@@ -400,9 +403,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if p.logger != nil {
 				p.logger.Warn("command execution failed", slog.Any("error", err))
 			}
-			outMsg = channel.Message{Text: friendlyOps("complete that command")}
+			outMsg = channel.Message{Text: friendlyOps(loc, "ops.verb.completeCommand")}
 		} else {
-			outMsg = renderResult(result, caps)
+			outMsg = renderResult(result, RenderContext{Caps: caps, T: loc})
 		}
 		// A command re-dispatched from an interactive button carries the id of
 		// the message to edit in place, so navigation/selection updates the
@@ -426,7 +429,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		p.commandHandler.IsCommandShaped(cmdText) &&
 		!p.commandHandler.IsCommand(cmdText) &&
 		!IsModeCommand(cmdText) && !isToolApprovalCommand(cmdText) {
-		out := applyMessageFormat(channel.Message{Text: command.UnknownCommandMessage(cmdText)}, p.channelCaps(msg.Channel))
+		out := applyMessageFormat(channel.Message{Text: command.UnknownCommandMessage(p.localizer(ctx, identity.BotID), cmdText)}, p.channelCaps(msg.Channel))
 		if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 			out.Reply = &channel.ReplyRef{MessageID: mid}
 		}
@@ -2806,11 +2809,12 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	if target == "" {
 		return errors.New("reply target missing for /stop command")
 	}
+	loc := p.localizer(ctx, identity.BotID)
 
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("stop the current reply")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.stopReply")},
 		})
 	}
 
@@ -2834,7 +2838,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("stop the current reply")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.stopReply")},
 		})
 	}
 
@@ -3141,13 +3145,14 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	if target == "" {
 		return errors.New("reply target missing for /new command")
 	}
+	loc := p.localizer(ctx, identity.BotID)
 
 	cmdText := rawTextForCommand(msg, "")
 	sessType, err := resolveNewSessionType(cmdText, msg)
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: "Couldn't read that — use /new for a chat, or /new discuss for a discussion."},
+			Message: channel.Message{Text: loc.T("newSession.usage")},
 		})
 	}
 
@@ -3161,19 +3166,19 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	caps := p.channelCaps(msg.Channel)
 	if caps.Buttons && !newCommandConfirmed(cmdText) {
-		return p.sendNewConfirmation(ctx, msg, sender, modeText, caps)
+		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, caps)
 	}
 
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("start a new session")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
 		})
 	}
 	if p.sessionEnsurer == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("start a new session")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
 		})
 	}
 
@@ -3197,7 +3202,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("start a new session")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
 		})
 	}
 
@@ -3208,13 +3213,13 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("start a new session")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
 		})
 	}
 
-	modeLabel := "chat"
+	modeKey := "newSession.modeChat"
 	if sess.Type == sessionpkg.TypeDiscuss {
-		modeLabel = "discussion"
+		modeKey = "newSession.modeDiscussion"
 	}
 	if p.logger != nil {
 		p.logger.Info("new session created via /new command",
@@ -3225,10 +3230,10 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			slog.String("channel", msg.Channel.String()),
 		)
 	}
-	text := fmt.Sprintf("New %s started.", modeLabel)
+	text := loc.T("newSession.title", map[string]any{"mode": loc.T(modeKey)})
 	if p.commandHandler != nil {
 		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
-			text = formatNewSessionMessage(modeLabel, cc)
+			text = formatNewSessionMessage(loc, modeKey, cc)
 		}
 	}
 	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
@@ -3264,15 +3269,20 @@ func (*ChannelInboundProcessor) sendNewConfirmation(
 	ctx context.Context,
 	msg channel.InboundMessage,
 	sender channel.StreamReplySender,
+	loc *i18n.Localizer,
 	modeText string,
 	caps channel.ChannelCapabilities,
 ) error {
-	text := command.MdBold("⚠️ Confirm /new") +
-		"\n\nThis starts a fresh " + modeText + " session and discards the current conversation history."
+	modeKey := "newSession.modeChat"
+	if modeText == "discuss" {
+		modeKey = "newSession.modeDiscussion"
+	}
+	text := command.MdBold(loc.T("newSession.confirmTitle")) +
+		"\n\n" + loc.T("newSession.confirmBody", map[string]any{"mode": loc.T(modeKey)})
 	out := applyMessageFormat(channel.Message{Text: text}, caps)
 	out.Actions = []channel.Action{
-		{Type: actionTypeCallback, Label: "✅ Confirm", Value: command.EncodeConfirmNewCallback(modeText), Row: 0},
-		{Type: actionTypeCallback, Label: "✕ Cancel", Value: command.DismissCallback(), Row: 0},
+		{Type: actionTypeCallback, Label: loc.T("newSession.btnConfirm"), Value: command.EncodeConfirmNewCallback(modeText), Row: 0},
+		{Type: actionTypeCallback, Label: loc.T("newSession.btnCancel"), Value: command.DismissCallback(), Row: 0},
 	}
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
@@ -3291,16 +3301,17 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	if target == "" {
 		return errors.New("reply target missing for /status command")
 	}
+	loc := p.localizer(ctx, identity.BotID)
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("load your status")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
 		})
 	}
 	if p.commandHandler == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("load your status")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
 		})
 	}
 
@@ -3324,7 +3335,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps("load your status")},
+			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
 		})
 	}
 
@@ -3354,7 +3365,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		if p.logger != nil {
 			p.logger.Warn("execute /status command failed", slog.Any("error", execErr))
 		}
-		reply = friendlyOps("load your status")
+		reply = friendlyOps(loc, "ops.verb.loadStatus")
 	}
 
 	statusOut := applyMessageFormat(channel.Message{Text: reply}, p.channelCaps(msg.Channel))

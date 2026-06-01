@@ -3,6 +3,8 @@ package command
 import (
 	"strings"
 	"testing"
+
+	"github.com/memohai/memoh/internal/i18n"
 )
 
 func TestReasoningRegisteredWithAliases(t *testing.T) {
@@ -23,7 +25,7 @@ func TestReasoningRegisteredWithAliases(t *testing.T) {
 
 func TestReasoningResultMarksCurrent(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(true, "medium")
+	res := reasoningResult(i18n.New("en"), true, "medium")
 	if res.Interactive == nil || res.Interactive.Kind != InteractiveChoices || res.Interactive.Choices == nil {
 		t.Fatalf("expected a choices interactive, got %+v", res.Interactive)
 	}
@@ -31,12 +33,12 @@ func TestReasoningResultMarksCurrent(t *testing.T) {
 	if !strings.Contains(res.Text, "Current: medium") {
 		t.Errorf("missing current line: %s", res.Text)
 	}
-	assertReasoningMarked(t, reasoningResult(false, "high"), "off")
+	assertReasoningMarked(t, reasoningResult(i18n.New("en"), false, "high"), "off")
 }
 
 func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(true, "xhigh")
+	res := reasoningResult(i18n.New("en"), true, "xhigh")
 	assertReasoningMarked(t, res, "xhigh")
 	for _, want := range []string{"off", "none", "low", "medium", "high", "xhigh"} {
 		if !strings.Contains(res.Text, want) {
@@ -90,7 +92,7 @@ func TestUnknownCommandHandling(t *testing.T) {
 	if !h.IsCommandShaped("/wat") || h.IsCommand("/wat") {
 		t.Errorf("/wat should be shaped-but-unknown")
 	}
-	msg := UnknownCommandMessage("/wat")
+	msg := UnknownCommandMessage(i18n.New("en"), "/wat")
 	if !strings.Contains(msg, "/wat") || !strings.Contains(msg, "/commands") {
 		t.Errorf("unknown message = %q", msg)
 	}

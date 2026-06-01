@@ -12,6 +12,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/heartbeat"
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/mcp"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
@@ -79,6 +80,9 @@ type ExecuteInput struct {
 	ThreadID          string
 	RouteID           string
 	SessionID         string
+	// Locale optionally pins the command-UI locale. When empty, ExecuteResult
+	// resolves it from the bot's command_ui_language setting (auto → en).
+	Locale string
 }
 
 // NewHandler creates a Handler with all required services.
@@ -135,7 +139,8 @@ func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries)
 // enriching command output (e.g. the /new confirmation). It is a read-only view
 // over existing bot settings and makes no changes.
 func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentContext, error) {
-	cc := CommandContext{Ctx: ctx, BotID: strings.TrimSpace(botID)}
+	loc := i18n.New(h.ResolveLocale(ctx, botID))
+	cc := CommandContext{Ctx: ctx, BotID: strings.TrimSpace(botID), Locale: loc.Locale(), L: loc}
 	s, err := h.getBotSettings(cc)
 	if err != nil {
 		return CurrentContext{}, err
@@ -242,12 +247,28 @@ func isCommandName(r string) bool {
 
 // UnknownCommandMessage is the reply for slash-command-shaped input that is not a
 // known command. It points the user at /commands and offers the no-slash escape.
-func UnknownCommandMessage(text string) string {
+func UnknownCommandMessage(t *i18n.Localizer, text string) string {
 	parsed, _ := Parse(ExtractCommandText(text))
-	return fmt.Sprintf(
-		"Unknown command %s. Run %s to see what's available, or resend without the leading slash to send it as a regular message.",
-		CmdRef(parsed.Resource), CmdRef("commands"),
-	)
+	return t.T("cmd.error.unknownCommand", map[string]any{
+		"command": CmdRef(parsed.Resource),
+		"help":    CmdRef("commands"),
+	})
+}
+
+// ResolveLocale resolves the command-UI locale for a bot from its
+// command_ui_language setting (auto/unknown → server default). Any settings I/O
+// error falls back to the default locale, so command rendering never blocks on
+// it. Exported so the channel layer can localize its own renderer chrome and
+// operational-failure messages with the same locale.
+func (h *Handler) ResolveLocale(ctx context.Context, botID string) string {
+	if h == nil || h.settingsService == nil || strings.TrimSpace(botID) == "" {
+		return i18n.DefaultLocale
+	}
+	s, err := h.settingsService.GetBot(ctx, strings.TrimSpace(botID))
+	if err != nil {
+		return i18n.DefaultLocale
+	}
+	return i18n.Resolve(s.CommandUILanguage)
 }
 
 // Execute parses and runs a slash command, returning the text reply.
@@ -276,7 +297,21 @@ func (h *Handler) ExecuteWithInput(ctx context.Context, input ExecuteInput) (str
 // ExecuteResult parses and runs a slash command, returning a neutral Result.
 // The Result always carries complete Text; Interactive is set only by commands
 // that opt into rich rendering via SubCommand.ResultHandler.
-func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Result, error) {
+func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *Result, err error) {
+	// Resolve the command-UI locale once and stamp it onto whatever Result we
+	// return, so the channel renderer can localize its own chrome to match.
+	localeStr := strings.TrimSpace(input.Locale)
+	if localeStr == "" {
+		localeStr = h.ResolveLocale(ctx, input.BotID)
+	}
+	loc := i18n.New(localeStr)
+	localeStr = loc.Locale()
+	defer func() {
+		if res != nil && res.Locale == "" {
+			res.Locale = localeStr
+		}
+	}()
+
 	cmdText := ExtractCommandText(input.Text)
 	if cmdText == "" {
 		return &Result{Text: h.registry.GlobalHelp()}, nil
@@ -324,6 +359,8 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 		Prov:              parsed.Prov,
 		Flat:              parsed.Flat,
 		Range:             parsed.Range,
+		Locale:            localeStr,
+		L:                 loc,
 	}
 
 	resource := canonicalResource(parsed.Resource)
@@ -349,7 +386,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 
 	group, ok := h.registry.groups[resource]
 	if !ok {
-		return &Result{Text: fmt.Sprintf("Unknown command %s. Run %s to see all commands.", CmdRef(parsed.Resource), CmdRef("help"))}, nil
+		return &Result{Text: cc.T("cmd.error.unknownCommandShort", map[string]any{"command": CmdRef(parsed.Resource), "help": CmdRef("help")})}, nil
 	}
 
 	if parsed.Action == "" {
@@ -362,17 +399,17 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 
 	sub, ok := group.commands[parsed.Action]
 	if !ok {
-		return &Result{Text: fmt.Sprintf("Unknown action %s for %s. Run %s to see its actions.", MdCode(parsed.Action), CmdRef(parsed.Resource), CmdRef("help "+parsed.Resource))}, nil
+		return &Result{Text: cc.T("cmd.error.unknownAction", map[string]any{"action": MdCode(parsed.Action), "command": CmdRef(parsed.Resource), "help": CmdRef("help " + parsed.Resource)})}, nil
 	}
 
 	if sub.IsWrite && !writeAccess {
-		return &Result{Text: fmt.Sprintf("⚠️ Only the bot owner can run %s. You can still chat normally.", CmdRef(parsed.Resource))}, nil
+		return &Result{Text: cc.T("cmd.error.ownerOnly", map[string]any{"command": CmdRef(parsed.Resource)})}, nil
 	}
 
 	if sub.ResultHandler != nil {
 		res, handlerErr := safeExecuteResult(sub.ResultHandler, cc)
 		if handlerErr != nil {
-			return &Result{Text: h.friendlyCommandError(parsed.Resource, handlerErr)}, nil
+			return &Result{Text: h.friendlyCommandError(cc.L, parsed.Resource, handlerErr)}, nil
 		}
 		if res == nil {
 			res = &Result{}
@@ -382,7 +419,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 
 	text, handlerErr := safeExecute(sub.Handler, cc)
 	if handlerErr != nil {
-		return &Result{Text: h.friendlyCommandError(parsed.Resource, handlerErr)}, nil
+		return &Result{Text: h.friendlyCommandError(cc.L, parsed.Resource, handlerErr)}, nil
 	}
 	return &Result{Text: text}, nil
 }
@@ -393,7 +430,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (*Resul
 // cases. Errors that look like infra/transport leaks (raw Go wrap chains,
 // "dial tcp", IPs, deadlines, SQL/driver text) are replaced with a generic
 // retry line so internals never reach chat.
-func (h *Handler) friendlyCommandError(resource string, err error) string {
+func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err error) string {
 	if err == nil {
 		return ""
 	}
@@ -405,7 +442,7 @@ func (h *Handler) friendlyCommandError(resource string, err error) string {
 			out += "."
 		}
 		if res != "" && strings.Contains(strings.ToLower(msg), "not found") {
-			out += fmt.Sprintf(" Run %s to see what's available.", CmdRef(res+" list"))
+			out += t.T("cmd.error.runToSeeList", map[string]any{"command": CmdRef(res + " list")})
 		}
 		return out
 	}
@@ -414,9 +451,9 @@ func (h *Handler) friendlyCommandError(resource string, err error) string {
 		h.logger.Warn("command failed", slog.String("resource", res), slog.Any("error", err))
 	}
 	if res == "" {
-		return "⚠️ Something went wrong. Try again in a moment."
+		return t.T("cmd.error.genericNoResource")
 	}
-	return fmt.Sprintf("⚠️ Couldn't complete %s right now. Try again in a moment.", CmdRef(res))
+	return t.T("cmd.error.generic", map[string]any{"command": CmdRef(res)})
 }
 
 // looksLikeInternalError reports whether an error message carries infra/transport

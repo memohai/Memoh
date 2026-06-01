@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -29,13 +30,13 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) == 0 {
-				return &Result{Text: settingsUpdateUsage()}, nil
+				return &Result{Text: cc.T("cmd.settings.updateUsage")}, nil
 			}
 			req := settings.UpsertRequest{}
 			args := cc.Args
 			for i := 0; i < len(args); i++ {
 				if i+1 >= len(args) {
-					return &Result{Text: fmt.Sprintf("Missing value for %s.\n\n%s", args[i], settingsUpdateUsage())}, nil
+					return &Result{Text: cc.T("cmd.settings.missingValue", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}
 				switch args[i] {
 				case "--language":
@@ -59,7 +60,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					i++
 					val, err := strconv.Atoi(args[i])
 					if err != nil {
-						return &Result{Text: fmt.Sprintf("Invalid heartbeat_interval: %s", args[i])}, nil
+						return &Result{Text: cc.T("cmd.settings.invalidHeartbeatInterval", map[string]any{"value": args[i]})}, nil
 					}
 					req.HeartbeatInterval = &val
 				case "--chat_model_id":
@@ -69,7 +70,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					i++
 					req.HeartbeatModelID = args[i]
 				default:
-					return &Result{Text: fmt.Sprintf("Unknown option: %s\n\n%s", args[i], settingsUpdateUsage())}, nil
+					return &Result{Text: cc.T("cmd.settings.unknownOption", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}
 			}
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
@@ -82,7 +83,77 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 			return h.settingsResult(cc, s), nil
 		},
 	})
+	g.Register(SubCommand{
+		Name:  "language",
+		Usage: "language [auto|en|zh] - View or set the command UI language",
+		// Deliberately NOT IsWrite: the command-UI language is a display
+		// preference, not a privileged bot setting, so any member can change it
+		// without owner rights. (The general /settings update path stays gated.)
+		ResultHandler: func(cc CommandContext) (*Result, error) {
+			// No arg → show the picker.
+			if len(cc.Args) == 0 {
+				s, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
+				if err != nil {
+					return nil, err
+				}
+				return commandLanguageResult(cc, s.CommandUILanguage), nil
+			}
+			// Arg → set the language (auto|en|zh).
+			v := strings.ToLower(strings.TrimSpace(cc.Args[0]))
+			if v != "auto" && !i18n.IsSupported(v) {
+				return &Result{Text: cc.T("cmd.settings.unknownLanguage", map[string]any{"value": cc.Args[0]})}, nil
+			}
+			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{CommandUILanguage: v}); err != nil {
+				return nil, err
+			}
+			s, err := h.settingsService.GetBot(cc.Ctx, cc.BotID)
+			if err != nil {
+				return nil, err
+			}
+			// Re-localize the confirmation card (and its renderer chrome, via
+			// Result.Locale) to the newly chosen language immediately.
+			cc.L = i18n.New(s.CommandUILanguage)
+			cc.Locale = cc.L.Locale()
+			res := h.settingsResult(cc, s)
+			res.Locale = cc.Locale
+			return res, nil
+		},
+	})
 	return g
+}
+
+// commandLanguageResult builds the command-UI language picker: one button per
+// supported locale (current marked ✓). Tapping re-dispatches
+// "/settings language <key>" (an un-gated path), which writes the choice and
+// re-renders the settings card in the newly chosen language. The locale keys
+// (auto/en/zh) are canonical args and stay untranslated; only the labels are
+// localized.
+func commandLanguageResult(cc CommandContext, current string) *Result {
+	cur := strings.ToLower(strings.TrimSpace(current))
+	if cur == "" {
+		cur = "auto"
+	}
+	options := []struct {
+		key   string
+		label string
+	}{
+		{"auto", cc.T("cmd.settings.langAuto")},
+		{"en", cc.T("cmd.settings.langEn")},
+		{"zh", cc.T("cmd.settings.langZh")},
+	}
+	choices := make([]ListItem, 0, len(options))
+	for _, o := range options {
+		choices = append(choices, ListItem{
+			Label:    o.label,
+			Selected: cur == o.key,
+			Action:   &ItemAction{Resource: "settings", Action: "language", Args: []string{o.key}},
+		})
+	}
+	title := MdBold(cc.T("cmd.settings.langPickerTitle"))
+	return &Result{
+		Text:        title,
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: title, Choices: choices}},
+	}
 }
 
 // settingsResult renders the settings card (the same KV detail as before) and,
@@ -91,51 +162,53 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 // place) and drill-downs to the /reasoning and /model pickers. Reuses
 // settingsService.UpsertBot — no backend changes.
 func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result {
-	reasoning := "off"
+	reasoning := cc.T("cmd.common.off")
 	if s.ReasoningEnabled {
 		reasoning = strings.TrimSpace(s.ReasoningEffort)
 		if reasoning == "" {
-			reasoning = "on"
+			reasoning = cc.T("cmd.common.on")
 		}
 	}
-	heartbeat := "off"
+	heartbeat := cc.T("cmd.common.off")
 	if s.HeartbeatEnabled {
-		heartbeat = fmt.Sprintf("on · every %d min", s.HeartbeatInterval)
+		heartbeat = cc.T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": s.HeartbeatInterval})
 	}
 	// Teach the ACL enum in plain English on this orienting surface.
 	aclLine := strings.TrimSpace(s.AclDefaultEffect)
 	switch strings.ToLower(aclLine) {
 	case "deny":
-		aclLine = "deny — tools ask before running"
+		aclLine = cc.T("cmd.settings.aclDeny")
 	case "allow":
-		aclLine = "allow — tools run without asking"
+		aclLine = cc.T("cmd.settings.aclAllow")
 	}
-	card := formatKVTitled("⚙️ Bot Settings", []kv{
-		{"Reasoning", reasoning},
-		{"Heartbeat", heartbeat},
-		{"ACL default", aclLine},
-		{"Chat Model", h.resolveModelName(cc, s.ChatModelID)},
-		{"Heartbeat Model", h.resolveModelName(cc, s.HeartbeatModelID)},
-		{"Search Provider", h.resolveSearchProviderName(cc, s.SearchProviderID)},
-		{"Memory Provider", h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
+	card := formatKVTitled(cc.T("cmd.settings.title"), []kv{
+		{cc.T("cmd.settings.fieldReasoning"), reasoning},
+		{cc.T("cmd.settings.fieldHeartbeat"), heartbeat},
+		{cc.T("cmd.settings.fieldAclDefault"), aclLine},
+		{cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, s.ChatModelID)},
+		{cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, s.HeartbeatModelID)},
+		{cc.T("cmd.settings.fieldSearchProvider"), h.resolveSearchProviderName(cc, s.SearchProviderID)},
+		{cc.T("cmd.settings.fieldMemoryProvider"), h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
+		{cc.T("cmd.settings.fieldCommandLanguage"), commandLanguageDisplay(cc, s.CommandUILanguage)},
 	})
 	aclNext := "deny"
-	aclAction := "Ask before tools"
+	aclAction := cc.T("cmd.settings.btnAclAsk")
 	if strings.EqualFold(strings.TrimSpace(s.AclDefaultEffect), "deny") {
 		aclNext = "allow"
-		aclAction = "Allow tools"
+		aclAction = cc.T("cmd.settings.btnAclAllow")
 	}
-	heartbeatAction := "Turn heartbeat on"
+	heartbeatAction := cc.T("cmd.settings.btnHeartbeatOn")
 	if s.HeartbeatEnabled {
-		heartbeatAction = "Turn heartbeat off"
+		heartbeatAction = cc.T("cmd.settings.btnHeartbeatOff")
 	}
 	choices := []ListItem{
-		{Label: "Reasoning ▸", Action: &ItemAction{Resource: "reasoning", Action: "show"}},
-		{Label: "Models ▸", Action: &ItemAction{Resource: "model", Action: "list"}},
+		{Label: cc.T("cmd.settings.btnReasoning"), Action: &ItemAction{Resource: "reasoning", Action: "show"}},
+		{Label: cc.T("cmd.settings.btnModels"), Action: &ItemAction{Resource: "model", Action: "list"}},
 		{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
 		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
-		{Label: "Search ▸", Action: &ItemAction{Resource: "search", Action: "list"}},
-		{Label: "Memory ▸", Action: &ItemAction{Resource: "memory", Action: "list"}},
+		{Label: cc.T("cmd.settings.btnSearch"), Action: &ItemAction{Resource: "search", Action: "list"}},
+		{Label: cc.T("cmd.settings.btnMemory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
+		{Label: cc.T("cmd.settings.btnLanguage"), Action: &ItemAction{Resource: "settings", Action: "language"}},
 	}
 	return &Result{
 		Text:        card,
@@ -143,17 +216,20 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 	}
 }
 
-func settingsUpdateUsage() string {
-	return "Usage: /settings update [options]\n\n" +
-		"Options:\n" +
-		"- --language <value>\n" +
-		"- --acl_default_effect <allow|deny>\n" +
-		"- --reasoning_enabled <true|false>\n" +
-		"- --reasoning_effort <none|low|medium|high|xhigh>\n" +
-		"- --heartbeat_enabled <true|false>\n" +
-		"- --heartbeat_interval <minutes>\n" +
-		"- --chat_model_id <id>\n" +
-		"- --heartbeat_model_id <id>"
+// commandLanguageDisplay renders the stored command-UI language setting for the
+// settings card: "auto"/en/zh map to their localized labels; anything else is
+// shown verbatim.
+func commandLanguageDisplay(cc CommandContext, value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return cc.T("cmd.settings.langAuto")
+	case "en":
+		return cc.T("cmd.settings.langEn")
+	case "zh":
+		return cc.T("cmd.settings.langZh")
+	default:
+		return value
+	}
 }
 
 func (h *Handler) getBotSettings(cc CommandContext) (settings.Settings, error) {
@@ -163,17 +239,20 @@ func (h *Handler) getBotSettings(cc CommandContext) (settings.Settings, error) {
 	return h.settingsService.GetBot(cc.Ctx, cc.BotID)
 }
 
-// resolveModelName resolves a model UUID to "model_name (provider_name)".
+// resolveModelName resolves a model UUID to "model_name (provider_name)". The
+// "(none)"/"(unavailable)" placeholders are localized via cc.T so they don't leak
+// English onto otherwise-localized cards; callers comparing the result against an
+// empty model must compare against cc.T("cmd.common.none"), not a literal.
 func (h *Handler) resolveModelName(cc CommandContext, modelID string) string {
 	if modelID == "" {
-		return "(none)"
+		return cc.T("cmd.common.none")
 	}
 	if h.modelsService == nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	m, err := h.modelsService.GetByID(cc.Ctx, modelID)
 	if err != nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	provName := ""
 	if h.providersService != nil {
@@ -191,14 +270,14 @@ func (h *Handler) resolveModelName(cc CommandContext, modelID string) string {
 // resolveSearchProviderName resolves a search provider UUID to its name.
 func (h *Handler) resolveSearchProviderName(cc CommandContext, id string) string {
 	if id == "" {
-		return "(none)"
+		return cc.T("cmd.common.none")
 	}
 	if h.searchProvService == nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	p, err := h.searchProvService.Get(cc.Ctx, id)
 	if err != nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	return p.Name
 }
@@ -206,14 +285,14 @@ func (h *Handler) resolveSearchProviderName(cc CommandContext, id string) string
 // resolveMemoryProviderName resolves a memory provider UUID to its name.
 func (h *Handler) resolveMemoryProviderName(cc CommandContext, id string) string {
 	if id == "" {
-		return "(none)"
+		return cc.T("cmd.common.none")
 	}
 	if h.memProvService == nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	p, err := h.memProvService.Get(cc.Ctx, id)
 	if err != nil {
-		return "(unavailable)"
+		return cc.T("cmd.common.unavailable")
 	}
 	return p.Name
 }
