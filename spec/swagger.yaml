@@ -1702,6 +1702,27 @@ definitions:
       updated_at:
         type: string
     type: object
+  handlers.ACPClaudeCodeOAuthAuthorizeResponse:
+    properties:
+      auth_url:
+        type: string
+      session_id:
+        type: string
+    type: object
+  handlers.ACPClaudeCodeOAuthExchangeRequest:
+    properties:
+      code:
+        type: string
+      session_id:
+        type: string
+    type: object
+  handlers.ACPClaudeCodeOAuthStatus:
+    properties:
+      configured:
+        type: boolean
+      has_token:
+        type: boolean
+    type: object
   handlers.BatchDeleteRequest:
     properties:
       ids:
@@ -3916,6 +3937,84 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
+  /bots/{bot_id}/acp/claude-code/oauth/authorize:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Claude Code ACP OAuth authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/claude-code/oauth/exchange:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: OAuth exchange request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPClaudeCodeOAuthExchangeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange Claude Code OAuth code for an ACP token
+      tags:
+      - acp
+  /bots/{bot_id}/acp/claude-code/oauth/status:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get Claude Code ACP OAuth status
+      tags:
+      - acp
   /bots/{bot_id}/backup/export:
     post:
       consumes:

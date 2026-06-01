@@ -45,6 +45,7 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 	agentID := metadataString(sess.Metadata, "acp_agent_id")
 	projectPath := metadataString(sess.Metadata, "project_path")
+	contextMarkdown := r.buildACPContextMarkdown(ctx, req, agentID, projectPath)
 
 	doneTurn := r.enterSessionTurn(ctx, req.BotID, req.SessionID)
 	defer doneTurn()
@@ -94,6 +95,8 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 		ReplyTarget:       req.ReplyTarget,
 		ConversationType:  req.ConversationType,
 		ToolHTTPURL:       req.ToolHTTPURL,
+		ContextURI:        acpContextURI,
+		ContextMarkdown:   contextMarkdown,
 		Sink: acpclient.EventSinkFunc(func(event acpclient.StreamEvent) {
 			for _, mapped := range mapACPStreamEvent(event) {
 				emit(mapped)

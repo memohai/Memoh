@@ -599,7 +599,7 @@ const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadat
 const selectedAgentIcon = computed(() => activeIsACP.value ? acpAgentIcon(activeACPAgentId.value, true) : MessageSquare)
 const selectedAgentLabel = computed(() =>
   activeIsACP.value
-    ? acpAgentDisplayName(activeACPAgentId.value, t('chat.agentCodex'))
+    ? acpAgentDisplayName(activeACPAgentId.value, t('chat.sessionTypeACPAgent'))
     : t('chat.agentMemoh'),
 )
 const activeACPProjectLabel = computed(() => {

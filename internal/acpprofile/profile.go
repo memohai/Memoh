@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	AgentCodexID   = "codex"
-	AgentCodexName = "Codex"
+	AgentCodexID        = "codex"
+	AgentCodexName      = "Codex"
+	AgentClaudeCodeID   = "claude-code"
+	AgentClaudeCodeName = "Claude Code"
 
 	MetadataKeyACP = "acp"
 
@@ -68,6 +70,7 @@ var registry = map[string]Profile{}
 
 func init() {
 	Register(codexProfile())
+	Register(claudeCodeProfile())
 }
 
 // Register adds (or replaces) a profile in the registry. Intended to be
@@ -107,6 +110,49 @@ func codexProfile() Profile {
 				Type:        "url",
 				Placeholder: "https://api.openai.com/v1",
 				Help:        "Optional Codex provider base URL.",
+			},
+		},
+		SupportedBackends: []string{"local", "container"},
+		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+	}
+}
+
+func claudeCodeProfile() Profile {
+	return Profile{
+		ID:           AgentClaudeCodeID,
+		DisplayName:  AgentClaudeCodeName,
+		Description:  "Claude Code ACP adapter",
+		Command:      "claude-agent-acp",
+		LocalCommand: "npx",
+		LocalArgs: []string{
+			"-y",
+			"@agentclientprotocol/claude-agent-acp@0.39.0",
+		},
+		ManagedFields: []ManagedField{
+			{
+				ID:          "api_key",
+				Label:       "Anthropic API key",
+				Type:        "password",
+				Required:    true,
+				Sensitive:   true,
+				Placeholder: "sk-ant-...",
+				Help:        "Used by API key setup to authenticate Claude Code.",
+			},
+			{
+				ID:          "base_url",
+				Label:       "Anthropic base URL",
+				Type:        "url",
+				Placeholder: "https://api.anthropic.com",
+				Help:        "Optional Claude Code API endpoint override.",
+			},
+			{
+				ID:          "oauth_token",
+				Label:       "Claude Code OAuth token",
+				Type:        "password",
+				Required:    true,
+				Sensitive:   true,
+				Placeholder: "Token from claude setup-token",
+				Help:        "Used by OAuth setup to authenticate Claude Code.",
 			},
 		},
 		SupportedBackends: []string{"local", "container"},

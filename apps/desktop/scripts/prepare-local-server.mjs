@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -83,6 +83,16 @@ goBuild(resolve(runtimeDir, 'bridge'), './cmd/bridge', {
   GOARCH: goArch,
 })
 cpSync(resolve(repoRoot, 'cmd', 'bridge', 'template'), resolve(runtimeDir, 'templates'), { recursive: true })
+
+const workspaceToolkitDir = resolve(repoRoot, '.toolkit')
+if (existsSync(workspaceToolkitDir)) {
+  const runtimeToolkitDir = resolve(runtimeDir, 'toolkit')
+  cpSync(workspaceToolkitDir, runtimeToolkitDir, { recursive: true })
+  rmSync(resolve(runtimeToolkitDir, 'bin'), { recursive: true, force: true })
+  cpSync(resolve(repoRoot, 'docker', 'toolkit', 'bin'), resolve(runtimeToolkitDir, 'bin'), { recursive: true })
+} else {
+  console.warn('Workspace toolkit not found; run `mise run install-workspace-toolkit` before packaging ACP agents.')
+}
 
 copyFileSync(resolve(repoRoot, 'conf', 'app.local.toml'), resolve(configDir, 'app.local.toml'))
 cpSync(resolve(repoRoot, 'conf', 'providers'), providersDir, { recursive: true })

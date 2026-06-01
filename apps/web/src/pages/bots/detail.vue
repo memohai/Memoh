@@ -351,7 +351,7 @@ const searchIndex = computed(() => {
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
-    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'coding agent', 'acp'] },
+    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'plugins'] },
     { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },

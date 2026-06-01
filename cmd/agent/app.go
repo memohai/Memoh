@@ -720,6 +720,14 @@ func provideACPCodexOAuthServerHandler(handler *handlers.ACPCodexOAuthHandler) *
 	return handler
 }
 
+func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
+	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+}
+
+func provideACPClaudeCodeOAuthServerHandler(handler *handlers.ACPClaudeCodeOAuthHandler) *handlers.ACPClaudeCodeOAuthHandler {
+	return handler
+}
+
 func provideProviderOAuthHandler(providersService *providers.Service, acpCodexOAuthHandler *handlers.ACPCodexOAuthHandler) *handlers.ProviderOAuthHandler {
 	handler := handlers.NewProviderOAuthHandler(providersService)
 	handler.SetACPCodexOAuthHandler(acpCodexOAuthHandler)

@@ -551,6 +551,64 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 	if localRunner.req.LocalCommand != "npx" || len(localRunner.req.LocalArgs) == 0 {
 		t.Fatalf("local command not passed through: %#v", localRunner.req)
 	}
+
+	claudeRunner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	claudePool := newSessionPool(nil, claudeRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentClaudeCodeID, "api_key", map[string]any{
+		"api_key":  "sk-ant-test",
+		"base_url": "https://anthropic-proxy.example.com",
+	})})
+	_, err = claudePool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentClaudeCodeID,
+		ProjectPath: "/data/project",
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("container Claude Code api_key error = %v, want runner start error", err)
+	}
+	if claudeRunner.req.Command != "claude-agent-acp" {
+		t.Fatalf("Claude Code command = %q", claudeRunner.req.Command)
+	}
+	if !startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_API_KEY", "sk-ant-test") ||
+		!startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_BASE_URL", "https://anthropic-proxy.example.com") {
+		t.Fatalf("Claude Code env = %#v, want Anthropic managed env", claudeRunner.req.Env)
+	}
+	if !startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_AUTH_TOKEN", "") ||
+		!startRequestEnvHas(claudeRunner.req.Env, "CLAUDE_CODE_OAUTH_TOKEN", "") {
+		t.Fatalf("Claude Code api_key env = %#v, want conflicting auth env cleared", claudeRunner.req.Env)
+	}
+
+	claudeOAuthRunner := &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+		startErr: errors.New("started"),
+	}
+	claudeOAuthManaged := map[string]any{ //nolint:gosec // Test fixture token, not a real credential.
+		"oauth_token": "fake-claude-oauth-token",
+		"base_url":    "https://anthropic-proxy.example.com",
+	}
+	claudeOAuthPool := newSessionPool(nil, claudeOAuthRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentClaudeCodeID, "oauth", claudeOAuthManaged)})
+	_, err = claudeOAuthPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentClaudeCodeID,
+		ProjectPath: "/data/project",
+		Prompt:      "run",
+	})
+	if err == nil || err.Error() != "started" {
+		t.Fatalf("container Claude Code oauth error = %v, want runner start error", err)
+	}
+	if !startRequestEnvHas(claudeOAuthRunner.req.Env, "CLAUDE_CODE_OAUTH_TOKEN", "fake-claude-oauth-token") ||
+		!startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_BASE_URL", "https://anthropic-proxy.example.com") {
+		t.Fatalf("Claude Code oauth env = %#v, want Claude managed oauth env", claudeOAuthRunner.req.Env)
+	}
+	if !startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_API_KEY", "") ||
+		!startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_AUTH_TOKEN", "") {
+		t.Fatalf("Claude Code oauth env = %#v, want conflicting auth env cleared", claudeOAuthRunner.req.Env)
+	}
 }
 
 func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
@@ -840,6 +898,10 @@ func (w sessionPoolWorkspace) WorkspaceInfo(context.Context, string) (bridge.Wor
 }
 
 func enabledACPBot(id, mode string, managed map[string]any) bots.Bot {
+	return enabledACPAgentBot(id, acpprofile.AgentCodexID, mode, managed)
+}
+
+func enabledACPAgentBot(id, agentID, mode string, managed map[string]any) bots.Bot {
 	if managed == nil {
 		managed = map[string]any{}
 	}
@@ -848,7 +910,7 @@ func enabledACPBot(id, mode string, managed map[string]any) bots.Bot {
 		Metadata: map[string]any{
 			"acp": map[string]any{
 				"agents": map[string]any{
-					"codex": map[string]any{
+					agentID: map[string]any{
 						"enabled":    true,
 						"setup_mode": mode,
 						"managed":    managed,
@@ -857,6 +919,16 @@ func enabledACPBot(id, mode string, managed map[string]any) bots.Bot {
 			},
 		},
 	}
+}
+
+func startRequestEnvHas(env []string, key, want string) bool {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix) == want
+		}
+	}
+	return false
 }
 
 func newSessionPoolBridgeClient(t *testing.T, root string) *bridge.Client {

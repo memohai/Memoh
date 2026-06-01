@@ -172,7 +172,7 @@
 
 <script setup lang="ts">
 import { ref, computed, type Component } from 'vue'
-import { Search, Plus, ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch } from 'lucide-vue-next'
+import { Search, Plus, ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch, Bot } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -199,7 +199,6 @@ import {
   DialogFooter,
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
-import { acpAgentIcon } from '@/utils/acp'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -229,7 +228,7 @@ const filterIconComponent = computed<Component>(() => {
     case 'heartbeat': return HeartPulse
     case 'schedule': return Clock
     case 'subagent': return GitBranch
-    case 'acp_agent': return acpAgentIcon('codex', true)
+    case 'acp_agent': return Bot
     default: return MessageSquare
   }
 })

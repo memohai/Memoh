@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/memohai/memoh/internal/mcp"
+	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type ToolSessionContext = mcp.ToolSessionContext
@@ -42,6 +43,13 @@ type PromptResult struct {
 	Events     []StreamEvent `json:"events,omitempty"`
 }
 
+// PromptResource is an embedded text resource sent alongside an ACP prompt.
+type PromptResource struct {
+	URI      string
+	MimeType string
+	Text     string
+}
+
 type Session struct {
 	logger          *slog.Logger
 	proc            *bridgeProcess
@@ -50,6 +58,7 @@ type Session struct {
 	sessionID       acp.SessionId
 	projectPath     string
 	modelState      ModelState
+	embeddedContext bool
 	defaultSink     EventSink
 	cancel          context.CancelFunc
 	reverseHTTPStop func()
@@ -133,12 +142,20 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			return nil, fmt.Errorf("prepare Memoh tools bridge: %w", err)
 		}
 		toolHTTPURL = guardedURL
-		stop, err := client.ServeReverseHTTPRoute(lifecycleCtx, guardedPath, guardedHandler)
+		var stop func()
+		client, stop, err = r.startMemohToolsBridge(lifecycleCtx, req.BotID, client, guardedPath, guardedHandler)
 		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("start Memoh tools bridge: %w", err)
+			if r.logger != nil {
+				r.logger.Warn("Memoh tools bridge unavailable; starting ACP session without Memoh tools",
+					slog.String("agent_id", req.AgentID),
+					slog.String("bot_id", req.BotID),
+					slog.Any("error", err),
+				)
+			}
+			toolHTTPURL = ""
+		} else {
+			toolHTTPStop = stop
 		}
-		toolHTTPStop = stop
 	} else if backend == WorkspaceBackendLocal && toolHTTPHandler != nil && toolHTTPURL != "" {
 		proxyURL, stop, err := startLocalToolHTTPProxy(lifecycleCtx, toolHTTPHandler)
 		if err != nil {
@@ -247,10 +264,60 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		sessionID:       sess.SessionId,
 		projectPath:     projectPath,
 		modelState:      modelStateFromACP(sess.Models),
+		embeddedContext: initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
 		defaultSink:     sink,
 		cancel:          cancel,
 		reverseHTTPStop: toolHTTPStop,
 	}, nil
+}
+
+func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
+	if client == nil {
+		return nil, nil, errors.New("workspace bridge client is required")
+	}
+	current := client
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		stop, err := current.ServeReverseHTTPRoute(ctx, route, handler)
+		if err == nil {
+			return current, stop, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || !isClosingBridgeClientError(err) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
+			return current, nil, err
+		}
+		_ = current.Close()
+		if err := sleepContext(ctx, time.Duration(attempt+1)*150*time.Millisecond); err != nil {
+			return current, nil, err
+		}
+		next, err := r.workspace.MCPClient(ctx, botID)
+		if err != nil {
+			return current, nil, fmt.Errorf("%w; reconnect workspace bridge: %w", lastErr, err)
+		}
+		current = next
+	}
+	return current, nil, lastErr
+}
+
+func isClosingBridgeClientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "client connection is closing") ||
+		strings.Contains(lower, "transport is closing") ||
+		strings.Contains(lower, "use of closed network connection")
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func guardToolHTTPHandler(rawURL string, handler http.Handler) (string, string, http.Handler, error) {
@@ -369,6 +436,11 @@ func (s *Session) ProjectPath() string {
 }
 
 func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink) (PromptResult, error) {
+	return s.PromptWithResources(ctx, prompt, nil, sinks...)
+}
+
+// PromptWithResources sends a user prompt plus optional embedded resources.
+func (s *Session) PromptWithResources(ctx context.Context, prompt string, resources []PromptResource, sinks ...EventSink) (PromptResult, error) {
 	if s == nil || s.conn == nil {
 		return PromptResult{}, ErrSessionNotInitialized
 	}
@@ -414,6 +486,7 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 		return PromptResult{}, ErrSessionNotInitialized
 	}
 
+	promptBlocks := s.promptBlocks(prompt, resources)
 	collector := newEventCollector()
 	sink := defaultSink
 	if len(sinks) > 0 {
@@ -430,7 +503,7 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 
 	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: sessionID,
-		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},
+		Prompt:    promptBlocks,
 	})
 	collected := collector.result()
 	result := PromptResult{
@@ -445,6 +518,62 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 		return result, fmt.Errorf("send ACP prompt: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Session) promptBlocks(prompt string, resources []PromptResource) []acp.ContentBlock {
+	cleaned := cleanPromptResources(resources)
+	if len(cleaned) == 0 {
+		return []acp.ContentBlock{acp.TextBlock(prompt)}
+	}
+	if s != nil && s.embeddedContext {
+		blocks := []acp.ContentBlock{acp.TextBlock(prompt)}
+		for _, resource := range cleaned {
+			mimeType := resource.MimeType
+			blocks = append(blocks, acp.ResourceBlock(acp.EmbeddedResourceResource{
+				TextResourceContents: &acp.TextResourceContents{
+					Uri:      resource.URI,
+					MimeType: &mimeType,
+					Text:     resource.Text,
+				},
+			}))
+		}
+		return blocks
+	}
+
+	var sb strings.Builder
+	for _, resource := range cleaned {
+		sb.WriteString("<context ref=\"")
+		sb.WriteString(resource.URI)
+		sb.WriteString("\">\n")
+		sb.WriteString(resource.Text)
+		sb.WriteString("\n</context>\n\n")
+	}
+	sb.WriteString(prompt)
+	return []acp.ContentBlock{acp.TextBlock(strings.TrimSpace(sb.String()))}
+}
+
+func cleanPromptResources(resources []PromptResource) []PromptResource {
+	out := make([]PromptResource, 0, len(resources))
+	for _, resource := range resources {
+		text := strings.TrimSpace(resource.Text)
+		if text == "" {
+			continue
+		}
+		uri := strings.TrimSpace(resource.URI)
+		if uri == "" {
+			continue
+		}
+		mimeType := strings.TrimSpace(resource.MimeType)
+		if mimeType == "" {
+			mimeType = "text/plain"
+		}
+		out = append(out, PromptResource{
+			URI:      uri,
+			MimeType: mimeType,
+			Text:     text,
+		})
+	}
+	return out
 }
 
 func (s *Session) Close() error {

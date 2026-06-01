@@ -283,6 +283,7 @@ const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
   },
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
     queryCache.invalidateQueries({ key: ['bots'] })
   },
 })
@@ -423,7 +424,6 @@ watch(settings, (val) => {
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
     form.language = val.language ?? ''
-    form.timezone = val.timezone ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
@@ -446,7 +446,6 @@ const hasSettingsChanges = computed(() => {
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
     || form.language !== (s.language ?? '')
-    || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)

@@ -355,6 +355,7 @@ function prepareRuntime(command: ServerCommand): void {
       throw new Error('failed to build bridge runtime for local desktop server')
     }
     syncBridgeTemplates(root, targetRuntime)
+    syncWorkspaceToolkit(root, targetRuntime)
     return
   }
 
@@ -365,6 +366,29 @@ function prepareRuntime(command: ServerCommand): void {
   rmSync(targetRuntime, { recursive: true, force: true })
   mkdirSync(targetRuntime, { recursive: true })
   cpSync(bundledRuntime, targetRuntime, { recursive: true })
+}
+
+function syncWorkspaceToolkit(root: string, targetRuntime: string): void {
+  const toolkitSource = join(root, '.toolkit')
+  const toolkitTarget = join(targetRuntime, 'toolkit')
+  if (!existsSync(toolkitSource)) {
+    appendLog(`workspace toolkit not found at ${toolkitSource}; run 'mise run install-workspace-toolkit' before using ACP agents in desktop dev`)
+    return
+  }
+  rmSync(toolkitTarget, { recursive: true, force: true })
+  cpSync(toolkitSource, toolkitTarget, { recursive: true })
+  syncToolkitWrappers(root, toolkitTarget)
+}
+
+function syncToolkitWrappers(root: string, toolkitTarget: string): void {
+  const wrappersSource = join(root, 'docker', 'toolkit', 'bin')
+  const wrappersTarget = join(toolkitTarget, 'bin')
+  if (!existsSync(wrappersSource)) {
+    appendLog(`workspace toolkit wrappers not found at ${wrappersSource}`)
+    return
+  }
+  rmSync(wrappersTarget, { recursive: true, force: true })
+  cpSync(wrappersSource, wrappersTarget, { recursive: true })
 }
 
 function syncBridgeTemplates(root: string, targetRuntime: string): void {

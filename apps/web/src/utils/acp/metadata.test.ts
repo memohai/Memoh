@@ -32,6 +32,33 @@ const codexProfile: AcpprofilePublicProfile = {
   ],
 }
 
+const claudeCodeProfile: AcpprofilePublicProfile = {
+  id: 'claude-code',
+  display_name: 'Claude Code',
+  setup_modes: ['api_key', 'oauth', 'self'],
+  managed_fields: [
+    {
+      id: 'api_key',
+      label: 'Anthropic API key',
+      type: 'password',
+      required: true,
+      sensitive: true,
+    },
+    {
+      id: 'base_url',
+      label: 'Anthropic base URL',
+      type: 'url',
+    },
+    {
+      id: 'oauth_token',
+      label: 'Claude Code OAuth token',
+      type: 'password',
+      required: true,
+      sensitive: true,
+    },
+  ],
+}
+
 describe('acp-metadata', () => {
   it('builds ACP form state from profile schema and metadata', () => {
     const metadata = {
@@ -131,6 +158,23 @@ describe('acp-metadata', () => {
     expect(findMissingRequiredManagedField(codexProfile, {
       api_key: '',
     }, 'api_key')?.id).toBe('api_key')
+  })
+
+  it('validates Claude Code setup mode required fields', () => {
+    expect(findMissingRequiredManagedField(claudeCodeProfile, {
+      api_key: '',
+    }, 'api_key')?.id).toBe('api_key')
+    expect(findMissingRequiredManagedField(claudeCodeProfile, {
+      api_key: 'sk-ant-test',
+      oauth_token: '',
+    }, 'api_key')).toBeNull()
+    expect(findMissingRequiredManagedField(claudeCodeProfile, {
+      oauth_token: '',
+    }, 'oauth')?.id).toBe('oauth_token')
+    expect(findMissingRequiredManagedField(claudeCodeProfile, {
+      oauth_token: 'oauth-token',
+    }, 'oauth')).toBeNull()
+    expect(findMissingRequiredManagedField(claudeCodeProfile, {}, 'self')).toBeNull()
   })
 
   it('writes ACP metadata into the agents map', () => {

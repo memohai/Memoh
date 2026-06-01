@@ -998,6 +998,21 @@ export type GithubComMemohaiMemohInternalMcpConnection = {
     updated_at?: string;
 };
 
+export type HandlersAcpClaudeCodeOAuthAuthorizeResponse = {
+    auth_url?: string;
+    session_id?: string;
+};
+
+export type HandlersAcpClaudeCodeOAuthExchangeRequest = {
+    code?: string;
+    session_id?: string;
+};
+
+export type HandlersAcpClaudeCodeOAuthStatus = {
+    configured?: boolean;
+    has_token?: boolean;
+};
+
 export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
 };
@@ -2722,6 +2737,111 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 };
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
+
+export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/claude-code/oauth/authorize';
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeError = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors];
+
+export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpClaudeCodeOAuthAuthorizeResponse;
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponse = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses];
+
+export type PostBotsByBotIdAcpClaudeCodeOauthExchangeData = {
+    /**
+     * OAuth exchange request
+     */
+    body: HandlersAcpClaudeCodeOAuthExchangeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/claude-code/oauth/exchange';
+};
+
+export type PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpClaudeCodeOauthExchangeError = PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors];
+
+export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpClaudeCodeOAuthStatus;
+};
+
+export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponse = PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses];
+
+export type GetBotsByBotIdAcpClaudeCodeOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp/claude-code/oauth/status';
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthStatusError = GetBotsByBotIdAcpClaudeCodeOauthStatusErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusErrors];
+
+export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAcpClaudeCodeOAuthStatus;
+};
+
+export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponse = GetBotsByBotIdAcpClaudeCodeOauthStatusResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**

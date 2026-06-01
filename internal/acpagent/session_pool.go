@@ -72,6 +72,8 @@ type PromptInput struct {
 	ReplyTarget       string
 	ConversationType  string
 	ToolHTTPURL       string
+	ContextURI        string
+	ContextMarkdown   string
 	Sink              acpclient.EventSink
 }
 
@@ -190,7 +192,7 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (acpclient.
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
 
-	result, err := sess.Prompt(ctx, input.Prompt, toolSink)
+	result, err := sess.PromptWithResources(ctx, input.Prompt, promptResources(input), toolSink)
 	orderedEvents := toolSink.Events()
 	if len(orderedEvents) > 0 {
 		result.Events = orderedEvents
@@ -204,6 +206,22 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (acpclient.
 	}
 	p.setStatus(input.SessionID, stateIdle)
 	return result, nil
+}
+
+func promptResources(input PromptInput) []acpclient.PromptResource {
+	markdown := strings.TrimSpace(input.ContextMarkdown)
+	if markdown == "" {
+		return nil
+	}
+	uri := strings.TrimSpace(input.ContextURI)
+	if uri == "" {
+		uri = "memoh://context/current-turn"
+	}
+	return []acpclient.PromptResource{{
+		URI:      uri,
+		MimeType: "text/markdown",
+		Text:     markdown,
+	}}
 }
 
 //nolint:contextcheck // lifecycle close intentionally uses background ctx.
@@ -558,6 +576,14 @@ func (p *SessionPool) getOrStart(ctx context.Context, input PromptInput) (*acpcl
 			return nil, err
 		}
 	}
+	var env []string
+	if workspaceInfo.Backend != "local" {
+		env, err = managedProcessEnv(profile, setup.Managed, mode)
+		if err != nil {
+			p.dropSession(sessionID, nil)
+			return nil, err
+		}
+	}
 
 	toolHTTPURL, err := p.resolveToolHTTPURL(startCtx, input, workspaceInfo)
 	if err != nil {
@@ -573,6 +599,7 @@ func (p *SessionPool) getOrStart(ctx context.Context, input PromptInput) (*acpcl
 		Args:            profile.Args,
 		LocalCommand:    profile.LocalCommand,
 		LocalArgs:       profile.LocalArgs,
+		Env:             env,
 		SetupMode:       mode,
 		Timeout:         0,
 		ToolHTTPURL:     toolHTTPURL,
@@ -761,6 +788,20 @@ func validateManagedFields(profile acpprofile.Profile, values map[string]string,
 			return nil
 		}
 	}
+	if profile.ID == acpprofile.AgentClaudeCodeID {
+		switch mode {
+		case acpclient.SetupModeOAuth:
+			if strings.TrimSpace(values["oauth_token"]) == "" {
+				return fmt.Errorf("oauth_token required for %s oauth setup", profile.DisplayName)
+			}
+			return nil
+		default:
+			if strings.TrimSpace(values["api_key"]) == "" {
+				return fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
+			}
+			return nil
+		}
+	}
 	for _, field := range profile.ManagedFields {
 		if !field.Required {
 			continue
@@ -770,6 +811,46 @@ func validateManagedFields(profile acpprofile.Profile, values map[string]string,
 		}
 	}
 	return nil
+}
+
+func managedProcessEnv(profile acpprofile.Profile, values map[string]string, mode acpclient.SetupMode) ([]string, error) {
+	switch profile.ID {
+	case acpprofile.AgentClaudeCodeID:
+		env := []string{
+			"ANTHROPIC_AUTH_TOKEN=",
+			"CLAUDE_CODE_USE_BEDROCK=",
+			"CLAUDE_CODE_USE_VERTEX=",
+			"CLAUDE_CODE_USE_FOUNDRY=",
+		}
+		switch mode {
+		case acpclient.SetupModeAPIKey:
+			apiKey := strings.TrimSpace(values["api_key"])
+			if apiKey == "" {
+				return nil, fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
+			}
+			env = append(env,
+				"CLAUDE_CODE_OAUTH_TOKEN=",
+				"ANTHROPIC_API_KEY="+apiKey,
+			)
+		case acpclient.SetupModeOAuth:
+			token := strings.TrimSpace(values["oauth_token"])
+			if token == "" {
+				return nil, fmt.Errorf("oauth_token required for %s oauth setup", profile.DisplayName)
+			}
+			env = append(env,
+				"ANTHROPIC_API_KEY=",
+				"CLAUDE_CODE_OAUTH_TOKEN="+token,
+			)
+		default:
+			return nil, nil
+		}
+		if baseURL := strings.TrimSpace(values["base_url"]); baseURL != "" {
+			env = append(env, "ANTHROPIC_BASE_URL="+baseURL)
+		}
+		return env, nil
+	default:
+		return nil, nil
+	}
 }
 
 func metadataString(metadata map[string]any, key string) string {
