@@ -4,6 +4,7 @@
       v-if="botId"
       :bot-id="botId"
       :file="fileInfo"
+      :readonly="!canWrite"
       @update:dirty="handleDirty"
     />
   </div>
@@ -16,6 +17,7 @@ import type { HandlersFsFileInfo } from '@memohai/sdk'
 import FileViewer from '@/components/file-manager/file-viewer.vue'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { hasBotPermission } from '@/utils/bot-permissions'
 
 const props = defineProps<{
   filePath: string
@@ -27,6 +29,12 @@ const { currentBotId } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
 
 const botId = computed(() => currentBotId.value ?? '')
+const currentBot = computed(() =>
+  chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
+)
+const canWrite = computed(() =>
+  hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_write'),
+)
 
 const fileInfo = computed<HandlersFsFileInfo>(() => {
   const path = props.filePath

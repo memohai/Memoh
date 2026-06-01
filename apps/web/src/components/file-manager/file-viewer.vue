@@ -42,6 +42,7 @@ const HtmlPreview = defineAsyncComponent({
 const props = defineProps<{
   botId: string
   file: HandlersFsFileInfo
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -108,6 +109,7 @@ async function loadImageBlob() {
 }
 
 async function handleSave() {
+  if (props.readonly) return
   if (!isDirty.value || saving.value) return
   saving.value = true
   try {
@@ -178,6 +180,7 @@ watch(fsChangedAt, () => {
 function handleKeydown(e: KeyboardEvent) {
   const isSave = (e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')
   if (!isSave) return
+  if (props.readonly) return
   if (!isText.value || !isDirty.value || saving.value) return
   e.preventDefault()
   void handleSave()
@@ -204,7 +207,7 @@ onBeforeUnmount(() => {
         v-model="mode"
       />
       <Button
-        v-if="isText && (!hasPreviewToggle || mode === 'raw')"
+        v-if="!readonly && isText && (!hasPreviewToggle || mode === 'raw')"
         type="button"
         size="sm"
         class="gap-1.5 bg-primary text-primary-foreground shadow-md hover:bg-brand-hover disabled:bg-primary/40 disabled:text-primary-foreground/80"
@@ -246,6 +249,7 @@ onBeforeUnmount(() => {
         v-else-if="isText"
         v-model="content"
         :filename="filename"
+        :readonly="readonly"
         class="h-full"
       />
 

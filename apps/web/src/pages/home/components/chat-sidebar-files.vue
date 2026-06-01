@@ -2,6 +2,7 @@
   <div class="flex flex-col h-full min-w-0">
     <div class="flex items-center gap-1 border-b border-border px-2 py-1.5 shrink-0">
       <Button
+        v-if="canWrite"
         variant="ghost"
         size="sm"
         class="size-7 p-0"
@@ -12,6 +13,7 @@
         <Upload class="size-3.5" />
       </Button>
       <Button
+        v-if="canWrite"
         variant="ghost"
         size="sm"
         class="size-7 p-0"
@@ -22,6 +24,7 @@
         <CloudUpload class="size-3.5" />
       </Button>
       <Button
+        v-if="canWrite"
         variant="ghost"
         size="sm"
         class="size-7 p-0"
@@ -50,7 +53,7 @@
         {{ t('bots.files.selectedCount', { count: selectedCount }) }}
       </span>
       <Button
-        v-if="selectedCount > 0"
+        v-if="selectedCount > 0 && canWrite"
         variant="ghost"
         size="sm"
         class="size-7 p-0"
@@ -117,7 +120,7 @@
       ref="uploadInputRef"
       type="file"
       class="hidden"
-      :disabled="operationLoading"
+      :disabled="operationLoading || !canWrite"
       @change="handleUpload"
     >
     <input
@@ -126,7 +129,7 @@
       class="hidden"
       multiple
       webkitdirectory
-      :disabled="operationLoading"
+      :disabled="operationLoading || !canWrite"
       @change="handleDirectoryInputUpload"
     >
 
@@ -150,6 +153,7 @@
             :selected-paths="selectedPaths"
             :selection-mode="selectionMode"
             :selection-disabled="operationLoading"
+            :can-write="canWrite"
             @navigate="navigateTo"
             @open="handleOpenFile"
             @download="handleDownload"
@@ -325,12 +329,16 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   botId: string
-}>()
+  canWrite?: boolean
+}>(), {
+  canWrite: false,
+})
 
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
+const canWrite = computed(() => props.canWrite)
 
 const currentPath = ref('/data')
 const entries = ref<HandlersFsFileInfo[]>([])
@@ -459,10 +467,12 @@ function handleOpenFile(entry: HandlersFsFileInfo) {
 }
 
 function triggerUpload() {
+  if (!props.canWrite) return
   uploadInputRef.value?.click()
 }
 
 async function triggerDirectoryUpload() {
+  if (!props.canWrite) return
   const picker = (window as unknown as {
     showDirectoryPicker?: () => Promise<FileSystemDirectoryHandleLike>
   }).showDirectoryPicker
@@ -556,6 +566,7 @@ async function handleDirectoryInputUpload(event: Event) {
 }
 
 async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
+  if (!props.canWrite) return
   if (directoryUploading.value) return
   const rootName = payload.rootName.trim() || t('bots.files.uploadedFolderFallbackName')
   const destinationRoot = joinPath(currentPath.value, rootName)
@@ -633,6 +644,7 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
 }
 
 async function handleUpload(event: Event) {
+  if (!props.canWrite) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -658,11 +670,13 @@ const mkdirName = ref('')
 const mkdirLoading = ref(false)
 
 function openMkdirDialog() {
+  if (!props.canWrite) return
   mkdirName.value = ''
   mkdirDialogOpen.value = true
 }
 
 async function handleMkdir() {
+  if (!props.canWrite) return
   const name = mkdirName.value.trim()
   if (!name || mkdirLoading.value) return
 
@@ -689,12 +703,14 @@ const renameNewName = ref('')
 const renameLoading = ref(false)
 
 function openRenameDialog(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
   renameTarget.value = entry
   renameNewName.value = entry.name ?? ''
   renameDialogOpen.value = true
 }
 
 async function handleRename() {
+  if (!props.canWrite) return
   const target = renameTarget.value
   const newName = renameNewName.value.trim()
   if (!target || !newName || renameLoading.value) return
@@ -724,11 +740,13 @@ const deleteTarget = ref<HandlersFsFileInfo | null>(null)
 const deleteLoading = ref(false)
 
 function openDeleteDialog(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
   deleteTarget.value = entry
   deleteDialogOpen.value = true
 }
 
 async function handleDelete() {
+  if (!props.canWrite) return
   const target = deleteTarget.value
   if (!target || deleteLoading.value) return
 
@@ -813,11 +831,13 @@ async function handleBatchDownload() {
 }
 
 function openBatchDeleteDialog() {
+  if (!props.canWrite) return
   if (selectedCount.value === 0) return
   batchDeleteDialogOpen.value = true
 }
 
 async function handleBatchDelete() {
+  if (!props.canWrite) return
   const targets = [...selectedEntries.value]
   if (targets.length === 0 || batchDeleteLoading.value) return
   batchDeleteLoading.value = true
@@ -848,6 +868,7 @@ async function handleBatchDelete() {
 }
 
 async function handleExtract(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
   if (!entry.path || extractLoading.value) return
   extractLoading.value = true
   try {

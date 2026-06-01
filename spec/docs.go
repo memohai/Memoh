@@ -15494,6 +15494,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "created_by_user_id": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },

@@ -2005,6 +2005,7 @@ export type SessionSession = {
     bot_id?: string;
     channel_type?: string;
     created_at?: string;
+    created_by_user_id?: string;
     id?: string;
     metadata?: {
         [key: string]: unknown;

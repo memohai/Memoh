@@ -159,7 +159,8 @@ func (h *ACPRuntimeHandler) authorizedACPSession(c echo.Context) (string, string
 	if botID == "" {
 		return "", "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+	if err != nil {
 		return "", "", session.Session{}, err
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
@@ -167,13 +168,35 @@ func (h *ACPRuntimeHandler) authorizedACPSession(c echo.Context) (string, string
 		return "", "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
-	if err != nil || sess.BotID != botID {
+	if err != nil || sess.BotID != bot.ID {
 		return "", "", session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 	if sess.Type != session.TypeACPAgent {
 		return "", "", session.Session{}, echo.NewHTTPError(http.StatusBadRequest, "session is not an ACP agent session")
 	}
-	return botID, sessionID, sess, nil
+	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	if err != nil {
+		return "", "", session.Session{}, err
+	}
+	if !canAccessSession(sess, channelIdentityID, perms) {
+		return "", "", session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return bot.ID, sessionID, sess, nil
+}
+
+func (h *ACPRuntimeHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
 }
 
 func buildACPMCPToolsURL(c echo.Context, botID string) string {

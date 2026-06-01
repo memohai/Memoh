@@ -180,6 +180,7 @@ type BotSession struct {
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
 	DeletedAt       sql.NullString `json:"deleted_at"`
+	CreatedByUserID sql.NullString `json:"created_by_user_id"`
 }
 
 type BotSessionEvent struct {

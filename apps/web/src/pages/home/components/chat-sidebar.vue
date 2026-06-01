@@ -39,9 +39,10 @@
           class="absolute inset-0"
         >
           <ChatSidebarFiles
-            v-if="currentBotId && canManage"
+            v-if="currentBotId && canWorkspaceRead"
             ref="filesPanelRef"
             :bot-id="currentBotId"
+            :can-write="canWorkspaceWrite"
           />
           <div
             v-else
@@ -55,7 +56,7 @@
           class="absolute inset-0"
         >
           <ChatSidebarSkills
-            v-if="currentBotId && canManage"
+            v-if="currentBotId && canWorkspaceRead"
             :bot-id="currentBotId"
           />
           <div
@@ -119,6 +120,7 @@ import { useQuery } from '@pinia/colada'
 import { getBotsById } from '@memohai/sdk'
 import { MessageSquare, Folder, Sparkles, Plug, CalendarClock } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
+import { hasBotPermission } from '@/utils/bot-permissions'
 import ChatSidebarSessions from './chat-sidebar-sessions.vue'
 import ChatSidebarFiles from './chat-sidebar-files.vue'
 import ChatSidebarSkills from './chat-sidebar-skills.vue'
@@ -135,12 +137,8 @@ interface ActivityTab {
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
+const { currentBotId, bots } = storeToRefs(chatStore)
 
-// Resolve the caller's permissions on the current bot. The files/skills/mcp/
-// schedule panels are management surfaces; members granted only chat access
-// should see just the conversation, not these panels (the backend rejects
-// them with "bot access denied" anyway).
 const { data: currentBot } = useQuery({
   key: () => ['bot', currentBotId.value ?? ''],
   query: async () => {
@@ -150,16 +148,30 @@ const { data: currentBot } = useQuery({
   enabled: () => !!currentBotId.value,
 })
 
-const canManage = computed(() => (currentBot.value?.current_user_permissions ?? []).includes('manage'))
+const currentBotFromList = computed(() =>
+  bots.value.find(bot => bot.id === currentBotId.value) ?? null,
+)
+const currentPermissions = computed(() =>
+  currentBot.value?.current_user_permissions
+  ?? currentBotFromList.value?.current_user_permissions
+  ?? [],
+)
+const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
+const canWorkspaceRead = computed(() => hasBotPermission(currentPermissions.value, 'workspace_read'))
+const canWorkspaceWrite = computed(() => hasBotPermission(currentPermissions.value, 'workspace_write'))
 
 const activityTabs = computed<ActivityTab[]>(() => {
   const tabs: ActivityTab[] = [
     { id: 'sessions', label: t('chat.activityTabSessions'), icon: MessageSquare },
   ]
-  if (canManage.value) {
+  if (canWorkspaceRead.value) {
     tabs.push(
       { id: 'files', label: t('chat.activityTabFiles'), icon: Folder },
       { id: 'skills', label: t('chat.activityTabSkills'), icon: Sparkles },
+    )
+  }
+  if (canManage.value) {
+    tabs.push(
       { id: 'mcp', label: t('chat.activityTabMcp'), icon: Plug },
       { id: 'schedule', label: t('chat.activityTabSchedule'), icon: CalendarClock },
     )
@@ -217,6 +229,7 @@ onBeforeUnmount(() => {
 })
 
 function openFilesAt(path: string) {
+  if (!canWorkspaceRead.value) return
   activeTab.value = 'files'
   void nextTick(() => {
     filesPanelRef.value?.navigateTo(path)

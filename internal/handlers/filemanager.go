@@ -16,6 +16,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -264,7 +265,7 @@ func fsHTTPError(err error) *echo.HTTPError {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs [get].
 func (h *ContainerdHandler) FSStat(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -311,7 +312,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/list [get].
 func (h *ContainerdHandler) FSList(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -369,7 +370,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/read [get].
 func (h *ContainerdHandler) FSRead(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -430,7 +431,9 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	requireAccess := h.requireBotAccess
+	requireAccess := func(c echo.Context) (string, error) {
+		return h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
+	}
 	if isContainerMediaPath(containerPath) {
 		requireAccess = h.requireBotAccessWithGuest
 	}
@@ -491,7 +494,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/archive [post].
 func (h *ContainerdHandler) FSArchive(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -616,7 +619,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/write [post].
 func (h *ContainerdHandler) FSWrite(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -660,7 +663,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/upload [post].
 func (h *ContainerdHandler) FSUpload(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -713,7 +716,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/mkdir [post].
 func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -756,7 +759,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/delete [post].
 func (h *ContainerdHandler) FSDelete(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -803,7 +806,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/rename [post].
 func (h *ContainerdHandler) FSRename(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -851,7 +854,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/fs/extract [post].
 func (h *ContainerdHandler) FSExtract(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}

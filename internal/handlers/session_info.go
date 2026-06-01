@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 )
 
@@ -80,9 +81,6 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat); err != nil {
-		return err
-	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
@@ -94,6 +92,32 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, userID, botID, requiredPermissionForSessionType(sessionRow.Type))
+	if err != nil {
+		return err
+	}
+	if sessionRow.BotID.String() != bot.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
+	if err != nil {
+		return err
+	}
+	sess := session.Session{
+		ID:    sessionRow.ID.String(),
+		BotID: sessionRow.BotID.String(),
+		Type:  sessionRow.Type,
+	}
+	if sessionRow.CreatedByUserID.Valid {
+		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
+	}
+	if !canAccessSession(sess, userID, perms) {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
 
 	messageCount, err := h.queries.CountMessagesBySession(ctx, pgSessionID)
 	if err != nil {
@@ -111,7 +135,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		usedTokens = latestUsage
 	}
 
-	contextWindow := h.resolveContextWindow(c, botID)
+	contextWindow := h.resolveContextWindow(c, bot.ID)
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
@@ -147,6 +171,21 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		Skills: skills,
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *SessionInfoHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
 }
 
 func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botID string) *int64 {

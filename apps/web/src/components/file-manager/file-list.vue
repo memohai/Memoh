@@ -19,6 +19,7 @@ const props = defineProps<{
   selectedPaths?: Set<string>
   selectionMode?: boolean
   selectionDisabled?: boolean
+  canWrite?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -185,7 +186,7 @@ function handleCheckboxUpdate(entry: HandlersFsFileInfo, checked: CheckboxState)
             {{ t('bots.files.download') }}
           </ContextMenuItem>
           <ContextMenuItem
-            v-if="!entry.isDir && isArchiveFile(entry.name)"
+            v-if="canWrite && !entry.isDir && isArchiveFile(entry.name)"
             @select="emit('extract', entry)"
           >
             <ArchiveRestore
@@ -193,14 +194,18 @@ function handleCheckboxUpdate(entry: HandlersFsFileInfo, checked: CheckboxState)
             />
             {{ t('bots.files.extract') }}
           </ContextMenuItem>
-          <ContextMenuItem @select="emit('rename', entry)">
+          <ContextMenuItem
+            v-if="canWrite"
+            @select="emit('rename', entry)"
+          >
             <SquarePen
               class="mr-2 size-3.5"
             />
             {{ t('bots.files.rename') }}
           </ContextMenuItem>
-          <ContextMenuSeparator />
+          <ContextMenuSeparator v-if="canWrite" />
           <ContextMenuItem
+            v-if="canWrite"
             class="text-destructive focus:text-destructive"
             @select="emit('delete', entry)"
           >

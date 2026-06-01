@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	messageevent "github.com/memohai/memoh/internal/message/event"
+	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
 )
 
@@ -29,6 +31,7 @@ import (
 type MessageHandler struct {
 	conversationService conversation.Accessor
 	messageService      messagepkg.Service
+	sessionService      *session.Service
 	messageEvents       messageevent.Subscriber
 	mediaService        *media.Service
 	botService          *bots.Service
@@ -39,7 +42,7 @@ type MessageHandler struct {
 }
 
 // NewMessageHandler creates a MessageHandler.
-func NewMessageHandler(log *slog.Logger, conversationService conversation.Accessor, messageService messagepkg.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
+func NewMessageHandler(log *slog.Logger, conversationService conversation.Accessor, messageService messagepkg.Service, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service, eventSubscribers ...messageevent.Subscriber) *MessageHandler {
 	var messageEvents messageevent.Subscriber
 	if len(eventSubscribers) > 0 {
 		messageEvents = eventSubscribers[0]
@@ -47,6 +50,7 @@ func NewMessageHandler(log *slog.Logger, conversationService conversation.Access
 	return &MessageHandler{
 		conversationService: conversationService,
 		messageService:      messageService,
+		sessionService:      sessionService,
 		messageEvents:       messageEvents,
 		botService:          botService,
 		accountService:      accountService,
@@ -147,13 +151,6 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
-
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
@@ -169,6 +166,19 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 
 	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	if sessionID != "" {
+		bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+		if err != nil {
+			return err
+		}
+		botID = bot.ID
+	} else {
+		bot, err := h.authorizeBotManage(c.Request().Context(), channelIdentityID, botID)
+		if err != nil {
+			return err
+		}
+		botID = bot.ID
+	}
 
 	var messages []messagepkg.Message
 	if sessionID != "" {
@@ -236,12 +246,6 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
-		return err
-	}
-	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
@@ -250,6 +254,11 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
 	}
+	bot, _, _, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	botID = bot.ID
 	externalMessageID := strings.TrimSpace(c.QueryParam("external_message_id"))
 	if externalMessageID == "" {
 		externalMessageID = strings.TrimSpace(c.QueryParam("message_id"))
@@ -418,12 +427,11 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
-	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
+	botID = bot.ID
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
@@ -467,9 +475,9 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 	defer cancel()
 
 	if hasSince {
-		backlog, err := h.messageService.ListSince(c.Request().Context(), botID, since)
+		backlog, err := h.messageBacklogSince(c, channelIdentityID, botID, perms, since)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return err
 		}
 		h.fillAssetMimeFromStorage(c.Request().Context(), botID, backlog)
 		for _, message := range backlog {
@@ -507,6 +515,9 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 					h.logger.Warn("decode message event failed", slog.Any("error", err))
 					continue
 				}
+				if !h.canReadMessageSession(c, channelIdentityID, botID, perms, message.SessionID) {
+					continue
+				}
 				h.fillAssetMimeFromStorage(c.Request().Context(), botID, []messagepkg.Message{message})
 				if err := writeCreatedEvent(message); err != nil {
 					return nil
@@ -514,6 +525,9 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionTitleUpdated:
 				var payload map[string]string
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if !h.canReadMessageSession(c, channelIdentityID, botID, perms, payload["session_id"]) {
 					continue
 				}
 				if err := writeSSEJSON(writer, flusher, map[string]any{
@@ -527,6 +541,9 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			case messageevent.EventTypeBackgroundTask:
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if !h.canReadPayloadSession(c, channelIdentityID, botID, perms, payload) {
 					continue
 				}
 				payload["type"] = string(messageevent.EventTypeBackgroundTask)
@@ -544,6 +561,9 @@ func (h *MessageHandler) StreamMessageEvents(c echo.Context) error {
 			case messageevent.EventTypeAgentStream:
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
+					continue
+				}
+				if !h.canReadPayloadSession(c, channelIdentityID, botID, perms, payload) {
 					continue
 				}
 				payload["type"] = string(messageevent.EventTypeAgentStream)
@@ -576,9 +596,11 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotManage(c.Request().Context(), channelIdentityID, botID); err != nil {
+	bot, err := h.authorizeBotManage(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
+	botID = bot.ID
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
@@ -609,28 +631,108 @@ func (h *MessageHandler) authorizeBotManage(ctx context.Context, channelIdentity
 	return AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionManage)
 }
 
-func (h *MessageHandler) requireReadable(ctx context.Context, conversationID, channelIdentityID string) error {
-	if h.conversationService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "conversation service not configured")
-	}
-	// Admin bypass.
-	if h.accountService != nil {
-		isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-		}
-		if isAdmin {
-			return nil
-		}
-	}
-	_, err := h.conversationService.GetReadAccess(ctx, conversationID, channelIdentityID)
+func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
-		if errors.Is(err, conversation.ErrPermissionDenied) {
-			return echo.NewHTTPError(http.StatusForbidden, "not allowed to read conversation")
+		bot, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+		if err != nil {
+			return bots.Bot{}, nil, err
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	return nil
+	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	if err != nil {
+		return bots.Bot{}, nil, err
+	}
+	return bot, perms, nil
+}
+
+func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Session, error) {
+	if h.sessionService == nil {
+		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+	}
+	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
+	if err != nil {
+		return bots.Bot{}, nil, session.Session{}, err
+	}
+	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	if err != nil || sess.BotID != bot.ID {
+		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if !canAccessSession(sess, channelIdentityID, perms) {
+		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return bot, perms, sess, nil
+}
+
+func (h *MessageHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
+}
+
+func (h *MessageHandler) messageBacklogSince(c echo.Context, channelIdentityID, botID string, perms []string, since time.Time) ([]messagepkg.Message, error) {
+	if bots.HasPermission(perms, bots.PermissionManage) {
+		backlog, err := h.messageService.ListSince(c.Request().Context(), botID, since)
+		if err != nil {
+			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return backlog, nil
+	}
+	if h.sessionService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+	}
+	sessions, err := h.sessionService.ListByBotAndCreatedByUser(c.Request().Context(), botID, channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
+	backlog := make([]messagepkg.Message, 0)
+	for _, sess := range sessions {
+		items, err := h.messageService.ListSinceBySession(c.Request().Context(), sess.ID, since)
+		if err != nil {
+			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		backlog = append(backlog, items...)
+	}
+	sort.SliceStable(backlog, func(i, j int) bool {
+		return backlog[i].CreatedAt.Before(backlog[j].CreatedAt)
+	})
+	return backlog, nil
+}
+
+func (h *MessageHandler) canReadPayloadSession(c echo.Context, channelIdentityID, botID string, perms []string, payload map[string]any) bool {
+	sessionID, _ := payload["session_id"].(string)
+	if sessionID == "" {
+		sessionID, _ = payload["sessionId"].(string)
+	}
+	return h.canReadMessageSession(c, channelIdentityID, botID, perms, sessionID)
+}
+
+func (h *MessageHandler) canReadMessageSession(c echo.Context, channelIdentityID, botID string, perms []string, sessionID string) bool {
+	if bots.HasPermission(perms, bots.PermissionManage) {
+		return true
+	}
+	if h.sessionService == nil {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	if err != nil || sess.BotID != botID {
+		return false
+	}
+	return canAccessSession(sess, channelIdentityID, perms)
 }
 
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
@@ -647,12 +749,11 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if contentHash == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "content hash is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
-	if err := h.requireReadable(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return err
-	}
+	botID = bot.ID
 	if h.mediaService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "media service not configured")
 	}

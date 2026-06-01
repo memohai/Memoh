@@ -3709,6 +3709,25 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]p
 	return result, nil
 }
 
+func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg pgsqlc.ListSessionsByBotAndCreatedByUserParams) ([]pgsqlc.ListSessionsByBotAndCreatedByUserRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListSessionsByBotAndCreatedByUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionsByBotAndCreatedByUser(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListSessionsByBotAndCreatedByUserRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) ([]pgsqlc.BotSession, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

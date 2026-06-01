@@ -14,10 +14,14 @@ import (
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 )
 
-// Grant permission scopes. manage implies chat.
+// Grant permission scopes. manage implies every scoped permission; workspace_write
+// implies workspace_read.
 const (
-	PermissionChat   = "chat"
-	PermissionManage = "manage"
+	PermissionChat           = "chat"
+	PermissionWorkspaceRead  = "workspace_read"
+	PermissionWorkspaceWrite = "workspace_write"
+	PermissionWorkspaceExec  = "workspace_exec"
+	PermissionManage         = "manage"
 )
 
 // Grant subject types.
@@ -70,30 +74,32 @@ type UpdateUserGrantRequest struct {
 
 // allPermissions returns the full permission set (owner/admin level).
 func allPermissions() []string {
-	return []string{PermissionChat, PermissionManage}
+	return []string{
+		PermissionChat,
+		PermissionWorkspaceRead,
+		PermissionWorkspaceWrite,
+		PermissionWorkspaceExec,
+		PermissionManage,
+	}
 }
 
-// hasPermission reports whether the granted set satisfies the required scope.
-// manage implies chat.
+// HasPermission reports whether the granted set satisfies the required scope.
+func HasPermission(granted []string, required string) bool {
+	return hasPermission(granted, required)
+}
+
 func hasPermission(granted []string, required string) bool {
-	switch required {
-	case PermissionChat:
-		for _, p := range granted {
-			if p == PermissionChat || p == PermissionManage {
-				return true
-			}
-		}
-		return false
-	case PermissionManage:
-		for _, p := range granted {
-			if p == PermissionManage {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
+	required = strings.ToLower(strings.TrimSpace(required))
+	if required == "" {
+		required = PermissionManage
 	}
+	perms := expandPermissions(granted)
+	for _, p := range perms {
+		if p == required {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizePermissions validates and de-duplicates a permission list, preserving
@@ -103,7 +109,7 @@ func normalizePermissions(raw []string) ([]string, error) {
 	for _, p := range raw {
 		key := strings.ToLower(strings.TrimSpace(p))
 		switch key {
-		case PermissionChat, PermissionManage:
+		case PermissionChat, PermissionWorkspaceRead, PermissionWorkspaceWrite, PermissionWorkspaceExec, PermissionManage:
 			seen[key] = true
 		case "":
 			continue
@@ -111,16 +117,50 @@ func normalizePermissions(raw []string) ([]string, error) {
 			return nil, ErrInvalidPermission
 		}
 	}
+	out := expandPermissionSet(seen)
+	if len(out) == 0 {
+		return nil, ErrInvalidPermission
+	}
+	return out, nil
+}
+
+func isKnownPermission(permission string) bool {
+	switch permission {
+	case PermissionChat, PermissionWorkspaceRead, PermissionWorkspaceWrite, PermissionWorkspaceExec, PermissionManage:
+		return true
+	default:
+		return false
+	}
+}
+
+func expandPermissions(perms []string) []string {
+	seen := make(map[string]bool, len(perms))
+	for _, p := range perms {
+		key := strings.ToLower(strings.TrimSpace(p))
+		if isKnownPermission(key) {
+			seen[key] = true
+		}
+	}
+	return expandPermissionSet(seen)
+}
+
+func expandPermissionSet(seen map[string]bool) []string {
+	if seen[PermissionManage] {
+		for _, p := range allPermissions() {
+			seen[p] = true
+		}
+	}
+	if seen[PermissionWorkspaceWrite] {
+		seen[PermissionWorkspaceRead] = true
+	}
+
 	out := make([]string, 0, len(seen))
 	for _, p := range allPermissions() {
 		if seen[p] {
 			out = append(out, p)
 		}
 	}
-	if len(out) == 0 {
-		return nil, ErrInvalidPermission
-	}
-	return out, nil
+	return out
 }
 
 func decodePermissions(payload []byte) []string {
@@ -134,11 +174,11 @@ func decodePermissions(payload []byte) []string {
 	out := make([]string, 0, len(perms))
 	for _, p := range perms {
 		key := strings.ToLower(strings.TrimSpace(p))
-		if key == PermissionChat || key == PermissionManage {
+		if isKnownPermission(key) {
 			out = append(out, key)
 		}
 	}
-	return out
+	return expandPermissions(out)
 }
 
 func encodePermissions(perms []string) ([]byte, error) {
@@ -189,13 +229,7 @@ func (s *Service) ResolveUserPermissions(ctx context.Context, botID, userID stri
 			seen[p] = true
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for _, p := range allPermissions() {
-		if seen[p] {
-			out = append(out, p)
-		}
-	}
-	return out, nil
+	return expandPermissionSet(seen), nil
 }
 
 // AuthorizeAccessWithPermission checks whether userID may access the bot with the

@@ -78,19 +78,16 @@
           {{ $t('bots.access.userAccess.permissionsQuestion') }}
         </Label>
         <div class="flex flex-wrap gap-4">
-          <label class="flex items-center gap-2 text-xs cursor-pointer">
+          <label
+            v-for="permission in permissionOptions"
+            :key="permission"
+            class="flex items-center gap-2 text-xs cursor-pointer"
+          >
             <Checkbox
-              :model-value="formPermissions.chat"
-              @update:model-value="(v) => (formPermissions.chat = v === true)"
+              :model-value="formPermissions[permission]"
+              @update:model-value="(v) => setFormPermission(permission, v === true)"
             />
-            {{ $t('bots.access.userAccess.permissionChat') }}
-          </label>
-          <label class="flex items-center gap-2 text-xs cursor-pointer">
-            <Checkbox
-              :model-value="formPermissions.manage"
-              @update:model-value="(v) => (formPermissions.manage = v === true)"
-            />
-            {{ $t('bots.access.userAccess.permissionManage') }}
+            {{ permissionLabel(permission) }}
           </label>
         </div>
       </div>
@@ -178,26 +175,17 @@
 
         <div class="flex items-center gap-3 shrink-0">
           <label
+            v-for="permission in permissionOptions"
+            :key="permission"
             class="flex items-center gap-1.5 text-[11px]"
             :class="grant.is_owner ? 'text-muted-foreground' : 'cursor-pointer text-foreground'"
           >
             <Checkbox
-              :model-value="hasPerm(grant, 'chat')"
+              :model-value="hasPerm(grant, permission)"
               :disabled="grant.is_owner || isRowBusy(grant)"
-              @update:model-value="() => togglePerm(grant, 'chat')"
+              @update:model-value="() => togglePerm(grant, permission)"
             />
-            {{ $t('bots.access.userAccess.permissionChat') }}
-          </label>
-          <label
-            class="flex items-center gap-1.5 text-[11px]"
-            :class="grant.is_owner ? 'text-muted-foreground' : 'cursor-pointer text-foreground'"
-          >
-            <Checkbox
-              :model-value="hasPerm(grant, 'manage')"
-              :disabled="grant.is_owner || isRowBusy(grant)"
-              @update:model-value="() => togglePerm(grant, 'manage')"
-            />
-            {{ $t('bots.access.userAccess.permissionManage') }}
+            {{ permissionLabel(permission) }}
           </label>
 
           <ConfirmPopover
@@ -240,6 +228,7 @@ import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '@/utils/bot-permissions'
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,
@@ -249,7 +238,7 @@ import {
 } from '@memohai/sdk'
 import type { BotsUserGrant, HandlersBotUserCandidate } from '@memohai/sdk'
 
-type Permission = 'chat' | 'manage'
+type Permission = BotPermission
 
 const props = defineProps<{
   botId: string
@@ -275,9 +264,16 @@ const grants = computed<BotsUserGrant[]>(() => grantsData.value?.items ?? [])
 const formVisible = ref(false)
 const formSubjectType = ref<'user' | 'everyone'>('user')
 const formUserId = ref('')
-const formPermissions = reactive<{ chat: boolean, manage: boolean }>({ chat: true, manage: false })
+const formPermissions = reactive<Record<Permission, boolean>>({
+  chat: true,
+  workspace_read: false,
+  workspace_write: false,
+  workspace_exec: false,
+  manage: false,
+})
 const isSaving = ref(false)
 const busyGrantIds = ref<Set<string>>(new Set())
+const permissionOptions = BOT_PERMISSION_ORDER
 
 const { data: candidatesData } = useQuery({
   key: () => ['bot-user-access-candidates', props.botId],
@@ -311,7 +307,7 @@ const candidateOptions = computed<SearchableSelectOption[]>(() => {
 const everyoneExists = computed(() => grants.value.some((g) => g.subject_type === 'everyone'))
 
 const canSubmit = computed(() => {
-  if (!formPermissions.chat && !formPermissions.manage) return false
+  if (buildPermissions().length === 0) return false
   if (formSubjectType.value === 'everyone') return !everyoneExists.value
   return !!formUserId.value
 })
@@ -321,6 +317,9 @@ function openAddForm() {
   formSubjectType.value = everyoneExists.value ? 'user' : 'user'
   formUserId.value = ''
   formPermissions.chat = true
+  formPermissions.workspace_read = false
+  formPermissions.workspace_write = false
+  formPermissions.workspace_exec = false
   formPermissions.manage = false
 }
 
@@ -330,10 +329,45 @@ function closeForm() {
 }
 
 function buildPermissions(): string[] {
-  const perms: string[] = []
-  if (formPermissions.chat) perms.push('chat')
-  if (formPermissions.manage) perms.push('manage')
-  return perms
+  const selected = new Set<Permission>()
+  for (const permission of permissionOptions) {
+    if (formPermissions[permission]) selected.add(permission)
+  }
+  return normalizePermissionSelection(selected)
+}
+
+function setFormPermission(permission: Permission, checked: boolean) {
+  if (permission !== 'manage' && !checked && formPermissions.manage) {
+    formPermissions.manage = false
+  }
+  formPermissions[permission] = checked
+  if (permission === 'manage' && checked) {
+    for (const item of permissionOptions) formPermissions[item] = true
+  }
+  if (permission === 'workspace_write' && checked) {
+    formPermissions.workspace_read = true
+  }
+  if (permission === 'workspace_read' && !checked) {
+    formPermissions.workspace_write = false
+  }
+}
+
+function normalizePermissionSelection(selected: Set<Permission>): Permission[] {
+  if (selected.has('manage')) {
+    for (const permission of permissionOptions) selected.add(permission)
+  }
+  if (selected.has('workspace_write')) selected.add('workspace_read')
+  return permissionOptions.filter(permission => selected.has(permission))
+}
+
+function permissionLabel(permission: Permission): string {
+  switch (permission) {
+    case 'chat': return t('bots.access.userAccess.permissionChat')
+    case 'workspace_read': return t('bots.access.userAccess.permissionWorkspaceRead')
+    case 'workspace_write': return t('bots.access.userAccess.permissionWorkspaceWrite')
+    case 'workspace_exec': return t('bots.access.userAccess.permissionWorkspaceExec')
+    case 'manage': return t('bots.access.userAccess.permissionManage')
+  }
 }
 
 function initials(grant: BotsUserGrant): string {
@@ -347,7 +381,7 @@ function grantLabel(grant: BotsUserGrant): string {
 }
 
 function hasPerm(grant: BotsUserGrant, perm: Permission): boolean {
-  return (grant.permissions ?? []).includes(perm)
+  return expandBotPermissions(grant.permissions).includes(perm)
 }
 
 function isRowBusy(grant: BotsUserGrant): boolean {
@@ -385,14 +419,18 @@ async function handleCreate() {
 
 async function togglePerm(grant: BotsUserGrant, perm: Permission) {
   if (grant.is_owner || !grant.id) return
-  const current = new Set(grant.permissions ?? [])
+  const current = new Set<Permission>(expandBotPermissions(grant.permissions))
+  if (perm !== 'manage' && current.has('manage') && current.has(perm)) {
+    current.delete('manage')
+  }
   if (current.has(perm)) current.delete(perm)
   else current.add(perm)
-  if (current.size === 0) {
+  if (perm === 'workspace_read' && !current.has('workspace_read')) current.delete('workspace_write')
+  const next = normalizePermissionSelection(current)
+  if (next.length === 0) {
     toast.error(t('bots.access.userAccess.atLeastOnePermission'))
     return
   }
-  const next = (['chat', 'manage'] as Permission[]).filter((p) => current.has(p))
   busyGrantIds.value.add(grant.id)
   try {
     await putBotsByBotIdUserAccessByGrantId({

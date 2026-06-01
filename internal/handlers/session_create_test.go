@@ -112,7 +112,7 @@ func callCreateSession(handler *SessionHandler, botID string, body string) error
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	ctx.SetPath("/bots/:bot_id/sessions")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)

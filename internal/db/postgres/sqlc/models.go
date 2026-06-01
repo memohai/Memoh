@@ -176,6 +176,7 @@ type BotSession struct {
 	Title           string             `json:"title"`
 	Metadata        []byte             `json:"metadata"`
 	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
