@@ -91,12 +91,21 @@ func extractFlags(tokens []string) ([]string, parsedFlags) {
 			target = &flags.prov
 			minVal = 0
 		}
-		if target != nil && i+1 < len(tokens) {
-			if n, err := strconv.Atoi(tokens[i+1]); err == nil && n >= minVal {
-				*target = n
-				i++ // skip the value token
-				continue
+		if target != nil {
+			// Recognized int flag: always drop the flag token itself, and consume
+			// its value token even when the value is invalid (e.g. "--prov -1" /
+			// "--page abc"). Otherwise an invalid value left the flag name AND the
+			// value as stray positional args, polluting downstream name matching
+			// (a "--prov" provider filter, a "-1" schedule/memory name, etc.).
+			// Guard the value-consume on the next token not being another --flag,
+			// so "--page --prov 2" still parses --prov rather than eating it.
+			if i+1 < len(tokens) && !strings.HasPrefix(tokens[i+1], "--") {
+				if n, err := strconv.Atoi(tokens[i+1]); err == nil && n >= minVal {
+					*target = n
+				}
+				i++ // consume the value token (valid or not)
 			}
+			continue // drop the flag token regardless
 		}
 		out = append(out, tokens[i])
 	}

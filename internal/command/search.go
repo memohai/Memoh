@@ -29,8 +29,13 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				rec := providerListRecord(cc, item.Name, item.Provider, false, item.ID == settingsResp.SearchProviderID)
-				// Tap a provider to switch to it — no typing of /search set.
-				rec.action = &ItemAction{Resource: "search", Action: "set", Args: []string{item.Name}}
+				// Tap a provider to switch to it — no typing of /search set. Owner-only:
+				// `search set` is IsWrite, so a tappable row for a non-owner just bounces
+				// off the owner gate (mirrors model_picker/reasoning). Members still see
+				// the list, minus the dead switch affordance.
+				if cc.WriteAccess {
+					rec.action = &ItemAction{Resource: "search", Action: "set", Args: []string{item.Name}}
+				}
 				if item.ID == settingsResp.SearchProviderID {
 					currentRecords = append(currentRecords, rec)
 					continue

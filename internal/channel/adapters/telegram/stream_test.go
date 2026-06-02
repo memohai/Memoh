@@ -329,6 +329,53 @@ func TestEditStreamMessageFinal_Success(t *testing.T) {
 	}
 }
 
+// TestEditStreamMessageFinal_UnrecoverableFallsBackToNewMessage pins the
+// recovery path: when the streamed placeholder is gone/uneditable, the final
+// edit can never land, so instead of silently dropping the answer (the old
+// no-op-on-unrecoverable behavior) the stream posts it as a NEW message.
+func TestEditStreamMessageFinal_UnrecoverableFallsBackToNewMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:      adapter,
+		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:       "123",
+		streamChatID: 1,
+		streamMsgID:  1,
+		lastEdited:   "a",
+		lastEditedAt: time.Now().Add(-time.Minute),
+	}
+	ctx := context.Background()
+
+	origGetBot := getOrCreateBotForTest
+	origEdit := testEditFunc
+	origSendText := sendTextForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return &tgbotapi.BotAPI{Token: "fake"}, nil
+	}
+	testEditFunc = func(*tgbotapi.BotAPI, int64, int, string, string) error {
+		return tgbotapi.Error{Code: 400, Message: "Bad Request: message to edit not found"}
+	}
+	var sentText string
+	var sentCount int
+	sendTextForTest = func(_ *tgbotapi.BotAPI, _ string, text string, _ int, _ string) (int64, int, error) {
+		sentText = text
+		sentCount++
+		return 1, 99, nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		testEditFunc = origEdit
+		sendTextForTest = origSendText
+	}()
+
+	if err := s.editStreamMessageFinal(ctx, "final answer"); err != nil {
+		t.Fatalf("unrecoverable edit should recover via a new message, got error: %v", err)
+	}
+	if sentCount != 1 || sentText != "final answer" {
+		t.Fatalf("expected the final answer posted as one new message, got count=%d text=%q", sentCount, sentText)
+	}
+}
+
 func TestEditStreamMessageFinal_SameContentNoOp(t *testing.T) {
 	t.Parallel()
 

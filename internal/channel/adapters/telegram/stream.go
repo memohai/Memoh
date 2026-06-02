@@ -206,14 +206,25 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 		if testEditFunc != nil {
 			editErr = testEditFunc(bot, chatID, msgID, text, s.parseMode)
 		} else {
-			editErr = editTelegramMessageText(bot, chatID, msgID, text, s.parseMode)
+			// Raw (non-swallowing) edit so an unrecoverable failure is visible
+			// below and the answer can be recovered, instead of being silently
+			// dropped by editTelegramMessageText's no-op-on-unrecoverable wrapper.
+			editErr = rawEditTelegramMessageText(bot, chatID, msgID, text, s.parseMode)
 		}
-		if editErr == nil {
+		// not-modified means the message already shows this text — treat as done.
+		if editErr == nil || isTelegramMessageNotModified(editErr) {
 			s.mu.Lock()
 			s.lastEdited = text
 			s.lastEditedAt = time.Now()
 			s.mu.Unlock()
 			return nil
+		}
+		// The streamed placeholder is gone or no longer editable (user deleted it,
+		// too old, …): editing can never land the final answer. Recover by posting
+		// it as a NEW message rather than dropping it silently — mirrors the
+		// with-actions final path in pushFinal, which already sends a fresh message.
+		if isTelegramEditUnrecoverable(editErr) {
+			return s.sendPermanentMessage(ctx, text, s.parseMode)
 		}
 		lastEditErr = editErr
 		if !isTelegramTooManyRequests(editErr) {

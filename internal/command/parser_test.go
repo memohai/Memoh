@@ -126,6 +126,13 @@ func TestParse_Flags(t *testing.T) {
 		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, "", ""},
 		{"/usage summary --range 30d", "usage", "summary", nil, 0, -1, "", "30d"},
 		{"/usage --range all", "usage", "", nil, 0, -1, "", "all"},
+		// Invalid int-flag values must not leak the flag name OR the value as
+		// stray positional args (would pollute provider/name matching downstream).
+		{"/model list --prov -1", "model", "list", nil, 0, -1, "", ""},
+		{"/heartbeat logs --page -5", "heartbeat", "logs", nil, 0, -1, "", ""},
+		{"/model list --prov abc", "model", "list", nil, 0, -1, "", ""},
+		// A following --flag is not eaten as the prior flag's value.
+		{"/model list --page --prov 2", "model", "list", nil, 0, 2, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {

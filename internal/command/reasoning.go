@@ -43,7 +43,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort, cc.WriteAccess), nil
 		},
 	})
 	g.Register(SubCommand{
@@ -77,7 +77,7 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
-			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort), nil
+			return reasoningResult(cc.L, s.ReasoningEnabled, s.ReasoningEffort, cc.WriteAccess), nil
 		},
 	})
 	return g
@@ -87,7 +87,14 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 // button per level (current marked ✓). Tapping re-dispatches "/reasoning set X"
 // which edits the message in place. Level tokens (off/none/low/…) are canonical
 // args and stay untranslated; only the surrounding prose is localized via t.
-func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
+//
+// Every choice routes to `/reasoning set` (IsWrite), so for non-owners
+// (writeAccess=false) the tappable buttons are a dead affordance — every tap
+// bounces off the owner-only gate. Mirror model_picker's convention: gate the
+// Interactive on write access so non-owners get the same rich text body without
+// can't-actually-pick buttons. (Dropping Interactive also drops the renderer's
+// "/reasoning set <…>" trailer for non-owners — intended, they can't set it.)
+func reasoningResult(t *i18n.Localizer, enabled bool, effort string, writeAccess bool) *Result {
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	current := t.T("cmd.common.off")
 	if enabled {
@@ -118,11 +125,12 @@ func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
 	// explainer in Text, text-channel users only saw the bare current-level
 	// header and a command syntax line with no context for why the levels matter.
 	body := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
-	return &Result{
-		Text: body,
-		Interactive: &Interactive{
+	res := &Result{Text: body}
+	if writeAccess {
+		res.Interactive = &Interactive{
 			Kind:    InteractiveChoices,
 			Choices: &ChoicesView{Title: body, Choices: choices},
-		},
+		}
 	}
+	return res
 }

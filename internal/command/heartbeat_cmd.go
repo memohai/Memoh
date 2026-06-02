@@ -11,9 +11,24 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 		// need created_at From/To params. Pagination already covers "view all".
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			const pageSize = 10
-			items, total, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, pageSize, cc.Page*pageSize)
+			page := cc.Page
+			if page < 0 {
+				page = 0
+			}
+			items, total, err := h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, pageSize, page*pageSize)
 			if err != nil {
 				return nil, err
+			}
+			// A page past the end (stale Next button, or a hand-typed
+			// "--page 999") fetches an empty slice while total>0, which would
+			// render an empty body under "Showing 0 of N". Clamp to the last
+			// page and refetch so the user lands on real data.
+			if total > 0 && page > 0 && page*pageSize >= int(total) {
+				page = (int(total) - 1) / pageSize
+				items, total, err = h.heartbeatService.ListLogs(cc.Ctx, cc.BotID, pageSize, page*pageSize)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if total == 0 {
 				return WithButtons(
@@ -42,7 +57,7 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 				}
 				records = append(records, listRecord{fields: rec, note: note})
 			}
-			return buildPagedListResult(cc.T("cmd.heartbeat.title"), "heartbeat", "logs", nil, records, cc.Page, pageSize, int(total), cc.T("cmd.heartbeat.olderHint"), cc.L), nil
+			return buildPagedListResult(cc.T("cmd.heartbeat.title"), "heartbeat", "logs", nil, records, page, pageSize, int(total), cc.T("cmd.heartbeat.olderHint"), cc.L), nil
 		},
 	})
 	return g

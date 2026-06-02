@@ -1124,6 +1124,20 @@ func collapseToTitle(text string) string {
 }
 
 func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {
+	err := rawEditTelegramMessageText(bot, chatID, messageID, text, parseMode)
+	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
+		return nil
+	}
+	return err
+}
+
+// rawEditTelegramMessageText performs the edit and returns the raw API error,
+// swallowing nothing. editTelegramMessageText wraps it with the
+// not-modified/unrecoverable swallow used by interactive edits (where a tap on a
+// deleted card should be a quiet no-op, not a burned retry). The streaming final
+// path uses the raw form instead so it can SEE an unrecoverable error and recover
+// the answer (post it as a new message) rather than dropping it silently.
+func rawEditTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	edit.ParseMode = parseMode
@@ -1131,11 +1145,7 @@ func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, 
 	if send == nil {
 		send = func(b *tgbotapi.BotAPI, e tgbotapi.EditMessageTextConfig) error { _, err := b.Send(e); return err }
 	}
-	err := send(bot, edit)
-	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
-		return nil
-	}
-	return err
+	return send(bot, edit)
 }
 
 func editTelegramMessageTextWithActions(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string, actions []channel.Action) error {

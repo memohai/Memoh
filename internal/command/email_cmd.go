@@ -75,10 +75,24 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 		// need created_at From/To params. Pagination already covers "view all".
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			const pageSize = 10
-			offset := cc.Page * pageSize
-			items, total, err := h.emailOutboxService.ListByBot(cc.Ctx, cc.BotID, pageSize, int32(offset)) //nolint:gosec // offset is a small, bounded page index
+			page := cc.Page
+			if page < 0 {
+				page = 0
+			}
+			items, total, err := h.emailOutboxService.ListByBot(cc.Ctx, cc.BotID, pageSize, int32(page*pageSize)) //nolint:gosec // offset is a small, bounded page index
 			if err != nil {
 				return nil, err
+			}
+			// A page past the end (stale Next button, or a hand-typed
+			// "--page 999") fetches an empty slice while total>0, which would
+			// render an empty body under "Showing 0 of N". Clamp to the last
+			// page and refetch so the user lands on real data.
+			if total > 0 && page > 0 && page*pageSize >= int(total) {
+				page = (int(total) - 1) / pageSize
+				items, total, err = h.emailOutboxService.ListByBot(cc.Ctx, cc.BotID, pageSize, int32(page*pageSize)) //nolint:gosec // offset is a small, bounded page index
+				if err != nil {
+					return nil, err
+				}
 			}
 			if total == 0 {
 				return WithButtons(
@@ -103,7 +117,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				fields = append(fields, kv{cc.T("cmd.email.fieldTo"), truncate(to, 40)}, kv{cc.T("cmd.email.fieldSent"), humanizeTimeT(cc, item.SentAt)})
 				records = append(records, listRecord{fields: fields, note: note})
 			}
-			result := buildPagedListResult(cc.T("cmd.email.outboxTitle"), "email", "outbox", nil, records, cc.Page, pageSize, int(total), "", cc.L)
+			result := buildPagedListResult(cc.T("cmd.email.outboxTitle"), "email", "outbox", nil, records, page, pageSize, int(total), "", cc.L)
 			return WithExtraActions(result,
 				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
 				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},

@@ -1,6 +1,11 @@
 package i18n
 
-import "testing"
+import (
+	"reflect"
+	"regexp"
+	"sort"
+	"testing"
+)
 
 func TestResolve(t *testing.T) {
 	t.Parallel()
@@ -107,6 +112,53 @@ func TestIsSupported(t *testing.T) {
 	for _, no := range []string{"auto", "", "fr", "zh-CN"} {
 		if IsSupported(no) {
 			t.Errorf("IsSupported(%q) = true, want false", no)
+		}
+	}
+}
+
+var placeholderRe = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
+
+func placeholderSet(template string) []string {
+	matches := placeholderRe.FindAllStringSubmatch(template, -1)
+	seen := make(map[string]bool, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, m[1])
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestSupportedCatalogsPlaceholderParity pins that every key's {placeholder} set
+// is identical across locales. TestSupportedCatalogsParity guarantees the keys
+// match; this guarantees the *templates* agree on their substitution variables.
+// A translator dropping a placeholder (e.g. zh "{minutes}" → "每分钟") would
+// otherwise render a literal "{minutes}" to users, or silently lose data — a
+// class of bug the key-set parity check cannot see.
+func TestSupportedCatalogsPlaceholderParity(t *testing.T) {
+	t.Parallel()
+	en := catalogs["en"]
+	if len(en) == 0 {
+		t.Fatal("en catalog is empty")
+	}
+	for _, loc := range Supported {
+		if loc == "en" {
+			continue
+		}
+		cat := catalogs[loc]
+		for key, enTmpl := range en {
+			locTmpl, ok := cat[key]
+			if !ok {
+				continue // key-presence gaps are covered by TestSupportedCatalogsParity
+			}
+			enPH, locPH := placeholderSet(enTmpl), placeholderSet(locTmpl)
+			if !reflect.DeepEqual(enPH, locPH) {
+				t.Errorf("key %q placeholder mismatch: en=%v %q=%v\n  en:  %q\n  %s: %q",
+					key, enPH, loc, locPH, enTmpl, loc, locTmpl)
+			}
 		}
 	}
 }
