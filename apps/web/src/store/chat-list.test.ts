@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { UIStreamEvent, UIStreamEventHandler } from '@/composables/api/useChat'
+import type { MessageStreamEvent, UIStreamEvent, UIStreamEventHandler } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useChatStore } from './chat-list'
 
@@ -27,6 +27,7 @@ function flushPromises() {
 
 describe('chat-list store', () => {
   let streamHandler: UIStreamEventHandler | null
+  let messageEventsHandler: ((event: MessageStreamEvent) => void) | null
   let sendEvents: UIStreamEvent[]
   let lastStreamId = ''
   let lastSessionId = ''
@@ -34,6 +35,7 @@ describe('chat-list store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     streamHandler = null
+    messageEventsHandler = null
     lastStreamId = ''
     lastSessionId = ''
     sendEvents = [
@@ -79,7 +81,8 @@ describe('chat-list store', () => {
       },
     })
     api.fetchMessagesUI.mockResolvedValue([])
-    api.streamMessageEvents.mockImplementation((_botId: string, signal: AbortSignal) => new Promise<void>((resolve) => {
+    api.streamMessageEvents.mockImplementation((_botId: string, signal: AbortSignal, onEvent: (event: MessageStreamEvent) => void) => new Promise<void>((resolve) => {
+      messageEventsHandler = onEvent
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {
@@ -216,6 +219,38 @@ describe('chat-list store', () => {
 
     expect(api.ensureACPRuntime).toHaveBeenCalledTimes(1)
     expect(store.acpRuntimeStatuses[store.acpRuntimeKey('bot-1', 'acp-session-1')]?.models?.available_models).toHaveLength(1)
+  })
+
+  it('refreshes the session list when message events arrive for an unknown session', async () => {
+    api.fetchSessions
+      .mockResolvedValueOnce([
+        { id: 'session-old', bot_id: 'bot-1', title: 'Old', type: 'chat' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'session-new', bot_id: 'bot-1', title: 'New from channel', type: 'chat' },
+        { id: 'session-old', bot_id: 'bot-1', title: 'Old', type: 'chat' },
+      ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    expect(store.sessionId).toBe('session-old')
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'message-1',
+        bot_id: 'bot-1',
+        session_id: 'session-new',
+        role: 'user',
+        created_at: '2026-06-02T10:00:00.000Z',
+      },
+    })
+    await flushPromises()
+
+    expect(api.fetchSessions).toHaveBeenCalledTimes(2)
+    expect(store.sessions.map(session => session.id)).toEqual(['session-new', 'session-old'])
+    expect(store.sessionId).toBe('session-old')
   })
 
   it('renders stream errors in the chat transcript after assistant output starts', async () => {
