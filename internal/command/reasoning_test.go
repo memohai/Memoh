@@ -25,7 +25,7 @@ func TestReasoningRegisteredWithAliases(t *testing.T) {
 
 func TestReasoningResultMarksCurrent(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("en"), true, "medium", true)
+	res := reasoningResult(i18n.New("en"), true, "medium")
 	if res.Interactive == nil || res.Interactive.Kind != InteractiveChoices || res.Interactive.Choices == nil {
 		t.Fatalf("expected a choices interactive, got %+v", res.Interactive)
 	}
@@ -33,32 +33,12 @@ func TestReasoningResultMarksCurrent(t *testing.T) {
 	if !strings.Contains(res.Text, "Current: medium") {
 		t.Errorf("missing current line: %s", res.Text)
 	}
-	assertReasoningMarked(t, reasoningResult(i18n.New("en"), false, "high", true), "off")
-}
-
-// TestReasoningResultGatesButtonsOnWriteAccess pins the owner-only gate: every
-// reasoning choice routes to `/reasoning set` (IsWrite), so a non-owner
-// (writeAccess=false) must get the text body WITHOUT tappable buttons — the
-// buttons would otherwise bounce off the owner gate on every tap. Mirrors the
-// model_picker convention. The current-level text stays visible either way.
-func TestReasoningResultGatesButtonsOnWriteAccess(t *testing.T) {
-	t.Parallel()
-	owner := reasoningResult(i18n.New("en"), true, "medium", true)
-	if owner.Interactive == nil {
-		t.Fatalf("owner should get tappable choices")
-	}
-	member := reasoningResult(i18n.New("en"), true, "medium", false)
-	if member.Interactive != nil {
-		t.Errorf("non-owner must not get tappable write-buttons, got %+v", member.Interactive)
-	}
-	if !strings.Contains(member.Text, "Current: medium") {
-		t.Errorf("non-owner should still see the current level: %s", member.Text)
-	}
+	assertReasoningMarked(t, reasoningResult(i18n.New("en"), false, "high"), "off")
 }
 
 func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("en"), true, "xhigh", true)
+	res := reasoningResult(i18n.New("en"), true, "xhigh")
 	assertReasoningMarked(t, res, "xhigh")
 	labels := make(map[string]bool)
 	for _, c := range res.Interactive.Choices.Choices {
@@ -127,7 +107,7 @@ func TestUnknownCommandHandling(t *testing.T) {
 		}
 	}
 	// Known commands and aliases are recognized (so they aren't treated as unknown).
-	for _, c := range []string{"/help", "/commands", "/setting", "/think", "/effort", "/reason"} {
+	for _, c := range []string{"/help", "/commands", "/setting", "/think", "/effort", "/reason", "/model", "/models"} {
 		if !h.IsCommand(c) {
 			t.Errorf("%s should be a known command", c)
 		}

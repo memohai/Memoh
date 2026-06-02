@@ -128,13 +128,12 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 		}
 	}
 
-	// Selecting a model is owner-only (/model set is IsWrite). Members may still
-	// run /model to SEE the current model and what's available, but rendering
-	// tappable select buttons for them is a dead affordance — every tap re-routes
-	// to /model set and bounces off the owner-only gate. Gate the interactive
-	// picker on write access; non-owners get the same rich text body without the
-	// can't-actually-pick buttons.
-	selectable := cc.WriteAccess
+	// Selecting a model is owner-only (/model set is IsWrite), but the picker
+	// buttons render for everyone: permission is enforced at execution time, so a
+	// non-owner tap returns a clear "owner only" message. Hiding the buttons for
+	// non-owners also hid them from owners whose Telegram identity isn't resolved
+	// as owner (WriteAccess=false) — which silently killed the picker on Telegram.
+	selectable := true
 
 	// No-button-channel parity: when the user opens /model without drilling
 	// into a provider, mirror Telegram's LevelProviders picker structure as

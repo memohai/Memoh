@@ -178,6 +178,8 @@ var resourceAliases = map[string]string{
 	"setting":   "settings",
 	"commands":  "help",
 	"cmds":      "help",
+	"model":     "model",
+	"models":    "model",
 	"reason":    "reasoning",
 	"reasoning": "reasoning",
 	"effort":    "reasoning",

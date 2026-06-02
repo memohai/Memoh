@@ -363,7 +363,7 @@ func TestSettingsResultUsesFocusedActions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handler{}
-			result := h.settingsResult(CommandContext{L: i18n.New("en"), WriteAccess: true}, tc.settings)
+			result := h.settingsResult(CommandContext{L: i18n.New("en")}, tc.settings)
 			if result.Interactive == nil || result.Interactive.Choices == nil {
 				t.Fatal("expected settings choices")
 			}
@@ -413,32 +413,6 @@ func TestSettingsResultUsesFocusedActions(t *testing.T) {
 				t.Errorf("acl toggle should dispatch --acl_default_effect %s, got %v", tc.aclArgValue, aclArgs)
 			}
 		})
-	}
-}
-
-// TestSettingsResultGatesWriteTogglesForNonOwner pins the owner-only gate on the
-// settings card's write toggles: heartbeat/ACL re-dispatch `/settings update`
-// (IsWrite), so a non-owner must not see those tappable buttons (they'd bounce
-// off the owner gate). The read drill-downs (Reasoning/Models/Search/Memory/
-// Language) stay tappable for everyone.
-func TestSettingsResultGatesWriteTogglesForNonOwner(t *testing.T) {
-	t.Parallel()
-	h := &Handler{}
-	member := h.settingsResult(CommandContext{L: i18n.New("en"), WriteAccess: false}, settings.Settings{AclDefaultEffect: "deny", CommandUILanguage: "auto"})
-	for _, item := range member.Interactive.Choices.Choices {
-		if item.Action != nil && item.Action.Resource == "settings" && item.Action.Action == "update" {
-			t.Errorf("non-owner must not get a write toggle, got %q args=%v", item.Label, item.Action.Args)
-		}
-	}
-	// Read drill-downs survive: there must still be tappable sections.
-	var readDrillDowns int
-	for _, item := range member.Interactive.Choices.Choices {
-		if item.Action != nil && item.Action.Action != "update" {
-			readDrillDowns++
-		}
-	}
-	if readDrillDowns == 0 {
-		t.Errorf("non-owner should still get read drill-down buttons, got none")
 	}
 }
 

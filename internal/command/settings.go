@@ -219,23 +219,12 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 	choices := []ListItem{
 		{Label: cc.T("cmd.settings.section.reasoning"), Action: &ItemAction{Resource: "reasoning", Action: "show"}},
 		{Label: cc.T("cmd.settings.section.models"), Action: &ItemAction{Resource: "model", Action: "list"}},
+		{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
+		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
+		{Label: cc.T("cmd.settings.section.search"), Action: &ItemAction{Resource: "search", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.language"), Action: &ItemAction{Resource: "settings", Action: "language"}},
 	}
-	// The heartbeat/ACL toggles re-dispatch `/settings update` (IsWrite). For
-	// non-owners those buttons are a dead affordance — every tap bounces off the
-	// owner-only gate — so omit them (mirrors model_picker/reasoning). The
-	// remaining drill-downs point to read actions (model/search/memory list,
-	// reasoning show, settings language) and stay tappable for everyone.
-	if cc.WriteAccess {
-		choices = append(choices,
-			ListItem{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
-			ListItem{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
-		)
-	}
-	choices = append(choices,
-		ListItem{Label: cc.T("cmd.settings.section.search"), Action: &ItemAction{Resource: "search", Action: "list"}},
-		ListItem{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
-		ListItem{Label: cc.T("cmd.settings.section.language"), Action: &ItemAction{Resource: "settings", Action: "language"}},
-	)
 	return &Result{
 		Text:        card,
 		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: card, Choices: choices}},

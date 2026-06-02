@@ -70,13 +70,8 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 			otherRecords := make([]listRecord, 0, len(items))
 			for _, item := range items {
 				rec := providerListRecord(cc, item.Name, item.Provider, item.IsDefault, item.ID == settingsResp.MemoryProviderID)
-				// Tap a provider to switch to it — no typing of /memory set. Owner-only:
-				// `memory set` is IsWrite, so a tappable row for a non-owner just bounces
-				// off the owner gate (mirrors model_picker/reasoning). Members still see
-				// the list, minus the dead switch affordance.
-				if cc.WriteAccess {
-					rec.action = &ItemAction{Resource: "memory", Action: "set", Args: []string{item.Name}}
-				}
+				// Tap a provider to switch to it — no typing of /memory set.
+				rec.action = &ItemAction{Resource: "memory", Action: "set", Args: []string{item.Name}}
 				if item.ID == settingsResp.MemoryProviderID {
 					currentRecords = append(currentRecords, rec)
 					continue
