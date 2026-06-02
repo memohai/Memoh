@@ -12,6 +12,32 @@ import (
 // LevelProviders picker: title with total count, optional current-model line,
 // optional reasoning line, then one bullet per provider with count and a ●
 // mark on the provider that owns the active model.
+// TestPickerProviderIndex pins the level decision: drill into an explicit
+// provider, ALWAYS drill into a lone provider (so no-button users get a
+// /model set trailer instead of a pointless one-provider grid), and otherwise
+// show the provider-selection level.
+func TestPickerProviderIndex(t *testing.T) {
+	cases := []struct {
+		name      string
+		provIdx   int
+		numGroups int
+		want      int
+	}{
+		{"explicit provider", 2, 5, 2},
+		{"explicit provider out of range", 9, 5, -1},
+		{"lone provider, no drill", -1, 1, 0},
+		{"many providers, no drill", -1, 4, -1},
+		{"zero providers", -1, 0, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickerProviderIndex(tc.provIdx, tc.numGroups); got != tc.want {
+				t.Errorf("pickerProviderIndex(%d, %d) = %d, want %d", tc.provIdx, tc.numGroups, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFormatProvidersSummary(t *testing.T) {
 	cc := CommandContext{L: i18n.New("en")}
 	cands := []modelCandidate{

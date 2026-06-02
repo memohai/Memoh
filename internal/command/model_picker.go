@@ -183,13 +183,28 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 		return res, nil
 	}
 	var picker *ModelPickerView
-	if provIdx >= 0 && provIdx < len(groups) {
-		picker = buildModelsPickerView(groups, cands, provIdx, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)
+	if eff := pickerProviderIndex(provIdx, len(groups)); eff >= 0 {
+		picker = buildModelsPickerView(groups, cands, eff, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)
 	} else {
 		picker = buildProvidersPickerView(groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)
 	}
 	res.Interactive = &Interactive{Kind: InteractiveModelPicker, Picker: picker}
 	return res, nil
+}
+
+// pickerProviderIndex decides which model-picker level to render: a provider
+// group index to drill into (model level), or -1 to show the provider-selection
+// level. A single provider is always drilled into — there is no meaningful
+// provider choice, and a one-button provider grid would leave no-button users
+// with a /model list trailer instead of a /model set one.
+func pickerProviderIndex(provIdx, numGroups int) int {
+	if provIdx >= 0 && provIdx < numGroups {
+		return provIdx
+	}
+	if provIdx < 0 && numGroups == 1 {
+		return 0
+	}
+	return -1
 }
 
 // formatProvidersSummary builds the text body shown to no-button channels when
