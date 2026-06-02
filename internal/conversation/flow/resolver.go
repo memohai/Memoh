@@ -553,7 +553,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort)
 	reasoningEffort := ""
-	if reasoningConfig != nil && reasoningConfig.Enabled {
+	if reasoningConfig != nil && reasoningConfig.Active {
 		reasoningEffort = reasoningConfig.Effort
 	}
 
@@ -601,7 +601,10 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	cfg := agentpkg.RunConfig{
 		Model:                 sdkModel,
 		ReasoningEffort:       reasoningEffort,
+		ReasoningActive:       reasoningConfig != nil && reasoningConfig.Active,
 		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
+		ReasoningAdaptive:     reasoningConfig != nil && reasoningConfig.Adaptive,
+		ReasoningOffEffort:    offEffortOrEmpty(reasoningConfig),
 		ChatCompletionsCompat: chatCompletionsCompat,
 		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		SessionType:           p.SessionType,
@@ -637,31 +640,85 @@ const (
 	reasoningEffortDisable  = "disable"
 )
 
+// resolveReasoningConfig makes the single reasoning decision for a call, driven
+// by the model's discovered thinking mode plus the user's settings/override.
+//
+//   - none:          no thinking; returns nil.
+//   - only_adaptive: thinking forced on (adaptive); only effort is adjustable;
+//     "disable" requests are ignored (the model cannot turn thinking off).
+//   - toggle:        on/off, with per-message override taking precedence over
+//     the bot's default.
 func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort string) *models.ReasoningConfig {
-	if !chatModel.HasCompatibility(models.CompatReasoning) {
+	mode := chatModel.ResolveThinkingMode()
+	if mode == models.ThinkingModeNone {
 		return nil
 	}
-	requestedEffort = strings.TrimSpace(requestedEffort)
-	switch {
-	case reasoningEffortDisabled(requestedEffort):
-		return &models.ReasoningConfig{Disabled: true}
-	case requestedEffort == reasoningEffortAdaptive:
-		return &models.ReasoningConfig{Enabled: true}
-	case requestedEffort != "":
-		return &models.ReasoningConfig{Enabled: true, Effort: requestedEffort}
-	case botSettings.ReasoningEnabled:
-		effort := strings.TrimSpace(botSettings.ReasoningEffort)
-		if effort == "" {
-			effort = models.ReasoningEffortMedium
+
+	effortLevels := chatModel.Config.ReasoningEfforts
+	offEffort := offEffortFor(effortLevels)
+	requested := strings.TrimSpace(requestedEffort)
+
+	if mode == models.ThinkingModeOnlyAdaptive {
+		// Forced adaptive: thinking is always on; only effort varies.
+		return &models.ReasoningConfig{
+			Active:    true,
+			Adaptive:  true,
+			Effort:    pickEffort(requested, botSettings),
+			OffEffort: offEffort,
 		}
-		return &models.ReasoningConfig{Enabled: true, Effort: effort}
-	default:
-		return &models.ReasoningConfig{Disabled: true}
 	}
+
+	// toggle
+	switch {
+	case reasoningEffortDisabled(requested):
+		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	case requested == reasoningEffortAdaptive:
+		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
+		// adaptive concept; send a normal effort).
+		return &models.ReasoningConfig{Active: true, Effort: pickEffort("", botSettings), OffEffort: offEffort}
+	case requested != "":
+		return &models.ReasoningConfig{Active: true, Effort: requested, OffEffort: offEffort}
+	case botSettings.ReasoningEnabled:
+		return &models.ReasoningConfig{Active: true, Effort: pickEffort("", botSettings), OffEffort: offEffort}
+	default:
+		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
+	}
+}
+
+// pickEffort resolves the effort to send when thinking is active: the
+// per-message override (if a concrete tier) wins, then the bot default, then
+// medium. No clamping against the model's level list — an unsupported effort
+// surfaces as an upstream error rather than being silently rewritten.
+func pickEffort(requested string, botSettings settings.Settings) string {
+	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
+		return e
+	}
+	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" {
+		return e
+	}
+	return models.ReasoningEffortMedium
+}
+
+// offEffortFor picks the effort an OpenAI-style provider should send to
+// approximate "off": "none" when the model supports it, otherwise "minimal".
+func offEffortFor(effortLevels []string) string {
+	for _, e := range effortLevels {
+		if e == models.ReasoningEffortNone {
+			return models.ReasoningEffortNone
+		}
+	}
+	return models.ReasoningEffortMinimal
 }
 
 func reasoningEffortDisabled(effort string) bool {
 	return strings.TrimSpace(effort) == reasoningEffortDisable
+}
+
+func offEffortOrEmpty(rc *models.ReasoningConfig) string {
+	if rc == nil {
+		return ""
+	}
+	return rc.OffEffort
 }
 
 func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {

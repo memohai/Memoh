@@ -100,7 +100,7 @@ import { Label, Separator, Popover, PopoverTrigger, PopoverContent, Button, Swit
 import { Lightbulb, ChevronDown } from 'lucide-vue-next'
 import ModelSelect from './model-select.vue'
 import ReasoningEffortSelect from './reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE } from './reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from './reasoning-effort'
 import type { SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 
 const props = defineProps<{
@@ -109,24 +109,32 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
 }>()
 
-const chatModelSupportsReasoning = computed(() => {
-  if (!props.form.chat_model_id) return false
-  const m = props.models.find((m) => m.id === props.form.chat_model_id)
-  return !!m?.config?.compatibilities?.includes('reasoning')
+const chatModelConfig = computed(() => {
+  if (!props.form.chat_model_id) return undefined
+  return props.models.find((m) => m.id === props.form.chat_model_id)?.config
 })
 
-const availableReasoningEfforts = computed(() => {
-  if (!props.form.chat_model_id) return ['low', 'medium', 'high']
-  const model = props.models.find((m) => m.id === props.form.chat_model_id)
-  const efforts = ((model?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((effort) => ['none', 'low', 'medium', 'high', 'xhigh'].includes(effort))
-  return efforts.length > 0 ? efforts : ['low', 'medium', 'high']
-})
+const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
 
-watch(availableReasoningEfforts, (efforts) => {
-  if (props.form.reasoning_enabled && !efforts.includes(props.form.reasoning_effort)) {
+const chatModelSupportsReasoning = computed(() => thinkingMode.value !== 'none')
+
+const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value))
+
+// Options shown in the picker: toggle adds an explicit "off"; only_adaptive
+// offers tiers only (thinking is forced on for the bot).
+const availableReasoningEfforts = computed(() =>
+  availableEffortsForMode(thinkingMode.value, effortLevels.value),
+)
+
+watch([effortLevels, thinkingMode], ([levels, mode]) => {
+  // Forced-adaptive models can't keep reasoning off.
+  if (mode === 'only_adaptive' && !props.form.reasoning_enabled) {
     // eslint-disable-next-line vue/no-mutating-props
-    props.form.reasoning_effort = efforts.includes('medium') ? 'medium' : efforts[0] ?? 'medium'
+    props.form.reasoning_enabled = true
+  }
+  if (props.form.reasoning_enabled && !levels.includes(props.form.reasoning_effort)) {
+    // eslint-disable-next-line vue/no-mutating-props
+    props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
   }
 }, { immediate: true })
 

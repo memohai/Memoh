@@ -3095,6 +3095,8 @@ definitions:
         items:
           type: string
         type: array
+      thinking_mode:
+        type: string
     type: object
   models.ModelType:
     enum:
@@ -3432,6 +3434,8 @@ definitions:
           type: string
         type: array
       skipped:
+        type: integer
+      updated:
         type: integer
     type: object
   providers.OAuthAccount:

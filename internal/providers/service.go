@@ -14,6 +14,7 @@ import (
 	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/capabilities"
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -23,10 +24,18 @@ import (
 
 // Service handles provider operations.
 type Service struct {
-	queries     dbstore.Queries
-	logger      *slog.Logger
-	httpClient  *http.Client
-	callbackURL string
+	queries            dbstore.Queries
+	logger             *slog.Logger
+	httpClient         *http.Client
+	callbackURL        string
+	capabilityRegistry *capabilities.Registry
+}
+
+// SetCapabilityRegistry wires the LiteLLM-backed capability registry used to
+// enrich fetched models. Setter injection keeps the many lightweight
+// NewService(nil, ...) call sites unaffected; when unset, enrichment is skipped.
+func (s *Service) SetCapabilityRegistry(r *capabilities.Registry) {
+	s.capabilityRegistry = r
 }
 
 // NewService creates a new provider service.
@@ -304,59 +313,169 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	if err != nil {
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
-	if models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot {
-		creds, err := s.ResolveModelCredentials(ctx, provider)
-		if err != nil {
-			return nil, err
-		}
-		sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
-		if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
-			return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
-		}
 
-		catalog := githubcopilot.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:      model.ID,
-				Name:    model.DisplayName,
-				Object:  "model",
-				OwnedBy: "github-copilot",
-				Type:    "chat",
-				Compatibilities: []string{
-					models.CompatVision,
-					models.CompatToolCall,
-					models.CompatReasoning,
-				},
-			})
-		}
-		return remoteModels, nil
+	// Kick off the capability-registry refresh concurrently with the provider's
+	// own model listing so the two network round-trips overlap. Best-effort and
+	// fail-open: a slow or failed registry never blocks or fails the fetch.
+	warm := s.warmCapabilities(ctx)
+
+	var remoteModels []RemoteModel
+	switch {
+	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
+		remoteModels, err = s.fetchGitHubCopilotModels(ctx, provider)
+	case supportsOAuth(provider):
+		remoteModels = fetchCodexCatalogModels()
+	default:
+		remoteModels, err = s.fetchRemoteModelsViaSDK(ctx, provider)
 	}
-	if supportsOAuth(provider) {
-		catalog := openaicodex.Catalog()
-		remoteModels := make([]RemoteModel, 0, len(catalog))
-		for _, model := range catalog {
-			compatibilities := make([]string, 0, 2)
-			if model.SupportsToolCall {
-				compatibilities = append(compatibilities, models.CompatToolCall)
-			}
-			if model.SupportsReasoning {
-				compatibilities = append(compatibilities, models.CompatReasoning)
-			}
-			remoteModels = append(remoteModels, RemoteModel{
-				ID:               model.ID,
-				Name:             model.DisplayName,
-				Object:           "model",
-				OwnedBy:          "openai-codex",
-				Type:             "chat",
-				Compatibilities:  compatibilities,
-				ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
-			})
-		}
-		return remoteModels, nil
+	if err != nil {
+		return nil, err
 	}
 
-	return s.fetchRemoteModelsViaSDK(ctx, provider)
+	s.enrichWithCapabilities(ctx, warm, remoteModels)
+	return remoteModels, nil
+}
+
+func (s *Service) fetchGitHubCopilotModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
+	creds, err := s.ResolveModelCredentials(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	sdkProvider := memohcopilot.NewProvider(creds.APIKey, nil)
+	if result := sdkProvider.Test(ctx); result.Status != sdk.ProviderStatusOK {
+		return nil, fmt.Errorf("github copilot provider test failed: %s", result.Message)
+	}
+
+	catalog := githubcopilot.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:      model.ID,
+			Name:    model.DisplayName,
+			Object:  "model",
+			OwnedBy: "github-copilot",
+			Type:    "chat",
+			Compatibilities: []string{
+				models.CompatVision,
+				models.CompatToolCall,
+				models.CompatReasoning,
+			},
+		})
+	}
+	return remoteModels, nil
+}
+
+func fetchCodexCatalogModels() []RemoteModel {
+	catalog := openaicodex.Catalog()
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
+		compatibilities := make([]string, 0, 2)
+		if model.SupportsToolCall {
+			compatibilities = append(compatibilities, models.CompatToolCall)
+		}
+		if model.SupportsReasoning {
+			compatibilities = append(compatibilities, models.CompatReasoning)
+		}
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:               model.ID,
+			Name:             model.DisplayName,
+			Object:           "model",
+			OwnedBy:          "openai-codex",
+			Type:             "chat",
+			Compatibilities:  compatibilities,
+			ReasoningEfforts: append([]string(nil), model.ReasoningEfforts...),
+		})
+	}
+	return remoteModels
+}
+
+// warmCapabilities triggers a background registry refresh detached from the
+// request context (bounded by probeTimeout). Returns a channel that closes when
+// the attempt completes, or nil when no registry is configured.
+func (s *Service) warmCapabilities(ctx context.Context) <-chan struct{} {
+	if s.capabilityRegistry == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
+		defer cancel()
+		s.capabilityRegistry.Warm(wctx)
+	}()
+	return done
+}
+
+// enrichWithCapabilities fills in reasoning capabilities (thinking mode, effort
+// levels, context window, and vision/tool-call/reasoning compatibility) for chat
+// models from the LiteLLM registry. It is strictly trust + fill: it only supplies
+// information the upstream did not, and never strips an upstream-claimed value.
+func (s *Service) enrichWithCapabilities(ctx context.Context, warm <-chan struct{}, remoteModels []RemoteModel) {
+	if s.capabilityRegistry == nil {
+		return
+	}
+	if warm != nil {
+		select {
+		case <-warm:
+		case <-ctx.Done():
+			return
+		}
+	}
+	for i := range remoteModels {
+		m := &remoteModels[i]
+		if t := strings.TrimSpace(m.Type); t != "" && t != string(models.ModelTypeChat) {
+			continue
+		}
+		caps, ok := s.capabilityRegistry.Lookup(ctx, m.ID)
+		if !ok {
+			continue
+		}
+		applyCapabilities(m, caps)
+	}
+}
+
+// applyCapabilities merges discovered capabilities into a RemoteModel without
+// overriding explicit upstream values.
+func applyCapabilities(m *RemoteModel, caps capabilities.Capabilities) {
+	if m.ThinkingMode == "" && caps.ThinkingMode != "" {
+		// Don't let a registry "none" override an explicit upstream reasoning claim.
+		if caps.ThinkingMode != models.ThinkingModeNone || !hasCompat(m.Compatibilities, models.CompatReasoning) {
+			m.ThinkingMode = caps.ThinkingMode
+		}
+	}
+	if len(m.ReasoningEfforts) == 0 && len(caps.EffortLevels) > 0 {
+		m.ReasoningEfforts = append([]string(nil), caps.EffortLevels...)
+	}
+	if m.ContextWindow == nil && caps.ContextWindow != nil {
+		m.ContextWindow = caps.ContextWindow
+	}
+
+	switch caps.ThinkingMode {
+	case models.ThinkingModeToggle, models.ThinkingModeOnlyAdaptive:
+		m.Compatibilities = addCompat(m.Compatibilities, models.CompatReasoning)
+	}
+	if caps.Vision != nil && *caps.Vision {
+		m.Compatibilities = addCompat(m.Compatibilities, models.CompatVision)
+	}
+	if caps.ToolCall != nil && *caps.ToolCall {
+		m.Compatibilities = addCompat(m.Compatibilities, models.CompatToolCall)
+	}
+}
+
+func hasCompat(list []string, c string) bool {
+	for _, v := range list {
+		if v == c {
+			return true
+		}
+	}
+	return false
+}
+
+func addCompat(list []string, c string) []string {
+	if hasCompat(list, c) {
+		return list
+	}
+	return append(list, c)
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {

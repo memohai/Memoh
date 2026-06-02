@@ -668,7 +668,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
-import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_DISABLE, availableEffortsForMode, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -885,15 +885,13 @@ const activeModel = computed(() => {
   return models.value.find((m) => m.id === id)
 })
 
-const activeModelSupportsReasoning = computed(() =>
-  !!activeModel.value?.config?.compatibilities?.includes('reasoning'),
-)
+const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?.config))
 
-const availableReasoningEfforts = computed(() => {
-  const efforts = ((activeModel.value?.config as { reasoning_efforts?: string[] } | undefined)?.reasoning_efforts ?? [])
-    .filter((e) => [REASONING_EFFORT_ADAPTIVE, 'none', 'low', 'medium', 'high', 'xhigh'].includes(e))
-  return [...new Set([REASONING_EFFORT_ADAPTIVE, ...(efforts.length > 0 ? efforts : ['low', 'medium', 'high'])])]
-})
+const activeModelSupportsReasoning = computed(() => activeThinkingMode.value !== 'none')
+
+const availableReasoningEfforts = computed(() =>
+  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config)),
+)
 
 const selectedModelLabel = computed(() => {
   if (activeIsPendingACP.value) {
@@ -929,6 +927,9 @@ function initFromBotSettings() {
   if (!overrideReasoningEffort.value) {
     if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
       overrideReasoningEffort.value = botSettings.value.reasoning_effort
+    } else if (activeThinkingMode.value === 'only_adaptive') {
+      // Forced-adaptive models cannot be turned off; default to a concrete tier.
+      overrideReasoningEffort.value = botSettings.value.reasoning_effort || 'medium'
     } else {
       overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     }
@@ -1008,6 +1009,11 @@ function onModelSelected() {
   modelPopoverOpen.value = false
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
+    return
+  }
+  // A forced-adaptive model can't be "off"; coerce a stale disable into a tier.
+  if (activeThinkingMode.value === 'only_adaptive' && overrideReasoningEffort.value === REASONING_EFFORT_DISABLE) {
+    overrideReasoningEffort.value = botSettings.value?.reasoning_effort || 'medium'
   }
 }
 

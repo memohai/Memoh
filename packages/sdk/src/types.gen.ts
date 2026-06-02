@@ -1860,6 +1860,7 @@ export type ModelsModelConfig = {
     context_window?: number;
     dimensions?: number;
     reasoning_efforts?: Array<string>;
+    thinking_mode?: string;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription';
@@ -2044,6 +2045,7 @@ export type ProvidersImportModelsResponse = {
     created?: number;
     models?: Array<string>;
     skipped?: number;
+    updated?: number;
 };
 
 export type ProvidersOAuthAccount = {

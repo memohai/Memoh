@@ -376,13 +376,12 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	return settings
 }
 
+// isValidReasoningEffort accepts the full effort tier range. Effort is now a
+// free-form tier string (models expose their own supported levels via capability
+// discovery), so we only reject empty/whitespace values here; the specific tiers
+// a given model accepts are enforced upstream, not by this generic setting.
 func isValidReasoningEffort(effort string) bool {
-	switch effort {
-	case "none", "low", "medium", "high", "xhigh":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(effort) != ""
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {

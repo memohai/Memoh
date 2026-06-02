@@ -72,7 +72,10 @@ type InjectMessage struct {
 type RunConfig struct {
 	Model                 *sdk.Model
 	ReasoningEffort       string
+	ReasoningActive       bool
 	ReasoningDisabled     bool
+	ReasoningAdaptive     bool
+	ReasoningOffEffort    string
 	ChatCompletionsCompat string
 	Messages              []sdk.Message
 	Query                 string

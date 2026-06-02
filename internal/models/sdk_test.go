@@ -24,13 +24,13 @@ func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
 			wantOpts: 1,
 		},
 		{
-			name:     "enabled with effort forwards effort",
-			config:   &ReasoningConfig{Enabled: true, Effort: "high"},
+			name:     "active with effort forwards effort",
+			config:   &ReasoningConfig{Active: true, Effort: "high"},
 			wantOpts: 1,
 		},
 		{
-			name:     "adaptive leaves effort unset for model default",
-			config:   &ReasoningConfig{Enabled: true},
+			name:     "active without effort leaves effort unset for model default",
+			config:   &ReasoningConfig{Active: true},
 			wantOpts: 0,
 		},
 		{

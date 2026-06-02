@@ -69,6 +69,7 @@ func options() fx.Option {
 			settings.NewService,
 			toolapproval.NewService,
 			userinput.NewService,
+			provideCapabilityRegistry,
 			provideProvidersService,
 			searchproviders.NewService,
 			policy.NewService,

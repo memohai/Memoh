@@ -93,10 +93,21 @@ func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
 func TestResolveReasoningConfig(t *testing.T) {
 	t.Parallel()
 
-	reasoningModel := models.GetResponse{
+	// Legacy data: reasoning compat without an explicit thinking_mode resolves to
+	// toggle via the SupportsReasoning/ResolveThinkingMode bridge.
+	toggleModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
 				Compatibilities: []string{models.CompatReasoning},
+			},
+		},
+	}
+	// Forced-adaptive model (Claude 4.6+ family).
+	adaptiveModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeOnlyAdaptive,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
 			},
 		},
 	}
@@ -111,47 +122,59 @@ func TestResolveReasoningConfig(t *testing.T) {
 	}{
 		{
 			name:          "disable overrides bot default",
-			model:         reasoningModel,
+			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: reasoningEffortDisable,
 			want:          &models.ReasoningConfig{Disabled: true},
 		},
 		{
-			name:          "adaptive enables reasoning without fixed effort",
-			model:         reasoningModel,
+			name:          "legacy adaptive request enables toggle with default effort",
+			model:         toggleModel,
 			requestEffort: reasoningEffortAdaptive,
-			want:          &models.ReasoningConfig{Enabled: true},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "none is preserved as effort",
-			model:         reasoningModel,
+			name:          "explicit none effort is preserved",
+			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortNone},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortNone},
 		},
 		{
 			name:          "explicit effort is trimmed",
-			model:         reasoningModel,
+			model:         toggleModel,
 			requestEffort: " low ",
-			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortLow},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortLow},
 		},
 		{
 			name:        "bot default is used when no request override",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: " high "},
-			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortHigh},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:        "bot default falls back to medium",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: true},
-			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortMedium},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
 			name:        "disabled bot explicitly disables reasoning",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: false, ReasoningEffort: models.ReasoningEffortHigh},
 			want:        &models.ReasoningConfig{Disabled: true},
+		},
+		{
+			name:          "only_adaptive forces thinking on even with disable request",
+			model:         adaptiveModel,
+			requestEffort: reasoningEffortDisable,
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+		},
+		{
+			name:          "only_adaptive honors explicit effort",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortXHigh,
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortXHigh},
 		},
 		{
 			name:          "model without reasoning ignores request",
@@ -172,7 +195,8 @@ func TestResolveReasoningConfig(t *testing.T) {
 				}
 				return
 			}
-			if got.Enabled != tt.want.Enabled || got.Disabled != tt.want.Disabled || got.Effort != tt.want.Effort {
+			if got.Active != tt.want.Active || got.Disabled != tt.want.Disabled ||
+				got.Adaptive != tt.want.Adaptive || got.Effort != tt.want.Effort {
 				t.Fatalf("expected %#v, got %#v", tt.want, got)
 			}
 		})

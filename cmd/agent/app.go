@@ -30,6 +30,7 @@ import (
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/capabilities"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
 	"github.com/memohai/memoh/internal/channel/adapters/discord"
@@ -875,8 +876,14 @@ func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenSto
 	return reg
 }
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, _ config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+func provideCapabilityRegistry(log *slog.Logger) *capabilities.Registry {
+	return capabilities.NewRegistry(capabilities.WithLogger(log))
+}
+
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries, _ config.Config, capReg *capabilities.Registry) *providers.Service {
+	svc := providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+	svc.SetCapabilityRegistry(capReg)
+	return svc
 }
 
 func defaultProviderOAuthCallbackURL() string {

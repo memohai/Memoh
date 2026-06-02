@@ -1,0 +1,111 @@
+package capabilities
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	"github.com/memohai/memoh/internal/models"
+)
+
+func ptrBool(b bool) *bool { return &b }
+func ptrInt(i int) *int    { return &i }
+
+func TestDerive_AdaptiveOpus(t *testing.T) {
+	// claude-opus-4-8: adaptive + xhigh + max.
+	caps := derive(litellmEntry{
+		SupportsReasoning:            ptrBool(true),
+		SupportsAdaptiveThinking:     ptrBool(true),
+		SupportsXHighReasoningEffort: ptrBool(true),
+		SupportsMaxReasoningEffort:   ptrBool(true),
+		SupportsVision:               ptrBool(true),
+		SupportsFunctionCalling:      ptrBool(true),
+		MaxInputTokens:               ptrInt(1000000),
+	})
+	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
+		t.Fatalf("thinking mode = %q, want only_adaptive", caps.ThinkingMode)
+	}
+	want := []string{"low", "medium", "high", "xhigh", "max"}
+	if !reflect.DeepEqual(caps.EffortLevels, want) {
+		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
+	}
+}
+
+func TestDerive_ToggleGPT5Minimal(t *testing.T) {
+	// gpt-5: reasoning + minimal, none/xhigh explicitly false, not adaptive.
+	caps := derive(litellmEntry{
+		SupportsReasoning:              ptrBool(true),
+		SupportsNoneReasoningEffort:    ptrBool(false),
+		SupportsMinimalReasoningEffort: ptrBool(true),
+		SupportsXHighReasoningEffort:   ptrBool(false),
+	})
+	if caps.ThinkingMode != models.ThinkingModeToggle {
+		t.Fatalf("thinking mode = %q, want toggle", caps.ThinkingMode)
+	}
+	want := []string{"minimal", "low", "medium", "high"}
+	if !reflect.DeepEqual(caps.EffortLevels, want) {
+		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
+	}
+}
+
+func TestDerive_PlainReasoning(t *testing.T) {
+	// o3: reasoning only → toggle with base tiers.
+	caps := derive(litellmEntry{SupportsReasoning: ptrBool(true)})
+	if caps.ThinkingMode != models.ThinkingModeToggle {
+		t.Fatalf("thinking mode = %q", caps.ThinkingMode)
+	}
+	want := []string{"low", "medium", "high"}
+	if !reflect.DeepEqual(caps.EffortLevels, want) {
+		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
+	}
+}
+
+func TestDerive_ExplicitNoReasoning(t *testing.T) {
+	caps := derive(litellmEntry{SupportsReasoning: ptrBool(false)})
+	if caps.ThinkingMode != models.ThinkingModeNone {
+		t.Fatalf("thinking mode = %q, want none", caps.ThinkingMode)
+	}
+	if caps.EffortLevels != nil {
+		t.Fatalf("effort levels should be nil, got %v", caps.EffortLevels)
+	}
+}
+
+func TestDerive_SilentRegistryIsUnknown(t *testing.T) {
+	caps := derive(litellmEntry{SupportsVision: ptrBool(true)})
+	if caps.ThinkingMode != "" {
+		t.Fatalf("thinking mode should be unknown (empty), got %q", caps.ThinkingMode)
+	}
+	if caps.Vision == nil || !*caps.Vision {
+		t.Fatalf("vision should be filled")
+	}
+}
+
+func TestRegistry_LookupViaInjectedFetch(t *testing.T) {
+	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
+		return map[string]litellmEntry{
+			"claude-opus-4-8": {
+				SupportsReasoning:            ptrBool(true),
+				SupportsAdaptiveThinking:     ptrBool(true),
+				SupportsXHighReasoningEffort: ptrBool(true),
+				SupportsMaxReasoningEffort:   ptrBool(true),
+			},
+		}, nil
+	}))
+
+	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
+	if !ok {
+		t.Fatalf("expected lookup hit")
+	}
+	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
+		t.Fatalf("thinking mode = %q", caps.ThinkingMode)
+	}
+}
+
+func TestRegistry_FailOpenReturnsUnknown(t *testing.T) {
+	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
+		return nil, context.DeadlineExceeded
+	}))
+	if _, ok := reg.Lookup(context.Background(), "claude-opus-4-8"); ok {
+		t.Fatalf("lookup should miss when registry never loaded")
+	}
+}

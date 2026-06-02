@@ -234,3 +234,8 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
+
+// Local development against the reason-effort branch of twilight-ai (Anthropic
+// output_config.effort support). Replace with a tagged pseudo-version once the
+// twilight change is merged/published upstream.
+replace github.com/memohai/twilight-ai => ../twilight-ai-reason-effort
