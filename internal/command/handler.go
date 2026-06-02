@@ -266,15 +266,20 @@ func UnknownCommandMessage(t *i18n.Localizer, text string) string {
 // error falls back to the default locale, so command rendering never blocks on
 // it. Exported so the channel layer can localize its own renderer chrome and
 // operational-failure messages with the same locale.
+//
+// Uses the scoped GetCommandUILanguage (single DB query) rather than GetBot
+// (which also fetches the ACL default-effect) — the locale is resolved per
+// command and per interactive callback tap, so single-query matters for
+// paginated lists where users tap Prev/Next repeatedly.
 func (h *Handler) ResolveLocale(ctx context.Context, botID string) string {
 	if h == nil || h.settingsService == nil || strings.TrimSpace(botID) == "" {
 		return i18n.DefaultLocale
 	}
-	s, err := h.settingsService.GetBot(ctx, strings.TrimSpace(botID))
+	lang, err := h.settingsService.GetCommandUILanguage(ctx, strings.TrimSpace(botID))
 	if err != nil {
 		return i18n.DefaultLocale
 	}
-	return i18n.Resolve(s.CommandUILanguage)
+	return i18n.Resolve(lang)
 }
 
 // Execute parses and runs a slash command, returning the text reply.
@@ -471,11 +476,18 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 // It keys on content markers only — a length cap was removed because legitimate
 // domain messages (e.g. an ambiguous-model list of provider-qualified IDs) can
 // be long, and capping by length wrongly replaced them with a dead retry line.
+//
+// Markers are conservative. "sql:" (with colon) catches database/sql / pq
+// wrap chains without flagging model names that happen to contain "sql"
+// (e.g. "sqlcoder"). "failed to " is the canonical Go wrap idiom; legitimate
+// domain messages can also begin with it ("failed to find …"), so the
+// false-positive test in handler_test pins the trade-off and the visible
+// fallback ("please try again") is still recoverable.
 func looksLikeInternalError(msg string) bool {
 	lower := strings.ToLower(msg)
 	markers := []string{
 		"failed to ", "dial tcp", "connection refused", "context deadline",
-		"i/o timeout", "no such host", "://", "pq:", "sql", "x509",
+		"i/o timeout", "no such host", "pq:", "sql:", "x509",
 		"panic:", "goroutine", "invalid memory", "nil pointer",
 	}
 	for _, m := range markers {

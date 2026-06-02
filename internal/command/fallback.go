@@ -65,14 +65,15 @@ func formatSlashCommand(resource, action string, args []string, quote bool) stri
 	b.WriteString(" ")
 	b.WriteString(action)
 	for _, arg := range args {
-		if strings.TrimSpace(arg) == "" {
+		trimmed := strings.TrimSpace(arg)
+		if trimmed == "" {
 			continue
 		}
 		b.WriteString(" ")
 		if quote {
-			b.WriteString(quoteArgIfNeeded(arg))
+			b.WriteString(quoteArgIfNeeded(trimmed))
 		} else {
-			b.WriteString(arg)
+			b.WriteString(trimmed)
 		}
 	}
 	return b.String()

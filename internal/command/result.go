@@ -48,6 +48,11 @@ type Interactive struct {
 // derivation on no-button channels — used when rows are display-only but the
 // list has a paired typeable affordance (e.g. /mcp list rows are display-only
 // but /mcp get <name> is the typeable next step). Empty = infer from structure.
+//
+// Note the asymmetry with ChoicesView.BodyEnumeratesChoices: ListView needs
+// to pick WHICH verb to emit, ChoicesView only needs to choose WHETHER to
+// emit. Different questions, different mechanisms — kept that way rather
+// than forcing them into one shape that fits neither cleanly.
 type ListView struct {
 	Title        string
 	ButtonText   string   // optional compact text for button-capable channels
@@ -128,6 +133,10 @@ type PickerModel struct {
 // typeable affordance (e.g. /help <group>'s Usage block lists every
 // sub-command verbatim), so the no-button fallback trailer should skip this
 // surface to avoid duplicating what the body already says.
+//
+// This is a bool (not a HintVerb sentinel like ListView's HintVerb) because
+// the question being answered is different: ChoicesView picks WHETHER to emit
+// a trailer at all, ListView picks WHICH verb to use. See ListView.HintVerb.
 type ChoicesView struct {
 	Title                 string
 	Choices               []ListItem

@@ -1128,7 +1128,7 @@ func TestCoerceFormatForCaps_DegradesMarkdownOnPlainChannel(t *testing.T) {
 	t.Parallel()
 	plainCaps := ChannelCapabilities{Text: true} // no Markdown, no RichText
 	msg := Message{Text: "Hello **world** and `code`", Format: MessageFormatMarkdown}
-	coerced := CoerceFormatForCaps(msg, plainCaps)
+	coerced := coerceFormatForCaps(msg, plainCaps)
 	if coerced.Format != MessageFormatPlain {
 		t.Fatalf("plain-only caps must coerce Markdown → Plain, got %q", coerced.Format)
 	}
@@ -1146,7 +1146,7 @@ func TestCoerceFormatForCaps_PreservesMarkdownOnCapableChannel(t *testing.T) {
 	t.Parallel()
 	mdCaps := ChannelCapabilities{Text: true, Markdown: true}
 	msg := Message{Text: "Hello **world**", Format: MessageFormatMarkdown}
-	coerced := CoerceFormatForCaps(msg, mdCaps)
+	coerced := coerceFormatForCaps(msg, mdCaps)
 	if coerced.Format != MessageFormatMarkdown {
 		t.Fatalf("markdown-capable channel must keep markdown format, got %q", coerced.Format)
 	}
@@ -1167,7 +1167,7 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			msg := Message{Text: "Plain reply", Format: MessageFormatPlain}
-			coerced := CoerceFormatForCaps(msg, caps)
+			coerced := coerceFormatForCaps(msg, caps)
 			if coerced.Format != MessageFormatPlain {
 				t.Fatalf("plain must stay plain on %s, got %q", name, coerced.Format)
 			}

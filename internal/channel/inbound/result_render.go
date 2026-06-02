@@ -97,8 +97,8 @@ func (rc RenderContext) localizerFor(result *command.Result) *i18n.Localizer {
 // button support. Channels without button support (or results without
 // structured data) degrade to the complete fallback Text, with a derived
 // "typeable affordances" trailer appended so users on no-button channels can
-// still discover and invoke what the buttons would have done. The final
-// message format (Markdown vs Plain) is decided once, capability-gated. The
+// still discover and invoke what the buttons would have done. Inbound picks
+// Format here; outbound coerceFormatForCaps re-validates before send. The
 // renderer's own chrome (Close/Prev/Next/…) is localized to Result.Locale.
 func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	if result == nil {
@@ -145,17 +145,14 @@ func appendFallbackTrailer(text string, iv *command.Interactive, caps channel.Ch
 	return strings.TrimRight(text, "\n") + "\n\n" + trailer
 }
 
-// applyMessageFormat sets the message format from the channel's capabilities:
-// Markdown when supported (Telegram renders it, others degrade client-side),
-// otherwise the inline markup authored upstream is stripped so text-only
-// channels stay clean. This is the single place command-reply format is decided
-// inside the inbound renderer.
+// applyMessageFormat picks Format and inline-markup handling based on what
+// the channel can render: Markdown for capable channels (Telegram et al.),
+// Plain elsewhere with `**` / backticks stripped from the body upstream.
 //
-// Setting Format explicitly here is no longer load-bearing for correctness —
-// the outbound layer's CoerceFormatForCaps will degrade an auto-promoted
-// Markdown back to Plain when caps reject it. The explicit set still avoids
-// unnecessary round-trips through that coercion and keeps the inbound output
-// matching what's actually sent.
+// The outbound layer's coerceFormatForCaps is the authoritative defense
+// against an auto-promoted Markdown reaching a plain-text-only channel; this
+// inbound step is the in-process companion that picks the right shape from
+// the start so the body the user sees matches what we render here.
 func applyMessageFormat(msg channel.Message, caps channel.ChannelCapabilities) channel.Message {
 	if caps.Markdown || caps.RichText {
 		msg.Format = channel.MessageFormatMarkdown
@@ -166,12 +163,11 @@ func applyMessageFormat(msg channel.Message, caps channel.ChannelCapabilities) c
 	return msg
 }
 
-// plainTextMessage builds a fully-formed channel.Message from `text` with
-// Format set per the target channel's caps. Use for every operational reply
-// constructed via `channel.Message{Text: …}` outside the main renderResult
-// path so the outbound layer's normalizeOutboundMessage auto-detect doesn't
-// promote bullet-list templates to Markdown and silently reject them on
-// plain-text-only channels (Weixin/WeChat OA/Local-Web).
+// plainTextMessage builds a fully-formed channel.Message from `text`, routing
+// through applyMessageFormat so the body's inline markup matches what the
+// target channel can render. Convenience wrapper for operational replies
+// constructed outside the main renderResult path (e.g. /new, /stop, ops
+// errors) — keeps every such reply consistent with the renderer's contract.
 func plainTextMessage(text string, caps channel.ChannelCapabilities) channel.Message {
 	return applyMessageFormat(channel.Message{Text: text}, caps)
 }
@@ -199,16 +195,18 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 		totalPages = (lv.Total + pageSize - 1) / pageSize
 	}
 
-	// Clamp Page into [0, totalPages-1]. A stale callback from a keyboard
-	// captured before the list shrunk (rows deleted on another device)
-	// would otherwise emit a broken nav row — "11/3" counter, Prev encoding
-	// a Page-1 jump backward into nowhere — and Next would silently vanish.
-	// Mirrors the clamp in renderModelPicker.
-	if lv.Page < 0 {
-		lv.Page = 0
+	// Clamp the page index used for nav rendering into [0, totalPages-1] in a
+	// local variable; do not mutate lv (a caller-owned pointer). A stale
+	// callback from a keyboard captured before the list shrunk (rows deleted
+	// on another device) would otherwise emit a broken nav row — "11/3"
+	// counter, Prev encoding a Page-1 jump backward into nowhere — and Next
+	// would silently vanish. Mirrors the clamp in renderModelPicker.
+	page := lv.Page
+	if page < 0 {
+		page = 0
 	}
-	if totalPages > 0 && lv.Page > totalPages-1 {
-		lv.Page = totalPages - 1
+	if totalPages > 0 && page > totalPages-1 {
+		page = totalPages - 1
 	}
 
 	var actions []channel.Action
@@ -261,25 +259,25 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 
 	if totalPages > 1 {
 		navRow := row
-		if lv.Page > 0 {
+		if page > 0 {
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
 				Label: t.T("chrome.prev"),
-				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, lv.Page-1),
+				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, page-1),
 				Row:   navRow,
 			})
 		}
 		actions = append(actions, channel.Action{
 			Type:  actionTypeCallback,
-			Label: fmt.Sprintf("%d/%d", lv.Page+1, totalPages),
+			Label: fmt.Sprintf("%d/%d", page+1, totalPages),
 			Value: command.NoopCallback(),
 			Row:   navRow,
 		})
-		if lv.Page < totalPages-1 {
+		if page < totalPages-1 {
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
 				Label: t.T("chrome.next"),
-				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, lv.Page+1),
+				Value: command.EncodeListCallback(lv.Resource, lv.Action, lv.Args, page+1),
 				Row:   navRow,
 			})
 		}

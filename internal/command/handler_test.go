@@ -683,3 +683,59 @@ var (
 	_ = mcp.Connection{}
 	_ = settings.Settings{}
 )
+
+// TestLooksLikeInternalError_KeepsRealLeaksHidden pins the markers that MUST
+// flag a message as internal (so the user sees a clean retry line instead of
+// raw infra).
+func TestLooksLikeInternalError_KeepsRealLeaksHidden(t *testing.T) {
+	t.Parallel()
+	internalCases := []string{
+		"failed to dial backend: connection refused",
+		"dial tcp 10.0.0.1:5432: connect: connection refused",
+		"context deadline exceeded",
+		"i/o timeout",
+		"no such host: api.example.com",
+		"pq: relation \"foo\" does not exist",
+		"sql: no rows in result set",
+		"x509: certificate signed by unknown authority",
+		"panic: nil pointer dereference",
+		"runtime error: invalid memory address or nil pointer dereference",
+		"goroutine 12 [running]:",
+	}
+	for _, msg := range internalCases {
+		if !looksLikeInternalError(msg) {
+			t.Errorf("expected internal-error classification for %q, got false", msg)
+		}
+	}
+}
+
+// TestLooksLikeInternalError_AllowsDomainMessages pins the legitimate-message
+// boundary. These are real strings handlers emit; flagging them as internal
+// would swap a helpful domain error for a dead "please try again" line.
+//
+// Documents the trade-offs of the current marker set:
+//   - "sqlcoder" (a real model name) used to trip on the bare "sql" marker;
+//     the marker is now "sql:" so model IDs with "sql" prefix/substring pass.
+//   - URLs in domain messages used to trip on "://"; that marker was removed.
+//     Actual URL-bearing transport leaks ("dial tcp…", "no such host") still
+//     get caught by the more-specific markers.
+//   - "failed to …" as a Go wrap-chain marker still flags legitimate English
+//     phrasing like "failed to find a matching schedule" — that's the known
+//     trade-off; handlers should phrase domain not-found errors without the
+//     "failed to" prefix (or with a more specific verb).
+func TestLooksLikeInternalError_AllowsDomainMessages(t *testing.T) {
+	t.Parallel()
+	domainCases := []string{
+		`model "sqlcoder" not found`,
+		`ambiguous model: openai/gpt-4 or sqlcoder/sqlcoder-7b`,
+		`schedule "daily-recap" not found`,
+		`visit https://example.com/docs to configure`,
+		`memory provider mem0 returned no matches`,
+		"reasoning effort must be one of: low, medium, high",
+	}
+	for _, msg := range domainCases {
+		if looksLikeInternalError(msg) {
+			t.Errorf("expected domain-message classification for %q, got true (this leaks the message into a dead retry line)", msg)
+		}
+	}
+}

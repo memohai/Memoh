@@ -59,6 +59,24 @@ func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
 	return settings, nil
 }
 
+// GetCommandUILanguage returns just the command_ui_language setting for a bot.
+// Avoids the second getDefaultEffect query that GetBot triggers — the locale
+// is resolved once per slash command + once per interactive callback tap, so
+// keeping it single-query matters for paginated lists where users tap Prev/Next
+// repeatedly. Returns the raw value (caller is responsible for i18n.Resolve to
+// map "auto"/unknown → server default).
+func (s *Service) GetCommandUILanguage(ctx context.Context, botID string) (string, error) {
+	pgID, err := db.ParseUUID(botID)
+	if err != nil {
+		return "", err
+	}
+	row, err := s.queries.GetSettingsByBotID(ctx, pgID)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(row.CommandUiLanguage), nil
+}
+
 func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest) (Settings, error) {
 	if s.queries == nil {
 		return Settings{}, errors.New("settings queries not configured")
