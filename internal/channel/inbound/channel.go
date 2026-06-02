@@ -3281,8 +3281,8 @@ func (*ChannelInboundProcessor) sendNewConfirmation(
 		"\n\n" + loc.T("newSession.confirmBody", map[string]any{"mode": loc.T(modeKey)})
 	out := applyMessageFormat(channel.Message{Text: text}, caps)
 	out.Actions = []channel.Action{
-		{Type: actionTypeCallback, Label: loc.T("newSession.btnConfirm"), Value: command.EncodeConfirmNewCallback(modeText), Row: 0},
-		{Type: actionTypeCallback, Label: loc.T("newSession.btnCancel"), Value: command.DismissCallback(), Row: 0},
+		{Type: actionTypeCallback, Label: loc.T("newSession.action.confirm"), Value: command.EncodeConfirmNewCallback(modeText), Row: 0},
+		{Type: actionTypeCallback, Label: loc.T("newSession.action.cancel"), Value: command.DismissCallback(), Row: 0},
 	}
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}

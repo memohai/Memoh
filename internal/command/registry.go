@@ -180,7 +180,7 @@ func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n" + t.T("cmd.help.tapAction"))
+	b.WriteString("\n" + t.T("cmd.help.chooseAction"))
 	title := strings.TrimRight(b.String(), "\n")
 	choices := make([]ListItem, 0, len(group.order)+1)
 	for _, subName := range group.order {

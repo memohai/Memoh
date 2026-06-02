@@ -22,8 +22,10 @@
     "usage": "Couldn't read that — use /new for a chat, or /new discuss for a discussion.",
     "confirmTitle": "⚠️ Confirm /new",
     "confirmBody": "This starts a fresh {mode} session and discards the current conversation history.",
-    "btnConfirm": "✅ Confirm",
-    "btnCancel": "✕ Cancel",
+    "action": {
+      "confirm": "✅ Confirm",
+      "cancel": "✕ Cancel"
+    },
     "labelModel": "Model",
     "labelHeartbeat": "Heartbeat",
     "labelReasoning": "Reasoning",
@@ -139,12 +141,12 @@
         "new": "start a new conversation",
         "stop": "stop the current reply"
       },
-      "globalHint": "Tap any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
+      "globalHint": "Send any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
       "runForDetails": "Run {command} for details.",
       "summaryLabel": "Summary",
       "usageLabel": "Usage",
       "siblingActionsLabel": "See sibling actions",
-      "tapAction": "Tap an action:",
+      "chooseAction": "Choose an action:",
       "backToGroup": "◀ {group}",
       "actionLabel": {
         "list": "list",
@@ -260,15 +262,19 @@
       "heartbeatOnEvery": "on · every {minutes} min",
       "aclDeny": "deny — tools ask before running",
       "aclAllow": "allow — tools run without asking",
-      "btnReasoning": "Reasoning ▸",
-      "btnModels": "Models ▸",
-      "btnSearch": "Search ▸",
-      "btnMemory": "Memory ▸",
-      "btnLanguage": "Language ▸",
-      "btnHeartbeatOn": "Turn heartbeat on",
-      "btnHeartbeatOff": "Turn heartbeat off",
-      "btnAclAsk": "Ask before tools",
-      "btnAclAllow": "Allow tools",
+      "section": {
+        "reasoning": "Reasoning ▸",
+        "models": "Models ▸",
+        "search": "Search ▸",
+        "memory": "Memory ▸",
+        "language": "Language ▸"
+      },
+      "action": {
+        "enableHeartbeat": "Turn heartbeat on",
+        "disableHeartbeat": "Turn heartbeat off",
+        "aclAsk": "Ask before tools",
+        "aclAllow": "Allow tools"
+      },
       "langPickerTitle": "Command UI language",
       "langAuto": "Auto",
       "langEn": "English",
@@ -370,9 +376,11 @@
       "providersEmpty": "No email providers yet.\n\nEmail providers let the bot send and receive mail. Add one in the web dashboard.",
       "bindingsEmpty": "No email bindings yet.\n\nA binding gives this bot an email address it can send from. Add one in the web dashboard.",
       "outboxEmpty": "No emails sent yet.\n\nEmails the bot sends will appear here.",
-      "btnProviders": "Providers",
-      "btnBindings": "Bindings",
-      "btnOutbox": "Outbox",
+      "section": {
+        "providers": "Providers",
+        "bindings": "Bindings",
+        "outbox": "Outbox"
+      },
       "fieldAddress": "Address",
       "fieldPermissions": "Permissions",
       "fieldSubject": "Subject",
@@ -385,7 +393,9 @@
     "heartbeat": {
       "title": "Heartbeat Logs",
       "empty": "No heartbeat logs yet.\n\nHeartbeats are periodic autonomous check-ins. Runs appear here once heartbeat is enabled.",
-      "btnSettings": "Settings ▸",
+      "section": {
+        "settings": "Settings ▸"
+      },
       "fieldTime": "Time",
       "fieldDuration": "Duration",
       "olderHint": "Use the Web UI for older heartbeat logs."
@@ -429,7 +439,7 @@
     "reasoning": {
       "header": "🧠 Reasoning",
       "current": "Current: {level}",
-      "tapPrompt": "Higher effort means more careful thinking, but slower replies. Tap a level:",
+      "choosePrompt": "Higher effort means more careful thinking, but slower replies. Choose a level:",
       "setUsage": "Usage: /reasoning set <off|none|low|medium|high|xhigh>",
       "unavailable": "Reasoning isn't available right now.",
       "unknownLevel": "Unknown level {level} — choose off, none, low, medium, high, or xhigh."

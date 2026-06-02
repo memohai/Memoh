@@ -38,7 +38,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	if group == nil || group.Interactive == nil || group.Interactive.Choices == nil {
 		t.Fatalf("expected interactive group help, got %+v", group)
 	}
-	for _, want := range []string{"**/model** — 切换对话模型", "列出 — 列出可用对话模型", "心跳 — 设置心跳模型", "点按一个操作："} {
+	for _, want := range []string{"**/model** — 切换对话模型", "列出 — 列出可用对话模型", "心跳 — 设置心跳模型", "选择操作："} {
 		if !strings.Contains(group.Interactive.Choices.Title, want) {
 			t.Fatalf("zh group help missing %q:\n%s", want, group.Interactive.Choices.Title)
 		}

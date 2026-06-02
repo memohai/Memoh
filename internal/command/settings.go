@@ -196,23 +196,23 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 		{cc.T("cmd.settings.fieldCommandLanguage"), commandLanguageDisplay(cc, s.CommandUILanguage)},
 	})
 	aclNext := "deny"
-	aclAction := cc.T("cmd.settings.btnAclAsk")
+	aclAction := cc.T("cmd.settings.action.aclAsk")
 	if strings.EqualFold(strings.TrimSpace(s.AclDefaultEffect), "deny") {
 		aclNext = "allow"
-		aclAction = cc.T("cmd.settings.btnAclAllow")
+		aclAction = cc.T("cmd.settings.action.aclAllow")
 	}
-	heartbeatAction := cc.T("cmd.settings.btnHeartbeatOn")
+	heartbeatAction := cc.T("cmd.settings.action.enableHeartbeat")
 	if s.HeartbeatEnabled {
-		heartbeatAction = cc.T("cmd.settings.btnHeartbeatOff")
+		heartbeatAction = cc.T("cmd.settings.action.disableHeartbeat")
 	}
 	choices := []ListItem{
-		{Label: cc.T("cmd.settings.btnReasoning"), Action: &ItemAction{Resource: "reasoning", Action: "show"}},
-		{Label: cc.T("cmd.settings.btnModels"), Action: &ItemAction{Resource: "model", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.reasoning"), Action: &ItemAction{Resource: "reasoning", Action: "show"}},
+		{Label: cc.T("cmd.settings.section.models"), Action: &ItemAction{Resource: "model", Action: "list"}},
 		{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
 		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
-		{Label: cc.T("cmd.settings.btnSearch"), Action: &ItemAction{Resource: "search", Action: "list"}},
-		{Label: cc.T("cmd.settings.btnMemory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
-		{Label: cc.T("cmd.settings.btnLanguage"), Action: &ItemAction{Resource: "settings", Action: "language"}},
+		{Label: cc.T("cmd.settings.section.search"), Action: &ItemAction{Resource: "search", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.language"), Action: &ItemAction{Resource: "settings", Action: "language"}},
 	}
 	return &Result{
 		Text:        card,

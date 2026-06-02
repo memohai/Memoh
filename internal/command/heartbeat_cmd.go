@@ -18,7 +18,7 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 			if total == 0 {
 				return WithButtons(
 					&Result{Text: cc.T("cmd.heartbeat.empty")},
-					ListItem{Label: cc.T("cmd.heartbeat.btnSettings"), Action: &ItemAction{Resource: "settings", Action: "get"}},
+					ListItem{Label: cc.T("cmd.heartbeat.section.settings"), Action: &ItemAction{Resource: "settings", Action: "get"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))

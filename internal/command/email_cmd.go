@@ -18,8 +18,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			if len(items) == 0 {
 				return WithButtons(
 					&Result{Text: cc.T("cmd.email.providersEmpty")},
-					ListItem{Label: cc.T("cmd.email.btnBindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
-					ListItem{Label: cc.T("cmd.email.btnOutbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
+					ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
+					ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
@@ -32,8 +32,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			}
 			result := buildListResult(cc.T("cmd.email.providersTitle"), "email", "providers", nil, records, cc.Page, defaultListLimit, "", cc.L)
 			return WithExtraActions(result,
-				ListItem{Label: cc.T("cmd.email.btnBindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
-				ListItem{Label: cc.T("cmd.email.btnOutbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
+				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
+				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 			), nil
 		},
 	})
@@ -48,8 +48,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			if len(items) == 0 {
 				return WithButtons(
 					&Result{Text: cc.T("cmd.email.bindingsEmpty")},
-					ListItem{Label: cc.T("cmd.email.btnProviders"), Action: &ItemAction{Resource: "email", Action: "providers"}},
-					ListItem{Label: cc.T("cmd.email.btnOutbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
+					ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
+					ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
@@ -62,8 +62,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			}
 			result := buildListResult(cc.T("cmd.email.bindingsTitle"), "email", "bindings", nil, records, cc.Page, defaultListLimit, "", cc.L)
 			return WithExtraActions(result,
-				ListItem{Label: cc.T("cmd.email.btnProviders"), Action: &ItemAction{Resource: "email", Action: "providers"}},
-				ListItem{Label: cc.T("cmd.email.btnOutbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
+				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
+				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
 			), nil
 		},
 	})
@@ -83,8 +83,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			if total == 0 {
 				return WithButtons(
 					&Result{Text: cc.T("cmd.email.outboxEmpty")},
-					ListItem{Label: cc.T("cmd.email.btnProviders"), Action: &ItemAction{Resource: "email", Action: "providers"}},
-					ListItem{Label: cc.T("cmd.email.btnBindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
+					ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
+					ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
 				), nil
 			}
 			records := make([]listRecord, 0, len(items))
@@ -105,8 +105,8 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 			}
 			result := buildPagedListResult(cc.T("cmd.email.outboxTitle"), "email", "outbox", nil, records, cc.Page, pageSize, int(total), "", cc.L)
 			return WithExtraActions(result,
-				ListItem{Label: cc.T("cmd.email.btnProviders"), Action: &ItemAction{Resource: "email", Action: "providers"}},
-				ListItem{Label: cc.T("cmd.email.btnBindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
+				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
+				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
 			), nil
 		},
 	})

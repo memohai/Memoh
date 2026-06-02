@@ -115,7 +115,7 @@ func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
 	// channels see header alone — the renderer appends the auto-derived
 	// "Pick with /reasoning set <off|none|low|medium|high|xhigh>." trailer so the
 	// level list and the typeable form arrive together without manual baking.
-	buttonTitle := header + "\n\n" + t.T("cmd.reasoning.tapPrompt")
+	buttonTitle := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
 	return &Result{
 		Text: header,
 		Interactive: &Interactive{
