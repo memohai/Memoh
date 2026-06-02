@@ -44,11 +44,10 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
 			var selectedID string
-			if cc.Flat >= 0 {
-				// Selection from a picker button: resolve the flat index against
-				// the canonical model list. Out-of-range means the list changed
-				// between render and tap.
-				cand, ok, err := h.modelCandidateByFlat(cc, cc.Flat)
+			if cc.SelectID != "" {
+				// Selection from a picker button: resolve the stable model id.
+				// A miss means the model was removed between render and tap.
+				cand, ok, err := h.modelCandidateByDBID(cc, cc.SelectID)
 				if err != nil {
 					return "", err
 				}

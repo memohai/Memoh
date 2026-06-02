@@ -374,7 +374,7 @@ func renderModelPicker(fallbackText string, p *command.ModelPickerView, t *i18n.
 			actions = append(actions, channel.Action{
 				Type:  actionTypeCallback,
 				Label: truncateButtonLabel(label),
-				Value: command.EncodeModelSelectCallback(m.FlatIndex),
+				Value: command.EncodeModelSelectCallback(m.DBID),
 				Row:   row,
 			})
 			row++

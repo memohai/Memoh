@@ -80,19 +80,21 @@ func groupCandidatesByProvider(cands []modelCandidate) []providerGroup {
 	return groups
 }
 
-// modelCandidateByFlat re-derives the canonical candidate list and returns the
-// candidate at the given flat index. ok is false when the index is out of range
-// (e.g. the model set changed between render and tap).
-func (h *Handler) modelCandidateByFlat(cc CommandContext, flat int) (modelCandidate, bool, error) {
+// modelCandidateByDBID re-derives the canonical candidate list and returns the
+// candidate with the given stable DB id. ok is false when no selectable model
+// has that id (e.g. it was deleted between render and tap).
+func (h *Handler) modelCandidateByDBID(cc CommandContext, dbID string) (modelCandidate, bool, error) {
 	items, err := h.selectableChatModels(cc)
 	if err != nil {
 		return modelCandidate{}, false, err
 	}
-	cands := h.buildModelCandidates(cc, items)
-	if flat < 0 || flat >= len(cands) {
-		return modelCandidate{}, false, nil
+	dbID = strings.TrimSpace(dbID)
+	for _, c := range h.buildModelCandidates(cc, items) {
+		if c.dbID == dbID {
+			return c, true, nil
+		}
 	}
-	return cands[flat], true, nil
+	return modelCandidate{}, false, nil
 }
 
 // buildModelPickerResult produces the model list as a Result: complete flat text
@@ -268,10 +270,10 @@ func buildModelsPickerView(groups []providerGroup, cands []modelCandidate, provI
 	for _, mi := range g.modelIdx {
 		c := cands[mi]
 		picks = append(picks, PickerModel{
-			FlatIndex: mi,
-			Name:      c.name,
-			Provider:  c.provider,
-			Selected:  c.dbID == currentDBID,
+			DBID:     c.dbID,
+			Name:     c.name,
+			Provider: c.provider,
+			Selected: c.dbID == currentDBID,
 		})
 	}
 	return &ModelPickerView{

@@ -35,7 +35,7 @@ type ParsedCallback struct {
 	Args          []string
 	Page          int
 	ProviderIndex int
-	FlatIndex     int
+	SelectID      string
 	Range         string
 }
 
@@ -102,10 +102,12 @@ func EncodeModelProviderCallback(providerIndex, page int) string {
 }
 
 // EncodeModelSelectCallback builds the callback_data for selecting a model by
-// its global flat index. Layout: "m~ms~{flatIndex}". The index avoids embedding
-// long model IDs that would breach the 64-byte limit.
-func EncodeModelSelectCallback(flatIndex int) string {
-	return fmt.Sprintf("%sms~%d", callbackNamespace, flatIndex)
+// its stable DB id. Layout: "m~ms~{modelDBID}". Using the stable id (not a
+// positional/flat index) means a model-list change between render and tap can't
+// silently resolve the tap to a different model. The id is a UUID (~36 bytes),
+// so "m~ms~"+id stays well within Telegram's 64-byte callback_data limit.
+func EncodeModelSelectCallback(modelDBID string) string {
+	return fmt.Sprintf("%sms~%s", callbackNamespace, url.QueryEscape(strings.TrimSpace(modelDBID)))
 }
 
 // EncodeRangeCallback builds the callback_data for a time-window preset button.
@@ -165,11 +167,11 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 		}
 		return ParsedCallback{Kind: callbackKindModelProvider, ProviderIndex: prov, Page: page}, true
 	case strings.HasPrefix(body, "ms~"):
-		flat, err := strconv.Atoi(strings.TrimPrefix(body, "ms~"))
-		if err != nil || flat < 0 {
+		id, err := url.QueryUnescape(strings.TrimPrefix(body, "ms~"))
+		if err != nil || strings.TrimSpace(id) == "" {
 			return ParsedCallback{}, false
 		}
-		return ParsedCallback{Kind: callbackKindModelSelect, FlatIndex: flat}, true
+		return ParsedCallback{Kind: callbackKindModelSelect, SelectID: strings.TrimSpace(id)}, true
 	case strings.HasPrefix(body, "rg~"):
 		parts := strings.SplitN(strings.TrimPrefix(body, "rg~"), "~", 3)
 		if len(parts) != 3 || parts[2] == "" {
@@ -199,7 +201,7 @@ func (p ParsedCallback) SyntheticCommand() string {
 	case callbackKindModelProvider:
 		return fmt.Sprintf("/model list --prov %d --page %d", p.ProviderIndex, p.Page)
 	case callbackKindModelSelect:
-		return fmt.Sprintf("/model set --flat %d", p.FlatIndex)
+		return fmt.Sprintf("/model set --id %s", p.SelectID)
 	case callbackKindRange:
 		return fmt.Sprintf("/%s %s --range %s", p.Resource, p.Action, p.Range)
 	case callbackKindConfirmNew:

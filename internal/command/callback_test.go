@@ -230,17 +230,21 @@ func TestModelProviderCallbackRoundTrip(t *testing.T) {
 }
 
 func TestModelSelectCallbackRoundTrip(t *testing.T) {
-	data := EncodeModelSelectCallback(17)
+	const modelID = "1f2e3d4c-5b6a-7980-1234-56789abcdef0" // stable UUID, not a flat index
+	data := EncodeModelSelectCallback(modelID)
+	if len(data) > telegramCallbackLimit {
+		t.Fatalf("callback %q exceeds %d-byte limit (%d)", data, telegramCallbackLimit, len(data))
+	}
 	parsed, ok := DecodeCallback(data)
-	if !ok || parsed.Kind != callbackKindModelSelect || parsed.FlatIndex != 17 {
+	if !ok || parsed.Kind != callbackKindModelSelect || parsed.SelectID != modelID {
 		t.Fatalf("decode %q -> %+v ok=%v", data, parsed, ok)
 	}
 	reparsed, err := Parse(parsed.SyntheticCommand())
 	if err != nil {
 		t.Fatalf("Parse(%q): %v", parsed.SyntheticCommand(), err)
 	}
-	if reparsed.Resource != "model" || reparsed.Action != "set" || reparsed.Flat != 17 {
-		t.Errorf("synthetic re-parse = %+v, want model/set flat=17", reparsed)
+	if reparsed.Resource != "model" || reparsed.Action != "set" || reparsed.SelectID != modelID {
+		t.Errorf("synthetic re-parse = %+v, want model/set id=%s", reparsed, modelID)
 	}
 }
 

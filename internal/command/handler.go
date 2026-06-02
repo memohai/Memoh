@@ -375,7 +375,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		SessionID:         strings.TrimSpace(input.SessionID),
 		Page:              parsed.Page,
 		Prov:              parsed.Prov,
-		Flat:              parsed.Flat,
+		SelectID:          parsed.SelectID,
 		Range:             parsed.Range,
 		Locale:            localeStr,
 		L:                 loc,

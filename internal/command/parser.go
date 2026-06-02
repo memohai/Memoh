@@ -13,7 +13,7 @@ type ParsedCommand struct {
 	Args     []string // remaining positional arguments
 	Page     int      // zero-based page offset from a "--page N" flag (0 if absent)
 	Prov     int      // provider index from a "--prov N" flag (-1 if absent)
-	Flat     int      // flat model index from a "--flat N" flag (-1 if absent)
+	SelectID string   // stable model id from a "--id V" flag ("" if absent)
 	Range    string   // time-window key from a "--range V" flag ("" if absent)
 }
 
@@ -45,7 +45,7 @@ func Parse(text string) (ParsedCommand, error) {
 		Resource: resource,
 		Page:     flags.page,
 		Prov:     flags.prov,
-		Flat:     flags.flat,
+		SelectID: flags.selectID,
 		Range:    flags.rangeKey,
 	}
 	if len(tokens) > 1 {
@@ -60,19 +60,24 @@ func Parse(text string) (ParsedCommand, error) {
 type parsedFlags struct {
 	page     int
 	prov     int
-	flat     int
 	rangeKey string
+	selectID string
 }
 
-// extractFlags pulls "--page N", "--prov N", "--flat N" (ints) and "--range V"
-// (string) out of the token stream so they do not leak into positional Args.
-// Absent integer flags default to 0 for page and -1 for prov/flat; range to "".
+// extractFlags pulls "--page N", "--prov N" (ints), "--range V" and "--id V"
+// (strings) out of the token stream so they do not leak into positional Args.
+// Absent integer flags default to 0 for page and -1 for prov; strings to "".
 func extractFlags(tokens []string) ([]string, parsedFlags) {
 	out := make([]string, 0, len(tokens))
-	flags := parsedFlags{page: 0, prov: -1, flat: -1}
+	flags := parsedFlags{page: 0, prov: -1}
 	for i := 0; i < len(tokens); i++ {
 		if tokens[i] == "--range" && i+1 < len(tokens) {
 			flags.rangeKey = tokens[i+1]
+			i++ // skip the value token
+			continue
+		}
+		if tokens[i] == "--id" && i+1 < len(tokens) {
+			flags.selectID = tokens[i+1]
 			i++ // skip the value token
 			continue
 		}
@@ -84,9 +89,6 @@ func extractFlags(tokens []string) ([]string, parsedFlags) {
 			minVal = 0
 		case "--prov":
 			target = &flags.prov
-			minVal = 0
-		case "--flat":
-			target = &flags.flat
 			minVal = 0
 		}
 		if target != nil && i+1 < len(tokens) {

@@ -1,6 +1,7 @@
 package inbound
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -319,7 +320,7 @@ func TestRenderModelPickerModelLevel(t *testing.T) {
 	// a Back-to-providers button, ✓ on the selected model, and Close.
 	models := make([]command.PickerModel, 0, 20)
 	for i := 0; i < 20; i++ {
-		models = append(models, command.PickerModel{FlatIndex: i, Name: "m", Selected: i == 9})
+		models = append(models, command.PickerModel{DBID: fmt.Sprintf("model-%d", i), Name: "m", Selected: i == 9})
 	}
 	res := &command.Result{
 		Text: "models",

@@ -25,7 +25,7 @@ type CommandContext struct {
 	SessionID         string
 	Page              int    // zero-based page offset for paginated list commands
 	Prov              int    // provider index for the model picker (-1 if absent)
-	Flat              int    // flat model index for picker selection (-1 if absent)
+	SelectID          string // stable model id for picker selection ("" if absent)
 	Range             string // time-window key for time-series commands ("" = default)
 	Locale            string // resolved command-UI locale ("en", "zh", …)
 	L                 *i18n.Localizer

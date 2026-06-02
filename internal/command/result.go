@@ -119,12 +119,14 @@ type PickerProvider struct {
 }
 
 // PickerModel is one model button in the picker. Selected marks the active
-// model (rendered with ✓). FlatIndex is the global index used for selection.
+// model (rendered with ✓). DBID is the model's stable id, carried in the
+// selection callback so a list change between render and tap can't resolve the
+// tap to a different model.
 type PickerModel struct {
-	FlatIndex int
-	Name      string
-	Provider  string
-	Selected  bool
+	DBID     string
+	Name     string
+	Provider string
+	Selected bool
 }
 
 // ChoicesView is a flat set of selectable choices (no pagination).

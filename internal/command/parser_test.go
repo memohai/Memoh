@@ -114,17 +114,18 @@ func TestParse_Flags(t *testing.T) {
 		input            string
 		resource, action string
 		args             []string
-		page, prov, flat int
+		page, prov       int
+		selectID         string
 		rangeKey         string
 	}{
-		{"/mcp list", "mcp", "list", nil, 0, -1, -1, ""},
-		{"/mcp list --page 3", "mcp", "list", nil, 3, -1, -1, ""},
-		{"/model list --prov 2 --page 1", "model", "list", nil, 1, 2, -1, ""},
-		{"/model set --flat 17", "model", "set", nil, 0, -1, 17, ""},
-		{"/model list openrouter --page 2", "model", "list", []string{"openrouter"}, 2, -1, -1, ""},
-		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, -1, ""},
-		{"/usage summary --range 30d", "usage", "summary", nil, 0, -1, -1, "30d"},
-		{"/usage --range all", "usage", "", nil, 0, -1, -1, "all"},
+		{"/mcp list", "mcp", "list", nil, 0, -1, "", ""},
+		{"/mcp list --page 3", "mcp", "list", nil, 3, -1, "", ""},
+		{"/model list --prov 2 --page 1", "model", "list", nil, 1, 2, "", ""},
+		{"/model set --id 1f2e3d4c-5b6a-7980-1234-56789abcdef0", "model", "set", nil, 0, -1, "1f2e3d4c-5b6a-7980-1234-56789abcdef0", ""},
+		{"/model list openrouter --page 2", "model", "list", []string{"openrouter"}, 2, -1, "", ""},
+		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, "", ""},
+		{"/usage summary --range 30d", "usage", "summary", nil, 0, -1, "", "30d"},
+		{"/usage --range all", "usage", "", nil, 0, -1, "", "all"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -136,8 +137,11 @@ func TestParse_Flags(t *testing.T) {
 			if p.Resource != tt.resource || p.Action != tt.action {
 				t.Errorf("resource/action = %q/%q, want %q/%q", p.Resource, p.Action, tt.resource, tt.action)
 			}
-			if p.Page != tt.page || p.Prov != tt.prov || p.Flat != tt.flat {
-				t.Errorf("page/prov/flat = %d/%d/%d, want %d/%d/%d", p.Page, p.Prov, p.Flat, tt.page, tt.prov, tt.flat)
+			if p.Page != tt.page || p.Prov != tt.prov {
+				t.Errorf("page/prov = %d/%d, want %d/%d", p.Page, p.Prov, tt.page, tt.prov)
+			}
+			if p.SelectID != tt.selectID {
+				t.Errorf("selectID = %q, want %q", p.SelectID, tt.selectID)
 			}
 			if p.Range != tt.rangeKey {
 				t.Errorf("range = %q, want %q", p.Range, tt.rangeKey)
