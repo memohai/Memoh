@@ -17,7 +17,7 @@ func TestHelpUsesCommandUILocale(t *testing.T) {
 	if res == nil {
 		t.Fatal("nil result")
 	}
-	for _, want := range []string{"可用命令", "/model — 切换对话模型", "/settings — 查看并修改机器人设置"} {
+	for _, want := range []string{"可用命令", "/model — 切换对话模型", "/settings — 查看和修改设置"} {
 		if !strings.Contains(res.Text, want) {
 			t.Fatalf("zh global help missing %q:\n%s", want, res.Text)
 		}
