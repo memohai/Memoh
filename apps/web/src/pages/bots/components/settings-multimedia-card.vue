@@ -29,7 +29,7 @@
         <TtsModelSelect
           v-model="form.transcription_model_id"
           :models="transcriptionModels"
-          :providers="ttsProviders"
+          :providers="transcriptionProviders"
           :placeholder="$t('bots.settings.transcriptionModelPlaceholder')"
           show-icons
         />
@@ -63,6 +63,7 @@ import type {
   AudioSpeechModelResponse, 
   AudioSpeechProviderResponse, 
   AudioTranscriptionModelResponse,
+  AudioTranscriptionProviderResponse,
   ModelsGetResponse,
   ProvidersGetResponse
 } from '@memohai/sdk'
@@ -72,6 +73,7 @@ defineProps<{
   ttsModels: AudioSpeechModelResponse[]
   ttsProviders: AudioSpeechProviderResponse[]
   transcriptionModels: AudioTranscriptionModelResponse[]
+  transcriptionProviders: AudioTranscriptionProviderResponse[]
   imageCapableModels: ModelsGetResponse[]
   providers: ProvidersGetResponse[]
 }>()
