@@ -13,6 +13,7 @@ package capabilities
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -50,9 +51,13 @@ var (
 	reDateCompact = regexp.MustCompile(`-\d{8}$`)
 	reDateDashed  = regexp.MustCompile(`-20\d{2}-\d{2}-\d{2}$`)
 	// trailing vendor decorations, stripped while original delimiters are intact:
-	//   @default (vertex), -v1:0 / -v2 (bedrock), :0 (revision).
+	//   @default (vertex), -v1:0 (bedrock revision), :0 (revision).
+	// IMPORTANT: only a bedrock-style "-vN:M" (with a colon revision) is stripped.
+	// A bare "-vN" (e.g. "deepseek-v4", "titan-...-v2") carries real version
+	// information and MUST survive into the version signature, otherwise distinct
+	// versions collapse to one canonical and the version veto is bypassed.
 	reAtSuffix   = regexp.MustCompile(`@[a-z0-9._-]+$`)
-	reBedrockVer = regexp.MustCompile(`[-_]v\d+(:\d+)?$`)
+	reBedrockVer = regexp.MustCompile(`[-_]v\d+:\d+$`)
 	reColonVer   = regexp.MustCompile(`:\d+$`)
 	// a token carries version information if it contains a digit.
 	reHasDigit = regexp.MustCompile(`\d`)
@@ -215,12 +220,18 @@ type indexEntry struct {
 
 func buildIndex(keys []string) *index {
 	idx := &index{byCanonical: make(map[string]string, len(keys))}
-	for _, k := range keys {
+	// Sort first: registry keys arrive from a map (random order). Sorting makes
+	// both the byCanonical representative choice and the fuzzy-tie winner in
+	// matchNorm deterministic across processes.
+	sorted := append([]string(nil), keys...)
+	sort.Strings(sorted)
+	for _, k := range sorted {
 		n := normalize(k)
 		if n.canonical == "" {
 			continue
 		}
-		// Prefer the shortest source key for a given canonical form (less noise).
+		// Prefer the shortest source key for a given canonical form (less noise);
+		// ties broken by the sorted order above.
 		if existing, ok := idx.byCanonical[n.canonical]; !ok || len(k) < len(existing) {
 			idx.byCanonical[n.canonical] = k
 		}

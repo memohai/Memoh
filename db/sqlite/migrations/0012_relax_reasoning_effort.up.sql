@@ -1,6 +1,9 @@
--- 0009_relax_reasoning_effort (down)
--- Restore the legacy low/medium/high CHECK constraint by rebuilding the table.
--- Rows with newer effort tiers must be reconciled before rolling back.
+-- 0012_relax_reasoning_effort
+-- Reasoning effort is now a free-form tier string (minimal/low/medium/high/xhigh/max/none),
+-- driven by per-model capability discovery. SQLite cannot drop a CHECK
+-- constraint in place, so rebuild the bots table without bots_reasoning_effort_check.
+-- NOTE: runs after 0010 (heartbeat_interval default 1440), so the rebuilt table
+-- must keep DEFAULT 1440 to avoid reverting that change.
 
 PRAGMA foreign_keys = OFF;
 
@@ -24,7 +27,7 @@ CREATE TABLE bots (
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
-  heartbeat_interval INTEGER NOT NULL DEFAULT 30,
+  heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   compaction_enabled INTEGER NOT NULL DEFAULT 0,
@@ -49,7 +52,6 @@ CREATE TABLE bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high')),
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'

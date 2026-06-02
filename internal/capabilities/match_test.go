@@ -129,6 +129,48 @@ func TestMatch_VariantDoesNotCollapseToBase(t *testing.T) {
 	}
 }
 
+// TestNormalize_BareVersionSuffixSurvives guards against the bedrock-revision
+// regex eating a legitimate bare "-vN" version token. Distinct bare versions
+// (titan-...-v1 vs -v2, deepseek-v4 vs -v2) must keep their version signature
+// and never collapse to one canonical / cross-match.
+func TestNormalize_BareVersionSuffixSurvives(t *testing.T) {
+	for _, c := range []struct {
+		raw      string
+		wantVer  string
+		wantCanT bool // version token expected present
+	}{
+		{"deepseek-v4", "v4", true},
+		{"amazon.titan-image-generator-v2", "v2", true},
+		{"anthropic.claude-v1", "v1", true},
+	} {
+		n := normalize(c.raw)
+		if _, ok := n.versions[c.wantVer]; ok != c.wantCanT {
+			t.Fatalf("normalize(%q).versions = %v, want %q present=%v", c.raw, n.versions, c.wantVer, c.wantCanT)
+		}
+	}
+
+	// Bedrock revision (with colon) is still stripped.
+	if _, ok := normalize("anthropic.claude-opus-4-8-v1:0").versions["v1"]; ok {
+		t.Fatalf("bedrock -v1:0 revision should be stripped, not kept as version")
+	}
+
+	// Distinct bare versions must not cross-match.
+	idx := buildIndex([]string{
+		"amazon.titan-image-generator-v1",
+		"amazon.titan-image-generator-v2",
+		"deepseek-v4",
+		"deepseek-v2",
+	})
+	got1, _ := idx.match("amazon.titan-image-generator-v1")
+	got2, _ := idx.match("amazon.titan-image-generator-v2")
+	if normalize(got1).canonical == normalize(got2).canonical {
+		t.Fatalf("titan v1 and v2 collapsed to one canonical: %q vs %q", got1, got2)
+	}
+	if got, ok := idx.match("deepseek-v3"); ok {
+		t.Fatalf("deepseek-v3 (absent) must not match a neighbor version, got %q", got)
+	}
+}
+
 func TestMatch_UnknownReturnsFalse(t *testing.T) {
 	idx := buildIndex(registryCorpus)
 	if got, ok := idx.match("some-totally-unknown-model-xyz"); ok {

@@ -1,4 +1,4 @@
--- 0084_relax_reasoning_effort (down)
+-- 0086_relax_reasoning_effort (down)
 -- Restore the legacy low/medium/high CHECK constraint. Rows with newer effort
 -- tiers (minimal/xhigh/max/none) must be reconciled before rolling back.
 
