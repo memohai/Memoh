@@ -33,11 +33,16 @@ var knownPrefixSegments = map[string]struct{}{
 	"sa": {}, "ca": {}, "me": {}, "emea": {},
 }
 
-// marketingSuffixTokens are trailing decorations that don't change the model's
-// reasoning capability shape and should not block a match.
+// marketingSuffixTokens are pure release-channel / alias decorations that point
+// at the same underlying model and should not block a match. We deliberately do
+// NOT include capability-distinguishing tokens here: the LiteLLM registry is
+// comprehensive and lists variants such as "...-fast", "...-exp",
+// "...-fast-reasoning" as their own keys with their own context windows and
+// reasoning shapes, so those tokens must be kept and matched exactly (or MISS),
+// never folded into the base model.
 var marketingSuffixTokens = map[string]struct{}{
-	"thinking": {}, "fast": {}, "latest": {}, "preview": {}, "exp": {},
-	"experimental": {}, "beta": {}, "online": {}, "nonthinking": {},
+	"latest": {}, "preview": {}, "beta": {}, "online": {},
+	"thinking": {}, "nonthinking": {},
 }
 
 var (

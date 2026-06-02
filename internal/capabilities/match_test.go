@@ -14,6 +14,7 @@ var registryCorpus = []string{
 	"anthropic.claude-opus-4-8",
 	"us.anthropic.claude-opus-4-8",
 	"vertex_ai/claude-opus-4-8@default",
+	"github_copilot/claude-opus-4-6-fast",
 	"gpt-5",
 	"gpt-5-mini",
 	"o3",
@@ -37,7 +38,7 @@ func TestMatch_ProviderNamingVariants(t *testing.T) {
 		{"region-dotted-prefix", "us.anthropic.claude-opus-4-8", "claude-opus-4-8"},
 		{"date-suffix", "claude-opus-4-8-20260514", "claude-opus-4-8"},
 		{"bedrock-version-tag", "bedrock/us-east-1/anthropic.claude-opus-4-8-v1:0", "claude-opus-4-8"},
-		{"fast-marketing-suffix", "github_copilot/claude-opus-4.8-fast", "claude-opus-4-8"},
+		{"fast-is-a-distinct-variant", "anthropic/claude-opus-4.6-fast", "claude-opus-4-6-fast"},
 		{"thinking-marketing-suffix", "claude-opus-4-8-thinking", "claude-opus-4-8"},
 		{"reordered-tokens", "claude-4.8-opus", "claude-opus-4-8"},
 		{"gpt5-plain", "openai/gpt-5", "gpt-5"},
@@ -95,9 +96,11 @@ func TestMatch_VersionVetoPreventsCrossVersion(t *testing.T) {
 func TestMatch_VariantDoesNotCollapseToBase(t *testing.T) {
 	idx := buildIndex([]string{
 		"deepseek-v4",
+		"deepseek-v3.2",
 		"gpt-5",
 		"qwen3-coder",
-		"gemini-3-flash", // base flash present, "lite" variant absent
+		"gemini-3-flash",  // base flash present, "lite" variant absent
+		"claude-opus-4-8", // base present, "-fast" variant absent
 	})
 
 	for _, variant := range []string{
@@ -108,6 +111,10 @@ func TestMatch_VariantDoesNotCollapseToBase(t *testing.T) {
 		"openai/gpt-5-nano",
 		"qwen/qwen3-coder-plus",
 		"google/gemini-3-flash-lite",
+		// fast / exp are capability-distinguishing now; without their own key
+		// they must MISS, not borrow the base model.
+		"anthropic/claude-opus-4.8-fast",
+		"deepseek/deepseek-v3.2-exp",
 	} {
 		if got, ok := idx.match(variant); ok {
 			t.Fatalf("variant %q must not collapse to a base model, got %q", variant, got)
