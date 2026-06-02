@@ -111,16 +111,18 @@ func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
 			Action:   &ItemAction{Resource: "reasoning", Action: "set", Args: []string{lvl}},
 		})
 	}
-	// Button channels see header + "Choose a level:" via Choices.Title; no-button
-	// channels see header alone — the renderer appends the auto-derived
-	// "Pick with /reasoning set <off|none|low|medium|high|xhigh>." trailer so the
-	// level list and the typeable form arrive together without manual baking.
-	buttonTitle := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
+	// Telegram users see header + "Choose a level:" + tappable buttons. No-button
+	// channels see header + the same "Choose a level:" explainer (the tradeoff
+	// reads as orienting advice on both surfaces) + the auto-derived
+	// "Pick with /reasoning set <…>" trailer the renderer appends. Without the
+	// explainer in Text, text-channel users only saw the bare current-level
+	// header and a command syntax line with no context for why the levels matter.
+	body := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
 	return &Result{
-		Text: header,
+		Text: body,
 		Interactive: &Interactive{
 			Kind:    InteractiveChoices,
-			Choices: &ChoicesView{Title: buttonTitle, Choices: choices},
+			Choices: &ChoicesView{Title: body, Choices: choices},
 		},
 	}
 }

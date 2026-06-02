@@ -172,6 +172,16 @@ func stripInlineMarkup(s string) string {
 	return s
 }
 
+// plainTextMessage builds a fully-formed channel.Message from `text` with
+// Format set per the target channel's caps. Use for every operational reply
+// constructed via `channel.Message{Text: …}` outside the main renderResult
+// path so the outbound layer's normalizeOutboundMessage auto-detect doesn't
+// promote bullet-list templates to Markdown and silently reject them on
+// plain-text-only channels (Weixin/WeChat OA/Local-Web).
+func plainTextMessage(text string, caps channel.ChannelCapabilities) channel.Message {
+	return applyMessageFormat(channel.Message{Text: text}, caps)
+}
+
 // renderListView renders a paginated list. The list content lives in the
 // message text; buttons are added only for navigation (Prev/Next + Close) when
 // there is more than one page, or for rows that carry an explicit ItemAction.

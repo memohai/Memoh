@@ -403,7 +403,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if p.logger != nil {
 				p.logger.Warn("command execution failed", slog.Any("error", err))
 			}
-			outMsg = channel.Message{Text: friendlyOps(loc, "ops.verb.completeCommand")}
+			outMsg = plainTextMessage(friendlyOps(loc, "ops.verb.completeCommand"), caps)
 		} else {
 			outMsg = renderResult(result, RenderContext{Caps: caps, T: loc})
 		}
@@ -2810,11 +2810,12 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		return errors.New("reply target missing for /stop command")
 	}
 	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
 
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.stopReply")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.stopReply"), caps),
 		})
 	}
 
@@ -2838,7 +2839,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.stopReply")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.stopReply"), caps),
 		})
 	}
 
@@ -3148,13 +3149,14 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		return errors.New("reply target missing for /new command")
 	}
 	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
 
 	cmdText := rawTextForCommand(msg, "")
 	sessType, err := resolveNewSessionType(cmdText, msg)
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: loc.T("newSession.usage")},
+			Message: plainTextMessage(loc.T("newSession.usage"), caps),
 		})
 	}
 
@@ -3166,7 +3168,6 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	if sessType == sessionpkg.TypeDiscuss {
 		modeText = "discuss"
 	}
-	caps := p.channelCaps(msg.Channel)
 	if caps.Buttons && !newCommandConfirmed(cmdText) {
 		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, caps)
 	}
@@ -3174,13 +3175,13 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
 	if p.sessionEnsurer == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
 
@@ -3204,7 +3205,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
 
@@ -3215,7 +3216,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.startSession")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
 		})
 	}
 
@@ -3304,16 +3305,17 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		return errors.New("reply target missing for /status command")
 	}
 	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
 	if p.routeResolver == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.loadStatus"), caps),
 		})
 	}
 	if p.commandHandler == nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.loadStatus"), caps),
 		})
 	}
 
@@ -3337,7 +3339,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
-			Message: channel.Message{Text: friendlyOps(loc, "ops.verb.loadStatus")},
+			Message: plainTextMessage(friendlyOps(loc, "ops.verb.loadStatus"), caps),
 		})
 	}
 

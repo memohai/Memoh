@@ -283,6 +283,7 @@
         "aclAllow": "Allow tools"
       },
       "langPickerTitle": "Command UI language",
+      "langCurrent": "Current: {label}",
       "langAuto": "Auto",
       "langEn": "English",
       "langZh": "中文",

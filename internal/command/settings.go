@@ -146,17 +146,25 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 		{"zh", cc.T("cmd.settings.langZh")},
 	}
 	choices := make([]ListItem, 0, len(options))
+	currentLabel := ""
 	for _, o := range options {
 		choices = append(choices, ListItem{
 			Label:    o.label,
 			Selected: cur == o.key,
 			Action:   &ItemAction{Resource: resource, Action: action, Args: []string{o.key}},
 		})
+		if cur == o.key {
+			currentLabel = o.label
+		}
 	}
 	title := MdBold(cc.T("cmd.settings.langPickerTitle"))
+	// Body includes a "Current: <label>" line so text-channel users see the
+	// active choice — on Telegram the ✓ in the choice list carries the same
+	// signal but text-channel users have no ✓ to read.
+	body := title + "\n" + cc.T("cmd.settings.langCurrent", map[string]any{"label": currentLabel})
 	return &Result{
-		Text:        title,
-		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: title, Choices: choices, Columns: 1}},
+		Text:        body,
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices, Columns: 1}},
 	}
 }
 

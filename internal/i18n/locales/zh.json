@@ -283,6 +283,7 @@
         "aclAllow": "允许工具运行"
       },
       "langPickerTitle": "命令界面语言",
+      "langCurrent": "当前：{label}",
       "langAuto": "自动",
       "langEn": "English",
       "langZh": "中文",
