@@ -1132,7 +1132,7 @@ func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, 
 		send = func(b *tgbotapi.BotAPI, e tgbotapi.EditMessageTextConfig) error { _, err := b.Send(e); return err }
 	}
 	err := send(bot, edit)
-	if err != nil && isTelegramMessageNotModified(err) {
+	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
 		return nil
 	}
 	return err
@@ -1153,7 +1153,7 @@ func editTelegramMessageTextWithActions(bot *tgbotapi.BotAPI, chatID int64, mess
 	edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, messageID, text, markup)
 	edit.ParseMode = parseMode
 	_, err := bot.Send(edit)
-	if err != nil && isTelegramMessageNotModified(err) {
+	if err != nil && (isTelegramMessageNotModified(err) || isTelegramEditUnrecoverable(err)) {
 		return nil
 	}
 	return err
@@ -1208,6 +1208,30 @@ func isTelegramMessageNotModified(err error) bool {
 	var apiErr tgbotapi.Error
 	if errors.As(err, &apiErr) {
 		return apiErr.Code == 400 && strings.Contains(apiErr.Message, "message is not modified")
+	}
+	return false
+}
+
+// isTelegramEditUnrecoverable reports whether an edit failed because the target
+// message is gone or can never be edited — retrying cannot help. The
+// interactive edit path (pagination/selection via Update) flows through the
+// generic outbound retry loop, which would otherwise burn RetryMax attempts
+// (each with a linear backoff sleep) on a message the user already deleted or
+// that aged past Telegram's edit window. Treated as terminal — the edit is a
+// no-op — exactly like "message is not modified".
+func isTelegramEditUnrecoverable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr tgbotapi.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.Code != 400 {
+			return false
+		}
+		m := strings.ToLower(apiErr.Message)
+		return strings.Contains(m, "message to edit not found") ||
+			strings.Contains(m, "message can't be edited") ||
+			strings.Contains(m, "message_id_invalid")
 	}
 	return false
 }

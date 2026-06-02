@@ -126,6 +126,14 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 		}
 	}
 
+	// Selecting a model is owner-only (/model set is IsWrite). Members may still
+	// run /model to SEE the current model and what's available, but rendering
+	// tappable select buttons for them is a dead affordance — every tap re-routes
+	// to /model set and bounces off the owner-only gate. Gate the interactive
+	// picker on write access; non-owners get the same rich text body without the
+	// can't-actually-pick buttons.
+	selectable := cc.WriteAccess
+
 	// No-button-channel parity: when the user opens /model without drilling
 	// into a provider, mirror Telegram's LevelProviders picker structure as
 	// the Text body — provider summary with counts and the active-provider
@@ -133,10 +141,11 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	// (image/voice/etc.) and leave the user with no way to discover provider
 	// names to type. Skipped when only one provider exists (nothing to pick).
 	if filterProvider == "" && provIdx < 0 && len(groups) > 1 {
-		return &Result{
-			Text:        formatProvidersSummary(cc, groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning),
-			Interactive: &Interactive{Kind: InteractiveModelPicker, Picker: buildProvidersPickerView(groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)},
-		}, nil
+		r := &Result{Text: formatProvidersSummary(cc, groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning)}
+		if selectable {
+			r.Interactive = &Interactive{Kind: InteractiveModelPicker, Picker: buildProvidersPickerView(groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)}
+		}
+		return r, nil
 	}
 
 	// Text fallback: flat list, selected-first, preserving prior /model list output.
@@ -168,6 +177,9 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	}
 	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, cc.L)
 
+	if !selectable {
+		return res, nil
+	}
 	var picker *ModelPickerView
 	if provIdx >= 0 && provIdx < len(groups) {
 		picker = buildModelsPickerView(groups, cands, provIdx, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)

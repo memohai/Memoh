@@ -49,10 +49,11 @@ func (a *ItemAction) Typeable() string {
 // for invalid (empty resource or action) input.
 //
 // When quote is true, whitespace-bearing args are wrapped via quoteArgIfNeeded
-// so the output round-trips through Parse()/tokenize() — required for
-// user-visible output that may be copy-pasted. Internal callback re-dispatch
-// already controls the args it emits and passes quote=false to keep the
-// re-dispatched command stable.
+// so the output round-trips through Parse()/tokenize(). Both the user-facing
+// hint trailer (Typeable, copy-pasted by hand) and internal callback
+// re-dispatch (ParsedCallback.SyntheticCommand) pass quote=true: a row tap on a
+// space-bearing name (e.g. an MCP connection "My Server") must re-Parse back to
+// a single arg, not split into two.
 func formatSlashCommand(resource, action string, args []string, quote bool) string {
 	resource = strings.TrimSpace(resource)
 	action = strings.TrimSpace(action)

@@ -663,6 +663,35 @@ func TestIsTelegramMessageNotModified(t *testing.T) {
 	}
 }
 
+func TestIsTelegramEditUnrecoverable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain error", errors.New("network error"), false},
+		{"message to edit not found", tgbotapi.Error{Code: 400, Message: "Bad Request: message to edit not found"}, true},
+		{"message can't be edited", tgbotapi.Error{Code: 400, Message: "Bad Request: message can't be edited"}, true},
+		{"message_id_invalid", tgbotapi.Error{Code: 400, Message: "Bad Request: MESSAGE_ID_INVALID"}, true},
+		{"not modified is not this", tgbotapi.Error{Code: 400, Message: "Bad Request: message is not modified"}, false},
+		{"transient chat not found", tgbotapi.Error{Code: 400, Message: "Bad Request: chat not found"}, false},
+		{"rate limit not terminal", tgbotapi.Error{Code: 429, Message: "Too Many Requests"}, false},
+		{"same text but code 500", tgbotapi.Error{Code: 500, Message: "message to edit not found"}, false},
+		{"wrapped terminal", fmt.Errorf("wrapped: %w", tgbotapi.Error{Code: 400, Message: "Bad Request: message to edit not found"}), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTelegramEditUnrecoverable(tt.err)
+			if got != tt.want {
+				t.Fatalf("isTelegramEditUnrecoverable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsTelegramTooManyRequests(t *testing.T) {
 	t.Parallel()
 

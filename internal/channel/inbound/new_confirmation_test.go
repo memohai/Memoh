@@ -8,7 +8,40 @@ import (
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/i18n"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 )
+
+// TestResolveNewSessionType_BareConfirmFlag guards the hand-typed "/new
+// --confirm" edge: extractFlags doesn't recognize --confirm, so it lands as the
+// first positional (the mode slot). It must NOT be read as a session type —
+// resolveNewSessionType should fall through to context defaults exactly like a
+// bare "/new", not error with `unknown session type "--confirm"`.
+func TestResolveNewSessionType_BareConfirmFlag(t *testing.T) {
+	msg := channel.InboundMessage{Channel: channel.ChannelTypeTelegram}
+
+	bare, errBare := resolveNewSessionType("/new", msg)
+	if errBare != nil {
+		t.Fatalf("/new returned error: %v", errBare)
+	}
+	withFlag, err := resolveNewSessionType("/new --confirm", msg)
+	if err != nil {
+		t.Fatalf("/new --confirm should not error, got: %v", err)
+	}
+	if withFlag != bare {
+		t.Errorf("/new --confirm resolved to %q, want same as bare /new (%q)", withFlag, bare)
+	}
+	// Explicit modes must still resolve normally.
+	if got, err := resolveNewSessionType("/new chat", msg); err != nil || got != sessionpkg.TypeChat {
+		t.Errorf("/new chat = (%q, %v), want (%q, nil)", got, err, sessionpkg.TypeChat)
+	}
+	if got, err := resolveNewSessionType("/new discuss", msg); err != nil || got != sessionpkg.TypeDiscuss {
+		t.Errorf("/new discuss = (%q, %v), want (%q, nil)", got, err, sessionpkg.TypeDiscuss)
+	}
+	// A genuinely unknown mode still errors.
+	if _, err := resolveNewSessionType("/new bogus", msg); err == nil {
+		t.Errorf("/new bogus should error on unknown session type")
+	}
+}
 
 // TestSendNewConfirmation_LocalizesActionLabels guards the
 // newSession.action.{confirm,cancel} key rename. /new on a button-capable

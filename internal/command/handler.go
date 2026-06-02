@@ -453,7 +453,7 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 	res := strings.TrimSpace(resource)
 	if msg != "" && !looksLikeInternalError(msg) {
 		out := capitalizeFirst(msg)
-		if !strings.HasSuffix(out, ".") {
+		if !endsWithTerminalPunct(out) {
 			out += "."
 		}
 		if res != "" && strings.Contains(strings.ToLower(msg), "not found") {
@@ -506,6 +506,22 @@ func capitalizeFirst(s string) string {
 	r := []rune(s)
 	r[0] = unicode.ToUpper(r[0])
 	return string(r)
+}
+
+// endsWithTerminalPunct reports whether s already ends in sentence-final
+// punctuation (ASCII or CJK). friendlyCommandError uses it so it never tacks an
+// ASCII "." onto an already-terminated string — e.g. a zh message ending in the
+// ideographic full stop "。" would otherwise become "…。.".
+func endsWithTerminalPunct(s string) bool {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) == 0 {
+		return false
+	}
+	switch r[len(r)-1] {
+	case '.', '!', '?', '。', '！', '？', '…':
+		return true
+	}
+	return false
 }
 
 func allowsUnboundWriteCommands(input ExecuteInput) bool {

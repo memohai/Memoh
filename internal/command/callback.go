@@ -64,15 +64,35 @@ func NoopCallback() string { return callbackNamespace + "noop" }
 // a bounded process-local table and referenced by a short token ("#<hash>").
 func EncodeListCallback(resource, action string, args []string, page int) string {
 	base := fmt.Sprintf("%slp~%s~%s~%d~", callbackNamespace, resource, action, page)
-	argsStr := strings.TrimSpace(strings.Join(args, " "))
+	argsStr := encodeArgs(args)
 	if argsStr == "" {
 		return base
 	}
-	encoded := base + url.QueryEscape(argsStr)
+	encoded := base + argsStr
 	if len(encoded) <= telegramCallbackLimit {
 		return encoded
 	}
 	return base + "#" + stashArgs(argsStr)
+}
+
+// encodeArgs escapes each arg individually, then joins them with spaces.
+// Escaping per-arg (rather than the joined string) is what keeps a space
+// *within* an arg from being mistaken for an arg boundary on decode: a real
+// space becomes "+", while the join delimiter stays a literal space. The prior
+// approach (join first, then escape the whole string) collapsed an arg like
+// "My Server" into two tokens on decode — a row tap on a space-bearing MCP
+// connection / schedule / memory / search name then re-dispatched the wrong
+// target. decodeArgs reverses this exactly.
+func encodeArgs(args []string) string {
+	escaped := make([]string, 0, len(args))
+	for _, a := range args {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		escaped = append(escaped, url.QueryEscape(a))
+	}
+	return strings.Join(escaped, " ")
 }
 
 // EncodeModelProviderCallback builds the callback_data for drilling into a
@@ -171,7 +191,7 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 func (p ParsedCallback) SyntheticCommand() string {
 	switch p.Kind {
 	case callbackKindListPage:
-		base := formatSlashCommand(p.Resource, p.Action, p.Args, false)
+		base := formatSlashCommand(p.Resource, p.Action, p.Args, true)
 		if base == "" {
 			return ""
 		}
@@ -206,20 +226,36 @@ func decodeArgsToken(token string) []string {
 		argsStashMu.Lock()
 		stored := argsStash[hash]
 		argsStashMu.Unlock()
-		if stored == "" {
-			return nil
+		return decodeArgs(stored)
+	}
+	return decodeArgs(token)
+}
+
+// decodeArgs reverses encodeArgs: split on the literal-space delimiter FIRST,
+// then QueryUnescape each field so an escaped in-arg space ("+") is restored to
+// a single arg. Splitting before unescaping is precisely what preserves arg
+// boundaries — unescaping first (then Fields) would reintroduce the boundary
+// loss this is built to avoid.
+func decodeArgs(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	fields := strings.Fields(s)
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		dec, err := url.QueryUnescape(f)
+		if err != nil {
+			dec = f
 		}
-		return strings.Fields(stored)
+		if dec = strings.TrimSpace(dec); dec == "" {
+			continue
+		}
+		out = append(out, dec)
 	}
-	decoded, err := url.QueryUnescape(token)
-	if err != nil {
+	if len(out) == 0 {
 		return nil
 	}
-	decoded = strings.TrimSpace(decoded)
-	if decoded == "" {
-		return nil
-	}
-	return strings.Fields(decoded)
+	return out
 }
 
 // Bounded process-local table for callback args too long to inline. This is

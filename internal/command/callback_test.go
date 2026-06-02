@@ -17,6 +17,8 @@ func TestEncodeDecodeListCallbackRoundTrip(t *testing.T) {
 		{"no args page 3", "schedule", "list", nil, 3},
 		{"single arg", "model", "list", []string{"openrouter"}, 2},
 		{"multi arg", "model", "list", []string{"open", "router"}, 5},
+		{"space-bearing arg", "mcp", "get", []string{"My Server"}, 0},
+		{"two args one with space", "settings", "update", []string{"--acl_default_effect", "deny all"}, 1},
 		{"high page", "memory", "list", nil, 9999},
 	}
 	for _, tt := range tests {
@@ -66,10 +68,67 @@ func TestEncodeListCallbackLongArgsUsesToken(t *testing.T) {
 	}
 }
 
+// TestEncodeListCallbackLongSpaceBearingArgsUsesToken guards the stash path:
+// even when an arg is long enough to be stashed under a token, its internal
+// spaces must survive as a single arg (not split on decode).
+func TestEncodeListCallbackLongSpaceBearingArgsUsesToken(t *testing.T) {
+	longName := strings.Repeat("My Long Server Name ", 5) // spaces + >64 bytes
+	longName = strings.TrimSpace(longName)
+	data := EncodeListCallback("mcp", "get", []string{longName}, 0)
+	if len(data) > telegramCallbackLimit {
+		t.Fatalf("callback_data %q exceeds %d bytes (%d)", data, telegramCallbackLimit, len(data))
+	}
+	if !strings.Contains(data, "~#") {
+		t.Fatalf("expected stashed token form (~#...), got %q", data)
+	}
+	parsed, ok := DecodeCallback(data)
+	if !ok {
+		t.Fatalf("DecodeCallback(%q) returned ok=false", data)
+	}
+	if len(parsed.Args) != 1 || parsed.Args[0] != longName {
+		t.Errorf("Args = %v, want [%q]", parsed.Args, longName)
+	}
+}
+
 func TestDecodeArgsTokenMiss(t *testing.T) {
 	// A token that was never stashed should decode to nil (treated as unfiltered).
 	if got := decodeArgsToken("#deadbeef"); got != nil {
 		t.Errorf("decodeArgsToken(miss) = %v, want nil", got)
+	}
+}
+
+// TestCallbackEncodersStayWithinLimit is a coverage gate for Telegram's 64-byte
+// callback_data ceiling. EncodeListCallback stashes oversized args (so its base
+// is the only concern), but EncodeRangeCallback and EncodeConfirmNewCallback
+// have NO stash fallback — a future long resource/action/range key would
+// silently breach the limit and Telegram would reject the button with no error
+// surfaced to the user. Pin the invariant against the real command surface.
+func TestCallbackEncodersStayWithinLimit(t *testing.T) {
+	resources := make([]string, 0)
+	for _, m := range MenuCommands(nil) {
+		resources = append(resources, m.Command)
+	}
+	// Actions seen on interactive surfaces (drill-down, row taps, ranges).
+	actions := []string{"list", "get", "set", "update", "show", "bindings", "providers", "outbox", "language"}
+	for _, r := range resources {
+		for _, a := range actions {
+			// List-page base with worst-case page; a long arg would stash, so the
+			// base ("m~lp~{resource}~{action}~{page}~") is what must fit.
+			if got := EncodeListCallback(r, a, nil, 99999); len(got) > telegramCallbackLimit {
+				t.Errorf("EncodeListCallback(%q,%q) base = %d bytes > %d", r, a, len(got), telegramCallbackLimit)
+			}
+		}
+	}
+	// Range presets actually emitted by /usage (no stash fallback).
+	for _, key := range []string{"24h", "7d", "30d", "90d", "all", "by-model", "summary"} {
+		if got := EncodeRangeCallback("usage", "summary", key); len(got) > telegramCallbackLimit {
+			t.Errorf("EncodeRangeCallback range=%q = %d bytes > %d", key, len(got), telegramCallbackLimit)
+		}
+	}
+	for _, mode := range []string{"chat", "discuss"} {
+		if got := EncodeConfirmNewCallback(mode); len(got) > telegramCallbackLimit {
+			t.Errorf("EncodeConfirmNewCallback(%q) = %d bytes > %d", mode, len(got), telegramCallbackLimit)
+		}
 	}
 }
 
@@ -119,6 +178,12 @@ func TestCallbackToCommandRoundTrip(t *testing.T) {
 		{"mcp", "list", nil, 1},
 		{"model", "list", []string{"openrouter"}, 4},
 		{"schedule", "list", nil, 0},
+		// A space-bearing name (MCP connection, schedule, memory/search target)
+		// must survive encode -> decode -> synthetic command -> re-Parse as ONE
+		// arg. Regression guard for the row-tap bug where "My Server" split into
+		// ["My","Server"] and the handler read only "My".
+		{"mcp", "get", []string{"My Server"}, 0},
+		{"memory", "set", []string{"my provider"}, 2},
 	}
 	for _, tt := range tests {
 		data := EncodeListCallback(tt.resource, tt.action, tt.args, tt.page)

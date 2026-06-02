@@ -85,6 +85,15 @@ func TestSupportedCatalogsParity(t *testing.T) {
 				t.Errorf("locale %q missing key %q present in en", loc, key)
 			}
 		}
+		// Reverse direction: a key in another locale but absent from en is also a
+		// bug — en is the fallback source, so such a key resolves to the raw key
+		// string (never the translation) for any locale that lacks it. The
+		// one-directional check above would not catch this.
+		for key := range cat {
+			if _, ok := en[key]; !ok {
+				t.Errorf("locale %q has key %q absent from en (en is the fallback source)", loc, key)
+			}
+		}
 	}
 }
 

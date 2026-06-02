@@ -3111,6 +3111,13 @@ func resolveNewSessionType(cmdText string, msg channel.InboundMessage) (string, 
 	parsed, _ := command.Parse(extracted)
 
 	explicit := strings.ToLower(strings.TrimSpace(parsed.Action))
+	// A bare flag in the mode slot (e.g. "/new --confirm" typed by hand, where
+	// extractFlags leaves the unrecognized --confirm as the first positional)
+	// is not a session type. Treat it as no explicit mode and fall through to
+	// context defaults rather than erroring with "unknown session type --confirm".
+	if strings.HasPrefix(explicit, "-") {
+		explicit = ""
+	}
 	switch explicit {
 	case "chat":
 		return sessionpkg.TypeChat, nil

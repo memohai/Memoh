@@ -37,6 +37,14 @@ func ContainsMarkdown(text string) bool {
 
 // StripInlineMarkup removes the inline Markdown markers (** and `) authored for
 // capable channels, leaving clean text for plain-text-only channels.
+//
+// Scope: only ** (bold) and ` (code) are stripped, because those are the only
+// inline markers the command renderers emit (MdBold/MdCode/CmdRef). Other
+// constructs ContainsMarkdown recognizes — links [a](b), headings, list
+// bullets — are intentionally NOT stripped: the renderers never produce them,
+// so any such characters in a body are literal user/content text and must be
+// preserved verbatim rather than mangled. Extend this (and coerceFormatForCaps)
+// if a renderer ever starts emitting those constructs.
 func StripInlineMarkup(s string) string {
 	s = strings.ReplaceAll(s, "**", "")
 	s = strings.ReplaceAll(s, "`", "")

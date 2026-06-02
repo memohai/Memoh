@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -737,5 +738,37 @@ func TestLooksLikeInternalError_AllowsDomainMessages(t *testing.T) {
 		if looksLikeInternalError(msg) {
 			t.Errorf("expected domain-message classification for %q, got true (this leaks the message into a dead retry line)", msg)
 		}
+	}
+}
+
+func TestEndsWithTerminalPunct(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"done.", "really?", "stop!", "完成。", "真的？", "等等…", "  trailing.  "} {
+		if !endsWithTerminalPunct(s) {
+			t.Errorf("endsWithTerminalPunct(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "no punct", "model x", "中文无标点"} {
+		if endsWithTerminalPunct(s) {
+			t.Errorf("endsWithTerminalPunct(%q) = true, want false", s)
+		}
+	}
+}
+
+// TestFriendlyCommandError_NoDoublePunctZh guards the CJK-aware period logic:
+// a zh domain error already ending in the ideographic full stop "。" must not
+// gain a trailing ASCII ".". The model not-found path (now carrying a baked-in
+// discovery pointer) flows through here in zh sessions.
+func TestFriendlyCommandError_NoDoublePunctZh(t *testing.T) {
+	t.Parallel()
+	h := newTestHandler(nil)
+	zh := i18n.New("zh")
+	err := errors.New("找不到模型 \"x\"。用 `/model list` 查看可用模型。")
+	got := h.friendlyCommandError(zh, "model", err)
+	if strings.Contains(got, "。.") {
+		t.Errorf("zh error gained a trailing ASCII period: %q", got)
+	}
+	if !strings.HasSuffix(got, "。") {
+		t.Errorf("zh error should still end with 。, got %q", got)
 	}
 }

@@ -128,7 +128,7 @@ func (h *Handler) findModelByProviderAndName(cc CommandContext, providerName, mo
 			return m, nil
 		}
 	}
-	return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFoundUnderProvider", map[string]any{"name": fmt.Sprintf("%q", modelName), "provider": fmt.Sprintf("%q", providerName)}))
+	return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFoundUnderProvider", map[string]any{"name": fmt.Sprintf("%q", modelName), "provider": fmt.Sprintf("%q", providerName), "command": CmdRef("model list")}))
 }
 
 func (h *Handler) findModelForSelection(cc CommandContext, args []string) (models.GetResponse, error) {
@@ -166,7 +166,7 @@ func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.
 	}
 	switch len(matches) {
 	case 0:
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFound", map[string]any{"name": fmt.Sprintf("%q", target)}))
+		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFound", map[string]any{"name": fmt.Sprintf("%q", target), "command": CmdRef("model list")}))
 	case 1:
 		return matches[0], nil
 	default:
