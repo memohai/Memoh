@@ -41,7 +41,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	// Action tokens stay literal (a command token must never be translated:
 	// showing "列出" but rejecting a typed "列出" is exactly the bug this guards).
 	// Only the trailing summary is localized.
-	for _, want := range []string{"**/model** — 切换对话模型", "`list` — 列出可用对话模型", "`set-heartbeat` — 设置心跳模型", "选择操作："} {
+	for _, want := range []string{"**/model** — 切换对话模型", "`/model list` — 列出可用对话模型", "`/model set-heartbeat` — 设置心跳模型", "选择操作："} {
 		if !strings.Contains(group.Interactive.Choices.Title, want) {
 			t.Fatalf("zh group help missing %q:\n%s", want, group.Interactive.Choices.Title)
 		}

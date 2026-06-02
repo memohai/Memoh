@@ -81,7 +81,7 @@ func (g *CommandGroup) Usage(localizers ...*i18n.Localizer) string {
 	for _, name := range g.order {
 		sub := g.commands[name]
 		_, summary := localizedActionUsage(t, g.Name, sub)
-		line := MdCode(sub.Name)
+		line := CmdRef(g.Name + " " + sub.Name)
 		if summary != "" {
 			line += " — " + summary
 		}
@@ -173,7 +173,7 @@ func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *
 	for _, subName := range group.order {
 		sub := group.commands[subName]
 		_, summary := localizedActionUsage(t, group.Name, sub)
-		line := "- " + MdCode(subName)
+		line := "- " + CmdRef(group.Name+" "+subName)
 		if summary != "" {
 			line += " — " + summary
 		}

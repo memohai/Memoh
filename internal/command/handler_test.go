@@ -168,7 +168,7 @@ func TestExecuteResult_HelpGroupUsesShortButtonLabels(t *testing.T) {
 	if result.Interactive == nil || result.Interactive.Choices == nil {
 		t.Fatal("expected interactive choices for group help")
 	}
-	if !strings.Contains(result.Interactive.Choices.Title, "`list` — List all schedules") {
+	if !strings.Contains(result.Interactive.Choices.Title, "`/schedule list` — List all schedules") {
 		t.Errorf("expected action descriptions in interactive title, got: %s", result.Interactive.Choices.Title)
 	}
 	if result.Interactive.Choices.Columns != 1 {

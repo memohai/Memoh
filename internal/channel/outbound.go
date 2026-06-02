@@ -212,7 +212,13 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 	}
 	base.Attachments = nil
 	textMessages := make([]OutboundMessage, 0)
-	shouldChunk := policy.TextChunkLimit > 0 && strings.TrimSpace(base.Text) != "" && len(base.Parts) == 0
+	// An edit (Message.ID set) targets exactly one existing message, so it must
+	// never be chunked: splitting would edit the first piece and post the rest as
+	// NEW messages, with the keyboard drifting onto a fresh message — the
+	// interactive card visibly falls apart. Edit and chunking are incompatible by
+	// definition; keep an edit as a single message. (Interactive cards are far
+	// below any platform limit, so this never truncates in practice.)
+	shouldChunk := policy.TextChunkLimit > 0 && strings.TrimSpace(base.Text) != "" && len(base.Parts) == 0 && strings.TrimSpace(base.ID) == ""
 	if shouldChunk {
 		chunks := chunker(base.Text, policy.TextChunkLimit)
 		for idx, chunk := range chunks {
