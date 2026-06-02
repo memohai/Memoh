@@ -30,7 +30,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				}
 				records = append(records, listRecord{fields: fields})
 			}
-			result := buildListResult(cc.T("cmd.email.providersTitle"), "email", "providers", nil, records, cc.Page, defaultListLimit, "", cc.L)
+			result := buildListResult(cc.T("cmd.email.providersTitle"), "email", "providers", nil, records, cc.Page, defaultListLimit, cc.L)
 			return WithExtraActions(result,
 				ListItem{Label: cc.T("cmd.email.section.bindings"), Action: &ItemAction{Resource: "email", Action: "bindings"}},
 				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},
@@ -60,7 +60,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 					{cc.T("cmd.email.fieldPermissions"), perms},
 				}})
 			}
-			result := buildListResult(cc.T("cmd.email.bindingsTitle"), "email", "bindings", nil, records, cc.Page, defaultListLimit, "", cc.L)
+			result := buildListResult(cc.T("cmd.email.bindingsTitle"), "email", "bindings", nil, records, cc.Page, defaultListLimit, cc.L)
 			return WithExtraActions(result,
 				ListItem{Label: cc.T("cmd.email.section.providers"), Action: &ItemAction{Resource: "email", Action: "providers"}},
 				ListItem{Label: cc.T("cmd.email.section.outbox"), Action: &ItemAction{Resource: "email", Action: "outbox"}},

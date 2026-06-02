@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -33,6 +34,14 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 			if sessionID == "" {
 				botUUID, err := db.ParseUUID(cc.BotID)
 				if err != nil {
+					// cc.BotID is framework-set so this only fires if the
+					// framework injects a malformed UUID — a deep internal
+					// bug. Log the diagnostic and surface a generic friendly
+					// message rather than leaking "invalid UUID length: 5"
+					// to the user verbatim.
+					if h.logger != nil {
+						h.logger.Warn("compact: parse bot id failed", slog.String("bot_id", cc.BotID), slog.Any("error", err))
+					}
 					return cc.T("cmd.error.generic", map[string]any{"command": CmdRef("compact")}), nil
 				}
 				latestUUID, err := h.queries.GetLatestSessionIDByBot(cc.Ctx, botUUID)

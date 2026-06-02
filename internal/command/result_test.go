@@ -19,7 +19,7 @@ func sampleRecords(n int) []listRecord {
 func TestBuildListResultPagination(t *testing.T) {
 	records := sampleRecords(27)
 
-	page0 := buildListResult("T", "mcp", "list", nil, records, 0, 12, "hint")
+	page0 := buildListResult("T", "mcp", "list", nil, records, 0, 12)
 	if page0.Interactive == nil || page0.Interactive.List == nil {
 		t.Fatal("expected interactive list view")
 	}
@@ -30,11 +30,8 @@ func TestBuildListResultPagination(t *testing.T) {
 	if !strings.Contains(page0.Text, "Showing 12 of 27 items.") {
 		t.Errorf("page0 text missing suffix: %q", page0.Text)
 	}
-	if !strings.Contains(page0.Text, "hint") {
-		t.Errorf("page0 text missing hint: %q", page0.Text)
-	}
 
-	last := buildListResult("T", "mcp", "list", nil, records, 2, 12, "hint")
+	last := buildListResult("T", "mcp", "list", nil, records, 2, 12)
 	if last.Interactive.List.Page != 2 || len(last.Interactive.List.Items) != 3 {
 		t.Errorf("last page: page=%d items=%d, want 2/3", last.Interactive.List.Page, len(last.Interactive.List.Items))
 	}
@@ -43,14 +40,14 @@ func TestBuildListResultPagination(t *testing.T) {
 	}
 
 	// Page beyond the end clamps to the last page.
-	clamped := buildListResult("T", "mcp", "list", nil, records, 99, 12, "hint")
+	clamped := buildListResult("T", "mcp", "list", nil, records, 99, 12)
 	if clamped.Interactive.List.Page != 2 {
 		t.Errorf("clamped page = %d, want 2", clamped.Interactive.List.Page)
 	}
 }
 
 func TestBuildListResultSinglePageNoSuffix(t *testing.T) {
-	res := buildListResult("T", "mcp", "list", nil, sampleRecords(5), 0, 12, "hint")
+	res := buildListResult("T", "mcp", "list", nil, sampleRecords(5), 0, 12)
 	if strings.Contains(res.Text, "Showing") {
 		t.Errorf("single page should have no 'Showing' suffix: %q", res.Text)
 	}
@@ -59,10 +56,14 @@ func TestBuildListResultSinglePageNoSuffix(t *testing.T) {
 	}
 }
 
-func TestBuildListResultButtonTextOmitsCommandHintForActionRows(t *testing.T) {
+// TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows covers the
+// hint-aware path through buildPagedListResult (used by /heartbeat logs).
+// buildListResult no longer has a hint param — all in-memory list callers
+// rely on the FallbackTrailer system for typeable guidance.
+func TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows(t *testing.T) {
 	records := sampleRecords(2)
 	records[0].action = &ItemAction{Resource: "search", Action: "set", Args: []string{"a"}}
-	res := buildListResult("T", "search", "list", nil, records, 0, 12, "Switch with "+CmdRef("search set <name>")+".")
+	res := buildPagedListResult("T", "search", "list", nil, records, 0, 12, len(records), "Switch with "+CmdRef("search set <name>")+".")
 	if !strings.Contains(res.Text, "/search set <name>") {
 		t.Fatalf("fallback text should keep copyable command hint: %q", res.Text)
 	}
@@ -71,8 +72,8 @@ func TestBuildListResultButtonTextOmitsCommandHintForActionRows(t *testing.T) {
 	}
 }
 
-func TestBuildListResultButtonTextKeepsPlainHintForDisplayRows(t *testing.T) {
-	res := buildListResult("T", "heartbeat", "logs", nil, sampleRecords(2), 0, 12, "Use the Web UI for older heartbeat logs.")
+func TestBuildPagedListResultButtonTextKeepsPlainHintForDisplayRows(t *testing.T) {
+	res := buildPagedListResult("T", "heartbeat", "logs", nil, sampleRecords(2), 0, 12, 2, "Use the Web UI for older heartbeat logs.")
 	if !strings.Contains(res.Interactive.List.ButtonText, "Use the Web UI") {
 		t.Fatalf("button text should keep non-action guidance: %q", res.Interactive.List.ButtonText)
 	}

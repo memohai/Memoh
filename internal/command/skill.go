@@ -30,7 +30,7 @@ func (h *Handler) buildSkillGroup() *CommandGroup {
 					note:   note,
 				})
 			}
-			return buildListResult(cc.T("cmd.skill.title"), "skill", "list", nil, records, cc.Page, defaultListLimit, "", cc.L), nil
+			return buildListResult(cc.T("cmd.skill.title"), "skill", "list", nil, records, cc.Page, defaultListLimit, cc.L), nil
 		},
 	})
 	return g

@@ -298,9 +298,11 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 // model count); the model level shows one model per row (✓ marks the selected
 // model) with a back button. Both levels paginate and carry a Close button.
 //
-// fallbackText is used when the picker view itself is nil — a defensive guard
-// against partial Result construction (e.g. panic-recovery returning a Result
-// with Kind set but no view populated).
+// fallbackText guards against a partial Interactive (Kind=ModelPicker but
+// Picker=nil). No production caller constructs that today, but if a future
+// refactor sets Kind before populating the view, the alternative is a
+// p.Level nil-dereference panic in modelPickerHeader. Cheap structural
+// safety net; the corresponding coverage-gate test row enforces it.
 func renderModelPicker(fallbackText string, p *command.ModelPickerView, t *i18n.Localizer) channel.Message {
 	if p == nil {
 		return channel.Message{Text: fallbackText}
@@ -471,8 +473,10 @@ func truncateButtonLabel(s string) string {
 // back to one column so Telegram does not crush the text. Each tap re-dispatches
 // "/{resource} {action} {args}" and edits in place.
 //
-// fallbackText is used when the choices view itself is nil — defensive guard
-// against partial Result construction.
+// fallbackText guards against a partial Interactive (Kind=Choices but
+// Choices=nil). No production caller constructs that today — same structural
+// safety net as renderModelPicker. The alternative is a cv.Title / cv.Choices
+// nil-dereference panic.
 func renderChoicesView(fallbackText string, cv *command.ChoicesView, t *i18n.Localizer) channel.Message {
 	if cv == nil {
 		return channel.Message{Text: fallbackText}

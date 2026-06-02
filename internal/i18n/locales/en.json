@@ -13,8 +13,7 @@
     "providerRange": "Provider: {provider} ({start}–{end} of {total})",
     "none": "(none)",
     "models": "models",
-    "rangeAll": "All",
-    "dismissed": "Closed."
+    "rangeAll": "All"
   },
   "newSession": {
     "title": "✨ New {mode} started.",

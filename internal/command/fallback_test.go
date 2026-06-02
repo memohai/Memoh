@@ -343,23 +343,6 @@ func TestFallbackTrailer_LocaleFallback(t *testing.T) {
 	}
 }
 
-func TestHintVerbIsValid(t *testing.T) {
-	for _, v := range []HintVerb{HintVerbSwitch, HintVerbPick, HintVerbToggle, HintVerbOpen, HintVerbDetails, HintVerbRange, HintVerbMenu} {
-		if !v.IsValid() {
-			t.Errorf("HintVerb %q should be valid", v)
-		}
-	}
-	for _, v := range []HintVerb{"", "unknown", "Switch", "DETAILS"} {
-		if v.IsValid() {
-			t.Errorf("HintVerb %q should be invalid", v)
-		}
-	}
-}
-
-// TestVerbLineAllVerbs guards against drift between the seven HintVerb*
-// constants and the verbLine dispatch switch. Every defined verb must produce
-// a non-empty trailer when fed a usable action (HintVerbRange is special:
-// it needs a RangeView, so verbLine returns empty by design — covered below).
 func TestVerbLineAllVerbs(t *testing.T) {
 	loc := i18n.New("en")
 	action := []*ItemAction{{Resource: "memory", Action: "set", Args: []string{"alice"}}}

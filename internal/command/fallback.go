@@ -26,16 +26,6 @@ const (
 	HintVerbMenu    HintVerb = "menu"
 )
 
-// IsValid reports whether v is one of the seven defined hint verbs.
-func (v HintVerb) IsValid() bool {
-	switch v {
-	case HintVerbSwitch, HintVerbPick, HintVerbToggle, HintVerbOpen,
-		HintVerbDetails, HintVerbRange, HintVerbMenu:
-		return true
-	}
-	return false
-}
-
 // Typeable renders an ItemAction as the slash command a user would type to
 // invoke it (e.g. "/memory set Alice"). Nil-safe.
 //

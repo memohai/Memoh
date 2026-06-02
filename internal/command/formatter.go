@@ -185,7 +185,13 @@ type listRecord struct {
 // produces a Result carrying complete fallback Text (preserving the existing
 // "Showing N of M items." wording) plus a structured ListView. Text-only
 // channels only ever see page 0, matching prior behavior.
-func buildListResult(title, resource, action string, args []string, records []listRecord, page, pageSize int, hint string, localizers ...*i18n.Localizer) *Result {
+//
+// Unlike buildPagedListResult, this variant has no per-caller "footer hint"
+// param — every in-memory list caller now relies on the FallbackTrailer
+// system to surface typeable next steps. If a caller genuinely needs a
+// per-list hint inline with the body, use buildPagedListResult or extend
+// this signature when the second caller appears.
+func buildListResult(title, resource, action string, args []string, records []listRecord, page, pageSize int, localizers ...*i18n.Localizer) *Result {
 	if pageSize <= 0 {
 		pageSize = defaultListLimit
 	}
@@ -206,7 +212,7 @@ func buildListResult(title, resource, action string, args []string, records []li
 	if start < total {
 		pageRecords = records[start:end]
 	}
-	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, hint, localizers...)
+	return assembleListResult(title, resource, action, args, pageRecords, page, pageSize, total, "", localizers...)
 }
 
 // buildPagedListResult builds a list Result when the caller has already fetched

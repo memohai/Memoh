@@ -79,7 +79,7 @@ func (h *Handler) buildMemoryGroup() *CommandGroup {
 				otherRecords = append(otherRecords, rec)
 			}
 			currentRecords = append(currentRecords, otherRecords...)
-			return buildListResult(cc.T("cmd.memory.title"), "memory", "list", nil, currentRecords, cc.Page, defaultListLimit, "", cc.L), nil
+			return buildListResult(cc.T("cmd.memory.title"), "memory", "list", nil, currentRecords, cc.Page, defaultListLimit, cc.L), nil
 		},
 	})
 	g.Register(SubCommand{

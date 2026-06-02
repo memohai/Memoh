@@ -13,8 +13,7 @@
     "providerRange": "服务商：{provider}（第 {start}–{end} 个，共 {total} 个）",
     "none": "（无）",
     "models": "模型",
-    "rangeAll": "全部",
-    "dismissed": "已关闭。"
+    "rangeAll": "全部"
   },
   "newSession": {
     "title": "✨ 已开启新{mode}。",

@@ -166,7 +166,7 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 		}
 		records = append(records, listRecord{fields: fields})
 	}
-	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, "", cc.L)
+	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, cc.L)
 
 	var picker *ModelPickerView
 	if provIdx >= 0 && provIdx < len(groups) {
