@@ -27,7 +27,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 				records = append(records, listRecord{
 					fields: []kv{
 						{cc.T("cmd.common.fieldName"), item.Name},
-					{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)},
+						{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)},
 						{cc.T("cmd.mcp.fieldType"), item.Type},
 					},
 					// Tap a connection to open its details — no typing of /mcp get.

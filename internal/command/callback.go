@@ -3,7 +3,6 @@ package command
 import (
 	"fmt"
 	"hash/fnv"
-	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -204,9 +203,7 @@ func (p ParsedCallback) SyntheticCommand() string {
 // bounded stash (256 entries, FIFO) has rolled past the original entry.
 // The downstream synthetic command then re-runs the list without the
 // narrowing args, showing the user an unfiltered view rather than the
-// filtered subset they originally requested. We log Debug on miss so
-// operators can observe the eviction rate via slog without surfacing
-// anything to the user.
+// filtered subset they originally requested.
 func decodeArgsToken(token string) []string {
 	if token == "" {
 		return nil
@@ -217,7 +214,6 @@ func decodeArgsToken(token string) []string {
 		stored := argsStash[hash]
 		argsStashMu.Unlock()
 		if stored == "" {
-			slog.Debug("callback: argsStash miss (filter args evicted, list will run unfiltered)", slog.String("token", hash))
 			return nil
 		}
 		return strings.Fields(stored)

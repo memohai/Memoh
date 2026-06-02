@@ -98,7 +98,7 @@ func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
 	t.Parallel()
 
-	got := normalizeBotSetting("en", "allow", false, "medium", false, 0, false, 0, 80)
+	got := normalizeBotSetting("en", "auto", "allow", false, "medium", false, 0, false, 0, 80)
 	if got.HeartbeatInterval != DefaultHeartbeatInterval {
 		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
 	}

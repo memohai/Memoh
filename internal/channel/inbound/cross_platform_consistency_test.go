@@ -31,7 +31,7 @@ import (
 func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 	// Three capability profiles, all with Buttons:false (only Telegram has Buttons:true).
 	profiles := map[string]channel.ChannelCapabilities{
-		"plain-text (Weixin / WeChat OA / Local-Web)": {Text: true},
+		"plain-text (Weixin / WeChat OA / Local-Web)":                           {Text: true},
 		"markdown (Discord / Slack / DingTalk / QQ / WeCom / Misskey / Matrix)": {Text: true, Markdown: true},
 		"richtext (Feishu)": {Text: true, RichText: true},
 	}
@@ -57,9 +57,9 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 				},
 			},
 			mustContain: []string{
-				"Reasoning",                            // body title (markup stripped on plain, rendered on others)
-				"Current: medium",                     // current state
-				"/reasoning set <off|low|high>",       // typeable enum surfaced via pick trailer
+				"Reasoning",                     // body title (markup stripped on plain, rendered on others)
+				"Current: medium",               // current state
+				"/reasoning set <off|low|high>", // typeable enum surfaced via pick trailer
 			},
 		},
 		{
@@ -81,8 +81,8 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 				},
 			},
 			mustContain: []string{
-				"Bot Settings", "推理", "心跳",                // body content
-				"/reasoning show", "/model list",          // cross-nav commands
+				"Bot Settings", "推理", "心跳", // body content
+				"/reasoning show", "/model list", // cross-nav commands
 				"/settings update --heartbeat_enabled true",
 				"/search list", "/memory list",
 				"/settings language",
@@ -120,8 +120,8 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 			},
 			mustContain: []string{
 				"DeepSeek", "OpenAI", "OpenRouter", // providers visible in body
-				"DeepSeek V4 Flash",                // current model
-				"/model list <provider_name>",      // typeable next step from trailer
+				"DeepSeek V4 Flash",           // current model
+				"/model list <provider_name>", // typeable next step from trailer
 			},
 		},
 	}
