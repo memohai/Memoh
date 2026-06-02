@@ -4,7 +4,7 @@ import {
   type RouteLocationNormalized,
   type RouteRecordRaw,
 } from 'vue-router'
-import { SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
+import { SETTINGS_ROUTE_SPECS, type SettingsRouteSpec } from '../shared/settings-routes'
 import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 
 // Chat-window router. Owns ONLY chat-related routes — visiting `/settings`
@@ -18,15 +18,20 @@ import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 // Stub component used by the settings name placeholders below. The
 // `beforeEach` guard returns `false` before vue-router ever renders these,
 // so the placeholder never instantiates — it exists purely so that
-// `router.push({ name: 'bot-detail', params: { botId } })` resolves to a
+// `router.push({ name: 'bot-detail', params: { botName } })` resolves to a
 // concrete `/settings/...` path that we can hand off to the IPC bridge.
 const SettingsRouteStub = { render: () => null }
 
-const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(({ name, path }) => ({
-  name,
-  path,
-  component: SettingsRouteStub,
-}))
+function mapSettingsStub(spec: SettingsRouteSpec): RouteRecordRaw {
+  return {
+    path: spec.path,
+    component: SettingsRouteStub,
+    ...(spec.name ? { name: spec.name } : {}),
+    ...(spec.children ? { children: spec.children.map(mapSettingsStub) } : {}),
+  }
+}
+
+const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSettingsStub)
 
 const routes: RouteRecordRaw[] = [
   {
