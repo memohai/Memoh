@@ -1,4 +1,4 @@
--- 0084_command_ui_language
+-- 0086_command_ui_language
 -- Remove per-bot command-UI language.
 
 ALTER TABLE bots
