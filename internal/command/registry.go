@@ -81,7 +81,7 @@ func (g *CommandGroup) Usage(localizers ...*i18n.Localizer) string {
 	for _, name := range g.order {
 		sub := g.commands[name]
 		_, summary := localizedActionUsage(t, g.Name, sub)
-		line := localizedActionLabel(t, sub.Name)
+		line := MdCode(sub.Name)
 		if summary != "" {
 			line += " — " + summary
 		}
@@ -173,7 +173,7 @@ func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *
 	for _, subName := range group.order {
 		sub := group.commands[subName]
 		_, summary := localizedActionUsage(t, group.Name, sub)
-		line := "- " + localizedActionLabel(t, subName)
+		line := "- " + MdCode(subName)
 		if summary != "" {
 			line += " — " + summary
 		}
@@ -185,7 +185,7 @@ func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *
 	choices := make([]ListItem, 0, len(group.order)+1)
 	for _, subName := range group.order {
 		choices = append(choices, ListItem{
-			Label:  localizedActionLabel(t, subName),
+			Label:  subName,
 			Action: &ItemAction{Resource: group.Name, Action: subName},
 		})
 	}
@@ -254,12 +254,4 @@ func localizedActionUsage(t *i18n.Localizer, groupName string, sub SubCommand) (
 		summary = v
 	}
 	return usage, summary
-}
-
-func localizedActionLabel(t *i18n.Localizer, action string) string {
-	key := "cmd.help.actionLabel." + action
-	if v := t.T(key); v != key {
-		return v
-	}
-	return action
 }

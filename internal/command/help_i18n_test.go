@@ -38,7 +38,10 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	if group == nil || group.Interactive == nil || group.Interactive.Choices == nil {
 		t.Fatalf("expected interactive group help, got %+v", group)
 	}
-	for _, want := range []string{"**/model** — 切换对话模型", "列出 — 列出可用对话模型", "心跳 — 设置心跳模型", "选择操作："} {
+	// Action tokens stay literal (a command token must never be translated:
+	// showing "列出" but rejecting a typed "列出" is exactly the bug this guards).
+	// Only the trailing summary is localized.
+	for _, want := range []string{"**/model** — 切换对话模型", "`list` — 列出可用对话模型", "`set-heartbeat` — 设置心跳模型", "选择操作："} {
 		if !strings.Contains(group.Interactive.Choices.Title, want) {
 			t.Fatalf("zh group help missing %q:\n%s", want, group.Interactive.Choices.Title)
 		}
@@ -46,10 +49,17 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	if group.Interactive.Choices.Columns != 1 {
 		t.Fatalf("zh group help buttons should be one per row, got columns=%d", group.Interactive.Choices.Columns)
 	}
+	labels := map[string]bool{}
 	for _, choice := range group.Interactive.Choices.Choices {
-		if choice.Label == "set-heartbeat" || choice.Label == "list" || strings.Contains(choice.Label, "🔒") || strings.Contains(choice.Label, "所有者") {
-			t.Fatalf("zh group help leaked raw or permission label: %#v", group.Interactive.Choices.Choices)
+		labels[choice.Label] = true
+		if strings.Contains(choice.Label, "🔒") || strings.Contains(choice.Label, "所有者") {
+			t.Fatalf("zh group help leaked permission label: %#v", group.Interactive.Choices.Choices)
 		}
+	}
+	// Buttons carry the literal canonical token so the visible action matches
+	// what re-dispatches and what a user would type.
+	if !labels["list"] || !labels["set-heartbeat"] {
+		t.Fatalf("group help buttons should carry literal action tokens, got %#v", group.Interactive.Choices.Choices)
 	}
 
 	action, err := h.ExecuteResult(context.Background(), ExecuteInput{Text: "/help model current", Locale: "zh"})
