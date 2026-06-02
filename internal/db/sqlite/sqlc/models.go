@@ -48,6 +48,7 @@ type Bot struct {
 	Metadata               string         `json:"metadata"`
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
+	CommandUiLanguage      string         `json:"command_ui_language"`
 }
 
 type BotAclRule struct {

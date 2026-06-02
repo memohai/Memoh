@@ -352,6 +352,13 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	}
 	writeAccess := role == "owner" || allowsUnboundWriteCommands(input)
 
+	resource := canonicalResource(parsed.Resource)
+	// /language <lang> shorthand → /language set <lang>. Must run BEFORE cc is
+	// built: cc.Args is frozen from parsed.Args below, so rewriting parsed.Args
+	// after construction would leave the `language set` handler reading an empty
+	// arg slice and emitting usage text instead of switching the language.
+	normalizeLanguageShorthand(resource, &parsed)
+
 	cc := CommandContext{
 		Ctx:               ctx,
 		BotID:             input.BotID,
@@ -372,12 +379,6 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		Range:             parsed.Range,
 		Locale:            localeStr,
 		L:                 loc,
-	}
-
-	resource := canonicalResource(parsed.Resource)
-	if resource == "language" && parsed.Action != "" && parsed.Action != "show" && parsed.Action != "set" {
-		parsed.Args = append([]string{parsed.Action}, parsed.Args...)
-		parsed.Action = "set"
 	}
 
 	// /help (and its alias /commands)
@@ -469,6 +470,18 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 		return t.T("cmd.error.genericNoResource")
 	}
 	return t.T("cmd.error.generic", map[string]any{"command": CmdRef(res)})
+}
+
+// normalizeLanguageShorthand rewrites the "/language <lang>" shorthand into the
+// explicit "/language set <lang>" form so a bare value (zh/en/auto) reaches the
+// set handler's argument slice. The caller must invoke this BEFORE freezing
+// CommandContext.Args from parsed.Args — otherwise the rewritten arg never makes
+// it into the context the handler reads.
+func normalizeLanguageShorthand(resource string, parsed *ParsedCommand) {
+	if resource == "language" && parsed.Action != "" && parsed.Action != "show" && parsed.Action != "set" {
+		parsed.Args = append([]string{parsed.Action}, parsed.Args...)
+		parsed.Action = "set"
+	}
 }
 
 // looksLikeInternalError reports whether an error message carries infra/transport

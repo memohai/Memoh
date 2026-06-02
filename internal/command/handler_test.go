@@ -741,6 +741,41 @@ func TestLooksLikeInternalError_AllowsDomainMessages(t *testing.T) {
 	}
 }
 
+// TestNormalizeLanguageShorthand guards the "/language zh" shorthand: the bare
+// value must be rewritten into the set handler's arg slice. Regression for the
+// bug where the rewrite ran after CommandContext.Args was frozen, so /language
+// zh fell through to usage text instead of switching the language.
+func TestNormalizeLanguageShorthand(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in         string
+		wantAction string
+		wantArgs   []string
+	}{
+		{"/language zh", "set", []string{"zh"}},
+		{"/language en", "set", []string{"en"}},
+		{"/language auto", "set", []string{"auto"}},
+		{"/language", "", nil},                      // bare → default (show), no rewrite
+		{"/language show", "show", nil},             // explicit show untouched
+		{"/language set zh", "set", []string{"zh"}}, // already explicit, untouched
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			parsed, err := Parse(tc.in)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", tc.in, err)
+			}
+			normalizeLanguageShorthand(canonicalResource(parsed.Resource), &parsed)
+			if parsed.Action != tc.wantAction {
+				t.Errorf("Action = %q, want %q", parsed.Action, tc.wantAction)
+			}
+			if strings.Join(parsed.Args, " ") != strings.Join(tc.wantArgs, " ") {
+				t.Errorf("Args = %v, want %v", parsed.Args, tc.wantArgs)
+			}
+		})
+	}
+}
+
 func TestEndsWithTerminalPunct(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"done.", "really?", "stop!", "完成。", "真的？", "等等…", "  trailing.  "} {

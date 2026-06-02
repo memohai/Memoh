@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS bots (
   status TEXT NOT NULL DEFAULT 'ready',
   acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   language TEXT NOT NULL DEFAULT 'auto',
+  command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,

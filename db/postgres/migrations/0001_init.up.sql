@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS bots (
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
   language TEXT NOT NULL DEFAULT 'auto',
+  command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
