@@ -777,6 +777,194 @@ definitions:
       name:
         type: string
     type: object
+  botbackup.ExportRequest:
+    properties:
+      passphrase:
+        type: string
+      sections:
+        items:
+          $ref: '#/definitions/botbackup.Section'
+        type: array
+    type: object
+  botbackup.ImportMode:
+    enum:
+    - create
+    - overwrite
+    type: string
+    x-enum-varnames:
+    - ImportModeCreate
+    - ImportModeOverwrite
+  botbackup.ImportResult:
+    properties:
+      bot_id:
+        type: string
+      created:
+        type: boolean
+      imported:
+        additionalProperties:
+          type: integer
+        description: |-
+          Imported reports how many items were restored per section, powering the
+          post-import summary in the UI.
+        type: object
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  botbackup.Manifest:
+    properties:
+      app:
+        type: string
+      checksums:
+        additionalProperties:
+          type: string
+        type: object
+      entries:
+        items:
+          $ref: '#/definitions/botbackup.ManifestEntry'
+        type: array
+      exported_at:
+        type: string
+      options:
+        $ref: '#/definitions/botbackup.ManifestOptions'
+      schema_version:
+        type: integer
+      source_bot_id:
+        type: string
+      source_bot_name:
+        type: string
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  botbackup.ManifestEntry:
+    properties:
+      path:
+        type: string
+      type:
+        type: string
+    type: object
+  botbackup.ManifestOptions:
+    properties:
+      sections:
+        items:
+          $ref: '#/definitions/botbackup.Section'
+        type: array
+    type: object
+  botbackup.PreviewResult:
+    properties:
+      conflicts:
+        items:
+          type: string
+        type: array
+      encrypted:
+        description: |-
+          Encrypted reports that the uploaded bundle is passphrase-encrypted. When
+          true and no (or a wrong) passphrase was supplied, the other fields are
+          empty and the UI should prompt for the passphrase. RequiresPassphrase
+          distinguishes "needs a passphrase" from "passphrase was wrong".
+        type: boolean
+      manifest:
+        $ref: '#/definitions/botbackup.Manifest'
+      missing:
+        items:
+          type: string
+        type: array
+      profile:
+        $ref: '#/definitions/botbackup.ProfilePreview'
+      requires_passphrase:
+        type: boolean
+      restore_plan:
+        $ref: '#/definitions/botbackup.RestorePlan'
+      sections:
+        items:
+          $ref: '#/definitions/botbackup.SectionSummary'
+        type: array
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  botbackup.ProfilePreview:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      is_active:
+        type: boolean
+      timezone:
+        type: string
+    type: object
+  botbackup.RestorePlan:
+    properties:
+      dependency_matches:
+        additionalProperties:
+          type: integer
+        type: object
+      mode:
+        $ref: '#/definitions/botbackup.ImportMode'
+      target_bot_id:
+        type: string
+      will_create_bot:
+        type: boolean
+      will_restore_workspace:
+        type: boolean
+    type: object
+  botbackup.Section:
+    enum:
+    - profile
+    - settings
+    - models
+    - acl
+    - channels
+    - mcp
+    - schedules
+    - email
+    - history
+    - assets
+    - workspace
+    type: string
+    x-enum-varnames:
+    - SectionProfile
+    - SectionSettings
+    - SectionModels
+    - SectionACL
+    - SectionChannels
+    - SectionMCP
+    - SectionSchedules
+    - SectionEmail
+    - SectionHistory
+    - SectionAssets
+    - SectionWorkspace
+  botbackup.SectionSummary:
+    properties:
+      conflict:
+        type: boolean
+      count:
+        type: integer
+      items:
+        items:
+          type: string
+        type: array
+      key:
+        $ref: '#/definitions/botbackup.Section'
+      sensitive:
+        type: boolean
+      target_count:
+        type: integer
+    type: object
+  botbackup.SummaryResult:
+    properties:
+      profile:
+        $ref: '#/definitions/botbackup.ProfilePreview'
+      sections:
+        items:
+          $ref: '#/definitions/botbackup.SectionSummary'
+        type: array
+    type: object
   bots.Bot:
     properties:
       avatar_url:
@@ -796,6 +984,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       owner_user_id:
         type: string
       status:
@@ -838,6 +1028,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       timezone:
         type: string
       wait_for_ready:
@@ -857,6 +1049,13 @@ definitions:
           $ref: '#/definitions/bots.BotCheck'
         type: array
     type: object
+  bots.NameAvailability:
+    properties:
+      available:
+        type: boolean
+      reason:
+        type: string
+    type: object
   bots.TransferBotRequest:
     properties:
       owner_user_id:
@@ -873,6 +1072,8 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      name:
+        type: string
       timezone:
         type: string
     type: object
@@ -1500,6 +1701,27 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  handlers.ACPClaudeCodeOAuthAuthorizeResponse:
+    properties:
+      auth_url:
+        type: string
+      session_id:
+        type: string
+    type: object
+  handlers.ACPClaudeCodeOAuthExchangeRequest:
+    properties:
+      code:
+        type: string
+      session_id:
+        type: string
+    type: object
+  handlers.ACPClaudeCodeOAuthStatus:
+    properties:
+      configured:
+        type: boolean
+      has_token:
+        type: boolean
     type: object
   handlers.BatchDeleteRequest:
     properties:
@@ -3715,6 +3937,148 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
+  /bots/{bot_id}/acp/claude-code/oauth/authorize:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start Claude Code ACP OAuth authorization
+      tags:
+      - acp
+  /bots/{bot_id}/acp/claude-code/oauth/exchange:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: OAuth exchange request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ACPClaudeCodeOAuthExchangeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Exchange Claude Code OAuth code for an ACP token
+      tags:
+      - acp
+  /bots/{bot_id}/acp/claude-code/oauth/status:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get Claude Code ACP OAuth status
+      tags:
+      - acp
+  /bots/{bot_id}/backup/export:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Export options
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/botbackup.ExportRequest'
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export a full bot backup
+      tags:
+      - bots
+  /bots/{bot_id}/backup/summary:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botbackup.SummaryResult'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Summarize what a bot would export
+      tags:
+      - bots
   /bots/{bot_id}/compaction/logs:
     delete:
       description: Delete all compaction logs for a bot
@@ -3848,59 +4212,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Create and start MCP container for bot
-      tags:
-      - containerd
-  /bots/{bot_id}/container/data/export:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      produces:
-      - application/gzip
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: file
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Export container /data as a tar.gz archive
-      tags:
-      - containerd
-  /bots/{bot_id}/container/data/import:
-    post:
-      consumes:
-      - multipart/form-data
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: tar.gz archive
-        in: formData
-        name: file
-        required: true
-        type: file
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import a tar.gz archive into container /data
       tags:
       - containerd
   /bots/{bot_id}/container/data/restore:
@@ -7507,6 +7818,125 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Transfer bot owner (admin only)
+      tags:
+      - bots
+  /bots/backup/import:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Bot backup zip
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Import mode
+        in: formData
+        name: mode
+        type: string
+      - description: Target bot ID for overwrite mode
+        in: formData
+        name: target_bot_id
+        type: string
+      - description: JSON object mapping section to strategy (skip|merge|replace),
+          e.g. {\
+        in: formData
+        name: sections
+        type: string
+      - description: Passphrase to decrypt an encrypted backup
+        in: formData
+        name: passphrase
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botbackup.ImportResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import a bot backup
+      tags:
+      - bots
+  /bots/backup/import/preview:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Bot backup zip
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Import mode
+        in: formData
+        name: mode
+        type: string
+      - description: Target bot ID for overwrite mode
+        in: formData
+        name: target_bot_id
+        type: string
+      - description: JSON object mapping section to strategy (skip|merge|replace),
+          e.g. {\
+        in: formData
+        name: sections
+        type: string
+      - description: Passphrase to decrypt an encrypted backup
+        in: formData
+        name: passphrase
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botbackup.PreviewResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Preview a bot backup import
+      tags:
+      - bots
+  /bots/name-availability:
+    get:
+      description: Validate a candidate bot name and report whether it is available
+      parameters:
+      - description: Candidate bot name
+        in: query
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.NameAvailability'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Check bot name availability
       tags:
       - bots
   /channels:

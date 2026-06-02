@@ -241,6 +241,10 @@ WHERE m.session_id = sqlc.arg(session_id)
 ORDER BY m.created_at ASC
 LIMIT sqlc.arg(max_count);
 
+-- name: CountMessagesByBot :one
+SELECT COUNT(*) FROM bot_history_messages
+WHERE bot_id = sqlc.arg(bot_id);
+
 -- name: DeleteMessagesByBot :exec
 DELETE FROM bot_history_messages
 WHERE bot_id = sqlc.arg(bot_id);
@@ -333,6 +337,8 @@ WHERE m.bot_id = sqlc.arg(bot_id)
   AND (sqlc.narg(role) IS NULL OR m.role = sqlc.narg(role))
   AND (sqlc.narg(keyword) IS NULL OR (
     CASE
+      WHEN NOT json_valid(m.content)
+        THEN CASE WHEN m.content LIKE '%' || sqlc.narg(keyword) || '%' THEN m.content ELSE '' END
       WHEN json_type(json_extract(m.content, '$.content')) = 'text'
         THEN json_extract(m.content, '$.content')
       WHEN json_type(json_extract(m.content, '$.content')) = 'array'

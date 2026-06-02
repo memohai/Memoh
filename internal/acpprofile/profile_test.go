@@ -2,6 +2,26 @@ package acpprofile
 
 import "testing"
 
+func TestListIncludesClaudeCode(t *testing.T) {
+	items := List()
+	if len(items) < 2 {
+		t.Fatalf("profiles len = %d, want at least 2", len(items))
+	}
+	profile, ok := Lookup(AgentClaudeCodeID)
+	if !ok {
+		t.Fatalf("Claude Code profile was not registered")
+	}
+	if profile.Command != "claude-agent-acp" {
+		t.Fatalf("Claude Code command = %q", profile.Command)
+	}
+	if len(profile.ManagedFields) == 0 || !profile.ManagedFields[0].Required {
+		t.Fatalf("Claude Code profile should expose required API key field: %#v", profile.ManagedFields)
+	}
+	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeOAuth || profile.SetupModes[2] != setupModeSelf {
+		t.Fatalf("Claude Code setup modes = %#v", profile.SetupModes)
+	}
+}
+
 func TestMetadataAgentEnabled(t *testing.T) {
 	tests := []struct {
 		name     string

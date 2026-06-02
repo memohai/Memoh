@@ -91,7 +91,7 @@ function handleNavigate() {
   emit('update:open', false)
   router.push({
     name: 'bot-detail',
-    params: { botId: selectedBotId.value },
+    params: { botName: selectedBotId.value },
     query: { tab: 'mcp' },
   })
 }

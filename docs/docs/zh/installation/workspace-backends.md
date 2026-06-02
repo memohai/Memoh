@@ -8,19 +8,16 @@
 
 ```toml
 [container]
-backend = "containerd" # containerd、docker、kubernetes 或 apple
+backend = "containerd" # containerd、docker 或 apple
 ```
 
 | Backend | 适合 | 说明 |
 |---------|------|------|
 | `containerd` | Docker Compose Server Deploy、Linux 服务器、开发环境 | 官方 server 镜像默认用它。支持 CNI 网络、快照、CDI 设备、provider sidecar，本地 workspace 功能最完整。 |
 | `docker` | Memoh 直接跑在宿主机，宿主机有 Docker Engine | 走宿主机 Docker API。`container.runtime_dir` 这类 bind mount 源路径必须在 Docker 宿主机上真实存在。 |
-| `kubernetes` | 集群部署 | 每个机器人一个 Pod/PVC，使用 Kubernetes 原生网络和存储。 |
 | `apple` | macOS 本地测试 | 通过 socktainer 和 Apple Containerization。provider sidecar 不支持。 |
 
-一键 Docker Compose Server Deploy 固定使用 `containerd`。这是有意的：server 镜像会启动内置 containerd，并挂好机器人 workspace 需要的 runtime 文件。`docker`、`kubernetes`、`apple` 更适合你能控制宿主机或集群 runtime 路径的手动部署。
-
-可直接改造的 Kubernetes 起步方案见 [Kubernetes 部署](/zh/installation/kubernetes)。
+一键 Docker Compose Server Deploy 固定使用 `containerd`。这是有意的：server 镜像会启动内置 containerd，并挂好机器人 workspace 需要的 runtime 文件。`docker`、`apple` 更适合你能控制宿主机 runtime 路径的手动部署。
 
 ## Trusted local workspace
 
@@ -74,27 +71,6 @@ Docker backend 通过标准 Docker 环境连接 Docker Engine。它更适合 Mem
 
 不要把官方 Docker Compose 安装里的 `containerd` 直接改成 `docker`，除非你同时处理好 Docker socket 和 `runtime_dir` 的宿主机路径。否则 workspace 容器可能建出来，但拿不到 bridge runtime 文件。
 
-## Kubernetes
-
-```toml
-[container]
-backend = "kubernetes"
-
-[kubernetes]
-namespace = "memoh"
-in_cluster = true
-kubeconfig = ""
-service_account_name = ""
-image_pull_secret = ""
-pvc_storage_class = ""
-pvc_size = "10Gi"
-bridge_port = 9090
-```
-
-`in_cluster = true` 时使用 Pod ServiceAccount。外部控制集群时，设为 `false` 并提供 `kubeconfig`。
-
-Kubernetes workspace 会创建 Pod 和 PVC。启动前请确认 namespace、RBAC、StorageClass 和镜像拉取权限都准备好了。
-
 ## Apple
 
 ```toml
@@ -125,12 +101,11 @@ Local workspace 不提供同样的容器桌面隔离。工具层面的区别见 
 
 不同后端能力不同：
 
-| Backend | Runtime network | Overlay sidecar | Kubernetes 原生 overlay | CDI 设备 | 容器 display |
-|---------|-----------------|-----------------|--------------------------|----------|--------------|
-| `containerd` | CNI | 支持 | 不适用 | 支持 | 支持 |
-| `docker` | 加入 Docker 容器网络 | 受 Docker runtime 能力限制 | 不适用 | 不支持 | runtime 文件和镜像组件齐全时支持 |
-| `kubernetes` | Pod 网络 | 取决于 provider | 支持 | 不支持 | 取决于后端 |
-| `apple` | 基础本地 runtime | 不支持 | 不适用 | 不支持 | 有限 |
-| `local` | 宿主机网络 | 不支持 | 不适用 | 宿主机级别 | 无容器桌面 |
+| Backend | Runtime network | Overlay sidecar | CDI 设备 | 容器 display |
+|---------|-----------------|-----------------|----------|--------------|
+| `containerd` | CNI | 支持 | 支持 | 支持 |
+| `docker` | 加入 Docker 容器网络 | 受 Docker runtime 能力限制 | 不支持 | runtime 文件和镜像组件齐全时支持 |
+| `apple` | 基础本地 runtime | 不支持 | 不支持 | 有限 |
+| `local` | 宿主机网络 | 不支持 | 宿主机级别 | 无容器桌面 |
 
 Overlay provider 在机器人界面里配置，不在全局 TOML 里配。全局 backend 仍然重要，因为它决定能跑哪类 overlay driver。

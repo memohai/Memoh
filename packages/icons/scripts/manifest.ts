@@ -31,6 +31,7 @@ const llmProviders: string[] = [
   ...withVariants('qwen', ['color']),
   ...withVariants('xai', []),
   ...withVariants('claude', ['color']),
+  ...withVariants('claude-code', ['color']),
   ...withVariants('gemini', ['color']),
   ...withVariants('meta', ['color']),
   ...withVariants('cohere', ['color']),

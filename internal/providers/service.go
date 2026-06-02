@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -210,10 +209,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-const (
-	probeTimeout        = models.DefaultProviderProbeTimeout
-	anthropicAPIVersion = "2023-06-01"
-)
+const probeTimeout = models.DefaultProviderProbeTimeout
 
 // Test probes the provider using the Twilight AI SDK to check
 // reachability and authentication.
@@ -281,7 +277,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 }
 
-// FetchRemoteModels fetches models from the provider's /v1/models endpoint.
+// FetchRemoteModels fetches available models from the provider using the Twilight AI SDK.
 func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteModel, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -344,112 +340,67 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return remoteModels, nil
 	}
 
-	if models.ClientType(provider.ClientType) == models.ClientTypeGoogleGenerativeAI {
-		return fetchRemoteModelsViaSDK(ctx, provider)
-	}
-
-	return fetchRemoteModelsFromProvider(ctx, provider)
+	return s.fetchRemoteModelsViaSDK(ctx, provider)
 }
 
-// fetchRemoteModelsViaSDK lists a provider's models through the twilight SDK
-// instead of the hand-rolled OpenAI-style HTTP path. It is required for
-// providers whose model-listing API diverges from the OpenAI contract — e.g.
-// Google Gemini, which authenticates with x-goog-api-key (not Bearer) and
-// returns models under "models" rather than "data". The SDK provider already
-// implements this correctly and is the same one Test()/inference use.
-func fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
+func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
 	cfg := providerConfig(provider.Config)
 	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
-	apiKey := configString(cfg, "api_key")
 	clientType := models.ClientType(provider.ClientType)
 
-	sdkProvider := models.NewSDKProvider(baseURL, apiKey, "", clientType, probeTimeout, nil)
-	sdkModels, err := sdkProvider.ListModels(ctx)
+	if clientType == models.ClientTypeAnthropicMessages && baseURL != "" && !strings.HasSuffix(baseURL, "/v1") {
+		baseURL += "/v1"
+	}
+
+	creds, err := s.ResolveModelCredentials(ctx, provider)
 	if err != nil {
-		return nil, fmt.Errorf("list models via sdk: %w", err)
+		return nil, fmt.Errorf("resolve credentials: %w", err)
 	}
 
-	remoteModels := make([]RemoteModel, 0, len(sdkModels))
-	for _, m := range sdkModels {
-		remoteModels = append(remoteModels, RemoteModel{
-			ID:   m.ID,
-			Name: m.DisplayName,
-			Type: string(models.ModelTypeChat),
-		})
-	}
-	return remoteModels, nil
-}
-
-func fetchRemoteModelsFromProvider(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
-	cfg := providerConfig(provider.Config)
-	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
-	apiKey := configString(cfg, "api_key")
-	modelsURL := fetchModelsURL(models.ClientType(provider.ClientType), baseURL)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	sdkModels, err := sdkProvider.ListModels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("list models: %w", err)
 	}
 
-	setFetchModelsAuthHeaders(req, models.ClientType(provider.ClientType), apiKey)
-
-	resp, err := models.NewProviderHTTPClient(probeTimeout).Do(req) //nolint:gosec // G704: URL is from operator-configured LLM provider base URL
-	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	var fetchResp FetchModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&fetchResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	normalizeFetchedModels(models.ClientType(provider.ClientType), fetchResp.Data)
-	return fetchResp.Data, nil
-}
-
-func fetchModelsURL(clientType models.ClientType, baseURL string) string {
-	if clientType == models.ClientTypeAnthropicMessages && !strings.HasSuffix(baseURL, "/v1") {
-		baseURL += "/v1"
-	}
-	return fmt.Sprintf("%s/models", baseURL)
-}
-
-func setFetchModelsAuthHeaders(req *http.Request, clientType models.ClientType, apiKey string) {
-	if apiKey == "" {
-		return
-	}
-	if clientType == models.ClientTypeAnthropicMessages {
-		req.Header.Set("x-api-key", apiKey)
-		req.Header.Set("anthropic-version", anthropicAPIVersion)
-		return
-	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
-}
-
-func normalizeFetchedModels(clientType models.ClientType, remoteModels []RemoteModel) {
-	if clientType != models.ClientTypeAnthropicMessages {
-		return
-	}
-	for i := range remoteModels {
-		if strings.TrimSpace(remoteModels[i].Name) == "" {
-			remoteModels[i].Name = strings.TrimSpace(remoteModels[i].DisplayName)
+	remoteModels := make([]RemoteModel, 0, len(sdkModels))
+	for _, m := range sdkModels {
+		modelType := m.Type
+		if modelType == "" {
+			modelType = sdk.ModelTypeChat
 		}
-		if strings.TrimSpace(remoteModels[i].Object) == "" {
-			remoteModels[i].Object = remoteModels[i].Type
+		if modelType != sdk.ModelTypeChat && modelType != sdk.ModelTypeEmbedding {
+			continue
 		}
-		if strings.TrimSpace(remoteModels[i].Type) == "model" {
-			remoteModels[i].Type = string(models.ModelTypeChat)
+		name := m.DisplayName
+		if name == "" {
+			name = m.ID
 		}
+		var dimensions *int
+		if modelType == sdk.ModelTypeEmbedding {
+			dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
+			if err != nil {
+				logger := s.logger
+				if logger == nil {
+					logger = slog.Default()
+				}
+				logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
+				continue
+			}
+			dimensions = &dim
+		}
+		remoteModels = append(remoteModels, RemoteModel{
+			ID:         m.ID,
+			Name:       name,
+			Type:       string(modelType),
+			Dimensions: dimensions,
+		})
 	}
+	return remoteModels, nil
 }
 
 // toGetResponse converts a database provider to a response.

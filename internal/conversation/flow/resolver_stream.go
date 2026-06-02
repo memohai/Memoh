@@ -34,6 +34,7 @@ func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
 		agentpkg.EventReasoningStart,
 		agentpkg.EventReasoningDelta,
 		agentpkg.EventReasoningEnd,
+		agentpkg.EventToolCallInputStart,
 		agentpkg.EventToolCallStart,
 		agentpkg.EventToolCallProgress,
 		agentpkg.EventToolCallEnd,

@@ -1,6 +1,6 @@
 {
   "name": "@memohai/icon",
-  "version": "0.10.0-alpha.1",
+  "version": "0.10.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

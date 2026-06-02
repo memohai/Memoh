@@ -13,13 +13,11 @@ func RegisterBuiltinProviders(registry *netctl.Registry, deps ProviderDeps) erro
 	providers := []netctl.Provider{
 		tailscale.NewProvider(tailscale.Deps{
 			SidecarRuntime: deps.SidecarRuntime,
-			KubeRuntime:    deps.KubeRuntime,
 			Runtime:        deps.Runtime,
 			StateRoot:      deps.StateRoot,
 		}),
 		netbird.NewProvider(netbird.Deps{
 			SidecarRuntime: deps.SidecarRuntime,
-			KubeRuntime:    deps.KubeRuntime,
 			Runtime:        deps.Runtime,
 			StateRoot:      deps.StateRoot,
 		}),

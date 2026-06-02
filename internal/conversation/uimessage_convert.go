@@ -114,12 +114,6 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 					continue
 				}
 
-				if isHiddenCurrentConversationToolOutput(toolResult.Output) {
-					removePendingAssistantMessage(pending, idx)
-					delete(pending.ToolIndexes, toolResult.ToolCallID)
-					continue
-				}
-
 				applyToolResultToUIMessage(&pending.Turn.Messages[idx], toolResult.Output)
 			}
 		}
@@ -349,12 +343,6 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					continue
 				}
 
-				if isHiddenCurrentConversationToolOutput(toolResult.Output) {
-					removePendingAssistantMessage(pending, idx)
-					delete(pending.ToolIndexes, toolResult.ToolCallID)
-					continue
-				}
-
 				applyToolResultToUIMessage(&pending.Turn.Messages[idx], toolResult.Output)
 			}
 		}
@@ -384,22 +372,6 @@ func appendPendingAssistantMessage(pending *uiPendingAssistantTurn, message UIMe
 	message.ID = pending.NextID
 	pending.NextID++
 	pending.Turn.Messages = append(pending.Turn.Messages, message)
-}
-
-func removePendingAssistantMessage(pending *uiPendingAssistantTurn, idx int) {
-	if pending == nil || idx < 0 || idx >= len(pending.Turn.Messages) {
-		return
-	}
-
-	pending.Turn.Messages = append(pending.Turn.Messages[:idx], pending.Turn.Messages[idx+1:]...)
-	for callID, currentIdx := range pending.ToolIndexes {
-		switch {
-		case currentIdx == idx:
-			delete(pending.ToolIndexes, callID)
-		case currentIdx > idx:
-			pending.ToolIndexes[callID] = currentIdx - 1
-		}
-	}
 }
 
 func buildStandaloneAssistantMessages(text string, reasonings []string, attachments []UIAttachment) []UIMessage {
@@ -910,15 +882,6 @@ func stripPersistedYAMLHeader(text string) string {
 func stripPersistedAgentTags(text string) string {
 	stripped := uiMessageAgentTagsRe.ReplaceAllString(text, "")
 	return strings.TrimSpace(uiMessageCollapsedNewlinesRe.ReplaceAllString(stripped, "\n\n"))
-}
-
-func isHiddenCurrentConversationToolOutput(output any) bool {
-	typed, ok := output.(map[string]any)
-	if !ok {
-		return false
-	}
-	delivered, _ := typed["delivered"].(string)
-	return strings.EqualFold(strings.TrimSpace(delivered), "current_conversation")
 }
 
 func applyToolResultToUIMessage(message *UIMessage, output any) {

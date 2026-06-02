@@ -113,11 +113,11 @@ const isError=ref(false)
 function handleSelect() {
   if (props.bot.status === 'error') return
   chatStore.selectBot(props.bot.id ?? '')
-  router.push({ name: 'chat', params: { botId: props.bot.id } })
+  router.push({ name: 'bot', params: { botName: props.bot.name ?? props.bot.id } })
 }
 
 function handleDetails() {
-  router.push({ name: 'bot-detail', params: { botId: props.bot.id } })
+  router.push({ name: 'bot-detail', params: { botName: props.bot.name ?? props.bot.id } })
 }
 
 function handleTogglePin() {

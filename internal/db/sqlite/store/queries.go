@@ -202,6 +202,44 @@ func (q *Queries) CountMemoryProvidersByDefault(ctx context.Context) (int64, err
 	return result, nil
 }
 
+func (q *Queries) CountMessageAssetsByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return 0, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return 0, err
+	}
+	out, err := q.store.queries.CountMessageAssetsByBot(ctx, sqliteBotID)
+	if err != nil {
+		return 0, mapQueryErr(err)
+	}
+	var result int64
+	if err := convertValue(out, &result); err != nil {
+		return 0, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CountMessagesByBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return 0, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return 0, err
+	}
+	out, err := q.store.queries.CountMessagesByBot(ctx, sqliteBotID)
+	if err != nil {
+		return 0, mapQueryErr(err)
+	}
+	var result int64
+	if err := convertValue(out, &result); err != nil {
+		return 0, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return 0, errSQLiteQueriesNotConfigured
@@ -1317,6 +1355,21 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (pgsqlc.GetBot
 	var result pgsqlc.GetBotByIDRow
 	if err := convertValue(out, &result); err != nil {
 		return pgsqlc.GetBotByIDRow{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetBotByName(ctx context.Context, name string) (pgsqlc.GetBotByNameRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.GetBotByNameRow{}, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.GetBotByName(ctx, name)
+	if err != nil {
+		return pgsqlc.GetBotByNameRow{}, mapQueryErr(err)
+	}
+	var result pgsqlc.GetBotByNameRow
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.GetBotByNameRow{}, err
 	}
 	return result, nil
 }

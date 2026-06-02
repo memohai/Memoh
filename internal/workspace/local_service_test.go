@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -39,8 +40,11 @@ func TestLocalServiceCRUDAndInProcessBridge(t *testing.T) {
 	if info.StorageRef.Key != workspaceRoot {
 		t.Fatalf("workspace path = %q, want %q", info.StorageRef.Key, workspaceRoot)
 	}
-	if _, err := os.Stat(filepath.Join(workspaceRoot, "IDENTITY.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "AGENTS.md")); err != nil {
 		t.Fatalf("expected seeded bridge template: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "IDENTITY.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy IDENTITY.md template to be absent, got err=%v", err)
 	}
 
 	if err := svc.StartContainer(ctx, info.ID, nil); err != nil {
@@ -80,4 +84,64 @@ func TestLocalServiceCRUDAndInProcessBridge(t *testing.T) {
 	if got := filepath.Clean(strings.TrimSpace(result.Stdout)); got != workspaceRoot {
 		t.Fatalf("pwd = %q, want %q", got, workspaceRoot)
 	}
+}
+
+func TestBridgeTemplateSetsMatch(t *testing.T) {
+	t.Parallel()
+
+	embedded, err := templateNameSet()
+	if err != nil {
+		t.Fatalf("read embedded templates: %v", err)
+	}
+	disk, err := diskTemplateNameSet(filepath.Join("..", "..", "cmd", "bridge", "template"))
+	if err != nil {
+		t.Fatalf("read bridge templates: %v", err)
+	}
+	if len(embedded) != len(disk) {
+		t.Fatalf("template count mismatch: embedded=%v disk=%v", embedded, disk)
+	}
+	for name := range embedded {
+		if !disk[name] {
+			t.Fatalf("template %q exists in embedded templates but not cmd/bridge/template", name)
+		}
+		embeddedContent, err := bridgeTemplates.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatalf("read embedded template %q: %v", name, err)
+		}
+		diskContent, err := os.ReadFile(filepath.Join("..", "..", "cmd", "bridge", "template", name)) //nolint:gosec // test compares a fixed repo path.
+		if err != nil {
+			t.Fatalf("read bridge template %q: %v", name, err)
+		}
+		if string(embeddedContent) != string(diskContent) {
+			t.Fatalf("template %q content differs between embedded and cmd/bridge/template", name)
+		}
+	}
+}
+
+func templateNameSet() (map[string]bool, error) {
+	entries, err := fs.ReadDir(bridgeTemplates, "templates")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			out[entry.Name()] = true
+		}
+	}
+	return out, nil
+}
+
+func diskTemplateNameSet(dir string) (map[string]bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			out[entry.Name()] = true
+		}
+	}
+	return out, nil
 }

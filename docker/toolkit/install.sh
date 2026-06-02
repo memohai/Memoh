@@ -16,6 +16,8 @@
 #   NPM_MIRROR          Default: https://registry.npmjs.org
 #   CODEX_VERSION       Default: pinned @openai/codex version below
 #   CODEX_ACP_VERSION   Default: pinned @zed-industries/codex-acp version below
+#   CLAUDE_AGENT_ACP_VERSION
+#                       Default: pinned @agentclientprotocol/claude-agent-acp version below
 #   ALPINE_MIRROR       Default: https://dl-cdn.alpinelinux.org/alpine
 #   DEBIAN_MIRROR       Default: https://deb.debian.org/debian
 #   DEBIAN_VERSION      Default: bookworm
@@ -30,10 +32,12 @@ NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
 CODEX_VERSION="${CODEX_VERSION:-0.133.0}"
 CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-0.15.0}"
+CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.39.0}"
 
 OUTDIR="${1:-.toolkit}"
 ARCH="${2:-}"
 DISPLAY_OUTDIR="${MEMOH_DISPLAY_OUTDIR:-${3:-$OUTDIR/display}}"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 if [ -z "$ARCH" ]; then
   case "$(uname -m)" in
@@ -224,7 +228,7 @@ install_ca_bundle() {
     fi
   done
 
-  echo "warning: no host CA bundle found; Codex may fail HTTPS requests in minimal workspace images." >&2
+  echo "warning: no host CA bundle found; ACP agents may fail HTTPS requests in minimal workspace images." >&2
 }
 
 apk_package_filename_from_index() {
@@ -517,7 +521,8 @@ install_acp_packages_with_toolkit_npm() {
     --cpu="$NPM_CPU" \
     --libc=glibc \
     "@openai/codex@$CODEX_VERSION" \
-    "@zed-industries/codex-acp@$CODEX_ACP_VERSION"
+    "@zed-industries/codex-acp@$CODEX_ACP_VERSION" \
+    "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
 }
 
 install_acp_packages_with_host_npm() {
@@ -534,18 +539,20 @@ install_acp_packages_with_host_npm() {
     --cpu="$NPM_CPU" \
     --libc=glibc \
     "@openai/codex@$CODEX_VERSION" \
-    "@zed-industries/codex-acp@$CODEX_ACP_VERSION"
+    "@zed-industries/codex-acp@$CODEX_ACP_VERSION" \
+    "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
 }
 
 install_acp_packages() {
   codex_bin="$OUTDIR/acp/lib/node_modules/@openai/codex/bin/codex.js"
   codex_acp_bin="$OUTDIR/acp/lib/node_modules/@zed-industries/codex-acp/bin/codex-acp.js"
-  if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ]; then
-    echo "Codex ACP packages already installed; skipping npm install."
+  claude_agent_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
+  if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ] && [ -f "$claude_agent_acp_bin" ]; then
+    echo "ACP agent packages already installed; skipping npm install."
     return
   fi
 
-  echo "Installing Codex ACP packages for linux-${NPM_CPU}..."
+  echo "Installing ACP agent packages for linux-${NPM_CPU}..."
   mkdir -p "$OUTDIR/acp"
 
   # On Linux builders, prefer the freshly downloaded target Node/npm so Docker
@@ -567,6 +574,21 @@ install_acp_packages() {
 
   echo "ERROR: npm is required to install Codex ACP packages into the workspace toolkit." >&2
   exit 1
+}
+
+install_toolkit_wrappers() {
+  source_dir="$SCRIPT_DIR/bin"
+  if [ ! -d "$source_dir" ]; then
+    echo "warning: toolkit command wrappers not found at $source_dir" >&2
+    return
+  fi
+
+  mkdir -p "$OUTDIR/bin"
+  cp -R "$source_dir"/. "$OUTDIR/bin/"
+  for wrapper in "$OUTDIR"/bin/*; do
+    [ -e "$wrapper" ] || continue
+    chmod +x "$wrapper"
+  done
 }
 
 write_display_wrappers() {
@@ -838,6 +860,7 @@ install_pinned_npm node-musl
 
 install_uv
 install_acp_packages
+install_toolkit_wrappers
 install_ca_bundle
 
 echo "Toolkit installed to $OUTDIR"

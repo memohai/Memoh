@@ -104,10 +104,3 @@ func TestPrepareBotConfigForWriteAllowsExitNodeWithKernelTUN(t *testing.T) {
 		t.Fatalf("unexpected provider: %+v", cfg)
 	}
 }
-
-func TestKubernetesRuntimeIsNotRejectedBeforeProviderSelection(t *testing.T) {
-	svc := &Service{runtimeKind: "kubernetes"}
-	if svc.overlayRuntimeUnsupported() {
-		t.Fatal("expected kubernetes runtime to be handled by provider driver selection")
-	}
-}

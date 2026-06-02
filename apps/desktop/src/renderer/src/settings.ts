@@ -10,10 +10,10 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
 
+import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
 import './desktop-shell.css'
 import 'animate.css'
-import 'markstream-vue/index.css'
 import 'katex/dist/katex.min.css'
 
 import App from './settings/App.vue'
@@ -21,12 +21,17 @@ import router from './settings/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
+  const status = await window.api.desktop.getServerStatus()
+  if (status.mode === 'remote' && !status.baseUrl) {
+    await window.api.window.closeSelf()
+    return
+  }
   const token = await window.api.desktop.authToken()
   if (token) {
     localStorage.setItem('token', token)
   }
   setupApiClient({
-    baseUrl: await window.api.desktop.apiBaseUrl(),
+    baseUrl: status.baseUrl || 'http://127.0.0.1:0',
     // Settings is a satellite window — it doesn't host the login screen.
     // On 401 we close ourselves and let the chat window route to login.
     onUnauthorized: () => {

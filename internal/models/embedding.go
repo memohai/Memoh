@@ -1,6 +1,8 @@
 package models
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -43,4 +45,19 @@ func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout t
 		p := openaiembedding.New(opts...)
 		return p.EmbeddingModel(modelID)
 	}
+}
+
+// InferEmbeddingDimensions probes the embedding endpoint and returns the vector
+// length produced by the provider for a minimal input.
+func InferEmbeddingDimensions(ctx context.Context, clientType, baseURL, apiKey, modelID string, timeout time.Duration, httpClient *http.Client) (int, error) {
+	model := NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID, timeout, httpClient)
+	client := sdk.NewClient()
+	vector, err := client.Embed(ctx, "dimensions", sdk.WithEmbeddingModel(model))
+	if err != nil {
+		return 0, err
+	}
+	if len(vector) == 0 {
+		return 0, errors.New("embedding provider returned no vector values")
+	}
+	return len(vector), nil
 }

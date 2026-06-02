@@ -140,7 +140,12 @@ export async function detectCliState(): Promise<CliStatus> {
   // The PATH entry is a memoh binary, but doesn't point at this app.
   // It might be a stale symlink from a previous app version, or a
   // foreign install (manual go build, homebrew, etc.).
-  if (realLocated.includes('/Memoh.app/') || realLocated.includes('\\Memoh\\')) {
+  if (
+    realLocated.includes('/Memoh Local.app/')
+    || realLocated.includes('/Memoh.app/')
+    || realLocated.includes('\\Memoh Local\\')
+    || realLocated.includes('\\Memoh\\')
+  ) {
     return { state: 'installed-stale', source, target: located }
   }
   return { state: 'installed-foreign', source, target: located }

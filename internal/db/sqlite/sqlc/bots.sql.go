@@ -11,7 +11,7 @@ import (
 )
 
 const createBot = `-- name: CreateBot :one
-INSERT INTO bots (id, owner_user_id, type, display_name, avatar_url, timezone, is_active, metadata, status)
+INSERT INTO bots (id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, metadata, status)
 VALUES (
   lower(hex(randomblob(4))) || '-' ||
   lower(hex(randomblob(2))) || '-' ||
@@ -25,13 +25,15 @@ VALUES (
   ?4,
   ?5,
   ?6,
-  ?7
+  ?7,
+  ?8
 )
-RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
 	OwnerUserID string         `json:"owner_user_id"`
+	Name        string         `json:"name"`
 	DisplayName sql.NullString `json:"display_name"`
 	AvatarUrl   sql.NullString `json:"avatar_url"`
 	Timezone    sql.NullString `json:"timezone"`
@@ -43,6 +45,7 @@ type CreateBotParams struct {
 type CreateBotRow struct {
 	ID                string         `json:"id"`
 	OwnerUserID       string         `json:"owner_user_id"`
+	Name              string         `json:"name"`
 	DisplayName       sql.NullString `json:"display_name"`
 	AvatarUrl         sql.NullString `json:"avatar_url"`
 	Timezone          sql.NullString `json:"timezone"`
@@ -65,6 +68,7 @@ type CreateBotRow struct {
 func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBotRow, error) {
 	row := q.db.QueryRowContext(ctx, createBot,
 		arg.OwnerUserID,
+		arg.Name,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.Timezone,
@@ -76,6 +80,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
+		&i.Name,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -107,7 +112,7 @@ func (q *Queries) DeleteBotByID(ctx context.Context, id string) error {
 }
 
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE id = ?1
 `
@@ -115,6 +120,7 @@ WHERE id = ?1
 type GetBotByIDRow struct {
 	ID                  string         `json:"id"`
 	OwnerUserID         string         `json:"owner_user_id"`
+	Name                string         `json:"name"`
 	DisplayName         sql.NullString `json:"display_name"`
 	AvatarUrl           sql.NullString `json:"avatar_url"`
 	Timezone            sql.NullString `json:"timezone"`
@@ -144,6 +150,72 @@ func (q *Queries) GetBotByID(ctx context.Context, id string) (GetBotByIDRow, err
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
+		&i.Name,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.Timezone,
+		&i.IsActive,
+		&i.Status,
+		&i.Language,
+		&i.ReasoningEnabled,
+		&i.ReasoningEffort,
+		&i.ChatModelID,
+		&i.SearchProviderID,
+		&i.MemoryProviderID,
+		&i.HeartbeatEnabled,
+		&i.HeartbeatInterval,
+		&i.HeartbeatPrompt,
+		&i.CompactionEnabled,
+		&i.CompactionThreshold,
+		&i.CompactionRatio,
+		&i.CompactionModelID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getBotByName = `-- name: GetBotByName :one
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id, metadata, created_at, updated_at
+FROM bots
+WHERE name = ?1
+`
+
+type GetBotByNameRow struct {
+	ID                  string         `json:"id"`
+	OwnerUserID         string         `json:"owner_user_id"`
+	Name                string         `json:"name"`
+	DisplayName         sql.NullString `json:"display_name"`
+	AvatarUrl           sql.NullString `json:"avatar_url"`
+	Timezone            sql.NullString `json:"timezone"`
+	IsActive            int64          `json:"is_active"`
+	Status              string         `json:"status"`
+	Language            string         `json:"language"`
+	ReasoningEnabled    int64          `json:"reasoning_enabled"`
+	ReasoningEffort     string         `json:"reasoning_effort"`
+	ChatModelID         sql.NullString `json:"chat_model_id"`
+	SearchProviderID    sql.NullString `json:"search_provider_id"`
+	MemoryProviderID    sql.NullString `json:"memory_provider_id"`
+	HeartbeatEnabled    int64          `json:"heartbeat_enabled"`
+	HeartbeatInterval   int64          `json:"heartbeat_interval"`
+	HeartbeatPrompt     string         `json:"heartbeat_prompt"`
+	CompactionEnabled   int64          `json:"compaction_enabled"`
+	CompactionThreshold int64          `json:"compaction_threshold"`
+	CompactionRatio     int64          `json:"compaction_ratio"`
+	CompactionModelID   sql.NullString `json:"compaction_model_id"`
+	Metadata            string         `json:"metadata"`
+	CreatedAt           string         `json:"created_at"`
+	UpdatedAt           string         `json:"updated_at"`
+}
+
+func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRow, error) {
+	row := q.db.QueryRowContext(ctx, getBotByName, name)
+	var i GetBotByNameRow
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Name,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -170,7 +242,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id string) (GetBotByIDRow, err
 }
 
 const listBotsByOwner = `-- name: ListBotsByOwner :many
-SELECT id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots
 WHERE owner_user_id = ?1
 ORDER BY created_at DESC
@@ -179,6 +251,7 @@ ORDER BY created_at DESC
 type ListBotsByOwnerRow struct {
 	ID                string         `json:"id"`
 	OwnerUserID       string         `json:"owner_user_id"`
+	Name              string         `json:"name"`
 	DisplayName       sql.NullString `json:"display_name"`
 	AvatarUrl         sql.NullString `json:"avatar_url"`
 	Timezone          sql.NullString `json:"timezone"`
@@ -210,6 +283,7 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID string) ([]Li
 		if err := rows.Scan(
 			&i.ID,
 			&i.OwnerUserID,
+			&i.Name,
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Timezone,
@@ -289,7 +363,7 @@ UPDATE bots
 SET owner_user_id = ?1,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?2
-RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
@@ -300,6 +374,7 @@ type UpdateBotOwnerParams struct {
 type UpdateBotOwnerRow struct {
 	ID                string         `json:"id"`
 	OwnerUserID       string         `json:"owner_user_id"`
+	Name              string         `json:"name"`
 	DisplayName       sql.NullString `json:"display_name"`
 	AvatarUrl         sql.NullString `json:"avatar_url"`
 	Timezone          sql.NullString `json:"timezone"`
@@ -325,6 +400,7 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
+		&i.Name,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,
@@ -348,17 +424,19 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 
 const updateBotProfile = `-- name: UpdateBotProfile :one
 UPDATE bots
-SET display_name = ?1,
-    avatar_url = ?2,
-    timezone = ?3,
-    is_active = ?4,
-    metadata = ?5,
+SET name = ?1,
+    display_name = ?2,
+    avatar_url = ?3,
+    timezone = ?4,
+    is_active = ?5,
+    metadata = ?6,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = ?6
-RETURNING id, owner_user_id, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+WHERE id = ?7
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
+	Name        string         `json:"name"`
 	DisplayName sql.NullString `json:"display_name"`
 	AvatarUrl   sql.NullString `json:"avatar_url"`
 	Timezone    sql.NullString `json:"timezone"`
@@ -370,6 +448,7 @@ type UpdateBotProfileParams struct {
 type UpdateBotProfileRow struct {
 	ID                string         `json:"id"`
 	OwnerUserID       string         `json:"owner_user_id"`
+	Name              string         `json:"name"`
 	DisplayName       sql.NullString `json:"display_name"`
 	AvatarUrl         sql.NullString `json:"avatar_url"`
 	Timezone          sql.NullString `json:"timezone"`
@@ -391,6 +470,7 @@ type UpdateBotProfileRow struct {
 
 func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfileParams) (UpdateBotProfileRow, error) {
 	row := q.db.QueryRowContext(ctx, updateBotProfile,
+		arg.Name,
 		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.Timezone,
@@ -402,6 +482,7 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
+		&i.Name,
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Timezone,

@@ -48,16 +48,6 @@ allow_absolute_paths = true
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
 
-[kubernetes]
-namespace = "default"
-in_cluster = false
-kubeconfig = ""
-service_account_name = ""
-image_pull_secret = ""
-pvc_storage_class = ""
-pvc_size = "10Gi"
-bridge_port = 9090
-
 [apple]
 socket_path = ""
 binary_path = ""

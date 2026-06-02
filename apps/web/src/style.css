@@ -50,23 +50,84 @@
   }
 }
 
-/* MarkdownRender (markstream-vue) — soft styling aligned with the design system.
- * Loaded after markstream-vue/index.css so equal-specificity selectors win. */
+/* MarkdownRender (markstream-vue 1.x) — bridge Memoh design tokens into markstream CSS vars.
+ * Loaded after markstream-vue/index.css (see apps/web/src/main.ts).
+ *
+ * 1.x ships a self-contained design system (--ms-* tokens) that takes over font,
+ * size, line-height, spacing, and colors. We neutralize its typography so markdown
+ * inherits the app's font/size like the pre-1.x version did, then map the remaining
+ * surface (colors, borders, spacing) onto Memoh design tokens. */
 .markstream-vue {
-  --link-color: var(--color-foreground);
-  --hr-border-color: var(--color-border);
-  --blockquote-border-color: var(--color-border);
-  --list-item-counter-marker: var(--color-muted-foreground);
-  --list-item-marker: var(--color-muted-foreground);
-  --table-border: var(--color-border);
+  /* Inherit the app font + size instead of markstream's built-in sans/body scale */
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.625;
   color: var(--color-foreground);
+
+  /* Typography scale — re-tighten to the compact look the chat/preview used before */
+  --ms-font-sans: inherit;
+  --ms-text-body: inherit;
+  --ms-leading-body: 1.625;
+  --ms-text-h1: 2.25rem;
+  --ms-text-h2: 1.5rem;
+  --ms-text-h3: 1.25rem;
+  --ms-text-h4: 1.125rem;
+  --ms-text-h5: 1rem;
+  --ms-text-h6: 1rem;
+  --ms-weight-h1: 800;
+  --ms-weight-h2: 700;
+  --ms-weight-h3: 600;
+  --ms-weight-h4: 600;
+
+  /* Flow spacing — calmer rhythm matching the previous defaults */
+  --ms-flow-paragraph-y: 1.25em;
+  --ms-flow-list-y: 1em;
+  --ms-flow-list-item-y: 0.25em;
+  --ms-flow-blockquote-y: 1rem;
+  --ms-flow-hr-y: 1.5rem;
+  --ms-flow-codeblock-y: 1rem;
+  --ms-flow-table-y: 1rem;
+  --ms-flow-table-cell: 0.5rem 0.875rem;
+  --ms-radius: var(--radius-lg);
+
+  /* Links — foreground instead of default info blue */
+  --link-color: var(--color-foreground);
+
+  /* HR, blockquote, lists (1.x renamed several 0.x vars) */
+  --hr-border: var(--color-border);
+  --blockquote-border: var(--color-border);
+  --blockquote-fg: var(--color-muted-foreground);
+  --list-counter-marker: var(--color-muted-foreground);
+  --list-marker: var(--color-muted-foreground);
+
+  /* Tables */
+  --table-border: var(--color-border);
+  --table-header-bg: var(--color-muted);
+  --code-action-hover-bg: color-mix(in oklch, var(--color-accent) 60%, transparent);
+
+  /* Inline code — accent pill (1.x uses .inline-code, not bare <code>) */
+  --inline-code-bg: var(--color-accent);
+  --inline-code-fg: var(--color-foreground);
+  --inline-code-border: transparent;
+
+  /* Code blocks */
+  --code-bg: var(--color-muted);
+  --code-fg: var(--color-foreground);
+  --code-border: var(--color-border);
 }
 
-/* Tables — rounded corners with a distinctly tinted header row */
+/* Paragraph/heading nodes hard-set font-size from --ms-text-* via scoped rules;
+ * keep them inheriting so chat text stays compact. */
+.markstream-vue .paragraph-node {
+  font-size: inherit;
+  line-height: 1.625;
+}
+
+/* Tables — restore the previous clean look: rounded outer frame, tinted header,
+ * horizontal row separators only. 1.x adds vertical grid lines, zebra striping,
+ * and a drop shadow that we remove here. */
 .markstream-vue .table-node-wrapper {
   margin: 1rem 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
   scrollbar-gutter: auto !important;
 }
 
@@ -74,66 +135,63 @@
   margin: 0;
 }
 
-.markstream-vue .table-node thead {
-  background-color: var(--color-muted);
+.markstream-vue .table-node {
+  box-shadow: none;
 }
 
-.markstream-vue .table-node th {
+/* Drop the per-cell vertical grid lines; keep a single horizontal separator */
+.markstream-vue .table-node th,
+.markstream-vue .table-node td {
+  border-right: 0;
+  border-bottom: 1px solid var(--color-border);
   padding: 0.5rem 0.875rem;
+}
+
+/* Header — tinted, left-aligned, single-weight bottom border */
+.markstream-vue .table-node thead th {
   text-align: left;
   font-weight: 600;
-  color: var(--color-foreground);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom-width: 1px;
 }
 
-.markstream-vue .table-node td {
-  padding: 0.5rem 0.875rem;
-  border-bottom: 1px solid var(--color-border);
+/* Remove 1.x zebra striping */
+.markstream-vue .table-node tbody tr:nth-child(2n) {
+  background-color: transparent;
 }
 
+/* Last row sits flush with the rounded bottom edge */
 .markstream-vue .table-node tbody tr:last-child td {
   border-bottom: 0;
 }
 
+/* Row hover tint */
 .markstream-vue .table-node tbody tr:hover td {
   background-color: color-mix(in oklch, var(--color-accent) 60%, transparent);
 }
 
-/* Inline code — pill-shaped chip on accent fill */
-.markstream-vue :not(pre) > code {
-  background-color: var(--color-accent);
-  color: var(--color-foreground);
+/* Inline code — shape tweaks on top of CSS vars */
+.markstream-vue .inline-code {
   border-radius: 0.3125rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* Code block container — soft rounded frame */
 .markstream-vue .code-block-container {
   margin: 1rem 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-/* Blockquote — subtle accent tint, drop the default italic for readability */
+/* Blockquote — soft accent tint (background not exposed as a CSS var in 1.x) */
 .markstream-vue .blockquote {
   font-style: normal;
   font-weight: 400;
-  color: var(--color-muted-foreground);
   background-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: 0.5rem 1rem;
-  margin: 1rem 0;
 }
 
-/* HR — tighter spacing, theme border color via CSS var above */
-.markstream-vue .hr-node {
-  margin: 1.5rem 0;
-}
-
-/* Links — soft underline, foreground color comes from the --link-color var above */
+/* Links — soft underline (1.x defaults to no underline until hover) */
 .markstream-vue .link-node {
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -143,6 +201,11 @@
 
 .markstream-vue .link-node:hover {
   text-decoration-color: var(--color-foreground);
+}
+
+/* Hide the typewriter blinking caret (keep the typewriter text reveal) */
+.markstream-vue .typewriter-cursor {
+  display: none !important;
 }
 
 /* Global Harmonious Scrollbar */

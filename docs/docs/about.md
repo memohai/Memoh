@@ -18,7 +18,7 @@ Desktop is the fastest way to try Memoh on your own machine.
 
 Server Deploy is for always-on shared usage. Use it when Memoh should serve multiple users, run continuously on a server, or connect to external channels while your personal computer is offline.
 
-The server stack can run with Docker Compose or Kubernetes and includes the backend, Web UI, database, memory services, and workspace runtime.
+The server stack runs with Docker Compose and includes the backend, Web UI, database, memory services, and workspace runtime.
 
 ## What Makes Memoh Different
 
@@ -33,7 +33,7 @@ Memoh is built for real sharing and real separation at the same time:
 
 ### Independent Workspaces
 
-Each bot can use an independent workspace for files, commands, MCP hosting, and long-running tasks. Server deployments normally use container workspaces through Docker, Kubernetes, containerd, or Apple-backed runtimes. Desktop/local deployments can also use trusted local workspaces when host-level access is intentional.
+Each bot can use an independent workspace for files, commands, MCP hosting, and long-running tasks. Server deployments normally use container workspaces through Docker, containerd, or Apple-backed runtimes. Desktop/local deployments can also use trusted local workspaces when host-level access is intentional.
 
 Container workspaces can provide a full graphical desktop with VNC/RFB transport and a headed Chrome/Chromium browser. This enables workflows that require visible browser state rather than pure headless automation.
 

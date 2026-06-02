@@ -1,12 +1,12 @@
 # Server Deploy
 
-Server Deploy is the self-hosted Memoh stack for always-on, multi-user or multi-tenant usage. Use it when Memoh should run on a server, VM, NAS, or Kubernetes cluster, or when bots need to keep serving external channels while your desktop is offline.
+Server Deploy is the self-hosted Memoh stack for always-on, multi-user or multi-tenant usage. Use it when Memoh should run on a server, VM, or NAS, or when bots need to keep serving external channels while your desktop is offline.
 
 This page keeps the historical `/installation/docker` path, but it documents the Docker Compose server deployment. For the native local client, see [Desktop Installation](/installation/desktop).
 
 The default Compose stack includes PostgreSQL, the main server with an explicit workspace backend and in-process AI agent, and the web UI. SQLite is also available for single-node server installs; see [SQLite deployment](/installation/sqlite.md).
 
-The official Compose stack uses the `containerd` workspace backend. The server image starts an embedded containerd and mounts the runtime files needed by bot workspaces. For Docker Engine, Kubernetes, and Apple backends, see [Workspace backends](/installation/workspace-backends.md).
+The official Compose stack uses the `containerd` workspace backend. The server image starts an embedded containerd and mounts the runtime files needed by bot workspaces. For Docker Engine and Apple backends, see [Workspace backends](/installation/workspace-backends.md).
 
 ## Service Architecture
 
@@ -219,7 +219,6 @@ The `config.toml` file controls all server behavior. Here is a summary of the av
 | `[container]` | Workspace backend selection plus common workspace image, pull policy, data path, runtime path, and CNI settings |
 | `[containerd]` | Containerd socket path and namespace |
 | `[docker]` | Docker Engine host override; empty uses Docker environment/default socket |
-| `[kubernetes]` | Kubernetes namespace, kubeconfig/in-cluster mode, PVC, image pull secret, bridge port |
 | `[apple]` | socktainer socket and binary overrides for the Apple backend |
 | `[postgres]` | PostgreSQL connection (host, port, user, password, database, sslmode) |
 | `[sqlite]` | SQLite file path, WAL mode, and busy timeout |
@@ -250,6 +249,6 @@ docker compose pull && docker compose up -d  # Update to latest images
 | `MEMOH_VERSION`    | *(latest release)* | Git tag to install (e.g. `v0.6.0`). Also pins Docker image versions. |
 | `MEMOH_INSTALL_MODE` | `auto`           | Install mode: `auto`, `fresh`, `upgrade`, or `reinstall` |
 | `MEMOH_DATABASE_DRIVER` | `postgres`    | Database backend for fresh installs: `postgres` or `sqlite` |
-| `MEMOH_CONTAINER_BACKEND` | `containerd` | Workspace backend. One-click Docker Compose installs support `containerd`; use manual deployment for `docker`, `kubernetes`, or `apple`. |
+| `MEMOH_CONTAINER_BACKEND` | `containerd` | Workspace backend. One-click Docker Compose installs support `containerd`; use manual deployment for `docker` or `apple`. |
 | `MEMOH_ALLOW_ROOT_INSTALL` | `false` | Allow running the installer shell itself as root. Prefer leaving this unset and running the installer as a normal user. |
 | `USE_CN_MIRROR`    | `false`            | Set to `true` to use China mainland image mirrors |

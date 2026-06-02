@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS bots (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
+  name TEXT NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
   timezone TEXT,
@@ -153,7 +154,7 @@ CREATE TABLE IF NOT EXISTS bots (
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
-  heartbeat_interval INTEGER NOT NULL DEFAULT 30,
+  heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
   heartbeat_prompt TEXT NOT NULL DEFAULT '',
   heartbeat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   compaction_enabled INTEGER NOT NULL DEFAULT 0,
@@ -178,10 +179,16 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high'))
+  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high')),
+  CONSTRAINT bots_name_format_check CHECK (
+    name GLOB '[a-z0-9]*'
+    AND name NOT GLOB '*[^a-z0-9-]*'
+    AND length(name) BETWEEN 2 AND 63
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
 
 CREATE TABLE IF NOT EXISTS bot_acl_rules (
   id TEXT PRIMARY KEY,

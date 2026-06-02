@@ -1,16 +1,13 @@
 package handlers
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/boot"
 	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
 	"github.com/memohai/memoh/internal/version"
 )
 
@@ -26,19 +23,13 @@ type PingResponse struct {
 type PingHandler struct {
 	logger  *slog.Logger
 	runtime *boot.RuntimeConfig
-	service ctr.Service
 	cfg     config.Config
 }
 
-type snapshotCapabilityProvider interface {
-	SnapshotSupported(ctx context.Context) bool
-}
-
-func NewPingHandler(log *slog.Logger, rc *boot.RuntimeConfig, service ctr.Service, cfg config.Config) *PingHandler {
+func NewPingHandler(log *slog.Logger, rc *boot.RuntimeConfig, cfg config.Config) *PingHandler {
 	return &PingHandler{
 		logger:  log.With(slog.String("handler", "ping")),
 		runtime: rc,
-		service: service,
 		cfg:     cfg,
 	}
 }
@@ -56,9 +47,9 @@ func (h *PingHandler) Register(e *echo.Echo) {
 func (h *PingHandler) Ping(c echo.Context) error {
 	return c.JSON(http.StatusOK, PingResponse{
 		Status:                "ok",
-		ContainerBackend:      ctr.NormalizeBackend(h.runtime.ContainerBackend),
+		ContainerBackend:      h.runtime.ContainerBackend,
 		LocalWorkspaceEnabled: h.cfg.Local.Enabled,
-		SnapshotSupported:     h.snapshotSupported(c.Request().Context()),
+		SnapshotSupported:     h.snapshotSupported(),
 		Version:               version.Version,
 		CommitHash:            version.ShortCommitHash(),
 	})
@@ -68,19 +59,6 @@ func (*PingHandler) PingHead(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-func (h *PingHandler) snapshotSupported(ctx context.Context) bool {
-	switch h.runtime.ContainerBackend {
-	case "apple":
-		return false
-	case ctr.BackendKubernetes, ctr.BackendK8s:
-		provider, ok := h.service.(snapshotCapabilityProvider)
-		if !ok {
-			return false
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		return provider.SnapshotSupported(probeCtx)
-	default:
-		return true
-	}
+func (h *PingHandler) snapshotSupported() bool {
+	return h.runtime.ContainerBackend != "apple"
 }

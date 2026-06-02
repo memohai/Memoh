@@ -498,32 +498,33 @@ func makeUserRow(userID pgtype.UUID, role string) *skillsTestRow {
 func makeBotRow(botID, ownerUserID pgtype.UUID, metadataJSON []byte) *skillsTestRow {
 	return &skillsTestRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 23 {
+			if len(dest) < 24 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
 			*dest[1].(*pgtype.UUID) = ownerUserID
-			*dest[2].(*pgtype.Text) = pgtype.Text{String: "test-bot", Valid: true}
-			*dest[3].(*pgtype.Text) = pgtype.Text{}
+			*dest[2].(*string) = "test-bot"
+			*dest[3].(*pgtype.Text) = pgtype.Text{String: "test-bot", Valid: true}
 			*dest[4].(*pgtype.Text) = pgtype.Text{}
-			*dest[5].(*bool) = true
-			*dest[6].(*string) = bots.BotStatusReady
-			*dest[7].(*string) = "en"
-			*dest[8].(*bool) = false
-			*dest[9].(*string) = "medium"
-			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[5].(*pgtype.Text) = pgtype.Text{}
+			*dest[6].(*bool) = true
+			*dest[7].(*string) = bots.BotStatusReady
+			*dest[8].(*string) = "en"
+			*dest[9].(*bool) = false
+			*dest[10].(*string) = "medium"
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*bool) = false
-			*dest[14].(*int32) = 30
-			*dest[15].(*string) = ""
-			*dest[16].(*bool) = false
-			*dest[17].(*int32) = 100000
-			*dest[18].(*int32) = 80
-			*dest[19].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[20].(*[]byte) = metadataJSON
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[13].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[14].(*bool) = false
+			*dest[15].(*int32) = 30
+			*dest[16].(*string) = ""
+			*dest[17].(*bool) = false
+			*dest[18].(*int32) = 100000
+			*dest[19].(*int32) = 80
+			*dest[20].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[21].(*[]byte) = metadataJSON
 			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

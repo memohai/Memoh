@@ -1,0 +1,52 @@
+appId: ai.memoh.desktop.online
+productName: Memoh
+copyright: Copyright © 2026 Memoh
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - resources/icon.png
+  - resources/tray-icon.png
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!scripts/*"
+  - "!AGENTS.md"
+  - "!electron.vite.config.{js,ts,mjs,cjs}"
+  - "!{.eslintrc.cjs,.eslintignore,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+  icon: build/icon.icon
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  notarize: true
+dmg:
+  icon: build/icon.icns
+  sign: true
+linux:
+  category: Utility
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  maintainer: Memoh
+  icon: build/icon.png
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-win-${arch}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+npmRebuild: false

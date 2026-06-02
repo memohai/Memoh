@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
@@ -50,11 +50,18 @@ const newText = computed(() => {
 
 const hasChanges = computed(() => Boolean(oldText.value || newText.value))
 
-onMounted(() => {
-  if (hasChanges.value) {
-    void shiki.highlightDiff(oldText.value, newText.value, extractFilename(filePath.value))
-  }
-})
+// Re-highlight whenever the diff arrives. Input now streams in after the tool
+// block first renders (tool_call_input_start), so an onMounted-only highlight
+// would miss content that lands later.
+watch(
+  [oldText, newText, filePath],
+  ([oldT, newT, path]) => {
+    if (oldT || newT) {
+      void shiki.highlightDiff(oldT, newT, extractFilename(path))
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style>

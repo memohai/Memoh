@@ -188,7 +188,6 @@ normalize_container_backend() {
   case "$backend" in
     containerd) printf '%s' "containerd" ;;
     docker) printf '%s' "docker" ;;
-    kubernetes|k8s) printf '%s' "kubernetes" ;;
     apple) printf '%s' "apple" ;;
     *) return 1 ;;
   esac
@@ -197,7 +196,7 @@ normalize_container_backend() {
 normalize_container_backend_or_exit() {
   normalized_container_backend=$(normalize_container_backend "$CONTAINER_BACKEND" || true)
   if [ -z "$normalized_container_backend" ]; then
-    echo "${RED}Error: unsupported workspace backend '${CONTAINER_BACKEND}'. Use containerd, docker, kubernetes, or apple.${NC}"
+    echo "${RED}Error: unsupported workspace backend '${CONTAINER_BACKEND}'. Use containerd, docker, or apple.${NC}"
     exit 1
   fi
   CONTAINER_BACKEND="$normalized_container_backend"
@@ -213,7 +212,7 @@ enforce_compose_container_backend() {
   fi
   echo "${RED}Error: one-click Docker Compose installs support workspace backend 'containerd' only.${NC}"
   echo "The server image starts an embedded containerd and mounts the required runtime paths."
-  echo "For docker, kubernetes, or apple backends, use a manual deployment and edit [container].backend in config.toml."
+  echo "For docker or apple backends, use a manual deployment and edit [container].backend in config.toml."
   exit 1
 }
 
@@ -659,7 +658,7 @@ if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   fi
 
   echo "  Workspace backend: containerd (Docker Compose default; starts an embedded containerd inside memoh-server)" > /dev/tty
-  echo "  Other backends such as docker, kubernetes, and apple are configured manually in config.toml." > /dev/tty
+  echo "  Other backends such as docker and apple are configured manually in config.toml." > /dev/tty
 
   printf "  Enable sparse memory service? [%s]: " "$( [ "$USE_SPARSE" = true ] && printf 'Y/n' || printf 'y/N' )" > /dev/tty
   read -r input < /dev/tty || true

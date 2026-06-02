@@ -337,12 +337,21 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 		case *sdk.ToolInputStartPart:
 			// ToolInputStartPart fires before tool input args have streamed.
-			// We suppress it here because downstream consumers (IM adapters and
-			// Web UI) only care about the fully-assembled call announced by
-			// StreamToolCallPart below. Emitting a start event twice for the
-			// same CallID would produce duplicate "running" messages in IMs.
+			// We emit a lightweight tool_call_input_start (name + call ID, no
+			// input) so the Web UI can render the tool block immediately while
+			// arguments are still streaming. StreamToolCallPart below backfills
+			// the fully-assembled Input under the same call ID. IM/Discuss
+			// adapters do not map tool_call_input_start, so they keep their
+			// single-start behavior and avoid duplicate "running" messages.
 			if textLoopProbeBuffer != nil {
 				textLoopProbeBuffer.Flush()
+			}
+			if !sendEvent(ctx, ch, StreamEvent{
+				Type:       EventToolCallInputStart,
+				ToolName:   p.ToolName,
+				ToolCallID: p.ID,
+			}) {
+				aborted = true
 			}
 
 		case *sdk.StreamToolCallPart:
@@ -1120,11 +1129,18 @@ func (a *Agent) runMidStreamRetry(
 					aborted = true
 				}
 			case *sdk.ToolInputStartPart:
-				// See ToolInputStartPart note above: suppress the early start
-				// and rely on StreamToolCallPart (which carries the fully
-				// assembled Input) as the single source of truth.
+				// See ToolInputStartPart note above: emit a lightweight
+				// tool_call_input_start so the Web UI shows the tool block while
+				// arguments stream; StreamToolCallPart backfills the Input.
 				if textLoopProbeBuffer != nil {
 					textLoopProbeBuffer.Flush()
+				}
+				if !sendEvent(sendCtx, ch, StreamEvent{
+					Type:       EventToolCallInputStart,
+					ToolName:   rp.ToolName,
+					ToolCallID: rp.ID,
+				}) {
+					aborted = true
 				}
 			case *sdk.StreamToolCallPart:
 				if textLoopProbeBuffer != nil {

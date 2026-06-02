@@ -60,9 +60,7 @@ func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 	yesterdayStr := fmt.Sprintf("%d-%s-%s", yesterday.Year(), pad(int(yesterday.Month())), pad(yesterday.Day()))
 
 	filenames := []string{
-		"IDENTITY.md",
-		"SOUL.md",
-		"TOOLS.md",
+		"AGENTS.md",
 		"MEMORY.md",
 		"PROFILES.md",
 		"memory/" + today + ".md",

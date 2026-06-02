@@ -94,3 +94,15 @@ func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
 		t.Fatalf("explicit false pointer must clear the flag")
 	}
 }
+
+func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeBotSetting("en", "allow", false, "medium", false, 0, false, 0, 80)
+	if got.HeartbeatInterval != DefaultHeartbeatInterval {
+		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
+	}
+	if got.HeartbeatInterval != 1440 {
+		t.Fatalf("heartbeat interval = %d, want 1440", got.HeartbeatInterval)
+	}
+}

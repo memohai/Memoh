@@ -282,19 +282,23 @@ const expandedIds = ref<Set<string>>(new Set())
 const lastSyncTime = ref('--:--')
 
 const route = useRoute()
-const botId = computed(() => route.params.botId as string)
+// The route param may be a name slug or a UUID; resolve it to the canonical
+// bot UUID so check endpoints (which require a UUID) keep working.
+const routeIdentifier = computed(() => route.params.botName as string)
 const activeTab = useSyncedQueryParam('tab', 'overview')
 const { t } = useI18n()
 
 // Data Fetching
 const { data: bot } = useQuery({
-  key: () => ['bot', botId.value],
+  key: () => ['bot', routeIdentifier.value],
   query: async () => {
-    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
     return data
   },
-  enabled: () => !!botId.value,
+  enabled: () => !!routeIdentifier.value,
 })
+
+const botId = computed(() => bot.value?.id ?? '')
 
 const { hasIssue } = useBotStatusMeta(bot, t)
 

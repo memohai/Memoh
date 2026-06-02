@@ -2,6 +2,7 @@ package agent
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -16,13 +17,14 @@ import (
 var promptsFS embed.FS
 
 var (
-	systemChatTmpl      string
-	systemDiscussTmpl   string
-	systemHeartbeatTmpl string
-	systemScheduleTmpl  string
-	systemSubagentTmpl  string
-	scheduleTmpl        string
-	heartbeatTmpl       string
+	systemCommonTmpl  string
+	modeChatTmpl      string
+	modeDiscussTmpl   string
+	modeHeartbeatTmpl string
+	modeScheduleTmpl  string
+	modeSubagentTmpl  string
+	scheduleTmpl      string
+	heartbeatTmpl     string
 
 	MemoryExtractPrompt string
 	MemoryUpdatePrompt  string
@@ -33,11 +35,12 @@ var (
 var includeRe = regexp.MustCompile(`\{\{include:(\w+)\}\}`)
 
 func init() {
-	systemChatTmpl = mustReadPrompt("prompts/system_chat.md")
-	systemDiscussTmpl = mustReadPrompt("prompts/system_discuss.md")
-	systemHeartbeatTmpl = mustReadPrompt("prompts/system_heartbeat.md")
-	systemScheduleTmpl = mustReadPrompt("prompts/system_schedule.md")
-	systemSubagentTmpl = mustReadPrompt("prompts/system_subagent.md")
+	systemCommonTmpl = mustReadPrompt("prompts/system_common.md")
+	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
+	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
+	modeHeartbeatTmpl = mustReadPrompt("prompts/mode_heartbeat.md")
+	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
+	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
 	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
 	MemoryExtractPrompt = mustReadPrompt("prompts/memory_extract.md")
@@ -52,11 +55,12 @@ func init() {
 		"_subagent":      mustReadPrompt("prompts/_subagent.md"),
 	}
 
-	systemChatTmpl = resolveIncludes(systemChatTmpl)
-	systemDiscussTmpl = resolveIncludes(systemDiscussTmpl)
-	systemHeartbeatTmpl = resolveIncludes(systemHeartbeatTmpl)
-	systemScheduleTmpl = resolveIncludes(systemScheduleTmpl)
-	systemSubagentTmpl = resolveIncludes(systemSubagentTmpl)
+	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
+	modeChatTmpl = resolveIncludes(modeChatTmpl)
+	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
+	modeHeartbeatTmpl = resolveIncludes(modeHeartbeatTmpl)
+	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
+	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
 }
 
 func mustReadPrompt(name string) string {
@@ -91,18 +95,18 @@ func render(tmpl string, vars map[string]string) string {
 	return strings.TrimSpace(result)
 }
 
-func selectSystemTemplate(sessionType string) string {
+func selectModeTemplate(sessionType string) string {
 	switch sessionType {
 	case "discuss":
-		return systemDiscussTmpl
+		return modeDiscussTmpl
 	case "heartbeat":
-		return systemHeartbeatTmpl
+		return modeHeartbeatTmpl
 	case "schedule":
-		return systemScheduleTmpl
+		return modeScheduleTmpl
 	case "subagent":
-		return systemSubagentTmpl
+		return modeSubagentTmpl
 	default:
-		return systemChatTmpl
+		return modeChatTmpl
 	}
 }
 
@@ -131,20 +135,13 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 	)
 
 	displayTools := buildDisplayToolsSection(params.DisplayEnabled)
+	botInfoSection := buildBotInfoSection(params.Bot)
 
 	skillsSection := buildSkillsSection(params.Skills)
 
-	fileSections := ""
-	var fileSectionsSb strings.Builder
-	for _, f := range params.Files {
-		if f.Content == "" {
-			continue
-		}
-		fileSectionsSb.WriteString("\n\n" + formatSystemFile(f))
-	}
-	fileSections += fileSectionsSb.String()
+	fileSections := buildFileSections(params.Files)
 
-	tmpl := selectSystemTemplate(params.SessionType)
+	tmpl := strings.TrimSpace(systemCommonTmpl + "\n\n" + selectModeTemplate(params.SessionType))
 
 	return render(tmpl, map[string]string{
 		"home":                      home,
@@ -152,8 +149,11 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 		"timezone":                  timezoneName,
 		"basicTools":                strings.Join(basicTools, "\n"),
 		"displayTools":              displayTools,
+		"botInfoSection":            botInfoSection,
 		"skillsSection":             skillsSection,
 		"platformIdentitiesSection": strings.TrimSpace(params.PlatformIdentitiesSection),
+		"mainAgentSections":         buildMainAgentSections(strings.TrimSpace(params.PlatformIdentitiesSection), skillsSection, fileSections),
+		"subagentSections":          buildSubagentSections(strings.TrimSpace(params.PlatformIdentitiesSection)),
 		"fileSections":              fileSections,
 	})
 }
@@ -161,6 +161,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 // SystemPromptParams holds all inputs for system prompt generation.
 type SystemPromptParams struct {
 	SessionType               string
+	Bot                       BotInfo
 	Skills                    []SkillEntry
 	Files                     []SystemFile
 	Now                       time.Time
@@ -184,6 +185,21 @@ This bot has a headed workspace display (Chrome on a virtual desktop). Use GUI t
 - **browser_remote_session**: Only when running Playwright or other CDP automation inside the workspace is clearly better than the browser tools above.
 - **Screenshots**: Both browser_observe and computer_observe save screenshots to a workspace path; they are not attached to the conversation. Read the returned path with the file read tool when you need the image.
 `)
+}
+
+func buildBotInfoSection(bot BotInfo) string {
+	bot.ID = strings.TrimSpace(bot.ID)
+	bot.Name = strings.TrimSpace(bot.Name)
+	bot.DisplayName = strings.TrimSpace(bot.DisplayName)
+	bot.Timezone = strings.TrimSpace(bot.Timezone)
+	if bot.ID == "" && bot.Name == "" && bot.DisplayName == "" && bot.Timezone == "" {
+		return ""
+	}
+	raw, err := json.MarshalIndent(bot, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return "## Bot\n\nService-provided bot identity. Use `display_name` as your user-facing name when it is present; otherwise use `name`. `name` is the stable slug. Do not invent another name.\n\n```json\n" + string(raw) + "\n```"
 }
 
 // GenerateSchedulePrompt builds the user message for a scheduled task trigger.
@@ -239,6 +255,58 @@ func buildSkillsSection(skills []SkillEntry) string {
 	sb.WriteString(" skill(s) available:\n")
 	for _, s := range sorted {
 		sb.WriteString("- **" + s.Name + "**: " + s.Description + "\n")
+	}
+	return sb.String()
+}
+
+func buildFileSections(files []SystemFile) string {
+	var sb strings.Builder
+	for _, f := range files {
+		if f.Content == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(formatSystemFile(f))
+	}
+	return sb.String()
+}
+
+func buildMainAgentSections(platformIdentitiesSection, skillsSection, fileSections string) string {
+	identitiesSection := render(includes["_identities"], map[string]string{
+		"platformIdentitiesSection": platformIdentitiesSection,
+	})
+	sections := []string{
+		includes["_memory"],
+		includes["_contacts"],
+		identitiesSection,
+		includes["_schedule_task"],
+		"When a scheduled task triggers, it runs in its own session. Use `send` in the schedule command to deliver results to the intended channel.",
+		includes["_subagent"],
+		skillsSection,
+		fileSections,
+	}
+	return joinPromptSections(sections...)
+}
+
+func buildSubagentSections(platformIdentitiesSection string) string {
+	return strings.TrimSpace(render(includes["_identities"], map[string]string{
+		"platformIdentitiesSection": platformIdentitiesSection,
+	}))
+}
+
+func joinPromptSections(sections ...string) string {
+	var sb strings.Builder
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(section)
 	}
 	return sb.String()
 }

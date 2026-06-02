@@ -13,6 +13,7 @@ const (
 	EventReasoningStart      StreamEventType = "reasoning_start"
 	EventReasoningDelta      StreamEventType = "reasoning_delta"
 	EventReasoningEnd        StreamEventType = "reasoning_end"
+	EventToolCallInputStart  StreamEventType = "tool_call_input_start"
 	EventToolCallStart       StreamEventType = "tool_call_start"
 	EventToolCallProgress    StreamEventType = "tool_call_progress"
 	EventToolCallEnd         StreamEventType = "tool_call_end"

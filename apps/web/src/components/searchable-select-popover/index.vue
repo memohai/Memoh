@@ -59,7 +59,9 @@
           v-if="rows.length === 0"
           class="py-6 text-center text-xs text-muted-foreground"
         >
-          {{ emptyText }}
+          <p class="inline-block max-w-60 p-2 text-left leading-5">
+            {{ emptyText }}
+          </p>
         </div>
 
         <div

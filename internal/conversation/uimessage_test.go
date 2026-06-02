@@ -10,7 +10,7 @@ import (
 	messagepkg "github.com/memohai/memoh/internal/message"
 )
 
-func TestConvertMessagesToUITurnsGroupsAssistantToolAndFiltersCurrentConversationDelivery(t *testing.T) {
+func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationDelivery(t *testing.T) {
 	baseTime := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	messages := []messagepkg.Message{
 		{
@@ -99,8 +99,8 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndFiltersCurrentConversatio
 	if assistantTurn.Role != "assistant" {
 		t.Fatalf("expected assistant turn, got %#v", assistantTurn)
 	}
-	if len(assistantTurn.Messages) != 4 {
-		t.Fatalf("expected 4 assistant messages, got %d", len(assistantTurn.Messages))
+	if len(assistantTurn.Messages) != 5 {
+		t.Fatalf("expected 5 assistant messages, got %d", len(assistantTurn.Messages))
 	}
 
 	if assistantTurn.Messages[0].Type != UIMessageReasoning || assistantTurn.Messages[0].Content != "thinking" {
@@ -112,20 +112,20 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndFiltersCurrentConversatio
 	if assistantTurn.Messages[1].Running == nil || *assistantTurn.Messages[1].Running {
 		t.Fatalf("expected tool block to be completed: %#v", assistantTurn.Messages[1])
 	}
-	if assistantTurn.Messages[2].Type != UIMessageAttachments || len(assistantTurn.Messages[2].Attachments) != 1 {
-		t.Fatalf("unexpected attachment block: %#v", assistantTurn.Messages[2])
+	if assistantTurn.Messages[2].Type != UIMessageTool || assistantTurn.Messages[2].Name != "send" {
+		t.Fatalf("expected current conversation delivery tool to be retained: %#v", assistantTurn.Messages[2])
 	}
-	if assistantTurn.Messages[2].Attachments[0].Type != "image" || assistantTurn.Messages[2].Attachments[0].BotID != "bot-1" {
-		t.Fatalf("unexpected attachment payload: %#v", assistantTurn.Messages[2].Attachments[0])
+	if assistantTurn.Messages[2].Running == nil || *assistantTurn.Messages[2].Running {
+		t.Fatalf("expected send tool block to be completed: %#v", assistantTurn.Messages[2])
 	}
-	if assistantTurn.Messages[3].Type != UIMessageText || assistantTurn.Messages[3].Content != "done" {
-		t.Fatalf("unexpected trailing text block: %#v", assistantTurn.Messages[3])
+	if assistantTurn.Messages[3].Type != UIMessageAttachments || len(assistantTurn.Messages[3].Attachments) != 1 {
+		t.Fatalf("unexpected attachment block: %#v", assistantTurn.Messages[3])
 	}
-
-	for _, block := range assistantTurn.Messages {
-		if block.Type == UIMessageTool && block.Name == "send" {
-			t.Fatalf("expected current conversation delivery tool to be filtered out")
-		}
+	if assistantTurn.Messages[3].Attachments[0].Type != "image" || assistantTurn.Messages[3].Attachments[0].BotID != "bot-1" {
+		t.Fatalf("unexpected attachment payload: %#v", assistantTurn.Messages[3].Attachments[0])
+	}
+	if assistantTurn.Messages[4].Type != UIMessageText || assistantTurn.Messages[4].Content != "done" {
+		t.Fatalf("unexpected trailing text block: %#v", assistantTurn.Messages[4])
 	}
 }
 
@@ -458,6 +458,63 @@ func TestUIMessageStreamConverterMergesRepeatedToolCallStart(t *testing.T) {
 		Output:     map[string]any{"ok": true},
 	})
 	if len(end) != 1 || end[0].ID != start[0].ID {
+		t.Fatalf("expected tool end to reuse merged message id, got %#v", end)
+	}
+	if !reflect.DeepEqual(end[0].Input, fullInput) {
+		t.Fatalf("expected tool end to preserve merged input, got %#v", end[0].Input)
+	}
+	if end[0].Running == nil || *end[0].Running {
+		t.Fatalf("expected tool end to mark message complete, got %#v", end[0])
+	}
+}
+
+func TestUIMessageStreamConverterToolCallInputStartThenStartBackfillsInput(t *testing.T) {
+	t.Parallel()
+
+	converter := NewUIMessageStreamConverter()
+
+	inputStart := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_input_start",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+	})
+	if len(inputStart) != 1 || inputStart[0].Type != UIMessageTool {
+		t.Fatalf("unexpected initial tool placeholder: %#v", inputStart)
+	}
+	if inputStart[0].Input != nil {
+		t.Fatalf("expected input-start placeholder to have nil input, got %#v", inputStart[0].Input)
+	}
+	if inputStart[0].Running == nil || !*inputStart[0].Running {
+		t.Fatalf("expected input-start placeholder to be running, got %#v", inputStart[0])
+	}
+
+	fullInput := map[string]any{"path": "/tmp/long.txt"}
+	start := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+		Input:      fullInput,
+	})
+	if len(start) != 1 {
+		t.Fatalf("expected one updated tool snapshot, got %#v", start)
+	}
+	if start[0].ID != inputStart[0].ID {
+		t.Fatalf("expected tool start to reuse message id, got input-start=%d start=%d", inputStart[0].ID, start[0].ID)
+	}
+	if !reflect.DeepEqual(start[0].Input, fullInput) {
+		t.Fatalf("expected tool start to backfill input, got %#v", start[0].Input)
+	}
+	if start[0].Running == nil || !*start[0].Running {
+		t.Fatalf("expected merged tool message to stay running, got %#v", start[0])
+	}
+
+	end := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "write",
+		ToolCallID: "call-1",
+		Output:     map[string]any{"ok": true},
+	})
+	if len(end) != 1 || end[0].ID != inputStart[0].ID {
 		t.Fatalf("expected tool end to reuse merged message id, got %#v", end)
 	}
 	if !reflect.DeepEqual(end[0].Input, fullInput) {

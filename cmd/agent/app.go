@@ -28,6 +28,7 @@ import (
 	agenttools "github.com/memohai/memoh/internal/agent/tools"
 	audiopkg "github.com/memohai/memoh/internal/audio"
 	"github.com/memohai/memoh/internal/boot"
+	"github.com/memohai/memoh/internal/botbackup"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
@@ -81,7 +82,6 @@ import (
 	"github.com/memohai/memoh/internal/messaging"
 	"github.com/memohai/memoh/internal/models"
 	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/network/kubeapi"
 	netoverlay "github.com/memohai/memoh/internal/network/overlay"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/policy"
@@ -178,13 +178,8 @@ func providePostgresStore(conn *pgxpool.Pool) (*postgresstore.Store, error) {
 func provideOverlayProviderRegistry(service ctr.Service, cfg config.Config, rc *boot.RuntimeConfig) *netctl.Registry {
 	registry := netctl.NewRegistry()
 	runtime := netctl.NewContainerRuntimeFromBackend(rc.ContainerBackend, service)
-	var kubeRuntime kubeapi.Runtime
-	if rt, ok := service.(kubeapi.Runtime); ok {
-		kubeRuntime = rt
-	}
 	if err := netoverlay.RegisterBuiltinProviders(registry, netoverlay.ProviderDeps{
 		SidecarRuntime: service,
-		KubeRuntime:    kubeRuntime,
 		Runtime:        runtime.Descriptor(),
 		StateRoot:      cfg.Workspace.DataRoot,
 	}); err != nil {
@@ -574,6 +569,26 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 }
 
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
+	return botbackup.New(botbackup.Params{
+		Logger:          log,
+		DB:              conn,
+		Queries:         queries,
+		Bots:            botService,
+		Settings:        settingsService,
+		ACL:             aclService,
+		Channels:        channelStore,
+		MCP:             mcpService,
+		Schedules:       scheduleService,
+		Email:           emailService,
+		Providers:       providerService,
+		Models:          modelsService,
+		SearchProviders: searchProviderService,
+		MemoryProviders: memoryProviderService,
+		Workspace:       manager,
+	})
+}
+
 func provideFederationGateway(log *slog.Logger, containerdHandler *handlers.ContainerdHandler) *handlers.MCPFederationGateway {
 	return handlers.NewMCPFederationGateway(log, containerdHandler)
 }
@@ -702,6 +717,14 @@ func provideACPCodexOAuthHandler(providersService *providers.Service, botService
 }
 
 func provideACPCodexOAuthServerHandler(handler *handlers.ACPCodexOAuthHandler) *handlers.ACPCodexOAuthHandler {
+	return handler
+}
+
+func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
+	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+}
+
+func provideACPClaudeCodeOAuthServerHandler(handler *handlers.ACPClaudeCodeOAuthHandler) *handlers.ACPClaudeCodeOAuthHandler {
 	return handler
 }
 

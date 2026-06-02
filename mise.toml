@@ -175,6 +175,7 @@ if [ -d ".toolkit" ]; then
   rm -rf "$RUNTIME_DIR/toolkit"
   mkdir -p "$RUNTIME_DIR/toolkit"
   cp -a .toolkit/. "$RUNTIME_DIR/toolkit/"
+  cp -a docker/toolkit/bin/. "$RUNTIME_DIR/toolkit/bin/"
 else
   echo "warning: .toolkit not found; Docker workspaces will run without bundled node/uv tools." >&2
   echo "         Run 'mise run install-workspace-toolkit' to install them." >&2

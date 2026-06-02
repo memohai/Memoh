@@ -114,16 +114,6 @@ func descriptorForBackend(backend string) RuntimeDescriptor {
 			DisplayName:  "Apple Container",
 			Capabilities: RuntimeCapabilities{},
 		}
-	case "kubernetes", "k8s":
-		return RuntimeDescriptor{
-			Kind:        "kubernetes",
-			DisplayName: "Kubernetes",
-			Capabilities: RuntimeCapabilities{
-				ClusterNative:    true,
-				PodLikeSandbox:   true,
-				KubernetesNative: true,
-			},
-		}
 	default:
 		return RuntimeDescriptor{
 			Kind:         normalizeKind(backend),

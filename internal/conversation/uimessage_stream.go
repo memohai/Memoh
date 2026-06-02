@@ -67,7 +67,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		c.reasoning = nil
 		return nil
 
-	case "tool_call_start":
+	case "tool_call_start", "tool_call_input_start":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{

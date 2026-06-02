@@ -74,6 +74,6 @@ const parsed = computed<HeartbeatInfo>(() => {
 
 function navigateToLogs() {
   if (!props.botId) return
-  router.push({ name: 'bot-detail', params: { botId: props.botId }, query: { tab: 'heartbeat' } })
+  router.push({ name: 'bot-detail', params: { botName: props.botId }, query: { tab: 'heartbeat' } })
 }
 </script>

@@ -79,6 +79,9 @@ func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
 	}
+	if pool.input.ContextURI != acpContextURI || !strings.Contains(pool.input.ContextMarkdown, "## Current Runtime") || !strings.Contains(pool.input.ContextMarkdown, "Bot ID: bot-1") {
+		t.Fatalf("ACP context = uri %q markdown %q, want dynamic Memoh context", pool.input.ContextURI, pool.input.ContextMarkdown)
+	}
 	if len(messages.persisted) != 2 {
 		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
 	}

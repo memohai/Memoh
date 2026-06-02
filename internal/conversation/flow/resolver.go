@@ -522,7 +522,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 	if err != nil {
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
-	loopDetectionEnabled := r.loadBotLoopDetectionEnabled(ctx, p.BotID)
+	botInfo, loopDetectionEnabled := r.loadBotRuntimeInfo(ctx, p.BotID)
 	userTimezoneName, userClockLocation := r.resolveTimezone(ctx, p.BotID, p.UserID)
 
 	chatID := p.ChatID
@@ -606,6 +606,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 			TimezoneLocation:  userClockLocation,
 			SessionToken:      p.SessionToken,
 		},
+		Bot:               botInfo,
 		Skills:            agentSkills,
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: r.bgManager,
@@ -790,6 +791,7 @@ func (r *Resolver) prepareRunConfig(ctx context.Context, cfg agentpkg.RunConfig)
 	}
 	cfg.System = agentpkg.GenerateSystemPrompt(agentpkg.SystemPromptParams{
 		SessionType:               cfg.SessionType,
+		Bot:                       cfg.Bot,
 		Skills:                    cfg.Skills,
 		Files:                     files,
 		Now:                       now,

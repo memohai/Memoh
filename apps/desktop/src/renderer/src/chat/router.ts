@@ -30,6 +30,11 @@ const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(({ name, path }
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/connect',
+    name: 'ConnectServer',
+    component: () => import('../connect/ConnectServer.vue'),
+  },
+  {
     path: '/onboarding',
     name: 'onboarding',
     component: () => import('@memohai/web/pages/onboarding/index.vue'),
@@ -44,9 +49,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@memohai/web/pages/home/index.vue'),
       },
       {
-        name: 'chat',
-        path: '/chat/:botId?/:sessionId?',
+        name: 'bot',
+        path: '/bot/:botName?/:sessionId?',
         component: () => import('@memohai/web/pages/home/index.vue'),
+      },
+      {
+        // Backwards-compatible redirect for legacy UUID-based chat links.
+        path: '/chat/:botName?/:sessionId?',
+        redirect: (to) => {
+          const botName = (to.params.botName as string) ?? ''
+          return botName
+            ? { name: 'bot', params: { botName, sessionId: to.params.sessionId } }
+            : { name: 'home' }
+        },
       },
     ],
   },
@@ -82,6 +97,15 @@ router.onError((error: Error) => {
 })
 
 router.beforeEach(async (to: RouteLocationNormalized) => {
+  const status = await window.api.desktop.getServerStatus()
+  const needsRemoteBaseUrl = status.mode === 'remote' && !status.baseUrl
+  if (needsRemoteBaseUrl) {
+    return to.path === '/connect' ? true : { name: 'ConnectServer' }
+  }
+  if (to.path === '/connect') {
+    return { name: 'Login' }
+  }
+
   // Settings lives in its own BrowserWindow. Any in-app navigation aimed at
   // the settings tree — whether via path (`router.push('/settings/bots')`)
   // or via name resolved through the placeholder stubs above

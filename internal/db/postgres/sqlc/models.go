@@ -11,6 +11,7 @@ import (
 type Bot struct {
 	ID                     pgtype.UUID        `json:"id"`
 	OwnerUserID            pgtype.UUID        `json:"owner_user_id"`
+	Name                   string             `json:"name"`
 	DisplayName            pgtype.Text        `json:"display_name"`
 	AvatarUrl              pgtype.Text        `json:"avatar_url"`
 	Timezone               pgtype.Text        `json:"timezone"`

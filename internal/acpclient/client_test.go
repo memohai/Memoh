@@ -38,6 +38,25 @@ func (w testWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceI
 	return w.info, nil
 }
 
+type rotatingTestWorkspace struct {
+	info    bridge.WorkspaceInfo
+	clients []*bridge.Client
+	calls   int
+}
+
+func (w *rotatingTestWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
+	if w.calls >= len(w.clients) {
+		return nil, errors.New("no more test clients")
+	}
+	client := w.clients[w.calls]
+	w.calls++
+	return client, nil
+}
+
+func (w *rotatingTestWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return w.info, nil
+}
+
 func TestRunnerRunLocalWorkspaceFakeAgent(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
@@ -169,6 +188,83 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 		if !hasStreamedToolEvent(result.Events, StreamEventToolCallEnd, want) {
 			t.Fatalf("result events missing %s tool end: %#v", want, result.Events)
 		}
+	}
+}
+
+func TestSessionPromptBuildsEmbeddedContextResource(t *testing.T) {
+	t.Parallel()
+
+	markdown := "# Memoh Context\n\nRemember the project preference."
+	sess := &Session{embeddedContext: true}
+	blocks := sess.promptBlocks("inspect the app", []PromptResource{{
+		URI:      "memoh://context/current-turn",
+		MimeType: "text/markdown",
+		Text:     markdown,
+	}})
+	if len(blocks) != 2 {
+		t.Fatalf("prompt blocks = %d, want text + resource", len(blocks))
+	}
+	if blocks[0].Text == nil || blocks[0].Text.Text != "inspect the app" {
+		t.Fatalf("first block = %#v, want user text", blocks[0])
+	}
+	if blocks[1].Resource == nil || blocks[1].Resource.Resource.TextResourceContents == nil {
+		t.Fatalf("second block = %#v, want embedded text resource", blocks[1])
+	}
+	resource := blocks[1].Resource.Resource.TextResourceContents
+	if resource.Uri != "memoh://context/current-turn" || resource.MimeType == nil || *resource.MimeType != "text/markdown" || resource.Text != markdown {
+		t.Fatalf("resource = %#v, want Memoh markdown context", resource)
+	}
+}
+
+func TestSessionPromptFallsBackToTextContextWhenEmbeddedContextUnsupported(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{}
+	blocks := sess.promptBlocks("inspect the app", []PromptResource{{
+		URI:      "memoh://context/current-turn",
+		MimeType: "text/markdown",
+		Text:     "Memoh context",
+	}})
+	if len(blocks) != 1 || blocks[0].Text == nil {
+		t.Fatalf("prompt blocks = %#v, want single text fallback", blocks)
+	}
+	text := blocks[0].Text.Text
+	if !strings.Contains(text, `<context ref="memoh://context/current-turn">`) || !strings.Contains(text, "Memoh context") || !strings.Contains(text, "inspect the app") {
+		t.Fatalf("fallback text = %q, want context and prompt", text)
+	}
+}
+
+func TestStartMemohToolsBridgeRetriesClosingWorkspaceClient(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	stale := newTestBridgeClient(t, root)
+	if err := stale.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fresh := newTestBridgeClient(t, root)
+	workspace := &rotatingTestWorkspace{
+		info: bridge.WorkspaceInfo{
+			Backend:         bridge.WorkspaceBackendContainer,
+			DefaultWorkDir:  "/data",
+			ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp",
+		},
+		clients: []*bridge.Client{fresh},
+	}
+	runner := NewRunner(nil, workspace)
+
+	gotClient, stop, err := runner.startMemohToolsBridge(context.Background(), "bot-1", stale, "/mcp/test", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	if err != nil {
+		t.Fatalf("startMemohToolsBridge() error = %v", err)
+	}
+	defer stop()
+	if gotClient != fresh {
+		t.Fatalf("startMemohToolsBridge() client = %#v, want fresh client", gotClient)
+	}
+	if workspace.calls != 1 {
+		t.Fatalf("workspace MCPClient calls = %d, want retry once", workspace.calls)
 	}
 }
 

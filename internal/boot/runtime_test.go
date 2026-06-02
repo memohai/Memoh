@@ -91,28 +91,8 @@ func TestProvideRuntimeConfigRequiresContainerBackend(t *testing.T) {
 	}
 }
 
-func TestProvideRuntimeConfigNormalizesK8sBackend(t *testing.T) {
-	cfg := config.Config{
-		Auth: config.AuthConfig{
-			JWTSecret:    "secret",
-			JWTExpiresIn: "24h",
-		},
-		Timezone: config.DefaultTimezone,
-		Container: config.ContainerConfig{
-			Backend: "k8s",
-		},
-	}
-	rc, err := ProvideRuntimeConfig(cfg)
-	if err != nil {
-		t.Fatalf("ProvideRuntimeConfig returned error: %v", err)
-	}
-	if rc.ContainerBackend != "kubernetes" {
-		t.Fatalf("ContainerBackend = %q, want kubernetes", rc.ContainerBackend)
-	}
-}
-
 func TestProvideRuntimeConfigBackendIgnoresEnvOverride(t *testing.T) {
-	t.Setenv("CONTAINER_BACKEND", "k8s")
+	t.Setenv("CONTAINER_BACKEND", "apple")
 	cfg := config.Config{
 		Auth: config.AuthConfig{
 			JWTSecret:    "secret",

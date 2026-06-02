@@ -99,6 +99,11 @@
               <Input
                 v-model="searchQuery"
                 type="text"
+                name="bot-settings-search"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
                 class="pl-8 h-8 text-xs bg-transparent shadow-none focus-visible:ring-0"
                 :placeholder="$t('common.search')"
               />
@@ -281,19 +286,23 @@ type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: 
 
 const route = useRoute()
 const { t } = useI18n()
-const botId = computed(() => {
-  const id = route.params.botId
+// The route param may be a name slug or a UUID; resolve it to the canonical
+// bot UUID so child tabs keep operating on UUIDs.
+const routeIdentifier = computed(() => {
+  const id = route.params.botName
   return typeof id === 'string' ? id : ''
 })
 
 const { data: bot } = useQuery({
-  key: () => ['bot', botId.value],
+  key: () => ['bot', routeIdentifier.value],
   query: async () => {
-    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
     return data
   },
-  enabled: () => !!botId.value,
+  enabled: () => !!routeIdentifier.value,
 })
+
+const botId = computed(() => bot.value?.id ?? '')
 
 const containerInfo = ref<BotContainerInfo | null>(null)
 
@@ -342,7 +351,7 @@ const searchIndex = computed(() => {
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
-    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'coding agent', 'acp'] },
+    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'plugins'] },
     { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },

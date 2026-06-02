@@ -1,9 +1,8 @@
-** This is a scheduled task automatically send to you by the system **
----
-schedule-name: {{name}}
-schedule-description: {{description}}
-max-calls: {{maxCalls}}
-cron-pattern: {{pattern}}
----
+Scheduled task triggered:
+name: {{name}}
+description: {{description}}
+cron: {{pattern}}
+max_calls: {{maxCalls}}
 
+Command:
 {{command}}

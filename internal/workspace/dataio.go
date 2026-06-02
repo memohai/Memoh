@@ -23,8 +23,6 @@ const (
 	containerDataDir = "/data"
 	snapshotsSubdir  = "snapshots"
 	backupsSubdir    = "backups"
-	legacyBotsSubdir = "bots"
-	migratedSuffix   = ".migrated"
 	archivePrefix    = "archive:"
 )
 
@@ -133,88 +131,29 @@ func (m *Manager) PreserveData(ctx context.Context, botID string) error {
 	return m.preserveDataToBackup(ctx, botID, mounts)
 }
 
-// RestorePreservedData imports preserved data (backup tar.gz or legacy
-// bind-mount directory) into a running container's /data.
+// RestorePreservedData imports preserved data (backup tar.gz) into a running
+// container's /data.
 func (m *Manager) RestorePreservedData(ctx context.Context, botID string) error {
 	bp := m.backupPath(botID)
-	if _, err := os.Stat(bp); err == nil {
-		f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
-		if err != nil {
-			return err
-		}
-		defer func() { _ = f.Close() }()
-
-		if err := m.ImportData(ctx, botID, f); err != nil {
-			return err
-		}
-		return os.Remove(bp)
-	}
-
-	// Legacy bind-mount directory
-	legacyDir := m.legacyDataDir(botID)
-	if _, err := os.Stat(legacyDir + migratedSuffix); err == nil {
-		return nil // already imported previously
-	}
-	info, err := os.Stat(legacyDir)
-	if err != nil || !info.IsDir() {
+	if _, err := os.Stat(bp); err != nil {
 		return errors.New("no preserved data found")
 	}
-	return m.importLegacyDir(ctx, botID, legacyDir)
-}
-
-// HasPreservedData checks whether backup data exists for a bot, either as
-// a tar.gz backup or a legacy bind-mount directory.
-func (m *Manager) HasPreservedData(botID string) bool {
-	if _, err := os.Stat(m.backupPath(botID)); err == nil {
-		return true
-	}
-	legacyDir := m.legacyDataDir(botID)
-	if _, err := os.Stat(legacyDir + migratedSuffix); err == nil {
-		return false // already imported
-	}
-	info, err := os.Stat(legacyDir)
-	return err == nil && info.IsDir()
-}
-
-// importLegacyDir copies a legacy bind-mount directory into the container
-// via snapshot mount, then renames the source to .migrated.
-func (m *Manager) importLegacyDir(ctx context.Context, botID, srcDir string) error {
-	ref, err := m.loadLockedContainer(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("get container: %w", err)
-	}
-	defer ref.Close()
-
-	mounts, err := m.snapshotMounts(ctx, ref.info)
-	if errors.Is(err, errMountNotSupported) {
-		return m.importLegacyDirViaGRPC(ctx, botID, srcDir)
-	}
+	f, err := os.Open(bp) //nolint:gosec // G304: operator-controlled path
 	if err != nil {
 		return err
 	}
+	defer func() { _ = f.Close() }()
 
-	restartTask, err := ref.StopTaskForMutation(ctx)
-	if err != nil {
-		return fmt.Errorf("stop container: %w", err)
+	if err := m.ImportData(ctx, botID, f); err != nil {
+		return err
 	}
-	defer restartTask()
+	return os.Remove(bp)
+}
 
-	mountErr := mount.WithTempMount(ctx, mounts, func(root string) error {
-		dataDir := mountedDataDir(root)
-		if err := os.MkdirAll(dataDir, 0o750); err != nil {
-			return err
-		}
-		return copyDirContents(srcDir, dataDir)
-	})
-	if mountErr != nil {
-		return mountErr
-	}
-
-	if err := os.Rename(srcDir, srcDir+migratedSuffix); err != nil {
-		m.logger.Warn("legacy import: rename to .migrated failed",
-			slog.String("src", srcDir), slog.Any("error", err))
-	}
-	return nil
+// HasPreservedData checks whether a backup tar.gz exists for a bot.
+func (m *Manager) HasPreservedData(botID string) bool {
+	_, err := os.Stat(m.backupPath(botID))
+	return err == nil
 }
 
 // recoverOrphanedSnapshot detects a snapshot whose container was deleted
@@ -440,13 +379,31 @@ func (m *Manager) archiveSnapshotPath(key string) string {
 	return filepath.Join(m.dataRoot(), snapshotsSubdir, filepath.FromSlash(rel))
 }
 
-func (m *Manager) legacyDataDir(botID string) string {
-	return filepath.Join(m.dataRoot(), legacyBotsSubdir, botID)
-}
-
 // ---------------------------------------------------------------------------
 // gRPC fallback (Apple backend / no mount support)
 // ---------------------------------------------------------------------------
+
+// CountData returns the number of regular files under the container's /data
+// directory, read live over the gRPC bridge so it never stops the container.
+// It is best-effort context for the export dialog; callers should treat an
+// error (e.g. a stopped or unreachable container) as "unknown".
+func (m *Manager) CountData(ctx context.Context, botID string) (int, error) {
+	client, err := m.MCPClient(ctx, botID)
+	if err != nil {
+		return 0, fmt.Errorf("grpc connect: %w", err)
+	}
+	entries, err := client.ListDirAll(ctx, containerDataDir, true)
+	if err != nil {
+		return 0, fmt.Errorf("list dir: %w", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.GetIsDir() {
+			count++
+		}
+	}
+	return count, nil
+}
 
 func (m *Manager) exportDataViaGRPC(ctx context.Context, botID string) (io.ReadCloser, error) {
 	client, err := m.MCPClient(ctx, botID)
@@ -605,41 +562,6 @@ func (m *Manager) importDataViaGRPC(ctx context.Context, botID string, r io.Read
 	}
 }
 
-func (m *Manager) importLegacyDirViaGRPC(ctx context.Context, botID, srcDir string) error {
-	client, err := m.MCPClient(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("grpc connect: %w", err)
-	}
-
-	err = filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, relErr := filepath.Rel(srcDir, path)
-		if relErr != nil || rel == "." || d.IsDir() {
-			return relErr
-		}
-		f, openErr := os.Open(path) //nolint:gosec // G304: operator-controlled legacy data path
-		if openErr != nil {
-			return openErr
-		}
-		defer func() { _ = f.Close() }()
-
-		containerPath := containerDataDir + "/" + filepath.ToSlash(rel)
-		_, copyErr := client.WriteRaw(ctx, containerPath, f)
-		return copyErr
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := os.Rename(srcDir, srcDir+migratedSuffix); err != nil {
-		m.logger.Warn("legacy import: rename failed",
-			slog.String("src", srcDir), slog.Any("error", err))
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // tar.gz helpers
 // ---------------------------------------------------------------------------
@@ -758,42 +680,6 @@ func untarGzDir(r io.Reader, dst string) error {
 			_ = f.Close()
 		}
 	}
-}
-
-// copyDirContents copies all files from src into dst (both must be directories).
-func copyDirContents(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil || rel == "." {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o750)
-		}
-
-		in, err := os.Open(path) //nolint:gosec // G304: copying operator-controlled migration data
-		if err != nil {
-			return err
-		}
-		defer func() { _ = in.Close() }()
-
-		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-			return err
-		}
-		out, err := os.Create(target) //nolint:gosec // G304: target within mounted snapshot
-		if err != nil {
-			return err
-		}
-		defer func() { _ = out.Close() }()
-
-		_, err = io.Copy(out, in)
-		return err
-	})
 }
 
 // sanitizeArchivePath converts a tar header path into a safe relative path.

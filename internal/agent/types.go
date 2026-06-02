@@ -26,6 +26,14 @@ type SessionContext struct {
 	IsSubagent        bool
 }
 
+// BotInfo is service-owned bot metadata injected into the system prompt.
+type BotInfo struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Timezone    string `json:"timezone,omitempty"`
+}
+
 // SkillEntry represents a skill loaded from the bot container.
 type SkillEntry struct {
 	Name        string
@@ -75,6 +83,7 @@ type RunConfig struct {
 	DisplayEnabled        bool
 	InlineImages          []sdk.ImagePart
 	Identity              SessionContext
+	Bot                   BotInfo
 	Skills                []SkillEntry
 	LoopDetection         LoopDetectionConfig
 	Retry                 RetryConfig

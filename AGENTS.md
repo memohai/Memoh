@@ -18,7 +18,7 @@ The native desktop client is a separate distribution boundary, not just a hosted
 Infrastructure dependencies:
 - **PostgreSQL or SQLite** — Relational data storage
 - **Qdrant** — Vector database for memory semantic search; external in deploy/server mode, embedded and managed by the desktop client for local desktop mode
-- **Workspace runtime** — Isolated containers per bot via Docker, Kubernetes, containerd v2, or Apple Virtualization, plus trusted local workspaces for desktop/local development
+- **Workspace runtime** — Isolated containers per bot via Docker, containerd v2, or Apple Virtualization, plus trusted local workspaces for desktop/local development
 
 ## Tech Stack
 
@@ -30,7 +30,7 @@ Infrastructure dependencies:
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
 - **MCP**: modelcontextprotocol/go-sdk
-- **Containers / Workspaces**: Docker / Kubernetes / containerd v2 / Apple Virtualization adapters, plus trusted local workspace routing
+- **Containers / Workspaces**: Docker / containerd v2 / Apple Virtualization adapters, plus trusted local workspace routing
 - **TUI**: Charm libraries (bubbletea, glamour, lipgloss) for CLI interactive mode
 
 ### Frontend (TypeScript)
@@ -61,7 +61,7 @@ Memoh/
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── mcp/                    #   MCP stdio transport binary
-│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh.app, talks to the local 18731 server
+│   └── memoh/                  #   Desktop companion CLI (Cobra: chat, tui, bots, start/stop/restart/status/logs, version) — bundled into Memoh Local.app, talks to the local 18731 server
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -111,7 +111,7 @@ Memoh/
 │   ├── command/                #   Slash command system (extensible command handlers)
 │   ├── compaction/             #   Message history compaction service (LLM summarization)
 │   ├── config/                 #   Configuration loading and parsing (TOML + YAML providers)
-│   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker, Kubernetes)
+│   ├── container/              #   Container runtime abstraction + adapters (containerd, Apple, Docker)
 │   ├── conversation/           #   Conversation management and flow resolver
 │   │   ├── service.go          #     Conversation CRUD and routing
 │   │   └── flow/               #     Chat orchestration (resolver, streaming, memory, triggers)
@@ -183,9 +183,6 @@ Memoh/
 │   ├── docker-compose.minify.yml #  Minified services compose
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
-├── deploy/
-│   ├── kubernetes/             # Kubernetes kustomize starter deployment
-│   └── kubernetes-local/       # Local K8s overlay using k8s-dev image tags
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
 ├── docs/                       # Documentation site (VitePress)
 ├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
@@ -325,7 +322,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - `src/main/qdrant.ts` manages the embedded Qdrant process and per-user `qdrant/ports.json`, `qdrant.pid.json`, `config.yaml`, and storage directory. Tray Quit and normal app quit both reuse the main-process shutdown path to stop the managed server, OAuth callback proxy, and embedded Qdrant.
 - Packaging is handled by `electron-builder` (config in `apps/desktop/electron-builder.yml`); output lands in `apps/desktop/dist/`. Packaged resources include `server`, `cli`, `runtime`, `config`, provider templates, Qdrant, and GStreamer assets.
 - The Memoh CLI (`cmd/memoh/`) is bundled into the app at `Resources/cli/memoh` next to `Resources/server/memoh-server`. On first launch (and via the `Install Command Line Tool…` menu item) the main process offers to add `memoh` to PATH (`/usr/local/bin/memoh` symlink on macOS, `~/.local/bin/memoh` on Linux, HKCU PATH on Windows). The CLI talks to the local server at `127.0.0.1:18731`, self-logs in with the `[admin]` credentials in `userData/config.toml`, and shares the same pid file (`local-server.pid.json`) so either side can `start`/`stop` the server. See `apps/desktop/AGENTS.md` § Bundled CLI.
-- `productName` is pinned to `Memoh` so userData lives at `~/Library/Application Support/Memoh/` (macOS), `%APPDATA%\Memoh\` (Windows), `~/.config/Memoh/` (Linux). The Go CLI hard-codes the same product name in `internal/tui/local/paths.go`; if you ever rename, both sides must change together.
+- The online desktop product name is `Memoh`; the local/offline desktop product name is `Memoh Local`, so local userData lives at `~/Library/Application Support/Memoh Local/` (macOS), `%APPDATA%\Memoh Local\` (Windows), `~/.config/Memoh Local/` (Linux). The Go CLI hard-codes the local product name in `internal/tui/local/paths.go`; if you ever rename the local app, both sides must change together.
 - When desktop needs to diverge from the web experience, extend the desktop bootstrap or add explicit `@memohai/web` subpath exports plus desktop type stubs. Do **not** fork `apps/web` itself.
 
 ### Container / Workspace Management
@@ -335,7 +332,7 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - The bridge binary (`cmd/bridge/`) runs inside each container, mounting runtime binaries from `$WORKSPACE_RUNTIME_DIR` and UDS sockets from `/run/memoh/`. When display is enabled it can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
 - Container images are standard base images (debian, alpine, ubuntu, etc.) — no dedicated MCP Docker image needed.
 - `internal/workspace/` manages workspace lifecycle (create, start, stop, reconcile), maintains a bridge gRPC connection pool for container runtimes, and uses `RuntimeRouter` to combine container backends with local workspaces when enabled.
-- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `k8s`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker, local, or archive-backed flows.
+- `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker, local, or archive-backed flows.
 - SSE-based progress feedback is provided during container image pull and creation.
 
 ## Database Tables
@@ -402,8 +399,8 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
 - `[database]` — Database backend selection (`postgres` or `sqlite`)
-- `[container]` — Workspace container backend selection (`docker`, `kubernetes`/`k8s`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
-- `[containerd]` / `[docker]` / `[kubernetes]` / `[apple]` — Backend-specific runtime configuration
+- `[container]` — Workspace container backend selection (`docker`, `containerd`, `apple`) and common workspace image/data/runtime/CNI settings
+- `[containerd]` / `[docker]` / `[apple]` — Backend-specific runtime configuration
 - `[local]` — Trusted local workspace support for desktop/local development (not container-isolated)
 - `[postgres]` — PostgreSQL connection
 - `[sqlite]` — SQLite database file and WAL/lock settings

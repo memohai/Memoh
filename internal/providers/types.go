@@ -108,12 +108,7 @@ type RemoteModel struct {
 	Type             string   `json:"type,omitempty"`
 	Compatibilities  []string `json:"compatibilities,omitempty"`
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
-}
-
-// FetchModelsResponse represents the response from the provider's /v1/models endpoint.
-type FetchModelsResponse struct {
-	Object string        `json:"object"`
-	Data   []RemoteModel `json:"data"`
+	Dimensions       *int     `json:"dimensions,omitempty"`
 }
 
 // ImportModelsResponse represents the response for importing models.

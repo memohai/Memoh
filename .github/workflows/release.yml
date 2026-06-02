@@ -90,7 +90,7 @@ jobs:
         run: pnpm publish:npm
 
   desktop-build:
-    name: Build desktop (${{ matrix.platform }})
+    name: Build desktop (${{ matrix.artifact_flavor }} ${{ matrix.platform }})
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 120
     strategy:
@@ -99,16 +99,35 @@ jobs:
         include:
           - platform: macos-26
             build_cmd: build:mac
+            flavor: online
+            artifact_flavor: online
+          - platform: macos-26
+            build_cmd: build:mac
+            flavor: offline
+            artifact_flavor: local
           - platform: ubuntu-22.04
             build_cmd: build:linux:x64
+            flavor: online
+            artifact_flavor: online
+          - platform: ubuntu-22.04
+            build_cmd: build:linux:x64
+            flavor: offline
+            artifact_flavor: local
           - platform: windows-latest
             build_cmd: build:win:x64
+            flavor: online
+            artifact_flavor: online
+          - platform: windows-latest
+            build_cmd: build:win:x64
+            flavor: offline
+            artifact_flavor: local
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      MEMOH_DESKTOP_FLAVOR: ${{ matrix.flavor }}
     steps:
       - uses: actions/checkout@v4
       - name: Sync desktop version
@@ -133,12 +152,14 @@ jobs:
           node-version: lts/*
           cache: pnpm
       - uses: actions/setup-go@v5
+        if: ${{ matrix.flavor == 'offline' }}
         with:
           go-version-file: go.mod
           cache: true
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
       - name: Cache desktop GStreamer runtime
+        if: ${{ matrix.flavor == 'offline' }}
         uses: actions/cache@v4
         with:
           path: apps/desktop/resources/gstreamer
@@ -182,6 +203,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
+          MEMOH_DESKTOP_FLAVOR: ${{ matrix.flavor }}
         run: pnpm --filter @memohai/desktop ${{ matrix.build_cmd }}
       - name: Notarize macOS DMGs
         if: ${{ startsWith(matrix.platform, 'macos-') && steps.mac-signing.outputs.has_cert == 'true' }}
@@ -190,7 +212,11 @@ jobs:
           set -euo pipefail
 
           shopt -s nullglob
-          dmg_artifacts=(apps/desktop/dist/Memoh-Desktop-*-mac-arm64.dmg apps/desktop/dist/Memoh-Desktop-*-mac-x64.dmg)
+          if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
+            dmg_artifacts=(apps/desktop/dist/Memoh-[0-9]*-mac-arm64.dmg apps/desktop/dist/Memoh-[0-9]*-mac-x64.dmg)
+          else
+            dmg_artifacts=(apps/desktop/dist/Memoh-Local-*-mac-arm64.dmg apps/desktop/dist/Memoh-Local-*-mac-x64.dmg)
+          fi
           if (( ${#dmg_artifacts[@]} != 2 )); then
             echo "Expected mac arm64/x64 dmg artifacts." >&2
             ls -lh apps/desktop/dist || true
@@ -211,10 +237,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          declare -a bundles=(
-            "arm64:darwin-arm64:apps/desktop/dist/mac-arm64/Memoh.app"
-            "x64:darwin-x64:apps/desktop/dist/mac/Memoh.app"
-          )
+          if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
+            declare -a bundles=(
+              "arm64:__none__:apps/desktop/dist/mac-arm64/Memoh.app"
+              "x64:__none__:apps/desktop/dist/mac/Memoh.app"
+            )
+          else
+            declare -a bundles=(
+              "arm64:darwin-arm64:apps/desktop/dist/mac-arm64/Memoh Local.app"
+              "x64:darwin-x64:apps/desktop/dist/mac/Memoh Local.app"
+            )
+          fi
 
           for bundle in "${bundles[@]}"; do
             IFS=: read -r arch qdrant_target app_path <<<"$bundle"
@@ -224,19 +257,35 @@ jobs:
               exit 1
             fi
 
-            qdrant_root="$app_path/Contents/Resources/qdrant"
-            qdrant_bin="$qdrant_root/$qdrant_target/qdrant"
-            if [[ ! -x "$qdrant_bin" ]]; then
-              echo "Missing $arch qdrant binary: $qdrant_bin" >&2
-              find "$qdrant_root" -maxdepth 3 -type f -print || true
-              exit 1
-            fi
+            if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
+              for local_resource in server cli runtime config providers qdrant gstreamer; do
+                if [[ -e "$app_path/Contents/Resources/$local_resource" ]]; then
+                  echo "Unexpected local-only resource in online $arch app: $local_resource" >&2
+                  exit 1
+                fi
+              done
+            else
+              for local_resource in server cli runtime config providers qdrant gstreamer; do
+                if [[ ! -e "$app_path/Contents/Resources/$local_resource" ]]; then
+                  echo "Missing local resource in local $arch app: $local_resource" >&2
+                  exit 1
+                fi
+              done
 
-            extra_qdrant_dirs="$(find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d ! -name "$qdrant_target" -print -quit)"
-            if [[ -n "$extra_qdrant_dirs" ]]; then
-              echo "Unexpected qdrant resource in $arch app: $extra_qdrant_dirs" >&2
-              find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d -print
-              exit 1
+              qdrant_root="$app_path/Contents/Resources/qdrant"
+              qdrant_bin="$qdrant_root/$qdrant_target/qdrant"
+              if [[ ! -x "$qdrant_bin" ]]; then
+                echo "Missing $arch qdrant binary: $qdrant_bin" >&2
+                find "$qdrant_root" -maxdepth 3 -type f -print || true
+                exit 1
+              fi
+
+              extra_qdrant_dirs="$(find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d ! -name "$qdrant_target" -print -quit)"
+              if [[ -n "$extra_qdrant_dirs" ]]; then
+                echo "Unexpected qdrant resource in $arch app: $extra_qdrant_dirs" >&2
+                find "$qdrant_root" -mindepth 1 -maxdepth 1 -type d -print
+                exit 1
+              fi
             fi
 
             codesign --verify --deep --strict --verbose=2 "$app_path"
@@ -245,7 +294,11 @@ jobs:
           done
 
           shopt -s nullglob
-          dmg_artifacts=(apps/desktop/dist/Memoh-Desktop-*-mac-arm64.dmg apps/desktop/dist/Memoh-Desktop-*-mac-x64.dmg)
+          if [[ "$MEMOH_DESKTOP_FLAVOR" == "online" ]]; then
+            dmg_artifacts=(apps/desktop/dist/Memoh-[0-9]*-mac-arm64.dmg apps/desktop/dist/Memoh-[0-9]*-mac-x64.dmg)
+          else
+            dmg_artifacts=(apps/desktop/dist/Memoh-Local-*-mac-arm64.dmg apps/desktop/dist/Memoh-Local-*-mac-x64.dmg)
+          fi
           if (( ${#dmg_artifacts[@]} != 2 )); then
             echo "Expected mac arm64/x64 dmg artifacts." >&2
             ls -lh apps/desktop/dist || true
@@ -260,7 +313,7 @@ jobs:
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.platform }}
+          name: desktop-${{ matrix.artifact_flavor }}-${{ matrix.platform }}
           path: |
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb

@@ -93,7 +93,8 @@ export function findMissingRequiredACPField(value: ACPForm, profiles: Acpprofile
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
   const mode = normalizeSetupMode(setupMode, managed)
   if (!profile || mode === 'self') return null
-  if (normalizeACPAgentID(profile.id) === 'codex') {
+  const agentID = normalizeACPAgentID(profile.id)
+  if (agentID === 'codex') {
     if (mode === 'oauth') {
       return null
     }
@@ -101,6 +102,14 @@ export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile
       return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === 'api_key')
         ?? { id: 'api_key', label: 'OpenAI API key', type: 'password', required: true, sensitive: true }
     }
+  }
+  if (agentID === 'claude-code') {
+    const requiredFieldID = mode === 'oauth' ? 'oauth_token' : 'api_key'
+    if (!String(managed[requiredFieldID] ?? '').trim()) {
+      return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === requiredFieldID)
+        ?? { id: requiredFieldID, label: requiredFieldID, type: 'password', required: true, sensitive: true }
+    }
+    return null
   }
   for (const field of profile.managed_fields ?? []) {
     const id = normalizeACPAgentID(field.id)

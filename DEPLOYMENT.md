@@ -15,19 +15,7 @@ For a lightweight single-node install backed by SQLite:
 curl -fsSL https://memoh.sh | MEMOH_DATABASE_DRIVER=sqlite sh
 ```
 
-The one-click Docker Compose installer uses the `containerd` workspace backend. Docker, Kubernetes, and Apple workspace backends are available for manual deployments by editing `[container].backend` in `config.toml`.
-
-## Kubernetes
-
-A kustomize starter deployment is available in `deploy/kubernetes`:
-
-```bash
-kubectl apply -k deploy/kubernetes
-kubectl -n memoh rollout status deployment/memoh-server
-kubectl -n memoh rollout status deployment/memoh-web
-```
-
-Edit `deploy/kubernetes/config-secret.yaml` before deploying. At minimum, change the admin password, JWT secret, and PostgreSQL password. See the Kubernetes installation guide for runtime hostPath, RBAC, storage, and snapshot notes.
+The one-click Docker Compose installer uses the `containerd` workspace backend. Docker and Apple workspace backends are available for manual deployments by editing `[container].backend` in `config.toml`.
 
 ## Manual Install
 
@@ -107,7 +95,7 @@ Recommended changes for production:
 - `admin.password` — Admin password
 - `auth.jwt_secret` — JWT secret (generate with `openssl rand -base64 32`)
 - `database.driver` — `postgres` for the default deployment, or `sqlite` for a single-node install
-- `container.backend` — `containerd` for the official Docker Compose stack; use `docker`, `kubernetes`, or `apple` only for matching manual deployments
+- `container.backend` — `containerd` for the official Docker Compose stack; use `docker` or `apple` only for matching manual deployments
 - `postgres.password` — Database password (also set `POSTGRES_PASSWORD` env var)
 
 SQLite deployments should use `docker-compose.sqlite.yml`; the database file lives in the `memoh_data` Docker volume.

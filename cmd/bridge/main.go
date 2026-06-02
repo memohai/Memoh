@@ -24,19 +24,30 @@ import (
 const (
 	defaultSocketPath = "/run/memoh/bridge.sock"
 	templateDir       = "/opt/memoh/templates"
+
+	agentsFileName         = "AGENTS.md"
+	legacyIdentityFileName = "IDENTITY.md"
 )
 
 // initDataDir ensures /data exists and seeds template files on first boot.
 func initDataDir() {
-	if err := os.MkdirAll(bridgesvc.DefaultWorkDir, 0o750); err != nil {
+	initDataDirAt(bridgesvc.DefaultWorkDir, templateDir)
+}
+
+func initDataDirAt(dataDir, templatesDir string) {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		logger.Warn("failed to create data dir", slog.Any("error", err))
 		return
 	}
+	if err := migrateLegacyIdentityFile(dataDir); err != nil {
+		logger.Warn("failed to migrate legacy identity file", slog.Any("error", err))
+		return
+	}
 
-	entries, err := os.ReadDir(templateDir)
+	entries, err := os.ReadDir(templatesDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			logger.Warn("failed to read template dir", slog.String("dir", templateDir), slog.Any("error", err))
+			logger.Warn("failed to read template dir", slog.String("dir", templatesDir), slog.Any("error", err))
 		}
 		return
 	}
@@ -44,11 +55,11 @@ func initDataDir() {
 		if e.IsDir() {
 			continue
 		}
-		dst := filepath.Join(bridgesvc.DefaultWorkDir, e.Name())
+		dst := filepath.Join(dataDir, e.Name())
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(templateDir, e.Name()))
+		data, err := os.ReadFile(filepath.Join(templatesDir, e.Name())) //nolint:gosec // G304: file name comes from os.ReadDir(templatesDir).
 		if err != nil {
 			continue
 		}
@@ -56,6 +67,28 @@ func initDataDir() {
 			logger.Warn("failed to seed template", slog.String("file", e.Name()), slog.Any("error", err))
 		}
 	}
+}
+
+func migrateLegacyIdentityFile(dataDir string) error {
+	agentsPath := filepath.Join(dataDir, agentsFileName)
+	if _, err := os.Stat(agentsPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	identityPath := filepath.Join(dataDir, legacyIdentityFileName)
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	return os.Rename(identityPath, agentsPath)
 }
 
 func main() {

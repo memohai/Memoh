@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
@@ -43,9 +43,16 @@ const content = computed(() => {
   return (input?.content as string) ?? ''
 })
 
-onMounted(() => {
-  if (content.value) {
-    void shiki.highlight(content.value, extractFilename(filePath.value))
-  }
-})
+// Re-highlight whenever content arrives. Input now streams in after the tool
+// block first renders (tool_call_input_start), so an onMounted-only highlight
+// would miss the content that lands later.
+watch(
+  [content, filePath],
+  ([text, path]) => {
+    if (text) {
+      void shiki.highlight(text, extractFilename(path))
+    }
+  },
+  { immediate: true },
+)
 </script>

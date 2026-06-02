@@ -22,14 +22,30 @@ const xcodeDeveloperDir = xcodeDeveloperDirCandidates.find((candidate) => (
   existsSync(resolve(candidate, 'usr/bin/actool'))
 ))
 
-const marker = process.argv.indexOf('--')
-const rawTarget = process.argv[2] && process.argv[2] !== '--' ? process.argv[2] : 'current'
-const builderArgs = marker >= 0 ? process.argv.slice(marker + 1) : process.argv.slice(3)
+const rawArgs = process.argv.slice(2)
+const marker = rawArgs.indexOf('--')
+const buildOptions = marker >= 0 ? rawArgs.slice(0, marker) : rawArgs
+const targetIndex = buildOptions.findIndex(arg => arg && arg !== '--' && !arg.startsWith('--'))
+const rawTarget = targetIndex >= 0 ? buildOptions[targetIndex] : 'current'
+const builderArgs = marker >= 0
+  ? rawArgs.slice(marker + 1)
+  : rawArgs.filter((arg, index) => index !== targetIndex && !arg.startsWith('--flavor='))
+const flavor = resolveFlavor(buildOptions)
 const qdrantTarget = rawTarget === 'current' ? `${process.platform}-${process.arch}` : rawTarget
 const gstreamerTarget = resolveGStreamerTarget(qdrantTarget)
 const macToolchainEnv = process.platform === 'darwin' && xcodeDeveloperDir
   ? { DEVELOPER_DIR: xcodeDeveloperDir }
   : {}
+
+function resolveFlavor(options) {
+  const envFlavor = process.env.MEMOH_DESKTOP_FLAVOR?.trim()
+  const flag = options.find(arg => arg.startsWith('--flavor='))?.slice('--flavor='.length).trim()
+  const value = flag || envFlavor || 'offline'
+  if (value !== 'online' && value !== 'offline') {
+    throw new Error(`Unsupported desktop build flavor: ${value}`)
+  }
+  return value
+}
 
 function resolveGStreamerTarget(target) {
   if (target.startsWith('darwin-')) {
@@ -67,18 +83,30 @@ function run(command, args, extraEnv = {}) {
   })
 }
 
-run(process.execPath, ['scripts/prepare-qdrant.mjs', `--targets=${qdrantTarget}`])
-if (gstreamerTarget !== '__none__') {
-  run(process.execPath, ['scripts/prepare-gstreamer.mjs', `--targets=${gstreamerTarget}`])
-} else {
-  run(process.execPath, ['scripts/prepare-gstreamer.mjs', '--targets=none'])
+if (flavor === 'offline') {
+  run(process.execPath, ['scripts/prepare-qdrant.mjs', `--targets=${qdrantTarget}`])
+  if (gstreamerTarget !== '__none__') {
+    run(process.execPath, ['scripts/prepare-gstreamer.mjs', `--targets=${gstreamerTarget}`])
+  } else {
+    run(process.execPath, ['scripts/prepare-gstreamer.mjs', '--targets=none'])
+  }
+  runPnpm(['run', 'prepare:local-server'], {
+    MEMOH_DESKTOP_BUNDLE_TARGET: qdrantTarget,
+  })
 }
-runPnpm(['run', 'prepare:local-server'], {
-  MEMOH_DESKTOP_BUNDLE_TARGET: qdrantTarget,
+runPnpm(['exec', 'electron-vite', 'build'], {
+  MEMOH_DESKTOP_FLAVOR: flavor,
 })
-runPnpm(['exec', 'electron-vite', 'build'])
-runPnpm(['exec', 'electron-builder', ...builderArgs], {
+runPnpm(['exec', 'electron-builder', ...builderConfigArgs(flavor), ...builderArgs], {
   ...macToolchainEnv,
+  MEMOH_DESKTOP_FLAVOR: flavor,
   MEMOH_DESKTOP_QDRANT_TARGET: qdrantTarget,
   MEMOH_DESKTOP_GSTREAMER_TARGET: gstreamerTarget,
 })
+
+function builderConfigArgs(targetFlavor) {
+  if (targetFlavor === 'online') {
+    return ['--config', 'electron-builder.online.yml']
+  }
+  return []
+}

@@ -10,8 +10,16 @@ import (
 //go:embed templates/*
 var bridgeTemplates embed.FS
 
+const (
+	agentsFileName         = "AGENTS.md"
+	legacyIdentityFileName = "IDENTITY.md"
+)
+
 func seedBridgeTemplates(dstDir string) error {
 	if err := os.MkdirAll(dstDir, 0o750); err != nil {
+		return err
+	}
+	if err := migrateLegacyIdentityFile(dstDir); err != nil {
 		return err
 	}
 	entries, err := fs.ReadDir(bridgeTemplates, "templates")
@@ -35,4 +43,26 @@ func seedBridgeTemplates(dstDir string) error {
 		}
 	}
 	return nil
+}
+
+func migrateLegacyIdentityFile(dstDir string) error {
+	agentsPath := filepath.Join(dstDir, agentsFileName)
+	if _, err := os.Stat(agentsPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	identityPath := filepath.Join(dstDir, legacyIdentityFileName)
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return nil
+	}
+	return os.Rename(identityPath, agentsPath)
 }

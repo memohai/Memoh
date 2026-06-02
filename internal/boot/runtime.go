@@ -16,7 +16,7 @@ type RuntimeConfig struct {
 	JwtExpiresIn         time.Duration
 	ServerAddr           string
 	ContainerdSocketPath string
-	ContainerBackend     string // "docker", "kubernetes", "containerd", or "apple"
+	ContainerBackend     string // "docker", "containerd", or "apple"
 	Timezone             string
 	TimezoneLocation     *time.Location
 }
@@ -33,7 +33,7 @@ func ProvideRuntimeConfig(cfg config.Config) (*RuntimeConfig, error) {
 
 	backend := normalizeContainerBackend(cfg.Container.Backend)
 	if backend == "" {
-		return nil, errors.New("container backend is required; set [container].backend to docker, kubernetes, containerd, or apple")
+		return nil, errors.New("container backend is required; set [container].backend to docker, containerd, or apple")
 	}
 
 	tzName := strings.TrimSpace(cfg.Timezone)
@@ -67,9 +67,7 @@ func ProvideRuntimeConfig(cfg config.Config) (*RuntimeConfig, error) {
 
 func normalizeContainerBackend(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "k8s":
-		return "kubernetes"
-	case "apple", "containerd", "kubernetes", "docker":
+	case "apple", "containerd", "docker":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return strings.TrimSpace(value)

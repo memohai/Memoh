@@ -99,6 +99,16 @@ fn preferred_action_index(descriptors: &[atspi::Action]) -> usize {
     0
 }
 
+/// The `length` argument of AT-SPI `EditableText.InsertText` is interpreted as
+/// the number of **UTF-8 bytes** by the toolkits we drive (GTK/ATK documents it
+/// as "length ... in bytes", and Chromium copies `length` bytes out of the
+/// string). Passing the Unicode scalar count instead truncates multi-byte text
+/// such as CJK — e.g. "你好" is 2 chars but 6 bytes, so a length of 2 inserts a
+/// broken prefix. Always derive the length from the UTF-8 byte length.
+fn insert_text_length(text: &str) -> i32 {
+    i32::try_from(text.len()).unwrap_or(i32::MAX)
+}
+
 pub async fn type_text(ref_id: &str, text: &str) -> Result<()> {
     let entry = refs::lookup(ref_id)?;
     let outcome = try_type(&entry, text).await;
@@ -121,7 +131,7 @@ async fn try_type(entry: &RefEntry, text: &str) -> Result<()> {
     let text_proxy = connection::text_for(&conn, &accessible).await?;
     let caret = text_proxy.caret_offset().await.unwrap_or(-1);
     let position = if caret < 0 { 0 } else { caret };
-    let length = i32::try_from(text.chars().count()).unwrap_or(i32::MAX);
+    let length = insert_text_length(text);
     let inserted = editable.insert_text(position, text, length).await?;
     if !inserted {
         anyhow::bail!("editable text widget refused to insert");
@@ -201,5 +211,18 @@ mod tests {
     fn preferred_index_handles_empty_descriptors() {
         let descriptors: [atspi::Action; 0] = [];
         assert_eq!(preferred_action_index(&descriptors), 0);
+    }
+
+    #[test]
+    fn insert_text_length_uses_utf8_byte_count() {
+        // ASCII: byte length equals char count.
+        assert_eq!(insert_text_length("abc"), 3);
+        // CJK: each char is 3 UTF-8 bytes, so the length must be 6, not 2.
+        assert_eq!(insert_text_length("你好"), 6);
+        // Mixed content keeps byte semantics.
+        assert_eq!(insert_text_length("a你b"), 5);
+        // Astral plane (emoji) is 4 bytes.
+        assert_eq!(insert_text_length("😀"), 4);
+        assert_eq!(insert_text_length(""), 0);
     }
 }

@@ -18,7 +18,7 @@ Desktop 适合个人和本地使用。它会在 `127.0.0.1:18731` 启动本地 `
 
 Server Deploy 适合长期在线和多人共享。只要 Memoh 需要服务多个用户、部署在服务器上持续运行，或在你的个人电脑离线时继续接入外部渠道，就应该用这一形态。
 
-Server stack 可以用 Docker Compose 或 Kubernetes 跑起来，包含后端、网页端、数据库、记忆服务和 workspace runtime。
+Server stack 用 Docker Compose 跑起来，包含后端、网页端、数据库、记忆服务和 workspace runtime。
 
 ## 和其它方案不一样在哪
 
@@ -30,7 +30,7 @@ Server stack 可以用 Docker Compose 或 Kubernetes 跑起来，包含后端、
 
 ### 独立 Workspace
 
-每个机器人可以有自己的 workspace，用来放文件、跑命令、托管 MCP 和执行长期任务。Server Deploy 通常通过 Docker、Kubernetes、containerd 或 Apple 后端提供容器 workspace。Desktop/local 模式也可以启用 trusted local workspace，让机器人在明确受信任的本机路径里工作。
+每个机器人可以有自己的 workspace，用来放文件、跑命令、托管 MCP 和执行长期任务。Server Deploy 通常通过 Docker、containerd 或 Apple 后端提供容器 workspace。Desktop/local 模式也可以启用 trusted local workspace，让机器人在明确受信任的本机路径里工作。
 
 容器 workspace 还能提供完整图形桌面，通过 VNC/RFB 作为显示与输入基础，并运行有头 Chrome/Chromium。这样就能处理很多纯 headless 自动化不可靠的网站和登录流程。
 

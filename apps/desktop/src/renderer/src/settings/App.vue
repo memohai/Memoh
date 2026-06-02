@@ -25,15 +25,15 @@ const isMacDesktopShell = computed(() =>
 
 // Fetch bot data in the layout to ensure reactive breadcrumb updates for bot-detail
 const { data: bot } = useQuery({
-  key: () => ['bot', route.params.botId as string],
+  key: () => ['bot', route.params.botName as string],
   query: async () => {
     const { data } = await getBotsById({
-      path: { id: route.params.botId as string },
+      path: { id: route.params.botName as string },
       throwOnError: true,
     })
     return data
   },
-  enabled: () => route.name === 'bot-detail' && !!route.params.botId,
+  enabled: () => route.name === 'bot-detail' && !!route.params.botName,
 })
 
 const breadcrumbs = computed(() => {

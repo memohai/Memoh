@@ -26,6 +26,8 @@ const heartbeatTokenTTL = 10 * time.Minute
 // This prevents unbounded Generate() calls from hanging forever.
 const heartbeatRunTimeout = 5 * time.Minute
 
+const defaultHeartbeatIntervalMinutes = 1440
+
 // SessionCreator creates sessions for heartbeat runs.
 type SessionCreator interface {
 	CreateSession(ctx context.Context, botID, sessionType string) (string, error)
@@ -239,9 +241,7 @@ func (s *Service) generateTriggerToken(userID string) (string, error) {
 }
 
 func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
-	if cfg.Interval <= 0 {
-		cfg.Interval = 30
-	}
+	cfg.Interval = normalizeHeartbeatInterval(cfg.Interval)
 	spec := fmt.Sprintf("@every %dm", cfg.Interval)
 	job := func() {
 		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), heartbeatRunTimeout)
@@ -257,6 +257,13 @@ func (s *Service) scheduleJob(ctx context.Context, cfg Config) error {
 	s.mu.Unlock()
 	s.logger.Info("heartbeat scheduled", slog.String("bot_id", cfg.BotID), slog.Int("interval_minutes", cfg.Interval))
 	return nil
+}
+
+func normalizeHeartbeatInterval(interval int) int {
+	if interval <= 0 {
+		return defaultHeartbeatIntervalMinutes
+	}
+	return interval
 }
 
 func (s *Service) removeJob(botID string) {

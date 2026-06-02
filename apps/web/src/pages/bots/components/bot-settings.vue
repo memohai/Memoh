@@ -24,7 +24,7 @@
 
         <Button
           size="sm"
-          :disabled="!hasChanges || saveLoading"
+          :disabled="!hasChanges || saveLoading || !nameValid"
           class="h-8 text-xs font-medium min-w-24 shadow-none"
           @click="handleSave"
         >
@@ -39,6 +39,51 @@
 
     <!-- Standardized Card Container -->
     <div class="space-y-4">
+      <div class="space-y-3 rounded-md border border-border bg-background p-4 shadow-none">
+        <div class="space-y-0.5">
+          <h4 class="text-xs font-medium text-foreground">
+            {{ $t('bots.name') }}
+          </h4>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.nameHint') }}
+          </p>
+        </div>
+        <div class="relative">
+          <Input
+            v-model="nameInput"
+            type="text"
+            autocapitalize="off"
+            autocomplete="off"
+            spellcheck="false"
+            class="h-8 pr-9 text-xs"
+            :placeholder="$t('bots.namePlaceholder')"
+          />
+          <span class="absolute right-3 top-1/2 -translate-y-1/2">
+            <LoaderCircle
+              v-if="nameStatus === 'checking'"
+              class="size-4 animate-spin text-muted-foreground"
+            />
+            <Check
+              v-else-if="nameStatus === 'available'"
+              class="size-4 text-success-foreground"
+            />
+            <X
+              v-else-if="nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved'"
+              class="size-4 text-destructive"
+            />
+          </span>
+        </div>
+        <p
+          v-if="nameStatusMessage"
+          class="text-xs"
+          :class="nameStatus === 'available'
+            ? 'text-success-foreground'
+            : 'text-destructive'"
+        >
+          {{ nameStatusMessage }}
+        </p>
+      </div>
+
       <SettingsGlobalCard :form="form" />
       
       <SettingsInteractionCard
@@ -68,6 +113,25 @@
       />
     </div>
 
+    <!-- Bot Backup -->
+    <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div class="space-y-0.5">
+          <h4 class="text-xs font-medium text-foreground">
+            {{ $t('bots.backup.cardTitle') }}
+          </h4>
+          <p class="text-[11px] text-muted-foreground">
+            {{ $t('bots.backup.cardSubtitle') }}
+          </p>
+        </div>
+        <BotBackupActions
+          :bot-id="botId"
+          :bot-name="bot?.display_name"
+          @imported="handleBackupImported"
+        />
+      </div>
+    </div>
+
     <!-- Danger Zone: Isolated with top margin -->
     <div class="pt-4">
       <SettingsDangerZone
@@ -81,9 +145,12 @@
 <script setup lang="ts">
 import {
   Button,
+  Input,
   Spinner,
 } from '@memohai/ui'
-import { reactive, computed, watch } from 'vue'
+import { Check, X, LoaderCircle } from 'lucide-vue-next'
+import { reactive, ref, computed, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -92,8 +159,9 @@ import SettingsInteractionCard from './settings-interaction-card.vue'
 import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
+import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -205,19 +273,77 @@ const { mutateAsync: updateSettings, isLoading } = useMutation({
 })
 
 const { mutateAsync: updateBot, isLoading: isUpdatingBot } = useMutation({
-  mutation: async (timezone: string) => {
+  mutation: async (body: { timezone?: string, name?: string }) => {
     const { data } = await putBotsById({
       path: { id: botIdRef.value },
-      body: { timezone },
+      body,
       throwOnError: true,
     })
     return data
   },
   onSettled: () => {
     queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+    queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
     queryCache.invalidateQueries({ key: ['bots'] })
   },
 })
+
+// ---- URL name (slug) editing ----
+type NameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'reserved'
+const nameInput = ref('')
+const nameStatus = ref<NameStatus>('idle')
+
+watch(bot, (val) => {
+  nameInput.value = val?.name ?? ''
+  nameStatus.value = 'idle'
+}, { immediate: true })
+
+const hasNameChange = computed(() => nameInput.value.trim() !== (bot.value?.name ?? ''))
+
+const checkNameAvailability = useDebounceFn(async (candidate: string) => {
+  const normalized = candidate.trim()
+  if (!normalized || !hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  try {
+    const { data } = await getBotsNameAvailability({
+      query: { name: normalized, exclude_bot_id: botIdRef.value },
+      throwOnError: true,
+    })
+    nameStatus.value = data?.available ? 'available' : ((data?.reason as NameStatus) || 'taken')
+  } catch {
+    nameStatus.value = 'idle'
+  }
+}, 400)
+
+watch(nameInput, (candidate) => {
+  if (!hasNameChange.value) {
+    nameStatus.value = 'idle'
+    return
+  }
+  nameStatus.value = 'checking'
+  void checkNameAvailability(candidate)
+})
+
+const nameStatusMessage = computed(() => {
+  switch (nameStatus.value) {
+    case 'checking':
+      return t('bots.nameStatus.checking')
+    case 'available':
+      return t('bots.nameStatus.available')
+    case 'taken':
+      return t('bots.nameStatus.taken')
+    case 'invalid':
+      return t('bots.nameStatus.invalid')
+    case 'reserved':
+      return t('bots.nameStatus.reserved')
+    default:
+      return ''
+  }
+})
+
+const nameValid = computed(() => !hasNameChange.value || nameStatus.value === 'available')
 
 const { mutateAsync: deleteBot, isLoading: deleteLoading } = useMutation({
   mutation: async () => {
@@ -298,7 +424,6 @@ watch(settings, (val) => {
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
     form.language = val.language ?? ''
-    form.timezone = val.timezone ?? ''
     form.reasoning_enabled = val.reasoning_enabled ?? false
     form.reasoning_effort = val.reasoning_effort || 'medium'
     form.show_tool_calls_in_im = val.show_tool_calls_in_im ?? false
@@ -321,7 +446,6 @@ const hasSettingsChanges = computed(() => {
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')
     || form.language !== (s.language ?? '')
-    || form.timezone !== (s.timezone ?? '')
     || form.reasoning_enabled !== (s.reasoning_enabled ?? false)
     || form.reasoning_effort !== (s.reasoning_effort || 'medium')
     || form.show_tool_calls_in_im !== (s.show_tool_calls_in_im ?? false)
@@ -329,20 +453,38 @@ const hasSettingsChanges = computed(() => {
 })
 
 const hasTimezoneChanges = computed(() => form.timezone !== (bot.value?.timezone ?? ''))
-const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value)
+const hasChanges = computed(() => hasSettingsChanges.value || hasTimezoneChanges.value || hasNameChange.value)
 const saveLoading = computed(() => isLoading.value || isUpdatingBot.value)
 
+function isNameConflict(error: unknown): boolean {
+  const e = error as { status?: number, response?: { status?: number } } | null
+  if (e?.status === 409 || e?.response?.status === 409) return true
+  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
+}
+
 async function handleSave() {
+  if (!nameValid.value) {
+    toast.error(nameStatusMessage.value || t('bots.nameStatus.invalid'))
+    return
+  }
   try {
     if (hasSettingsChanges.value) {
       const { timezone: _timezone, ...settingsPayload } = form
       await updateSettings(settingsPayload)
     }
-    if (hasTimezoneChanges.value) {
-      await updateBot(form.timezone)
+    if (hasTimezoneChanges.value || hasNameChange.value) {
+      await updateBot({
+        ...(hasTimezoneChanges.value ? { timezone: form.timezone } : {}),
+        ...(hasNameChange.value ? { name: nameInput.value.trim() } : {}),
+      })
     }
     toast.success(t('bots.settings.saveSuccess'))
   } catch (error) {
+    if (isNameConflict(error)) {
+      nameStatus.value = 'taken'
+      toast.error(t('bots.nameStatus.taken'))
+      return
+    }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
 }
@@ -358,6 +500,16 @@ async function handleMemorySync() {
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.settings.memorySyncFailed')))
   }
+}
+
+function handleBackupImported(botId: string) {
+  queryCache.invalidateQueries({ key: ['bots'] })
+  if (botId && botId !== props.botId) {
+    router.push({ name: 'bot-detail', params: { botId } })
+    return
+  }
+  queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
+  queryCache.invalidateQueries({ key: ['bot-settings', botIdRef.value] })
 }
 
 async function handleDeleteBot() {

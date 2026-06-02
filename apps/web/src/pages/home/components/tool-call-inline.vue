@@ -15,10 +15,10 @@
         class="size-3.5 shrink-0"
       />
       <span
-        v-if="!display.hideAction"
+        v-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
-      >{{ actionLabel }}</span>
+      >{{ renderedActionLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
         class="font-mono truncate hover:underline cursor-pointer"
@@ -70,10 +70,10 @@
         class="size-3.5 shrink-0"
       />
       <span
-        v-if="!display.hideAction"
+        v-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
-      >{{ actionLabel }}</span>
+      >{{ renderedActionLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
         class="font-mono truncate hover:underline cursor-pointer"
@@ -108,7 +108,7 @@
     </div>
 
     <div
-      v-if="expandable && open"
+      v-if="expandable && open && !isPending"
       class="mt-1 ml-5 py-1 space-y-1.5"
     >
       <component
@@ -179,6 +179,40 @@ const actionLabel = computed(() => {
   return t(key, display.value.actionParams ?? {})
 })
 
+// A tool is "pending" while it is running and its input arguments have not
+// streamed in yet (tool_call_input_start fires before the full call). In that
+// window tools like write/edit hide their action label and have no target, so
+// only a bare icon would show. We surface a placeholder label instead.
+const isPending = computed(() => {
+  if (props.block.done) return false
+  const input = props.block.input
+  return !(
+    input
+    && typeof input === 'object'
+    && Object.keys(input as Record<string, unknown>).length > 0
+  )
+})
+
+const showsBareIconWhenPending = computed(
+  () => display.value.hideAction === true && !display.value.target,
+)
+
+const showPendingLabel = computed(
+  () => isPending.value && showsBareIconWhenPending.value,
+)
+
+const pendingLabel = computed(
+  () => t(`chat.tools.pending.${display.value.actionKey}`, t('chat.tools.pending.generic')),
+)
+
+const showActionLabel = computed(
+  () => showPendingLabel.value || !display.value.hideAction,
+)
+
+const renderedActionLabel = computed(
+  () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
+)
+
 const rowClass = computed(() => {
   if (!expandable.value) {
     return display.value.isError ? 'text-destructive' : 'text-muted-foreground'
@@ -226,6 +260,7 @@ const targetClass = computed(() => {
 })
 
 const actionClass = computed(() => {
+  if (showPendingLabel.value) return 'tool-shimmer-text'
   if (showRunning.value && !display.value.target) return 'tool-shimmer-text'
   return ''
 })

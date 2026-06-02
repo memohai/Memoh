@@ -106,7 +106,7 @@
               type="number"
               :min="1"
               class="h-8 text-[11px] font-mono bg-muted/5 border-border/50 shadow-none"
-              :placeholder="'30'"
+              :placeholder="'1440'"
             />
           </div>
           <div class="space-y-1.5 md:col-span-2">
@@ -361,14 +361,14 @@ const providers = computed(() => providerData.value ?? [])
 
 const settingsForm = reactive({
   heartbeat_enabled: false,
-  heartbeat_interval: 30,
+  heartbeat_interval: 1440,
   heartbeat_model_id: '',
 })
 
 watch(settings, (val: SettingsSettings | undefined) => {
   if (val) {
     settingsForm.heartbeat_enabled = val.heartbeat_enabled ?? false
-    settingsForm.heartbeat_interval = val.heartbeat_interval ?? 30
+    settingsForm.heartbeat_interval = val.heartbeat_interval ?? 1440
     settingsForm.heartbeat_model_id = val.heartbeat_model_id ?? ''
   }
 }, { immediate: true })
@@ -377,7 +377,7 @@ const settingsChanged = computed(() => {
   if (!settings.value) return false
   const s: SettingsSettings = settings.value
   return settingsForm.heartbeat_enabled !== (s.heartbeat_enabled ?? false)
-    || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 30)
+    || settingsForm.heartbeat_interval !== (s.heartbeat_interval ?? 1440)
     || settingsForm.heartbeat_model_id !== (s.heartbeat_model_id ?? '')
 })
 
@@ -512,4 +512,3 @@ onMounted(() => {
   fetchLogs()
 })
 </script>
-

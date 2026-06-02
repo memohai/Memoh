@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/md5" //nolint:gosec
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -248,10 +249,11 @@ func sendMediaBytesAsFile(ctx context.Context, client *Client, cfg adapterConfig
 	return nil
 }
 
-// encodeAESKeyForSend encodes a raw 16-byte AES key for the sendmessage protocol.
+// encodeAESKeyForSend base64-encodes the hex representation of a raw AES key,
+// matching the sendmessage wire format used by the upstream Weixin plugin.
 func encodeAESKeyForSend(key []byte) string {
 	hexStr := hex.EncodeToString(key)
-	return strings.TrimSpace(hexStr)
+	return base64.StdEncoding.EncodeToString([]byte(hexStr))
 }
 
 func generateClientID() string {

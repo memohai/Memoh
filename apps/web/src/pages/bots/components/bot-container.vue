@@ -11,8 +11,6 @@ import {
   getBotsByBotIdContainerMetrics,
   getBotsByBotIdContainerSnapshots,
   getBotsById,
-  postBotsByBotIdContainerDataExport,
-  postBotsByBotIdContainerDataImport,
   postBotsByBotIdContainerDataRestore,
   postBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerSnapshotsRollback,
@@ -50,8 +48,6 @@ type ContainerAction =
   | 'delete'
   | 'delete-preserve'
   | 'snapshot'
-  | 'export'
-  | 'import'
   | 'restore'
   | 'rollback'
   | 'recreate'
@@ -67,7 +63,6 @@ const createGPUEnabled = ref(false)
 const createGPUDevices = ref('')
 const createGPUPrefilled = ref(false)
 const newSnapshotName = ref('')
-const importInputRef = ref<HTMLInputElement | null>(null)
 
 interface CreateProgress {
   phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
@@ -90,7 +85,10 @@ const createProgressPercent = computed(() => {
 })
 
 const capabilitiesStore = useCapabilitiesStore()
-const botId = computed(() => route.params.botId as string)
+// The route param may be a name slug or UUID; resolve it to the canonical UUID
+// (via the fetched bot) so container sub-resource calls keep using the UUID.
+const routeIdentifier = computed(() => route.params.botName as string)
+const botId = computed(() => bot.value?.id ?? '')
 const containerBusy = computed(() => containerLoading.value || containerAction.value !== '')
 
 type BotContainerInfo = HandlersGetContainerResponse
@@ -211,12 +209,12 @@ async function handleRefreshContainer() {
 }
 
 const { data: bot, refetch: refetchBot } = useQuery({
-  key: () => ['bot', botId.value],
+  key: () => ['bot', routeIdentifier.value],
   query: async () => {
-    const { data } = await getBotsById({ path: { id: botId.value }, throwOnError: true })
+    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
     return data
   },
-  enabled: () => !!botId.value,
+  enabled: () => !!routeIdentifier.value,
 })
 
 function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {
@@ -460,64 +458,6 @@ async function handleDeleteContainer(preserveData: boolean) {
     },
     successMessage,
   )
-}
-
-function buildExportFilename() {
-  const timestamp = new Date().toISOString().replaceAll(':', '-')
-  return `bot-${botId.value}-data-${timestamp}.tar.gz`
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-async function handleExportData() {
-  if (botLifecyclePending.value || !containerInfo.value) return
-
-  await runContainerAction(
-    'export',
-    async () => {
-      const response = await postBotsByBotIdContainerDataExport({
-        path: { bot_id: botId.value },
-        parseAs: 'blob',
-        throwOnError: true,
-      })
-      downloadBlob(response.data as unknown as Blob, buildExportFilename())
-    },
-    t('bots.container.exportSuccess'),
-  )
-}
-
-function triggerImportData() {
-  importInputRef.value?.click()
-}
-
-async function handleImportData(event: Event) {
-  if (botLifecyclePending.value || !containerInfo.value) return
-
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-
-  await runContainerAction(
-    'import',
-    async () => {
-      await postBotsByBotIdContainerDataImport({
-        path: { bot_id: botId.value },
-        body: { file },
-        throwOnError: true,
-      })
-      await loadContainerData(false)
-    },
-    t('bots.container.importSuccess'),
-  )
-
-  input.value = ''
 }
 
 async function handleRestorePreservedData() {
@@ -1019,24 +959,6 @@ watch([activeTab, botId], ([tab]) => {
                 </div>
               </div>
               <div class="flex items-center gap-2 shrink-0 sm:justify-end">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="containerBusy || botLifecyclePending"
-                  class="h-8 text-xs shadow-none font-medium border border-border"
-                  @click="handleExportData"
-                >
-                  {{ $t('bots.container.actions.exportData') }}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  :disabled="containerBusy || botLifecyclePending"
-                  class="h-8 text-xs shadow-none font-medium border border-border"
-                  @click="triggerImportData"
-                >
-                  {{ $t('bots.container.actions.importData') }}
-                </Button>
                 <ConfirmPopover
                   :message="$t('bots.container.restoreConfirm')"
                   :loading="containerAction === 'restore'"
@@ -1098,13 +1020,6 @@ watch([activeTab, botId], ([tab]) => {
             </div>
           </div>
         </div>
-        <input
-          ref="importInputRef"
-          type="file"
-          accept=".tar.gz,.tgz,application/gzip,application/x-gzip,application/x-tar"
-          class="hidden"
-          @change="handleImportData"
-        >
       </div>
 
       <!-- Danger Zone - Exact replica from ?tab=channels -->
@@ -1241,7 +1156,7 @@ watch([activeTab, botId], ([tab]) => {
                 </div>
               </div>
 
-              <div class="shrink-0 flex items-center justify-end">
+              <div class="shrink-0 min-w-10 flex items-center justify-end">
                 <ConfirmPopover
                   v-if="canRollbackSnapshot(item)"
                   :message="$t('bots.container.rollbackConfirm')"

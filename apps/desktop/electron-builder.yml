@@ -1,5 +1,5 @@
 appId: ai.memoh.desktop
-productName: Memoh
+productName: Memoh Local
 copyright: Copyright © 2026 Memoh
 directories:
   buildResources: build
@@ -41,13 +41,14 @@ mac:
   target:
     - dmg
   icon: build/icon.icon
-  artifactName: ${productName}-Desktop-${version}-mac-${arch}.${ext}
+  artifactName: Memoh-Local-${version}-mac-${arch}.${ext}
   notarize: true
 dmg:
   icon: build/icon.icns
   sign: true
 linux:
   category: Utility
+  executableName: memoh-local
   target:
     - target: AppImage
       arch: [x64]
@@ -57,13 +58,17 @@ linux:
       arch: [x64]
   maintainer: Memoh
   icon: build/icon.png
-  artifactName: ${productName}-Desktop-${version}-linux-${arch}.${ext}
+  artifactName: Memoh-Local-${version}-linux-${arch}.${ext}
+deb:
+  packageName: memoh-local
+rpm:
+  packageName: memoh-local
 win:
   target:
     - target: nsis
       arch: [x64]
   icon: build/icon.ico
-  artifactName: ${productName}-Desktop-${version}-win-${arch}-setup.${ext}
+  artifactName: Memoh-Local-${version}-win-${arch}-setup.${ext}
 nsis:
   oneClick: false
   perMachine: false

@@ -7,14 +7,12 @@ import (
 	"path/filepath"
 
 	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/network/kubeapi"
 	"github.com/memohai/memoh/internal/network/overlay/internal/configutil"
 	"github.com/memohai/memoh/internal/network/overlay/internal/sidecar"
 )
 
 type Deps struct {
 	SidecarRuntime sidecar.Runtime
-	KubeRuntime    kubeapi.Runtime
 	Runtime        netctl.RuntimeDescriptor
 	StateRoot      string
 }
@@ -45,7 +43,6 @@ func (p *Provider) Descriptor() netctl.ProviderDescriptor {
 			KernelTUN:        true,
 			NativeClient:     true,
 			SidecarWorker:    true,
-			KubernetesNative: true,
 		},
 		Actions: []netctl.ProviderAction{
 			{
@@ -132,17 +129,10 @@ func (p *Provider) BuildDriver(cfg netctl.BotOverlayConfig) (netctl.OverlayDrive
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	if p.useKubernetesDriver() {
-		return newKubernetesDriver(cfg, p.deps.KubeRuntime), nil
-	}
 	if p.deps.Runtime.Capabilities.SidecarWorker {
 		return newNativeDriver(cfg, p.deps.SidecarRuntime, p.stateRoot()), nil
 	}
 	return unsupportedDriver{kind: p.Kind(), message: "Tailscale overlay is not supported by the current runtime backend."}, nil
-}
-
-func (p *Provider) useKubernetesDriver() bool {
-	return p.deps.KubeRuntime != nil && p.deps.Runtime.Capabilities.KubernetesNative
 }
 
 func (p *Provider) stateRoot() string {

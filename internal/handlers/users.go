@@ -74,6 +74,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup := e.Group("/bots")
 	botGroup.POST("", h.CreateBot)
 	botGroup.GET("", h.ListBots)
+	botGroup.GET("/name-availability", h.CheckBotName)
 	botGroup.GET("/:id", h.GetBot)
 	botGroup.GET("/:id/checks", h.ListBotChecks)
 	botGroup.PUT("/:id", h.UpdateBot)
@@ -453,9 +454,40 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 		if errors.Is(err, acl.ErrUnknownPreset) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if errors.Is(err, bots.ErrBotNameTaken) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
+}
+
+// CheckBotName godoc
+// @Summary Check bot name availability
+// @Description Validate a candidate bot name and report whether it is available
+// @Tags bots
+// @Param name query string true "Candidate bot name"
+// @Success 200 {object} bots.NameAvailability
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/name-availability [get].
+func (h *UsersHandler) CheckBotName(c echo.Context) error {
+	if _, err := h.requireChannelIdentityID(c); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(c.QueryParam("name"))
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	excludeBotID := strings.TrimSpace(c.QueryParam("exclude_bot_id"))
+	result, err := h.botService.CheckNameAvailability(c.Request().Context(), name, excludeBotID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 // ListBots godoc
@@ -576,15 +608,22 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
 	var req bots.UpdateBotRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	resp, err := h.botService.Update(c.Request().Context(), botID, req)
+	resp, err := h.botService.Update(c.Request().Context(), bot.ID, req)
 	if err != nil {
+		if errors.Is(err, bots.ErrBotNameTaken) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if req.Metadata != nil {

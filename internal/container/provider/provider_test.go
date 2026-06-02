@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"testing"
 
@@ -30,19 +29,6 @@ func TestProvideServiceDockerSlot(t *testing.T) {
 		t.Skipf("docker daemon unavailable: %v", imgErr)
 	default:
 		t.Fatalf("docker GetImage error = %v, want not found (or skip if daemon unreachable)", imgErr)
-	}
-}
-
-func TestProvideServiceKubernetesSlot(t *testing.T) {
-	svc, cleanup, err := ProvideService(context.Background(), slog.Default(), config.Config{}, containerapi.BackendKubernetes)
-	if err != nil {
-		t.Fatalf("ProvideService kubernetes returned error: %v", err)
-	}
-	defer cleanup()
-	if imageSvc, ok := svc.(containerapi.ImageService); ok {
-		if _, err := imageSvc.GetImage(context.Background(), "debian"); !errors.Is(err, containerapi.ErrNotSupported) {
-			t.Fatalf("kubernetes GetImage error = %v, want ErrNotSupported", err)
-		}
 	}
 }
 

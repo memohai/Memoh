@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build (${{ matrix.platform }})
+    name: Build online (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +38,7 @@ jobs:
           - platform: windows-latest
 
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -55,24 +55,11 @@ jobs:
           node-version: lts/*
           cache: pnpm
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck desktop
         run: pnpm --filter @memohai/desktop typecheck
-
-      - name: Cache desktop GStreamer runtime
-        uses: actions/cache@v4
-        with:
-          path: apps/desktop/resources/gstreamer
-          key: ${{ runner.os }}-desktop-gstreamer-${{ hashFiles('apps/desktop/scripts/prepare-gstreamer.mjs') }}
-          restore-keys: |
-            ${{ runner.os }}-desktop-gstreamer-
 
       - name: Prepare macOS code signing
         id: mac-signing
@@ -86,10 +73,10 @@ jobs:
           echo "CSC_KEY_PASSWORD=$APPLE_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
           echo "has_cert=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build desktop (unpacked smoke)
+      - name: Build desktop online (unpacked smoke)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.mac-signing.outputs.has_cert == 'true' && 'true' || 'false' }}
-        run: pnpm --filter @memohai/desktop build:dir
+        run: pnpm --filter @memohai/desktop build:dir:online
 
       - name: Verify macOS signature
         if: ${{ startsWith(matrix.platform, 'macos-') && steps.mac-signing.outputs.has_cert == 'true' }}

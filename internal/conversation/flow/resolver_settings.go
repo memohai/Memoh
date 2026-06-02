@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/settings"
 )
@@ -17,13 +19,14 @@ func (r *Resolver) loadBotSettings(ctx context.Context, botID string) (settings.
 	return r.settingsService.GetBot(ctx, botID)
 }
 
-func (r *Resolver) loadBotLoopDetectionEnabled(ctx context.Context, botID string) bool {
+func (r *Resolver) loadBotRuntimeInfo(ctx context.Context, botID string) (agentpkg.BotInfo, bool) {
+	info := agentpkg.BotInfo{ID: strings.TrimSpace(botID)}
 	if r.queries == nil {
-		return false
+		return info, false
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return false
+		return info, false
 	}
 	row, err := r.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
@@ -31,9 +34,16 @@ func (r *Resolver) loadBotLoopDetectionEnabled(ctx context.Context, botID string
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
-		return false
+		return info, false
 	}
-	return parseLoopDetectionEnabledFromMetadata(row.Metadata)
+	info.Name = strings.TrimSpace(row.Name)
+	if row.DisplayName.Valid {
+		info.DisplayName = strings.TrimSpace(row.DisplayName.String)
+	}
+	if row.Timezone.Valid {
+		info.Timezone = strings.TrimSpace(row.Timezone.String)
+	}
+	return info, parseLoopDetectionEnabledFromMetadata(row.Metadata)
 }
 
 func parseLoopDetectionEnabledFromMetadata(payload []byte) bool {

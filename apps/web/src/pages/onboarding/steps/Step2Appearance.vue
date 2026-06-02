@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/store/settings'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { Button, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@memohai/ui'
-import { Check, Moon, Sun } from 'lucide-vue-next'
+import { Moon, Sun } from 'lucide-vue-next'
+import ColorSchemeCard from '@/components/color-scheme-card/index.vue'
 import { colorSchemes } from '@/constants/color-schemes'
 import type { Locale } from '@/i18n'
 import { useStepTransition } from '../useStepTransition'
@@ -95,46 +96,13 @@ const { visible, exiting, leave } = useStepTransition()
             {{ t('settings.appearance.colorScheme') }}
           </Label>
           <div class="grid grid-cols-3 gap-3">
-            <button
+            <ColorSchemeCard
               v-for="scheme in colorSchemes"
               :key="scheme.id"
-              type="button"
-              class="rounded-lg border bg-background p-2 text-left transition-colors"
-              :class="colorScheme === scheme.id ? 'border-foreground' : 'border-border hover:border-muted-foreground/50'"
-              @click="setColorScheme(scheme.id)"
-            >
-              <div class="rounded-md border border-border bg-muted p-2">
-                <div class="h-1.5 w-3/5 rounded-full bg-muted-foreground/40" />
-                <div class="mt-1 h-1.5 w-4/5 rounded-full bg-muted-foreground/20" />
-                <div class="mt-2 flex items-center gap-1">
-                  <div
-                    class="h-2 w-1/2 rounded-full"
-                    :style="{ backgroundColor: scheme.swatches[4] }"
-                  />
-                  <div
-                    class="size-2 shrink-0 rounded-full"
-                    :style="{ backgroundColor: scheme.swatches[5] }"
-                  />
-                  <div
-                    class="size-2 shrink-0 rounded-full"
-                    :style="{ backgroundColor: scheme.swatches[6] }"
-                  />
-                  <div
-                    class="size-2 shrink-0 rounded-full"
-                    :style="{ backgroundColor: scheme.swatches[7] }"
-                  />
-                </div>
-              </div>
-              <div class="mt-2 flex items-center justify-between gap-2 px-0.5">
-                <p class="text-xs font-medium">
-                  {{ t(scheme.labelKey) }}
-                </p>
-                <Check
-                  v-if="colorScheme === scheme.id"
-                  class="size-3.5 shrink-0"
-                />
-              </div>
-            </button>
+              :scheme="scheme"
+              :selected="colorScheme === scheme.id"
+              @select="setColorScheme(scheme.id)"
+            />
           </div>
         </div>
       </div>
