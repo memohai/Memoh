@@ -363,6 +363,14 @@ func (m *Manager) sendWithConfig(ctx context.Context, sender Sender, cfg Channel
 		return err
 	}
 	normalized.Message.Attachments = attachments
+	// Coerce Format down to what the channel can render BEFORE validation, so
+	// a plain-by-intent body that got bullet-auto-detected to Markdown
+	// upstream doesn't get rejected (silently) on plain-text-only channels.
+	// Only Markdown→Plain degrades losslessly — other format/cap mismatches
+	// still fail validation below.
+	if caps, ok := m.registry.GetCapabilities(cfg.ChannelType); ok {
+		normalized.Message = CoerceFormatForCaps(normalized.Message, caps)
+	}
 	if err := validateMessageCapabilities(m.registry, cfg.ChannelType, normalized.Message); err != nil {
 		return err
 	}
@@ -505,6 +513,9 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 	case StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("stream final payload is required")
+		}
+		if caps, ok := registry.GetCapabilities(channelType); ok {
+			event.Final.Message = CoerceFormatForCaps(event.Final.Message, caps)
 		}
 		if err := validateMessageCapabilities(registry, channelType, event.Final.Message); err != nil {
 			return err

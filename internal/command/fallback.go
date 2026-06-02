@@ -7,13 +7,12 @@ import (
 )
 
 // HintVerb names the shape of a typeable affordance when rendering the
-// no-button fallback trailer. Setting ItemAction.Verb or ListView.HintVerb to
-// one of these overrides the automatic inference in FallbackTrailer.
+// no-button fallback trailer. Setting ListView.HintVerb to one of these
+// overrides the automatic inference in FallbackTrailer.
 //
 // The values double as the suffix of the i18n key (cmd.fallback.<verb>) so
 // adding a verb is a two-step change: register the constant here and add the
-// matching localized template in locales/*.json. Use IsValid() before relying
-// on a verb passed through unsafe boundaries.
+// matching localized template in locales/*.json.
 type HintVerb string
 
 const (
@@ -41,8 +40,22 @@ func (a *ItemAction) Typeable() string {
 	if a == nil {
 		return ""
 	}
-	resource := strings.TrimSpace(a.Resource)
-	action := strings.TrimSpace(a.Action)
+	return formatSlashCommand(a.Resource, a.Action, a.Args, true)
+}
+
+// formatSlashCommand builds the canonical "/resource action [args...]" string
+// used by both user-facing hint trailers (Typeable) and internal callback
+// re-dispatch (ParsedCallback.SyntheticCommand for list-page kind). Returns ""
+// for invalid (empty resource or action) input.
+//
+// When quote is true, whitespace-bearing args are wrapped via quoteArgIfNeeded
+// so the output round-trips through Parse()/tokenize() — required for
+// user-visible output that may be copy-pasted. Internal callback re-dispatch
+// already controls the args it emits and passes quote=false to keep the
+// re-dispatched command stable.
+func formatSlashCommand(resource, action string, args []string, quote bool) string {
+	resource = strings.TrimSpace(resource)
+	action = strings.TrimSpace(action)
 	if resource == "" || action == "" {
 		return ""
 	}
@@ -51,12 +64,16 @@ func (a *ItemAction) Typeable() string {
 	b.WriteString(resource)
 	b.WriteString(" ")
 	b.WriteString(action)
-	for _, arg := range a.Args {
+	for _, arg := range args {
 		if strings.TrimSpace(arg) == "" {
 			continue
 		}
 		b.WriteString(" ")
-		b.WriteString(quoteArgIfNeeded(arg))
+		if quote {
+			b.WriteString(quoteArgIfNeeded(arg))
+		} else {
+			b.WriteString(arg)
+		}
 	}
 	return b.String()
 }
@@ -143,12 +160,7 @@ func trailerForList(lv *ListView, t *i18n.Localizer) string {
 		}
 
 		if len(actionable) > 0 {
-			// Row-level Verb override applies when set on the first actionable row.
-			if verb := actionable[0].Verb; verb != "" {
-				if line := verbLine(verb, actionable, t); line != "" {
-					lines = append(lines, line)
-				}
-			} else if homogeneous {
+			if homogeneous {
 				lines = append(lines, t.T("cmd.fallback.switch", map[string]any{
 					"command": MdCode("/" + resource + " " + action + " <name>"),
 				}))
@@ -184,8 +196,12 @@ func trailerForList(lv *ListView, t *i18n.Localizer) string {
 // listOverrideTrailer synthesizes a pseudo ItemAction for each supported
 // list-level HintVerb and routes it through verbLine, so list-level overrides
 // share the verb dictionary with row-level overrides (no two-switch drift).
-// Verbs that don't naturally apply at the list level (pick/toggle/open/range
-// need explicit row actions or a different Interactive type) return "".
+// Verbs that don't naturally apply at the list level return "":
+//   - pick/toggle/open need explicit row actions
+//   - range needs a RangeView (presets)
+//   - menu at list level would self-reference (a /resource list trailer
+//     pointing back to /resource list is orientation noise), so the trailer
+//     stays empty and the caller falls through to row-level inference
 func listOverrideTrailer(lv *ListView, verb HintVerb, t *i18n.Localizer) string {
 	resource := strings.TrimSpace(lv.Resource)
 	if resource == "" {
@@ -197,12 +213,6 @@ func listOverrideTrailer(lv *ListView, verb HintVerb, t *i18n.Localizer) string 
 		fake = &ItemAction{Resource: resource, Action: "get", Args: []string{"<name>"}}
 	case HintVerbSwitch:
 		fake = &ItemAction{Resource: resource, Action: "set", Args: []string{"<name>"}}
-	case HintVerbMenu:
-		action := strings.TrimSpace(lv.Action)
-		if action == "" {
-			action = "list"
-		}
-		fake = &ItemAction{Resource: resource, Action: action}
 	default:
 		return ""
 	}
@@ -210,7 +220,7 @@ func listOverrideTrailer(lv *ListView, verb HintVerb, t *i18n.Localizer) string 
 }
 
 func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
-	if cv == nil || cv.SuppressFallback {
+	if cv == nil || cv.BodyEnumeratesChoices {
 		return ""
 	}
 	var actionable []*ItemAction
@@ -237,9 +247,6 @@ func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
 	}
 
 	if homogeneous {
-		if verb := actionable[0].Verb; verb != "" {
-			return verbLine(verb, actionable, t)
-		}
 		if isPickShape(actionable) {
 			if hasAnyArgs(actionable) {
 				return t.T("cmd.fallback.pick", map[string]any{
@@ -351,9 +358,8 @@ func trailerForRange(rv *RangeView, t *i18n.Localizer) string {
 	})
 }
 
-// verbLine renders a single trailer line for the given verb. Used by both
-// row-level Verb overrides and (via listOverrideTrailer) list-level HintVerb
-// overrides — a single dispatch surface keeps the two paths from drifting.
+// verbLine renders a single trailer line for the given verb. Used by
+// listOverrideTrailer to honor list-level HintVerb overrides.
 // Verbs that need data not available at this level (HintVerbRange needs
 // presets that only RangeView carries) return "".
 func verbLine(verb HintVerb, actions []*ItemAction, t *i18n.Localizer) string {

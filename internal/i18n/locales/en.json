@@ -63,8 +63,7 @@
       "changedTo": "✅ {label} changed to {value}.",
       "fieldCreated": "Created",
       "fieldUpdated": "Updated",
-      "fieldStatus": "Status",
-      "back": "◀ {group}"
+      "fieldStatus": "Status"
     },
     "session": {
       "noActive": "No active session found for this conversation.",

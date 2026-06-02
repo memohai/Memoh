@@ -292,9 +292,9 @@ func TestFormatNewSessionMessage(t *testing.T) {
 		t.Errorf("expected tap-to-copy tip:\n%s", got)
 	}
 	// Markup strips cleanly for plain-text channels.
-	plain := stripInlineMarkup(got)
+	plain := channel.StripInlineMarkup(got)
 	if strings.Contains(plain, "**") || strings.Contains(plain, "`") {
-		t.Errorf("stripInlineMarkup left markers: %q", plain)
+		t.Errorf("channel.StripInlineMarkup left markers: %q", plain)
 	}
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); no
@@ -361,5 +361,65 @@ func TestRenderModelPickerModelLevel(t *testing.T) {
 	// Selected model is flat index 9, which falls in page 1's slice [8,16).
 	if !hasSelected {
 		t.Error("selected model (flat 9) should be marked with ✓ on page 1")
+	}
+}
+
+// TestTelegramCallbackTapRoundTrip pins the full Telegram button-tap loop:
+// renderer produces buttons with callback_data → DecodeCallback parses it →
+// SyntheticCommand produces the slash command to re-dispatch → Parse() round-trips
+// to the same (Resource, Action, Args, Page). This is the chain a user's button
+// tap travels through end-to-end. Unit tests cover each step individually; this
+// test pins the *join*.
+func TestTelegramCallbackTapRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tgCaps := channel.ChannelCapabilities{Text: true, Markdown: true, Buttons: true}
+	loc := i18n.New("en")
+
+	// 50 mcp connections, 12 per page; we're on page 0 looking at "Next ▶".
+	msg := renderResult(listResult(50, 0, 12), RenderContext{Caps: tgCaps, T: loc})
+
+	var nextValue string
+	for _, a := range msg.Actions {
+		if a.Label == "Next ▶" {
+			nextValue = a.Value
+			break
+		}
+	}
+	if nextValue == "" {
+		t.Fatal("Next ▶ button missing — renderer didn't emit pagination, can't test the loop")
+	}
+
+	// Step 1: decode the wire-format callback_data the bot received.
+	parsed, ok := command.DecodeCallback(nextValue)
+	if !ok {
+		t.Fatalf("DecodeCallback(%q) returned ok=false — Telegram would silently drop the tap", nextValue)
+	}
+	if parsed.Kind != "list_page" {
+		t.Fatalf("Kind = %q, want list_page (the renderer-encoder/decoder split has drifted)", parsed.Kind)
+	}
+	if parsed.Page != 1 {
+		t.Fatalf("Page = %d, want 1 (Next on page 0 should land on page 1)", parsed.Page)
+	}
+	if parsed.Resource != "mcp" || parsed.Action != "list" {
+		t.Fatalf("got Resource=%q Action=%q, want mcp/list", parsed.Resource, parsed.Action)
+	}
+
+	// Step 2: synthesize the re-dispatch command.
+	syn := parsed.SyntheticCommand()
+	if syn == "" {
+		t.Fatal("SyntheticCommand returned empty — re-dispatch chain broken")
+	}
+
+	// Step 3: parse it back, confirm intent survived the encode→decode→synthesize→parse cycle.
+	cmd, err := command.Parse(syn)
+	if err != nil {
+		t.Fatalf("Parse(%q) failed: %v — Telegram tap would re-dispatch as a malformed command", syn, err)
+	}
+	if cmd.Resource != "mcp" || cmd.Action != "list" {
+		t.Fatalf("re-parsed Resource=%q Action=%q, want mcp/list", cmd.Resource, cmd.Action)
+	}
+	if cmd.Page != 1 {
+		t.Fatalf("re-parsed Page=%d, want 1 — pagination intent lost in the round-trip", cmd.Page)
 	}
 }

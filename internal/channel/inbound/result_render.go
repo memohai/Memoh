@@ -148,30 +148,22 @@ func appendFallbackTrailer(text string, iv *command.Interactive, caps channel.Ch
 // applyMessageFormat sets the message format from the channel's capabilities:
 // Markdown when supported (Telegram renders it, others degrade client-side),
 // otherwise the inline markup authored upstream is stripped so text-only
-// channels stay clean. This is the single place command-reply format is decided.
+// channels stay clean. This is the single place command-reply format is decided
+// inside the inbound renderer.
 //
-// The plain branch MUST set Format explicitly. Otherwise the downstream
-// outbound normalizer (channel.normalizeOutboundMessage) auto-detects Markdown
-// from list bullets ("- /help — …") and promotes Format to Markdown, which
-// then fails validateMessageCapabilities on channels like Weixin / WeChat OA /
-// Local-Web that declare neither Markdown nor RichText — and the user sees
-// nothing because the error is only logged, never replied.
+// Setting Format explicitly here is no longer load-bearing for correctness —
+// the outbound layer's CoerceFormatForCaps will degrade an auto-promoted
+// Markdown back to Plain when caps reject it. The explicit set still avoids
+// unnecessary round-trips through that coercion and keeps the inbound output
+// matching what's actually sent.
 func applyMessageFormat(msg channel.Message, caps channel.ChannelCapabilities) channel.Message {
 	if caps.Markdown || caps.RichText {
 		msg.Format = channel.MessageFormatMarkdown
 	} else {
-		msg.Text = stripInlineMarkup(msg.Text)
+		msg.Text = channel.StripInlineMarkup(msg.Text)
 		msg.Format = channel.MessageFormatPlain
 	}
 	return msg
-}
-
-// stripInlineMarkup removes the inline Markdown markers (** and `) authored for
-// capable channels, leaving clean text for plain-text-only channels.
-func stripInlineMarkup(s string) string {
-	s = strings.ReplaceAll(s, "**", "")
-	s = strings.ReplaceAll(s, "`", "")
-	return s
 }
 
 // plainTextMessage builds a fully-formed channel.Message from `text` with
@@ -205,6 +197,18 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 	totalPages := 1
 	if pageSize > 0 {
 		totalPages = (lv.Total + pageSize - 1) / pageSize
+	}
+
+	// Clamp Page into [0, totalPages-1]. A stale callback from a keyboard
+	// captured before the list shrunk (rows deleted on another device)
+	// would otherwise emit a broken nav row — "11/3" counter, Prev encoding
+	// a Page-1 jump backward into nowhere — and Next would silently vanish.
+	// Mirrors the clamp in renderModelPicker.
+	if lv.Page < 0 {
+		lv.Page = 0
+	}
+	if totalPages > 0 && lv.Page > totalPages-1 {
+		lv.Page = totalPages - 1
 	}
 
 	var actions []channel.Action

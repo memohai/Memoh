@@ -11,7 +11,7 @@ import (
 
 // TestNoButtonFallbackCoverage is the regression guard for the no-button
 // trailer architecture: every Interactive shape that ships to users must
-// either (a) be opted out via SuppressFallback, or (b) produce a typeable
+// either (a) be opted out via BodyEnumeratesChoices, or (b) produce a typeable
 // trailer that contains at least one slash command and no callback artifacts.
 //
 // The fixture covers every Interactive Kind plus every override flag. New
@@ -26,7 +26,7 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 		expectTrailer   bool     // when false, msg.Text must equal result.Text
 		mustContain     []string // substrings the rendered text must contain when trailer expected
 		mustNotContain  []string // substrings the rendered text must never contain
-		allowEmptyChain bool     // true for SuppressFallback/genuinely-empty surfaces
+		allowEmptyChain bool     // true for BodyEnumeratesChoices/genuinely-empty surfaces
 	}{
 		{
 			name: "list switch-shape (memory)",
@@ -139,11 +139,11 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			},
 		},
 		{
-			name: "choices SuppressFallback (/help group)",
+			name: "choices BodyEnumeratesChoices (/help group)",
 			result: &command.Result{
 				Text: "Already-exhaustive help block",
 				Interactive: &command.Interactive{Kind: command.InteractiveChoices, Choices: &command.ChoicesView{
-					SuppressFallback: true,
+					BodyEnumeratesChoices: true,
 					Choices: []command.ListItem{
 						{Action: &command.ItemAction{Resource: "schedule", Action: "list"}},
 					},
@@ -258,9 +258,9 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			}
 
 			if !tc.expectTrailer {
-				// SuppressFallback / genuinely-empty: rendered text equals input,
+				// BodyEnumeratesChoices / genuinely-empty: rendered text equals input,
 				// minus the markup strip that applyMessageFormat performs.
-				expected := stripInlineMarkup(tc.result.Text)
+				expected := channel.StripInlineMarkup(tc.result.Text)
 				if msg.Text != expected {
 					t.Errorf("expected no trailer (text unchanged), got %q want %q", msg.Text, expected)
 				}
@@ -284,7 +284,7 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			}
 
 			// Trailer must be appended below original text (separated by blank line).
-			if !strings.Contains(msg.Text, stripInlineMarkup(tc.result.Text)) {
+			if !strings.Contains(msg.Text, channel.StripInlineMarkup(tc.result.Text)) {
 				t.Errorf("rendered text dropped the original body. got=%q original=%q", msg.Text, tc.result.Text)
 			}
 		})

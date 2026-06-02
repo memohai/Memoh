@@ -180,9 +180,9 @@ func TestFallbackTrailer_Choices(t *testing.T) {
 		empty    bool
 	}{
 		{
-			name: "SuppressFallback returns empty",
+			name: "BodyEnumeratesChoices returns empty",
 			iv: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{
-				SuppressFallback: true,
+				BodyEnumeratesChoices: true,
 				Choices: []ListItem{
 					{Action: &ItemAction{Resource: "schedule", Action: "list"}},
 				},
@@ -228,15 +228,6 @@ func TestFallbackTrailer_Choices(t *testing.T) {
 				},
 			}},
 			contains: []string{"Open:", "/settings update --heartbeat_enabled true", "/reasoning show", "/model list", "/memory list"},
-		},
-		{
-			name: "per-row Verb override wins over inference",
-			iv: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{
-				Choices: []ListItem{
-					{Action: &ItemAction{Resource: "reasoning", Action: "set", Args: []string{"low"}, Verb: HintVerbMenu}},
-				},
-			}},
-			contains: []string{"Or type", "/reasoning set low"},
 		},
 		{
 			name: "homogeneous single no-arg button (WithButtons empty state)",
@@ -437,8 +428,7 @@ func TestListOverrideTrailerAllVerbs(t *testing.T) {
 	}{
 		{HintVerbDetails, &ListView{Resource: "mcp", Action: "list"}, "/mcp get <name>"},
 		{HintVerbSwitch, &ListView{Resource: "memory", Action: "list"}, "/memory set <name>"},
-		{HintVerbMenu, &ListView{Resource: "schedule", Action: "list"}, "/schedule list"},
-		{HintVerbMenu, &ListView{Resource: "schedule"}, "/schedule list"}, // Action empty → default "list"
+		{HintVerbMenu, &ListView{Resource: "schedule", Action: "list"}, ""}, // Menu at list level would self-reference; suppressed.
 		{HintVerbPick, &ListView{Resource: "memory", Action: "list"}, ""},
 		{HintVerbToggle, &ListView{Resource: "memory", Action: "list"}, ""},
 		{HintVerbOpen, &ListView{Resource: "memory", Action: "list"}, ""},

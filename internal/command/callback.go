@@ -171,18 +171,11 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 func (p ParsedCallback) SyntheticCommand() string {
 	switch p.Kind {
 	case callbackKindListPage:
-		var b strings.Builder
-		b.WriteString("/")
-		b.WriteString(p.Resource)
-		b.WriteString(" ")
-		b.WriteString(p.Action)
-		if len(p.Args) > 0 {
-			b.WriteString(" ")
-			b.WriteString(strings.Join(p.Args, " "))
+		base := formatSlashCommand(p.Resource, p.Action, p.Args, false)
+		if base == "" {
+			return ""
 		}
-		b.WriteString(" --page ")
-		b.WriteString(strconv.Itoa(p.Page))
-		return b.String()
+		return base + " --page " + strconv.Itoa(p.Page)
 	case callbackKindModelProvider:
 		return fmt.Sprintf("/model list --prov %d --page %d", p.ProviderIndex, p.Page)
 	case callbackKindModelSelect:

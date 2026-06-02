@@ -63,8 +63,7 @@
       "changedTo": "✅ {label} 已改为 {value}。",
       "fieldCreated": "创建于",
       "fieldUpdated": "更新于",
-      "fieldStatus": "状态",
-      "back": "◀ {group}"
+      "fieldStatus": "状态"
     },
     "session": {
       "noActive": "当前对话没有进行中的会话。",

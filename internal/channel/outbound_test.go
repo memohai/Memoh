@@ -1115,3 +1115,62 @@ func TestNormalizeOutboundMessage_BulletListExplicitPlainSurvives(t *testing.T) 
 		t.Fatalf("auto-detect is supposed to promote bullet lists to markdown (this is the bug the renderer guards against); got %q — if the auto-detect rule changed, also update applyMessageFormat", autoDetected.Format)
 	}
 }
+
+// TestCoerceFormatForCaps_DegradesMarkdownOnPlainChannel pins the outbound
+// boundary defense: when bullet-auto-detect (or any other path) promotes a
+// message to Markdown but the target channel can only render plain text, the
+// message must degrade to Plain (with inline markup stripped) instead of being
+// rejected by validateMessageCapabilities. This makes the Format=Plain
+// invariant a property of the outbound layer rather than discipline at every
+// channel.Message{...} construction site upstream — the previous failure mode
+// was a silent drop (logged but never replied) on Weixin/WeChat OA/Local-Web.
+func TestCoerceFormatForCaps_DegradesMarkdownOnPlainChannel(t *testing.T) {
+	t.Parallel()
+	plainCaps := ChannelCapabilities{Text: true} // no Markdown, no RichText
+	msg := Message{Text: "Hello **world** and `code`", Format: MessageFormatMarkdown}
+	coerced := CoerceFormatForCaps(msg, plainCaps)
+	if coerced.Format != MessageFormatPlain {
+		t.Fatalf("plain-only caps must coerce Markdown → Plain, got %q", coerced.Format)
+	}
+	if strings.Contains(coerced.Text, "**") || strings.Contains(coerced.Text, "`") {
+		t.Fatalf("coercion must strip inline markup, got %q", coerced.Text)
+	}
+	if !strings.Contains(coerced.Text, "Hello world and code") {
+		t.Fatalf("coercion must preserve readable text content, got %q", coerced.Text)
+	}
+}
+
+// TestCoerceFormatForCaps_PreservesMarkdownOnCapableChannel — Telegram and
+// other Markdown-capable channels must not lose formatting.
+func TestCoerceFormatForCaps_PreservesMarkdownOnCapableChannel(t *testing.T) {
+	t.Parallel()
+	mdCaps := ChannelCapabilities{Text: true, Markdown: true}
+	msg := Message{Text: "Hello **world**", Format: MessageFormatMarkdown}
+	coerced := CoerceFormatForCaps(msg, mdCaps)
+	if coerced.Format != MessageFormatMarkdown {
+		t.Fatalf("markdown-capable channel must keep markdown format, got %q", coerced.Format)
+	}
+	if !strings.Contains(coerced.Text, "**world**") {
+		t.Fatalf("coercion must not strip markup on capable channel, got %q", coerced.Text)
+	}
+}
+
+// TestCoerceFormatForCaps_PreservesPlainEverywhere — explicit Plain is never
+// upgraded by coercion.
+func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
+	t.Parallel()
+	for name, caps := range map[string]ChannelCapabilities{
+		"plain-only": {Text: true},
+		"markdown":   {Text: true, Markdown: true},
+		"rich":       {Text: true, RichText: true},
+		"buttons":    {Text: true, Markdown: true, Buttons: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			msg := Message{Text: "Plain reply", Format: MessageFormatPlain}
+			coerced := CoerceFormatForCaps(msg, caps)
+			if coerced.Format != MessageFormatPlain {
+				t.Fatalf("plain must stay plain on %s, got %q", name, coerced.Format)
+			}
+		})
+	}
+}

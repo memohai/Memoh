@@ -71,15 +71,10 @@ type ListItem struct {
 }
 
 // ItemAction triggers a command when a row is tapped.
-//
-// Verb is an optional explicit hint verb (one of HintVerb*) overriding the
-// trailer-derivation logic used on no-button channels. Empty = infer from
-// structure (see trailerForChoices / trailerForList for the inference rules).
 type ItemAction struct {
 	Resource string
 	Action   string
 	Args     []string
-	Verb     HintVerb
 }
 
 // ModelPickerView is the two-level model picker (populated in the model-picker
@@ -129,14 +124,15 @@ type PickerModel struct {
 
 // ChoicesView is a flat set of selectable choices (no pagination).
 //
-// SuppressFallback opts the surface out of no-button trailer derivation —
-// used when the body Text already enumerates every typeable affordance (e.g.
-// /help <group>'s Usage block lists every sub-command verbatim).
+// BodyEnumeratesChoices asserts that the body Text already enumerates every
+// typeable affordance (e.g. /help <group>'s Usage block lists every
+// sub-command verbatim), so the no-button fallback trailer should skip this
+// surface to avoid duplicating what the body already says.
 type ChoicesView struct {
-	Title            string
-	Choices          []ListItem
-	Columns          int // optional keyboard columns; 0 lets renderers pick
-	SuppressFallback bool
+	Title                 string
+	Choices               []ListItem
+	Columns               int // optional keyboard columns; 0 lets renderers pick
+	BodyEnumeratesChoices bool
 }
 
 // RangeView is a time-window selector for a time-series command. Selecting a

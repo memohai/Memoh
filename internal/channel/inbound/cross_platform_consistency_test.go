@@ -161,7 +161,7 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 			// profile doesn't trip the byte-equality check.
 			canonical := make(map[string]string)
 			for profile, output := range outputs {
-				canonical[profile] = strings.TrimRight(stripInlineMarkup(output), " \t\n")
+				canonical[profile] = strings.TrimRight(channel.StripInlineMarkup(output), " \t\n")
 			}
 			plain := canonical["plain-text (Weixin / WeChat OA / Local-Web)"]
 			for profile, c := range canonical {
