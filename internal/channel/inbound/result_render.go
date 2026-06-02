@@ -140,7 +140,9 @@ func appendFallbackTrailer(text string, iv *command.Interactive, caps channel.Ch
 	if strings.TrimSpace(text) == "" {
 		return trailer
 	}
-	return text + "\n\n" + trailer
+	// TrimRight on the body so a body that already ends in "\n" doesn't
+	// produce a triple-newline gap before the trailer.
+	return strings.TrimRight(text, "\n") + "\n\n" + trailer
 }
 
 // applyMessageFormat sets the message format from the channel's capabilities:

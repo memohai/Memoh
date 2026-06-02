@@ -22,11 +22,51 @@ func TestItemActionTypeable(t *testing.T) {
 		{"flag args", &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}, "/settings update --heartbeat_enabled true"},
 		{"empty arg skipped", &ItemAction{Resource: "memory", Action: "set", Args: []string{"alice", "", "  "}}, "/memory set alice"},
 		{"whitespace trimmed", &ItemAction{Resource: " memory ", Action: " list "}, "/memory list"},
+		{"arg with internal space gets quoted", &ItemAction{Resource: "memory", Action: "set", Args: []string{"daily report"}}, `/memory set "daily report"`},
+		{"arg with tab gets quoted", &ItemAction{Resource: "schedule", Action: "get", Args: []string{"my\ttask"}}, `/schedule get "my	task"`},
+		{"arg with newline gets quoted + newline replaced", &ItemAction{Resource: "x", Action: "y", Args: []string{"a\nb"}}, `/x y "a b"`},
+		{"arg with double quote becomes single quote inside wrapper", &ItemAction{Resource: "x", Action: "y", Args: []string{`he said "hi"`}}, `/x y "he said 'hi'"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.a.Typeable(); got != tc.want {
 				t.Errorf("Typeable() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTypeableRoundTripsThroughParse pins the contract: any string produced
+// by Typeable() must re-parse back to the same (Resource, Action, Args)
+// triple. This is the property that makes copy-paste hints actually work.
+func TestTypeableRoundTripsThroughParse(t *testing.T) {
+	cases := []*ItemAction{
+		{Resource: "memory", Action: "set", Args: []string{"alice"}},
+		{Resource: "memory", Action: "set", Args: []string{"daily report"}},        // space in arg
+		{Resource: "schedule", Action: "create", Args: []string{"morning report"}}, // space
+		{Resource: "model", Action: "set", Args: []string{"openai", "gpt-4o"}},     // multiple args
+	}
+	for _, a := range cases {
+		t.Run(strings.Join(a.Args, "+"), func(t *testing.T) {
+			typed := a.Typeable()
+			parsed, err := Parse(typed)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", typed, err)
+			}
+			if parsed.Resource != a.Resource {
+				t.Errorf("Resource: got %q, want %q", parsed.Resource, a.Resource)
+			}
+			if parsed.Action != a.Action {
+				t.Errorf("Action: got %q, want %q", parsed.Action, a.Action)
+			}
+			if len(parsed.Args) != len(a.Args) {
+				t.Errorf("Args len: got %d %v, want %d %v", len(parsed.Args), parsed.Args, len(a.Args), a.Args)
+			} else {
+				for i := range a.Args {
+					if parsed.Args[i] != a.Args[i] {
+						t.Errorf("Args[%d]: got %q, want %q", i, parsed.Args[i], a.Args[i])
+					}
+				}
 			}
 		})
 	}
@@ -441,6 +481,46 @@ func TestTrailerForList_HintVerbPlusExtras(t *testing.T) {
 		if !strings.Contains(got, sub) {
 			t.Errorf("trailer %q missing required substring %q", got, sub)
 		}
+	}
+}
+
+// TestTrailerForList_UnknownHintVerbFallsBackToInference pins the BUG-1 fix:
+// when listOverrideTrailer returns "" (e.g. unknown HintVerb value, or a
+// verb that doesn't apply at list level), trailerForList must fall through
+// to row-level inference instead of silently producing an empty trailer.
+func TestTrailerForList_UnknownHintVerbFallsBackToInference(t *testing.T) {
+	loc := i18n.New("en")
+	// HintVerbToggle doesn't apply at list level (listOverrideTrailer returns
+	// "" for it). The trailer should still pick up the row-level switch
+	// inference from the actionable items.
+	got := FallbackTrailer(&Interactive{
+		Kind: InteractiveList,
+		List: &ListView{
+			Resource: "memory", Action: "list",
+			HintVerb: HintVerbToggle,
+			Items: []ListItem{
+				{Label: "alice", Action: &ItemAction{Resource: "memory", Action: "set", Args: []string{"alice"}}},
+				{Label: "bob", Action: &ItemAction{Resource: "memory", Action: "set", Args: []string{"bob"}}},
+			},
+		},
+	}, loc)
+	if !strings.Contains(got, "Switch with") || !strings.Contains(got, "/memory set <name>") {
+		t.Errorf("unknown HintVerb at list level should fall through to row inference; got %q", got)
+	}
+
+	// Also exercise a truly unrecognized verb (typo / future-removed constant).
+	got2 := FallbackTrailer(&Interactive{
+		Kind: InteractiveList,
+		List: &ListView{
+			Resource: "memory", Action: "list",
+			HintVerb: HintVerb("typo-value"),
+			Items: []ListItem{
+				{Label: "alice", Action: &ItemAction{Resource: "memory", Action: "set", Args: []string{"alice"}}},
+			},
+		},
+	}, loc)
+	if !strings.Contains(got2, "/memory set <name>") {
+		t.Errorf("unrecognized HintVerb should fall through to row inference; got %q", got2)
 	}
 }
 

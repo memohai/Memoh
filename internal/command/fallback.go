@@ -32,6 +32,11 @@ const (
 // Unlike ParsedCallback.SyntheticCommand, this is designed for display in hint
 // text — it does not append --page artifacts and does not round-trip through
 // the callback encoder.
+//
+// Args containing whitespace are double-quoted so a copy-pasted hint
+// round-trips through Parse()/tokenize() back to the same intent. Without
+// quoting, `/memory set my provider` would tokenize as ["my", "provider"]
+// and the handler would read only "my" — silently picking the wrong target.
 func (a *ItemAction) Typeable() string {
 	if a == nil {
 		return ""
@@ -51,9 +56,23 @@ func (a *ItemAction) Typeable() string {
 			continue
 		}
 		b.WriteString(" ")
-		b.WriteString(arg)
+		b.WriteString(quoteArgIfNeeded(arg))
 	}
 	return b.String()
+}
+
+// quoteArgIfNeeded wraps an arg in double quotes when it contains whitespace
+// that would otherwise split it into separate tokens. Embedded double quotes
+// are replaced with single quotes (cheap fallback — tokenize() doesn't handle
+// escape sequences, and resource names with literal double quotes are absurd
+// in practice). Newlines are stripped because they'd never survive the chat
+// transport intact anyway.
+func quoteArgIfNeeded(arg string) string {
+	if !strings.ContainsAny(arg, " \t\n\r") {
+		return arg
+	}
+	cleaned := strings.NewReplacer("\n", " ", "\r", " ", `"`, "'").Replace(arg)
+	return `"` + cleaned + `"`
 }
 
 // FallbackTrailer derives a human-readable list of typeable commands from an
@@ -87,15 +106,22 @@ func trailerForList(lv *ListView, t *i18n.Localizer) string {
 	}
 
 	var lines []string
+	var primaryEmitted bool
 
-	// Primary verb line: either from explicit HintVerb override, or inferred
-	// from row-level actions. Both paths feed into the same verb dictionary
-	// so the trailer reads consistently.
+	// Try list-level HintVerb override first. If it returns "" — either
+	// because the verb doesn't apply at list level (pick/toggle/open/range)
+	// or because a future caller used an unrecognized HintVerb value — fall
+	// through to row-level inference instead of silently leaving the trailer
+	// empty. An empty trailer on a Result with no other text would otherwise
+	// produce an outbound "message is required" rejection.
 	if v := lv.HintVerb; v != "" {
 		if line := listOverrideTrailer(lv, v, t); line != "" {
 			lines = append(lines, line)
+			primaryEmitted = true
 		}
-	} else {
+	}
+
+	if !primaryEmitted {
 		// Walk actionable rows. Detect homogeneity by (Resource, Action) so a
 		// memory/search/model-style list (every row's tap means "switch to this
 		// one") collapses into a single switch line rather than enumerating
