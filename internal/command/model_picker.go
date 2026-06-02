@@ -48,7 +48,7 @@ func (h *Handler) buildModelCandidates(cc CommandContext, items []models.GetResp
 		cands = append(cands, modelCandidate{
 			dbID:       it.ID,
 			modelID:    it.ModelID,
-			name:       it.Name,
+			name:       modelDisplayName(it),
 			providerID: it.ProviderID,
 			provider:   resolve(it.ProviderID),
 		})
@@ -164,7 +164,7 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	records := make([]listRecord, 0, len(textModels))
 	for _, item := range textModels {
 		fields := []kv{
-			{cc.T("cmd.status.fieldModel"), item.Name},
+			{cc.T("cmd.status.fieldModel"), modelDisplayName(item)},
 			{cc.T("cmd.model.fieldProvider"), h.resolveProviderName(cc, item.ProviderID)},
 		}
 		// Active-role markers (chat/heartbeat) are a chip, not bracketed into the

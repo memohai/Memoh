@@ -274,9 +274,9 @@ func (h *Handler) resolveModelName(cc CommandContext, modelID string) string {
 		}
 	}
 	if provName != "" {
-		return fmt.Sprintf("%s (%s)", m.Name, provName)
+		return fmt.Sprintf("%s (%s)", modelDisplayName(m), provName)
 	}
-	return m.Name
+	return modelDisplayName(m)
 }
 
 // resolveSearchProviderName resolves a search provider UUID to its name.

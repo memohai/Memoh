@@ -113,7 +113,24 @@ func (h *Handler) resolveProviderName(cc CommandContext, providerID string) stri
 	if err != nil {
 		return providerID
 	}
-	return p.Name
+	// A blank provider name would drop the provider button from Telegram
+	// keyboards and render blank in summaries; fall back to the id.
+	if name := strings.TrimSpace(p.Name); name != "" {
+		return name
+	}
+	return providerID
+}
+
+// modelDisplayName returns a non-empty label for a model: its display name, or
+// its model_id when the (nullable) name column is blank. model_id is required
+// at write time, so this never yields "" — an empty label would be dropped from
+// Telegram inline keyboards and render blank for text-only users, making an
+// otherwise selectable model impossible to choose or discover.
+func modelDisplayName(m models.GetResponse) string {
+	if n := strings.TrimSpace(m.Name); n != "" {
+		return n
+	}
+	return m.ModelID
 }
 
 func (h *Handler) findModelByProviderAndName(cc CommandContext, providerName, modelName string) (models.GetResponse, error) {

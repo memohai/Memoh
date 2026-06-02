@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/memohai/memoh/internal/i18n"
+	"github.com/memohai/memoh/internal/models"
 )
 
 // TestFormatProvidersSummary pins the text body that no-button channels see
@@ -16,6 +17,25 @@ import (
 // provider, ALWAYS drill into a lone provider (so no-button users get a
 // /model set trailer instead of a pointless one-provider grid), and otherwise
 // show the provider-selection level.
+// TestModelDisplayName pins the empty-name fallback: a model with a blank
+// (nullable) name must fall back to its model_id so its picker button isn't
+// dropped as an empty label and text-only users can still see/select it.
+func TestModelDisplayName(t *testing.T) {
+	cases := []struct {
+		name, modelID, want string
+	}{
+		{"GPT-4o", "gpt-4o", "GPT-4o"},
+		{"", "gpt-4o", "gpt-4o"},
+		{"   ", "claude-3-5", "claude-3-5"},
+	}
+	for _, tc := range cases {
+		got := modelDisplayName(models.GetResponse{ModelID: tc.modelID, Model: models.Model{Name: tc.name}})
+		if got != tc.want {
+			t.Errorf("modelDisplayName(name=%q, id=%q) = %q, want %q", tc.name, tc.modelID, got, tc.want)
+		}
+	}
+}
+
 func TestPickerProviderIndex(t *testing.T) {
 	cases := []struct {
 		name      string
