@@ -1,4 +1,16 @@
-import { app, dialog, Menu, shell, BrowserWindow, ipcMain, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
+import {
+  app,
+  dialog,
+  Menu,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  nativeImage,
+  Tray,
+  screen,
+  type BrowserWindowConstructorOptions,
+  type MenuItemConstructorOptions,
+} from 'electron'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -47,6 +59,7 @@ const LOCAL_USER_DATA_ENTRIES = [
   'gstreamer',
   'cli-token.json',
   'cli-prefs.json',
+  'window-state.json',
 ]
 
 function platformUserDataBaseDirectory(): string {
@@ -103,7 +116,7 @@ function migrateRemoteUserDataDirectory(): void {
   const modern = productUserDataDirectory(ONLINE_PRODUCT_NAME)
   if (migrateWholeUserDataDirectory(legacy, modern)) return
   try {
-    moveUserDataEntries(legacy, modern, ['remote-profile.json'])
+    moveUserDataEntries(legacy, modern, ['remote-profile.json', 'window-state.json'])
   } catch (error) {
     console.error('failed to migrate remote userData entries', { from: legacy, to: modern, error })
   }
@@ -144,6 +157,18 @@ const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 
 const CONNECTION_DEFAULTS = { width: 520, height: 360, minWidth: 460, minHeight: 320 }
 
 type WindowKind = 'chat' | 'settings'
+type WindowDefaults = {
+  width: number
+  height: number
+  minWidth: number
+  minHeight: number
+}
+type StoredWindowState = {
+  width?: number
+  height?: number
+  maximized?: boolean
+}
+type StoredWindowStates = Partial<Record<WindowKind, StoredWindowState>>
 type TrayBot = {
   id: string
   displayName: string
@@ -166,6 +191,7 @@ let appTray: Tray | null = null
 // ever introduces multiple settings windows.
 const pendingSettingsNavigate = new Map<number, string>()
 let stoppingLocalProcesses = false
+let windowStatesCache: StoredWindowStates | null = null
 
 function isRemoteMode(): boolean {
   return DESKTOP_RUNTIME_MODE === 'remote'
@@ -193,6 +219,88 @@ function readRemoteProfile(): RemoteProfile {
 function writeRemoteProfile(profile: RemoteProfile): void {
   mkdirSync(app.getPath('userData'), { recursive: true })
   writeFileSync(remoteProfilePath(), `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 })
+}
+
+function windowStatePath(): string {
+  return join(app.getPath('userData'), 'window-state.json')
+}
+
+function readWindowStates(): StoredWindowStates {
+  if (windowStatesCache) return windowStatesCache
+  const path = windowStatePath()
+  if (!existsSync(path)) {
+    windowStatesCache = {}
+    return windowStatesCache
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as StoredWindowStates
+    windowStatesCache = typeof parsed === 'object' && parsed !== null ? parsed : {}
+  } catch (error) {
+    console.error('failed to read desktop window state', error)
+    windowStatesCache = {}
+  }
+  return windowStatesCache
+}
+
+function writeWindowState(kind: WindowKind, state: StoredWindowState): void {
+  const states = {
+    ...readWindowStates(),
+    [kind]: state,
+  }
+  windowStatesCache = states
+  mkdirSync(app.getPath('userData'), { recursive: true })
+  writeFileSync(windowStatePath(), `${JSON.stringify(states, null, 2)}\n`, { mode: 0o600 })
+}
+
+function clampWindowDimension(raw: unknown, fallback: number, minimum: number, maximum: number): number {
+  const value = typeof raw === 'number' && Number.isFinite(raw) ? Math.round(raw) : fallback
+  return Math.min(Math.max(value, minimum), maximum)
+}
+
+function rememberedWindowOptions(kind: WindowKind, defaults: WindowDefaults): BrowserWindowConstructorOptions {
+  const state = readWindowStates()[kind] ?? {}
+  const area = screen.getPrimaryDisplay().workAreaSize
+  const maxWidth = Math.max(defaults.minWidth, area.width)
+  const maxHeight = Math.max(defaults.minHeight, area.height)
+  return {
+    ...defaults,
+    width: clampWindowDimension(state.width, defaults.width, defaults.minWidth, maxWidth),
+    height: clampWindowDimension(state.height, defaults.height, defaults.minHeight, maxHeight),
+  }
+}
+
+function attachWindowStatePersistence(window: BrowserWindow, kind: WindowKind, defaults: WindowDefaults): void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const save = (): void => {
+    if (window.isDestroyed()) return
+    const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
+    const area = screen.getDisplayMatching(window.getBounds()).workAreaSize
+    const maxWidth = Math.max(defaults.minWidth, area.width)
+    const maxHeight = Math.max(defaults.minHeight, area.height)
+    writeWindowState(kind, {
+      width: clampWindowDimension(bounds.width, defaults.width, defaults.minWidth, maxWidth),
+      height: clampWindowDimension(bounds.height, defaults.height, defaults.minHeight, maxHeight),
+      maximized: window.isMaximized(),
+    })
+  }
+  const scheduleSave = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(save, 300)
+  }
+
+  window.on('resize', scheduleSave)
+  window.on('maximize', save)
+  window.on('unmaximize', save)
+  window.on('close', save)
+  window.on('closed', () => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+function restoreWindowMaximized(window: BrowserWindow, kind: WindowKind): void {
+  if (readWindowStates()[kind]?.maximized) {
+    window.maximize()
+  }
 }
 
 function getDesktopApiBaseUrl(): string {
@@ -533,7 +641,7 @@ function macWindowChromeOptions(tabbingIdentifier: string): Partial<Electron.Bro
 
 function createChatWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    ...CHAT_DEFAULTS,
+    ...rememberedWindowOptions('chat', CHAT_DEFAULTS),
     ...macWindowChromeOptions('memoh-chat'),
     show: false,
     autoHideMenuBar: true,
@@ -546,8 +654,10 @@ function createChatWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+  attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
   window.on('ready-to-show', () => {
+    restoreWindowMaximized(window, 'chat')
     window.show()
   })
   window.on('close', (event) => {
@@ -566,7 +676,7 @@ function createChatWindow(): BrowserWindow {
 
 function createSettingsWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    ...SETTINGS_DEFAULTS,
+    ...rememberedWindowOptions('settings', SETTINGS_DEFAULTS),
     ...macWindowChromeOptions('memoh-settings'),
     show: false,
     autoHideMenuBar: true,
@@ -579,12 +689,14 @@ function createSettingsWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+  attachWindowStatePersistence(window, 'settings', SETTINGS_DEFAULTS)
   window.setParentWindow(null)
   const webContentsId = window.webContents.id
 
   window.on('ready-to-show', () => {
     if (window.isDestroyed()) return
     window.setParentWindow(null)
+    restoreWindowMaximized(window, 'settings')
     window.show()
   })
   window.on('closed', () => {
