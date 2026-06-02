@@ -90,15 +90,24 @@ func (r *Registry) Lookup(ctx context.Context, modelID string) (Capabilities, bo
 	if idx == nil {
 		return Capabilities{}, false
 	}
-	key, ok := idx.match(modelID)
-	if !ok {
-		return Capabilities{}, false
+	if key, ok := idx.match(modelID); ok {
+		if entry, ok := entries[key]; ok {
+			return derive(entry), true
+		}
 	}
-	entry, ok := entries[key]
-	if !ok {
-		return Capabilities{}, false
+	// Fallback for low-latency variants (e.g. "...-fast") that the registry has
+	// not catalogued yet: borrow the base model's reasoning SHAPE only. The
+	// context window is dropped because latency variants frequently differ from
+	// the base (e.g. claude-opus-4.6-fast is 128k vs the base's 1M), so it must
+	// come from the upstream provider or the local default, never the base.
+	if key, ok := idx.matchLatencyBase(modelID); ok {
+		if entry, ok := entries[key]; ok {
+			caps := derive(entry)
+			caps.ContextWindow = nil
+			return caps, true
+		}
 	}
-	return derive(entry), true
+	return Capabilities{}, false
 }
 
 // Warm triggers a snapshot refresh if stale (best-effort, fail-open) without

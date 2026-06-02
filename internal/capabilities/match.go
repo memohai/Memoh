@@ -58,11 +58,47 @@ var (
 	reHasDigit = regexp.MustCompile(`\d`)
 )
 
+// latencyVariantTokens are low-latency sibling markers that share the parent
+// model's reasoning shape (thinking mode + effort tiers) but may differ in
+// context window. When the registry lacks an exact key for such a variant we
+// fall back to the base model's reasoning shape only (see Registry.Lookup),
+// never its context window.
+var latencyVariantTokens = map[string]struct{}{
+	"fast": {},
+}
+
 // normalized is the canonical signature of a model name used for matching.
 type normalized struct {
-	canonical string              // hyphen-joined non-marketing tokens
-	tokens    map[string]struct{} // full token set (incl. version tokens)
-	versions  map[string]struct{} // tokens that carry version info (digit-bearing)
+	canonical       string              // hyphen-joined non-marketing tokens
+	canonicalTokens []string            // ordered tokens behind canonical (for rebuild)
+	tokens          map[string]struct{} // full token set (incl. version tokens)
+	versions        map[string]struct{} // tokens that carry version info (digit-bearing)
+}
+
+// withoutTokens returns a copy of the signature with the given tokens removed,
+// preserving order. Used to derive a base name from a variant (e.g. drop "fast").
+func (n normalized) withoutTokens(drop map[string]struct{}) normalized {
+	kept := make([]string, 0, len(n.canonicalTokens))
+	for _, t := range n.canonicalTokens {
+		if _, d := drop[t]; d {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	tokens := make(map[string]struct{}, len(kept))
+	versions := make(map[string]struct{})
+	for _, t := range kept {
+		tokens[t] = struct{}{}
+		if reHasDigit.MatchString(t) {
+			versions[t] = struct{}{}
+		}
+	}
+	return normalized{
+		canonical:       strings.Join(kept, "-"),
+		canonicalTokens: kept,
+		tokens:          tokens,
+		versions:        versions,
+	}
 }
 
 // normalize reduces a raw model identifier to its matching signature.
@@ -148,9 +184,10 @@ func normalize(raw string) normalized {
 	}
 
 	return normalized{
-		canonical: strings.Join(canonicalTokens, "-"),
-		tokens:    tokens,
-		versions:  versions,
+		canonical:       strings.Join(canonicalTokens, "-"),
+		canonicalTokens: canonicalTokens,
+		tokens:          tokens,
+		versions:        versions,
 	}
 }
 
@@ -201,7 +238,11 @@ func buildIndex(keys []string) *index {
 // Every fuzzy tier requires the version signatures to match exactly, so models
 // that differ only by version (4.8 vs 4.6) never collide.
 func (idx *index) match(raw string) (string, bool) {
-	n := normalize(raw)
+	return idx.matchNorm(normalize(raw))
+}
+
+// matchNorm runs the matching strategy over an already-normalized signature.
+func (idx *index) matchNorm(n normalized) (string, bool) {
 	if n.canonical == "" {
 		return "", false
 	}
@@ -228,6 +269,30 @@ func (idx *index) match(raw string) (string, bool) {
 		return bestKey, true
 	}
 	return "", false
+}
+
+// matchLatencyBase resolves the base model for a low-latency variant (e.g.
+// "claude-opus-4.8-fast" -> "claude-opus-4-8") when the variant itself has no
+// registry key. It returns false unless the input carries a latency-variant
+// token AND a different base resolves. Callers must use only the base model's
+// reasoning shape from the result, never its context window.
+func (idx *index) matchLatencyBase(raw string) (string, bool) {
+	n := normalize(raw)
+	hasLatency := false
+	for t := range n.tokens {
+		if _, ok := latencyVariantTokens[t]; ok {
+			hasLatency = true
+			break
+		}
+	}
+	if !hasLatency {
+		return "", false
+	}
+	base := n.withoutTokens(latencyVariantTokens)
+	if base.canonical == "" || base.canonical == n.canonical {
+		return "", false
+	}
+	return idx.matchNorm(base)
 }
 
 // setMatchScore returns a relevance score for two token sets, or -1 if they are

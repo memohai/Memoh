@@ -101,6 +101,42 @@ func TestRegistry_LookupViaInjectedFetch(t *testing.T) {
 	}
 }
 
+func TestRegistry_FastVariantBorrowsBaseShapeNotContext(t *testing.T) {
+	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
+		return map[string]litellmEntry{
+			// Base model only; the "-fast" variant is not catalogued.
+			"claude-opus-4-8": {
+				SupportsReasoning:            ptrBool(true),
+				SupportsAdaptiveThinking:     ptrBool(true),
+				SupportsXHighReasoningEffort: ptrBool(true),
+				MaxInputTokens:               ptrInt(1000000),
+			},
+			// A sibling non-latency variant whose context window differs.
+			"gpt-5-mini": {
+				SupportsReasoning: ptrBool(true),
+				MaxInputTokens:    ptrInt(272000),
+			},
+		}, nil
+	}))
+
+	// fast variant: borrows the base reasoning shape but NOT the 1M context.
+	caps, ok := reg.Lookup(context.Background(), "anthropic/claude-opus-4.8-fast")
+	if !ok {
+		t.Fatalf("expected fast variant to fall back to base shape")
+	}
+	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
+		t.Fatalf("thinking mode = %q, want only_adaptive (borrowed from base)", caps.ThinkingMode)
+	}
+	if caps.ContextWindow != nil {
+		t.Fatalf("context window must NOT be inherited from base, got %v", *caps.ContextWindow)
+	}
+
+	// Non-latency variant with no key (e.g. "-pro") must NOT borrow the base.
+	if _, ok := reg.Lookup(context.Background(), "anthropic/claude-opus-4.8-pro"); ok {
+		t.Fatalf("pro variant must not fall back to base")
+	}
+}
+
 func TestRegistry_FailOpenReturnsUnknown(t *testing.T) {
 	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
 		return nil, context.DeadlineExceeded

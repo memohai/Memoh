@@ -99,6 +99,7 @@ func TestMatchMatrix(t *testing.T) {
 		mode       string
 		collapse   bool
 		miss       bool
+		fallback   bool
 	}
 
 	keyToInputs := map[string][]string{}
@@ -106,6 +107,14 @@ func TestMatchMatrix(t *testing.T) {
 
 	for _, in := range inputs {
 		key, ok := idx.match(in)
+		fallback := false
+		if !ok {
+			// Mirror Registry.Lookup: low-latency variants borrow the base
+			// reasoning shape (context window dropped).
+			if bkey, bok := idx.matchLatencyBase(in); bok {
+				key, ok, fallback = bkey, true, true
+			}
+		}
 		r := row{input: in, key: key}
 		if !ok {
 			r.miss = true
@@ -115,24 +124,32 @@ func TestMatchMatrix(t *testing.T) {
 		keyToInputs[key] = append(keyToInputs[key], in)
 
 		e := entries[key]
-		if e.MaxInputTokens != nil {
-			r.ctx = strconv.Itoa(*e.MaxInputTokens)
-		} else {
-			r.ctx = "-"
-		}
 		caps := derive(e)
 		r.mode = caps.ThinkingMode
 		if r.mode == "" {
 			r.mode = "?"
 		}
+		switch {
+		case fallback:
+			r.ctx = "(dropped)" // base ctx never inherited for latency variants
+			r.fallback = true
+		case e.MaxInputTokens != nil:
+			r.ctx = strconv.Itoa(*e.MaxInputTokens)
+		default:
+			r.ctx = "-"
+		}
 
 		// Variant-collapse: the input has a variant token the matched key lacks.
-		inNorm := normalize(in)
-		keyNorm := normalize(key)
-		for tok := range inNorm.tokens {
-			if variantTokens[tok] {
-				if _, present := keyNorm.tokens[tok]; !present {
-					r.collapse = true
+		// The intentional fast→base fallback is excluded (it deliberately drops
+		// the variant token and the context window).
+		if !fallback {
+			inNorm := normalize(in)
+			keyNorm := normalize(key)
+			for tok := range inNorm.tokens {
+				if variantTokens[tok] {
+					if _, present := keyNorm.tokens[tok]; !present {
+						r.collapse = true
+					}
 				}
 			}
 		}
@@ -154,6 +171,9 @@ func TestMatchMatrix(t *testing.T) {
 		case r.collapse:
 			flag = "** VARIANT-COLLAPSE **"
 			collapsed++
+			matched++
+		case r.fallback:
+			flag = "fast→base shape (ctx dropped)"
 			matched++
 		default:
 			matched++
