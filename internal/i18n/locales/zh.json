@@ -430,7 +430,7 @@
     "fallback": {
       "switch": "切换：{command}",
       "pick": "选择：{command}",
-      "toggle": "切换：{command}",
+      "toggle": "开关：{commands}",
       "open": "可选操作：{commands}",
       "details": "查看详情：{command}",
       "range": "时间范围：{command}（可选 {presets}）",

@@ -111,8 +111,11 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 			result: &command.Result{
 				Text: "Chat Models (564)\n\nCurrent model: DeepSeek V4 Flash\n\nBy provider:\n- DeepSeek (4) ●\n- OpenAI (124)\n- OpenRouter (436)",
 				Interactive: &command.Interactive{
-					Kind:   command.InteractiveModelPicker,
-					Picker: &command.ModelPickerView{Level: command.LevelProviders},
+					Kind: command.InteractiveModelPicker,
+					Picker: &command.ModelPickerView{
+						Level:     command.LevelProviders,
+						Providers: []command.PickerProvider{{Name: "DeepSeek", Count: 4}, {Name: "OpenAI", Count: 124}, {Name: "OpenRouter", Count: 436}},
+					},
 				},
 			},
 			mustContain: []string{

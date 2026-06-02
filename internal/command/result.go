@@ -59,7 +59,7 @@ type ListView struct {
 	Page         int        // zero-based page index of this view
 	PageSize     int        // items per page
 	ExtraActions []ListItem // contextual action buttons below the list rows (e.g. "All commands")
-	HintVerb     string     // optional fallback-trailer verb override (HintVerb*)
+	HintVerb     HintVerb   // optional fallback-trailer verb override (HintVerb*)
 }
 
 // ListItem is one row in a ListView. Action is nil for display-only rows.
@@ -74,12 +74,12 @@ type ListItem struct {
 //
 // Verb is an optional explicit hint verb (one of HintVerb*) overriding the
 // trailer-derivation logic used on no-button channels. Empty = infer from
-// structure.
+// structure (see trailerForChoices / trailerForList for the inference rules).
 type ItemAction struct {
 	Resource string
 	Action   string
 	Args     []string
-	Verb     string
+	Verb     HintVerb
 }
 
 // ModelPickerView is the two-level model picker (populated in the model-picker

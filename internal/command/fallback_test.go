@@ -233,7 +233,7 @@ func TestFallbackTrailer_ModelPicker(t *testing.T) {
 	t.Run("LevelProviders", func(t *testing.T) {
 		got := FallbackTrailer(&Interactive{
 			Kind:   InteractiveModelPicker,
-			Picker: &ModelPickerView{Level: LevelProviders},
+			Picker: &ModelPickerView{Level: LevelProviders, Providers: []PickerProvider{{Name: "DeepSeek", Count: 4}}},
 		}, loc)
 		for _, sub := range []string{"Or type", "/model list <provider_name>"} {
 			if !strings.Contains(got, sub) {
@@ -245,12 +245,32 @@ func TestFallbackTrailer_ModelPicker(t *testing.T) {
 	t.Run("LevelModels", func(t *testing.T) {
 		got := FallbackTrailer(&Interactive{
 			Kind:   InteractiveModelPicker,
-			Picker: &ModelPickerView{Level: LevelModels},
+			Picker: &ModelPickerView{Level: LevelModels, Models: []PickerModel{{Name: "gpt-4o"}}},
 		}, loc)
 		for _, sub := range []string{"Or type", "/model set <name>"} {
 			if !strings.Contains(got, sub) {
 				t.Errorf("trailer %q does not contain %q", got, sub)
 			}
+		}
+	})
+
+	t.Run("LevelProviders empty returns empty trailer", func(t *testing.T) {
+		got := FallbackTrailer(&Interactive{
+			Kind:   InteractiveModelPicker,
+			Picker: &ModelPickerView{Level: LevelProviders, Providers: nil},
+		}, loc)
+		if got != "" {
+			t.Errorf("empty providers should yield empty trailer, got %q", got)
+		}
+	})
+
+	t.Run("LevelModels empty returns empty trailer", func(t *testing.T) {
+		got := FallbackTrailer(&Interactive{
+			Kind:   InteractiveModelPicker,
+			Picker: &ModelPickerView{Level: LevelModels, Models: nil},
+		}, loc)
+		if got != "" {
+			t.Errorf("empty models should yield empty trailer, got %q", got)
 		}
 	})
 }
@@ -320,5 +340,203 @@ func TestFallbackTrailer_LocaleFallback(t *testing.T) {
 	}, loc)
 	if got == "" || strings.HasPrefix(got, "cmd.fallback.") {
 		t.Errorf("zh trailer fell through to raw key or empty: %q", got)
+	}
+}
+
+func TestHintVerbIsValid(t *testing.T) {
+	for _, v := range []HintVerb{HintVerbSwitch, HintVerbPick, HintVerbToggle, HintVerbOpen, HintVerbDetails, HintVerbRange, HintVerbMenu} {
+		if !v.IsValid() {
+			t.Errorf("HintVerb %q should be valid", v)
+		}
+	}
+	for _, v := range []HintVerb{"", "unknown", "Switch", "DETAILS"} {
+		if v.IsValid() {
+			t.Errorf("HintVerb %q should be invalid", v)
+		}
+	}
+}
+
+// TestVerbLineAllVerbs guards against drift between the seven HintVerb*
+// constants and the verbLine dispatch switch. Every defined verb must produce
+// a non-empty trailer when fed a usable action (HintVerbRange is special:
+// it needs a RangeView, so verbLine returns empty by design — covered below).
+func TestVerbLineAllVerbs(t *testing.T) {
+	loc := i18n.New("en")
+	action := []*ItemAction{{Resource: "memory", Action: "set", Args: []string{"alice"}}}
+	cases := map[HintVerb]string{
+		HintVerbSwitch:  "/memory set alice",
+		HintVerbPick:    "/memory set alice",
+		HintVerbDetails: "/memory set alice",
+		HintVerbMenu:    "/memory set alice",
+		HintVerbToggle:  "/memory set alice",
+		HintVerbOpen:    "/memory set alice",
+	}
+	for verb, wantCmd := range cases {
+		t.Run(string(verb), func(t *testing.T) {
+			got := verbLine(verb, action, loc)
+			if got == "" {
+				t.Fatalf("verbLine(%q) returned empty trailer", verb)
+			}
+			if !strings.Contains(got, wantCmd) {
+				t.Errorf("verbLine(%q) = %q, missing %q", verb, got, wantCmd)
+			}
+		})
+	}
+	// HintVerbRange is the documented exception — it needs a RangeView's
+	// presets, which row actions can't provide.
+	t.Run("range yields empty by design", func(t *testing.T) {
+		if got := verbLine(HintVerbRange, action, loc); got != "" {
+			t.Errorf("verbLine(range) should be empty (needs RangeView): %q", got)
+		}
+	})
+	t.Run("unknown verb yields empty", func(t *testing.T) {
+		if got := verbLine(HintVerb("totally-bogus"), action, loc); got != "" {
+			t.Errorf("unknown verb should yield empty: %q", got)
+		}
+	})
+	t.Run("empty actions yields empty", func(t *testing.T) {
+		if got := verbLine(HintVerbSwitch, nil, loc); got != "" {
+			t.Errorf("empty actions should yield empty: %q", got)
+		}
+	})
+}
+
+// TestListOverrideTrailerAllVerbs covers the list-level HintVerb override
+// dispatch. Verbs that don't naturally apply at list level (pick/toggle/open/
+// range) return empty; details/switch/menu synthesize a pseudo command from
+// the list's Resource/Action.
+func TestListOverrideTrailerAllVerbs(t *testing.T) {
+	loc := i18n.New("en")
+	cases := []struct {
+		verb        HintVerb
+		lv          *ListView
+		wantContain string // empty means trailer should be empty
+	}{
+		{HintVerbDetails, &ListView{Resource: "mcp", Action: "list"}, "/mcp get <name>"},
+		{HintVerbSwitch, &ListView{Resource: "memory", Action: "list"}, "/memory set <name>"},
+		{HintVerbMenu, &ListView{Resource: "schedule", Action: "list"}, "/schedule list"},
+		{HintVerbMenu, &ListView{Resource: "schedule"}, "/schedule list"}, // Action empty → default "list"
+		{HintVerbPick, &ListView{Resource: "memory", Action: "list"}, ""},
+		{HintVerbToggle, &ListView{Resource: "memory", Action: "list"}, ""},
+		{HintVerbOpen, &ListView{Resource: "memory", Action: "list"}, ""},
+		{HintVerbRange, &ListView{Resource: "usage", Action: "summary"}, ""},
+		{HintVerbDetails, &ListView{Resource: ""}, ""}, // empty resource → empty
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.verb), func(t *testing.T) {
+			got := listOverrideTrailer(tc.lv, tc.verb, loc)
+			if tc.wantContain == "" {
+				if got != "" {
+					t.Errorf("expected empty, got %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.wantContain) {
+				t.Errorf("trailer %q missing %q", got, tc.wantContain)
+			}
+		})
+	}
+}
+
+// TestTrailerForList_HintVerbPlusExtras pins the bug fix where HintVerb=details
+// on /mcp list (and /schedule list) used to short-circuit and drop the
+// "All commands ▸" cross-nav ExtraAction. Now both lines must appear.
+func TestTrailerForList_HintVerbPlusExtras(t *testing.T) {
+	loc := i18n.New("en")
+	got := FallbackTrailer(&Interactive{
+		Kind: InteractiveList,
+		List: &ListView{
+			Resource: "mcp", Action: "list",
+			HintVerb: HintVerbDetails,
+			Items:    []ListItem{{Label: "server-a"}},
+			ExtraActions: []ListItem{
+				{Action: &ItemAction{Resource: "help", Action: "mcp"}},
+			},
+		},
+	}, loc)
+	for _, sub := range []string{"See details with", "/mcp get <name>", "Open:", "/help mcp"} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("trailer %q missing required substring %q", got, sub)
+		}
+	}
+}
+
+func TestPickValueClauseEdgeCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		actions []*ItemAction
+		want    string
+	}{
+		{"empty actions", nil, "<value>"},
+		{"all-empty args", []*ItemAction{{Args: []string{""}}, {Args: []string{"  "}}}, "<value>"},
+		{"deduplicates encounter-order", []*ItemAction{
+			{Args: []string{"low"}}, {Args: []string{"high"}}, {Args: []string{"low"}}, {Args: []string{"medium"}},
+		}, "<low|high|medium>"},
+		{"trims whitespace", []*ItemAction{{Args: []string{" low "}}, {Args: []string{" high "}}}, "<low|high>"},
+		{"skips actions with no args", []*ItemAction{{Args: nil}, {Args: []string{"x"}}}, "<x>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickValueClause(tc.actions); got != tc.want {
+				t.Errorf("pickValueClause = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasAnyArgs(t *testing.T) {
+	cases := []struct {
+		name    string
+		actions []*ItemAction
+		want    bool
+	}{
+		{"empty", nil, false},
+		{"all-no-args", []*ItemAction{{Args: nil}, {Args: []string{}}}, false},
+		{"all-blank-args", []*ItemAction{{Args: []string{"", "  "}}}, false},
+		{"one-has-real-arg", []*ItemAction{{Args: nil}, {Args: []string{"x"}}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasAnyArgs(tc.actions); got != tc.want {
+				t.Errorf("hasAnyArgs = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestJoinActionCmdsSingleItemHasSpace pins the Open: {commands} layout
+// contract: with one command the joiner emits " /cmd" (leading space) so the
+// template "Open:{commands}" renders as "Open: /cmd" — not "Open:/cmd".
+func TestJoinActionCmdsSingleItemHasSpace(t *testing.T) {
+	got := joinActionCmds([]*ItemAction{{Resource: "email", Action: "outbox"}})
+	if got != " `/email outbox`" {
+		t.Errorf("single-item joiner = %q, want leading-space form", got)
+	}
+	multi := joinActionCmds([]*ItemAction{
+		{Resource: "a", Action: "b"}, {Resource: "c", Action: "d"},
+	})
+	if !strings.HasPrefix(multi, "\n- ") {
+		t.Errorf("multi-item joiner should start with newline-bullet, got %q", multi)
+	}
+}
+
+// TestTrailerForList_HeartbeatStyleOpenSingleItemReadable verifies the
+// rendered trailer reads cleanly when a list has a single ExtraAction and no
+// row actions (e.g. an empty-state list with one nav button), exercising the
+// joinActionCmds single-item branch through the template.
+func TestTrailerForList_OpenSingleExtraReadable(t *testing.T) {
+	loc := i18n.New("en")
+	got := FallbackTrailer(&Interactive{
+		Kind: InteractiveList,
+		List: &ListView{
+			Items:        []ListItem{{Label: "display-only"}},
+			ExtraActions: []ListItem{{Action: &ItemAction{Resource: "help", Action: "settings"}}},
+		},
+	}, loc)
+	if !strings.Contains(got, "Open: ") {
+		t.Errorf("single-extras open trailer should have 'Open: ', got %q", got)
+	}
+	if strings.Contains(got, "Open:/") {
+		t.Errorf("single-extras open trailer must not collapse to 'Open:/...', got %q", got)
 	}
 }

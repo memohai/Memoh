@@ -170,7 +170,8 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			result: &command.Result{
 				Text: "Models",
 				Interactive: &command.Interactive{Kind: command.InteractiveModelPicker, Picker: &command.ModelPickerView{
-					Level: command.LevelProviders,
+					Level:     command.LevelProviders,
+					Providers: []command.PickerProvider{{Name: "DeepSeek", Count: 4}},
 				}},
 			},
 			expectTrailer: true,
@@ -181,7 +182,8 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			result: &command.Result{
 				Text: "Provider: openai",
 				Interactive: &command.Interactive{Kind: command.InteractiveModelPicker, Picker: &command.ModelPickerView{
-					Level: command.LevelModels,
+					Level:  command.LevelModels,
+					Models: []command.PickerModel{{Name: "gpt-4o"}},
 				}},
 			},
 			expectTrailer: true,
@@ -198,6 +200,46 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			},
 			expectTrailer: true,
 			mustContain:   []string{"/usage summary --range <preset>", "24h", "7d", "30d", "all"},
+		},
+		{
+			// Defensive: an Interactive wrapper with Kind set but the matching
+			// sub-view nil (e.g. partial Result from a panic-recover path) must
+			// not drop the body text or panic. The renderer falls back to
+			// Result.Text and the trailer-derivation skips silently.
+			name: "mixed-shape Interactive (Kind=List but List=nil)",
+			result: &command.Result{
+				Text:        "Settings shown to fallback",
+				Interactive: &command.Interactive{Kind: command.InteractiveList, List: nil},
+			},
+			expectTrailer:   false,
+			allowEmptyChain: true,
+		},
+		{
+			name: "mixed-shape Interactive (Kind=Choices but Choices=nil)",
+			result: &command.Result{
+				Text:        "Reasoning body",
+				Interactive: &command.Interactive{Kind: command.InteractiveChoices, Choices: nil},
+			},
+			expectTrailer:   false,
+			allowEmptyChain: true,
+		},
+		{
+			name: "mixed-shape Interactive (Kind=ModelPicker but Picker=nil)",
+			result: &command.Result{
+				Text:        "Model card body",
+				Interactive: &command.Interactive{Kind: command.InteractiveModelPicker, Picker: nil},
+			},
+			expectTrailer:   false,
+			allowEmptyChain: true,
+		},
+		{
+			name: "mixed-shape Interactive (Kind=Range but Range=nil)",
+			result: &command.Result{
+				Text:        "Usage card body",
+				Interactive: &command.Interactive{Kind: command.InteractiveRange, Range: nil},
+			},
+			expectTrailer:   false,
+			allowEmptyChain: true,
 		},
 	}
 

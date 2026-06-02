@@ -6,22 +6,35 @@ import (
 	"github.com/memohai/memoh/internal/i18n"
 )
 
-// Hint verbs name the shape of a typeable affordance when rendering the
+// HintVerb names the shape of a typeable affordance when rendering the
 // no-button fallback trailer. Setting ItemAction.Verb or ListView.HintVerb to
 // one of these overrides the automatic inference in FallbackTrailer.
 //
 // The values double as the suffix of the i18n key (cmd.fallback.<verb>) so
 // adding a verb is a two-step change: register the constant here and add the
-// matching localized template in locales/*.json.
+// matching localized template in locales/*.json. Use IsValid() before relying
+// on a verb passed through unsafe boundaries.
+type HintVerb string
+
 const (
-	HintVerbSwitch  = "switch"
-	HintVerbPick    = "pick"
-	HintVerbToggle  = "toggle"
-	HintVerbOpen    = "open"
-	HintVerbDetails = "details"
-	HintVerbRange   = "range"
-	HintVerbMenu    = "menu"
+	HintVerbSwitch  HintVerb = "switch"
+	HintVerbPick    HintVerb = "pick"
+	HintVerbToggle  HintVerb = "toggle"
+	HintVerbOpen    HintVerb = "open"
+	HintVerbDetails HintVerb = "details"
+	HintVerbRange   HintVerb = "range"
+	HintVerbMenu    HintVerb = "menu"
 )
+
+// IsValid reports whether v is one of the seven defined hint verbs.
+func (v HintVerb) IsValid() bool {
+	switch v {
+	case HintVerbSwitch, HintVerbPick, HintVerbToggle, HintVerbOpen,
+		HintVerbDetails, HintVerbRange, HintVerbMenu:
+		return true
+	}
+	return false
+}
 
 // Typeable renders an ItemAction as the slash command a user would type to
 // invoke it (e.g. "/memory set Alice"). Nil-safe.
@@ -83,48 +96,60 @@ func trailerForList(lv *ListView, t *i18n.Localizer) string {
 		return ""
 	}
 
-	// Explicit list-level override.
-	if v := strings.TrimSpace(lv.HintVerb); v != "" {
-		return listOverrideTrailer(lv, v, t)
+	var lines []string
+
+	// Primary verb line: either from explicit HintVerb override, or inferred
+	// from row-level actions. Both paths feed into the same verb dictionary
+	// so the trailer reads consistently.
+	if v := lv.HintVerb; v != "" {
+		if line := listOverrideTrailer(lv, v, t); line != "" {
+			lines = append(lines, line)
+		}
+	} else {
+		// Walk actionable rows. Detect homogeneity by (Resource, Action) so a
+		// memory/search/model-style list (every row's tap means "switch to this
+		// one") collapses into a single switch line rather than enumerating
+		// every row's typeable form.
+		var actionable []*ItemAction
+		resource, action := "", ""
+		homogeneous := true
+		for _, item := range lv.Items {
+			if item.Action == nil {
+				continue
+			}
+			if len(actionable) == 0 {
+				resource = item.Action.Resource
+				action = item.Action.Action
+			} else if item.Action.Resource != resource || item.Action.Action != action {
+				homogeneous = false
+			}
+			actionable = append(actionable, item.Action)
+		}
+
+		if len(actionable) > 0 {
+			// Row-level Verb override applies when set on the first actionable row.
+			if verb := actionable[0].Verb; verb != "" {
+				if line := verbLine(verb, actionable, t); line != "" {
+					lines = append(lines, line)
+				}
+			} else if homogeneous {
+				lines = append(lines, t.T("cmd.fallback.switch", map[string]any{
+					"command": MdCode("/" + resource + " " + action + " <name>"),
+				}))
+			} else {
+				lines = append(lines, t.T("cmd.fallback.open", map[string]any{
+					"commands": joinActionCmds(actionable),
+				}))
+			}
+		}
 	}
 
-	// Walk actionable rows. Detect homogeneity by (Resource, Action) so a
-	// memory/search/model-style list (every row's tap means "switch to this
-	// one") collapses into a single switch line rather than enumerating every
-	// row's typeable form.
-	var actionable []*ItemAction
-	resource, action := "", ""
-	homogeneous := true
-	for _, item := range lv.Items {
-		if item.Action == nil {
-			continue
-		}
-		if len(actionable) == 0 {
-			resource = item.Action.Resource
-			action = item.Action.Action
-		} else if item.Action.Resource != resource || item.Action.Action != action {
-			homogeneous = false
-		}
-		actionable = append(actionable, item.Action)
-	}
-
-	if len(actionable) > 0 {
-		// Row-level Verb override applies when set on the first actionable row.
-		if verb := strings.TrimSpace(actionable[0].Verb); verb != "" {
-			return verbLine(verb, actionable, t)
-		}
-		if homogeneous {
-			return t.T("cmd.fallback.switch", map[string]any{
-				"command": MdCode("/" + resource + " " + action + " <name>"),
-			})
-		}
-		// Heterogeneous actionable rows: list each typeable.
-		return t.T("cmd.fallback.open", map[string]any{
-			"commands": joinActionCmds(actionable),
-		})
-	}
-
-	// No row-level actions; surface cross-nav extras if any.
+	// Cross-nav extras: surfaced REGARDLESS of the primary verb path, since the
+	// "All commands ▸" affordance disappears on text channels and the user
+	// needs the typeable equivalent independently of any row drill-down.
+	// Previously the HintVerb override short-circuited the function and
+	// silently dropped these — /mcp list and /schedule list users on WeChat
+	// saw "See details with /mcp get <name>" but never learned /help mcp.
 	var extras []*ItemAction
 	for _, ea := range lv.ExtraActions {
 		if ea.Action != nil {
@@ -132,24 +157,40 @@ func trailerForList(lv *ListView, t *i18n.Localizer) string {
 		}
 	}
 	if len(extras) > 0 {
-		return t.T("cmd.fallback.open", map[string]any{
+		lines = append(lines, t.T("cmd.fallback.open", map[string]any{
 			"commands": joinActionCmds(extras),
-		})
+		}))
 	}
 
-	return ""
+	return strings.Join(lines, "\n")
 }
 
-func listOverrideTrailer(lv *ListView, verb string, t *i18n.Localizer) string {
+// listOverrideTrailer synthesizes a pseudo ItemAction for each supported
+// list-level HintVerb and routes it through verbLine, so list-level overrides
+// share the verb dictionary with row-level overrides (no two-switch drift).
+// Verbs that don't naturally apply at the list level (pick/toggle/open/range
+// need explicit row actions or a different Interactive type) return "".
+func listOverrideTrailer(lv *ListView, verb HintVerb, t *i18n.Localizer) string {
+	resource := strings.TrimSpace(lv.Resource)
+	if resource == "" {
+		return ""
+	}
+	var fake *ItemAction
 	switch verb {
 	case HintVerbDetails:
-		// Convention: list/get-paired groups (mcp, schedule, …) — the typeable
-		// target is "/<Resource> get <name>".
-		return t.T("cmd.fallback.details", map[string]any{
-			"command": MdCode("/" + strings.TrimSpace(lv.Resource) + " get <name>"),
-		})
+		fake = &ItemAction{Resource: resource, Action: "get", Args: []string{"<name>"}}
+	case HintVerbSwitch:
+		fake = &ItemAction{Resource: resource, Action: "set", Args: []string{"<name>"}}
+	case HintVerbMenu:
+		action := strings.TrimSpace(lv.Action)
+		if action == "" {
+			action = "list"
+		}
+		fake = &ItemAction{Resource: resource, Action: action}
+	default:
+		return ""
 	}
-	return ""
+	return verbLine(verb, []*ItemAction{fake}, t)
 }
 
 func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
@@ -180,7 +221,7 @@ func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
 	}
 
 	if homogeneous {
-		if verb := strings.TrimSpace(actionable[0].Verb); verb != "" {
+		if verb := actionable[0].Verb; verb != "" {
 			return verbLine(verb, actionable, t)
 		}
 		if isPickShape(actionable) {
@@ -196,7 +237,7 @@ func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
 			})
 		}
 		return t.T("cmd.fallback.toggle", map[string]any{
-			"command": joinActionCmds(actionable),
+			"commands": joinActionCmds(actionable),
 		})
 	}
 
@@ -262,10 +303,16 @@ func trailerForPicker(p *ModelPickerView, t *i18n.Localizer) string {
 	}
 	switch p.Level {
 	case LevelProviders:
+		if len(p.Providers) == 0 {
+			return ""
+		}
 		return t.T("cmd.fallback.menu", map[string]any{
 			"command": MdCode("/model list <provider_name>"),
 		})
 	case LevelModels:
+		if len(p.Models) == 0 {
+			return ""
+		}
 		return t.T("cmd.fallback.menu", map[string]any{
 			"command": MdCode("/model set <name>"),
 		})
@@ -279,7 +326,7 @@ func trailerForRange(rv *RangeView, t *i18n.Localizer) string {
 	}
 	resource := strings.TrimSpace(rv.Resource)
 	action := strings.TrimSpace(rv.Action)
-	if resource == "" || action == "" {
+	if resource == "" || action == "" || len(rv.Presets) == 0 {
 		return ""
 	}
 	return t.T("cmd.fallback.range", map[string]any{
@@ -288,23 +335,40 @@ func trailerForRange(rv *RangeView, t *i18n.Localizer) string {
 	})
 }
 
-func verbLine(verb string, actions []*ItemAction, t *i18n.Localizer) string {
+// verbLine renders a single trailer line for the given verb. Used by both
+// row-level Verb overrides and (via listOverrideTrailer) list-level HintVerb
+// overrides — a single dispatch surface keeps the two paths from drifting.
+// Verbs that need data not available at this level (HintVerbRange needs
+// presets that only RangeView carries) return "".
+func verbLine(verb HintVerb, actions []*ItemAction, t *i18n.Localizer) string {
 	if len(actions) == 0 {
 		return ""
 	}
 	switch verb {
-	case HintVerbSwitch, HintVerbPick, HintVerbToggle, HintVerbDetails, HintVerbMenu, HintVerbRange:
+	case HintVerbSwitch, HintVerbPick, HintVerbDetails, HintVerbMenu:
 		cmd := actions[0].Typeable()
 		if cmd == "" {
 			return ""
 		}
-		return t.T("cmd.fallback."+verb, map[string]any{"command": MdCode(cmd)})
+		return t.T("cmd.fallback."+string(verb), map[string]any{"command": MdCode(cmd)})
+	case HintVerbToggle:
+		return t.T("cmd.fallback.toggle", map[string]any{"commands": joinActionCmds(actions)})
 	case HintVerbOpen:
 		return t.T("cmd.fallback.open", map[string]any{"commands": joinActionCmds(actions)})
+	case HintVerbRange:
+		// Range needs the preset list, which lives on RangeView, not on rows.
+		// Trying to render a range trailer from row actions would leak a
+		// literal "{presets}" placeholder. Use a RangeView Interactive instead.
+		return ""
 	}
 	return ""
 }
 
+// joinActionCmds formats the commands of multiple actions for the {commands}
+// placeholder. Single-action result: " /cmd" (leading space so templates like
+// "Open:{commands}" render as "Open: /cmd"). Multi-action: newline-bullet
+// list ("\n- /a\n- /b"). Empty: "" (the template ends up with a dangling
+// label and an empty commands clause — callers should guard).
 func joinActionCmds(actions []*ItemAction) string {
 	parts := make([]string, 0, len(actions))
 	for _, a := range actions {
@@ -312,13 +376,12 @@ func joinActionCmds(actions []*ItemAction) string {
 			parts = append(parts, MdCode(cmd))
 		}
 	}
-	// One-per-line for the "open" / heterogeneous trailer. A `·` separator
-	// collapses into an unreadable wall on plain-text channels where each
-	// command is many characters long (e.g. /settings's 7 cross-nav targets).
-	// The trailer is only ever shown on no-button channels, so the extra
-	// vertical space costs nothing on Telegram.
-	if len(parts) <= 1 {
-		return strings.Join(parts, "")
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return " " + parts[0]
+	default:
+		return "\n- " + strings.Join(parts, "\n- ")
 	}
-	return "\n- " + strings.Join(parts, "\n- ")
 }

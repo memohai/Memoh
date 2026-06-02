@@ -430,7 +430,7 @@
     "fallback": {
       "switch": "Switch with {command}.",
       "pick": "Pick with {command}.",
-      "toggle": "Toggle: {command}.",
+      "toggle": "Toggle:{commands}",
       "open": "Open:{commands}",
       "details": "See details with {command}.",
       "range": "Time window: {command} (presets: {presets}).",

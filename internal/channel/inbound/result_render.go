@@ -113,9 +113,9 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		case command.InteractiveList:
 			msg = renderListView(result.Text, result.Interactive.List, t)
 		case command.InteractiveModelPicker:
-			msg = renderModelPicker(result.Interactive.Picker, t)
+			msg = renderModelPicker(result.Text, result.Interactive.Picker, t)
 		case command.InteractiveChoices:
-			msg = renderChoicesView(result.Interactive.Choices, t)
+			msg = renderChoicesView(result.Text, result.Interactive.Choices, t)
 		case command.InteractiveRange:
 			msg = renderRangeView(result.Text, result.Interactive.Range, t)
 		default:
@@ -287,9 +287,13 @@ func renderListView(text string, lv *command.ListView, t *i18n.Localizer) channe
 // a 2-column grid (● marks the provider holding the current model, with its
 // model count); the model level shows one model per row (✓ marks the selected
 // model) with a back button. Both levels paginate and carry a Close button.
-func renderModelPicker(p *command.ModelPickerView, t *i18n.Localizer) channel.Message {
+//
+// fallbackText is used when the picker view itself is nil — a defensive guard
+// against partial Result construction (e.g. panic-recovery returning a Result
+// with Kind set but no view populated).
+func renderModelPicker(fallbackText string, p *command.ModelPickerView, t *i18n.Localizer) channel.Message {
 	if p == nil {
-		return channel.Message{}
+		return channel.Message{Text: fallbackText}
 	}
 	pageSize := p.PageSize
 	if pageSize <= 0 {
@@ -456,9 +460,12 @@ func truncateButtonLabel(s string) string {
 // levels or settings toggles). Short labels share two columns; long labels fall
 // back to one column so Telegram does not crush the text. Each tap re-dispatches
 // "/{resource} {action} {args}" and edits in place.
-func renderChoicesView(cv *command.ChoicesView, t *i18n.Localizer) channel.Message {
+//
+// fallbackText is used when the choices view itself is nil — defensive guard
+// against partial Result construction.
+func renderChoicesView(fallbackText string, cv *command.ChoicesView, t *i18n.Localizer) channel.Message {
 	if cv == nil {
-		return channel.Message{}
+		return channel.Message{Text: fallbackText}
 	}
 	msg := channel.Message{Text: cv.Title}
 	var actions []channel.Action
