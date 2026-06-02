@@ -218,6 +218,19 @@ type indexEntry struct {
 	norm normalized
 }
 
+// isUntrustedRegistryKey reports whether a registry key comes from a gateway
+// that repackages other vendors' models without authoritative capability
+// metadata. GitHub Copilot is the case in point: every github_copilot/* entry
+// carries no reasoning flags and exposes Copilot's truncated context window
+// (e.g. gpt-5 at 128k instead of the real 272k). Matching an official model to
+// such a shell would strip its reasoning capabilities, so these keys are
+// excluded from the index entirely. A model served only via Copilot then MISSes
+// and falls back to safe defaults / the base reasoning shape.
+func isUntrustedRegistryKey(key string) bool {
+	k := strings.ToLower(strings.TrimSpace(key))
+	return strings.HasPrefix(k, "github_copilot/") || strings.HasPrefix(k, "copilot/")
+}
+
 func buildIndex(keys []string) *index {
 	idx := &index{byCanonical: make(map[string]string, len(keys))}
 	// Sort first: registry keys arrive from a map (random order). Sorting makes
@@ -226,6 +239,9 @@ func buildIndex(keys []string) *index {
 	sorted := append([]string(nil), keys...)
 	sort.Strings(sorted)
 	for _, k := range sorted {
+		if isUntrustedRegistryKey(k) {
+			continue
+		}
 		n := normalize(k)
 		if n.canonical == "" {
 			continue

@@ -14,7 +14,7 @@ var registryCorpus = []string{
 	"anthropic.claude-opus-4-8",
 	"us.anthropic.claude-opus-4-8",
 	"vertex_ai/claude-opus-4-8@default",
-	"github_copilot/claude-opus-4-6-fast",
+	"claude-opus-4-6-fast",
 	"gpt-5",
 	"gpt-5-mini",
 	"o3",
@@ -168,6 +168,26 @@ func TestNormalize_BareVersionSuffixSurvives(t *testing.T) {
 	}
 	if got, ok := idx.match("deepseek-v3"); ok {
 		t.Fatalf("deepseek-v3 (absent) must not match a neighbor version, got %q", got)
+	}
+}
+
+// TestBuildIndex_SkipsGithubCopilotShells ensures Copilot's capability-empty
+// repackaged entries never become a match target. An official model name that
+// only exists in the registry under github_copilot/* must MISS (so it can fall
+// back to the base reasoning shape) rather than inherit the empty shell.
+func TestBuildIndex_SkipsGithubCopilotShells(t *testing.T) {
+	idx := buildIndex([]string{
+		"github_copilot/claude-opus-4.6-fast",
+		"github_copilot/gpt-5",
+		"gpt-5", // authoritative key also present
+	})
+	if got, ok := idx.match("anthropic/claude-opus-4.6-fast"); ok {
+		t.Fatalf("copilot-only fast variant must MISS, got %q", got)
+	}
+	// gpt-5 still resolves via the authoritative (non-copilot) key.
+	got, ok := idx.match("openai/gpt-5")
+	if !ok || got != "gpt-5" {
+		t.Fatalf("gpt-5 should resolve to the authoritative key, got %q,%v", got, ok)
 	}
 }
 
