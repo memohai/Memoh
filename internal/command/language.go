@@ -38,6 +38,7 @@ func (h *Handler) buildLanguageGroup() *CommandGroup {
 			if v != "auto" && !i18n.IsSupported(v) {
 				return &Result{Text: cc.T("cmd.settings.unknownLanguage", map[string]any{"value": cc.Args[0]})}, nil
 			}
+			before, _ := h.settingsService.GetBot(cc.Ctx, cc.BotID)
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{CommandUILanguage: v}); err != nil {
 				return nil, err
 			}
@@ -45,11 +46,19 @@ func (h *Handler) buildLanguageGroup() *CommandGroup {
 			if err != nil {
 				return nil, err
 			}
+			// Explicit set ("/language zh") confirms the change in plain text — it
+			// must NOT re-render the chooser buttons (a "set" is a set, not a
+			// re-prompt). The picker is reserved for the no-arg "/language" path
+			// (the show handler). Re-localize the confirmation to the newly chosen
+			// language and stamp Result.Locale so the renderer chrome matches.
 			cc.L = i18n.New(s.CommandUILanguage)
 			cc.Locale = cc.L.Locale()
-			res := commandLanguageResultFor(cc, s.CommandUILanguage, "language", "set")
-			res.Locale = cc.Locale
-			return res, nil
+			return &Result{
+				Text: formatChangedValueT(cc, cc.T("cmd.settings.fieldCommandLanguage"),
+					commandLanguageDisplay(cc, before.CommandUILanguage),
+					commandLanguageDisplay(cc, s.CommandUILanguage)),
+				Locale: cc.Locale,
+			}, nil
 		},
 	})
 	return g

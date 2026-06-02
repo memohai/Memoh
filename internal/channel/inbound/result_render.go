@@ -519,13 +519,26 @@ func renderChoicesView(fallbackText string, cv *command.ChoicesView, t *i18n.Loc
 	return msg
 }
 
+// maxChoiceColumns caps how many inline-keyboard buttons share one row. Telegram
+// sizes a button to (row width / buttons in that row) — it offers no absolute
+// width control — so columns-per-row is the only lever to stop a 2-char label
+// from stretching across the whole chat. 3 keeps short picks (languages,
+// reasoning levels) compact without crushing the text.
+const maxChoiceColumns = 3
+
 func choiceColumns(cv *command.ChoicesView) int {
 	if cv == nil {
 		return 1
 	}
-	if cv.Columns == 1 || cv.Columns == 2 {
+	// An explicit column count is honored (clamped to maxChoiceColumns) so a
+	// caller can pack short value-picks tighter than the auto heuristic would.
+	if cv.Columns >= 1 {
+		if cv.Columns > maxChoiceColumns {
+			return maxChoiceColumns
+		}
 		return cv.Columns
 	}
+	// Auto (Columns unset): a long label takes its own row; otherwise pair up.
 	for _, item := range cv.Choices {
 		if len([]rune(item.Label)) > 18 {
 			return 1

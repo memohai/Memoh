@@ -43,8 +43,12 @@ func TestLanguageShortcutPickerDispatchesLanguageSet(t *testing.T) {
 	if res == nil || !strings.Contains(res.Text, i18n.New("zh").T("cmd.settings.langPickerTitle")) {
 		t.Fatalf("localized result = %+v", res)
 	}
-	if res.Interactive == nil || res.Interactive.Choices == nil || res.Interactive.Choices.Columns != 1 {
-		t.Fatalf("/language picker should render one large button per row, got %+v", res.Interactive)
+	// The picker packs its short locale options multiple-per-row (Columns:3) so
+	// Telegram renders compact buttons instead of stretching one full-width
+	// button per row. (Explicit "/language <arg>" no longer renders this picker
+	// at all — it returns a plain text confirmation; see the set handler.)
+	if res.Interactive == nil || res.Interactive.Choices == nil || res.Interactive.Choices.Columns != 3 {
+		t.Fatalf("/language picker should pack options 3-per-row, got %+v", res.Interactive)
 	}
 	for _, choice := range res.Interactive.Choices.Choices {
 		if choice.Action == nil || choice.Action.Resource != "language" || choice.Action.Action != "set" {

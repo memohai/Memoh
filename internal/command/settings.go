@@ -162,9 +162,12 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 	// active choice — on Telegram the ✓ in the choice list carries the same
 	// signal but text-channel users have no ✓ to read.
 	body := title + "\n" + cc.T("cmd.settings.langCurrent", map[string]any{"label": currentLabel})
+	// Three short locale options (auto/en/zh) fit one row — Columns:3 keeps each
+	// button ~⅓ width instead of stretching full-width one-per-row. Close gets its
+	// own row (appended by the renderer).
 	return &Result{
 		Text:        body,
-		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices, Columns: 1}},
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices, Columns: 3}},
 	}
 }
 
