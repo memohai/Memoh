@@ -512,10 +512,16 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		if event.Final == nil {
 			return errors.New("stream final payload is required")
 		}
+		// Validate against the format the channel will actually receive, but do
+		// NOT mutate event.Final here: the event may be fanned out to other
+		// channels (tee), and coercing the shared payload would strip markup for
+		// a later Markdown-capable channel. The real downgrade is applied to a
+		// local copy in Push.
+		final := event.Final.Message
 		if caps, ok := registry.GetCapabilities(channelType); ok {
-			event.Final.Message = coerceFormatForCaps(event.Final.Message, caps)
+			final = coerceFormatForCaps(final, caps)
 		}
-		if err := validateMessageCapabilities(registry, channelType, event.Final.Message); err != nil {
+		if err := validateMessageCapabilities(registry, channelType, final); err != nil {
 			return err
 		}
 		if _, err := normalizeAttachmentRefs(event.Final.Message.Attachments, channelType); err != nil {
@@ -630,6 +636,19 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	}
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
+	}
+
+	// Downgrade the final's Format to what the channel can render, on a LOCAL
+	// copy, so the adapter actually receives the coerced payload. Done here (not
+	// in validateStreamEvent) so the shared event is never mutated — it may be
+	// fanned out to other channels via tee, where stripping markup for a
+	// plain-text channel would corrupt a Markdown-capable channel's copy.
+	if event.Type == StreamEventFinal && event.Final != nil {
+		if caps, ok := s.manager.registry.GetCapabilities(s.channelType); ok {
+			final := *event.Final
+			final.Message = coerceFormatForCaps(final.Message, caps)
+			event.Final = &final
+		}
 	}
 
 	if event.Type == StreamEventDelta && event.Delta != "" && event.Phase != StreamPhaseReasoning {

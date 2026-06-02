@@ -13,6 +13,7 @@ import (
 type streamValidationAdapter struct {
 	channelType    ChannelType
 	outboundPolicy OutboundPolicy
+	noMarkdown     bool // when true, advertise a plain-text-only channel
 }
 
 func (a *streamValidationAdapter) Type() ChannelType {
@@ -25,7 +26,7 @@ func (a *streamValidationAdapter) Descriptor() Descriptor {
 		DisplayName: "stream-validation",
 		Capabilities: ChannelCapabilities{
 			Text:           true,
-			Markdown:       true,
+			Markdown:       !a.noMarkdown,
 			Attachments:    true,
 			Streaming:      true,
 			BlockStreaming: true,
@@ -384,6 +385,49 @@ func TestPushFinalWithChunking_MarkdownFormat(t *testing.T) {
 	}
 	if (*sent)[0].Message.Format != MessageFormatMarkdown {
 		t.Fatal("overflow chunk should preserve markdown format")
+	}
+}
+
+func TestPushFinal_CoercesMarkdownToPlainForNoMarkdownChannel(t *testing.T) {
+	t.Parallel()
+	channelType := ChannelType("plainstream")
+	registry := NewRegistry()
+	if err := registry.Register(&streamValidationAdapter{channelType: channelType, noMarkdown: true}); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+	rec := &recordingStream{}
+	stream := &managerOutboundStream{
+		manager:     manager,
+		config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+		stream:      rec,
+		channelType: channelType,
+		policy:      manager.resolveOutboundPolicy(channelType),
+	}
+
+	event := StreamEvent{
+		Type:  StreamEventFinal,
+		Final: &StreamFinalizePayload{Message: Message{Text: "**bold** and `code`", Format: MessageFormatMarkdown}},
+	}
+	if err := stream.Push(context.Background(), event); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	evs := rec.Events()
+	if len(evs) == 0 || evs[0].Final == nil {
+		t.Fatalf("expected a final event, got %+v", evs)
+	}
+	got := evs[0].Final.Message
+	if got.Format != MessageFormatPlain {
+		t.Errorf("adapter Format = %q, want Plain (downgraded for no-markdown channel)", got.Format)
+	}
+	if strings.Contains(got.Text, "**") || strings.Contains(got.Text, "`") {
+		t.Errorf("inline markup not stripped from payload: %q", got.Text)
+	}
+	// The shared input event must NOT be mutated: it may be fanned out to other
+	// (Markdown-capable) channels via tee, which would lose their markup.
+	if event.Final.Message.Format != MessageFormatMarkdown || !strings.Contains(event.Final.Message.Text, "**") {
+		t.Errorf("shared input event was mutated by coercion: %+v", event.Final.Message)
 	}
 }
 
