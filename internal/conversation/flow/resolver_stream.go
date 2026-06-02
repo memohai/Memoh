@@ -21,9 +21,9 @@ type WSStreamEvent = json.RawMessage
 // interrupted-path fallback so that real partial messages get saved instead
 // of a synthetic placeholder.
 type terminalSnapshot struct {
-	sdkMessages []sdk.Message
-	usage       json.RawMessage
-	approvalID  string
+	sdkMessages    []sdk.Message
+	usage          json.RawMessage
+	deferredToolID string
 }
 
 func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
@@ -39,6 +39,7 @@ func isVisibleAgentStreamEvent(event agentpkg.StreamEvent) bool {
 		agentpkg.EventToolCallProgress,
 		agentpkg.EventToolCallEnd,
 		agentpkg.EventToolApprovalRequest,
+		agentpkg.EventUserInputRequest,
 		agentpkg.EventAttachment,
 		agentpkg.EventReaction,
 		agentpkg.EventSpeech:
@@ -69,9 +70,9 @@ func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 		return terminalSnapshot{}, false
 	}
 	return terminalSnapshot{
-		sdkMessages: sdkMsgs,
-		usage:       envelope.Usage,
-		approvalID:  strings.TrimSpace(envelope.ApprovalID),
+		sdkMessages:    sdkMsgs,
+		usage:          envelope.Usage,
+		deferredToolID: strings.TrimSpace(envelope.ApprovalID),
 	}, true
 }
 
@@ -384,7 +385,7 @@ func (r *Resolver) persistTerminalSnapshot(ctx context.Context, req conversation
 	}
 
 	if err := r.storeRoundWithOptions(ctx, req, roundMessages, rc.model.ID, storeRoundOptions{
-		AllowPendingToolCalls: snap.approvalID != "",
+		AllowPendingToolCalls: snap.deferredToolID != "",
 	}); err != nil {
 		return err
 	}

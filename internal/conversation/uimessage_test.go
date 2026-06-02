@@ -185,6 +185,86 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 	}
 }
 
+func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+	messages := converter.HandleEvent(UIMessageStreamEvent{
+		Type:        "user_input_request",
+		ToolName:    "ask_user",
+		ToolCallID:  "call-ask",
+		UserInputID: "input-1",
+		ShortID:     3,
+		Status:      "pending",
+		Input:       map[string]any{"question": "Which plan?"},
+		Metadata: map[string]any{
+			"user_input_id": "input-1",
+			"ui_payload": map[string]any{
+				"question": "Which plan?",
+				"options": []any{
+					map[string]any{"id": "a", "label": "Plan A", "value": "A"},
+					map[string]any{"id": "custom", "label": "Custom answer", "input_type": "text", "placeholder": "Type an answer"},
+				},
+			},
+		},
+	})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %d", len(messages))
+	}
+	msg := messages[0]
+	if msg.UserInput == nil {
+		t.Fatalf("missing user input: %#v", msg)
+	}
+	if msg.UserInput.UserInputID != "input-1" || msg.UserInput.Question != "Which plan?" {
+		t.Fatalf("unexpected user input: %#v", msg.UserInput)
+	}
+	if msg.Running == nil || *msg.Running {
+		t.Fatalf("expected tool to stop running while waiting: %#v", msg)
+	}
+}
+
+func TestConvertModelMessagesToUIAssistantMessagesIncludesUserInputMetadata(t *testing.T) {
+	messages := ConvertModelMessagesToUIAssistantMessages([]ModelMessage{{
+		Role: "assistant",
+		Content: mustUIRawJSON(t, []map[string]any{{
+			"type":       "tool-call",
+			"toolCallId": "call-ask",
+			"toolName":   "ask_user",
+			"input":      map[string]any{"question": "Which plan?"},
+			"providerMetadata": map[string]any{
+				"user_input": map[string]any{
+					"user_input_id": "input-1",
+					"short_id":      2,
+					"status":        "pending",
+					"ui_payload": map[string]any{
+						"question": "Which plan?",
+						"options": []any{
+							map[string]any{"id": "a", "label": "Plan A", "value": "A"},
+							map[string]any{"id": "custom", "label": "Custom answer", "input_type": "text", "placeholder": "Type an answer"},
+						},
+					},
+				},
+			},
+		}}),
+	}})
+
+	if len(messages) != 1 {
+		t.Fatalf("expected one message, got %d", len(messages))
+	}
+	userInput := messages[0].UserInput
+	if userInput == nil {
+		t.Fatalf("missing user input: %#v", messages[0])
+	}
+	if userInput.UserInputID != "input-1" || userInput.ShortID != 2 || !userInput.CanRespond {
+		t.Fatalf("unexpected user input: %#v", userInput)
+	}
+	if len(userInput.Options) != 2 || userInput.Options[0].ID != "a" {
+		t.Fatalf("unexpected options: %#v", userInput.Options)
+	}
+	if userInput.Options[1].InputType != "text" || userInput.Options[1].Placeholder != "Type an answer" {
+		t.Fatalf("unexpected text input option: %#v", userInput.Options[1])
+	}
+}
+
 func TestConvertMessagesToUITurnsIncludesReplyAndForwardMetadata(t *testing.T) {
 	now := time.Now().UTC()
 	turns := ConvertMessagesToUITurns([]messagepkg.Message{{

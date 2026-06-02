@@ -15,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/agent/background"
 	"github.com/memohai/memoh/internal/agent/tools"
 	"github.com/memohai/memoh/internal/models"
+	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -378,15 +379,25 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.ToolApprovalRequestPart:
+			eventType := EventToolApprovalRequest
+			var userInputID string
+			var approvalID string
+			if isUserInputMetadata(p.Metadata) {
+				eventType = EventUserInputRequest
+				userInputID = p.ApprovalID
+			} else {
+				approvalID = p.ApprovalID
+			}
 			if !sendEvent(ctx, ch, StreamEvent{
-				Type:       EventToolApprovalRequest,
-				ToolName:   p.ToolName,
-				ToolCallID: p.ToolCallID,
-				ApprovalID: p.ApprovalID,
-				ShortID:    approvalShortID(p.Metadata),
-				Status:     "pending",
-				Input:      p.Input,
-				Metadata:   p.Metadata,
+				Type:        eventType,
+				ToolName:    p.ToolName,
+				ToolCallID:  p.ToolCallID,
+				ApprovalID:  approvalID,
+				UserInputID: userInputID,
+				ShortID:     approvalShortID(p.Metadata),
+				Status:      "pending",
+				Input:       p.Input,
+				Metadata:    p.Metadata,
 			}) {
 				aborted = true
 			}
@@ -450,6 +461,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 
 		case *sdk.ErrorPart:
 			errMsg := p.Error.Error()
+			if isAskUserArgumentParseError(errMsg) {
+				continue
+			}
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: errMsg})
 
 			// Mid-stream retry: if the error is retryable, attempt to continue
@@ -515,6 +529,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	if streamResult.DeferredToolApproval != nil {
 		termEvent.ApprovalID = streamResult.DeferredToolApproval.ApprovalID
+		if isUserInputMetadata(streamResult.DeferredToolApproval.Metadata) {
+			termEvent.UserInputID = streamResult.DeferredToolApproval.ApprovalID
+		}
 		termEvent.ShortID = approvalShortID(streamResult.DeferredToolApproval.Metadata)
 		termEvent.Status = "pending"
 		termEvent.Metadata = streamResult.DeferredToolApproval.Metadata
@@ -824,17 +841,38 @@ func annotateDeferredApproval(messages []sdk.Message, approval sdk.ToolApprovalR
 			if call.ProviderMetadata == nil {
 				call.ProviderMetadata = map[string]any{}
 			}
-			call.ProviderMetadata["approval"] = map[string]any{
-				"approval_id": approval.ApprovalID,
-				"short_id":    approvalShortID(approval.Metadata),
-				"status":      "pending",
-				"can_approve": true,
+			if isUserInputMetadata(approval.Metadata) {
+				call.ProviderMetadata["user_input"] = map[string]any{
+					"user_input_id": approval.ApprovalID,
+					"short_id":      approvalShortID(approval.Metadata),
+					"status":        "pending",
+					"ui_payload":    approval.Metadata["ui_payload"],
+				}
+			} else {
+				call.ProviderMetadata["approval"] = map[string]any{
+					"approval_id": approval.ApprovalID,
+					"short_id":    approvalShortID(approval.Metadata),
+					"status":      "pending",
+					"can_approve": true,
+				}
 			}
 			annotated[msgIdx].Content[partIdx] = call
 			return annotated
 		}
 	}
 	return annotated
+}
+
+func isUserInputMetadata(metadata map[string]any) bool {
+	if metadata == nil {
+		return false
+	}
+	kind, _ := metadata["kind"].(string)
+	return strings.TrimSpace(kind) == userinput.DeferredKind
+}
+
+func isAskUserArgumentParseError(message string) bool {
+	return strings.Contains(message, `unmarshal tool call arguments for "ask_user"`)
 }
 
 // toolStreamEventToAgentEvent converts a tool-layer ToolStreamEvent into an
@@ -1193,7 +1231,11 @@ func (a *Agent) runMidStreamRetry(
 					aborted = true
 				}
 			case *sdk.ErrorPart:
-				sendEvent(sendCtx, ch, StreamEvent{Type: EventError, Error: rp.Error.Error()})
+				errMsg := rp.Error.Error()
+				if isAskUserArgumentParseError(errMsg) {
+					continue
+				}
+				sendEvent(sendCtx, ch, StreamEvent{Type: EventError, Error: errMsg})
 				aborted = true
 			case *sdk.AbortPart:
 				aborted = true

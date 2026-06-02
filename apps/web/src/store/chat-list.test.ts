@@ -29,6 +29,7 @@ describe('chat-list store', () => {
   let streamHandler: UIStreamEventHandler | null
   let messageEventsHandler: ((event: MessageStreamEvent) => void) | null
   let sendEvents: UIStreamEvent[]
+  let sentWSMessages: Array<Record<string, unknown>>
   let lastStreamId = ''
   let lastSessionId = ''
 
@@ -38,6 +39,7 @@ describe('chat-list store', () => {
     messageEventsHandler = null
     lastStreamId = ''
     lastSessionId = ''
+    sentWSMessages = []
     sendEvents = [
       { type: 'start' } as UIStreamEvent,
       { type: 'error', message: 'model failed' } as UIStreamEvent,
@@ -92,6 +94,7 @@ describe('chat-list store', () => {
           return true
         },
         send: vi.fn((message: { stream_id?: string; session_id?: string }) => {
+          sentWSMessages.push(message as Record<string, unknown>)
           lastStreamId = message.stream_id ?? ''
           lastSessionId = message.session_id ?? ''
           for (const event of sendEvents) {
@@ -190,6 +193,127 @@ describe('chat-list store', () => {
     expect(api.ensureACPRuntime).toHaveBeenCalledTimes(1)
     expect(store.acpRuntimeStatuses[key]?.models?.current_model_id).toBe('gpt-5.1-codex')
     expect(store.acpRuntimePending[key]).toBeUndefined()
+  })
+
+  it('responds to user input over websocket and marks the block answered', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = {
+      user_input_id: 'input-1',
+      short_id: 4,
+      status: 'pending',
+      question: 'Which plan?',
+      options: [{ id: 'a', label: 'Plan A', value: 'A' }],
+      can_respond: true,
+    }
+    store.messages.push({
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        input: { question: 'Which plan?' },
+        tool_call_id: 'call-ask',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user',
+        running: false,
+        done: true,
+        result: null,
+        userInput,
+      }],
+      timestamp: new Date().toISOString(),
+      streaming: false,
+    })
+
+    await store.respondUserInput(userInput, { optionId: 'a', answer: 'A' })
+    await flushPromises()
+
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'user_input_response',
+      session_id: 'session-1',
+      user_input_id: 'input-1',
+      short_id: 4,
+      option_id: 'a',
+      answer: 'A',
+      canceled: false,
+    })
+    const block = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('submitted')
+      expect(block.userInput?.can_respond).toBe(false)
+    }
+  })
+
+  it('refreshes pending user input after response stream failure', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = {
+      user_input_id: 'input-1',
+      short_id: 4,
+      status: 'pending',
+      question: 'Which plan?',
+      options: [{ id: 'a', label: 'Plan A', value: 'A' }],
+      can_respond: true,
+    }
+    store.messages.push({
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        input: { question: 'Which plan?' },
+        tool_call_id: 'call-ask',
+        toolCallId: 'call-ask',
+        toolName: 'ask_user',
+        running: false,
+        done: true,
+        result: null,
+        userInput,
+      }],
+      timestamp: new Date().toISOString(),
+      streaming: false,
+    })
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{
+        id: 1,
+        type: 'tool',
+        name: 'ask_user',
+        input: { question: 'Which plan?' },
+        tool_call_id: 'call-ask',
+        running: false,
+        user_input: userInput,
+      }],
+      timestamp: new Date().toISOString(),
+    }])
+
+    await store.respondUserInput(userInput, { optionId: 'a', answer: 'A' })
+    await flushPromises()
+    await flushPromises()
+
+    const block = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('pending')
+      expect(block.userInput?.can_respond).toBe(true)
+    }
   })
 
   it('deduplicates concurrent ACP runtime ensure calls', async () => {

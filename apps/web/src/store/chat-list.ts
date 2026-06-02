@@ -30,6 +30,7 @@ import {
   type UITextMessage,
   type UIToolApproval,
   type UIToolMessage,
+  type UIUserInput,
   type UITurn,
   type UIUserTurn,
   type UIStreamEvent,
@@ -55,6 +56,7 @@ export interface ToolCallBlock extends UIToolMessage {
   result: unknown | null
   done: boolean
   approval?: UIToolApproval
+  userInput?: UIUserInput
   backgroundTask?: BackgroundTask
 }
 
@@ -85,6 +87,11 @@ export interface ChatAssistantTurn {
   platform?: string
   externalMessageId?: string
   streaming: boolean
+}
+
+interface UserInputStateSnapshot {
+  block: ToolCallBlock
+  userInput: UIUserInput
 }
 
 export interface BackgroundTask {
@@ -503,6 +510,7 @@ export const useChatStore = defineStore('chat', () => {
           running: backgroundTask ? isBackgroundTaskActive(backgroundTask) : msg.running,
           done: backgroundTask ? !isBackgroundTaskActive(backgroundTask) : !msg.running,
           approval: msg.approval,
+          userInput: msg.user_input,
           backgroundTask: backgroundTask ?? undefined,
           progress: msg.progress ? [...msg.progress] : undefined,
         }
@@ -985,6 +993,38 @@ export const useChatStore = defineStore('chat', () => {
 
   function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
     return turn.messages.some(block => block.type !== 'error')
+  }
+
+  function cloneUserInputState(userInput: UIUserInput): UIUserInput {
+    return {
+      ...userInput,
+      options: userInput.options?.map(option => ({ ...option })),
+    }
+  }
+
+  function snapshotUserInputStates(userInputId: string): UserInputStateSnapshot[] {
+    const id = userInputId.trim()
+    if (!id) return []
+    const snapshots: UserInputStateSnapshot[] = []
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.messages) {
+        if (block.type === 'tool' && block.userInput?.user_input_id === id) {
+          snapshots.push({
+            block,
+            userInput: cloneUserInputState(block.userInput),
+          })
+        }
+      }
+    }
+    return snapshots
+  }
+
+  function restoreUserInputStates(snapshots: UserInputStateSnapshot[]) {
+    for (const snapshot of snapshots) {
+      if (snapshot.block.userInput?.user_input_id !== snapshot.userInput.user_input_id) continue
+      snapshot.block.userInput = cloneUserInputState(snapshot.userInput)
+    }
   }
 
   function rememberAssistantError(errorMessage: string, botId: string, targetSessionId: string, assistantTurn: ChatAssistantTurn) {
@@ -1860,6 +1900,53 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  async function respondUserInput(
+    userInput: UIUserInput,
+    payload: { optionId?: string; answer?: unknown; canceled?: boolean; reason?: string },
+  ) {
+    const bid = currentBotId.value ?? ''
+    const sid = sessionId.value ?? ''
+    if (!bid || !sid || !userInput.user_input_id || streaming.value) return
+    const ws = ensureWebSocket(bid)
+    const streamId = createStreamId()
+    const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
+    const assistantTurn = createOptimisticAssistantTurn()
+    messages.push(assistantTurn)
+    void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
+      finalizeStreamFailure(assistantTurn, bid, sid, error)
+      void refreshCurrentSession(bid, sid).catch(() => {
+        restoreUserInputStates(previousUserInputStates)
+      })
+    })
+    loading.value = true
+
+    const status = payload.canceled ? 'canceled' : 'submitted'
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue
+      for (const block of message.messages) {
+        if (block.type === 'tool' && block.userInput?.user_input_id === userInput.user_input_id) {
+          block.userInput = {
+            ...block.userInput,
+            status,
+            can_respond: false,
+          }
+        }
+      }
+    }
+
+    ws?.send({
+      type: 'user_input_response',
+      stream_id: streamId,
+      session_id: sid,
+      user_input_id: userInput.user_input_id,
+      short_id: userInput.short_id,
+      option_id: payload.optionId,
+      answer: payload.answer,
+      canceled: payload.canceled === true,
+      reason: payload.reason,
+    })
+  }
+
   function clearMessages() {
     abort()
     replaceMessages([])
@@ -1912,6 +1999,7 @@ export const useChatStore = defineStore('chat', () => {
     renameSession,
     sendMessage,
     respondToolApproval,
+    respondUserInput,
     clearMessages,
     resetUserScopedState,
     loadOlderMessages,

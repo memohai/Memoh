@@ -1,5 +1,6 @@
 <template>
   <div
+    v-if="shouldRenderMessage"
     ref="messageItem"
     class="flex gap-3 items-start"
     :class="message.role === 'user' && isSelf && !isSpecialUserMessage ? 'justify-end' : ''"
@@ -256,7 +257,7 @@
 
           <!-- Tool call block -->
           <ToolCallBlock
-            v-else-if="block.type === 'tool'"
+            v-else-if="block.type === 'tool' && isVisibleAssistantBlock(block)"
             :block="(block as ToolCallBlockType)"
           />
 
@@ -332,6 +333,7 @@ import { useI18n } from 'vue-i18n'
 import type {
   AttachmentItem,
   ChatMessage,
+  ContentBlock,
   ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
@@ -472,8 +474,21 @@ function isAssistantBlockStreaming(index: number): boolean {
 
 const hasVisibleAssistantBlocks = computed(() =>
   props.message.role === 'assistant'
-  && props.message.messages.length > 0,
+  && props.message.messages.some(isVisibleAssistantBlock),
 )
+
+const shouldRenderMessage = computed(() =>
+  props.message.role !== 'assistant' || hasVisibleAssistantBlocks.value || props.message.streaming,
+)
+
+function isVisibleAssistantBlock(block: ContentBlock): boolean {
+  if (block.type === 'tool') {
+    return !(block.toolName === 'ask_user' && block.userInput?.status === 'pending')
+  }
+  if (block.type === 'text' || block.type === 'error') return Boolean(block.content)
+  if (block.type === 'attachments') return block.attachments.length > 0
+  return true
+}
 
 const relativeTimestamp = computed(() =>
   formatRelativeTime(props.message.timestamp, { locale: locale.value }),

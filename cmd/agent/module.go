@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/searchproviders"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 func runServe() {
@@ -66,6 +67,7 @@ func options() fx.Option {
 			acl.NewService,
 			settings.NewService,
 			toolapproval.NewService,
+			userinput.NewService,
 			provideProvidersService,
 			searchproviders.NewService,
 			policy.NewService,

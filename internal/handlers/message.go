@@ -25,6 +25,7 @@ import (
 	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // MessageHandler handles bot-scoped messaging endpoints.
@@ -37,6 +38,7 @@ type MessageHandler struct {
 	botService          *bots.Service
 	accountService      *accounts.Service
 	toolApproval        *toolapproval.Service
+	userInput           *userinput.Service
 	bgManager           *background.Manager
 	logger              *slog.Logger
 }
@@ -65,6 +67,10 @@ func (h *MessageHandler) SetMediaService(svc *media.Service) {
 
 func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
 	h.toolApproval = svc
+}
+
+func (h *MessageHandler) SetUserInputService(svc *userinput.Service) {
+	h.userInput = svc
 }
 
 func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
@@ -214,6 +220,11 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 				mergeToolApprovals(items, approvals)
 			}
 		}
+		if sessionID != "" && h.userInput != nil {
+			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
+				mergeUserInputs(items, requests)
+			}
+		}
 		return c.JSON(http.StatusOK, map[string]any{
 			"items": items,
 		})
@@ -285,6 +296,11 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	if h.toolApproval != nil {
 		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
 			mergeToolApprovals(items, approvals)
+		}
+	}
+	if h.userInput != nil {
+		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
+			mergeUserInputs(items, requests)
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{
@@ -367,6 +383,57 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 				Status:         approval.Status,
 				DecisionReason: approval.DecisionReason,
 				CanApprove:     approval.Status == toolapproval.StatusPending,
+			}
+		}
+	}
+}
+
+func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request) {
+	if len(turns) == 0 || len(requests) == 0 {
+		return
+	}
+	byCallID := make(map[string]userinput.Request, len(requests))
+	for _, req := range requests {
+		if callID := strings.TrimSpace(req.ToolCallID); callID != "" {
+			byCallID[callID] = req
+		}
+	}
+	for turnIdx := range turns {
+		if turns[turnIdx].Role != "assistant" {
+			continue
+		}
+		for msgIdx := range turns[turnIdx].Messages {
+			msg := &turns[turnIdx].Messages[msgIdx]
+			if msg.Type != conversation.UIMessageTool {
+				continue
+			}
+			req, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
+			if !ok {
+				continue
+			}
+			running := false
+			msg.Running = &running
+			options := make([]conversation.UIUserInputOption, 0, len(req.UIPayload.Options))
+			for _, option := range req.UIPayload.Options {
+				options = append(options, conversation.UIUserInputOption{
+					ID:          option.ID,
+					Label:       option.Label,
+					Description: option.Description,
+					Value:       option.Value,
+					InputType:   option.InputType,
+					Placeholder: option.Placeholder,
+				})
+			}
+			msg.UserInput = &conversation.UIUserInput{
+				UserInputID: req.ID,
+				ShortID:     req.ShortID,
+				Status:      req.Status,
+				Question:    req.UIPayload.Question,
+				Options:     options,
+				AllowCustom: req.UIPayload.AllowCustom,
+				InputType:   req.UIPayload.InputType,
+				Placeholder: req.UIPayload.Placeholder,
+				CanRespond:  req.Status == userinput.StatusPending,
 			}
 		}
 	}

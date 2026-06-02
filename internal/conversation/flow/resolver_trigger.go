@@ -481,6 +481,7 @@ func uiStreamEventFromAgentEvent(event agentpkg.StreamEvent) conversation.UIMess
 		Attachments: attachments,
 		Error:       event.Error,
 		ApprovalID:  event.ApprovalID,
+		UserInputID: event.UserInputID,
 		ShortID:     event.ShortID,
 		Status:      event.Status,
 		Metadata:    event.Metadata,

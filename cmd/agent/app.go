@@ -96,6 +96,7 @@ import (
 	"github.com/memohai/memoh/internal/storage/providers/fallback"
 	"github.com/memohai/memoh/internal/storage/providers/localfs"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/version"
 	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
@@ -386,7 +387,7 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, channelStore *channel.Store, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, acpPool *acpagent.SessionPool) *flow.Resolver {
+func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *models.Service, queries dbstore.Queries, chatService *conversation.Service, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, memoryRegistry *memprovider.Registry, channelStore *channel.Store, routeService *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *pipelinepkg.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool) *flow.Resolver {
 	resolver := flow.NewResolver(log, modelsService, queries, chatService, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	resolver.SetMemoryRegistry(memoryRegistry)
 	resolver.SetSkillLoader(&skillLoaderAdapter{handler: containerdHandler})
@@ -399,6 +400,7 @@ func provideChatResolver(log *slog.Logger, a *agentpkg.Agent, modelsService *mod
 	resolver.SetPipeline(pipeline)
 	resolver.SetBackgroundManager(bgManager)
 	resolver.SetToolApprovalService(toolApproval)
+	resolver.SetUserInputService(userInput)
 	resolver.SetACPSessionPool(acpPool)
 	if bgManager != nil {
 		bgManager.SetWakeFunc(func(botID, sessionID string) {
@@ -635,6 +637,9 @@ func acpToolProviders(providers []agenttools.ToolProvider) []agenttools.ToolProv
 		if provider == nil {
 			continue
 		}
+		if _, ok := provider.(*agenttools.AskUserProvider); ok {
+			continue
+		}
 		if _, ok := provider.(*agenttools.FederationProvider); ok {
 			continue
 		}
@@ -654,6 +659,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 	}
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService)
 	return []agenttools.ToolProvider{
+		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelManager, channelManager, registry, assetResolver),
 		agenttools.NewContactsProvider(log, routeService),
 		agenttools.NewScheduleProvider(log, scheduleService),
@@ -685,10 +691,11 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, bgManager *background.Manager) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, chatService, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
+	h.SetUserInputService(userInput)
 	h.SetBackgroundManager(bgManager)
 	return h
 }

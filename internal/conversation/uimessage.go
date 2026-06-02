@@ -58,6 +58,7 @@ type UIMessage struct {
 	Running     *bool             `json:"running,omitempty"`
 	Progress    []any             `json:"progress,omitempty"`
 	Approval    *UIToolApproval   `json:"approval,omitempty"`
+	UserInput   *UIUserInput      `json:"user_input,omitempty"`
 	Attachments []UIAttachment    `json:"attachments,omitempty"`
 	Background  *UIBackgroundTask `json:"background_task,omitempty"`
 }
@@ -68,6 +69,27 @@ type UIToolApproval struct {
 	Status         string `json:"status"`
 	DecisionReason string `json:"decision_reason,omitempty"`
 	CanApprove     bool   `json:"can_approve,omitempty"`
+}
+
+type UIUserInput struct {
+	UserInputID string              `json:"user_input_id"`
+	ShortID     int                 `json:"short_id,omitempty"`
+	Status      string              `json:"status"`
+	Question    string              `json:"question"`
+	Options     []UIUserInputOption `json:"options,omitempty"`
+	AllowCustom bool                `json:"allow_custom,omitempty"`
+	InputType   string              `json:"input_type,omitempty"`
+	Placeholder string              `json:"placeholder,omitempty"`
+	CanRespond  bool                `json:"can_respond,omitempty"`
+}
+
+type UIUserInputOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Value       any    `json:"value,omitempty"`
+	InputType   string `json:"input_type,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
 }
 
 // UITurn is the normalized chat turn used by the web frontend.
@@ -116,6 +138,7 @@ type UIMessageStreamEvent struct {
 	Attachments []UIAttachment
 	Error       string
 	ApprovalID  string
+	UserInputID string
 	ShortID     int
 	Status      string
 	Metadata    map[string]any

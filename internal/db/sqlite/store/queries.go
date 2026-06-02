@@ -5147,3 +5147,250 @@ func (q *Queries) UpsertUserProviderOAuthToken(ctx context.Context, arg pgsqlc.U
 	}
 	return result, nil
 }
+
+func (q *Queries) CancelUserInputRequest(ctx context.Context, arg pgsqlc.CancelUserInputRequestParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelUserInputRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.CancelUserInputRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CreateUserInputRequest(ctx context.Context, arg pgsqlc.CreateUserInputRequestParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateUserInputRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.CreateUserInputRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) FailUserInputRequest(ctx context.Context, arg pgsqlc.FailUserInputRequestParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.FailUserInputRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.FailUserInputRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetLatestPendingUserInputBySession(ctx context.Context, arg pgsqlc.GetLatestPendingUserInputBySessionParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetLatestPendingUserInputBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetLatestPendingUserInputBySession(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetPendingUserInputByReplyMessage(ctx context.Context, arg pgsqlc.GetPendingUserInputByReplyMessageParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetPendingUserInputByReplyMessageParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetPendingUserInputByReplyMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetPendingUserInputBySessionShortID(ctx context.Context, arg pgsqlc.GetPendingUserInputBySessionShortIDParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetPendingUserInputBySessionShortIDParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetPendingUserInputBySessionShortID(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetUserInputRequest(ctx context.Context, id pgtype.UUID) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteID string
+	if err := convertValue(id, &sqliteID); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetUserInputRequest(ctx, sqliteID)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListPendingUserInputsBySession(ctx context.Context, arg pgsqlc.ListPendingUserInputsBySessionParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListPendingUserInputsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListPendingUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListUserInputsBySession(ctx context.Context, arg pgsqlc.ListUserInputsBySessionParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListUserInputsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) SubmitUserInputRequest(ctx context.Context, arg pgsqlc.SubmitUserInputRequestParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.SubmitUserInputRequestParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.SubmitUserInputRequest(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateUserInputAssistantMessage(ctx context.Context, arg pgsqlc.UpdateUserInputAssistantMessageParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateUserInputAssistantMessageParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.UpdateUserInputAssistantMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateUserInputPromptMessage(ctx context.Context, arg pgsqlc.UpdateUserInputPromptMessageParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateUserInputPromptMessageParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.UpdateUserInputPromptMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateUserInputToolResultMessage(ctx context.Context, arg pgsqlc.UpdateUserInputToolResultMessageParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateUserInputToolResultMessageParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.UpdateUserInputToolResultMessage(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}

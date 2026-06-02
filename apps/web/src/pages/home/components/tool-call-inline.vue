@@ -50,6 +50,10 @@
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
+      <span
+        v-if="userInputLabel"
+        class="font-mono shrink-0 text-xs text-warning-foreground"
+      >{{ userInputLabel }}</span>
       <ChevronRight
         v-if="!open"
         class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
@@ -105,6 +109,10 @@
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
+      <span
+        v-if="userInputLabel"
+        class="font-mono shrink-0 text-xs text-warning-foreground"
+      >{{ userInputLabel }}</span>
     </div>
 
     <div
@@ -276,6 +284,29 @@ const approvalLabel = computed(() => {
   if (approval.status === 'pending') return `${id} ${t('chat.tools.pendingApproval', 'pending approval')}`.trim()
   return `${id} ${approval.status}`.trim()
 })
+
+const userInputLabel = computed(() => {
+  const userInput = props.block.userInput
+  if (!userInput?.user_input_id) return ''
+  if (userInput.status === 'pending') return ''
+  return userInputStatusLabel(userInput.status)
+})
+
+function userInputStatusLabel(status: string) {
+  const normalized = status.trim().toLowerCase()
+  switch (normalized) {
+    case 'submitted':
+      return t('chat.tools.userInputSubmitted', 'answered')
+    case 'canceled':
+      return t('chat.tools.userInputCanceled', 'canceled')
+    case 'failed':
+      return t('chat.tools.userInputFailed', 'failed')
+    case 'expired':
+      return t('chat.tools.userInputExpired', 'expired')
+    default:
+      return status
+  }
+}
 
 const canRespondApproval = computed(() => {
   const approval = props.block.approval

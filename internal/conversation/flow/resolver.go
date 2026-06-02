@@ -36,6 +36,7 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 const (
@@ -92,6 +93,7 @@ type Resolver struct {
 	streamHTTPClient  *http.Client
 	bgManager         *background.Manager
 	toolApproval      *toolapproval.Service
+	userInput         *userinput.Service
 	outboundFn        func(ctx context.Context, botID, channelType, target, text string) error
 	bgNotifDeferred   sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
 	sessionTurnMu     sync.Mutex
@@ -190,6 +192,10 @@ func (r *Resolver) SetBackgroundManager(m *background.Manager) {
 
 func (r *Resolver) SetToolApprovalService(s *toolapproval.Service) {
 	r.toolApproval = s
+}
+
+func (r *Resolver) SetUserInputService(s *userinput.Service) {
+	r.userInput = s
 }
 
 // SetOutboundFn configures the function used to deliver background notification
@@ -611,7 +617,7 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		LoopDetection:     agentpkg.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: r.bgManager,
 	}
-	if r.toolApproval != nil {
+	if r.toolApproval != nil || r.userInput != nil {
 		cfg.ToolApprovalHandler = r.buildToolApprovalHandler(p)
 	}
 
@@ -652,6 +658,59 @@ func reasoningEffortDisabled(effort string) bool {
 
 func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
 	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+		if strings.TrimSpace(call.ToolName) == userinput.ToolNameAskUser {
+			if err := userinput.ValidateAskUserInput(call.Input); err != nil {
+				// Let the tool's Execute handler return an instructional tool result
+				// to the model instead of creating a fake pending request.
+				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+			}
+			if r.userInput == nil {
+				return sdk.ToolApprovalResult{
+					Decision: sdk.ToolApprovalDecisionRejected,
+					Reason:   "user input service is not configured",
+				}, nil
+			}
+			req, err := r.userInput.CreatePending(ctx, userinput.CreatePendingInput{
+				BotID:                        p.BotID,
+				SessionID:                    p.SessionID,
+				RouteID:                      p.RouteID,
+				ChannelIdentityID:            p.ChannelIdentityID,
+				RequestedByChannelIdentityID: p.ChannelIdentityID,
+				ToolCallID:                   call.ToolCallID,
+				ToolName:                     call.ToolName,
+				Input:                        call.Input,
+				SourcePlatform:               p.CurrentPlatform,
+				ReplyTarget:                  p.ReplyTarget,
+				ConversationType:             p.ConversationType,
+			})
+			if err != nil {
+				return sdk.ToolApprovalResult{}, err
+			}
+			if !isInteractiveApprovalSession(p.SessionType) {
+				canceled, err := r.userInput.Cancel(ctx, userinput.CancelInput{
+					RequestID:              req.ID,
+					ActorChannelIdentityID: p.ChannelIdentityID,
+					Reason:                 "non_interactive_session",
+				})
+				if err != nil {
+					return sdk.ToolApprovalResult{}, err
+				}
+				return sdk.ToolApprovalResult{
+					Decision:   sdk.ToolApprovalDecisionRejected,
+					ApprovalID: canceled.ID,
+					Reason:     "user input requested in a non-interactive session",
+					Metadata:   userinput.DeferredMetadata(canceled),
+				}, nil
+			}
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: req.ID,
+				Metadata:   userinput.DeferredMetadata(req),
+			}, nil
+		}
+		if r.toolApproval == nil {
+			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+		}
 		input := toolapproval.CreatePendingInput{
 			BotID:                        p.BotID,
 			SessionID:                    p.SessionID,

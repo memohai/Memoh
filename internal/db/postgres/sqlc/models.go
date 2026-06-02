@@ -552,6 +552,36 @@ type UserChannelBinding struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserInputRequest struct {
+	ID                           pgtype.UUID        `json:"id"`
+	BotID                        pgtype.UUID        `json:"bot_id"`
+	SessionID                    pgtype.UUID        `json:"session_id"`
+	RouteID                      pgtype.UUID        `json:"route_id"`
+	ChannelIdentityID            pgtype.UUID        `json:"channel_identity_id"`
+	ToolCallID                   string             `json:"tool_call_id"`
+	ToolName                     string             `json:"tool_name"`
+	ShortID                      int32              `json:"short_id"`
+	Status                       string             `json:"status"`
+	InputJson                    []byte             `json:"input_json"`
+	UiPayloadJson                []byte             `json:"ui_payload_json"`
+	ResultJson                   []byte             `json:"result_json"`
+	ProviderMetadata             []byte             `json:"provider_metadata"`
+	RequestedByChannelIdentityID pgtype.UUID        `json:"requested_by_channel_identity_id"`
+	RespondedByChannelIdentityID pgtype.UUID        `json:"responded_by_channel_identity_id"`
+	AssistantMessageID           pgtype.UUID        `json:"assistant_message_id"`
+	ToolResultMessageID          pgtype.UUID        `json:"tool_result_message_id"`
+	PromptMessageID              pgtype.UUID        `json:"prompt_message_id"`
+	PromptExternalMessageID      string             `json:"prompt_external_message_id"`
+	SourcePlatform               string             `json:"source_platform"`
+	ReplyTarget                  string             `json:"reply_target"`
+	ConversationType             string             `json:"conversation_type"`
+	ExpiresAt                    pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
+	RespondedAt                  pgtype.Timestamptz `json:"responded_at"`
+	CanceledAt                   pgtype.Timestamptz `json:"canceled_at"`
+	UpdatedAt                    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type UserProviderOauthToken struct {
 	ID               pgtype.UUID        `json:"id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`

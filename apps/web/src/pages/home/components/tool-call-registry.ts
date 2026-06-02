@@ -241,6 +241,17 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
   
   switch (block.toolName) {
+    case 'ask_user': {
+      const question = block.userInput?.question || pickString(input, 'question')
+      const showQuestionInBody = block.userInput?.status === 'pending'
+      return {
+        icon: TextCursorInput,
+        actionKey: 'ask_user',
+        target: showQuestionInBody ? '' : truncate(question, 80),
+        fullTarget: showQuestionInBody ? '' : question,
+        expandable: true,
+      }
+    }
     case 'read': {
       const path = pickString(input, 'path')
       return { icon: FileText, actionKey: 'read', target: path }

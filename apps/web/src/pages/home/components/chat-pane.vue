@@ -215,6 +215,83 @@
             @change="handleFileInputChange"
           >
           <section>
+            <Transition
+              enter-active-class="transition-all duration-150 ease-out"
+              enter-from-class="opacity-0 translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition-all duration-100 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 translate-y-1"
+            >
+              <div
+                v-if="pendingUserInput"
+                class="mb-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
+              >
+                <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+                  {{ pendingUserInput.question }}
+                </p>
+                <div
+                  v-if="pendingUserInputChoices.length > 0"
+                  class="mt-2 flex flex-col gap-1"
+                >
+                  <Button
+                    v-for="(option, optionIndex) in pendingUserInputChoices"
+                    :key="option.id"
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
+                    :class="selectedPendingUserInputOptionId === option.id ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
+                    :title="option.description || option.label"
+                    :disabled="streaming"
+                    :aria-pressed="selectedPendingUserInputOptionId === option.id"
+                    @click="selectPendingUserInputOption(option)"
+                  >
+                    <span class="mr-2 shrink-0 text-muted-foreground">
+                      {{ optionIndex + 1 }}.
+                    </span>
+                    <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
+                    <Check
+                      v-if="selectedPendingUserInputOptionId === option.id"
+                      class="ml-2 size-3.5 shrink-0 text-muted-foreground"
+                    />
+                  </Button>
+                </div>
+                <div
+                  v-if="showPendingCustomUserInput"
+                  class="mt-1 flex items-center gap-2"
+                >
+                  <input
+                    v-model="pendingUserInputAnswer"
+                    class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :placeholder="pendingUserInputOptionPlaceholder"
+                    :disabled="streaming"
+                    @keydown.enter.prevent="handlePendingUserInputSubmit"
+                  >
+                </div>
+                <div class="mt-2 flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    class="text-xs text-muted-foreground hover:text-foreground"
+                    :disabled="streaming"
+                    @click="handlePendingUserInputCancel"
+                  >
+                    {{ $t('chat.tools.cancelUserInput') }}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    class="text-xs"
+                    :disabled="streaming || !canSubmitPendingUserInput"
+                    @click="handlePendingUserInputSubmit"
+                  >
+                    {{ $t('chat.tools.submitUserInput') }}
+                  </Button>
+                </div>
+              </div>
+            </Transition>
             <div
               v-if="composerError"
               class="mb-2 flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
@@ -484,7 +561,7 @@ import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import type { ChatAttachment } from '@/composables/api/useChat'
+import type { ChatAttachment, UIUserInput } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import type { ChatMessage } from '@/store/chat-list'
 import { useACPRuntime } from '@/composables/useACPRuntime'
@@ -508,6 +585,8 @@ interface ScrollSegmentSource {
   messageIndex: number
 }
 
+type PendingUserInputOption = NonNullable<UIUserInput['options']>[number]
+
 const props = withDefaults(defineProps<{
   tabId?: string
   active?: boolean
@@ -521,6 +600,8 @@ const chatStore = useChatStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const composerError = ref('')
+const pendingUserInputAnswer = ref('')
+const selectedPendingUserInputOptionId = ref('')
 const modelPopoverOpen = ref(false)
 const reasoningPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
@@ -544,6 +625,69 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+
+const pendingUserInput = computed<UIUserInput | null>(() => {
+  for (let msgIndex = messages.value.length - 1; msgIndex >= 0; msgIndex--) {
+    const message = messages.value[msgIndex]
+    if (!message || message.role !== 'assistant') continue
+    for (let blockIndex = message.messages.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = message.messages[blockIndex]
+      if (
+        block?.type === 'tool'
+        && block.userInput?.user_input_id
+        && block.userInput.status === 'pending'
+        && block.userInput.can_respond !== false
+      ) {
+        return block.userInput
+      }
+    }
+  }
+  return null
+})
+
+const pendingUserInputOptions = computed(() => pendingUserInput.value?.options ?? [])
+
+const pendingUserInputChoices = computed(() => pendingUserInputOptions.value)
+
+const selectedPendingUserInputOption = computed(() => (
+  pendingUserInputChoices.value.find(option => option.id === selectedPendingUserInputOptionId.value) ?? null
+))
+
+const selectedPendingUserInputChoiceIsText = computed(() => (
+  selectedPendingUserInputOption.value?.input_type === 'text'
+))
+
+const pendingUserInputOptionPlaceholder = computed(() => (
+  selectedPendingUserInputOption.value?.placeholder
+  || pendingUserInput.value?.placeholder
+  || t('chat.tools.userInputPlaceholder')
+))
+
+const usesFreeTextUserInput = computed(() => {
+  const input = pendingUserInput.value
+  if (!input) return false
+  return pendingUserInputChoices.value.length === 0 || input.input_type === 'text'
+})
+
+const showPendingCustomUserInput = computed(() => {
+  const input = pendingUserInput.value
+  if (!input) return false
+  return selectedPendingUserInputChoiceIsText.value || usesFreeTextUserInput.value
+})
+
+const canSubmitPendingUserInput = computed(() => (
+  selectedPendingUserInputChoiceIsText.value || usesFreeTextUserInput.value
+    ? pendingUserInputAnswer.value.trim().length > 0
+    : Boolean(selectedPendingUserInputOption.value)
+))
+
+watch(
+  () => pendingUserInput.value?.user_input_id,
+  () => {
+    pendingUserInputAnswer.value = ''
+    selectedPendingUserInputOptionId.value = ''
+  },
+)
 
 
 const { data: modelData } = useQuery({
@@ -1375,6 +1519,46 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
     }
     reader.onerror = () => reject(new Error('Failed to read file'))
     reader.readAsDataURL(file)
+  })
+}
+
+function selectPendingUserInputOption(option: PendingUserInputOption) {
+  selectedPendingUserInputOptionId.value = option.id
+  if (option.input_type !== 'text') {
+    pendingUserInputAnswer.value = ''
+  }
+}
+
+function handlePendingUserInputSubmit() {
+  const userInput = pendingUserInput.value
+  if (!userInput) return
+  const option = selectedPendingUserInputOption.value
+  if (option) {
+    if (option.input_type === 'text') {
+      const answer = pendingUserInputAnswer.value.trim()
+      if (!answer) return
+      void chatStore.respondUserInput(userInput, { optionId: option.id, answer })
+      return
+    }
+    void chatStore.respondUserInput(userInput, {
+      optionId: option.id,
+      answer: option.value ?? option.label,
+    })
+    return
+  }
+  if (usesFreeTextUserInput.value) {
+    const answer = pendingUserInputAnswer.value.trim()
+    if (!answer) return
+    void chatStore.respondUserInput(userInput, { answer })
+  }
+}
+
+function handlePendingUserInputCancel() {
+  const userInput = pendingUserInput.value
+  if (!userInput) return
+  void chatStore.respondUserInput(userInput, {
+    canceled: true,
+    reason: 'user_canceled',
   })
 }
 

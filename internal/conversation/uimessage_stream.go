@@ -157,6 +157,50 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		}
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
+	case "user_input_request":
+		state := c.findToolState(event.ToolCallID, event.ToolName)
+		if state == nil {
+			state = &uiToolStreamState{
+				Message: UIMessage{
+					ID:         c.nextMessageID(),
+					Type:       UIMessageTool,
+					Name:       strings.TrimSpace(event.ToolName),
+					Input:      event.Input,
+					ToolCallID: strings.TrimSpace(event.ToolCallID),
+				},
+			}
+			if state.Message.ToolCallID != "" {
+				c.tools[state.Message.ToolCallID] = state
+			}
+		}
+		if event.Input != nil {
+			state.Message.Input = event.Input
+		}
+		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
+			state.Message.Name = trimmed
+		}
+		if trimmed := strings.TrimSpace(event.ToolCallID); trimmed != "" {
+			state.Message.ToolCallID = trimmed
+			c.tools[trimmed] = state
+		}
+		status := strings.TrimSpace(event.Status)
+		if status == "" {
+			status = "pending"
+		}
+		userInputID := strings.TrimSpace(event.UserInputID)
+		if userInputID == "" {
+			userInputID = stringFromAny(event.Metadata["user_input_id"])
+		}
+		state.Message.Running = uiBoolPtr(false)
+		state.Message.UserInput = uiUserInputFromPayload(
+			userInputID,
+			event.ShortID,
+			status,
+			event.Metadata["ui_payload"],
+			status == "pending",
+		)
+		return []UIMessage{cloneToolStreamMessage(state.Message)}
+
 	case "tool_call_end":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {

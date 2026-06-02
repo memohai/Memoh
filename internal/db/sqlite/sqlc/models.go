@@ -504,6 +504,36 @@ type UserChannelBinding struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type UserInputRequest struct {
+	ID                           string         `json:"id"`
+	BotID                        string         `json:"bot_id"`
+	SessionID                    string         `json:"session_id"`
+	RouteID                      sql.NullString `json:"route_id"`
+	ChannelIdentityID            sql.NullString `json:"channel_identity_id"`
+	ToolCallID                   string         `json:"tool_call_id"`
+	ToolName                     string         `json:"tool_name"`
+	ShortID                      int64          `json:"short_id"`
+	Status                       string         `json:"status"`
+	InputJson                    string         `json:"input_json"`
+	UiPayloadJson                string         `json:"ui_payload_json"`
+	ResultJson                   string         `json:"result_json"`
+	ProviderMetadata             string         `json:"provider_metadata"`
+	RequestedByChannelIdentityID sql.NullString `json:"requested_by_channel_identity_id"`
+	RespondedByChannelIdentityID sql.NullString `json:"responded_by_channel_identity_id"`
+	AssistantMessageID           sql.NullString `json:"assistant_message_id"`
+	ToolResultMessageID          sql.NullString `json:"tool_result_message_id"`
+	PromptMessageID              sql.NullString `json:"prompt_message_id"`
+	PromptExternalMessageID      string         `json:"prompt_external_message_id"`
+	SourcePlatform               string         `json:"source_platform"`
+	ReplyTarget                  string         `json:"reply_target"`
+	ConversationType             string         `json:"conversation_type"`
+	ExpiresAt                    sql.NullString `json:"expires_at"`
+	CreatedAt                    string         `json:"created_at"`
+	RespondedAt                  sql.NullString `json:"responded_at"`
+	CanceledAt                   sql.NullString `json:"canceled_at"`
+	UpdatedAt                    string         `json:"updated_at"`
+}
+
 type UserProviderOauthToken struct {
 	ID               string         `json:"id"`
 	ProviderID       string         `json:"provider_id"`

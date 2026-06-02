@@ -18,6 +18,7 @@ const (
 	EventToolCallProgress    StreamEventType = "tool_call_progress"
 	EventToolCallEnd         StreamEventType = "tool_call_end"
 	EventToolApprovalRequest StreamEventType = "tool_approval_request"
+	EventUserInputRequest    StreamEventType = "user_input_request"
 	EventAttachment          StreamEventType = "attachment_delta"
 	EventReaction            StreamEventType = "reaction_delta"
 	EventSpeech              StreamEventType = "speech_delta"
@@ -35,6 +36,7 @@ type StreamEvent struct {
 	ToolName       string           `json:"toolName,omitempty"`
 	ToolCallID     string           `json:"toolCallId,omitempty"`
 	ApprovalID     string           `json:"approvalId,omitempty"`
+	UserInputID    string           `json:"userInputId,omitempty"`
 	ShortID        int              `json:"shortId,omitempty"`
 	Status         string           `json:"status,omitempty"`
 	Input          any              `json:"input,omitempty"`

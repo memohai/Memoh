@@ -234,6 +234,125 @@ CREATE TABLE mcp_oauth_tokens (
 	assertScopes(t, legacy.ScopesSupported, []string{"email", "offline_access"})
 }
 
+func TestSQLiteUserInputAllowsRepeatedToolCallID(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	execAll(t, conn, `
+CREATE TABLE bots (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE bot_sessions (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE bot_channel_routes (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE channel_identities (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE bot_history_messages (
+  id TEXT PRIMARY KEY
+);
+CREATE TABLE user_input_requests (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES bot_sessions(id) ON DELETE CASCADE,
+  route_id TEXT REFERENCES bot_channel_routes(id) ON DELETE SET NULL,
+  channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
+  tool_call_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL DEFAULT 'ask_user',
+  short_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  input_json TEXT NOT NULL,
+  ui_payload_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  provider_metadata TEXT NOT NULL DEFAULT '{}',
+  requested_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
+  responded_by_channel_identity_id TEXT REFERENCES channel_identities(id) ON DELETE SET NULL,
+  assistant_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  tool_result_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  prompt_message_id TEXT REFERENCES bot_history_messages(id) ON DELETE SET NULL,
+  prompt_external_message_id TEXT NOT NULL DEFAULT '',
+  source_platform TEXT NOT NULL DEFAULT '',
+  reply_target TEXT NOT NULL DEFAULT '',
+  conversation_type TEXT NOT NULL DEFAULT '',
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  responded_at TEXT,
+  canceled_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
+  CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
+  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
+);
+`)
+
+	botID := "00000000-0000-0000-0000-000000001001"
+	sessionID := "00000000-0000-0000-0000-000000001002"
+	actorID := "00000000-0000-0000-0000-000000001003"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bots (id) VALUES (?)`, botID); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO bot_sessions (id) VALUES (?)`, sessionID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO channel_identities (id) VALUES (?)`, actorID); err != nil {
+		t.Fatalf("insert identity: %v", err)
+	}
+
+	store, err := New(conn)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	q := NewQueries(store)
+	create := func(question string) pgsqlc.UserInputRequest {
+		t.Helper()
+		row, err := q.CreateUserInputRequest(ctx, pgsqlc.CreateUserInputRequestParams{
+			BotID:                        mustUUID(t, botID),
+			SessionID:                    mustUUID(t, sessionID),
+			ToolCallID:                   "reused-call-id",
+			ToolName:                     "ask_user",
+			InputJson:                    []byte(`{"question":"` + question + `"}`),
+			UiPayloadJson:                []byte(`{"question":"` + question + `"}`),
+			ProviderMetadata:             []byte(`{}`),
+			RequestedByChannelIdentityID: mustUUID(t, actorID),
+		})
+		if err != nil {
+			t.Fatalf("create user input %q: %v", question, err)
+		}
+		return row
+	}
+
+	first := create("first")
+	if first.Status != "pending" || first.ShortID != 1 {
+		t.Fatalf("first request = status %q short_id %d", first.Status, first.ShortID)
+	}
+	canceled, err := q.CancelUserInputRequest(ctx, pgsqlc.CancelUserInputRequestParams{
+		ID:                           first.ID,
+		ResultJson:                   []byte(`{"status":"canceled"}`),
+		RespondedByChannelIdentityID: mustUUID(t, actorID),
+	})
+	if err != nil {
+		t.Fatalf("cancel first: %v", err)
+	}
+	if canceled.Status != "canceled" {
+		t.Fatalf("canceled status = %q", canceled.Status)
+	}
+
+	second := create("second")
+	if second.ID == first.ID {
+		t.Fatalf("expected a new request id when tool_call_id is reused")
+	}
+	if second.Status != "pending" || second.ShortID != 2 {
+		t.Fatalf("second request = status %q short_id %d, want pending #2", second.Status, second.ShortID)
+	}
+}
+
 func execAll(t *testing.T, db *sql.DB, statement string) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), statement); err != nil {

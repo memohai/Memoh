@@ -51,6 +51,7 @@ export interface StreamEvent {
     | 'text_start' | 'text_delta' | 'text_end'
     | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
     | 'tool_call_start' | 'tool_call_progress' | 'tool_call_end'
+    | 'user_input_request'
     | 'attachment_delta' | 'reaction_delta'
     | 'agent_start' | 'agent_end' | 'agent_abort'
     | 'processing_started' | 'processing_completed' | 'processing_failed'
@@ -145,6 +146,7 @@ export interface UIToolMessage {
   running: boolean
   progress?: unknown[]
   approval?: UIToolApproval
+  user_input?: UIUserInput
   background_task?: UIBackgroundTask
 }
 
@@ -171,6 +173,27 @@ export interface UIToolApproval {
   status: string
   decision_reason?: string
   can_approve?: boolean
+}
+
+export interface UIUserInput {
+  user_input_id: string
+  short_id?: number
+  status: string
+  question: string
+  options?: UIUserInputOption[]
+  allow_custom?: boolean
+  input_type?: string
+  placeholder?: string
+  can_respond?: boolean
+}
+
+export interface UIUserInputOption {
+  id: string
+  label: string
+  description?: string
+  value?: unknown
+  input_type?: string
+  placeholder?: string
 }
 
 export interface UIAttachmentsMessage {

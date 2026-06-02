@@ -33,10 +33,11 @@ type uiContentPart struct {
 }
 
 type uiExtractedToolCall struct {
-	ID       string
-	Name     string
-	Input    any
-	Approval *UIToolApproval
+	ID        string
+	Name      string
+	Input     any
+	Approval  *UIToolApproval
+	UserInput *UIUserInput
 }
 
 type uiExtractedToolResult struct {
@@ -101,6 +102,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []ModelMessage) []UIMess
 					ToolCallID: call.ID,
 					Running:    uiBoolPtr(true),
 					Approval:   call.Approval,
+					UserInput:  call.UserInput,
 				})
 				if call.ID != "" {
 					pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
@@ -558,10 +560,11 @@ func extractPersistedToolCalls(message ModelMessage) []uiExtractedToolCall {
 			continue
 		}
 		calls = append(calls, uiExtractedToolCall{
-			ID:       strings.TrimSpace(part.ToolCallID),
-			Name:     strings.TrimSpace(part.ToolName),
-			Input:    part.Input,
-			Approval: extractApprovalMetadata(part.ProviderMetadata),
+			ID:        strings.TrimSpace(part.ToolCallID),
+			Name:      strings.TrimSpace(part.ToolName),
+			Input:     part.Input,
+			Approval:  extractApprovalMetadata(part.ProviderMetadata),
+			UserInput: extractUserInputMetadata(part.ProviderMetadata),
 		})
 	}
 	if len(calls) > 0 {
@@ -613,6 +616,35 @@ func extractApprovalMetadata(metadata map[string]any) *UIToolApproval {
 		DecisionReason: stringFromAny(obj["decision_reason"]),
 		CanApprove:     boolFromAny(obj["can_approve"], true),
 	}
+}
+
+func extractUserInputMetadata(metadata map[string]any) *UIUserInput {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["user_input"]
+	if !ok {
+		return nil
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	userInputID := stringFromAny(obj["user_input_id"])
+	if userInputID == "" {
+		return nil
+	}
+	status := stringFromAny(obj["status"])
+	if status == "" {
+		status = "pending"
+	}
+	return uiUserInputFromPayload(
+		userInputID,
+		intFromAny(obj["short_id"]),
+		status,
+		obj["ui_payload"],
+		status == "pending",
+	)
 }
 
 func intFromAny(value any) int {
@@ -899,6 +931,14 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 		}
 	}
 	message.Running = uiBoolPtr(false)
+	if message.UserInput != nil {
+		if payload, ok := toolResultMap(output); ok {
+			if status := stringFromMap(payload, "status"); status != "" {
+				message.UserInput.Status = status
+			}
+		}
+		message.UserInput.CanRespond = false
+	}
 }
 
 func backgroundTaskFromExecToolResult(output any) (UIBackgroundTask, bool) {

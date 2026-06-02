@@ -267,10 +267,14 @@ type wsClientMessage struct {
 	ModelID         string            `json:"model_id,omitempty"`
 	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	ApprovalID      string            `json:"approval_id,omitempty"`
+	UserInputID     string            `json:"user_input_id,omitempty"`
 	ShortID         int               `json:"short_id,omitempty"`
 	ToolCallID      string            `json:"tool_call_id,omitempty"`
 	Decision        string            `json:"decision,omitempty"`
 	Reason          string            `json:"reason,omitempty"`
+	Answer          json.RawMessage   `json:"answer,omitempty"`
+	OptionID        string            `json:"option_id,omitempty"`
+	Canceled        bool              `json:"canceled,omitempty"`
 }
 
 type wsOutboundEvent struct {
@@ -637,6 +641,47 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				},
 			)
 
+		case "user_input_response":
+			sessionID := strings.TrimSpace(msg.SessionID)
+			if sessionID == "" {
+				sendWSError(writer, strings.TrimSpace(msg.StreamID), "", "session_id is required")
+				continue
+			}
+			streamID := strings.TrimSpace(msg.StreamID)
+			if streamID == "" {
+				sendWSError(writer, "", sessionID, "stream_id is required")
+				continue
+			}
+			explicitID := strings.TrimSpace(msg.UserInputID)
+			if explicitID == "" && msg.ShortID > 0 {
+				explicitID = strconv.Itoa(msg.ShortID)
+			}
+			var answer any
+			if len(msg.Answer) > 0 {
+				if err := json.Unmarshal(msg.Answer, &answer); err != nil {
+					answer = string(msg.Answer)
+				}
+			} else if text := strings.TrimSpace(msg.Text); text != "" {
+				answer = text
+			}
+
+			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error",
+				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}) error {
+					return h.resolver.RespondUserInput(ctx, flow.UserInputResponseInput{
+						BotID:                  botID,
+						SessionID:              sessionID,
+						ActorChannelIdentityID: channelIdentityID,
+						UserInputID:            strings.TrimSpace(msg.UserInputID),
+						ExplicitID:             explicitID,
+						Answer:                 answer,
+						OptionID:               strings.TrimSpace(msg.OptionID),
+						Canceled:               msg.Canceled,
+						Reason:                 strings.TrimSpace(msg.Reason),
+						ChatToken:              bearerToken,
+					}, eventCh)
+				},
+			)
+
 		case "message":
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -726,6 +771,7 @@ func uiStreamEventFromAgentEvent(event agentpkg.StreamEvent) conversation.UIMess
 		Attachments: attachments,
 		Error:       event.Error,
 		ApprovalID:  event.ApprovalID,
+		UserInputID: event.UserInputID,
 		ShortID:     event.ShortID,
 		Status:      event.Status,
 		Metadata:    event.Metadata,
