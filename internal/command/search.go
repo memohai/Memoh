@@ -38,7 +38,7 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 				otherRecords = append(otherRecords, rec)
 			}
 			currentRecords = append(currentRecords, otherRecords...)
-			return buildListResult(cc.T("cmd.search.title"), "search", "list", nil, currentRecords, cc.Page, defaultListLimit, cc.T("cmd.search.switchHint", map[string]any{"command": CmdRef("search set <name>")}), cc.L), nil
+			return buildListResult(cc.T("cmd.search.title"), "search", "list", nil, currentRecords, cc.Page, defaultListLimit, "", cc.L), nil
 		},
 	})
 	g.Register(SubCommand{

@@ -202,7 +202,7 @@ func (r *Registry) GroupHelpResult(name string, localizers ...*i18n.Localizer) *
 		Text: group.Usage(t),
 		Interactive: &Interactive{
 			Kind:    InteractiveChoices,
-			Choices: &ChoicesView{Title: title, Choices: choices, Columns: 1},
+			Choices: &ChoicesView{Title: title, Choices: choices, Columns: 1, SuppressFallback: true},
 		},
 	}
 }

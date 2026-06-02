@@ -423,12 +423,17 @@ func TestFormatRecordsNote(t *testing.T) {
 	result := formatRecords([]listRecord{
 		{fields: []kv{{"Name", "daily-report"}, {"Enabled", "on"}}, note: "daily at 09:00 · Send the morning summary"},
 	})
-	// Label and a chip on line 1; prose note indented on line 2.
+	// Note inlined with em-dash so plain-text IMs (Weixin / WeChat OA /
+	// Local-Web) don't soft-wrap-collapse a 2-space-indented continuation
+	// line into the next row's label.
 	if !strings.Contains(result, "- `daily-report` — on") {
 		t.Errorf("expected label + chip line, got: %s", result)
 	}
-	if !strings.Contains(result, "\n  daily at 09:00 · Send the morning summary") {
-		t.Errorf("expected indented note line, got: %s", result)
+	if !strings.Contains(result, " — daily at 09:00 · Send the morning summary") {
+		t.Errorf("expected inline em-dash note, got: %s", result)
+	}
+	if strings.Contains(result, "\n  daily at 09:00") {
+		t.Errorf("note must not appear on a 2-space-indented continuation line, got: %s", result)
 	}
 }
 

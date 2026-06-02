@@ -43,6 +43,11 @@ type Interactive struct {
 // ListView is a generic paginated list. It is re-derivable by re-running the
 // originating command with a page offset, so Resource/Action/Args round-trip
 // through the callback data of pagination buttons.
+//
+// HintVerb is an optional explicit verb (one of HintVerb*) for trailer
+// derivation on no-button channels — used when rows are display-only but the
+// list has a paired typeable affordance (e.g. /mcp list rows are display-only
+// but /mcp get <name> is the typeable next step). Empty = infer from structure.
 type ListView struct {
 	Title        string
 	ButtonText   string   // optional compact text for button-capable channels
@@ -54,6 +59,7 @@ type ListView struct {
 	Page         int        // zero-based page index of this view
 	PageSize     int        // items per page
 	ExtraActions []ListItem // contextual action buttons below the list rows (e.g. "All commands")
+	HintVerb     string     // optional fallback-trailer verb override (HintVerb*)
 }
 
 // ListItem is one row in a ListView. Action is nil for display-only rows.
@@ -65,10 +71,15 @@ type ListItem struct {
 }
 
 // ItemAction triggers a command when a row is tapped.
+//
+// Verb is an optional explicit hint verb (one of HintVerb*) overriding the
+// trailer-derivation logic used on no-button channels. Empty = infer from
+// structure.
 type ItemAction struct {
 	Resource string
 	Action   string
 	Args     []string
+	Verb     string
 }
 
 // ModelPickerView is the two-level model picker (populated in the model-picker
@@ -117,10 +128,15 @@ type PickerModel struct {
 }
 
 // ChoicesView is a flat set of selectable choices (no pagination).
+//
+// SuppressFallback opts the surface out of no-button trailer derivation —
+// used when the body Text already enumerates every typeable affordance (e.g.
+// /help <group>'s Usage block lists every sub-command verbatim).
 type ChoicesView struct {
-	Title   string
-	Choices []ListItem
-	Columns int // optional keyboard columns; 0 lets renderers pick
+	Title            string
+	Choices          []ListItem
+	Columns          int // optional keyboard columns; 0 lets renderers pick
+	SuppressFallback bool
 }
 
 // RangeView is a time-window selector for a time-series command. Selecting a

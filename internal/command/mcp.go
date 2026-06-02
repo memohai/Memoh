@@ -34,7 +34,10 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					action: &ItemAction{Resource: "mcp", Action: "get", Args: []string{item.Name}},
 				})
 			}
-			result := buildListResult(cc.T("cmd.mcp.title"), "mcp", "list", nil, records, cc.Page, defaultListLimit, cc.T("cmd.mcp.detailsHint", map[string]any{"command": CmdRef("mcp get <name>")}), cc.L)
+			result := buildListResult(cc.T("cmd.mcp.title"), "mcp", "list", nil, records, cc.Page, defaultListLimit, "", cc.L)
+			if result.Interactive != nil && result.Interactive.List != nil {
+				result.Interactive.List.HintVerb = HintVerbDetails
+			}
 			return WithExtraActions(result,
 				ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "mcp"}},
 			), nil

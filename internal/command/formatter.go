@@ -59,8 +59,14 @@ func formatRow(r listRecord) string {
 	if len(chips) > 0 {
 		fmt.Fprintf(&b, " — %s", strings.Join(chips, " · "))
 	}
+	// Note inlined with the row, not on a 2-space-indented continuation line.
+	// Plain-text IMs (Weixin / WeChat OA / Local-Web) collapse indented
+	// continuation lines, blending one row's note into the next row's label.
+	// An em-dash separator keeps the note attached to its row on every channel
+	// at the cost of one denser line on Telegram. Acceptable: note text is
+	// already truncated by callers (60–80 chars).
 	if note := strings.TrimSpace(r.note); note != "" {
-		fmt.Fprintf(&b, "\n  %s", note)
+		fmt.Fprintf(&b, " — %s", note)
 	}
 	return b.String()
 }

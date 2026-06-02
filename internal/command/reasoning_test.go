@@ -40,9 +40,13 @@ func TestReasoningChoicesIncludeFullBackendEffortLadder(t *testing.T) {
 	t.Parallel()
 	res := reasoningResult(i18n.New("en"), true, "xhigh")
 	assertReasoningMarked(t, res, "xhigh")
+	labels := make(map[string]bool)
+	for _, c := range res.Interactive.Choices.Choices {
+		labels[c.Label] = true
+	}
 	for _, want := range []string{"off", "none", "low", "medium", "high", "xhigh"} {
-		if !strings.Contains(res.Text, want) {
-			t.Errorf("reasoning fallback missing %q: %s", want, res.Text)
+		if !labels[want] {
+			t.Errorf("reasoning choices missing %q", want)
 		}
 	}
 }

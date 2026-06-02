@@ -95,9 +95,11 @@ func (rc RenderContext) localizerFor(result *command.Result) *i18n.Localizer {
 // renderResult converts a neutral command.Result into a channel.Message,
 // upgrading to interactive inline-keyboard buttons when the channel advertises
 // button support. Channels without button support (or results without
-// structured data) degrade to the complete fallback Text. The final message
-// format (Markdown vs Plain) is decided once, capability-gated. The renderer's
-// own chrome (Close/Prev/Next/…) is localized to Result.Locale.
+// structured data) degrade to the complete fallback Text, with a derived
+// "typeable affordances" trailer appended so users on no-button channels can
+// still discover and invoke what the buttons would have done. The final
+// message format (Markdown vs Plain) is decided once, capability-gated. The
+// renderer's own chrome (Close/Prev/Next/…) is localized to Result.Locale.
 func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	if result == nil {
 		return channel.Message{}
@@ -105,7 +107,7 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	t := rc.localizerFor(result)
 	var msg channel.Message
 	if result.Interactive == nil || !rc.Caps.Buttons {
-		msg = channel.Message{Text: result.Text}
+		msg = channel.Message{Text: appendFallbackTrailer(result.Text, result.Interactive, rc.Caps, t)}
 	} else {
 		switch result.Interactive.Kind {
 		case command.InteractiveList:
@@ -123,15 +125,41 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	return applyMessageFormat(msg, rc.Caps)
 }
 
+// appendFallbackTrailer adds a typeable-command guide derived from Interactive
+// when buttons aren't available (or absent). Telegram-class channels (with
+// buttons) take a different code path and never enter here, so the trailer
+// never appears alongside live buttons.
+func appendFallbackTrailer(text string, iv *command.Interactive, caps channel.ChannelCapabilities, t *i18n.Localizer) string {
+	if caps.Buttons || iv == nil {
+		return text
+	}
+	trailer := command.FallbackTrailer(iv, t)
+	if trailer == "" {
+		return text
+	}
+	if strings.TrimSpace(text) == "" {
+		return trailer
+	}
+	return text + "\n\n" + trailer
+}
+
 // applyMessageFormat sets the message format from the channel's capabilities:
 // Markdown when supported (Telegram renders it, others degrade client-side),
 // otherwise the inline markup authored upstream is stripped so text-only
 // channels stay clean. This is the single place command-reply format is decided.
+//
+// The plain branch MUST set Format explicitly. Otherwise the downstream
+// outbound normalizer (channel.normalizeOutboundMessage) auto-detects Markdown
+// from list bullets ("- /help — …") and promotes Format to Markdown, which
+// then fails validateMessageCapabilities on channels like Weixin / WeChat OA /
+// Local-Web that declare neither Markdown nor RichText — and the user sees
+// nothing because the error is only logged, never replied.
 func applyMessageFormat(msg channel.Message, caps channel.ChannelCapabilities) channel.Message {
 	if caps.Markdown || caps.RichText {
 		msg.Format = channel.MessageFormatMarkdown
 	} else {
 		msg.Text = stripInlineMarkup(msg.Text)
+		msg.Format = channel.MessageFormatPlain
 	}
 	return msg
 }

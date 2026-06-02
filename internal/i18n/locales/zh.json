@@ -286,6 +286,7 @@
     "model": {
       "title": "对话模型",
       "currentTitle": "当前模型",
+      "byProvider": "按服务商：",
       "fieldProvider": "服务商",
       "unavailable": "模型功能暂不可用。",
       "listChanged": "模型列表已变化，请重新打开 /model 再选择。",
@@ -293,8 +294,6 @@
       "setHeartbeatUsage": "用法：/model set-heartbeat <model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "服务商 {provider} 下没有对话模型。运行 {command} 查看全部服务商。",
       "empty": "还没有对话模型。\n\n请在 Web 控制台添加模型。",
-      "currentHint": "使用 {command} 查看当前选择。",
-      "narrowHint": "使用 {command} 缩小结果范围。",
       "marker": {
         "chat": "对话",
         "heartbeat": "心跳"
@@ -305,7 +304,6 @@
       "label": "记忆服务商",
       "unavailable": "记忆功能暂不可用。",
       "empty": "还没有记忆服务商。\n\n记忆服务商让机器人在多次对话之间保留长期记忆。请在 Web 控制台添加。",
-      "switchHint": "使用 {command} 切换。",
       "noneSet": "还没有设置记忆服务商。用 {list} 查看选项，然后用 {set} 选择。",
       "active": "当前记忆服务商：{name}",
       "setUsage": "用法：/memory set <name>",
@@ -316,7 +314,6 @@
       "label": "搜索服务商",
       "unavailable": "搜索功能暂不可用。",
       "empty": "还没有搜索服务商。\n\n搜索服务商让机器人查询网页信息。请在 Web 控制台添加。",
-      "switchHint": "使用 {command} 切换。",
       "noneSet": "还没有设置搜索服务商。用 {list} 查看选项，然后用 {set} 选择。",
       "active": "当前搜索服务商：{name}",
       "setUsage": "用法：/search set <name>",
@@ -355,7 +352,6 @@
     "mcp": {
       "title": "MCP 连接",
       "empty": "还没有 MCP 连接。\n\nMCP 连接会给机器人提供外部服务器上的额外工具。请在 Web 控制台添加。",
-      "detailsHint": "使用 {command} 查看完整详情。",
       "getUsage": "用法：{command}",
       "deleteUsage": "用法：/mcp delete <name>",
       "fieldStatus": "状态",
@@ -421,11 +417,19 @@
       "unavailable": "上下文压缩暂不可用。",
       "done": "✅ 上下文已压缩。"
     },
+    "fallback": {
+      "switch": "切换：{command}",
+      "pick": "选择：{command}",
+      "toggle": "切换：{command}",
+      "open": "可选操作：{commands}",
+      "details": "查看详情：{command}",
+      "range": "时间范围：{command}（可选 {presets}）",
+      "menu": "或直接输入 {command}"
+    },
     "reasoning": {
       "header": "🧠 推理",
       "current": "当前：{level}",
       "tapPrompt": "强度越高，思考越仔细，但回复更慢。点按选择级别：",
-      "levelsFallback": "可选级别：{levels}。\n使用 {command} 设置。",
       "setUsage": "用法：/reasoning set <off|none|low|medium|high|xhigh>",
       "unavailable": "推理功能暂不可用。",
       "unknownLevel": "未知级别 {level}，请选择 off、none、low、medium、high 或 xhigh。"

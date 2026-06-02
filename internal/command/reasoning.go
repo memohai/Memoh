@@ -111,15 +111,13 @@ func reasoningResult(t *i18n.Localizer, enabled bool, effort string) *Result {
 			Action:   &ItemAction{Resource: "reasoning", Action: "set", Args: []string{lvl}},
 		})
 	}
-	// Button channels get the tradeoff + a tap prompt; text-only channels get a
-	// copyable set command instead of a list that just restates the buttons.
+	// Button channels see header + "Choose a level:" via Choices.Title; no-button
+	// channels see header alone — the renderer appends the auto-derived
+	// "Pick with /reasoning set <off|none|low|medium|high|xhigh>." trailer so the
+	// level list and the typeable form arrive together without manual baking.
 	buttonTitle := header + "\n\n" + t.T("cmd.reasoning.tapPrompt")
-	fallback := header + "\n\n" + t.T("cmd.reasoning.levelsFallback", map[string]any{
-		"levels":  strings.Join(reasoningChoices, " · "),
-		"command": CmdRef("reasoning set <level>"),
-	})
 	return &Result{
-		Text: fallback,
+		Text: header,
 		Interactive: &Interactive{
 			Kind:    InteractiveChoices,
 			Choices: &ChoicesView{Title: buttonTitle, Choices: choices},

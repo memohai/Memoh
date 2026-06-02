@@ -1082,3 +1082,36 @@ func TestNormalizeOutboundMessage_RichParts(t *testing.T) {
 		t.Errorf("expected %q, got %q", MessageFormatRich, msg.Format)
 	}
 }
+
+// TestNormalizeOutboundMessage_BulletListFalsePositive is the regression guard
+// for the silent-command-failure bug on plain-text-only channels (Weixin,
+// WeChat OA, Local-Web). The /help body looks like:
+//
+//	**Available commands**
+//
+//	- /help — Show available commands
+//	- /new — Start a new conversation
+//	...
+//
+// After the renderer strips ** markers for non-markdown channels, the leading
+// "- " bullets remain and ContainsMarkdown's ^[-*]\s pattern matches them. If
+// Format is left empty, the auto-detect promotes the message to Markdown and
+// validateMessageCapabilities rejects it with "channel does not support
+// markdown" — which is logged but never replied, so the user sees silence.
+//
+// The renderer guards against this by setting Format=Plain explicitly. This
+// test pins the contract: an EXPLICIT Plain format survives, regardless of
+// what auto-detect would have inferred from the bullet list.
+func TestNormalizeOutboundMessage_BulletListExplicitPlainSurvives(t *testing.T) {
+	t.Parallel()
+	bulletHelp := "Available commands\n\n- /help — Show available commands\n- /new — Start a new conversation\n- /stop — Stop the current reply\n"
+	msg := normalizeOutboundMessage(Message{Text: bulletHelp, Format: MessageFormatPlain})
+	if msg.Format != MessageFormatPlain {
+		t.Fatalf("explicit plain format must survive bullet-list auto-detect, got %q", msg.Format)
+	}
+	// Sanity: without the explicit Plain, auto-detect IS fooled by the bullets.
+	autoDetected := normalizeOutboundMessage(Message{Text: bulletHelp})
+	if autoDetected.Format != MessageFormatMarkdown {
+		t.Fatalf("auto-detect is supposed to promote bullet lists to markdown (this is the bug the renderer guards against); got %q — if the auto-detect rule changed, also update applyMessageFormat", autoDetected.Format)
+	}
+}

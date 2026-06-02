@@ -71,6 +71,9 @@ func TestRenderResultFormatGate(t *testing.T) {
 	if plain.Format == channel.MessageFormatMarkdown {
 		t.Error("text-only channel should not be markdown")
 	}
+	if plain.Format != channel.MessageFormatPlain {
+		t.Errorf("text-only channel must set Format=plain explicitly (else outbound auto-detect promotes bullet-list output to markdown and validateMessageCapabilities rejects it on WeChat/Local/WechatOA): got %q", plain.Format)
+	}
 	if strings.Contains(plain.Text, "**") || strings.Contains(plain.Text, "`") {
 		t.Errorf("text-only channel should strip markup, got %q", plain.Text)
 	}

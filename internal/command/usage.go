@@ -97,15 +97,18 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 					b.WriteByte('\n')
 				}
 				first = false
-				b.WriteString(MdBold(bk.label) + ":\n")
+				b.WriteString(MdBold(bk.label) + "\n")
 				var totalIn, totalOut int64
 				for _, r := range bk.rows {
 					day := r.Day.Time.Format("Jan 02")
-					fmt.Fprintf(&b, "  %s  %s\n", day, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
+					// Bulleted lines so WeChat / Weixin / Local-Web preserve the per-day
+					// breaks. Indented (2-space) lines without a bullet get collapsed by
+					// plain-text IM renderers and the breakdown reads as one paragraph.
+					fmt.Fprintf(&b, "- %s · %s\n", day, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
 					totalIn += r.InputTokens
 					totalOut += r.OutputTokens
 				}
-				fmt.Fprintf(&b, "  %s  %s\n", cc.T("cmd.usage.total"), cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(totalIn), "out": formatTokens(totalOut)}))
+				fmt.Fprintf(&b, "- %s · %s\n", cc.T("cmd.usage.total"), cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(totalIn), "out": formatTokens(totalOut)}))
 			}
 
 			return &Result{
@@ -156,7 +159,9 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 					!strings.Contains(strings.ToLower(name), strings.ToLower(r.ProviderName)):
 					name = fmt.Sprintf("%s (%s)", name, r.ProviderName)
 				}
-				fmt.Fprintf(&b, "  %s — %s\n", name, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
+				// Bulleted lines so per-model breakdown survives plain-text IMs that
+				// fold indented continuation lines.
+				fmt.Fprintf(&b, "- %s — %s\n", name, cc.T("cmd.usage.inOut", map[string]any{"in": formatTokens(r.InputTokens), "out": formatTokens(r.OutputTokens)}))
 			}
 
 			return &Result{

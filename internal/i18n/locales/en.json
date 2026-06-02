@@ -286,6 +286,7 @@
     "model": {
       "title": "Chat Models",
       "currentTitle": "Current Models",
+      "byProvider": "By provider:",
       "fieldProvider": "Provider",
       "unavailable": "Models aren't available right now.",
       "listChanged": "Model list changed — reopen /model to pick again.",
@@ -293,8 +294,6 @@
       "setHeartbeatUsage": "Usage: /model set-heartbeat <model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "No chat models under provider {provider}. Run {command} to see all providers.",
       "empty": "No chat models yet.\n\nAdd a model in the web dashboard.",
-      "currentHint": "Use {command} to inspect active selections.",
-      "narrowHint": "Use {command} to narrow results.",
       "marker": {
         "chat": "chat",
         "heartbeat": "heartbeat"
@@ -305,7 +304,6 @@
       "label": "Memory provider",
       "unavailable": "Memory isn't available right now.",
       "empty": "No memory providers yet.\n\nMemory providers give the bot long-term memory across conversations. Add one in the web dashboard.",
-      "switchHint": "Switch with {command}.",
       "noneSet": "No memory provider is set. See options with {list}, then choose one with {set}.",
       "active": "Active memory provider: {name}",
       "setUsage": "Usage: /memory set <name>",
@@ -316,7 +314,6 @@
       "label": "Search provider",
       "unavailable": "Search isn't available right now.",
       "empty": "No search providers yet.\n\nSearch providers let the bot look things up on the web. Add one in the web dashboard.",
-      "switchHint": "Switch with {command}.",
       "noneSet": "No search provider is set. See options with {list}, then choose one with {set}.",
       "active": "Active search provider: {name}",
       "setUsage": "Usage: /search set <name>",
@@ -355,7 +352,6 @@
     "mcp": {
       "title": "MCP Connections",
       "empty": "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard.",
-      "detailsHint": "See full details with {command}.",
       "getUsage": "Usage: {command}",
       "deleteUsage": "Usage: /mcp delete <name>",
       "fieldStatus": "Status",
@@ -421,11 +417,19 @@
       "unavailable": "Compaction isn't available right now.",
       "done": "✅ Context compacted."
     },
+    "fallback": {
+      "switch": "Switch with {command}.",
+      "pick": "Pick with {command}.",
+      "toggle": "Toggle: {command}.",
+      "open": "Open:{commands}",
+      "details": "See details with {command}.",
+      "range": "Time window: {command} (presets: {presets}).",
+      "menu": "Or type {command} directly."
+    },
     "reasoning": {
       "header": "🧠 Reasoning",
       "current": "Current: {level}",
       "tapPrompt": "Higher effort means more careful thinking, but slower replies. Tap a level:",
-      "levelsFallback": "Levels: {levels}.\nSet with {command}.",
       "setUsage": "Usage: /reasoning set <off|none|low|medium|high|xhigh>",
       "unavailable": "Reasoning isn't available right now.",
       "unknownLevel": "Unknown level {level} — choose off, none, low, medium, high, or xhigh."

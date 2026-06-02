@@ -27,15 +27,19 @@ func (h *Handler) buildFSGroup() *CommandGroup {
 			if len(entries) == 0 {
 				return cc.T("cmd.fs.emptyDir", map[string]any{"path": fmt.Sprintf("%q", dir)}), nil
 			}
-			// Wrap in a code fence so the proportional font doesn't collapse the
-			// indentation and columns stay aligned.
+			// Wrap in a code fence so on markdown-capable channels the proportional
+			// font doesn't collapse alignment. Inside the fence, entries are
+			// bulleted (not 2-space indented) so that on plain-text channels
+			// (Weixin / WeChat OA / Local-Web) — where the fence is stripped —
+			// each entry still owns its own line instead of soft-wrapping into
+			// the parent header.
 			var b strings.Builder
 			fmt.Fprintf(&b, "```\n%s:\n", dir)
 			for _, e := range entries {
 				if e.IsDir {
-					fmt.Fprintf(&b, "  %s/\n", e.Name)
+					fmt.Fprintf(&b, "- %s/\n", e.Name)
 				} else {
-					fmt.Fprintf(&b, "  %s (%s)\n", e.Name, humanizeBytes(e.Size))
+					fmt.Fprintf(&b, "- %s (%s)\n", e.Name, humanizeBytes(e.Size))
 				}
 			}
 			b.WriteString("```")

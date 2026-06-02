@@ -111,6 +111,33 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	}
 
 	settingsResp, _ := h.getBotSettings(cc)
+	cands := h.buildModelCandidates(cc, items)
+	groups := groupCandidatesByProvider(cands)
+	currentDisplay := h.resolveModelName(cc, settingsResp.ChatModelID)
+	reasoning := formatReasoningLabel(cc, settingsResp)
+
+	provIdx := cc.Prov
+	if provIdx < 0 && filterProvider != "" {
+		for i, g := range groups {
+			if strings.EqualFold(g.name, filterProvider) {
+				provIdx = i
+				break
+			}
+		}
+	}
+
+	// No-button-channel parity: when the user opens /model without drilling
+	// into a provider, mirror Telegram's LevelProviders picker structure as
+	// the Text body — provider summary with counts and the active-provider
+	// marker. A flat first-N-of-many model list would dump unrelated models
+	// (image/voice/etc.) and leave the user with no way to discover provider
+	// names to type. Skipped when only one provider exists (nothing to pick).
+	if filterProvider == "" && provIdx < 0 && len(groups) > 1 {
+		return &Result{
+			Text:        formatProvidersSummary(cc, groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning),
+			Interactive: &Interactive{Kind: InteractiveModelPicker, Picker: buildProvidersPickerView(groups, cands, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)},
+		}, nil
+	}
 
 	// Text fallback: flat list, selected-first, preserving prior /model list output.
 	textModels := h.filterModelsByProvider(cc, items, filterProvider)
@@ -139,26 +166,8 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 		}
 		records = append(records, listRecord{fields: fields})
 	}
-	hint := cc.T("cmd.model.currentHint", map[string]any{"command": CmdRef("model current")})
-	if filterProvider == "" {
-		hint = cc.T("cmd.model.narrowHint", map[string]any{"command": CmdRef("model list <provider_name>")})
-	}
-	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, hint, cc.L)
+	res := buildListResult(cc.T("cmd.model.title"), "model", "list", nil, records, cc.Page, defaultListLimit, "", cc.L)
 
-	// Interactive picker. Resolve the drill-down level.
-	cands := h.buildModelCandidates(cc, items)
-	groups := groupCandidatesByProvider(cands)
-	currentDisplay := h.resolveModelName(cc, settingsResp.ChatModelID)
-	reasoning := formatReasoningLabel(cc, settingsResp)
-	provIdx := cc.Prov
-	if provIdx < 0 && filterProvider != "" {
-		for i, g := range groups {
-			if strings.EqualFold(g.name, filterProvider) {
-				provIdx = i
-				break
-			}
-		}
-	}
 	var picker *ModelPickerView
 	if provIdx >= 0 && provIdx < len(groups) {
 		picker = buildModelsPickerView(groups, cands, provIdx, settingsResp.ChatModelID, currentDisplay, reasoning, cc.Page)
@@ -167,6 +176,43 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 	}
 	res.Interactive = &Interactive{Kind: InteractiveModelPicker, Picker: picker}
 	return res, nil
+}
+
+// formatProvidersSummary builds the text body shown to no-button channels when
+// the user opens bare /model. Mirrors Telegram's LevelProviders picker: title +
+// current-model header + per-provider count list with an ● marking the provider
+// that owns the active chat model.
+func formatProvidersSummary(cc CommandContext, groups []providerGroup, cands []modelCandidate, currentDBID, currentDisplay, reasoning string) string {
+	var b strings.Builder
+	totalModels := 0
+	for _, g := range groups {
+		totalModels += len(g.modelIdx)
+	}
+	b.WriteString(MdBold(fmt.Sprintf("%s (%d)", cc.T("cmd.model.title"), totalModels)))
+	b.WriteString("\n\n")
+	if current := strings.TrimSpace(currentDisplay); current != "" {
+		fmt.Fprintf(&b, "%s\n", cc.T("chrome.currentModel", map[string]any{"model": current}))
+	}
+	if r := strings.TrimSpace(reasoning); r != "" {
+		fmt.Fprintf(&b, "%s\n", cc.T("chrome.reasoningLine", map[string]any{"effort": r}))
+	}
+	b.WriteString("\n")
+	b.WriteString(MdBold(cc.T("cmd.model.byProvider")) + "\n")
+	for _, g := range groups {
+		hasCurrent := false
+		for _, mi := range g.modelIdx {
+			if cands[mi].dbID == currentDBID {
+				hasCurrent = true
+				break
+			}
+		}
+		marker := ""
+		if hasCurrent {
+			marker = " ●"
+		}
+		fmt.Fprintf(&b, "- %s (%d)%s\n", g.name, len(g.modelIdx), marker)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // formatReasoningLabel renders the current reasoning state for picker headers.

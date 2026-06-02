@@ -50,6 +50,9 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				})
 			}
 			result := buildListResult(cc.T("cmd.schedule.title"), "schedule", "list", nil, records, cc.Page, defaultListLimit, "", cc.L)
+			if result.Interactive != nil && result.Interactive.List != nil {
+				result.Interactive.List.HintVerb = HintVerbDetails
+			}
 			return WithExtraActions(result,
 				ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "schedule"}},
 			), nil

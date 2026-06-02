@@ -91,16 +91,20 @@ func TestRenderRangePresetAllLocalizedTokenPreserved(t *testing.T) {
 }
 
 // TestNoButtonChannelKeepsCopyableFallback verifies the degrade path: a
-// button-less channel drops the keyboard but keeps the full fallback Text, which
-// (for reasoning) carries a copyable command. Markup is stripped for plain text.
+// button-less channel drops the keyboard but inherits a typeable-command
+// trailer auto-derived from the Interactive payload, so a WeChat-class user
+// learns how to set reasoning by typing.
 func TestNoButtonChannelKeepsCopyableFallback(t *testing.T) {
 	res := reasoningFallbackResultZh()
 	plain := renderResult(res, RenderContext{Caps: channel.ChannelCapabilities{}, T: i18n.New("zh")})
 	if len(plain.Actions) != 0 {
 		t.Errorf("button-less channel should have no actions, got %d", len(plain.Actions))
 	}
-	if !strings.Contains(plain.Text, "/reasoning set <level>") {
-		t.Errorf("fallback should keep a copyable command, got %q", plain.Text)
+	if !strings.Contains(plain.Text, "/reasoning set") {
+		t.Errorf("fallback should auto-derive a copyable /reasoning set command, got %q", plain.Text)
+	}
+	if !strings.Contains(plain.Text, "xhigh") {
+		t.Errorf("trailer should enumerate the available reasoning levels, got %q", plain.Text)
 	}
 	if strings.Contains(plain.Text, "`") || strings.Contains(plain.Text, "**") {
 		t.Errorf("plain channel should strip markup, got %q", plain.Text)
@@ -139,12 +143,27 @@ func TestChromeFollowsResultLocaleNotStaleRenderContext(t *testing.T) {
 }
 
 // reasoningFallbackResultZh mirrors the shape the command layer produces for
-// /reasoning: a localized fallback Text containing a copyable command ref.
+// /reasoning after Phase 2 of the no-button trailer refactor: a localized
+// header in Text plus a Choices view carrying every level. The renderer
+// auto-appends the typeable-command trailer for button-less channels.
 func reasoningFallbackResultZh() *command.Result {
 	t := i18n.New("zh")
-	fallback := t.T("cmd.reasoning.levelsFallback", map[string]any{
-		"levels":  "off · none · low · medium · high · xhigh",
-		"command": command.CmdRef("reasoning set <level>"),
-	})
-	return &command.Result{Text: fallback, Locale: "zh"}
+	header := command.MdBold(t.T("cmd.reasoning.header")) + "\n" +
+		t.T("cmd.reasoning.current", map[string]any{"level": "xhigh"})
+	levels := []string{"off", "none", "low", "medium", "high", "xhigh"}
+	choices := make([]command.ListItem, 0, len(levels))
+	for _, lvl := range levels {
+		choices = append(choices, command.ListItem{
+			Label:  lvl,
+			Action: &command.ItemAction{Resource: "reasoning", Action: "set", Args: []string{lvl}},
+		})
+	}
+	return &command.Result{
+		Text:   header,
+		Locale: "zh",
+		Interactive: &command.Interactive{
+			Kind:    command.InteractiveChoices,
+			Choices: &command.ChoicesView{Title: header, Choices: choices},
+		},
+	}
 }
