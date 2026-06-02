@@ -273,15 +273,37 @@ func TestFallbackTrailer_ModelPicker(t *testing.T) {
 		}
 	})
 
-	t.Run("LevelModels", func(t *testing.T) {
+	t.Run("LevelModels qualifies hint with provider", func(t *testing.T) {
+		got := FallbackTrailer(&Interactive{
+			Kind:   InteractiveModelPicker,
+			Picker: &ModelPickerView{Level: LevelModels, ProviderName: "openai", Models: []PickerModel{{Name: "gpt-4o"}}},
+		}, loc)
+		// Must emit the provider-scoped two-arg form (single-arg /model set <name>
+		// errors as ambiguous when the name exists under multiple providers).
+		for _, sub := range []string{"Or type", "/model set openai <model_name>"} {
+			if !strings.Contains(got, sub) {
+				t.Errorf("trailer %q does not contain %q", got, sub)
+			}
+		}
+	})
+
+	t.Run("LevelModels quotes provider with spaces", func(t *testing.T) {
+		got := FallbackTrailer(&Interactive{
+			Kind:   InteractiveModelPicker,
+			Picker: &ModelPickerView{Level: LevelModels, ProviderName: "Azure OpenAI", Models: []PickerModel{{Name: "gpt-4o"}}},
+		}, loc)
+		if !strings.Contains(got, `/model set "Azure OpenAI" <model_name>`) {
+			t.Errorf("trailer %q should quote a space-bearing provider", got)
+		}
+	})
+
+	t.Run("LevelModels without provider falls back to bare hint", func(t *testing.T) {
 		got := FallbackTrailer(&Interactive{
 			Kind:   InteractiveModelPicker,
 			Picker: &ModelPickerView{Level: LevelModels, Models: []PickerModel{{Name: "gpt-4o"}}},
 		}, loc)
-		for _, sub := range []string{"Or type", "/model set <name>"} {
-			if !strings.Contains(got, sub) {
-				t.Errorf("trailer %q does not contain %q", got, sub)
-			}
+		if !strings.Contains(got, "/model set <name>") {
+			t.Errorf("trailer %q should fall back to the bare hint when provider is unknown", got)
 		}
 	})
 

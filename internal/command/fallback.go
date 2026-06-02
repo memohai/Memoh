@@ -338,6 +338,16 @@ func trailerForPicker(p *ModelPickerView, t *i18n.Localizer) string {
 		if len(p.Models) == 0 {
 			return ""
 		}
+		// Provider-scoped list: a single-arg "/model set <name>" is resolved
+		// globally and errors as ambiguous when the same model name exists under
+		// more than one provider. The selection the user actually drilled into is
+		// the two-arg, provider-qualified form, so emit that with the concrete
+		// provider (quoted when it contains spaces so it survives re-parse).
+		if provider := strings.TrimSpace(p.ProviderName); provider != "" {
+			return t.T("cmd.fallback.menu", map[string]any{
+				"command": MdCode("/model set " + quoteArgIfNeeded(provider) + " <model_name>"),
+			})
+		}
 		return t.T("cmd.fallback.menu", map[string]any{
 			"command": MdCode("/model set <name>"),
 		})
