@@ -337,33 +337,81 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 
 func TestSettingsResultUsesFocusedActions(t *testing.T) {
 	t.Parallel()
-	h := &Handler{}
-	result := h.settingsResult(CommandContext{L: i18n.New("en")}, settings.Settings{AclDefaultEffect: "allow"})
-	if result.Interactive == nil || result.Interactive.Choices == nil {
-		t.Fatal("expected settings choices")
+	cases := []struct {
+		name             string
+		settings         settings.Settings
+		mustHaveLabels   []string
+		mustHaveArgValue string // the heartbeat toggle's Args[1] must match this
+		aclArgValue      string // the acl toggle's Args[1] must match this
+	}{
+		{
+			name:             "acl=allow, heartbeat off → enable+aclAsk",
+			settings:         settings.Settings{AclDefaultEffect: "allow", HeartbeatEnabled: false},
+			mustHaveLabels:   []string{"Reasoning ▸", "Models ▸", "Turn heartbeat on", "Ask before tools", "Search ▸", "Memory ▸"},
+			mustHaveArgValue: "true",
+			aclArgValue:      "deny",
+		},
+		{
+			name:             "acl=deny, heartbeat on → disable+aclAllow",
+			settings:         settings.Settings{AclDefaultEffect: "deny", HeartbeatEnabled: true},
+			mustHaveLabels:   []string{"Reasoning ▸", "Models ▸", "Turn heartbeat off", "Allow tools", "Search ▸", "Memory ▸"},
+			mustHaveArgValue: "false",
+			aclArgValue:      "allow",
+		},
 	}
-	var labels []string
-	for _, item := range result.Interactive.Choices.Choices {
-		labels = append(labels, item.Label)
-	}
-	for _, forbidden := range []string{"Reasoning: off", "Effort ▸", "ACL: allow", "Heartbeat: off"} {
-		for _, label := range labels {
-			if label == forbidden {
-				t.Fatalf("settings should not expose redundant state button %q; labels=%v", forbidden, labels)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{}
+			result := h.settingsResult(CommandContext{L: i18n.New("en")}, tc.settings)
+			if result.Interactive == nil || result.Interactive.Choices == nil {
+				t.Fatal("expected settings choices")
 			}
-		}
-	}
-	for _, want := range []string{"Reasoning ▸", "Models ▸", "Turn heartbeat on", "Ask before tools", "Search ▸", "Memory ▸"} {
-		var found bool
-		for _, label := range labels {
-			if label == want {
-				found = true
-				break
+			var labels []string
+			for _, item := range result.Interactive.Choices.Choices {
+				labels = append(labels, item.Label)
 			}
-		}
-		if !found {
-			t.Fatalf("settings labels missing %q: %v", want, labels)
-		}
+			for _, forbidden := range []string{"Reasoning: off", "Effort ▸", "ACL: allow", "Heartbeat: off"} {
+				for _, label := range labels {
+					if label == forbidden {
+						t.Fatalf("settings should not expose redundant state button %q; labels=%v", forbidden, labels)
+					}
+				}
+			}
+			for _, want := range tc.mustHaveLabels {
+				var found bool
+				for _, label := range labels {
+					if label == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("settings labels missing %q: %v", want, labels)
+				}
+			}
+			// Heartbeat toggle args must flip with current state so the
+			// re-dispatched command sets the opposite of the displayed state.
+			var heartbeatArgs, aclArgs []string
+			for _, item := range result.Interactive.Choices.Choices {
+				if item.Action == nil || item.Action.Resource != "settings" || item.Action.Action != "update" {
+					continue
+				}
+				if len(item.Action.Args) >= 2 {
+					switch item.Action.Args[0] {
+					case "--heartbeat_enabled":
+						heartbeatArgs = item.Action.Args
+					case "--acl_default_effect":
+						aclArgs = item.Action.Args
+					}
+				}
+			}
+			if len(heartbeatArgs) != 2 || heartbeatArgs[1] != tc.mustHaveArgValue {
+				t.Errorf("heartbeat toggle should dispatch --heartbeat_enabled %s, got %v", tc.mustHaveArgValue, heartbeatArgs)
+			}
+			if len(aclArgs) != 2 || aclArgs[1] != tc.aclArgValue {
+				t.Errorf("acl toggle should dispatch --acl_default_effect %s, got %v", tc.aclArgValue, aclArgs)
+			}
+		})
 	}
 }
 

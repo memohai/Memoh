@@ -148,13 +148,20 @@ func TestNonTelegramPlatformsRenderEquivalently(t *testing.T) {
 				}
 			}
 
-			// Cross-platform check: after stripping markdown markup, the three
-			// profiles must produce IDENTICAL plain text. Any divergence here
-			// means some content is conditional on caps — which is exactly the
-			// drift this test exists to prevent.
+			// Cross-platform check: after stripping markdown markup AND
+			// collapsing trailing whitespace, the three profiles must produce
+			// equivalent plain text. Any divergence here means some content is
+			// conditional on caps — which is exactly the drift this test
+			// exists to prevent.
+			//
+			// Inline styling (** and `) is stripped before comparison since
+			// those are legitimate cap-driven differences (markdown channels
+			// render them, plain channels strip them). Trailing whitespace
+			// from per-renderer chrome is normalized so a stray "\n" on one
+			// profile doesn't trip the byte-equality check.
 			canonical := make(map[string]string)
 			for profile, output := range outputs {
-				canonical[profile] = stripInlineMarkup(output)
+				canonical[profile] = strings.TrimRight(stripInlineMarkup(output), " \t\n")
 			}
 			plain := canonical["plain-text (Weixin / WeChat OA / Local-Web)"]
 			for profile, c := range canonical {
