@@ -246,11 +246,37 @@ func setMatchScore(a, b map[string]struct{}) int {
 	if inter != len(a) && inter != len(b) {
 		return -1
 	}
-	larger := len(a)
-	if len(b) > larger {
-		larger = len(b)
+	// The extra tokens on the larger side must all be ignorable noise (vendor /
+	// region prefixes or marketing suffixes). A meaningful distinguishing token
+	// (pro, mini, nano, flash, lite, plus, codex, chat, coder, ...) identifies a
+	// sibling/variant model with potentially different context window and
+	// capabilities, so it must NOT be absorbed via subset matching. Without this
+	// guard, "deepseek-v4-pro" would borrow "deepseek-v4"'s capabilities whenever
+	// the registry lacks the exact variant key.
+	larger, smaller := a, b
+	if len(b) > len(a) {
+		larger, smaller = b, a
 	}
-	return inter*1000 - larger
+	for t := range larger {
+		if _, ok := smaller[t]; ok {
+			continue
+		}
+		if !isIgnorableToken(t) {
+			return -1
+		}
+	}
+	return inter*1000 - len(larger)
+}
+
+// isIgnorableToken reports whether a token is pure naming noise (a vendor/region
+// prefix or a marketing suffix) that may legitimately differ between two names
+// for the same model. Anything else is treated as model-distinguishing.
+func isIgnorableToken(t string) bool {
+	if _, ok := marketingSuffixTokens[t]; ok {
+		return true
+	}
+	_, ok := knownPrefixSegments[t]
+	return ok
 }
 
 func sameSet(a, b map[string]struct{}) bool {

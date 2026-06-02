@@ -87,6 +87,41 @@ func TestMatch_VersionVetoPreventsCrossVersion(t *testing.T) {
 	}
 }
 
+// TestMatch_VariantDoesNotCollapseToBase guards the highest-impact failure
+// mode: when the registry carries a base model but NOT a sibling variant, the
+// variant must MISS (fall back to safe defaults) rather than borrow the base's
+// capabilities/context window. e.g. deepseek-v4-pro and deepseek-v4-flash have
+// different context windows, so neither may resolve to a bare deepseek-v4.
+func TestMatch_VariantDoesNotCollapseToBase(t *testing.T) {
+	idx := buildIndex([]string{
+		"deepseek-v4",
+		"gpt-5",
+		"qwen3-coder",
+		"gemini-3-flash", // base flash present, "lite" variant absent
+	})
+
+	for _, variant := range []string{
+		"deepseek/deepseek-v4-pro",
+		"deepseek/deepseek-v4-flash",
+		"openai/gpt-5-pro",
+		"openai/gpt-5-mini",
+		"openai/gpt-5-nano",
+		"qwen/qwen3-coder-plus",
+		"google/gemini-3-flash-lite",
+	} {
+		if got, ok := idx.match(variant); ok {
+			t.Fatalf("variant %q must not collapse to a base model, got %q", variant, got)
+		}
+	}
+
+	// Sanity: the bare base names still resolve exactly.
+	for _, base := range []string{"deepseek-v4", "gpt-5", "qwen3-coder"} {
+		if _, ok := idx.match(base); !ok {
+			t.Fatalf("base %q should still match", base)
+		}
+	}
+}
+
 func TestMatch_UnknownReturnsFalse(t *testing.T) {
 	idx := buildIndex(registryCorpus)
 	if got, ok := idx.match("some-totally-unknown-model-xyz"); ok {
