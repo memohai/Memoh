@@ -533,7 +533,9 @@ func (a *TelegramAdapter) handleTelegramCallback(ctx context.Context, cfg channe
 			// rather than deleting the whole message — the user keeps a short
 			// breadcrumb of what was opened instead of having it vanish.
 			if cb.Message != nil && cb.Message.Chat != nil {
-				_ = editTelegramMessageText(bot, cb.Message.Chat.ID, cb.Message.MessageID, collapseToTitle(cb.Message.Text), "")
+				if title := collapseToTitle(cb.Message.Text); title != "" {
+					_ = editTelegramMessageText(bot, cb.Message.Chat.ID, cb.Message.MessageID, title, "")
+				}
 			}
 			return
 		default:
@@ -1107,17 +1109,18 @@ func sendTelegramTextWithActionsReturnMessage(bot *tgbotapi.BotAPI, target strin
 
 var sendEditForTest func(bot *tgbotapi.BotAPI, edit tgbotapi.EditMessageTextConfig) error
 
-// editTelegramMessageText sends an edit request. It handles "message is not modified"
-// silently but returns 429 and other errors to the caller for higher-level retry decisions.
-// collapseToTitle returns the first non-empty line of a message, used to shrink
-// an interactive card to a short breadcrumb when the user taps Close.
+// collapseToTitle returns the first non-empty line of a message, used to
+// shrink an interactive card to a short breadcrumb when the user taps Close.
+// Returns empty when every line is blank — caller should skip the edit so
+// callers don't have to choose a localized "(closed)" placeholder string with
+// no localizer available at the callback boundary.
 func collapseToTitle(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		if s := strings.TrimSpace(line); s != "" {
 			return s
 		}
 	}
-	return "Closed."
+	return ""
 }
 
 func editTelegramMessageText(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, parseMode string) error {

@@ -13,7 +13,8 @@
     "providerRange": "Provider: {provider} ({start}–{end} of {total})",
     "none": "(none)",
     "models": "models",
-    "rangeAll": "All"
+    "rangeAll": "All",
+    "dismissed": "Closed."
   },
   "newSession": {
     "title": "✨ New {mode} started.",
@@ -60,7 +61,11 @@
       "allCommands": "All commands ▸",
       "showingItems": "Showing {shown} of {total} items.",
       "alreadySet": "{label} is already set to {value}.",
-      "changedTo": "✅ {label} changed to {value}."
+      "changedTo": "✅ {label} changed to {value}.",
+      "fieldCreated": "Created",
+      "fieldUpdated": "Updated",
+      "fieldStatus": "Status",
+      "back": "◀ {group}"
     },
     "session": {
       "noActive": "No active session found for this conversation.",
@@ -139,12 +144,14 @@
       "top": {
         "help": "show this help",
         "new": "start a new conversation",
-        "stop": "stop the current reply"
+        "stop": "stop the current reply",
+        "approve": "approve the latest or specified pending tool call",
+        "reject": "reject the latest or specified pending tool call"
       },
       "globalHint": "Send any command to run it. For a group's actions, send /help <group> — e.g. /help model.",
       "runForDetails": "Run {command} for details.",
-      "summaryLabel": "Summary",
-      "usageLabel": "Usage",
+      "summaryLabel": "Summary:",
+      "usageLabel": "Usage:",
       "siblingActionsLabel": "See sibling actions",
       "chooseAction": "Choose an action:",
       "backToGroup": "◀ {group}",
@@ -300,6 +307,11 @@
       "setHeartbeatUsage": "Usage: /model set-heartbeat <model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "No chat models under provider {provider}. Run {command} to see all providers.",
       "empty": "No chat models yet.\n\nAdd a model in the web dashboard.",
+      "notFound": "Model {name} not found.",
+      "notFoundUnderProvider": "Model {name} not found under provider {provider}.",
+      "ambiguous": "Model {name} is ambiguous — use a model ID or provider-qualified name ({candidates}).",
+      "idRequired": "Model identifier is required.",
+      "serviceUnavailable": "Model service isn't available right now.",
       "marker": {
         "chat": "chat",
         "heartbeat": "heartbeat"
@@ -344,11 +356,9 @@
       "fieldDescription": "Description",
       "fieldSchedule": "Schedule",
       "fieldCommand": "Command",
-      "fieldStatus": "Status",
       "fieldRuns": "Runs",
       "runsOf": "{current} of {max}",
-      "fieldCreated": "Created",
-      "fieldUpdated": "Updated",
+      "notFound": "No schedule named {name}. See schedules with {command}.",
       "created": "✅ Schedule {name} created.\n\n- Runs: {runs}\n- Command: {command}",
       "updated": "✅ Schedule {name} updated.",
       "deleted": "✅ Schedule {name} deleted.",
@@ -360,12 +370,12 @@
       "empty": "No MCP connections yet.\n\nMCP connections give the bot extra tools from external servers. Add one in the web dashboard.",
       "getUsage": "Usage: {command}",
       "deleteUsage": "Usage: /mcp delete <name>",
-      "fieldStatus": "Status",
       "fieldReason": "Reason",
       "fieldType": "Type",
       "fieldActive": "Active",
       "fieldAuth": "Auth",
       "fieldTools": "Tools",
+      "back": "◀ MCP",
       "notFound": "No MCP connection named {name}. See connections with {command}.",
       "deleted": "✅ MCP connection {name} deleted."
     },
@@ -425,7 +435,12 @@
     },
     "compact": {
       "unavailable": "Compaction isn't available right now.",
-      "done": "✅ Context compacted."
+      "done": "✅ Context compacted.",
+      "noModel": "No compaction or chat model is configured for this bot."
+    },
+    "toolApproval": {
+      "unavailable": "⚠️ Approvals aren't available here right now.",
+      "parseFailed": "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."
     },
     "fallback": {
       "switch": "Switch with {command}.",

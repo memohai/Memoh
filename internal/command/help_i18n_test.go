@@ -56,7 +56,7 @@ func TestGroupAndActionHelpUseCommandUILocale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteResult /help model current: %v", err)
 	}
-	for _, want := range []string{"说明: 查看当前对话模型和心跳模型", "用法:", "查看同组操作"} {
+	for _, want := range []string{"说明： 查看当前对话模型和心跳模型", "用法：", "查看同组操作"} {
 		if action == nil || !strings.Contains(action.Text, want) {
 			t.Fatalf("zh action help missing %q:\n%v", want, action)
 		}

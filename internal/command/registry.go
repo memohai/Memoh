@@ -101,12 +101,12 @@ func (g *CommandGroup) ActionHelp(action string, localizers ...*i18n.Localizer) 
 	var b strings.Builder
 	b.WriteString(MdBold("/"+g.Name+" "+sub.Name) + "\n")
 	if summary != "" {
-		fmt.Fprintf(&b, "- %s: %s\n", t.T("cmd.help.summaryLabel"), summary)
+		fmt.Fprintf(&b, "- %s %s\n", t.T("cmd.help.summaryLabel"), summary)
 	}
 	if usage == "" {
 		usage = sub.Name
 	}
-	fmt.Fprintf(&b, "- %s: %s\n", t.T("cmd.help.usageLabel"), CmdRef(g.Name+" "+usage))
+	fmt.Fprintf(&b, "- %s %s\n", t.T("cmd.help.usageLabel"), CmdRef(g.Name+" "+usage))
 	fmt.Fprintf(&b, "- %s: %s", t.T("cmd.help.siblingActionsLabel"), CmdRef("help "+g.Name))
 	return strings.TrimRight(b.String(), "\n")
 }

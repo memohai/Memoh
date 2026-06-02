@@ -2906,11 +2906,13 @@ func isToolApprovalCommand(cmdText string) bool {
 }
 
 func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID, sessionID, cmdText string) error {
+	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
 	approvalRunner, ok := p.runner.(ToolApprovalRunner)
 	if !ok {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: channel.Message{Text: "⚠️ Approvals aren't available here right now."},
+			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.toolApproval.unavailable")}, caps),
 		})
 	}
 	extracted := command.ExtractCommandText(cmdText)
@@ -2918,7 +2920,7 @@ func (p *ChannelInboundProcessor) handleToolApprovalCommand(ctx context.Context,
 	if err != nil {
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  strings.TrimSpace(msg.ReplyTarget),
-			Message: channel.Message{Text: "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."},
+			Message: applyMessageFormat(channel.Message{Text: loc.T("cmd.toolApproval.parseFailed")}, caps),
 		})
 	}
 	explicitID := ""

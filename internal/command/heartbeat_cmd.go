@@ -35,7 +35,7 @@ func (h *Handler) buildHeartbeatGroup() *CommandGroup {
 				// the eye lands on the run that needs attention.
 				rec := []kv{{cc.T("cmd.heartbeat.fieldTime"), humanizeTimeT(cc, item.StartedAt)}}
 				if !isSuccessStatus(item.Status) {
-					rec = append(rec, kv{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)})
+					rec = append(rec, kv{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)})
 				}
 				if dur != "" {
 					rec = append(rec, kv{cc.T("cmd.heartbeat.fieldDuration"), dur})

@@ -98,7 +98,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				// "Sent" is the expected outcome; flag only failures, like heartbeat.
 				fields := []kv{{cc.T("cmd.email.fieldSubject"), truncate(item.Subject, 40)}}
 				if st := strings.ToLower(strings.TrimSpace(item.Status)); st != "sent" && !isSuccessStatus(item.Status) {
-					fields = append(fields, kv{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)})
+					fields = append(fields, kv{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)})
 				}
 				fields = append(fields, kv{cc.T("cmd.email.fieldTo"), truncate(to, 40)}, kv{cc.T("cmd.email.fieldSent"), humanizeTimeT(cc, item.SentAt)})
 				records = append(records, listRecord{fields: fields, note: note})

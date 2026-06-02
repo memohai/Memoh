@@ -13,7 +13,8 @@
     "providerRange": "服务商：{provider}（第 {start}–{end} 个，共 {total} 个）",
     "none": "（无）",
     "models": "模型",
-    "rangeAll": "全部"
+    "rangeAll": "全部",
+    "dismissed": "已关闭。"
   },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
@@ -60,7 +61,11 @@
       "allCommands": "全部命令 ▸",
       "showingItems": "显示 {shown} / {total} 项。",
       "alreadySet": "{label} 已经是 {value}。",
-      "changedTo": "✅ {label} 已改为 {value}。"
+      "changedTo": "✅ {label} 已改为 {value}。",
+      "fieldCreated": "创建于",
+      "fieldUpdated": "更新于",
+      "fieldStatus": "状态",
+      "back": "◀ {group}"
     },
     "session": {
       "noActive": "当前对话没有活跃会话。",
@@ -139,12 +144,14 @@
       "top": {
         "help": "查看这份帮助",
         "new": "开启新对话",
-        "stop": "停止当前回复"
+        "stop": "停止当前回复",
+        "approve": "批准最近一次或指定的待审批工具调用",
+        "reject": "拒绝最近一次或指定的待审批工具调用"
       },
       "globalHint": "发送任意命令即可运行。要查看某组命令的操作，发送 /help <group>，例如 /help model。",
       "runForDetails": "运行 {command} 查看详情。",
-      "summaryLabel": "说明",
-      "usageLabel": "用法",
+      "summaryLabel": "说明：",
+      "usageLabel": "用法：",
       "siblingActionsLabel": "查看同组操作",
       "chooseAction": "选择操作：",
       "backToGroup": "◀ {group}",
@@ -300,6 +307,11 @@
       "setHeartbeatUsage": "用法：/model set-heartbeat <model_id> | <provider_name> <model_name>",
       "noneUnderProvider": "服务商 {provider} 下没有对话模型。运行 {command} 查看全部服务商。",
       "empty": "还没有对话模型。\n\n请在 Web 控制台添加模型。",
+      "notFound": "找不到模型 {name}。",
+      "notFoundUnderProvider": "服务商 {provider} 下找不到模型 {name}。",
+      "ambiguous": "模型 {name} 不唯一，请使用 model ID 或带服务商前缀的名称（{candidates}）。",
+      "idRequired": "请提供模型标识符。",
+      "serviceUnavailable": "模型服务暂不可用。",
       "marker": {
         "chat": "对话",
         "heartbeat": "心跳"
@@ -344,11 +356,9 @@
       "fieldDescription": "描述",
       "fieldSchedule": "计划",
       "fieldCommand": "命令",
-      "fieldStatus": "状态",
       "fieldRuns": "运行次数",
       "runsOf": "{current} / {max}",
-      "fieldCreated": "创建时间",
-      "fieldUpdated": "更新时间",
+      "notFound": "没有名为 {name} 的定时任务。用 {command} 查看任务。",
       "created": "✅ 定时任务 {name} 已创建。\n\n- 运行：{runs}\n- 命令：{command}",
       "updated": "✅ 定时任务 {name} 已更新。",
       "deleted": "✅ 定时任务 {name} 已删除。",
@@ -360,12 +370,12 @@
       "empty": "还没有 MCP 连接。\n\nMCP 连接会给机器人提供外部服务器上的额外工具。请在 Web 控制台添加。",
       "getUsage": "用法：{command}",
       "deleteUsage": "用法：/mcp delete <name>",
-      "fieldStatus": "状态",
       "fieldReason": "原因",
       "fieldType": "类型",
       "fieldActive": "启用",
       "fieldAuth": "认证",
       "fieldTools": "工具",
+      "back": "◀ MCP 连接",
       "notFound": "没有名为 {name} 的 MCP 连接。用 {command} 查看连接。",
       "deleted": "✅ MCP 连接 {name} 已删除。"
     },
@@ -425,7 +435,12 @@
     },
     "compact": {
       "unavailable": "上下文压缩暂不可用。",
-      "done": "✅ 上下文已压缩。"
+      "done": "✅ 上下文已压缩。",
+      "noModel": "此机器人未配置压缩模型或对话模型。"
+    },
+    "toolApproval": {
+      "unavailable": "⚠️ 此处暂时不能审批工具调用。",
+      "parseFailed": "没看懂这条消息。回复该请求并发送 /approve 或 /reject，或者点按下方按钮。"
     },
     "fallback": {
       "switch": "切换：{command}",

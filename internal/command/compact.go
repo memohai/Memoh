@@ -12,6 +12,12 @@ import (
 	"github.com/memohai/memoh/internal/providers"
 )
 
+// errCompactNoModel is a sentinel returned by buildCompactConfig when neither
+// a compaction model nor a chat model is configured. The Handler catches it
+// via errors.Is and surfaces a localized user message; other (internal) errors
+// flow through friendlyCommandError's looksLikeInternalError path.
+var errCompactNoModel = errors.New("compact: no compaction or chat model configured")
+
 func (h *Handler) buildCompactGroup() *CommandGroup {
 	g := newCommandGroup("compact", "Compact conversation context")
 	g.DefaultAction = "run"
@@ -27,7 +33,7 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 			if sessionID == "" {
 				botUUID, err := db.ParseUUID(cc.BotID)
 				if err != nil {
-					return "", fmt.Errorf("invalid bot id: %w", err)
+					return cc.T("cmd.error.generic", map[string]any{"command": CmdRef("compact")}), nil
 				}
 				latestUUID, err := h.queries.GetLatestSessionIDByBot(cc.Ctx, botUUID)
 				if err != nil {
@@ -38,6 +44,9 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 
 			cfg, err := h.buildCompactConfig(cc, sessionID)
 			if err != nil {
+				if errors.Is(err, errCompactNoModel) {
+					return cc.T("cmd.compact.noModel"), nil
+				}
 				return "", err
 			}
 
@@ -60,7 +69,7 @@ func (h *Handler) buildCompactConfig(cc CommandContext, sessionID string) (compa
 		modelID = botSettings.ChatModelID
 	}
 	if modelID == "" {
-		return compaction.TriggerConfig{}, errors.New("no compaction or chat model configured for this bot")
+		return compaction.TriggerConfig{}, errCompactNoModel
 	}
 
 	compactModel, err := h.modelsService.GetByID(cc.Ctx, modelID)

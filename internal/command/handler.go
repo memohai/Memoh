@@ -384,8 +384,8 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	// Top-level commands (e.g. /new) are handled by the channel inbound
 	// processor which has the required routing context. If Execute is
 	// called for one of these, return a short usage hint.
-	if desc, ok := topLevelCommands[resource]; ok {
-		return &Result{Text: fmt.Sprintf("/%s - %s", resource, desc)}, nil
+	if _, ok := topLevelCommands[resource]; ok {
+		return &Result{Text: fmt.Sprintf("/%s — %s", resource, cc.T("cmd.help.top."+resource))}, nil
 	}
 
 	group, ok := h.registry.groups[resource]

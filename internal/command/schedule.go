@@ -87,12 +87,12 @@ func (h *Handler) buildScheduleGroup() *CommandGroup {
 				{cc.T("cmd.schedule.fieldDescription"), desc},
 				{cc.T("cmd.schedule.fieldSchedule"), humanizeCronT(cc, item.Pattern)},
 				{cc.T("cmd.schedule.fieldCommand"), item.Command},
-				{cc.T("cmd.schedule.fieldStatus"), status},
+				{cc.T("cmd.common.fieldStatus"), status},
 				{cc.T("cmd.schedule.fieldRuns"), runs},
-				{cc.T("cmd.schedule.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
+				{cc.T("cmd.common.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
 			}
 			if !item.UpdatedAt.Truncate(time.Second).Equal(item.CreatedAt.Truncate(time.Second)) {
-				pairs = append(pairs, kv{cc.T("cmd.schedule.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)})
+				pairs = append(pairs, kv{cc.T("cmd.common.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)})
 			}
 			return WithButtons(
 				&Result{Text: formatKVTitled(item.Name, pairs)},
@@ -244,5 +244,5 @@ func (h *Handler) findScheduleByName(cc CommandContext, name string) (schedule.S
 			return item, nil
 		}
 	}
-	return schedule.Schedule{}, fmt.Errorf("schedule %q not found", name)
+	return schedule.Schedule{}, fmt.Errorf("%s", cc.T("cmd.schedule.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("schedule list")}))
 }

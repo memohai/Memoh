@@ -27,7 +27,7 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 				records = append(records, listRecord{
 					fields: []kv{
 						{cc.T("cmd.common.fieldName"), item.Name},
-						{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)},
+					{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)},
 						{cc.T("cmd.mcp.fieldType"), item.Type},
 					},
 					// Tap a connection to open its details — no typing of /mcp get.
@@ -71,16 +71,16 @@ func (h *Handler) buildMCPGroup() *CommandGroup {
 					}
 					return WithButtons(
 						&Result{Text: formatKVTitled(item.Name, []kv{
-							{cc.T("cmd.mcp.fieldStatus"), humanizeStatusT(cc, item.Status)},
+							{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)},
 							{cc.T("cmd.mcp.fieldReason"), item.StatusMessage},
 							{cc.T("cmd.mcp.fieldType"), item.Type},
 							{cc.T("cmd.mcp.fieldActive"), boolStrT(cc, item.Active)},
 							{cc.T("cmd.mcp.fieldAuth"), authType},
 							{cc.T("cmd.mcp.fieldTools"), toolsStr},
-							{cc.T("cmd.schedule.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
-							{cc.T("cmd.schedule.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)},
+							{cc.T("cmd.common.fieldCreated"), humanizeTimeT(cc, item.CreatedAt)},
+							{cc.T("cmd.common.fieldUpdated"), humanizeTimeT(cc, item.UpdatedAt)},
 						})},
-						ListItem{Label: "◀ MCP", Action: &ItemAction{Resource: "mcp", Action: "list"}},
+						ListItem{Label: cc.T("cmd.mcp.back"), Action: &ItemAction{Resource: "mcp", Action: "list"}},
 						ListItem{Label: cc.T("cmd.common.allCommands"), Action: &ItemAction{Resource: "help", Action: "mcp"}},
 					), nil
 				}
