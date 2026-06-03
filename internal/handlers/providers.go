@@ -394,6 +394,11 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 // window) rather than only filling blanks, so an old, less-accurate import
 // (e.g. an effort list missing xhigh/max) cannot survive. Returns true if the
 // model was changed and persisted.
+//
+// When the same model_id exists under multiple providers, GetByModelID reports
+// ambiguity and we deliberately skip the fill: two providers' same-named models
+// can carry different capabilities, so cross-provider backfill is intentionally
+// NOT performed (the model is left untouched rather than risk wrong data).
 func (h *ProvidersHandler) fillExistingModel(ctx context.Context, modelID string, discovered models.ModelConfig) bool {
 	existing, err := h.modelsService.GetByModelID(ctx, modelID)
 	if err != nil {

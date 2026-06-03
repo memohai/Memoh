@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS bots (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0009).
+  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0012).
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'
