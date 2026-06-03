@@ -132,7 +132,8 @@ watch([effortLevels, thinkingMode], ([levels, mode]) => {
     // eslint-disable-next-line vue/no-mutating-props
     props.form.reasoning_enabled = true
   }
-  if (props.form.reasoning_enabled && !levels.includes(props.form.reasoning_effort)) {
+  const current = props.form.reasoning_effort
+  if (props.form.reasoning_enabled && (!current || !levels.includes(current))) {
     // eslint-disable-next-line vue/no-mutating-props
     props.form.reasoning_effort = levels.includes('medium') ? 'medium' : levels[0] ?? 'medium'
   }
@@ -141,7 +142,7 @@ watch([effortLevels, thinkingMode], ([levels, mode]) => {
 const reasoningPopoverOpen = ref(false)
 
 const reasoningFormValue = computed({
-  get: () => props.form.reasoning_enabled ? props.form.reasoning_effort : REASONING_EFFORT_DISABLE,
+  get: () => (props.form.reasoning_enabled ? (props.form.reasoning_effort ?? 'medium') : REASONING_EFFORT_DISABLE),
   set: (v: string) => {
     if (v === REASONING_EFFORT_DISABLE) {
       // eslint-disable-next-line vue/no-mutating-props

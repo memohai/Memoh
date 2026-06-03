@@ -71,11 +71,22 @@ func TextToString(value pgtype.Text) string {
 	return value.String
 }
 
-// IsUniqueViolation reports whether err is a PostgreSQL unique constraint violation (SQLSTATE 23505).
+// IsUniqueViolation reports whether err is a unique constraint violation for
+// the configured database drivers (PostgreSQL SQLSTATE 23505, SQLite
+// SQLITE_CONSTRAINT/SQLITE_CONSTRAINT_UNIQUE).
 func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
-	return pgErr.Code == "23505"
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) {
+		const sqliteConstraint = 19
+		return coded.Code()&0xff == sqliteConstraint
+	}
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		return strings.Contains(msg, "unique constraint failed") || strings.Contains(msg, "constraint failed")
+	}
+	return false
 }

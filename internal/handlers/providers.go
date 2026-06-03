@@ -387,10 +387,13 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-// fillExistingModel merges newly discovered capabilities into an existing model,
-// filling only fields that are currently empty/unset and adding missing
-// compatibility tokens. It never strips or overrides existing values. Returns
-// true if the model was changed and persisted.
+// fillExistingModel refreshes an existing model's capability-discovery fields
+// from the latest trusted discovery (upstream + litellm registry) and adds
+// missing compatibility tokens. Re-import is a refresh: newer discovery
+// overwrites stale capability values (thinking_mode / effort tiers / context
+// window) rather than only filling blanks, so an old, less-accurate import
+// (e.g. an effort list missing xhigh/max) cannot survive. Returns true if the
+// model was changed and persisted.
 func (h *ProvidersHandler) fillExistingModel(ctx context.Context, modelID string, discovered models.ModelConfig) bool {
 	existing, err := h.modelsService.GetByModelID(ctx, modelID)
 	if err != nil {
@@ -416,18 +419,25 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, modelID string
 func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
 	out := existing
 	changed := false
-	if out.ThinkingMode == "" && discovered.ThinkingMode != "" {
+	// Capability-discovery fields: a present discovery wins. The fetch layer
+	// (applyCapabilities) has already let an explicit upstream claim take
+	// precedence over the registry, so whatever arrives here is the freshest
+	// trusted value and should replace the stored one. We only skip when the
+	// discovery is empty (nothing learned this round → keep what we have).
+	if discovered.ThinkingMode != "" && discovered.ThinkingMode != out.ThinkingMode {
 		out.ThinkingMode = discovered.ThinkingMode
 		changed = true
 	}
-	if len(out.ReasoningEfforts) == 0 && len(discovered.ReasoningEfforts) > 0 {
+	if len(discovered.ReasoningEfforts) > 0 && !slices.Equal(discovered.ReasoningEfforts, out.ReasoningEfforts) {
 		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
 		changed = true
 	}
-	if out.ContextWindow == nil && discovered.ContextWindow != nil {
+	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
 		out.ContextWindow = discovered.ContextWindow
 		changed = true
 	}
+	// Compatibilities are additive: keep anything already present and add the
+	// newly discovered tokens.
 	for _, c := range discovered.Compatibilities {
 		if !slices.Contains(out.Compatibilities, c) {
 			out.Compatibilities = append(out.Compatibilities, c)
