@@ -235,7 +235,6 @@ require (
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
 
-// Local development against the reason-effort branch of twilight-ai (Anthropic
-// output_config.effort support). Replace with a tagged pseudo-version once the
-// twilight change is merged/published upstream.
-replace github.com/memohai/twilight-ai => ../twilight-ai-reason-effort
+// Temporary fork pin for the reason-effort Twilight changes. Replace with an
+// upstream memohai/twilight-ai pseudo-version or tag once the Twilight PR merges.
+replace github.com/memohai/twilight-ai => github.com/qqqqqf-q/twilight-ai v0.4.1-0.20260603155016-c5b994717692
