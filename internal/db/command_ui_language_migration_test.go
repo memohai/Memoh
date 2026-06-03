@@ -16,11 +16,11 @@ import (
 // (CREATE TABLE ... INSERT SELECT) WITHOUT command_ui_language — dropping the
 // 0001 column so 0011 can re-add it cleanly, exactly once.
 //
-// If anyone later adds a bots-table rebuild AFTER 0011 (or one between 0010 and
-// 0011 that DOES carry the column forward), a fresh `up` would hit a
-// "duplicate column name" error and every new install would fail. This test
-// fails the instant that happens. (Already-migrated installs are unaffected;
-// they only run the incremental 0011.)
+// If anyone later adds a bots-table rebuild between 0010 and 0011 that DOES
+// carry the column forward, a fresh `up` would hit a "duplicate column name"
+// error at 0011 and every new install would fail. This test fails the instant
+// that happens. (Already-migrated installs are unaffected; they only run the
+// incremental 0011.)
 func TestSQLiteFreshReplayCommandUILanguageColumn(t *testing.T) {
 	migrations := sqliteMigrationsFS(t)
 	dsn := tempSQLiteMigrationDSN(t)
@@ -52,5 +52,35 @@ func TestSQLiteFreshReplayCommandUILanguageColumn(t *testing.T) {
 	}
 	if lang != "auto" {
 		t.Fatalf("fresh bot command_ui_language default = %q, want %q", lang, "auto")
+	}
+}
+
+func TestSQLiteFreshReplayReasoningEffortLadder(t *testing.T) {
+	migrations := sqliteMigrationsFS(t)
+	dsn := tempSQLiteMigrationDSN(t)
+
+	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, migrations, "up", nil); err != nil {
+		t.Fatalf("fresh full migrate up failed: %v", err)
+	}
+
+	db := openMigrationSQLite(t, dsn)
+	defer closeMigrationSQLite(t, db)
+
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users(id,email,role) VALUES('00000000-0000-0000-0000-0000000000b1','reasoning@example.com','member')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	for _, tc := range []struct {
+		id     string
+		name   string
+		effort string
+	}{
+		{"00000000-0000-0000-0000-0000000000b2", "reason-none", "none"},
+		{"00000000-0000-0000-0000-0000000000b3", "reason-xhigh", "xhigh"},
+	} {
+		_, err := db.ExecContext(context.Background(), `INSERT INTO bots(id,owner_user_id,type,name,display_name,reasoning_effort) VALUES(?,?,?,?,?,?)`,
+			tc.id, "00000000-0000-0000-0000-0000000000b1", "personal", tc.name, tc.name, tc.effort)
+		if err != nil {
+			t.Fatalf("insert bot with reasoning_effort=%q: %v", tc.effort, err)
+		}
 	}
 }

@@ -11,7 +11,7 @@ BEGIN
     SELECT 1 FROM pg_constraint WHERE conname = 'bots_reasoning_effort_check'
   ) THEN
     ALTER TABLE bots ADD CONSTRAINT bots_reasoning_effort_check
-      CHECK (reasoning_effort IN ('low', 'medium', 'high'));
+      CHECK (reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh'));
   END IF;
 END
 $$;
