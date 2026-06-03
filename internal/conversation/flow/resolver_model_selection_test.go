@@ -16,9 +16,9 @@ func TestOffEffortFor(t *testing.T) {
 	}{
 		{"none wins", []string{models.ReasoningEffortNone, "low", "medium"}, models.ReasoningEffortNone},
 		{"minimal when no none", []string{models.ReasoningEffortMinimal, "low", "medium"}, models.ReasoningEffortMinimal},
-		{"lowest advertised when neither", []string{"medium", "high", "xhigh"}, "medium"},
-		{"legacy base falls back to low", []string{"low", "medium", "high"}, "low"},
-		{"empty falls back to minimal", nil, models.ReasoningEffortMinimal},
+		{"empty when only real tiers (omit, do not enable)", []string{"medium", "high", "xhigh"}, ""},
+		{"legacy base yields empty (omit reasoning_effort)", []string{"low", "medium", "high"}, ""},
+		{"empty levels yield empty", nil, ""},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

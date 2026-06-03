@@ -766,10 +766,13 @@ func hasEffort(effortLevels []string, effort string) bool {
 
 // offEffortFor picks the effort an OpenAI-style provider should send to
 // approximate "off": "none" when advertised, else "minimal" when advertised,
-// else the lowest advertised tier. Falling back to a tier the model actually
-// advertises avoids sending an unsupported effort (e.g. gpt-5.5-pro advertises
-// neither none nor minimal) and failing the request exactly when disabling.
-// effortLevels is ordered low→high.
+// else "" meaning the caller must omit reasoning_effort entirely. Returning a
+// real tier (low/medium/high) here would *enable* thinking instead of disabling
+// it — e.g. OpenRouter translates reasoning_effort:"low" into Anthropic extended
+// thinking, so a toggle model that advertises only low/medium/high would keep
+// reasoning on when the user selected Off. Omitting the field instead lets the
+// provider default (thinking off for toggle/Anthropic-compat models) take over
+// and also avoids sending an unsupported tier. effortLevels is ordered low→high.
 func offEffortFor(effortLevels []string) string {
 	if hasEffort(effortLevels, models.ReasoningEffortNone) {
 		return models.ReasoningEffortNone
@@ -777,10 +780,7 @@ func offEffortFor(effortLevels []string) string {
 	if hasEffort(effortLevels, models.ReasoningEffortMinimal) {
 		return models.ReasoningEffortMinimal
 	}
-	if len(effortLevels) > 0 {
-		return effortLevels[0]
-	}
-	return models.ReasoningEffortMinimal
+	return ""
 }
 
 func reasoningEffortDisabled(effort string) bool {

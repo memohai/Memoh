@@ -49,8 +49,10 @@ type ReasoningConfig struct {
 	Adaptive bool
 	// Effort is the effort tier to send when active ("" lets the SDK default).
 	Effort string
-	// OffEffort is the effort an OpenAI-style provider should send when disabled
-	// ("none" when supported, otherwise "minimal").
+	// OffEffort is the effort an OpenAI-style provider should send when disabled:
+	// "none" when supported, else "minimal" when supported, else "" meaning the
+	// reasoning_effort field is omitted entirely. It is never a real tier
+	// (low/medium/high) because those enable thinking instead of disabling it.
 	OffEffort string
 }
 
@@ -231,9 +233,15 @@ func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
 		}
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
 	case rc.Disabled:
+		// Approximate "off". Only "none"/"minimal" actually reduce/disable
+		// thinking; a real tier (low/medium/high) would turn thinking ON (e.g.
+		// OpenRouter maps reasoning_effort:"low" to Anthropic extended thinking).
+		// When the model advertises no such off-ish tier, OffEffort is empty and
+		// we omit reasoning_effort entirely so the provider default (no thinking
+		// for toggle/Anthropic-compat models) applies.
 		off := openAIWireEffort(rc.OffEffort)
 		if off == "" {
-			off = ReasoningEffortMinimal
+			return nil
 		}
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(off)}
 	default:

@@ -55,6 +55,52 @@ func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
 	}
 }
 
+func TestBuildReasoningOptionsOpenAIDisable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		config   *ReasoningConfig
+		wantOpts int
+	}{
+		{
+			// Toggle model advertising only low/medium/high: OffEffort is empty,
+			// so reasoning_effort must be omitted. Sending a real tier (e.g. low)
+			// would enable thinking (OpenRouter maps it to Anthropic thinking).
+			name:     "disabled with empty off effort omits reasoning_effort",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ""},
+			wantOpts: 0,
+		},
+		{
+			name:     "disabled with none off effort sends none",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortNone},
+			wantOpts: 1,
+		},
+		{
+			name:     "disabled with minimal off effort sends minimal",
+			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortMinimal},
+			wantOpts: 1,
+		},
+		{
+			name:     "active sends effort",
+			config:   &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			wantOpts: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := BuildReasoningOptions(SDKModelConfig{
+				ClientType:      string(ClientTypeOpenAICompletions),
+				ReasoningConfig: tt.config,
+			})
+			if len(opts) != tt.wantOpts {
+				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
+			}
+		})
+	}
+}
+
 func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
