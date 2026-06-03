@@ -178,6 +178,7 @@ func (s *Service) targetSectionCounts(ctx context.Context, botID string) map[Sec
 			out[SectionHistory] = len(msgs)
 		}
 	}
+	out[SectionMemory] = s.targetMemoryCount(ctx, botID)
 	return out
 }
 
@@ -287,6 +288,8 @@ func summarizeSections(entries map[string]backupZipEntry) []SectionSummary {
 		jsonArrayLabels(entries["history/sessions.json"].data, sectionItemLimit, "title", "type"))
 	add(SectionAssets, "assets/message_assets.json", countArrayEntry(entries, "assets/message_assets.json"),
 		jsonArrayLabels(entries["assets/message_assets.json"].data, sectionItemLimit, "name"))
+	add(SectionMemory, memoryEntriesPath, countArrayEntry(entries, memoryEntriesPath),
+		jsonArrayLabels(entries[memoryEntriesPath].data, sectionItemLimit, "memory"))
 	if hasWorkspaceEntries(entries) {
 		out = append(out, SectionSummary{
 			Key:   SectionWorkspace,
@@ -504,7 +507,13 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	}
 
 	committed = true
-	return ImportResult{BotID: targetBotID, Created: created, Warnings: state.warnings, Imported: state.counts}, nil
+	return ImportResult{
+		BotID:              targetBotID,
+		Created:            created,
+		Warnings:           state.warnings,
+		Imported:           state.counts,
+		MemoryNeedsRebuild: s.memoryNeedsRebuild(ctx, targetBotID, state),
+	}, nil
 }
 
 // applyRestore runs every selected section in order. A returned error is fatal
@@ -574,6 +583,11 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if err := restore("history import failed", func() error {
 			return s.restoreHistory(ctx, targetBotID, state, opts.wants(SectionAssets), replace)
 		}); err != nil {
+			return err
+		}
+	}
+	if opts.wants(SectionMemory) {
+		if err := restore("memory import failed", func() error { return s.restoreMemory(ctx, targetBotID, state) }); err != nil {
 			return err
 		}
 	}
@@ -687,7 +701,7 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	}
 	memoryProviders, _ := readEntry[[]memprovider.ProviderGetResponse](state, "dependencies/memory_providers.json")
 	for _, item := range memoryProviders {
-		id, err := s.ensureMemoryProvider(ctx, item)
+		id, err := s.ensureMemoryProvider(ctx, item, deps)
 		if err != nil {
 			state.warnings = append(state.warnings, "memory provider dependency skipped: "+err.Error())
 			continue
@@ -1174,10 +1188,15 @@ func (s *Service) ensureSearchProvider(ctx context.Context, item searchpkg.GetRe
 	return created.ID, nil
 }
 
-func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.ProviderGetResponse) (string, error) {
+func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.ProviderGetResponse, deps dependencyMap) (string, error) {
 	if s.memoryProviders == nil {
 		return item.ID, errors.New("memory provider service not configured")
 	}
+	// A dense built-in provider references an embedding model by id inside its
+	// config. Remap that reference through the imported models so the restored
+	// provider points at the target's freshly-imported model rather than the
+	// source's id (which would be dangling on the target and break dense memory).
+	remapEmbeddingModel(item.Config, deps.models)
 	list, _ := s.memoryProviders.List(ctx)
 	for _, existing := range list {
 		if existing.Name == item.Name {
@@ -1193,6 +1212,23 @@ func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.Pro
 		return "", err
 	}
 	return created.ID, nil
+}
+
+// remapEmbeddingModel rewrites a memory provider config's embedding_model_id
+// from a source model id to its imported counterpart, when one exists. A value
+// that is not a known source id (e.g. a bare model_id string, or already valid
+// on the target) is left untouched.
+func remapEmbeddingModel(config map[string]any, models map[string]string) {
+	if config == nil {
+		return
+	}
+	raw, ok := config["embedding_model_id"].(string)
+	if !ok {
+		return
+	}
+	if mapped := strings.TrimSpace(models[strings.TrimSpace(raw)]); mapped != "" {
+		config["embedding_model_id"] = mapped
+	}
 }
 
 func (s *Service) ensureEmailProvider(ctx context.Context, item emailpkg.ProviderResponse) (string, error) {

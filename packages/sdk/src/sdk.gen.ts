@@ -1624,7 +1624,7 @@ export const putProvidersById = <ThrowOnError extends boolean = false>(options: 
 /**
  * Import models from provider
  *
- * Fetch models from provider's /v1/models endpoint and import them
+ * Fetch models from provider and import them
  */
 export const postProvidersByIdImportModels = <ThrowOnError extends boolean = false>(options: Options<PostProvidersByIdImportModelsData, ThrowOnError>) => (options.client ?? client).post<PostProvidersByIdImportModelsResponses, PostProvidersByIdImportModelsErrors, ThrowOnError>({ url: '/providers/{id}/import-models', ...options });
 

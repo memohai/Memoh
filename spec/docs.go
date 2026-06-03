@@ -8252,7 +8252,7 @@ const docTemplate = `{
         },
         "/providers/{id}/import-models": {
             "post": {
-                "description": "Fetch models from provider's /v1/models endpoint and import them",
+                "description": "Fetch models from provider and import them",
                 "consumes": [
                     "application/json"
                 ],
@@ -11464,6 +11464,10 @@ const docTemplate = `{
                         "type": "integer"
                     }
                 },
+                "memory_needs_rebuild": {
+                    "description": "MemoryNeedsRebuild signals that the restored memory has a derived index\n(built-in sparse/dense Qdrant, or Mem0 SaaS) that is now stale and should\nbe rebuilt before it becomes searchable. The UI uses this to guide the\nuser to the rebuild step. External providers (e.g. OpenViking) persist on\nwrite and never need a rebuild, so this stays false for them.",
+                    "type": "boolean"
+                },
                 "warnings": {
                     "type": "array",
                     "items": {
@@ -11633,6 +11637,7 @@ const docTemplate = `{
                 "email",
                 "history",
                 "assets",
+                "memory",
                 "workspace"
             ],
             "x-enum-varnames": [
@@ -11646,6 +11651,7 @@ const docTemplate = `{
                 "SectionEmail",
                 "SectionHistory",
                 "SectionAssets",
+                "SectionMemory",
                 "SectionWorkspace"
             ]
         },

@@ -499,6 +499,14 @@ export type BotbackupImportResult = {
     imported?: {
         [key: string]: number;
     };
+    /**
+     * MemoryNeedsRebuild signals that the restored memory has a derived index
+     * (built-in sparse/dense Qdrant, or Mem0 SaaS) that is now stale and should
+     * be rebuilt before it becomes searchable. The UI uses this to guide the
+     * user to the rebuild step. External providers (e.g. OpenViking) persist on
+     * write and never need a rebuild, so this stays false for them.
+     */
+    memory_needs_rebuild?: boolean;
     warnings?: Array<string>;
 };
 
@@ -560,7 +568,7 @@ export type BotbackupRestorePlan = {
     will_restore_workspace?: boolean;
 };
 
-export type BotbackupSection = 'profile' | 'settings' | 'models' | 'acl' | 'channels' | 'mcp' | 'schedules' | 'email' | 'history' | 'assets' | 'workspace';
+export type BotbackupSection = 'profile' | 'settings' | 'models' | 'acl' | 'channels' | 'mcp' | 'schedules' | 'email' | 'history' | 'assets' | 'memory' | 'workspace';
 
 export type BotbackupSectionSummary = {
     conflict?: boolean;

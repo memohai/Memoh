@@ -41,6 +41,7 @@ func buildSampleBundle(t *testing.T) []byte {
 	write("history/sessions.json", "history", []map[string]any{{"title": "chat 1", "type": "conversation"}})
 	write("history/messages.json", "history", []map[string]any{{"id": "1"}, {"id": "2"}, {"id": "3"}})
 	write("assets/message_assets.json", "assets", []map[string]any{{"name": "image.png"}})
+	write(memoryEntriesPath, "memory_entries", []map[string]any{{"id": "m1", "memory": "likes coffee"}, {"id": "m2", "memory": "based in NYC"}})
 
 	if err := w.writeStream(workspaceArchivePath, bytes.NewReader(sampleTarGz(t)), 0o640, time.Time{}, zip.Store); err != nil {
 		t.Fatalf("writeStream(workspace) error = %v", err)
@@ -104,6 +105,9 @@ func TestPreviewPlainBundleRoundTrip(t *testing.T) {
 	}
 	if got := sectionCount(preview.Sections, SectionWorkspace); got != 1 {
 		t.Fatalf("workspace count = %d, want 1", got)
+	}
+	if got := sectionCount(preview.Sections, SectionMemory); got != 2 {
+		t.Fatalf("memory count = %d, want 2", got)
 	}
 	if preview.RestorePlan.Mode != ImportModeCreate {
 		t.Fatalf("restore mode = %q, want create", preview.RestorePlan.Mode)
@@ -247,5 +251,50 @@ func TestMCPRequestFromConnection(t *testing.T) {
 	}
 	if sse.Headers["Authorization"] != "Bearer x" {
 		t.Fatalf("sse headers = %v", sse.Headers)
+	}
+}
+
+func TestIsFileBackedMemoryType(t *testing.T) {
+	// Built-in and Mem0 keep memory as files under /data (workspace section);
+	// an unset type defaults to built-in. Only external services are not.
+	for _, tt := range []struct {
+		providerType string
+		want         bool
+	}{
+		{"builtin", true},
+		{"mem0", true},
+		{"", true},
+		{"openviking", false},
+		{"unknown", false},
+	} {
+		if got := isFileBackedMemoryType(tt.providerType); got != tt.want {
+			t.Fatalf("isFileBackedMemoryType(%q) = %v, want %v", tt.providerType, got, tt.want)
+		}
+	}
+}
+
+func TestRemapEmbeddingModel(t *testing.T) {
+	models := map[string]string{"src-embed": "dst-embed"}
+
+	// A known source id is remapped to its imported counterpart.
+	cfg := map[string]any{"memory_mode": "dense", "embedding_model_id": "src-embed"}
+	remapEmbeddingModel(cfg, models)
+	if cfg["embedding_model_id"] != "dst-embed" {
+		t.Fatalf("embedding_model_id = %v, want dst-embed", cfg["embedding_model_id"])
+	}
+
+	// An unknown id (e.g. a bare model_id string) is left untouched.
+	cfg = map[string]any{"embedding_model_id": "text-embedding-3-small"}
+	remapEmbeddingModel(cfg, models)
+	if cfg["embedding_model_id"] != "text-embedding-3-small" {
+		t.Fatalf("embedding_model_id = %v, want unchanged", cfg["embedding_model_id"])
+	}
+
+	// Nil config and missing key are no-ops.
+	remapEmbeddingModel(nil, models)
+	cfg = map[string]any{"memory_mode": "sparse"}
+	remapEmbeddingModel(cfg, models)
+	if _, ok := cfg["embedding_model_id"]; ok {
+		t.Fatal("remapEmbeddingModel should not add embedding_model_id when absent")
 	}
 }

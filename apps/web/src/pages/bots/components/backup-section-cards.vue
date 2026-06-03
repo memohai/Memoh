@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Paperclip,
   HardDrive,
+  Brain,
   type LucideIcon,
 } from 'lucide-vue-next'
 
@@ -61,6 +62,7 @@ const iconMap: Record<string, LucideIcon> = {
   email: Mail,
   history: MessageCircle,
   assets: Paperclip,
+  memory: Brain,
   workspace: HardDrive,
 }
 

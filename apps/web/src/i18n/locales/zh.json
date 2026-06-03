@@ -22,6 +22,7 @@
     "viewAll": "查看全部",
     "import": "导入",
     "export": "导出",
+    "done": "完成",
     "copy": "复制",
     "copied": "已复制到剪贴板",
     "tabAddSingle": "添加单个",
@@ -1227,6 +1228,7 @@
         "email": "邮箱绑定",
         "history": "聊天历史",
         "assets": "附件",
+        "memory": "长期记忆",
         "workspace": "工作区文件"
       },
       "previewSchema": "备份格式版本：{version}",
@@ -1234,7 +1236,34 @@
       "exportFailed": "导出 Bot 备份失败",
       "previewFailed": "预览备份失败",
       "importSuccess": "Bot 备份已导入",
-      "importFailed": "导入 Bot 备份失败"
+      "importFailed": "导入 Bot 备份失败",
+      "memoryRebuild": {
+        "title": "重建记忆索引",
+        "loading": "正在检查记忆状态…",
+        "variant": {
+          "dense": "记忆内容已导入，但其稠密向量索引需要重建后才能被检索。",
+          "sparse": "记忆内容已导入，但其稀疏索引需要重建后才能被检索。",
+          "mem0": "导入的记忆文件需要同步到 Mem0 后才能被检索。",
+          "generic": "导入的记忆需要重建后才能被检索。"
+        },
+        "selectModel": "嵌入模型",
+        "selectModelHint": "稠密记忆需要一个嵌入模型来构建向量索引。",
+        "selectModelPlaceholder": "选择嵌入模型",
+        "selectModelRequired": "请选择嵌入模型后再重建。",
+        "sourceInfo": "共有 {count} 条记忆待建立索引。",
+        "action": {
+          "dense": "保存并重建",
+          "sparse": "重建索引",
+          "mem0": "同步到 Mem0",
+          "generic": "重建索引"
+        },
+        "skip": "暂时跳过",
+        "statusFailed": "加载记忆状态失败",
+        "success": "记忆已重建 —— 已索引 {count} 条",
+        "failed": "重建记忆索引失败",
+        "resultTitle": "记忆索引已重建",
+        "resultDetail": "已索引 {restored} / {total} 条。"
+      }
     },
     "checks": {
       "lastSync": "上次同步",
@@ -1575,6 +1604,7 @@
       "mem0StatusHint": "Markdown 文件是唯一可信源；手动同步将把 /data/memory 中的条目重新同步至 Mem0。",
       "indexedMemoryStatusPendingSave": "请在查看索引状态或执行同步前，先保存所选的记忆提供方。",
       "memorySyncAction": "手动同步",
+      "memoryIndexStale": "记忆索引落后于来源（来源 {source} 条，已索引 {indexed} 条）。请重建后才能检索。",
       "memorySyncSuccess": "同步完成：源条目 {fsCount} 条，修复 {restoredCount} 条，索引现有 {storageCount} 条。",
       "memorySyncFailed": "手动同步失败",
       "memorySourceDir": "记忆目录",

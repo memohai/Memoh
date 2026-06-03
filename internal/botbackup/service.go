@@ -58,6 +58,7 @@ type Service struct {
 	models          *modelpkg.Service
 	searchProviders *searchpkg.Service
 	memoryProviders *memprovider.Service
+	memoryRegistry  *memprovider.Registry
 	workspace       WorkspaceData
 }
 
@@ -76,6 +77,7 @@ type Params struct {
 	Models          *modelpkg.Service
 	SearchProviders *searchpkg.Service
 	MemoryProviders *memprovider.Service
+	MemoryRegistry  *memprovider.Registry
 	Workspace       WorkspaceData
 }
 
@@ -99,6 +101,7 @@ func New(params Params) *Service {
 		models:          params.Models,
 		searchProviders: params.SearchProviders,
 		memoryProviders: params.MemoryProviders,
+		memoryRegistry:  params.MemoryRegistry,
 		workspace:       params.Workspace,
 	}
 }
@@ -197,6 +200,11 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	if opts.wants(SectionAssets) {
 		if err := writer.writeJSON("assets/message_assets.json", "bot_message_assets", data.History.Assets, opts); err != nil {
 			return err
+		}
+	}
+	if opts.wants(SectionMemory) {
+		if err := s.writeMemory(ctx, botID, writer, opts); err != nil {
+			manifest.Warnings = append(manifest.Warnings, "memory export failed: "+err.Error())
 		}
 	}
 	if opts.wants(SectionWorkspace) && s.workspace != nil {

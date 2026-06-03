@@ -807,6 +807,14 @@ definitions:
           Imported reports how many items were restored per section, powering the
           post-import summary in the UI.
         type: object
+      memory_needs_rebuild:
+        description: |-
+          MemoryNeedsRebuild signals that the restored memory has a derived index
+          (built-in sparse/dense Qdrant, or Mem0 SaaS) that is now stale and should
+          be rebuilt before it becomes searchable. The UI uses this to guide the
+          user to the rebuild step. External providers (e.g. OpenViking) persist on
+          write and never need a rebuild, so this stays false for them.
+        type: boolean
       warnings:
         items:
           type: string
@@ -925,6 +933,7 @@ definitions:
     - email
     - history
     - assets
+    - memory
     - workspace
     type: string
     x-enum-varnames:
@@ -938,6 +947,7 @@ definitions:
     - SectionEmail
     - SectionHistory
     - SectionAssets
+    - SectionMemory
     - SectionWorkspace
   botbackup.SectionSummary:
     properties:
@@ -8919,7 +8929,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Fetch models from provider's /v1/models endpoint and import them
+      description: Fetch models from provider and import them
       parameters:
       - description: Provider ID (UUID)
         in: path

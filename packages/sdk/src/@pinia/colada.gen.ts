@@ -2969,7 +2969,7 @@ export const putProvidersByIdMutation = (options?: Partial<Options<PutProvidersB
 /**
  * Import models from provider
  *
- * Fetch models from provider's /v1/models endpoint and import them
+ * Fetch models from provider and import them
  */
 export const postProvidersByIdImportModelsMutation = (options?: Partial<Options<PostProvidersByIdImportModelsData>>): UseMutationOptions<PostProvidersByIdImportModelsResponse, Options<PostProvidersByIdImportModelsData>, PostProvidersByIdImportModelsError> => ({
     mutation: async (vars) => {

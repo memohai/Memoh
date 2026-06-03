@@ -73,7 +73,32 @@
               </Button>
             </div>
           </div>
-          
+
+          <div
+            v-if="memoryIndexStale"
+            class="flex items-center justify-between gap-2 rounded-md border border-warning-border bg-warning-soft px-3 py-2"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <TriangleAlert class="size-3.5 shrink-0 text-warning-foreground" />
+              <p class="truncate text-[11px] text-warning-foreground">
+                {{ $t('bots.settings.memoryIndexStale', { source: statusCardData?.source_count ?? 0, indexed: statusCardData?.indexed_count ?? 0 }) }}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="isRebuilding"
+              class="h-7 shrink-0 bg-background px-3 text-xs shadow-none"
+              @click="$emit('sync-memory')"
+            >
+              <Spinner
+                v-if="isRebuilding"
+                class="mr-1.5 size-3"
+              />
+              {{ $t('bots.settings.memorySyncAction') }}
+            </Button>
+          </div>
+
           <div
             v-if="showDetails && isSelectedMemoryProviderPersisted"
             class="grid gap-2 sm:grid-cols-3"
@@ -196,7 +221,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Label, Button, Spinner } from '@memohai/ui'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, TriangleAlert } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import SearchProviderSelect from './search-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
@@ -258,6 +283,13 @@ const indexedMemoryStatusTitle = computed(() =>
 )
 
 const statusCardData = computed(() => props.memoryStatus)
+// The derived index lags the source files (e.g. after a backup import that
+// restored memory files but never rebuilt). Prompt a rebuild.
+const memoryIndexStale = computed(() => {
+  const s = props.memoryStatus
+  if (!s || !isSelectedMemoryProviderPersisted.value || !s.can_manual_sync) return false
+  return (s.source_count ?? 0) > (s.indexed_count ?? 0)
+})
 const showQdrantDetails = computed(() =>
   selectedBuiltinMemoryMode.value === 'sparse' || selectedBuiltinMemoryMode.value === 'dense',
 )

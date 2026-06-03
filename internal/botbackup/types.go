@@ -10,6 +10,11 @@ const (
 	// workspaceArchivePath is the single zip entry holding the container's
 	// /data tar.gz verbatim (no re-packing on export/import).
 	workspaceArchivePath = "workspace/data.tar.gz"
+	// memoryEntriesPath holds long-term memory entries as a backend-agnostic
+	// JSON array. It is only written for providers whose canonical data lives
+	// outside the workspace /data tree (e.g. external services like OpenViking);
+	// built-in/Mem0 memory rides the workspace section as files under /data.
+	memoryEntriesPath = "memory/entries.json"
 )
 
 // Section identifies a selectable group of data within a backup. On import,
@@ -28,6 +33,7 @@ const (
 	SectionEmail     Section = "email"
 	SectionHistory   Section = "history"
 	SectionAssets    Section = "assets"
+	SectionMemory    Section = "memory"
 	SectionWorkspace Section = "workspace"
 )
 
@@ -35,7 +41,7 @@ const (
 // profile is always exported (it identifies the bot) and is not user-toggleable.
 var AllExportSections = []Section{
 	SectionSettings, SectionModels, SectionACL, SectionChannels, SectionMCP,
-	SectionSchedules, SectionEmail, SectionHistory, SectionAssets, SectionWorkspace,
+	SectionSchedules, SectionEmail, SectionHistory, SectionAssets, SectionMemory, SectionWorkspace,
 }
 
 // isSensitiveSection reports whether a section may carry API keys or other
@@ -203,6 +209,12 @@ type ImportResult struct {
 	// Imported reports how many items were restored per section, powering the
 	// post-import summary in the UI.
 	Imported map[Section]int `json:"imported,omitempty"`
+	// MemoryNeedsRebuild signals that the restored memory has a derived index
+	// (built-in sparse/dense Qdrant, or Mem0 SaaS) that is now stale and should
+	// be rebuilt before it becomes searchable. The UI uses this to guide the
+	// user to the rebuild step. External providers (e.g. OpenViking) persist on
+	// write and never need a rebuild, so this stays false for them.
+	MemoryNeedsRebuild bool `json:"memory_needs_rebuild,omitempty"`
 }
 
 type backupData struct {

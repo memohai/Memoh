@@ -65,6 +65,7 @@ func (s *Service) Summary(ctx context.Context, botID string) (SummaryResult, err
 	add(SectionEmail, data.EmailBindings, "email_address")
 	res.Sections = append(res.Sections, s.summarizeHistory(ctx, botID))
 	res.Sections = append(res.Sections, s.summarizeAssets(ctx, botID))
+	res.Sections = append(res.Sections, s.summarizeMemory(ctx, botID))
 	res.Sections = append(res.Sections, s.summarizeWorkspace(ctx, botID))
 	return res, nil
 }

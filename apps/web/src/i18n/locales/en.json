@@ -22,6 +22,7 @@
     "viewAll": "View All",
     "import": "Import",
     "export": "Export",
+    "done": "Done",
     "copy": "Copy",
     "copied": "Copied to clipboard",
     "tabAddSingle": "Add single",
@@ -1231,6 +1232,7 @@
         "email": "Email bindings",
         "history": "Chat history",
         "assets": "Attachments",
+        "memory": "Long-term memory",
         "workspace": "Workspace files"
       },
       "previewSchema": "Backup schema version: {version}",
@@ -1238,7 +1240,34 @@
       "exportFailed": "Failed to export bot backup",
       "previewFailed": "Failed to preview backup",
       "importSuccess": "Bot backup imported",
-      "importFailed": "Failed to import bot backup"
+      "importFailed": "Failed to import bot backup",
+      "memoryRebuild": {
+        "title": "Rebuild memory index",
+        "loading": "Checking memory status…",
+        "variant": {
+          "dense": "Imported memory is stored, but its dense vector index needs to be rebuilt before it becomes searchable.",
+          "sparse": "Imported memory is stored, but its sparse index needs to be rebuilt before it becomes searchable.",
+          "mem0": "Imported memory files need to be synced to Mem0 before they become searchable.",
+          "generic": "Imported memory needs to be rebuilt before it becomes searchable."
+        },
+        "selectModel": "Embedding model",
+        "selectModelHint": "Dense memory needs an embedding model to build its vector index.",
+        "selectModelPlaceholder": "Select an embedding model",
+        "selectModelRequired": "Choose an embedding model to enable the rebuild.",
+        "sourceInfo": "{count} memory item(s) ready to index.",
+        "action": {
+          "dense": "Save & rebuild",
+          "sparse": "Rebuild index",
+          "mem0": "Sync to Mem0",
+          "generic": "Rebuild index"
+        },
+        "skip": "Skip for now",
+        "statusFailed": "Failed to load memory status",
+        "success": "Memory rebuilt — {count} item(s) indexed",
+        "failed": "Failed to rebuild memory index",
+        "resultTitle": "Memory index rebuilt",
+        "resultDetail": "{restored} of {total} item(s) indexed."
+      }
     },
     "checks": {
       "lastSync": "Last synced",
@@ -1579,6 +1608,7 @@
       "mem0StatusHint": "Markdown files are the source of truth. Syncing rebuilds Mem0 memories from /data/memory.",
       "indexedMemoryStatusPendingSave": "Save the selected memory provider before viewing indexed memory status or running a sync.",
       "memorySyncAction": "Manual Sync",
+      "memoryIndexStale": "Memory index is behind its source ({source} entries vs {indexed} indexed). Rebuild to make it searchable.",
       "memorySyncSuccess": "Sync completed: {fsCount} source entries, {restoredCount} restored, {storageCount} indexed.",
       "memorySyncFailed": "Manual sync failed",
       "memorySourceDir": "Memory Directory",

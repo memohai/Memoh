@@ -23,6 +23,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatFileSize } from '@/components/file-manager/utils'
 import { uploadWithProgress } from '@/lib/upload-with-progress'
 import BackupSectionCards from './backup-section-cards.vue'
+import MemoryRebuildStep from './memory-rebuild-step.vue'
 
 type SectionState = 'skip' | 'merge' | 'replace'
 
@@ -48,6 +49,9 @@ const preview = ref<BotbackupPreviewResult | null>(null)
 const previewError = ref('')
 const passphrase = ref('')
 const uploadPercent = ref(0)
+// When an import leaves a stale memory index, we hold the new bot id here and
+// show the rebuild step instead of finishing immediately.
+const finalizeBotId = ref<string | null>(null)
 
 const allowOverwrite = computed(() => !!props.targetBotId)
 const importMode = ref<'create' | 'overwrite'>('create')
@@ -61,7 +65,7 @@ const isOverwrite = computed(() => allowOverwrite.value && importMode.value === 
 // Canonical section order. Every section is always shown; those absent from the
 // backup (or empty) are rendered disabled so users see the full picture.
 const ALL_SECTIONS = [
-  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'email', 'history', 'assets', 'workspace',
+  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'email', 'history', 'assets', 'memory', 'workspace',
 ] as const
 
 const sectionItems = computed(() => {
@@ -204,6 +208,12 @@ async function handleImport() {
     if (data.warnings?.length) {
       toast.warning(t('bots.backup.importWarnings', { count: data.warnings.length }))
     }
+    // A restored file-backed memory index is stale: keep the panel open on a
+    // rebuild step instead of navigating away, so the user can finish the job.
+    if (data.bot_id && data.memory_needs_rebuild) {
+      finalizeBotId.value = data.bot_id
+      return
+    }
     clearFile()
     if (data.bot_id) emit('imported', data.bot_id)
   } catch (error) {
@@ -212,10 +222,25 @@ async function handleImport() {
     importing.value = false
   }
 }
+
+function handleFinalizeDone() {
+  const botId = finalizeBotId.value
+  finalizeBotId.value = null
+  clearFile()
+  if (botId) emit('imported', botId)
+}
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-1 flex-col gap-3">
+  <MemoryRebuildStep
+    v-if="finalizeBotId"
+    :bot-id="finalizeBotId"
+    @done="handleFinalizeDone"
+  />
+  <div
+    v-else
+    class="flex min-h-0 flex-1 flex-col gap-3"
+  >
     <input
       ref="fileInput"
       type="file"
