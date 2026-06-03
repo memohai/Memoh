@@ -1,4 +1,4 @@
--- 0087_reasoning_effort_ladder
+-- 0088_reasoning_effort_ladder
 -- Restore the previous reasoning effort constraint.
 
 UPDATE bots

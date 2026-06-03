@@ -1,7 +1,11 @@
--- 0011_command_ui_language
--- Remove per-bot command-UI language.
+-- 0013_reasoning_effort_ladder
+-- Restore the previous reasoning effort constraint.
 
 PRAGMA foreign_keys = OFF;
+
+UPDATE bots
+SET reasoning_effort = 'medium'
+WHERE reasoning_effort NOT IN ('low', 'medium', 'high');
 
 CREATE TABLE bots_new (
   id TEXT PRIMARY KEY,
@@ -15,6 +19,7 @@ CREATE TABLE bots_new (
   status TEXT NOT NULL DEFAULT 'ready',
   acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   language TEXT NOT NULL DEFAULT 'auto',
+  command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
@@ -46,7 +51,7 @@ CREATE TABLE bots_new (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh')),
+  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high')),
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'
@@ -56,7 +61,7 @@ CREATE TABLE bots_new (
 
 INSERT INTO bots_new (
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
-  acl_default_effect, language, reasoning_enabled, reasoning_effort,
+  acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
   chat_model_id, search_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,
@@ -67,7 +72,7 @@ INSERT INTO bots_new (
 )
 SELECT
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
-  acl_default_effect, language, reasoning_enabled, reasoning_effort,
+  acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
   chat_model_id, search_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,

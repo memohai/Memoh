@@ -1,4 +1,4 @@
--- 0012_reasoning_effort_ladder
+-- 0013_reasoning_effort_ladder
 -- Allow the full reasoning effort ladder stored by command/settings.
 
 PRAGMA foreign_keys = OFF;
