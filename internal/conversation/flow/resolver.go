@@ -658,6 +658,14 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	offEffort := offEffortFor(effortLevels)
 	requested := strings.TrimSpace(requestedEffort)
 	adaptive := mode == models.ThinkingModeAdaptive
+	// Anthropic 4.6+ uses the effort/adaptive wire (no budget_tokens). Cloud
+	// variants (bedrock/vertex/azure/openrouter) are missing
+	// supports_adaptive_thinking in the LiteLLM registry but still advertise the
+	// 4.6+ effort tiers, so promote them to adaptive here. This keeps them off the
+	// legacy budget path, where budget_tokens is rejected with 400 on 4.7+.
+	if !adaptive && clientType == string(models.ClientTypeAnthropicMessages) && anthropicEffortEra(effortLevels) {
+		adaptive = true
+	}
 
 	switch {
 	case reasoningEffortDisabled(requested):
@@ -673,6 +681,23 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	default:
 		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
 	}
+}
+
+// anthropicEffortEra reports whether an Anthropic model uses the 4.6+
+// effort/adaptive thinking mechanism rather than the legacy
+// thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
+// the implicit low/medium/high base; 4.6+ adds at least one of none/minimal/
+// xhigh/max. Detecting any of those tiers catches the cloud-provider variants
+// that the registry leaves without supports_adaptive_thinking.
+func anthropicEffortEra(effortLevels []string) bool {
+	for _, e := range effortLevels {
+		switch e {
+		case models.ReasoningEffortNone, models.ReasoningEffortMinimal,
+			models.ReasoningEffortXHigh, models.ReasoningEffortMax:
+			return true
+		}
+	}
+	return false
 }
 
 // pickEffort resolves the effort to send when thinking is active: the

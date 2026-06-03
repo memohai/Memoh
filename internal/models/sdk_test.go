@@ -340,6 +340,124 @@ func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
 	}
 }
 
+func TestNewSDKChatModelAnthropicThinkingWire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		config     *ReasoningConfig
+		wantType   string
+		wantBudget int
+	}{
+		{
+			// Legacy (<=4.5): non-adaptive active call must enable thinking via
+			// budget_tokens (output_config.effort alone does not turn it on).
+			name:       "legacy non-adaptive sends enabled with budget",
+			config:     &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			wantType:   "enabled",
+			wantBudget: 50000,
+		},
+		{
+			name:       "legacy non-adaptive defaults empty effort to medium budget",
+			config:     &ReasoningConfig{Active: true},
+			wantType:   "enabled",
+			wantBudget: 16000,
+		},
+		{
+			// 4.6+ (adaptive): thinking{type:"adaptive"} and never a budget.
+			name:       "adaptive sends adaptive without budget",
+			config:     &ReasoningConfig{Active: true, Adaptive: true, Effort: ReasoningEffortHigh},
+			wantType:   "adaptive",
+			wantBudget: 0,
+		},
+		{
+			// Disabled: no thinking field at all.
+			name:     "disabled sends no thinking",
+			config:   &ReasoningConfig{Disabled: true},
+			wantType: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var body struct {
+				Thinking *struct {
+					Type         string `json:"type"`
+					BudgetTokens int    `json:"budget_tokens"`
+				} `json:"thinking"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "msg_anthropic", "type": "message", "model": "claude-test", "role": "assistant",
+					"content":     []map[string]any{{"type": "text", "text": "ok"}},
+					"stop_reason": "end_turn",
+					"usage":       map[string]any{"input_tokens": 1, "output_tokens": 1},
+				})
+			}))
+			defer srv.Close()
+
+			cfg := SDKModelConfig{
+				ModelID:         "claude-test",
+				ClientType:      string(ClientTypeAnthropicMessages),
+				BaseURL:         srv.URL,
+				APIKey:          "test-key",
+				ReasoningConfig: tt.config,
+			}
+			model := NewSDKChatModel(cfg)
+			if model == nil {
+				t.Fatal("expected a model, got nil")
+			}
+
+			opts := append([]sdk.GenerateOption{
+				sdk.WithModel(model),
+				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+			}, BuildReasoningOptions(cfg)...)
+			if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
+				t.Fatalf("generate text: %v", err)
+			}
+
+			if tt.wantType == "" {
+				if body.Thinking != nil {
+					t.Fatalf("thinking should be omitted, got %#v", body.Thinking)
+				}
+				return
+			}
+			if body.Thinking == nil {
+				t.Fatalf("thinking missing, want type %q", tt.wantType)
+			}
+			if body.Thinking.Type != tt.wantType {
+				t.Fatalf("thinking type: got %q, want %q", body.Thinking.Type, tt.wantType)
+			}
+			if body.Thinking.BudgetTokens != tt.wantBudget {
+				t.Fatalf("budget_tokens: got %d, want %d", body.Thinking.BudgetTokens, tt.wantBudget)
+			}
+		})
+	}
+}
+
+func TestLegacyAnthropicBudgetFor(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]int{
+		ReasoningEffortLow:    5000,
+		ReasoningEffortMedium: 16000,
+		ReasoningEffortHigh:   50000,
+		"":                    16000,
+		"unexpected":          16000,
+	}
+	for effort, want := range cases {
+		if got := legacyAnthropicBudgetFor(effort); got != want {
+			t.Fatalf("legacyAnthropicBudgetFor(%q): got %d, want %d", effort, got, want)
+		}
+	}
+}
+
 func TestResolveChatCompletionsCompatInfersDeepSeekBaseURL(t *testing.T) {
 	t.Parallel()
 

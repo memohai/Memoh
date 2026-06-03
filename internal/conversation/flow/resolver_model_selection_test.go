@@ -142,6 +142,28 @@ func TestResolveReasoningConfig(t *testing.T) {
 			},
 		},
 	}
+	// Legacy Anthropic (<=4.5): toggle mode advertising only the implicit
+	// low/medium/high base. On the Anthropic wire this must stay non-adaptive so
+	// the SDK sends thinking{type:"enabled", budget_tokens:N}.
+	legacyAnthropicModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high"},
+			},
+		},
+	}
+	// Cloud-variant Claude 4.6+: the registry left it toggle (no
+	// supports_adaptive_thinking) but it advertises 4.6+ effort tiers, so the
+	// Anthropic wire promotes it to adaptive to stay off the legacy budget path.
+	cloudEffortModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
+			},
+		},
+	}
 	plainModel := models.GetResponse{}
 
 	tests := []struct {
@@ -228,6 +250,27 @@ func TestResolveReasoningConfig(t *testing.T) {
 			requestEffort: models.ReasoningEffortMax,
 			clientType:    string(models.ClientTypeAnthropicMessages),
 			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMax},
+		},
+		{
+			name:        "legacy anthropic stays non-adaptive for budget path",
+			model:       legacyAnthropicModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "anthropic cloud variant with effort tiers is promoted to adaptive",
+			model:       cloudEffortModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "non-anthropic effort tiers are not promoted to adaptive",
+			model:       cloudEffortModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeOpenAICompletions),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "model without reasoning ignores request",

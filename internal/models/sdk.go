@@ -31,9 +31,11 @@ type SDKModelConfig struct {
 
 // ReasoningConfig is the resolved extended-thinking decision for one call. The
 // resolver makes a single decision (based on the model's thinking mode and the
-// user's settings); the SDK layer mechanically translates it per provider. We
-// never send token budgets — only effort strings and (for Anthropic 4.6+) the
-// adaptive thinking flag.
+// user's settings); the SDK layer mechanically translates it per provider.
+// Anthropic 4.6+ (Adaptive) sends thinking{type:"adaptive"} plus an effort
+// string and never a token budget; legacy Anthropic (<=4.5, non-adaptive) sends
+// thinking{type:"enabled", budget_tokens:N} derived from the effort. OpenAI-style
+// providers only ever receive an effort string.
 type ReasoningConfig struct {
 	// Active means thinking is on for this call.
 	Active bool
@@ -41,7 +43,9 @@ type ReasoningConfig struct {
 	// OpenAI-style providers without a real off switch, OffEffort approximates it.
 	Disabled bool
 	// Adaptive means the provider's thinking is adaptive (Anthropic 4.6+), wired
-	// as thinking{type:"adaptive"} with no budget.
+	// as thinking{type:"adaptive"} with no budget. When false on an active
+	// Anthropic call, the model is treated as legacy (<=4.5) and wired as
+	// thinking{type:"enabled", budget_tokens:N}.
 	Adaptive bool
 	// Effort is the effort tier to send when active ("" lets the SDK default).
 	Effort string
@@ -107,14 +111,27 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		if cfg.BaseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(cfg.BaseURL))
 		}
-		// Anthropic thinking is only wired as adaptive (4.6+). We never send
-		// budget_tokens (deprecated on 4.6, rejected on 4.7+). Effort is carried
-		// per-request via output_config.effort (see BuildReasoningOptions).
-		// Non-adaptive Anthropic (toggle, e.g. 4.5) sends effort only, no thinking.
-		if cfg.ReasoningConfig != nil && cfg.ReasoningConfig.Active && cfg.ReasoningConfig.Adaptive {
-			opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
-				Type: "adaptive",
-			}))
+		// Anthropic extended thinking has two wire shapes by model generation:
+		//   - 4.6+ (Adaptive): thinking{type:"adaptive"}; effort is carried
+		//     per-request via output_config.effort (see BuildReasoningOptions).
+		//     budget_tokens is deprecated on 4.6 and rejected (400) on 4.7+, so it
+		//     is never sent here.
+		//   - <=4.5 (legacy): thinking is only enabled via
+		//     thinking{type:"enabled", budget_tokens:N}; output_config.effort alone
+		//     does not turn it on. The resolver flags every effort-era model as
+		//     Adaptive (including cloud variants missing supports_adaptive_thinking),
+		//     so a non-adaptive active config here is a legacy model.
+		if rc := cfg.ReasoningConfig; rc != nil && rc.Active {
+			if rc.Adaptive {
+				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
+					Type: "adaptive",
+				}))
+			} else {
+				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
+					Type:         "enabled",
+					BudgetTokens: legacyAnthropicBudgetFor(rc.Effort),
+				}))
+			}
 		}
 		p := anthropicmessages.New(opts...)
 		return p.ChatModel(cfg.ModelID)
@@ -180,9 +197,12 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 
 	switch ct {
 	case ClientTypeAnthropicMessages:
-		// Effort only; thinking (adaptive) is set on the provider. When disabled,
-		// send nothing (absence of thinking == off for Anthropic).
-		if rc.Active && rc.Effort != "" {
+		// Effort-era (4.6+, Adaptive) carries effort via output_config.effort;
+		// thinking{adaptive} is set on the provider. Legacy (<=4.5) models enable
+		// thinking via budget_tokens only and do not accept output_config.effort,
+		// so send nothing for them. When disabled, send nothing too (absence of
+		// thinking == off for Anthropic).
+		if rc.Active && rc.Adaptive && rc.Effort != "" {
 			return []sdk.GenerateOption{sdk.WithReasoningEffort(rc.Effort)}
 		}
 		return nil
@@ -231,6 +251,27 @@ func openAIWireEffort(effort string) string {
 		return ReasoningEffortXHigh
 	}
 	return effort
+}
+
+// anthropicLegacyBudget maps an effort tier to the extended-thinking token
+// budget for legacy (<=4.5) Claude models, which require
+// thinking{type:"enabled", budget_tokens:N}. 4.6 deprecates budget_tokens and
+// 4.7+ rejects it, so the resolver routes those generations through the adaptive
+// path instead and this is only reached for pre-4.6 models (which advertise only
+// the low/medium/high base). Values mirror the pre-adaptive defaults.
+var anthropicLegacyBudget = map[string]int{
+	ReasoningEffortLow:    5000,
+	ReasoningEffortMedium: 16000,
+	ReasoningEffortHigh:   50000,
+}
+
+// legacyAnthropicBudgetFor resolves the token budget for a legacy Anthropic
+// thinking call, defaulting to the medium budget for empty or unexpected efforts.
+func legacyAnthropicBudgetFor(effort string) int {
+	if b, ok := anthropicLegacyBudget[effort]; ok {
+		return b
+	}
+	return anthropicLegacyBudget[ReasoningEffortMedium]
 }
 
 // ResolveClientType infers the client type string from an SDK Model's provider name.
