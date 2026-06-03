@@ -451,7 +451,7 @@ func applyCapabilities(m *RemoteModel, caps capabilities.Capabilities) {
 	}
 
 	switch caps.ThinkingMode {
-	case models.ThinkingModeToggle, models.ThinkingModeOnlyAdaptive:
+	case models.ThinkingModeToggle, models.ThinkingModeAdaptive, models.ThinkingModeOnlyAdaptive:
 		m.Compatibilities = addCompat(m.Compatibilities, models.CompatReasoning)
 	}
 	if caps.Vision != nil && *caps.Vision {

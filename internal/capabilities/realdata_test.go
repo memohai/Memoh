@@ -34,11 +34,11 @@ func TestRealRegistry(t *testing.T) {
 			input            string
 			wantThinkingMode string
 		}{
-			{"claude-opus-4-8", models.ThinkingModeOnlyAdaptive},
-			{"anthropic/claude-opus-4.8", models.ThinkingModeOnlyAdaptive},
-			{"openrouter/anthropic/claude-opus-4.8", models.ThinkingModeOnlyAdaptive},
-			{"us.anthropic.claude-opus-4-8", models.ThinkingModeOnlyAdaptive},
-			{"claude-sonnet-4-6", models.ThinkingModeOnlyAdaptive},
+			{"claude-opus-4-8", models.ThinkingModeAdaptive},
+			{"anthropic/claude-opus-4.8", models.ThinkingModeAdaptive},
+			{"openrouter/anthropic/claude-opus-4.8", models.ThinkingModeAdaptive},
+			{"us.anthropic.claude-opus-4-8", models.ThinkingModeAdaptive},
+			{"claude-sonnet-4-6", models.ThinkingModeAdaptive},
 			{"openai/gpt-5", models.ThinkingModeToggle},
 			{"o3", models.ThinkingModeToggle},
 			{"google/gemini-2.5-pro", models.ThinkingModeToggle},
@@ -74,7 +74,7 @@ func TestRealRegistry(t *testing.T) {
 				t.Errorf("adaptive key %q did not round-trip match", key)
 				continue
 			}
-			if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
+			if caps.ThinkingMode != models.ThinkingModeAdaptive {
 				t.Errorf("adaptive key %q resolved to %q", key, caps.ThinkingMode)
 			}
 		}

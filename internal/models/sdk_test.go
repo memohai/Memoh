@@ -69,13 +69,13 @@ func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
 			wantOpts: 1,
 		},
 		{
-			name:     "enabled without effort forwards nothing (provider default applies)",
-			config:   &ReasoningConfig{Enabled: true},
+			name:     "active without effort forwards nothing (provider default applies)",
+			config:   &ReasoningConfig{Active: true},
 			wantOpts: 0,
 		},
 		{
-			name:     "enabled with effort forwards effort",
-			config:   &ReasoningConfig{Enabled: true, Effort: "high"},
+			name:     "active with effort forwards effort",
+			config:   &ReasoningConfig{Active: true, Effort: "high"},
 			wantOpts: 1,
 		},
 		{
@@ -271,7 +271,7 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	opts = append(opts, BuildReasoningOptions(SDKModelConfig{
 		ClientType:            string(ClientTypeOpenAICompletions),
 		ChatCompletionsCompat: compat,
-		ReasoningConfig:       &ReasoningConfig{Enabled: true, Effort: "high"},
+		ReasoningConfig:       &ReasoningConfig{Active: true, Effort: "high"},
 	})...)
 	_, err := sdk.GenerateTextResult(context.Background(), opts...)
 	if err != nil {
@@ -286,6 +286,57 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	}
 	if body.Thinking == nil || body.Thinking.Type != "adaptive" {
 		t.Fatalf("thinking: got %#v, want adaptive", body.Thinking)
+	}
+}
+
+func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
+	t.Parallel()
+
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-openai",
+			"model": "openrouter/anthropic/claude-opus-4.8",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	model := NewSDKChatModel(SDKModelConfig{
+		ModelID:    "openrouter/anthropic/claude-opus-4.8",
+		ClientType: string(ClientTypeOpenAICompletions),
+		BaseURL:    srv.URL,
+		APIKey:     "test-key",
+	})
+
+	opts := BuildReasoningOptions(SDKModelConfig{
+		ClientType:      string(ClientTypeOpenAICompletions),
+		ReasoningConfig: &ReasoningConfig{Active: true, Effort: ReasoningEffortMax},
+	})
+	_, err := sdk.GenerateTextResult(
+		context.Background(),
+		append([]sdk.GenerateOption{
+			sdk.WithModel(model),
+			sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+		}, opts...)...,
+	)
+	if err != nil {
+		t.Fatalf("generate text: %v", err)
+	}
+
+	if body.ReasoningEffort == nil || *body.ReasoningEffort != ReasoningEffortXHigh {
+		t.Fatalf("reasoning_effort: got %v, want xhigh", body.ReasoningEffort)
 	}
 }
 

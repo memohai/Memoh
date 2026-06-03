@@ -102,11 +102,12 @@ func TestResolveReasoningConfig(t *testing.T) {
 			},
 		},
 	}
-	// Forced-adaptive model (Claude 4.6+ family).
+	// Adaptive-capable model (Claude 4.6+ family): user can turn thinking off,
+	// but when enabled it uses adaptive thinking.
 	adaptiveModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeOnlyAdaptive,
+				ThinkingMode:     models.ThinkingModeAdaptive,
 				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
 			},
 		},
@@ -118,6 +119,7 @@ func TestResolveReasoningConfig(t *testing.T) {
 		model         models.GetResponse
 		botSettings   settings.Settings
 		requestEffort string
+		clientType    string
 		want          *models.ReasoningConfig
 	}{
 		{
@@ -165,16 +167,30 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:        &models.ReasoningConfig{Disabled: true},
 		},
 		{
-			name:          "only_adaptive forces thinking on even with disable request",
+			name:          "adaptive model can still be disabled",
 			model:         adaptiveModel,
 			requestEffort: reasoningEffortDisable,
-			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+			want:          &models.ReasoningConfig{Disabled: true},
 		},
 		{
-			name:          "only_adaptive honors explicit effort",
+			name:          "adaptive model honors explicit effort",
 			model:         adaptiveModel,
 			requestEffort: models.ReasoningEffortXHigh,
 			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortXHigh},
+		},
+		{
+			name:          "openai wire drops max and falls back to medium",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortMax,
+			clientType:    string(models.ClientTypeOpenAICompletions),
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+		},
+		{
+			name:          "anthropic wire preserves max",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortMax,
+			clientType:    string(models.ClientTypeAnthropicMessages),
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMax},
 		},
 		{
 			name:          "model without reasoning ignores request",
@@ -188,7 +204,7 @@ func TestResolveReasoningConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort)
+			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort, tt.clientType)
 			if got == nil || tt.want == nil {
 				if got != tt.want {
 					t.Fatalf("expected %#v, got %#v", tt.want, got)

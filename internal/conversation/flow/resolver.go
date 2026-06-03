@@ -551,12 +551,6 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		return agentpkg.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
-	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort)
-	reasoningEffort := ""
-	if reasoningConfig != nil && reasoningConfig.Active {
-		reasoningEffort = reasoningConfig.Effort
-	}
-
 	authResolver := providers.NewService(nil, r.queries, "")
 	authCtx := oauthctx.WithUserID(ctx, p.UserID)
 	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
@@ -569,6 +563,12 @@ func (r *Resolver) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams
 		baseURL,
 		providers.ProviderConfigString(provider, "chat_completions_compat"),
 	)
+
+	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
+	reasoningEffort := ""
+	if reasoningConfig != nil && reasoningConfig.Active {
+		reasoningEffort = reasoningConfig.Effort
+	}
 
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
@@ -643,43 +643,33 @@ const (
 // resolveReasoningConfig makes the single reasoning decision for a call, driven
 // by the model's discovered thinking mode plus the user's settings/override.
 //
-//   - none:          no thinking; returns nil.
-//   - only_adaptive: thinking forced on (adaptive); only effort is adjustable;
-//     "disable" requests are ignored (the model cannot turn thinking off).
-//   - toggle:        on/off, with per-message override taking precedence over
-//     the bot's default.
-func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort string) *models.ReasoningConfig {
+//   - none:     no thinking; returns nil.
+//   - adaptive: on/off; when active, Anthropic-style providers use adaptive
+//     thinking plus the selected effort.
+//   - toggle:   on/off, with per-message override taking precedence over the
+//     bot's default.
+func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, clientType string) *models.ReasoningConfig {
 	mode := chatModel.ResolveThinkingMode()
 	if mode == models.ThinkingModeNone {
 		return nil
 	}
 
-	effortLevels := chatModel.Config.ReasoningEfforts
+	effortLevels := effectiveReasoningEfforts(chatModel.Config.ReasoningEfforts, clientType)
 	offEffort := offEffortFor(effortLevels)
 	requested := strings.TrimSpace(requestedEffort)
+	adaptive := mode == models.ThinkingModeAdaptive
 
-	if mode == models.ThinkingModeOnlyAdaptive {
-		// Forced adaptive: thinking is always on; only effort varies.
-		return &models.ReasoningConfig{
-			Active:    true,
-			Adaptive:  true,
-			Effort:    pickEffort(requested, botSettings),
-			OffEffort: offEffort,
-		}
-	}
-
-	// toggle
 	switch {
 	case reasoningEffortDisabled(requested):
 		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
 	case requested == reasoningEffortAdaptive:
 		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
 		// adaptive concept; send a normal effort).
-		return &models.ReasoningConfig{Active: true, Effort: pickEffort("", botSettings), OffEffort: offEffort}
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	case requested != "":
-		return &models.ReasoningConfig{Active: true, Effort: requested, OffEffort: offEffort}
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
 	case botSettings.ReasoningEnabled:
-		return &models.ReasoningConfig{Active: true, Effort: pickEffort("", botSettings), OffEffort: offEffort}
+		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
 	default:
 		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
 	}
@@ -687,16 +677,66 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 
 // pickEffort resolves the effort to send when thinking is active: the
 // per-message override (if a concrete tier) wins, then the bot default, then
-// medium. No clamping against the model's level list — an unsupported effort
-// surfaces as an upstream error rather than being silently rewritten.
-func pickEffort(requested string, botSettings settings.Settings) string {
+// medium. Values outside the effective model+wire effort list are ignored so
+// stale settings or command/API overrides cannot send a known-invalid wire value.
+func pickEffort(requested string, botSettings settings.Settings, effortLevels []string) string {
 	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
+		if e == models.ReasoningEffortNone || hasEffort(effortLevels, e) {
+			return e
+		}
+	}
+	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" && hasEffort(effortLevels, e) {
 		return e
 	}
-	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" {
-		return e
+	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
+		return models.ReasoningEffortMedium
+	}
+	if len(effortLevels) > 0 {
+		return effortLevels[0]
 	}
 	return models.ReasoningEffortMedium
+}
+
+// effectiveReasoningEfforts intersects the model's advertised effort levels
+// with the wire format's accepted set. OpenAI-format clients reject "max", so
+// it is excluded here. This is the primary filter; openAIWireEffort in
+// models/sdk.go and the Twilight SDK provider layer act as defence-in-depth.
+// Keep isOpenAIReasoningWire in sync with the frontend OPENAI_FORMAT_CLIENT_TYPES.
+func effectiveReasoningEfforts(effortLevels []string, clientType string) []string {
+	levels := effortLevels
+	if len(levels) == 0 {
+		levels = []string{models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh}
+	}
+	out := make([]string, 0, len(levels))
+	for _, e := range levels {
+		if isOpenAIReasoningWire(clientType) && e == models.ReasoningEffortMax {
+			continue
+		}
+		if !hasEffort(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// isOpenAIReasoningWire returns true for client types whose wire format rejects
+// "max" effort. Keep in sync with OPENAI_FORMAT_CLIENT_TYPES in reasoning-effort.ts.
+func isOpenAIReasoningWire(clientType string) bool {
+	switch models.ClientType(clientType) {
+	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses, models.ClientTypeOpenAICodex:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasEffort(effortLevels []string, effort string) bool {
+	for _, e := range effortLevels {
+		if e == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // offEffortFor picks the effort an OpenAI-style provider should send to

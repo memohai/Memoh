@@ -27,7 +27,7 @@ type litellmEntry struct {
 // field means "registry did not provide this"; callers must only fill missing
 // upstream values and never override explicit ones.
 type Capabilities struct {
-	// ThinkingMode is "", toggle, only_adaptive, or none. "" = unknown.
+	// ThinkingMode is "", toggle, adaptive, or none. "" = unknown.
 	ThinkingMode string
 	// EffortLevels is the ordered effort tier list, or nil if unknown.
 	EffortLevels []string
@@ -70,7 +70,7 @@ func derive(e litellmEntry) Capabilities {
 	switch {
 	case reasoningSupported:
 		if boolVal(e.SupportsAdaptiveThinking) {
-			caps.ThinkingMode = models.ThinkingModeOnlyAdaptive
+			caps.ThinkingMode = models.ThinkingModeAdaptive
 		} else {
 			caps.ThinkingMode = models.ThinkingModeToggle
 		}

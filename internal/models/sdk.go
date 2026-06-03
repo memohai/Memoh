@@ -35,7 +35,7 @@ type SDKModelConfig struct {
 // never send token budgets — only effort strings and (for Anthropic 4.6+) the
 // adaptive thinking flag.
 type ReasoningConfig struct {
-	// Active means thinking is on for this call (toggle=on or only_adaptive).
+	// Active means thinking is on for this call.
 	Active bool
 	// Disabled means thinking was explicitly turned off (toggle=off). For
 	// OpenAI-style providers without a real off switch, OffEffort approximates it.
@@ -172,7 +172,7 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		case rc.Disabled:
 			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
 		case rc.Active && rc.Effort != "":
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(rc.Effort)}
+			return []sdk.GenerateOption{sdk.WithReasoningEffort(openAIWireEffort(rc.Effort))}
 		default:
 			return nil
 		}
@@ -205,13 +205,13 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
 	switch {
 	case rc.Active:
-		effort := rc.Effort
+		effort := openAIWireEffort(rc.Effort)
 		if effort == "" {
 			effort = ReasoningEffortMedium
 		}
 		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
 	case rc.Disabled:
-		off := rc.OffEffort
+		off := openAIWireEffort(rc.OffEffort)
 		if off == "" {
 			off = ReasoningEffortMinimal
 		}
@@ -219,6 +219,18 @@ func openAIEffortOptions(rc *ReasoningConfig) []sdk.GenerateOption {
 	default:
 		return nil
 	}
+}
+
+// openAIWireEffort is a last-resort guard that rewrites effort values the
+// OpenAI wire format rejects. The primary filter lives in the resolver's
+// effectiveReasoningEfforts (which removes "max" from the selectable set for
+// OpenAI-format clients), and the Twilight SDK's openai provider package
+// also normalizes max→xhigh independently. This function is defence-in-depth.
+func openAIWireEffort(effort string) string {
+	if effort == ReasoningEffortMax {
+		return ReasoningEffortXHigh
+	}
+	return effort
 }
 
 // ResolveClientType infers the client type string from an SDK Model's provider name.

@@ -114,24 +114,23 @@ const chatModelConfig = computed(() => {
   return props.models.find((m) => m.id === props.form.chat_model_id)?.config
 })
 
+const chatModelClientType = computed(() => {
+  if (!props.form.chat_model_id) return undefined
+  const model = props.models.find((m) => m.id === props.form.chat_model_id)
+  return props.providers.find((p) => p.id === model?.provider_id)?.client_type
+})
+
 const thinkingMode = computed(() => resolveThinkingMode(chatModelConfig.value))
 
 const chatModelSupportsReasoning = computed(() => thinkingMode.value !== 'none')
 
-const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value))
+const effortLevels = computed(() => resolveEffortLevels(chatModelConfig.value, chatModelClientType.value))
 
-// Options shown in the picker: toggle adds an explicit "off"; only_adaptive
-// offers tiers only (thinking is forced on for the bot).
 const availableReasoningEfforts = computed(() =>
   availableEffortsForMode(thinkingMode.value, effortLevels.value),
 )
 
-watch([effortLevels, thinkingMode], ([levels, mode]) => {
-  // Forced-adaptive models can't keep reasoning off.
-  if (mode === 'only_adaptive' && !props.form.reasoning_enabled) {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.form.reasoning_enabled = true
-  }
+watch([effortLevels, thinkingMode], ([levels]) => {
   const current = props.form.reasoning_effort
   if (props.form.reasoning_enabled && (!current || !levels.includes(current))) {
     // eslint-disable-next-line vue/no-mutating-props

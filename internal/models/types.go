@@ -63,13 +63,15 @@ const (
 //
 //   - toggle:        user can turn thinking on/off (most reasoning/hybrid models,
 //     incl. OpenAI). "off" wire behavior is provider-specific (see adapter).
-//   - only_adaptive: thinking is forced adaptive, cannot be enable/disabled
-//     (Claude 4.6+/4.7/4.8/Mythos). Identified via litellm supports_adaptive_thinking.
+//   - adaptive:      user can turn thinking on/off; when on, the provider uses
+//     adaptive thinking (Claude 4.6+/4.7/4.8).
+//   - only_adaptive: legacy alias for adaptive retained for branch-local imports.
 //   - none:          model has no thinking concept.
 //
 // An empty value means "unknown" and is treated as a transitional state that
 // falls back to the legacy CompatReasoning flag (see Model.SupportsReasoning).
 const (
+	ThinkingModeAdaptive     = "adaptive"
 	ThinkingModeToggle       = "toggle"
 	ThinkingModeOnlyAdaptive = "only_adaptive"
 	ThinkingModeNone         = "none"
@@ -91,6 +93,7 @@ var validReasoningEfforts = map[string]struct{}{
 }
 
 var validThinkingModes = map[string]struct{}{
+	ThinkingModeAdaptive:     {},
 	ThinkingModeToggle:       {},
 	ThinkingModeOnlyAdaptive: {},
 	ThinkingModeNone:         {},
@@ -170,7 +173,7 @@ func (m *Model) HasCompatibility(c string) bool {
 // existed (transitional; resolved naturally on next model re-fetch).
 func (m *Model) SupportsReasoning() bool {
 	switch m.Config.ThinkingMode {
-	case ThinkingModeToggle, ThinkingModeOnlyAdaptive:
+	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeOnlyAdaptive:
 		return true
 	case ThinkingModeNone:
 		return false
@@ -183,8 +186,10 @@ func (m *Model) SupportsReasoning() bool {
 // unknown + reasoning compat → toggle; unknown without it → none.
 func (m *Model) ResolveThinkingMode() string {
 	switch m.Config.ThinkingMode {
-	case ThinkingModeToggle, ThinkingModeOnlyAdaptive, ThinkingModeNone:
+	case ThinkingModeToggle, ThinkingModeAdaptive, ThinkingModeNone:
 		return m.Config.ThinkingMode
+	case ThinkingModeOnlyAdaptive:
+		return ThinkingModeAdaptive
 	default:
 		if m.HasCompatibility(CompatReasoning) {
 			return ThinkingModeToggle

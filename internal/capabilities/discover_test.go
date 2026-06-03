@@ -22,8 +22,8 @@ func TestDerive_AdaptiveOpus(t *testing.T) {
 		SupportsFunctionCalling:      ptrBool(true),
 		MaxInputTokens:               ptrInt(1000000),
 	})
-	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
-		t.Fatalf("thinking mode = %q, want only_adaptive", caps.ThinkingMode)
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode = %q, want adaptive", caps.ThinkingMode)
 	}
 	want := []string{"low", "medium", "high", "xhigh", "max"}
 	if !reflect.DeepEqual(caps.EffortLevels, want) {
@@ -96,7 +96,7 @@ func TestRegistry_LookupViaInjectedFetch(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected lookup hit")
 	}
-	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
 		t.Fatalf("thinking mode = %q", caps.ThinkingMode)
 	}
 }
@@ -124,8 +124,8 @@ func TestRegistry_FastVariantBorrowsBaseShapeNotContext(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fast variant to fall back to base shape")
 	}
-	if caps.ThinkingMode != models.ThinkingModeOnlyAdaptive {
-		t.Fatalf("thinking mode = %q, want only_adaptive (borrowed from base)", caps.ThinkingMode)
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode = %q, want adaptive (borrowed from base)", caps.ThinkingMode)
 	}
 	if caps.ContextWindow != nil {
 		t.Fatalf("context window must NOT be inherited from base, got %v", *caps.ContextWindow)

@@ -889,8 +889,12 @@ const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?
 
 const activeModelSupportsReasoning = computed(() => activeThinkingMode.value !== 'none')
 
+const activeModelClientType = computed(() =>
+  providers.value.find((p) => p.id === activeModel.value?.provider_id)?.client_type,
+)
+
 const availableReasoningEfforts = computed(() =>
-  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config)),
+  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config, activeModelClientType.value)),
 )
 
 const selectedModelLabel = computed(() => {
@@ -927,9 +931,6 @@ function initFromBotSettings() {
   if (!overrideReasoningEffort.value) {
     if (botSettings.value.reasoning_enabled && botSettings.value.reasoning_effort) {
       overrideReasoningEffort.value = botSettings.value.reasoning_effort
-    } else if (activeThinkingMode.value === 'only_adaptive') {
-      // Forced-adaptive models cannot be turned off; default to a concrete tier.
-      overrideReasoningEffort.value = botSettings.value.reasoning_effort || 'medium'
     } else {
       overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     }
@@ -937,6 +938,12 @@ function initFromBotSettings() {
 }
 
 watch(botSettings, () => initFromBotSettings(), { immediate: true })
+
+watch(availableReasoningEfforts, (efforts) => {
+  const current = overrideReasoningEffort.value
+  if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
+  overrideReasoningEffort.value = efforts.includes('medium') ? 'medium' : efforts[0] ?? REASONING_EFFORT_DISABLE
+}, { immediate: true })
 
 watch(currentBotId, () => {
   overrideModelId.value = ''
@@ -1009,11 +1016,6 @@ function onModelSelected() {
   modelPopoverOpen.value = false
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
-    return
-  }
-  // A forced-adaptive model can't be "off"; coerce a stale disable into a tier.
-  if (activeThinkingMode.value === 'only_adaptive' && overrideReasoningEffort.value === REASONING_EFFORT_DISABLE) {
-    overrideReasoningEffort.value = botSettings.value?.reasoning_effort || 'medium'
   }
 }
 
