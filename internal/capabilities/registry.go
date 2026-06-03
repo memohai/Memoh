@@ -1,7 +1,10 @@
 package capabilities
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +19,9 @@ import (
 	"github.com/memohai/memoh/internal/models"
 )
 
+//go:embed litellm_snapshot.json.gz
+var bundledRegistryFS embed.FS
+
 // DefaultRegistryURL is the LiteLLM static model registry (the same file shipped
 // with the litellm package). It is a large JSON object keyed by model name.
 const DefaultRegistryURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -27,9 +33,9 @@ const (
 
 // Registry resolves model capabilities from the LiteLLM registry. It keeps an
 // in-memory snapshot with a TTL and refreshes lazily. It is fail-open: if a
-// refresh fails, the previous snapshot (if any) keeps serving; if nothing has
-// ever loaded, Lookup simply reports "unknown" and callers fall back to their
-// own defaults. Nothing here ever blocks model import.
+// refresh fails, the previous snapshot keeps serving. By default that previous
+// snapshot is the bundled LiteLLM registry, so offline/blocked GitHub access
+// still provides baseline capability discovery.
 type Registry struct {
 	url     string
 	ttl     time.Duration
@@ -37,6 +43,7 @@ type Registry struct {
 	logger  *slog.Logger
 	fetchFn func(context.Context) (map[string]litellmEntry, error)
 	group   singleflight.Group
+	bundled []byte
 
 	mu        sync.RWMutex
 	entries   map[string]litellmEntry
@@ -59,19 +66,26 @@ func WithHTTPClient(c *http.Client) Option { return func(r *Registry) { r.client
 // WithLogger sets the logger.
 func WithLogger(l *slog.Logger) Option { return func(r *Registry) { r.logger = l } }
 
+// withoutBundledSnapshot disables the embedded LiteLLM baseline. Intended for
+// tests that need an exactly controlled registry.
+func withoutBundledSnapshot() Option { return func(r *Registry) { r.bundled = nil } }
+
 // withFetchFn injects a fetch function (tests).
 func withFetchFn(fn func(context.Context) (map[string]litellmEntry, error)) Option {
 	return func(r *Registry) { r.fetchFn = fn }
 }
 
-// NewRegistry builds a Registry. By default it fetches DefaultRegistryURL over
-// HTTP with a 30s timeout and caches for 6h.
+// NewRegistry builds a Registry. It starts with the bundled LiteLLM snapshot,
+// then refreshes DefaultRegistryURL over HTTP with a 30s timeout and caches for
+// 6h. The bundled snapshot keeps Desktop/local imports useful when raw GitHub is
+// unavailable.
 func NewRegistry(opts ...Option) *Registry {
 	r := &Registry{
-		url:    DefaultRegistryURL,
-		ttl:    defaultTTL,
-		client: models.NewProviderHTTPClient(defaultFetchTimeout),
-		logger: slog.Default(),
+		url:     DefaultRegistryURL,
+		ttl:     defaultTTL,
+		client:  models.NewProviderHTTPClient(defaultFetchTimeout),
+		logger:  slog.Default(),
+		bundled: bundledRegistryJSON(),
 	}
 	for _, o := range opts {
 		o(r)
@@ -79,6 +93,7 @@ func NewRegistry(opts ...Option) *Registry {
 	if r.fetchFn == nil {
 		r.fetchFn = r.fetchHTTP
 	}
+	r.loadBundledSnapshot()
 	return r
 }
 
@@ -181,6 +196,38 @@ func (r *Registry) fetchHTTP(ctx context.Context) (map[string]litellmEntry, erro
 		return nil, err
 	}
 	return parseRegistry(body)
+}
+
+func (r *Registry) loadBundledSnapshot() {
+	if len(r.bundled) == 0 {
+		return
+	}
+	entries, err := parseRegistry(r.bundled)
+	if err != nil {
+		r.logger.Warn("capabilities: bundled registry snapshot ignored",
+			slog.Any("error", err))
+		return
+	}
+	r.entries = entries
+	r.idx = buildIndex(keysOf(entries))
+	r.fetchedAt = time.Now()
+}
+
+func bundledRegistryJSON() []byte {
+	body, err := bundledRegistryFS.ReadFile("litellm_snapshot.json.gz")
+	if err != nil {
+		return nil
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = reader.Close() }()
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // parseRegistry decodes the LiteLLM registry JSON. It skips the non-model

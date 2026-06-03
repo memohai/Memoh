@@ -112,6 +112,14 @@ func TestResolveReasoningConfig(t *testing.T) {
 			},
 		},
 	}
+	noneEffortModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"none", "minimal", "low", "medium", "high"},
+			},
+		},
+	}
 	plainModel := models.GetResponse{}
 
 	tests := []struct {
@@ -136,8 +144,15 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "explicit none effort is preserved",
+			name:          "unsupported none effort falls back to bot default",
 			model:         toggleModel,
+			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			requestEffort: models.ReasoningEffortNone,
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:          "explicit none effort is preserved when model supports it",
+			model:         noneEffortModel,
 			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortNone},

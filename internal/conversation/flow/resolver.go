@@ -681,7 +681,7 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 // stale settings or command/API overrides cannot send a known-invalid wire value.
 func pickEffort(requested string, botSettings settings.Settings, effortLevels []string) string {
 	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
-		if e == models.ReasoningEffortNone || hasEffort(effortLevels, e) {
+		if hasEffort(effortLevels, e) {
 			return e
 		}
 	}

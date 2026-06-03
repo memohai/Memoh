@@ -27,7 +27,7 @@ func TestRealRegistry(t *testing.T) {
 	}
 	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
 		return entries, nil
-	}))
+	}), withoutBundledSnapshot())
 
 	t.Run("provider_naming_variants_resolve", func(t *testing.T) {
 		cases := []struct {

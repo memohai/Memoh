@@ -90,7 +90,7 @@ func TestRegistry_LookupViaInjectedFetch(t *testing.T) {
 				SupportsMaxReasoningEffort:   ptrBool(true),
 			},
 		}, nil
-	}))
+	}), withoutBundledSnapshot())
 
 	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
 	if !ok {
@@ -117,7 +117,7 @@ func TestRegistry_FastVariantBorrowsBaseShapeNotContext(t *testing.T) {
 				MaxInputTokens:    ptrInt(272000),
 			},
 		}, nil
-	}))
+	}), withoutBundledSnapshot())
 
 	// fast variant: borrows the base reasoning shape but NOT the 1M context.
 	caps, ok := reg.Lookup(context.Background(), "anthropic/claude-opus-4.8-fast")
@@ -140,8 +140,35 @@ func TestRegistry_FastVariantBorrowsBaseShapeNotContext(t *testing.T) {
 func TestRegistry_FailOpenReturnsUnknown(t *testing.T) {
 	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
 		return nil, context.DeadlineExceeded
-	}))
+	}), withoutBundledSnapshot())
 	if _, ok := reg.Lookup(context.Background(), "claude-opus-4-8"); ok {
 		t.Fatalf("lookup should miss when registry never loaded")
+	}
+}
+
+func TestRegistry_BundledSnapshotProvidesBaseline(t *testing.T) {
+	reg := NewRegistry()
+	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
+	if !ok {
+		t.Fatalf("expected bundled snapshot lookup hit")
+	}
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode = %q, want adaptive", caps.ThinkingMode)
+	}
+}
+
+func TestRegistry_BundledSnapshotSurvivesRefreshFailure(t *testing.T) {
+	reg := NewRegistry(
+		WithTTL(0),
+		withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
+			return nil, context.DeadlineExceeded
+		}),
+	)
+	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
+	if !ok {
+		t.Fatalf("expected bundled snapshot lookup hit after failed refresh")
+	}
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode = %q, want adaptive", caps.ThinkingMode)
 	}
 }
