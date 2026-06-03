@@ -482,9 +482,7 @@ const shouldRenderMessage = computed(() =>
 )
 
 function isVisibleAssistantBlock(block: ContentBlock): boolean {
-  if (block.type === 'tool') {
-    return !(block.toolName === 'ask_user' && block.userInput?.status === 'pending')
-  }
+  if (block.type === 'tool') return true
   if (block.type === 'text' || block.type === 'error') return Boolean(block.content)
   if (block.type === 'attachments') return block.attachments.length > 0
   return true
