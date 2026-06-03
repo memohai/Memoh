@@ -126,6 +126,8 @@ func TestParse_Flags(t *testing.T) {
 		{"/model list --page 2 openrouter", "model", "list", []string{"openrouter"}, 2, -1, "", ""},
 		{"/usage summary --range 30d", "usage", "summary", nil, 0, -1, "", "30d"},
 		{"/usage --range all", "usage", "", nil, 0, -1, "", "all"},
+		{"/schedule create daily \"0 9 * * *\" /usage summary --range 7d", "schedule", "create", []string{"daily", "0 9 * * *", "/usage", "summary", "--range", "7d"}, 0, -1, "", ""},
+		{"/schedule update daily --command /usage summary --range 7d", "schedule", "update", []string{"daily", "--command", "/usage", "summary", "--range", "7d"}, 0, -1, "", ""},
 		// Invalid int-flag values must not leak the flag name OR the value as
 		// stray positional args (would pollute provider/name matching downstream).
 		{"/model list --prov -1", "model", "list", nil, 0, -1, "", ""},

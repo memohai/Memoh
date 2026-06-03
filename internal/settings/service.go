@@ -378,7 +378,7 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 
 func isValidReasoningEffort(effort string) bool {
 	switch effort {
-	case "low", "medium", "high":
+	case "none", "low", "medium", "high", "xhigh":
 		return true
 	default:
 		return false

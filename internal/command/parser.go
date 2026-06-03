@@ -30,15 +30,29 @@ func Parse(text string) (ParsedCommand, error) {
 	if len(tokens) == 0 {
 		return ParsedCommand{}, errors.New("empty command")
 	}
-	tokens, flags := extractFlags(tokens)
-	if len(tokens) == 0 {
-		return ParsedCommand{}, errors.New("empty command")
-	}
-
 	resource := strings.ToLower(tokens[0])
 	// Strip Telegram-style @botname suffix (e.g. "help@MemohBot" -> "help").
 	if idx := strings.IndexByte(resource, '@'); idx > 0 {
 		resource = resource[:idx]
+	}
+	action := ""
+	if len(tokens) > 1 {
+		action = strings.ToLower(tokens[1])
+	}
+	flags := parsedFlags{page: 0, prov: -1}
+	if shouldExtractGlobalFlags(resource, action) {
+		tokens, flags = extractFlags(tokens)
+		if len(tokens) == 0 {
+			return ParsedCommand{}, errors.New("empty command")
+		}
+		resource = strings.ToLower(tokens[0])
+		if idx := strings.IndexByte(resource, '@'); idx > 0 {
+			resource = resource[:idx]
+		}
+		action = ""
+		if len(tokens) > 1 {
+			action = strings.ToLower(tokens[1])
+		}
 	}
 
 	cmd := ParsedCommand{
@@ -48,9 +62,7 @@ func Parse(text string) (ParsedCommand, error) {
 		SelectID: flags.selectID,
 		Range:    flags.rangeKey,
 	}
-	if len(tokens) > 1 {
-		cmd.Action = strings.ToLower(tokens[1])
-	}
+	cmd.Action = action
 	if len(tokens) > 2 {
 		cmd.Args = tokens[2:]
 	}
@@ -62,6 +74,16 @@ type parsedFlags struct {
 	prov     int
 	rangeKey string
 	selectID string
+}
+
+func shouldExtractGlobalFlags(resource, action string) bool {
+	if resource == "schedule" && (action == "create" || action == "update") {
+		// These commands intentionally accept another slash command as a
+		// positional argument. A global flag sweep would strip flags that
+		// belong to that nested command, changing what gets scheduled.
+		return false
+	}
+	return true
 }
 
 // extractFlags pulls "--page N", "--prov N" (ints), "--range V" and "--id V"

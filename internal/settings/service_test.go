@@ -106,3 +106,17 @@ func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
 		t.Fatalf("heartbeat interval = %d, want 1440", got.HeartbeatInterval)
 	}
 }
+
+func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
+	t.Parallel()
+
+	for _, effort := range []string{"none", "low", "medium", "high", "xhigh"} {
+		if !isValidReasoningEffort(effort) {
+			t.Fatalf("isValidReasoningEffort(%q) = false, want true", effort)
+		}
+		got := normalizeBotSetting("en", "auto", "allow", true, effort, false, 60, false, 0, 80)
+		if got.ReasoningEffort != effort {
+			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
+		}
+	}
+}
