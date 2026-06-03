@@ -37,7 +37,7 @@ require (
 	github.com/mailgun/mailgun-go/v5 v5.14.0
 	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
 	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260603074827-eedffe3595b4
+	github.com/memohai/twilight-ai v0.4.1-0.20260603165258-f4a48c387b9b
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
@@ -234,7 +234,3 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
-
-// Temporary fork pin for the reason-effort Twilight changes. Replace with an
-// upstream memohai/twilight-ai pseudo-version or tag once the Twilight PR merges.
-replace github.com/memohai/twilight-ai => github.com/qqqqqf-q/twilight-ai v0.4.1-0.20260603155016-c5b994717692
