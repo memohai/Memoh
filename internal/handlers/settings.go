@@ -58,7 +58,9 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	// Reading settings is part of the chat experience (the chat UI needs model
+	// capabilities, etc.), so allow chat-level members. Writes stay manage-only.
+	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionChat); err != nil {
 		return err
 	}
 	resp, err := h.service.GetBot(c.Request().Context(), botID)

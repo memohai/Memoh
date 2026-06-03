@@ -3,6 +3,7 @@
 
 PRAGMA foreign_keys = OFF;
 
+DROP TABLE IF EXISTS bot_user_grants;
 DROP TABLE IF EXISTS user_provider_oauth_tokens;
 DROP TABLE IF EXISTS provider_oauth_tokens;
 DROP TABLE IF EXISTS email_outbox;

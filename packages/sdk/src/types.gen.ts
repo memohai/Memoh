@@ -581,6 +581,12 @@ export type BotsBot = {
     check_issue_count?: number;
     check_state?: string;
     created_at?: string;
+    /**
+     * CurrentUserPermissions lists the effective access permissions of the
+     * requesting user on this bot (e.g. "chat", "manage"). It is populated by
+     * the API layer per request and is not persisted.
+     */
+    current_user_permissions?: Array<string>;
     display_name?: string;
     id?: string;
     is_active?: boolean;
@@ -620,6 +626,12 @@ export type BotsCreateBotRequest = {
     wait_for_ready?: boolean;
 };
 
+export type BotsCreateUserGrantRequest = {
+    permissions?: Array<string>;
+    subject_type?: string;
+    user_id?: string;
+};
+
 export type BotsListBotsResponse = {
     items?: Array<BotsBot>;
 };
@@ -646,6 +658,24 @@ export type BotsUpdateBotRequest = {
     };
     name?: string;
     timezone?: string;
+};
+
+export type BotsUpdateUserGrantRequest = {
+    permissions?: Array<string>;
+};
+
+export type BotsUserGrant = {
+    bot_id?: string;
+    created_at?: string;
+    id?: string;
+    is_owner?: boolean;
+    permissions?: Array<string>;
+    subject_type?: string;
+    updated_at?: string;
+    user_avatar_url?: string;
+    user_display_name?: string;
+    user_id?: string;
+    user_username?: string;
 };
 
 export type ChannelAction = {
@@ -1015,6 +1045,21 @@ export type HandlersAcpClaudeCodeOAuthStatus = {
 
 export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
+};
+
+export type HandlersBotUserCandidate = {
+    avatar_url?: string;
+    display_name?: string;
+    id?: string;
+    username?: string;
+};
+
+export type HandlersBotUserCandidateListResponse = {
+    items?: Array<HandlersBotUserCandidate>;
+};
+
+export type HandlersBotUserGrantListResponse = {
+    items?: Array<BotsUserGrant>;
 };
 
 export type HandlersCacheStats = {
@@ -1991,6 +2036,7 @@ export type SessionSession = {
     bot_id?: string;
     channel_type?: string;
     created_at?: string;
+    created_by_user_id?: string;
     id?: string;
     metadata?: {
         [key: string]: unknown;
@@ -7119,6 +7165,229 @@ export type PostBotsByBotIdTtsSynthesizeResponses = {
 };
 
 export type PostBotsByBotIdTtsSynthesizeResponse = PostBotsByBotIdTtsSynthesizeResponses[keyof PostBotsByBotIdTtsSynthesizeResponses];
+
+export type GetBotsByBotIdUserAccessData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/user-access';
+};
+
+export type GetBotsByBotIdUserAccessErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdUserAccessError = GetBotsByBotIdUserAccessErrors[keyof GetBotsByBotIdUserAccessErrors];
+
+export type GetBotsByBotIdUserAccessResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBotUserGrantListResponse;
+};
+
+export type GetBotsByBotIdUserAccessResponse = GetBotsByBotIdUserAccessResponses[keyof GetBotsByBotIdUserAccessResponses];
+
+export type PostBotsByBotIdUserAccessData = {
+    /**
+     * Grant payload
+     */
+    body: BotsCreateUserGrantRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/user-access';
+};
+
+export type PostBotsByBotIdUserAccessErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdUserAccessError = PostBotsByBotIdUserAccessErrors[keyof PostBotsByBotIdUserAccessErrors];
+
+export type PostBotsByBotIdUserAccessResponses = {
+    /**
+     * Created
+     */
+    201: BotsUserGrant;
+};
+
+export type PostBotsByBotIdUserAccessResponse = PostBotsByBotIdUserAccessResponses[keyof PostBotsByBotIdUserAccessResponses];
+
+export type GetBotsByBotIdUserAccessCandidatesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/user-access/candidates';
+};
+
+export type GetBotsByBotIdUserAccessCandidatesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdUserAccessCandidatesError = GetBotsByBotIdUserAccessCandidatesErrors[keyof GetBotsByBotIdUserAccessCandidatesErrors];
+
+export type GetBotsByBotIdUserAccessCandidatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBotUserCandidateListResponse;
+};
+
+export type GetBotsByBotIdUserAccessCandidatesResponse = GetBotsByBotIdUserAccessCandidatesResponses[keyof GetBotsByBotIdUserAccessCandidatesResponses];
+
+export type DeleteBotsByBotIdUserAccessByGrantIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Grant ID
+         */
+        grant_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/user-access/{grant_id}';
+};
+
+export type DeleteBotsByBotIdUserAccessByGrantIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdUserAccessByGrantIdError = DeleteBotsByBotIdUserAccessByGrantIdErrors[keyof DeleteBotsByBotIdUserAccessByGrantIdErrors];
+
+export type DeleteBotsByBotIdUserAccessByGrantIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PutBotsByBotIdUserAccessByGrantIdData = {
+    /**
+     * Grant payload
+     */
+    body: BotsUpdateUserGrantRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Grant ID
+         */
+        grant_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/user-access/{grant_id}';
+};
+
+export type PutBotsByBotIdUserAccessByGrantIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdUserAccessByGrantIdError = PutBotsByBotIdUserAccessByGrantIdErrors[keyof PutBotsByBotIdUserAccessByGrantIdErrors];
+
+export type PutBotsByBotIdUserAccessByGrantIdResponses = {
+    /**
+     * OK
+     */
+    200: BotsUserGrant;
+};
+
+export type PutBotsByBotIdUserAccessByGrantIdResponse = PutBotsByBotIdUserAccessByGrantIdResponses[keyof PutBotsByBotIdUserAccessByGrantIdResponses];
 
 export type DeleteBotsByIdData = {
     body?: never;

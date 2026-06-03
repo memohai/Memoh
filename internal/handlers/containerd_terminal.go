@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -43,7 +44,7 @@ type terminalControlMessage struct {
 // @Failure 404 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/terminal [get].
 func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceExec)
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/terminal/ws [get].
 func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceExec)
 	if err != nil {
 		return err
 	}

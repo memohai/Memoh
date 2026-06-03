@@ -4,6 +4,7 @@ import { useStorage } from '@vueuse/core'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
+import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
 import {
   clearTerminalSnapshots,
   clearTerminalSnapshotsForBot,
@@ -65,6 +66,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
   const { currentBotId } = storeToRefs(selection)
   const chatStore = useChatStore()
+  const currentBot = computed(() =>
+    chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
+  )
 
   const storage = useStorage<WorkspaceTabsStorage>('workspace-tabs', {})
 
@@ -182,6 +186,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openFile(filePath: string) {
+    if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
     const state = ensureBot(currentBotId.value)
@@ -246,6 +251,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openTerminal() {
+    if (!hasCurrentPermission('workspace_exec')) return
     const state = ensureBot(currentBotId.value)
     if (!state) return
     const nextCounter = state.terminalCounter + 1
@@ -264,6 +270,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   function openDisplay() {
+    if (!hasCurrentPermission('manage')) return
     const state = ensureBot(currentBotId.value)
     if (!state) return
     const existing = state.tabs.find((tab) => tab.type === 'display')
@@ -422,6 +429,45 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     commit({ ...state, tabs: next })
   }
 
+  function hasCurrentPermission(permission: BotPermission): boolean {
+    return hasBotPermission(currentBot.value?.current_user_permissions, permission)
+  }
+
+  function isTabAllowed(tab: WorkspaceTab): boolean {
+    switch (tab.type) {
+      case 'file':
+        return hasCurrentPermission('workspace_read')
+      case 'terminal':
+        return hasCurrentPermission('workspace_exec')
+      case 'display':
+        return hasCurrentPermission('manage')
+      case 'chat':
+      case 'draft':
+        return true
+    }
+  }
+
+  function pruneUnauthorizedTabs() {
+    const perms = currentBot.value?.current_user_permissions
+    if (!currentBotId.value || !perms || perms.length === 0) return
+    const state = ensureBot(currentBotId.value)
+    if (!state) return
+    const tabs = state.tabs.filter(isTabAllowed)
+    if (tabs.length === state.tabs.length) return
+    const botId = currentBotId.value
+    const removed = state.tabs.filter(tab => !tabs.some(item => item.id === tab.id))
+    let activeId = state.activeId
+    if (activeId && !tabs.some(tab => tab.id === activeId)) {
+      activeId = tabs[0]?.id ?? null
+    }
+    const dirtyFileTabs: Record<string, boolean> = {}
+    for (const tab of tabs) {
+      if (state.dirtyFileTabs[tab.id]) dirtyFileTabs[tab.id] = true
+    }
+    commit({ ...state, tabs, activeId, dirtyFileTabs })
+    discardTerminalSnapshots(botId, removed)
+  }
+
   // Reset all tabs for a specific bot. Used when the user switches bots.
   function resetBot(botId: string) {
     const bid = (botId ?? '').trim()
@@ -452,6 +498,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(currentBotId, (bid) => {
     ensureBot(bid)
   }, { immediate: true })
+
+  watch(
+    () => [currentBotId.value, ...(currentBot.value?.current_user_permissions ?? [])].join('|'),
+    () => pruneUnauthorizedTabs(),
+    { immediate: true },
+  )
 
   // When the chat-store session is set externally (e.g. URL navigation, or
   // the first message in a draft tab triggering server-side session creation),

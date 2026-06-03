@@ -1,6 +1,6 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, title, metadata, parent_session_id
+  bot_id, route_id, channel_type, type, title, metadata, parent_session_id, created_by_user_id
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -9,7 +9,8 @@ VALUES (
   sqlc.arg(type),
   sqlc.arg(title),
   sqlc.arg(metadata),
-  sqlc.narg(parent_session_id)::uuid
+  sqlc.narg(parent_session_id)::uuid,
+  sqlc.narg(created_by_user_id)::uuid
 )
 RETURNING *;
 
@@ -22,12 +23,25 @@ WHERE id = $1
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
-  s.created_at, s.updated_at, s.deleted_at,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
   r.metadata AS route_metadata,
   r.conversation_type AS route_conversation_type
 FROM bot_sessions s
 LEFT JOIN bot_channel_routes r ON r.id = s.route_id
 WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.deleted_at IS NULL
+ORDER BY s.updated_at DESC;
+
+-- name: ListSessionsByBotAndCreatedByUser :many
+SELECT
+  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at,
+  r.metadata AS route_metadata,
+  r.conversation_type AS route_conversation_type
+FROM bot_sessions s
+LEFT JOIN bot_channel_routes r ON r.id = s.route_id
+WHERE s.bot_id = sqlc.arg(bot_id)
+  AND s.created_by_user_id = sqlc.arg(created_by_user_id)
   AND s.deleted_at IS NULL
 ORDER BY s.updated_at DESC;
 

@@ -41,6 +41,7 @@
 
     <div class="flex items-center shrink-0 px-1.5 pt-2 pb-1 gap-0.5 border-l border-border">
       <button
+        v-if="canWorkspaceExec"
         type="button"
         class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
         :title="t('chat.tabBarToolkit.newTerminal')"
@@ -51,7 +52,7 @@
         <TerminalSquare class="size-4" />
       </button>
       <button
-        v-if="!isLocalWorkspace"
+        v-if="canManage && !isLocalWorkspace"
         type="button"
         class="inline-flex items-center justify-center size-8 rounded-md text-muted-foreground hover:bg-sidebar-accent/40 hover:text-foreground transition-colors [-webkit-app-region:no-drag]"
         :title="t('chat.tabBarToolkit.openBrowser')"
@@ -114,6 +115,7 @@ import {
 import { useWorkspaceTabsStore, type WorkspaceTab } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
+import { hasBotPermission } from '@/utils/bot-permissions'
 import { useResizeObserver } from '@vueuse/core'
 
 const { t } = useI18n()
@@ -173,6 +175,9 @@ const { bots, currentBotId, sessions } = storeToRefs(chatStore)
 const currentBot = computed(() =>
   bots.value.find(bot => bot.id === currentBotId.value) ?? null,
 )
+const currentPermissions = computed(() => currentBot.value?.current_user_permissions ?? [])
+const canWorkspaceExec = computed(() => hasBotPermission(currentPermissions.value, 'workspace_exec'))
+const canManage = computed(() => hasBotPermission(currentPermissions.value, 'manage'))
 const isLocalWorkspace = computed(() =>
   isLocalWorkspaceBot(currentBot.value?.metadata),
 )

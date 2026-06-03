@@ -27,8 +27,15 @@ func RequireChannelIdentityID(c echo.Context) (string, error) {
 	return channelIdentityID, nil
 }
 
-// AuthorizeBotAccess validates that the given identity has owner/admin access to the specified bot.
+// AuthorizeBotAccess validates that the given identity has manage-level access to
+// the specified bot (owner, workspace admin, or a user grant carrying manage).
 func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountService *accounts.Service, channelIdentityID, botID string) (bots.Bot, error) {
+	return AuthorizeBotAccessWithPermission(ctx, botService, accountService, channelIdentityID, botID, bots.PermissionManage)
+}
+
+// AuthorizeBotAccessWithPermission validates that the given identity holds the
+// required permission scope on the specified bot.
+func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Service, accountService *accounts.Service, channelIdentityID, botID, requiredPermission string) (bots.Bot, error) {
 	if botService == nil || accountService == nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
 	}
@@ -36,7 +43,7 @@ func AuthorizeBotAccess(ctx context.Context, botService *bots.Service, accountSe
 	if err != nil {
 		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	bot, err := botService.AuthorizeAccess(ctx, channelIdentityID, botID, isAdmin)
+	bot, err := botService.AuthorizeAccessWithPermission(ctx, channelIdentityID, botID, isAdmin, requiredPermission)
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")

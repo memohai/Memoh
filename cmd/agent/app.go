@@ -685,8 +685,8 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, bgManager *background.Manager) *handlers.MessageHandler {
-	h := handlers.NewMessageHandler(log, chatService, msgService, botService, accountService, hub)
+func provideMessageHandler(log *slog.Logger, chatService *conversation.Service, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, bgManager *background.Manager) *handlers.MessageHandler {
+	h := handlers.NewMessageHandler(log, chatService, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
 	h.SetBackgroundManager(bgManager)

@@ -227,6 +227,85 @@ func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRo
 	return i, err
 }
 
+const listAccessibleBots = `-- name: ListAccessibleBots :many
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+FROM bots b
+WHERE b.owner_user_id = $1
+   OR EXISTS (
+     SELECT 1 FROM bot_user_grants g
+     WHERE g.bot_id = b.id
+       AND (
+         g.subject_type = 'everyone'
+         OR (g.subject_type = 'user' AND g.user_id = $1)
+       )
+   )
+ORDER BY b.created_at DESC
+`
+
+type ListAccessibleBotsRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	Name              string             `json:"name"`
+	DisplayName       pgtype.Text        `json:"display_name"`
+	AvatarUrl         pgtype.Text        `json:"avatar_url"`
+	Timezone          pgtype.Text        `json:"timezone"`
+	IsActive          bool               `json:"is_active"`
+	Status            string             `json:"status"`
+	Language          string             `json:"language"`
+	ReasoningEnabled  bool               `json:"reasoning_enabled"`
+	ReasoningEffort   string             `json:"reasoning_effort"`
+	ChatModelID       pgtype.UUID        `json:"chat_model_id"`
+	SearchProviderID  pgtype.UUID        `json:"search_provider_id"`
+	MemoryProviderID  pgtype.UUID        `json:"memory_provider_id"`
+	HeartbeatEnabled  bool               `json:"heartbeat_enabled"`
+	HeartbeatInterval int32              `json:"heartbeat_interval"`
+	HeartbeatPrompt   string             `json:"heartbeat_prompt"`
+	Metadata          []byte             `json:"metadata"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUID) ([]ListAccessibleBotsRow, error) {
+	rows, err := q.db.Query(ctx, listAccessibleBots, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccessibleBotsRow
+	for rows.Next() {
+		var i ListAccessibleBotsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Name,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.Timezone,
+			&i.IsActive,
+			&i.Status,
+			&i.Language,
+			&i.ReasoningEnabled,
+			&i.ReasoningEffort,
+			&i.ChatModelID,
+			&i.SearchProviderID,
+			&i.MemoryProviderID,
+			&i.HeartbeatEnabled,
+			&i.HeartbeatInterval,
+			&i.HeartbeatPrompt,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBotsByOwner = `-- name: ListBotsByOwner :many
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots

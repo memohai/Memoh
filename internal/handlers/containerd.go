@@ -964,6 +964,10 @@ func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, b
 
 // requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
 func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
+	return h.requireBotAccessWithPermission(c, bots.PermissionManage)
+}
+
+func (h *ContainerdHandler) requireBotAccessWithPermission(c echo.Context, permission string) (string, error) {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return "", err
@@ -972,7 +976,7 @@ func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
 	if botID == "" {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	if _, err := h.authorizeBotAccessWithPermission(c.Request().Context(), channelIdentityID, botID, permission); err != nil {
 		return "", err
 	}
 	return botID, nil
@@ -982,8 +986,8 @@ func (*ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, erro
 	return RequireChannelIdentityID(c)
 }
 
-func (h *ContainerdHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
-	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
+func (h *ContainerdHandler) authorizeBotAccessWithPermission(ctx context.Context, channelIdentityID, botID, permission string) (bots.Bot, error) {
+	return AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, permission)
 }
 
 // requireBotAccessWithGuest is like requireBotAccess but also allows guest access

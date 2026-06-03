@@ -4,6 +4,8 @@
 
 Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace, or a trusted local workspace in desktop/local mode, allowing it to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
 
+The public documentation site is maintained separately in `memohai/memoh-docs`.
+
 ## Architecture Overview
 
 Deploy/server mode consists of two core services:
@@ -184,7 +186,6 @@ Memoh/
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
-├── docs/                       # Documentation site (VitePress)
 ├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
@@ -228,7 +229,6 @@ Memoh/
 | `mise run icons-generate` | Generate icon Vue components from SVG sources |
 | `mise run db-up` | Initialize and migrate the database |
 | `mise run db-down` | Drop the database |
-| `mise run docs` | Start documentation dev server |
 | `mise run build-embedded-assets` | Build and stage embedded web assets |
 | `mise run build-unified` | Build memoh CLI locally |
 | `mise run bridge:build` | Rebuild bridge binary in dev container |

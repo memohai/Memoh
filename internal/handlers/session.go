@@ -79,10 +79,6 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	bot, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID)
-	if err != nil {
-		return err
-	}
 	var req createSessionRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -94,17 +90,22 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if !session.IsKnownType(sessionType) {
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
 	}
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredPermissionForSessionType(sessionType))
+	if err != nil {
+		return err
+	}
 	if sessionType == session.TypeACPAgent {
 		if err := validateACPCreate(bot, req.Metadata); err != nil {
 			return err
 		}
 	}
 	sess, err := h.sessionService.Create(c.Request().Context(), session.CreateInput{
-		BotID:       botID,
-		ChannelType: req.ChannelType,
-		Type:        sessionType,
-		Title:       req.Title,
-		Metadata:    req.Metadata,
+		BotID:           bot.ID,
+		ChannelType:     req.ChannelType,
+		Type:            sessionType,
+		Title:           req.Title,
+		Metadata:        req.Metadata,
+		CreatedByUserID: channelIdentityID,
 	})
 	if err != nil {
 		return sessionServiceError(err)
@@ -129,10 +130,17 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
+	bot, perms, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID)
+	if err != nil {
 		return err
 	}
-	sessions, err := h.sessionService.ListByBot(c.Request().Context(), botID)
+	var sessions []session.Session
+	if bots.HasPermission(perms, bots.PermissionManage) {
+		sessions, err = h.sessionService.ListByBot(c.Request().Context(), bot.ID)
+	} else {
+		sessions, err = h.sessionService.ListByBotAndCreatedByUser(c.Request().Context(), bot.ID, channelIdentityID)
+		sessions = filterSessionsForPermissions(sessions, channelIdentityID, perms)
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -158,19 +166,13 @@ func (h *SessionHandler) GetSession(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
-		return err
-	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
-	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	_, _, sess, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
-	}
-	if sess.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return err
 	}
 	return c.JSON(http.StatusOK, sess)
 }
@@ -195,21 +197,14 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	bot, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID)
-	if err != nil {
-		return err
-	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
 
-	existing, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	bot, perms, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
-	}
-	if existing.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return err
 	}
 
 	var req updateSessionRequest
@@ -228,6 +223,9 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		}
 		if !session.IsKnownType(targetType) {
 			return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
+		}
+		if !bots.HasPermission(perms, requiredPermissionForSessionType(targetType)) {
+			return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 		}
 		targetMetadata := cloneSessionMetadata(existing.Metadata)
 		if req.Metadata != nil {
@@ -292,19 +290,13 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
-		return err
-	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
-	existing, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	_, _, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
-	}
-	if existing.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return err
 	}
 	if existing.Type == session.TypeACPAgent && h.acpPool != nil {
 		if closeErr := h.acpPool.CloseSession(sessionID); closeErr != nil {
@@ -315,6 +307,85 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *SessionHandler) authorizeBotSessionAccess(c echo.Context, channelIdentityID, botID string) (bots.Bot, []string, error) {
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionChat)
+	if err != nil {
+		bot, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+		if err != nil {
+			return bots.Bot{}, nil, err
+		}
+	}
+	perms, err := h.resolveCurrentUserPermissions(c, channelIdentityID, bot.ID)
+	if err != nil {
+		return bots.Bot{}, nil, err
+	}
+	return bot, perms, nil
+}
+
+func (h *SessionHandler) authorizeSession(c echo.Context, channelIdentityID, botID, sessionID string) (bots.Bot, []string, session.Session, error) {
+	bot, perms, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID)
+	if err != nil {
+		return bots.Bot{}, nil, session.Session{}, err
+	}
+	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
+	if err != nil || sess.BotID != bot.ID {
+		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	if !canAccessSession(sess, channelIdentityID, perms) {
+		return bots.Bot{}, nil, session.Session{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	return bot, perms, sess, nil
+}
+
+func (h *SessionHandler) resolveCurrentUserPermissions(c echo.Context, channelIdentityID, botID string) ([]string, error) {
+	if h.botService == nil || h.accountService == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "bot services not configured")
+	}
+	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return perms, nil
+}
+
+func requiredPermissionForSessionType(sessionType string) string {
+	switch strings.TrimSpace(sessionType) {
+	case session.TypeChat:
+		return bots.PermissionChat
+	case session.TypeACPAgent:
+		return bots.PermissionWorkspaceExec
+	default:
+		return bots.PermissionManage
+	}
+}
+
+func canAccessSession(sess session.Session, userID string, perms []string) bool {
+	if bots.HasPermission(perms, bots.PermissionManage) {
+		return true
+	}
+	if strings.TrimSpace(sess.CreatedByUserID) == "" || sess.CreatedByUserID != strings.TrimSpace(userID) {
+		return false
+	}
+	return bots.HasPermission(perms, requiredPermissionForSessionType(sess.Type))
+}
+
+func filterSessionsForPermissions(items []session.Session, userID string, perms []string) []session.Session {
+	if bots.HasPermission(perms, bots.PermissionManage) {
+		return items
+	}
+	out := make([]session.Session, 0, len(items))
+	for _, item := range items {
+		if canAccessSession(item, userID, perms) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func validateACPCreate(bot bots.Bot, metadata map[string]any) error {

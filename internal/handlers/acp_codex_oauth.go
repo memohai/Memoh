@@ -173,7 +173,7 @@ func (h *ACPCodexOAuthHandler) Callback(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, oauthState.ChannelIdentityID, oauthState.BotID); err != nil {
+	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, oauthState.ChannelIdentityID, oauthState.BotID, bots.PermissionWorkspaceExec); err != nil {
 		return err
 	}
 	creds, err := h.provider.ExchangeOpenAICodexACPCode(c.Request().Context(), h.callbackURL, code, oauthState.CodeVerifier)
@@ -211,10 +211,11 @@ func (h *ACPCodexOAuthHandler) requireBotAccess(c echo.Context) (string, string,
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
+	if err != nil {
 		return "", "", err
 	}
-	return botID, channelIdentityID, nil
+	return bot.ID, channelIdentityID, nil
 }
 
 func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {

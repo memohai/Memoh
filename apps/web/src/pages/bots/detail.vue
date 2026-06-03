@@ -310,6 +310,16 @@ const isLocalWorkspace = computed(() =>
   isLocalWorkspaceBot(bot.value?.metadata, containerInfo.value?.workspace_backend),
 )
 
+const canManageBot = computed(() => {
+  const perms = bot.value?.current_user_permissions
+  // Only restrict management when the backend explicitly reports a permission
+  // set without "manage". When the field is absent (older backend, cache, etc.)
+  // default to allowing management so owners are never locked out of their own
+  // bot; the backend still enforces access on every management endpoint.
+  if (!perms || perms.length === 0) return true
+  return perms.includes('manage')
+})
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
@@ -330,10 +340,11 @@ const tabList = computed(() => {
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
   ]
+  const scoped = canManageBot.value ? tabs : tabs.filter(tab => tab.value === 'overview')
   if (isLocalWorkspace.value) {
-    return tabs.filter(tab => tab.value !== 'container' && tab.value !== 'network' && tab.value !== 'desktop')
+    return scoped.filter(tab => tab.value !== 'container' && tab.value !== 'network' && tab.value !== 'desktop')
   }
-  return tabs
+  return scoped
 })
 
 const searchQuery = ref('')
@@ -498,11 +509,15 @@ watch(botId, () => {
   botNameDraft.value = ''
 })
 
-watch([activeTab, botId], ([tab]) => {
+watch([activeTab, botId, canManageBot], ([tab]) => {
   if (!botId.value) {
     return
   }
   if (tab === 'container') {
+    // Container data is management-only; chat-only members never see this tab.
+    if (!canManageBot.value) {
+      return
+    }
     void loadContainerData(true)
     return
   }

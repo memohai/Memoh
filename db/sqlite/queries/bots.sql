@@ -34,6 +34,20 @@ FROM bots
 WHERE owner_user_id = sqlc.arg(owner_user_id)
 ORDER BY created_at DESC;
 
+-- name: ListAccessibleBots :many
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+FROM bots b
+WHERE b.owner_user_id = sqlc.arg(user_id)
+   OR EXISTS (
+     SELECT 1 FROM bot_user_grants g
+     WHERE g.bot_id = b.id
+       AND (
+         g.subject_type = 'everyone'
+         OR (g.subject_type = 'user' AND g.user_id = sqlc.arg(user_id))
+       )
+   )
+ORDER BY b.created_at DESC;
+
 -- name: UpdateBotProfile :one
 UPDATE bots
 SET name = sqlc.arg(name),

@@ -29,10 +29,6 @@ description = "Install dependencies"
 env = { CI = "true" }
 run = "pnpm install"
 
-[tasks.docs]
-description = "start documentation"
-run = "pnpm docs:dev"
-
 [tasks.go-install]
 description = "Install Go dependencies"
 run = "go mod download"
