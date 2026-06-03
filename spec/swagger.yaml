@@ -975,6 +975,14 @@ definitions:
         type: string
       created_at:
         type: string
+      current_user_permissions:
+        description: |-
+          CurrentUserPermissions lists the effective access permissions of the
+          requesting user on this bot (e.g. "chat", "manage"). It is populated by
+          the API layer per request and is not persisted.
+        items:
+          type: string
+        type: array
       display_name:
         type: string
       id:
@@ -1035,6 +1043,17 @@ definitions:
       wait_for_ready:
         type: boolean
     type: object
+  bots.CreateUserGrantRequest:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
+      subject_type:
+        type: string
+      user_id:
+        type: string
+    type: object
   bots.ListBotsResponse:
     properties:
       items:
@@ -1075,6 +1094,40 @@ definitions:
       name:
         type: string
       timezone:
+        type: string
+    type: object
+  bots.UpdateUserGrantRequest:
+    properties:
+      permissions:
+        items:
+          type: string
+        type: array
+    type: object
+  bots.UserGrant:
+    properties:
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_owner:
+        type: boolean
+      permissions:
+        items:
+          type: string
+        type: array
+      subject_type:
+        type: string
+      updated_at:
+        type: string
+      user_avatar_url:
+        type: string
+      user_display_name:
+        type: string
+      user_id:
+        type: string
+      user_username:
         type: string
     type: object
   channel.Action:
@@ -1735,6 +1788,31 @@ definitions:
       ids:
         items:
           type: string
+        type: array
+    type: object
+  handlers.BotUserCandidate:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      username:
+        type: string
+    type: object
+  handlers.BotUserCandidateListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.BotUserCandidate'
+        type: array
+    type: object
+  handlers.BotUserGrantListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/bots.UserGrant'
         type: array
     type: object
   handlers.CacheStats:
@@ -3342,6 +3420,8 @@ definitions:
       channel_type:
         type: string
       created_at:
+        type: string
+      created_by_user_id:
         type: string
       id:
         type: string
@@ -7404,6 +7484,191 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Synthesize speech for a bot
+      tags:
+      - bots
+  /bots/{bot_id}/user-access:
+    get:
+      description: List workspace user access grants for a bot, including the owner
+        entry
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BotUserGrantListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot user access grants
+      tags:
+      - bots
+    post:
+      description: Grant a workspace user (or everyone) access to a bot with a permission
+        set
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/bots.CreateUserGrantRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/bots.UserGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create bot user access grant
+      tags:
+      - bots
+  /bots/{bot_id}/user-access/{grant_id}:
+    delete:
+      description: Remove a workspace user access grant from a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant ID
+        in: path
+        name: grant_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Delete bot user access grant
+      tags:
+      - bots
+    put:
+      description: Update the permission set of a grant
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Grant ID
+        in: path
+        name: grant_id
+        required: true
+        type: string
+      - description: Grant payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/bots.UpdateUserGrantRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/bots.UserGrant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update bot user access grant
+      tags:
+      - bots
+  /bots/{bot_id}/user-access/candidates:
+    get:
+      description: List workspace members that can be granted access to a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BotUserCandidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List grantable workspace members
       tags:
       - bots
   /bots/{id}:

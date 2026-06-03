@@ -102,7 +102,6 @@ tmp/
 **/*.rs.bk
 Cargo.lock.bak
 
-docs/docs/.vitepress/cache
 .pnpm-store
 
 dump.rdb

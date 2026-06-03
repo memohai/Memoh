@@ -2,7 +2,7 @@
   <div class="space-y-1.5">
     <div
       v-if="backgroundMeta.length"
-      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+      class="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-foreground"
     >
       <span
         v-for="item in backgroundMeta"
@@ -12,23 +12,23 @@
     </div>
     <pre
       v-if="progressText"
-      class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
     >{{ progressText }}</pre>
     <pre
       v-if="backgroundOutput"
-      class="text-xs text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
     >{{ backgroundOutput }}</pre>
     <pre
       v-if="stdout"
-      class="text-xs text-foreground/80 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
+      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
     >{{ stdout }}</pre>
     <pre
       v-if="stderr"
-      class="text-xs text-destructive/80 overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-destructive/5 px-2 py-1"
+      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
     >{{ stderr }}</pre>
     <pre
       v-if="errorText"
-      class="text-xs text-destructive overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-destructive/5 px-2 py-1"
+      class="text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1"
     >{{ errorText }}</pre>
     <p
       v-if="!progressText && !backgroundOutput && !stdout && !stderr && !errorText"
@@ -82,7 +82,6 @@ const backgroundMeta = computed(() => {
   if (!task?.taskId) return []
   const items = [task.taskId]
   if (task.status) items.push(task.status)
-  if (typeof task.exitCode === 'number' && !isBackgroundActive.value) items.push(`exit ${task.exitCode}`)
   if (task.duration) items.push(task.duration)
   if (task.outputFile) items.push(task.outputFile)
   return items

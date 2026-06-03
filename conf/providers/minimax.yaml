@@ -2,6 +2,8 @@ name: Minimax
 client_type: openai-completions
 icon: minimax-color
 base_url: https://api.minimaxi.com/v1
+config:
+  chat_completions_compat: minimax
 
 models:
   - model_id: MiniMax-M2.7

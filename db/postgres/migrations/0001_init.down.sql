@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS bot_user_grants;
 DROP TABLE IF EXISTS bot_history_message_assets;
 DROP TABLE IF EXISTS media_assets;
 DROP TABLE IF EXISTS bot_storage_bindings;

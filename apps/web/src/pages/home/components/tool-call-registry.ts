@@ -134,35 +134,6 @@ function lineCount(s: string): number {
   return s.split('\n').length
 }
 
-function structured(block: ToolCallBlock): Record<string, unknown> {
-  const r = asObject(block.result)
-  const sc = asObject(r.structuredContent)
-  return Object.keys(sc).length > 0 ? sc : r
-}
-
-function execErrorState(block: ToolCallBlock): { isError: boolean; suffix: string } {
-  const bg = block.backgroundTask
-  if (bg?.status === 'stalled') return { isError: true, suffix: '(stalled)' }
-  if (bg && block.done) {
-    if (bg.status === 'failed' || bg.status === 'killed') {
-      return { isError: true, suffix: typeof bg.exitCode === 'number' ? `(exit ${bg.exitCode})` : '' }
-    }
-    if (typeof bg.exitCode === 'number' && bg.exitCode !== 0) {
-      return { isError: true, suffix: `(exit ${bg.exitCode})` }
-    }
-  }
-  if (!block.done || !block.result) return { isError: false, suffix: '' }
-  const r = asObject(block.result)
-  const sc = structured(block)
-  const code = sc.exit_code
-  if (typeof code === 'number') {
-    if (code === 0) return { isError: false, suffix: '' }
-    return { isError: true, suffix: `(exit ${code})` }
-  }
-  if (r.isError === true) return { isError: true, suffix: '' }
-  return { isError: false, suffix: '' }
-}
-
 function hostnameOrUrl(url: string): string {
   if (!url) return ''
   try {
@@ -308,15 +279,12 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'exec': {
       const cmd = pickString(input, 'command')
-      const { isError, suffix } = execErrorState(block)
       return {
         icon: SquareTerminal,
         actionKey: 'exec',
         target: firstLine(cmd, 80),
         fullTarget: cmd,
         detail: ToolCallDetailExec,
-        isError,
-        errorSuffix: suffix,
       }
     }
     case 'bg_status': {

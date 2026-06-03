@@ -220,6 +220,7 @@ export const useChatStore = defineStore('chat', () => {
   let activeWs: ChatWebSocket | null = null
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
   let refreshPromise: { key: string; promise: Promise<void> } | null = null
+  let sessionListRefreshPromise: { botId: string; promise: Promise<void> } | null = null
   const pendingBackgroundEvents = new Map<string, BackgroundTask[]>()
   const latestBackgroundTasks = new Map<string, BackgroundTask>()
   // Open chat tabs share this store, so keep a small per-session view cache.
@@ -1096,6 +1097,7 @@ export const useChatStore = defineStore('chat', () => {
       refreshTimer = null
     }
     refreshPromise = null
+    sessionListRefreshPromise = null
     messageEventsSince = ''
 
     sessions.value = []
@@ -1172,6 +1174,29 @@ export const useChatStore = defineStore('chat', () => {
     refreshPromise = { key, promise }
 
     await promise
+  }
+
+  function refreshSessionsList(targetBotId: string): Promise<void> {
+    const bid = targetBotId.trim()
+    if (!bid) return Promise.resolve()
+    if (sessionListRefreshPromise?.botId === bid) return sessionListRefreshPromise.promise
+
+    const promise = fetchSessions(bid)
+      .then((visible) => {
+        if ((currentBotId.value ?? '').trim() !== bid) return
+        sessions.value = visible
+      })
+      .catch((error) => {
+        console.error('Failed to refresh sessions:', error)
+      })
+      .finally(() => {
+        if (sessionListRefreshPromise?.promise === promise) {
+          sessionListRefreshPromise = null
+        }
+      })
+
+    sessionListRefreshPromise = { botId: bid, promise }
+    return promise
   }
 
   function scheduleRefreshCurrentSession(expectedSessionId?: string, delay = 100) {
@@ -1289,6 +1314,14 @@ export const useChatStore = defineStore('chat', () => {
       const raw = event.message
       if (!raw) return
       updateSince(raw.created_at)
+      const messageSessionId = String(raw.session_id ?? event.session_id ?? '').trim()
+      if (messageSessionId) {
+        if (sessions.value.some((session) => session.id === messageSessionId)) {
+          touchSession(messageSessionId)
+        } else {
+          void refreshSessionsList(targetBotId)
+        }
+      }
       if (shouldRefreshFromMessageCreated(targetBotId, sessionId.value, streamingSessionId.value, event)) {
         scheduleRefreshCurrentSession((raw.session_id ?? '').trim())
       }

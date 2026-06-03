@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   title TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
   parent_session_id TEXT REFERENCES bot_sessions(id) ON DELETE SET NULL,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT
@@ -356,6 +357,8 @@ CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_id ON bot_sessions(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_route_id ON bot_sessions(route_id);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_active ON bot_sessions(bot_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_bot_sessions_parent ON bot_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_created_by_user_id ON bot_sessions(created_by_user_id) WHERE created_by_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_bot_created_by ON bot_sessions(bot_id, created_by_user_id, deleted_at);
 
 -- bot_session_events: DCP pipeline event store for cold-start replay.
 CREATE TABLE IF NOT EXISTS bot_session_events (
@@ -712,3 +715,27 @@ CREATE TABLE IF NOT EXISTS user_provider_oauth_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_provider_oauth_tokens_state ON user_provider_oauth_tokens(state) WHERE state != '';
+
+-- bot_user_grants: workspace user access grants for a bot.
+-- subject_type 'user' targets a specific workspace member; 'everyone' targets all members.
+-- permissions is a JSON string array of grant scopes ('chat', 'manage').
+CREATE TABLE IF NOT EXISTS bot_user_grants (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  subject_type TEXT NOT NULL,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT bot_user_grants_subject_type_check CHECK (subject_type IN ('user', 'everyone')),
+  CONSTRAINT bot_user_grants_subject_value_check CHECK (
+    (subject_type = 'user' AND user_id IS NOT NULL) OR
+    (subject_type = 'everyone' AND user_id IS NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_user_grants_bot_id ON bot_user_grants(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_user_grants_user_id ON bot_user_grants(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_user_grants_unique_user ON bot_user_grants(bot_id, user_id) WHERE subject_type = 'user';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_user_grants_unique_everyone ON bot_user_grants(bot_id) WHERE subject_type = 'everyone';

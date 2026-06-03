@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/memohai/memoh/internal/bots"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace"
 )
@@ -58,7 +59,7 @@ type skillsOpResponse struct {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -81,7 +82,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/skills [post].
 func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}
@@ -176,7 +177,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/container/skills/actions [post].
 func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
-	botID, err := h.requireBotAccess(c)
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
 	if err != nil {
 		return err
 	}

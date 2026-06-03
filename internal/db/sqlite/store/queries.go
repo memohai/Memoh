@@ -441,6 +441,131 @@ func (q *Queries) CreateBotACLRule(ctx context.Context, arg pgsqlc.CreateBotACLR
 	return result, nil
 }
 
+func (q *Queries) CreateBotUserGrant(ctx context.Context, arg pgsqlc.CreateBotUserGrantParams) (pgsqlc.BotUserGrant, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotUserGrant{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateBotUserGrantParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	out, err := q.store.queries.CreateBotUserGrant(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotUserGrant{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotUserGrant
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (pgsqlc.BotUserGrant, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotUserGrant{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteID string
+	if err := convertValue(id, &sqliteID); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	out, err := q.store.queries.GetBotUserGrantByID(ctx, sqliteID)
+	if err != nil {
+		return pgsqlc.BotUserGrant{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotUserGrant
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateBotUserGrantPermissions(ctx context.Context, arg pgsqlc.UpdateBotUserGrantPermissionsParams) (pgsqlc.BotUserGrant, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotUserGrant{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateBotUserGrantPermissionsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	out, err := q.store.queries.UpdateBotUserGrantPermissions(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotUserGrant{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotUserGrant
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotUserGrant{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteID string
+	if err := convertValue(id, &sqliteID); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.DeleteBotUserGrantByID(ctx, sqliteID))
+}
+
+func (q *Queries) ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.ListBotUserGrantsRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListBotUserGrants(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListBotUserGrantsRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListBotUserGrantsForUser(ctx context.Context, arg pgsqlc.ListBotUserGrantsForUserParams) ([]pgsqlc.ListBotUserGrantsForUserRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListBotUserGrantsForUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListBotUserGrantsForUser(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListBotUserGrantsForUserRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUID) ([]pgsqlc.ListAccessibleBotsRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteUserID string
+	if err := convertValue(ownerUserID, &sqliteUserID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListAccessibleBots(ctx, sqliteUserID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListAccessibleBotsRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) CreateBotEmailBinding(ctx context.Context, arg pgsqlc.CreateBotEmailBindingParams) (pgsqlc.BotEmailBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.BotEmailBinding{}, errSQLiteQueriesNotConfigured
@@ -3578,6 +3703,25 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]p
 		return nil, mapQueryErr(err)
 	}
 	var result []pgsqlc.ListSessionsByBotRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg pgsqlc.ListSessionsByBotAndCreatedByUserParams) ([]pgsqlc.ListSessionsByBotAndCreatedByUserRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.ListSessionsByBotAndCreatedByUserParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListSessionsByBotAndCreatedByUser(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListSessionsByBotAndCreatedByUserRow
 	if err := convertValue(out, &result); err != nil {
 		return nil, err
 	}

@@ -518,10 +518,16 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
+		if err := h.attachCurrentUserPermissionsList(c.Request().Context(), channelIdentityID, items); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 		return c.JSON(http.StatusOK, bots.ListBotsResponse{Items: scrubBotsForResponse(items)})
 	}
 	items, err := h.botService.ListAccessible(c.Request().Context(), channelIdentityID)
 	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if err := h.attachCurrentUserPermissionsList(c.Request().Context(), channelIdentityID, items); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, bots.ListBotsResponse{Items: scrubBotsForResponse(items)})
@@ -547,9 +553,12 @@ func (h *UsersHandler) GetBot(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.service, channelIdentityID, botID, bots.PermissionChat)
 	if err != nil {
 		return err
+	}
+	if err := h.attachCurrentUserPermissions(c.Request().Context(), channelIdentityID, &bot); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(bot))
 }
@@ -574,7 +583,8 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
+	// Health checks are read-only status; members with chat access may view them.
+	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.service, channelIdentityID, botID, bots.PermissionChat); err != nil {
 		return err
 	}
 	items, err := h.botService.ListChecks(c.Request().Context(), botID)
@@ -1026,6 +1036,37 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 
 func (h *UsersHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.service, channelIdentityID, botID)
+}
+
+// attachCurrentUserPermissions populates the requesting user's effective access
+// permissions for a single bot.
+func (h *UsersHandler) attachCurrentUserPermissions(ctx context.Context, channelIdentityID string, bot *bots.Bot) error {
+	isAdmin, err := h.service.IsAdmin(ctx, channelIdentityID)
+	if err != nil {
+		return err
+	}
+	perms, err := h.botService.ResolveUserPermissions(ctx, bot.ID, channelIdentityID, isAdmin)
+	if err != nil {
+		return err
+	}
+	bot.CurrentUserPermissions = perms
+	return nil
+}
+
+// attachCurrentUserPermissionsList populates effective permissions for a list of bots.
+func (h *UsersHandler) attachCurrentUserPermissionsList(ctx context.Context, channelIdentityID string, items []bots.Bot) error {
+	isAdmin, err := h.service.IsAdmin(ctx, channelIdentityID)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		perms, err := h.botService.ResolveUserPermissions(ctx, items[i].ID, channelIdentityID, isAdmin)
+		if err != nil {
+			return err
+		}
+		items[i].CurrentUserPermissions = perms
+	}
+	return nil
 }
 
 func (*UsersHandler) requireChannelIdentityID(c echo.Context) (string, error) {

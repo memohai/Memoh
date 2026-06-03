@@ -27,6 +27,7 @@ type Session struct {
 	Title                 string         `json:"title"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
 	ParentSessionID       string         `json:"parent_session_id,omitempty"`
+	CreatedByUserID       string         `json:"created_by_user_id,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	RouteMetadata         map[string]any `json:"route_metadata,omitempty"`
@@ -67,6 +68,7 @@ type CreateInput struct {
 	Title           string
 	Metadata        map[string]any
 	ParentSessionID string
+	CreatedByUserID string
 }
 
 // Service manages bot chat sessions.
@@ -131,6 +133,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 	if err != nil {
 		return Session{}, fmt.Errorf("invalid parent session id: %w", err)
 	}
+	pgCreatedByUserID, err := parseOptionalUUID(input.CreatedByUserID)
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid created by user id: %w", err)
+	}
 
 	row, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
 		BotID:           pgBotID,
@@ -140,6 +146,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		Title:           input.Title,
 		Metadata:        metaBytes,
 		ParentSessionID: pgParentSessionID,
+		CreatedByUserID: pgCreatedByUserID,
 	})
 	if err != nil {
 		return Session{}, err
@@ -217,6 +224,30 @@ func (s *Service) ListByBot(ctx context.Context, botID string) ([]Session, error
 	sessions := make([]Session, 0, len(rows))
 	for _, row := range rows {
 		sessions = append(sessions, toSessionFromListRow(row))
+	}
+	return sessions, nil
+}
+
+// ListByBotAndCreatedByUser returns all active sessions for a bot created by a user.
+func (s *Service) ListByBotAndCreatedByUser(ctx context.Context, botID, userID string) ([]Session, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	pgUserID, err := dbpkg.ParseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+	rows, err := s.queries.ListSessionsByBotAndCreatedByUser(ctx, sqlc.ListSessionsByBotAndCreatedByUserParams{
+		BotID:           pgBotID,
+		CreatedByUserID: pgUserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, toSessionFromUserListRow(row))
 	}
 	return sessions, nil
 }
@@ -382,6 +413,10 @@ func toSession(row sqlc.BotSession) Session {
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()
 	}
+	createdByUserID := ""
+	if row.CreatedByUserID.Valid {
+		createdByUserID = row.CreatedByUserID.String()
+	}
 	return Session{
 		ID:              row.ID.String(),
 		BotID:           row.BotID.String(),
@@ -391,6 +426,7 @@ func toSession(row sqlc.BotSession) Session {
 		Title:           row.Title,
 		Metadata:        parseJSONMap(row.Metadata),
 		ParentSessionID: parentID,
+		CreatedByUserID: createdByUserID,
 		CreatedAt:       row.CreatedAt.Time,
 		UpdatedAt:       row.UpdatedAt.Time,
 	}
@@ -447,6 +483,14 @@ func parseJSONMap(data []byte) map[string]any {
 }
 
 func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
+	parentID := ""
+	if row.ParentSessionID.Valid {
+		parentID = row.ParentSessionID.String()
+	}
+	createdByUserID := ""
+	if row.CreatedByUserID.Valid {
+		createdByUserID = row.CreatedByUserID.String()
+	}
 	return Session{
 		ID:                    row.ID.String(),
 		BotID:                 row.BotID.String(),
@@ -455,6 +499,34 @@ func toSessionFromListRow(row sqlc.ListSessionsByBotRow) Session {
 		Type:                  row.Type,
 		Title:                 row.Title,
 		Metadata:              parseJSONMap(row.Metadata),
+		ParentSessionID:       parentID,
+		CreatedByUserID:       createdByUserID,
+		CreatedAt:             row.CreatedAt.Time,
+		UpdatedAt:             row.UpdatedAt.Time,
+		RouteMetadata:         parseJSONMap(row.RouteMetadata),
+		RouteConversationType: dbpkg.TextToString(row.RouteConversationType),
+	}
+}
+
+func toSessionFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Session {
+	parentID := ""
+	if row.ParentSessionID.Valid {
+		parentID = row.ParentSessionID.String()
+	}
+	createdByUserID := ""
+	if row.CreatedByUserID.Valid {
+		createdByUserID = row.CreatedByUserID.String()
+	}
+	return Session{
+		ID:                    row.ID.String(),
+		BotID:                 row.BotID.String(),
+		RouteID:               row.RouteID.String(),
+		ChannelType:           dbpkg.TextToString(row.ChannelType),
+		Type:                  row.Type,
+		Title:                 row.Title,
+		Metadata:              parseJSONMap(row.Metadata),
+		ParentSessionID:       parentID,
+		CreatedByUserID:       createdByUserID,
 		CreatedAt:             row.CreatedAt.Time,
 		UpdatedAt:             row.UpdatedAt.Time,
 		RouteMetadata:         parseJSONMap(row.RouteMetadata),

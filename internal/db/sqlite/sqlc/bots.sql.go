@@ -241,6 +241,88 @@ func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRo
 	return i, err
 }
 
+const listAccessibleBots = `-- name: ListAccessibleBots :many
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+FROM bots b
+WHERE b.owner_user_id = ?1
+   OR EXISTS (
+     SELECT 1 FROM bot_user_grants g
+     WHERE g.bot_id = b.id
+       AND (
+         g.subject_type = 'everyone'
+         OR (g.subject_type = 'user' AND g.user_id = ?1)
+       )
+   )
+ORDER BY b.created_at DESC
+`
+
+type ListAccessibleBotsRow struct {
+	ID                string         `json:"id"`
+	OwnerUserID       string         `json:"owner_user_id"`
+	Name              string         `json:"name"`
+	DisplayName       sql.NullString `json:"display_name"`
+	AvatarUrl         sql.NullString `json:"avatar_url"`
+	Timezone          sql.NullString `json:"timezone"`
+	IsActive          int64          `json:"is_active"`
+	Status            string         `json:"status"`
+	Language          string         `json:"language"`
+	ReasoningEnabled  int64          `json:"reasoning_enabled"`
+	ReasoningEffort   string         `json:"reasoning_effort"`
+	ChatModelID       sql.NullString `json:"chat_model_id"`
+	SearchProviderID  sql.NullString `json:"search_provider_id"`
+	MemoryProviderID  sql.NullString `json:"memory_provider_id"`
+	HeartbeatEnabled  int64          `json:"heartbeat_enabled"`
+	HeartbeatInterval int64          `json:"heartbeat_interval"`
+	HeartbeatPrompt   string         `json:"heartbeat_prompt"`
+	Metadata          string         `json:"metadata"`
+	CreatedAt         string         `json:"created_at"`
+	UpdatedAt         string         `json:"updated_at"`
+}
+
+func (q *Queries) ListAccessibleBots(ctx context.Context, userID string) ([]ListAccessibleBotsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAccessibleBots, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccessibleBotsRow
+	for rows.Next() {
+		var i ListAccessibleBotsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.Name,
+			&i.DisplayName,
+			&i.AvatarUrl,
+			&i.Timezone,
+			&i.IsActive,
+			&i.Status,
+			&i.Language,
+			&i.ReasoningEnabled,
+			&i.ReasoningEffort,
+			&i.ChatModelID,
+			&i.SearchProviderID,
+			&i.MemoryProviderID,
+			&i.HeartbeatEnabled,
+			&i.HeartbeatInterval,
+			&i.HeartbeatPrompt,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBotsByOwner = `-- name: ListBotsByOwner :many
 SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_enabled, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
 FROM bots

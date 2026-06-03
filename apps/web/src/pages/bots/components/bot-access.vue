@@ -623,6 +623,9 @@
         </form>
       </section>
     </Transition>
+
+    <!-- Workspace member access -->
+    <BotUserAccess :bot-id="botId" />
   </div>
 </template>
 
@@ -656,6 +659,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import type { AclObservedConversationCandidate, AclRule, AclSourceScope, HandlersChannelMeta } from '@memohai/sdk'

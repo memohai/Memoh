@@ -60,6 +60,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
 			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
 		}
+		if isMiniMaxChatCompletionsCompat(chatCompletionsCompat) {
+			opts = append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
+		}
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
@@ -127,6 +130,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		if isDeepSeekChatCompletionsCompat(chatCompletionsCompat) {
 			opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
 		}
+		if isMiniMaxChatCompletionsCompat(chatCompletionsCompat) {
+			opts = append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
+		}
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 	}
@@ -138,7 +144,14 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		return nil
 	}
 
-	if ClientType(cfg.ClientType) == ClientTypeOpenAICompletions && isDeepSeekChatCompletionsCompat(cfg.ChatCompletionsCompat) {
+	// DeepSeek and MiniMax keep the generic Chat Completions transport but gate
+	// thinking via a toggle rather than reasoning_effort. Their SDK compat layer
+	// maps reasoning_effort "none" to thinking-off and any other effort to
+	// thinking-on, so we forward "none" to disable and an explicit effort to
+	// enable. Enabled-without-effort (adaptive) forwards nothing and lets the
+	// provider's default thinking behavior apply.
+	if ClientType(cfg.ClientType) == ClientTypeOpenAICompletions &&
+		(isDeepSeekChatCompletionsCompat(cfg.ChatCompletionsCompat) || isMiniMaxChatCompletionsCompat(cfg.ChatCompletionsCompat)) {
 		switch {
 		case cfg.ReasoningConfig.Disabled:
 			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
