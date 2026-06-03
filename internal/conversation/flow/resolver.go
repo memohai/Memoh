@@ -740,12 +740,20 @@ func hasEffort(effortLevels []string, effort string) bool {
 }
 
 // offEffortFor picks the effort an OpenAI-style provider should send to
-// approximate "off": "none" when the model supports it, otherwise "minimal".
+// approximate "off": "none" when advertised, else "minimal" when advertised,
+// else the lowest advertised tier. Falling back to a tier the model actually
+// advertises avoids sending an unsupported effort (e.g. gpt-5.5-pro advertises
+// neither none nor minimal) and failing the request exactly when disabling.
+// effortLevels is ordered low→high.
 func offEffortFor(effortLevels []string) string {
-	for _, e := range effortLevels {
-		if e == models.ReasoningEffortNone {
-			return models.ReasoningEffortNone
-		}
+	if hasEffort(effortLevels, models.ReasoningEffortNone) {
+		return models.ReasoningEffortNone
+	}
+	if hasEffort(effortLevels, models.ReasoningEffortMinimal) {
+		return models.ReasoningEffortMinimal
+	}
+	if len(effortLevels) > 0 {
+		return effortLevels[0]
 	}
 	return models.ReasoningEffortMinimal
 }

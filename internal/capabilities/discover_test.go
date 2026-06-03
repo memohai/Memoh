@@ -50,6 +50,22 @@ func TestDerive_ToggleGPT5Minimal(t *testing.T) {
 	}
 }
 
+func TestDerive_LowExplicitlyUnsupported(t *testing.T) {
+	// gpt-5.5-pro: reasoning + xhigh, but none/minimal/low explicitly false.
+	// low must be dropped from the base so the UI/resolver never offers it.
+	caps := derive(litellmEntry{
+		SupportsReasoning:              ptrBool(true),
+		SupportsNoneReasoningEffort:    ptrBool(false),
+		SupportsMinimalReasoningEffort: ptrBool(false),
+		SupportsLowReasoningEffort:     ptrBool(false),
+		SupportsXHighReasoningEffort:   ptrBool(true),
+	})
+	want := []string{"medium", "high", "xhigh"}
+	if !reflect.DeepEqual(caps.EffortLevels, want) {
+		t.Fatalf("effort levels = %v, want %v", caps.EffortLevels, want)
+	}
+}
+
 func TestDerive_PlainReasoning(t *testing.T) {
 	// o3: reasoning only → toggle with base tiers.
 	caps := derive(litellmEntry{SupportsReasoning: ptrBool(true)})

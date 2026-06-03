@@ -85,14 +85,18 @@ func derive(e litellmEntry) Capabilities {
 	return caps
 }
 
-// deriveEffortLevels builds the effort tier list. low/medium/high form the
-// implicit base for any reasoning model (the registry has no per-tier flag for
-// them); none/minimal/xhigh/max are added when their explicit flags are set.
+// deriveEffortLevels builds the effort tier list. medium/high form the implicit
+// base for any reasoning model (the registry has no per-tier flag for them). low
+// is part of that base unless the registry explicitly disables it
+// (supports_low_reasoning_effort: false, e.g. gpt-5.5-pro). none/minimal/xhigh/max
+// are added only when their explicit flags are set.
 func deriveEffortLevels(e litellmEntry) []string {
 	present := map[string]bool{
-		models.ReasoningEffortLow:    true,
 		models.ReasoningEffortMedium: true,
 		models.ReasoningEffortHigh:   true,
+	}
+	if e.SupportsLowReasoningEffort == nil || *e.SupportsLowReasoningEffort {
+		present[models.ReasoningEffortLow] = true
 	}
 	if boolVal(e.SupportsNoneReasoningEffort) {
 		present[models.ReasoningEffortNone] = true

@@ -7,6 +7,28 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+func TestOffEffortFor(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		levels []string
+		want   string
+	}{
+		{"none wins", []string{models.ReasoningEffortNone, "low", "medium"}, models.ReasoningEffortNone},
+		{"minimal when no none", []string{models.ReasoningEffortMinimal, "low", "medium"}, models.ReasoningEffortMinimal},
+		{"lowest advertised when neither", []string{"medium", "high", "xhigh"}, "medium"},
+		{"legacy base falls back to low", []string{"low", "medium", "high"}, "low"},
+		{"empty falls back to minimal", nil, models.ReasoningEffortMinimal},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := offEffortFor(tt.levels); got != tt.want {
+				t.Fatalf("offEffortFor(%v) = %q, want %q", tt.levels, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchesModelReference_ModelID(t *testing.T) {
 	t.Parallel()
 
