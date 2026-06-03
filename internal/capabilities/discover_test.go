@@ -3,7 +3,9 @@ package capabilities
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/memohai/memoh/internal/models"
 )
@@ -91,6 +93,9 @@ func TestRegistry_LookupViaInjectedFetch(t *testing.T) {
 			},
 		}, nil
 	}), withoutBundledSnapshot())
+	if err := reg.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh registry: %v", err)
+	}
 
 	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
 	if !ok {
@@ -118,6 +123,9 @@ func TestRegistry_FastVariantBorrowsBaseShapeNotContext(t *testing.T) {
 			},
 		}, nil
 	}), withoutBundledSnapshot())
+	if err := reg.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh registry: %v", err)
+	}
 
 	// fast variant: borrows the base reasoning shape but NOT the 1M context.
 	caps, ok := reg.Lookup(context.Background(), "anthropic/claude-opus-4.8-fast")
@@ -157,10 +165,54 @@ func TestRegistry_BundledSnapshotProvidesBaseline(t *testing.T) {
 	}
 }
 
+func TestRegistry_LookupUsesStaleCacheWhileRefreshIsBlocked(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+
+	reg := NewRegistry(
+		WithTTL(0),
+		withFetchFn(func(ctx context.Context) (map[string]litellmEntry, error) {
+			once.Do(func() { close(started) })
+			select {
+			case <-release:
+				return map[string]litellmEntry{
+					"gpt-5": {SupportsReasoning: ptrBool(true)},
+				}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}),
+	)
+	defer close(release)
+
+	start := time.Now()
+	caps, ok := reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
+	if !ok {
+		t.Fatalf("expected stale bundled snapshot lookup hit")
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("lookup blocked on refresh for %s", elapsed)
+	}
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode = %q, want adaptive from stale cache", caps.ThinkingMode)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatalf("expected stale lookup to trigger background refresh")
+	}
+}
+
 func TestRegistry_BundledSnapshotSurvivesRefreshFailure(t *testing.T) {
+	refreshAttempted := make(chan struct{})
+	var once sync.Once
+
 	reg := NewRegistry(
 		WithTTL(0),
 		withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
+			once.Do(func() { close(refreshAttempted) })
 			return nil, context.DeadlineExceeded
 		}),
 	)
@@ -170,5 +222,19 @@ func TestRegistry_BundledSnapshotSurvivesRefreshFailure(t *testing.T) {
 	}
 	if caps.ThinkingMode != models.ThinkingModeAdaptive {
 		t.Fatalf("thinking mode = %q, want adaptive", caps.ThinkingMode)
+	}
+
+	select {
+	case <-refreshAttempted:
+	case <-time.After(time.Second):
+		t.Fatalf("expected stale lookup to attempt background refresh")
+	}
+
+	caps, ok = reg.Lookup(context.Background(), "openrouter/anthropic/claude-opus-4.8")
+	if !ok {
+		t.Fatalf("expected bundled snapshot lookup hit after failed refresh")
+	}
+	if caps.ThinkingMode != models.ThinkingModeAdaptive {
+		t.Fatalf("thinking mode after failed refresh = %q, want adaptive", caps.ThinkingMode)
 	}
 }

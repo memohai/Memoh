@@ -314,10 +314,9 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
 
-	// Kick off the capability-registry refresh concurrently with the provider's
-	// own model listing so the two network round-trips overlap. Best-effort and
+	// Kick off the capability-registry refresh in the background. Best-effort and
 	// fail-open: a slow or failed registry never blocks or fails the fetch.
-	warm := s.warmCapabilities(ctx)
+	s.warmCapabilities(ctx)
 
 	var remoteModels []RemoteModel
 	switch {
@@ -332,7 +331,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, err
 	}
 
-	s.enrichWithCapabilities(ctx, warm, remoteModels)
+	s.enrichWithCapabilities(ctx, remoteModels)
 	return remoteModels, nil
 }
 
@@ -390,36 +389,22 @@ func fetchCodexCatalogModels() []RemoteModel {
 }
 
 // warmCapabilities triggers a background registry refresh detached from the
-// request context (bounded by probeTimeout). Returns a channel that closes when
-// the attempt completes, or nil when no registry is configured.
-func (s *Service) warmCapabilities(ctx context.Context) <-chan struct{} {
+// request context (bounded inside the registry). It is intentionally fire and
+// forget so model listing never waits for LiteLLM registry I/O.
+func (s *Service) warmCapabilities(ctx context.Context) {
 	if s.capabilityRegistry == nil {
-		return nil
+		return
 	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
-		defer cancel()
-		s.capabilityRegistry.Warm(wctx)
-	}()
-	return done
+	s.capabilityRegistry.Warm(ctx)
 }
 
 // enrichWithCapabilities fills in reasoning capabilities (thinking mode, effort
 // levels, context window, and vision/tool-call/reasoning compatibility) for chat
 // models from the LiteLLM registry. It is strictly trust + fill: it only supplies
 // information the upstream did not, and never strips an upstream-claimed value.
-func (s *Service) enrichWithCapabilities(ctx context.Context, warm <-chan struct{}, remoteModels []RemoteModel) {
+func (s *Service) enrichWithCapabilities(ctx context.Context, remoteModels []RemoteModel) {
 	if s.capabilityRegistry == nil {
 		return
-	}
-	if warm != nil {
-		select {
-		case <-warm:
-		case <-ctx.Done():
-			return
-		}
 	}
 	for i := range remoteModels {
 		m := &remoteModels[i]

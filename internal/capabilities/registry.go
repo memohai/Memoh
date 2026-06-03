@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/memohai/memoh/internal/models"
 )
 
@@ -32,23 +30,25 @@ const (
 )
 
 // Registry resolves model capabilities from the LiteLLM registry. It keeps an
-// in-memory snapshot with a TTL and refreshes lazily. It is fail-open: if a
-// refresh fails, the previous snapshot keeps serving. By default that previous
-// snapshot is the bundled LiteLLM registry, so offline/blocked GitHub access
-// still provides baseline capability discovery.
+// in-memory snapshot with a TTL and refreshes lazily in the background. It is
+// fail-open: if a refresh fails, the previous snapshot keeps serving. By
+// default that previous snapshot is the bundled LiteLLM registry, so
+// offline/blocked GitHub access still provides baseline capability discovery.
 type Registry struct {
 	url     string
 	ttl     time.Duration
 	client  *http.Client
 	logger  *slog.Logger
 	fetchFn func(context.Context) (map[string]litellmEntry, error)
-	group   singleflight.Group
 	bundled []byte
 
 	mu        sync.RWMutex
 	entries   map[string]litellmEntry
 	idx       *index
 	fetchedAt time.Time
+
+	refreshMu  sync.Mutex
+	refreshing bool
 }
 
 // Option configures a Registry.
@@ -75,10 +75,10 @@ func withFetchFn(fn func(context.Context) (map[string]litellmEntry, error)) Opti
 	return func(r *Registry) { r.fetchFn = fn }
 }
 
-// NewRegistry builds a Registry. It starts with the bundled LiteLLM snapshot,
-// then refreshes DefaultRegistryURL over HTTP with a 30s timeout and caches for
-// 6h. The bundled snapshot keeps Desktop/local imports useful when raw GitHub is
-// unavailable.
+// NewRegistry builds a Registry from the bundled LiteLLM snapshot. Remote
+// refreshes happen later through Warm/Lookup and never during construction, so
+// server startup does not depend on raw GitHub access. The bundled snapshot
+// keeps Desktop/local imports useful when raw GitHub is unavailable.
 func NewRegistry(opts ...Option) *Registry {
 	r := &Registry{
 		url:     DefaultRegistryURL,
@@ -99,9 +99,13 @@ func NewRegistry(opts ...Option) *Registry {
 
 // Lookup resolves capabilities for an upstream model identifier. The bool is
 // false when the model could not be matched (or the registry is unavailable and
-// nothing is cached). Lookup is non-blocking beyond a single concurrent refresh.
+// nothing is cached). Lookup never waits for network I/O: stale snapshots keep
+// serving while a background refresh is attempted.
 func (r *Registry) Lookup(ctx context.Context, modelID string) (Capabilities, bool) {
-	idx, entries := r.snapshot(ctx)
+	idx, entries, stale := r.currentSnapshot()
+	if stale {
+		r.Warm(ctx)
+	}
 	if idx == nil {
 		return Capabilities{}, false
 	}
@@ -125,55 +129,78 @@ func (r *Registry) Lookup(ctx context.Context, modelID string) (Capabilities, bo
 	return Capabilities{}, false
 }
 
-// Warm triggers a snapshot refresh if stale (best-effort, fail-open) without
-// returning data. Useful for overlapping the registry fetch with other I/O.
+// Warm triggers a background snapshot refresh if stale (best-effort, fail-open)
+// without returning data. Useful for overlapping the registry fetch with other
+// I/O. Only one refresh runs at a time.
 func (r *Registry) Warm(ctx context.Context) {
-	r.snapshot(ctx)
-}
-
-// snapshot returns the current index/entries, refreshing if stale. On refresh
-// failure it returns whatever is cached (possibly nil).
-func (r *Registry) snapshot(ctx context.Context) (*index, map[string]litellmEntry) {
-	r.mu.RLock()
-	fresh := r.idx != nil && time.Since(r.fetchedAt) < r.ttl
-	idx, entries := r.idx, r.entries
-	r.mu.RUnlock()
-	if fresh {
-		return idx, entries
+	if !r.needsRefresh() {
+		return
 	}
 
-	// Coalesce concurrent refreshes; the result is shared.
-	_, _, _ = r.group.Do("refresh", func() (any, error) {
-		// Re-check freshness inside the flight (another goroutine may have just
-		// refreshed).
-		r.mu.RLock()
-		stillStale := r.idx == nil || time.Since(r.fetchedAt) >= r.ttl
-		r.mu.RUnlock()
-		if !stillStale {
-			return nil, nil
-		}
+	r.refreshMu.Lock()
+	if r.refreshing {
+		r.refreshMu.Unlock()
+		return
+	}
+	r.refreshing = true
+	r.refreshMu.Unlock()
 
-		fetched, err := r.fetchFn(ctx)
-		if err != nil {
+	go func() {
+		defer func() {
+			r.refreshMu.Lock()
+			r.refreshing = false
+			r.refreshMu.Unlock()
+		}()
+
+		refreshCtx, cancel := refreshContext(ctx)
+		defer cancel()
+		if err := r.refresh(refreshCtx); err != nil {
 			r.logger.Warn("capabilities: registry refresh failed, using cached snapshot",
 				slog.String("url", r.url), slog.Any("error", err))
-			return nil, nil
 		}
+	}()
+}
 
-		newIdx := buildIndex(keysOf(fetched))
-		r.mu.Lock()
-		r.entries = fetched
-		r.idx = newIdx
-		r.fetchedAt = time.Now()
-		r.mu.Unlock()
-		r.logger.Info("capabilities: registry refreshed",
-			slog.Int("models", len(fetched)))
-		return nil, nil
-	})
+func (r *Registry) currentSnapshot() (*index, map[string]litellmEntry, bool) {
+	r.mu.RLock()
+	idx, entries := r.idx, r.entries
+	stale := idx == nil || time.Since(r.fetchedAt) >= r.ttl
+	r.mu.RUnlock()
+	return idx, entries, stale
+}
 
+func (r *Registry) needsRefresh() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.idx, r.entries
+	return r.idx == nil || time.Since(r.fetchedAt) >= r.ttl
+}
+
+func (r *Registry) refresh(ctx context.Context) error {
+	if !r.needsRefresh() {
+		return nil
+	}
+
+	fetched, err := r.fetchFn(ctx)
+	if err != nil {
+		return err
+	}
+
+	newIdx := buildIndex(keysOf(fetched))
+	r.mu.Lock()
+	r.entries = fetched
+	r.idx = newIdx
+	r.fetchedAt = time.Now()
+	r.mu.Unlock()
+	r.logger.Info("capabilities: registry refreshed",
+		slog.Int("models", len(fetched)))
+	return nil
+}
+
+func refreshContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), defaultFetchTimeout)
 }
 
 func (r *Registry) fetchHTTP(ctx context.Context) (map[string]litellmEntry, error) {

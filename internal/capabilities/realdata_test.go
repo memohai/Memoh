@@ -28,6 +28,9 @@ func TestRealRegistry(t *testing.T) {
 	reg := NewRegistry(withFetchFn(func(context.Context) (map[string]litellmEntry, error) {
 		return entries, nil
 	}), withoutBundledSnapshot())
+	if err := reg.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh registry: %v", err)
+	}
 
 	t.Run("provider_naming_variants_resolve", func(t *testing.T) {
 		cases := []struct {
