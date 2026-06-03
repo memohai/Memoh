@@ -369,7 +369,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				// Upsert/assert: re-importing fills in newly discovered
 				// capabilities on existing models without clobbering user config.
-				if h.fillExistingModel(ctx, m.ID, cfg) {
+				if h.fillExistingModel(ctx, id, m.ID, cfg) {
 					resp.Updated++
 				} else {
 					resp.Skipped++
@@ -395,12 +395,10 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 // (e.g. an effort list missing xhigh/max) cannot survive. Returns true if the
 // model was changed and persisted.
 //
-// When the same model_id exists under multiple providers, GetByModelID reports
-// ambiguity and we deliberately skip the fill: two providers' same-named models
-// can carry different capabilities, so cross-provider backfill is intentionally
-// NOT performed (the model is left untouched rather than risk wrong data).
-func (h *ProvidersHandler) fillExistingModel(ctx context.Context, modelID string, discovered models.ModelConfig) bool {
-	existing, err := h.modelsService.GetByModelID(ctx, modelID)
+// The lookup is provider-scoped because model_id is only unique per provider;
+// same-named models under other providers must not affect this refresh.
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.ModelConfig) bool {
+	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
 	if err != nil {
 		return false
 	}
@@ -408,7 +406,7 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, modelID string
 	if !changed {
 		return false
 	}
-	if _, err := h.modelsService.UpdateByModelID(ctx, modelID, models.UpdateRequest{
+	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
 		ModelID:    existing.ModelID,
 		Name:       existing.Name,
 		ProviderID: existing.ProviderID,
