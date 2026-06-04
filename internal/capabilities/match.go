@@ -59,6 +59,17 @@ var modelVendorSegments = map[string]struct{}{
 // never folded into the base model.
 var marketingSuffixTokens = map[string]struct{}{
 	"latest": {}, "preview": {}, "beta": {}, "online": {},
+}
+
+// thinkingVariantTokens mark a thinking/non-thinking model variant. They are
+// capability-distinguishing (the registry lists e.g. reasoning-enabled
+// "kimi-k2-thinking" separately from a non-thinking "kimi-k2"), so they stay in
+// the canonical signature and a bare base id must NOT borrow a distinct
+// "-thinking" key's reasoning. They are handled asymmetrically by
+// matchThinkingBase: only when the INPUT carries the marker and the qualified
+// variant has no own key do we fall back to the base model (the marker is then
+// just a runtime toggle on the same base, e.g. "claude-opus-4-8-thinking").
+var thinkingVariantTokens = map[string]struct{}{
 	"thinking": {}, "nonthinking": {},
 }
 
@@ -311,7 +322,37 @@ func (idx *index) match(raw string) (string, bool) {
 			return key, true
 		}
 	}
-	return idx.matchNorm(normalize(raw))
+	n := normalize(raw)
+	if key, ok := idx.matchNorm(n); ok {
+		return key, true
+	}
+	// A "<base>-thinking"/"-nonthinking" input with no own registry key falls
+	// back to the base model's reasoning shape. This is asymmetric on purpose:
+	// the base is reached only when the marker is on the INPUT, so a bare base id
+	// can never borrow a distinct "-thinking" variant's capabilities.
+	return idx.matchThinkingBase(n)
+}
+
+// matchThinkingBase resolves the base model for a thinking/non-thinking input
+// (e.g. "claude-opus-4-8-thinking" -> "claude-opus-4-8") when the qualified
+// variant itself has no registry key. Returns false unless the input carries a
+// thinking marker AND a different base canonical resolves.
+func (idx *index) matchThinkingBase(n normalized) (string, bool) {
+	hasMarker := false
+	for t := range n.tokens {
+		if _, ok := thinkingVariantTokens[t]; ok {
+			hasMarker = true
+			break
+		}
+	}
+	if !hasMarker {
+		return "", false
+	}
+	base := n.withoutTokens(thinkingVariantTokens)
+	if base.canonical == "" || base.canonical == n.canonical {
+		return "", false
+	}
+	return idx.matchNorm(base)
 }
 
 // matchNorm runs the matching strategy over an already-normalized signature.

@@ -250,6 +250,31 @@ func TestMatch_ExactProviderKeyWins(t *testing.T) {
 	}
 }
 
+// TestMatch_ThinkingVariantNotBorrowedByBase guards the asymmetric handling of
+// thinking/non-thinking variants. A distinct "-thinking" model (reasoning) must
+// NOT be inherited by a bare base id, while a "-thinking" INPUT with no own key
+// still falls back to the base model (the marker is a runtime toggle there).
+func TestMatch_ThinkingVariantNotBorrowedByBase(t *testing.T) {
+	idx := buildIndex([]string{
+		"kimi-k2",          // non-thinking shell
+		"kimi-k2-thinking", // distinct reasoning model
+		"claude-opus-4-8",  // base only; "-thinking" is just a toggle alias
+	})
+
+	// Bare base must resolve to its own non-thinking key, never the variant.
+	if got, ok := idx.match("kimi-k2"); !ok || got != "kimi-k2" {
+		t.Fatalf("bare kimi-k2 = %q,%v; want non-thinking kimi-k2", got, ok)
+	}
+	// The thinking variant resolves to its own key.
+	if got, ok := idx.match("kimi-k2-thinking"); !ok || got != "kimi-k2-thinking" {
+		t.Fatalf("kimi-k2-thinking = %q,%v; want the thinking key", got, ok)
+	}
+	// A "-thinking" input without its own key falls back to the base model.
+	if got, ok := idx.match("claude-opus-4-8-thinking"); !ok || got != "claude-opus-4-8" {
+		t.Fatalf("claude-opus-4-8-thinking = %q,%v; want base claude-opus-4-8", got, ok)
+	}
+}
+
 func TestMatch_UnknownReturnsFalse(t *testing.T) {
 	idx := buildIndex(registryCorpus)
 	if got, ok := idx.match("some-totally-unknown-model-xyz"); ok {
