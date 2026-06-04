@@ -262,47 +262,20 @@ func (r *sparseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllReq
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
-func (r *sparseRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
+func (r *sparseRuntime) ReplaceAll(ctx context.Context, filters map[string]any, items []adapters.MemoryItem) error {
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return adapters.CompactResult{}, err
+		return err
 	}
-	all, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, err
+	storeItems := make([]storefs.MemoryItem, 0, len(items))
+	for _, item := range items {
+		storeItems = append(storeItems, storeItemFromMemoryItem(item))
 	}
-	before := len(all)
-	if before == 0 {
-		return adapters.CompactResult{Ratio: ratio}, nil
+	if err := r.store.RebuildFiles(ctx, botID, storeItems, filters); err != nil {
+		return err
 	}
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].UpdatedAt > all[j].UpdatedAt
-	})
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	keptStore := append([]storefs.MemoryItem(nil), all[:target]...)
-	if err := r.store.RebuildFiles(ctx, botID, keptStore, filters); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if _, err := r.Rebuild(ctx, botID); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	kept := make([]adapters.MemoryItem, 0, len(keptStore))
-	for _, item := range keptStore {
-		kept = append(kept, memoryItemFromStore(item))
-	}
-	return adapters.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(kept),
-		Ratio:       ratio,
-		Results:     kept,
-	}, nil
+	_, err = r.Rebuild(ctx, botID)
+	return err
 }
 
 func (r *sparseRuntime) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {

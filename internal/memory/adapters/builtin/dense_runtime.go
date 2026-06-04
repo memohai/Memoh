@@ -295,47 +295,20 @@ func (r *denseRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 	return adapters.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
-func (r *denseRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (adapters.CompactResult, error) {
+func (r *denseRuntime) ReplaceAll(ctx context.Context, filters map[string]any, items []adapters.MemoryItem) error {
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return adapters.CompactResult{}, err
+		return err
 	}
-	if ratio <= 0 || ratio > 1 {
-		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
+	storeItems := make([]storefs.MemoryItem, 0, len(items))
+	for _, item := range items {
+		storeItems = append(storeItems, storeItemFromMemoryItem(item))
 	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return adapters.CompactResult{}, err
+	if err := r.store.RebuildFiles(ctx, botID, storeItems, filters); err != nil {
+		return err
 	}
-	before := len(items)
-	if before == 0 {
-		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	keptStore := append([]storefs.MemoryItem(nil), items[:target]...)
-	if err := r.store.RebuildFiles(ctx, botID, keptStore, filters); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	if _, err := r.Rebuild(ctx, botID); err != nil {
-		return adapters.CompactResult{}, err
-	}
-	kept := make([]adapters.MemoryItem, 0, len(keptStore))
-	for _, item := range keptStore {
-		kept = append(kept, memoryItemFromStore(item))
-	}
-	return adapters.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(kept),
-		Ratio:       ratio,
-		Results:     kept,
-	}, nil
+	_, err = r.Rebuild(ctx, botID)
+	return err
 }
 
 func (r *denseRuntime) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {

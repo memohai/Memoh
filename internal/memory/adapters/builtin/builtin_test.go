@@ -187,6 +187,113 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	}
 }
 
+func TestBuiltinProviderCompactUsesLLMAndReplacesWithFacts(t *testing.T) {
+	t.Parallel()
+	runtime := newFakeCompactRuntime([]adapters.MemoryItem{
+		{ID: "bot-1:mem_old", Memory: "old unchanged memory", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"},
+		{ID: "bot-1:mem_new", Memory: "new unchanged memory", CreatedAt: "2026-01-02T00:00:00Z", UpdatedAt: "2026-01-02T00:00:00Z"},
+		{ID: "bot-1:mem_mid", Memory: "middle unchanged memory", CreatedAt: "2026-01-03T00:00:00Z", UpdatedAt: "2026-01-03T00:00:00Z"},
+	})
+	llm := &fakeLLM{compactFacts: []string{"User prefers tea", "User lives in Berlin"}}
+	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p.SetLLM(llm)
+
+	result, err := p.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 30)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if llm.compactCalls != 1 {
+		t.Fatalf("expected one LLM compact call, got %d", llm.compactCalls)
+	}
+	if llm.compactReq.BotID != "bot-1" {
+		t.Fatalf("expected compact BotID bot-1, got %q", llm.compactReq.BotID)
+	}
+	if llm.compactReq.TargetCount != 2 {
+		t.Fatalf("expected target count 2, got %d", llm.compactReq.TargetCount)
+	}
+	if llm.compactReq.DecayDays != 30 {
+		t.Fatalf("expected decay days 30, got %d", llm.compactReq.DecayDays)
+	}
+	if len(llm.compactReq.Memories) != 3 {
+		t.Fatalf("expected 3 candidate memories, got %d", len(llm.compactReq.Memories))
+	}
+	if runtime.replaceCalls != 1 {
+		t.Fatalf("expected one replace call, got %d", runtime.replaceCalls)
+	}
+	if len(runtime.replaced) != 2 {
+		t.Fatalf("expected 2 replaced memories, got %d", len(runtime.replaced))
+	}
+	if runtime.replaced[0].Memory != "User prefers tea" || runtime.replaced[1].Memory != "User lives in Berlin" {
+		t.Fatalf("expected LLM facts to replace source, got %#v", runtime.replaced)
+	}
+	for _, item := range runtime.replaced {
+		if strings.Contains(item.Memory, "unchanged memory") {
+			t.Fatalf("provider compact kept original memory instead of LLM fact: %#v", runtime.replaced)
+		}
+	}
+	if result.BeforeCount != 3 || result.AfterCount != 2 {
+		t.Fatalf("unexpected compact counts: %#v", result)
+	}
+}
+
+func TestBuiltinProviderCompactTargetCountUsesNonEmptyCandidates(t *testing.T) {
+	t.Parallel()
+	runtime := newFakeCompactRuntime([]adapters.MemoryItem{
+		{ID: "bot-1:mem_1", Memory: "one"},
+		{ID: "bot-1:mem_blank", Memory: "   "},
+		{ID: "bot-1:mem_2", Memory: "two"},
+	})
+	llm := &fakeLLM{compactFacts: []string{"one and two"}}
+	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p.SetLLM(llm)
+
+	if _, err := p.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 1, 0); err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if len(llm.compactReq.Memories) != 2 {
+		t.Fatalf("expected 2 candidate memories, got %d", len(llm.compactReq.Memories))
+	}
+	if llm.compactReq.TargetCount != 2 {
+		t.Fatalf("expected target count 2, got %d", llm.compactReq.TargetCount)
+	}
+}
+
+func TestBuiltinProviderCompactDoesNotReplaceWhenLLMFails(t *testing.T) {
+	t.Parallel()
+	runtime := newFakeCompactRuntime([]adapters.MemoryItem{
+		{ID: "bot-1:mem_1", Memory: "one"},
+		{ID: "bot-1:mem_2", Memory: "two"},
+	})
+	llm := &fakeLLM{compactErr: errFakeCompact}
+	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p.SetLLM(llm)
+
+	if _, err := p.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
+		t.Fatal("expected compact error")
+	}
+	if runtime.replaceCalls != 0 {
+		t.Fatalf("replace should not be called when LLM fails, got %d", runtime.replaceCalls)
+	}
+}
+
+func TestBuiltinProviderCompactDoesNotReplaceWhenLLMReturnsNoFacts(t *testing.T) {
+	t.Parallel()
+	runtime := newFakeCompactRuntime([]adapters.MemoryItem{
+		{ID: "bot-1:mem_1", Memory: "one"},
+		{ID: "bot-1:mem_2", Memory: "two"},
+	})
+	llm := &fakeLLM{compactFacts: []string{"", "  "}}
+	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	p.SetLLM(llm)
+
+	if _, err := p.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
+		t.Fatal("expected compact error")
+	}
+	if runtime.replaceCalls != 0 {
+		t.Fatalf("replace should not be called when LLM returns no facts, got %d", runtime.replaceCalls)
+	}
+}
+
 func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 	t.Parallel()
 	sentinel := "file-runtime-sentinel"
@@ -227,4 +334,62 @@ var _ sparseEncoder = (*fakeSparseEncoder)(nil)
 
 func init() {
 	_ = sparse.SparseVector{}
+}
+
+type fakeCompactRuntime struct {
+	items        []adapters.MemoryItem
+	replaced     []adapters.MemoryItem
+	replaceCalls int
+}
+
+func newFakeCompactRuntime(items []adapters.MemoryItem) *fakeCompactRuntime {
+	return &fakeCompactRuntime{items: items}
+}
+
+func (r *fakeCompactRuntime) Add(context.Context, adapters.AddRequest) (adapters.SearchResponse, error) {
+	return adapters.SearchResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) Search(context.Context, adapters.SearchRequest) (adapters.SearchResponse, error) {
+	return adapters.SearchResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) GetAll(context.Context, adapters.GetAllRequest) (adapters.SearchResponse, error) {
+	return adapters.SearchResponse{Results: append([]adapters.MemoryItem(nil), r.items...)}, nil
+}
+
+func (r *fakeCompactRuntime) Update(context.Context, adapters.UpdateRequest) (adapters.MemoryItem, error) {
+	return adapters.MemoryItem{}, nil
+}
+
+func (r *fakeCompactRuntime) Delete(context.Context, string) (adapters.DeleteResponse, error) {
+	return adapters.DeleteResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) DeleteBatch(context.Context, []string) (adapters.DeleteResponse, error) {
+	return adapters.DeleteResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) DeleteAll(context.Context, adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
+	return adapters.DeleteResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) ReplaceAll(_ context.Context, _ map[string]any, items []adapters.MemoryItem) error {
+	r.replaceCalls++
+	r.replaced = append([]adapters.MemoryItem(nil), items...)
+	return nil
+}
+
+func (r *fakeCompactRuntime) Usage(context.Context, map[string]any) (adapters.UsageResponse, error) {
+	return adapters.UsageResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) Mode() string { return string(ModeOff) }
+
+func (r *fakeCompactRuntime) Status(context.Context, string) (adapters.MemoryStatusResponse, error) {
+	return adapters.MemoryStatusResponse{}, nil
+}
+
+func (r *fakeCompactRuntime) Rebuild(context.Context, string) (adapters.RebuildResult, error) {
+	return adapters.RebuildResult{}, nil
 }

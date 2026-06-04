@@ -3,9 +3,12 @@ package builtin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/mcp"
@@ -43,7 +46,7 @@ type memoryRuntime interface {
 	Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error)
 	DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error)
 	DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error)
-	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error)
+	ReplaceAll(ctx context.Context, filters map[string]any, items []adapters.MemoryItem) error
 	Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error)
 	Mode() string
 	Status(ctx context.Context, botID string) (adapters.MemoryStatusResponse, error)
@@ -445,7 +448,95 @@ func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, r
 	if p.service == nil {
 		return adapters.CompactResult{}, errors.New("memory runtime not configured")
 	}
-	return p.service.Compact(ctx, filters, ratio, decayDays)
+	if p.llm == nil {
+		return adapters.CompactResult{}, errors.New("memory llm not configured")
+	}
+	if ratio <= 0 || ratio > 1 {
+		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
+	}
+	botID, err := runtimeBotID("", filters)
+	if err != nil {
+		return adapters.CompactResult{}, err
+	}
+	current, err := p.service.GetAll(ctx, adapters.GetAllRequest{BotID: botID, Filters: filters})
+	if err != nil {
+		return adapters.CompactResult{}, err
+	}
+	before := len(current.Results)
+	if before <= 1 {
+		return adapters.CompactResult{BeforeCount: before, AfterCount: before, Ratio: 1, Results: current.Results}, nil
+	}
+
+	candidates := make([]adapters.CandidateMemory, 0, before)
+	for _, item := range current.Results {
+		item.Memory = strings.TrimSpace(item.Memory)
+		if item.Memory == "" {
+			continue
+		}
+		candidates = append(candidates, adapters.CandidateMemory{
+			ID:        item.ID,
+			Memory:    item.Memory,
+			CreatedAt: item.CreatedAt,
+			Metadata:  item.Metadata,
+		})
+	}
+	if len(candidates) == 0 {
+		return adapters.CompactResult{}, errors.New("memory compact: no non-empty memories")
+	}
+	candidateCount := len(candidates)
+	targetCount := int(math.Round(float64(candidateCount) * ratio))
+	if targetCount < 1 {
+		targetCount = 1
+	}
+	if targetCount > candidateCount {
+		targetCount = candidateCount
+	}
+	resp, err := p.llm.Compact(ctx, adapters.CompactRequest{
+		BotID:       botID,
+		Memories:    candidates,
+		TargetCount: targetCount,
+		DecayDays:   decayDays,
+	})
+	if err != nil {
+		return adapters.CompactResult{}, fmt.Errorf("compact llm call failed: %w", err)
+	}
+
+	now := time.Now().UTC()
+	items := make([]adapters.MemoryItem, 0, len(resp.Facts))
+	seen := make(map[string]struct{}, len(resp.Facts))
+	for _, fact := range resp.Facts {
+		fact = strings.TrimSpace(fact)
+		if fact == "" {
+			continue
+		}
+		if _, ok := seen[fact]; ok {
+			continue
+		}
+		seen[fact] = struct{}{}
+		timestamp := now.Format(time.RFC3339)
+		items = append(items, adapters.MemoryItem{
+			ID:        runtimeMemoryID(botID, now),
+			Memory:    fact,
+			Hash:      runtimeHash(fact),
+			CreatedAt: timestamp,
+			UpdatedAt: timestamp,
+			BotID:     botID,
+		})
+		now = now.Add(time.Nanosecond)
+	}
+	if len(items) == 0 {
+		return adapters.CompactResult{}, errors.New("compact returned no facts")
+	}
+	if err := p.service.ReplaceAll(ctx, filters, items); err != nil {
+		return adapters.CompactResult{}, err
+	}
+	actualRatio := math.Round((float64(len(items))/float64(before))*100) / 100
+	return adapters.CompactResult{
+		BeforeCount: before,
+		AfterCount:  len(items),
+		Ratio:       actualRatio,
+		Results:     items,
+	}, nil
 }
 
 func (p *BuiltinProvider) Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error) {

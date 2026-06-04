@@ -187,6 +187,7 @@ type DecideResponse struct {
 }
 
 type CompactRequest struct {
+	BotID       string            `json:"bot_id,omitempty"`
 	Memories    []CandidateMemory `json:"memories"`
 	TargetCount int               `json:"target_count"`
 	DecayDays   int               `json:"decay_days,omitempty"`

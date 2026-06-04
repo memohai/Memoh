@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,8 +16,12 @@ type fakeLLM struct {
 	extractErr    error
 	decideActions []adapters.DecisionAction
 	decideErr     error
+	compactFacts  []string
+	compactErr    error
 	extractCalls  int
 	decideCalls   int
+	compactCalls  int
+	compactReq    adapters.CompactRequest
 }
 
 func (f *fakeLLM) Extract(_ context.Context, _ adapters.ExtractRequest) (adapters.ExtractResponse, error) {
@@ -29,13 +34,17 @@ func (f *fakeLLM) Decide(_ context.Context, _ adapters.DecideRequest) (adapters.
 	return adapters.DecideResponse{Actions: f.decideActions}, f.decideErr
 }
 
-func (*fakeLLM) Compact(context.Context, adapters.CompactRequest) (adapters.CompactResponse, error) {
-	return adapters.CompactResponse{}, nil
+func (f *fakeLLM) Compact(_ context.Context, req adapters.CompactRequest) (adapters.CompactResponse, error) {
+	f.compactCalls++
+	f.compactReq = req
+	return adapters.CompactResponse{Facts: f.compactFacts}, f.compactErr
 }
 
 func (*fakeLLM) DetectLanguage(context.Context, string) (string, error) {
 	return "", nil
 }
+
+var errFakeCompact = errors.New("fake compact error")
 
 func TestFormationExtractAndAdd(t *testing.T) {
 	t.Parallel()

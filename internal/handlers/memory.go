@@ -851,41 +851,16 @@ func (r *fileMemoryRuntime) DeleteAll(ctx context.Context, req memprovider.Delet
 	return memprovider.DeleteResponse{Message: "All memories deleted successfully!"}, nil
 }
 
-func (r *fileMemoryRuntime) Compact(ctx context.Context, filters map[string]any, ratio float64, _ int) (memprovider.CompactResult, error) {
+func (r *fileMemoryRuntime) ReplaceAll(ctx context.Context, filters map[string]any, items []memprovider.MemoryItem) error {
 	botID, err := runtimeBotID("", filters)
 	if err != nil {
-		return memprovider.CompactResult{}, err
+		return err
 	}
-	if ratio <= 0 || ratio > 1 {
-		return memprovider.CompactResult{}, echo.NewHTTPError(http.StatusBadRequest, "ratio must be in range (0, 1]")
+	storeItems := make([]storefs.MemoryItem, 0, len(items))
+	for _, item := range items {
+		storeItems = append(storeItems, runtimeToStoreItem(item))
 	}
-	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
-	if err != nil {
-		return memprovider.CompactResult{}, err
-	}
-	before := len(items)
-	if before == 0 {
-		return memprovider.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []memprovider.MemoryItem{}}, nil
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt > items[j].UpdatedAt })
-	target := int(float64(before) * ratio)
-	if target < 1 {
-		target = 1
-	}
-	if target > before {
-		target = before
-	}
-	keptStore := append([]storefs.MemoryItem(nil), items[:target]...)
-	if err := r.store.RebuildFiles(ctx, botID, keptStore, filters); err != nil {
-		return memprovider.CompactResult{}, err
-	}
-	kept := runtimeFromStoreItems(keptStore)
-	return memprovider.CompactResult{
-		BeforeCount: before,
-		AfterCount:  len(kept),
-		Ratio:       ratio,
-		Results:     kept,
-	}, nil
+	return r.store.RebuildFiles(ctx, botID, storeItems, filters)
 }
 
 func (r *fileMemoryRuntime) Usage(ctx context.Context, filters map[string]any) (memprovider.UsageResponse, error) {
