@@ -15,7 +15,57 @@ import {
 import { bundledGStreamerEnv } from './gstreamer'
 import { desktopResourcePath, desktopServerWorkDir, repoRoot } from './paths'
 
-export const LOCAL_SERVER_PORT = 18731
+const DEFAULT_SERVER_PORT = 18731
+
+// activeSlot is the desktop dev slot keyword set by
+// `mise run desktop:dev -- <keyword>`. Empty (or "default") means the
+// historical single-instance layout with unchanged behavior.
+function activeSlot(): string {
+  const slot = process.env.MEMOH_SLOT?.trim() ?? ''
+  return slot === 'default' ? '' : slot
+}
+
+// slotServerPort returns the port this instance binds. The default slot
+// always uses 18731. A named slot MUST carry an explicit resolved port via
+// MEMOH_SLOT_SERVER_PORT; we never silently fall back to 18731 for a named
+// slot, since that would collide with the default instance.
+function slotServerPort(): number {
+  const slot = activeSlot()
+  if (!slot) {
+    return DEFAULT_SERVER_PORT
+  }
+  const raw = process.env.MEMOH_SLOT_SERVER_PORT?.trim() ?? ''
+  const port = Number.parseInt(raw, 10)
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(
+      `dev slot "${slot}" is active but MEMOH_SLOT_SERVER_PORT is missing or invalid (${JSON.stringify(raw)}); ` +
+        'launch via `mise run desktop:dev -- <keyword>` so the slot port is resolved.',
+    )
+  }
+  return port
+}
+
+// slotSuffix is appended to per-slot file names (pid/log/config) so
+// multiple slots can run in parallel without clobbering each other.
+function slotSuffix(): string {
+  const slot = activeSlot()
+  return slot ? `.${slot}` : ''
+}
+
+// slotDataDir is the per-slot data subdirectory relative to the server
+// work dir. Default keeps data/local; named slots get an isolated tree.
+function slotDataDir(): string {
+  const slot = activeSlot()
+  return slot ? `data/instances/${slot}` : 'data/local'
+}
+
+// slotRuntimeDir is the per-slot bridge runtime subdirectory.
+function slotRuntimeDir(): string {
+  const slot = activeSlot()
+  return slot ? `data/instances/${slot}/runtime` : 'data/runtime'
+}
+
+export const LOCAL_SERVER_PORT = slotServerPort()
 export const LOCAL_SERVER_BASE_URL = `http://127.0.0.1:${LOCAL_SERVER_PORT}`
 const PROVIDER_OAUTH_CALLBACK_PORT = 1455
 
@@ -116,11 +166,11 @@ function currentServerCommand(): ServerCommand {
 }
 
 function logPath(): string {
-  return join(app.getPath('userData'), 'local-server.log')
+  return join(app.getPath('userData'), `local-server${slotSuffix()}.log`)
 }
 
 function pidPath(): string {
-  return join(app.getPath('userData'), 'local-server.pid.json')
+  return join(app.getPath('userData'), `local-server${slotSuffix()}.pid.json`)
 }
 
 function appendLog(message: string): void {
@@ -208,7 +258,7 @@ function prepareConfig(cwd: string, sourcePath: string, qdrantGrpcBaseUrl: strin
   const home = app.getPath('home')
   const source = readFileSync(sourcePath, 'utf8')
   const contents = applyLocalConfigDefaults(source, cwd, home, providersDir, qdrantGrpcBaseUrl)
-  const targetPath = join(cwd, 'config.toml')
+  const targetPath = join(cwd, `config${slotSuffix()}.toml`)
   writeFileSync(targetPath, contents, { mode: 0o600 })
   return targetPath
 }
@@ -221,11 +271,19 @@ function applyLocalConfigDefaults(
   qdrantGrpcBaseUrl?: string,
 ): string {
   let next = contents.replaceAll('__HOME__', home)
-  next = setTomlString(next, 'container', 'data_root', toAbsoluteConfigPath(cwd, 'data/local'))
-  next = setTomlString(next, 'container', 'runtime_dir', toAbsoluteConfigPath(cwd, 'data/runtime'))
-  next = setTomlString(next, 'local', 'metadata_root', toAbsoluteConfigPath(cwd, 'data/local/containers'))
-  next = setTomlString(next, 'sqlite', 'path', toAbsoluteConfigPath(cwd, 'data/local/memoh.db'))
+  const dataDir = slotDataDir()
+  next = setTomlString(next, 'container', 'data_root', toAbsoluteConfigPath(cwd, dataDir))
+  next = setTomlString(next, 'container', 'runtime_dir', toAbsoluteConfigPath(cwd, slotRuntimeDir()))
+  next = setTomlString(next, 'local', 'metadata_root', toAbsoluteConfigPath(cwd, `${dataDir}/containers`))
+  next = setTomlString(next, 'sqlite', 'path', toAbsoluteConfigPath(cwd, `${dataDir}/memoh.db`))
   next = setTomlString(next, 'registry', 'providers_dir', providersDir)
+  if (activeSlot()) {
+    // Pin the slot's server port so this instance does not collide with the
+    // default slot (18731) or other slots. The Go server ignores [web], so the
+    // Vite dev port is handled separately via MEMOH_WEB_PORT in
+    // electron.vite.config.ts, not by rewriting config here.
+    next = setTomlString(next, 'server', 'addr', `:${slotServerPort()}`)
+  }
   if (qdrantGrpcBaseUrl) {
     next = setTomlString(next, 'qdrant', 'base_url', qdrantGrpcBaseUrl)
   }
@@ -335,9 +393,9 @@ export function tomlStringLiteral(value: string): string {
 }
 
 function prepareRuntime(command: ServerCommand): void {
-  mkdirSync(join(command.cwd, 'data', 'local'), { recursive: true })
+  mkdirSync(join(command.cwd, slotDataDir()), { recursive: true })
   prepareProviders(command.cwd)
-  const targetRuntime = join(command.cwd, 'data', 'runtime')
+  const targetRuntime = join(command.cwd, slotRuntimeDir())
   mkdirSync(targetRuntime, { recursive: true })
 
   if (!app.isPackaged) {

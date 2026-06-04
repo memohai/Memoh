@@ -417,6 +417,61 @@ desktop via screenshots and pointer/keyboard input. Headless Playwright can
 still run as an ordinary workspace command, but it is separate from the
 headed display path.
 
+### Dev Slots (multi-worktree parallel dev)
+
+Dev-only. Lets a full-stack developer run several desktop dev instances in
+parallel (e.g. one per git worktree / feature branch) without sharing one
+SQLite database and being forced to migrate up/down on every branch switch.
+
+- No keyword (`mise run desktop:dev`): the **default slot**. Unchanged
+  historical behavior — `userData/local-server/data/local/memoh.db`, server
+  `:18731`, web `8082`, `config.toml` / `local-server.pid.json` /
+  `local-server.log`. Existing users and the packaged app are unaffected.
+- With a keyword (`mise run desktop:dev -- bind`): an **isolated slot**,
+  reused by that keyword. Each keyword gets its own SQLite DB, ports, pid,
+  log, and rendered config. Schema version follows the keyword, so switching
+  worktrees never requires a manual downgrade.
+
+How the keyword flows (argument outside, env var inside):
+
+```
+mise run desktop:dev -- bind
+  -> go run ./cmd/agent slot env bind   # resolve + persist ports (free-port scan)
+  -> export MEMOH_SLOT / MEMOH_SLOT_SERVER_PORT / MEMOH_WEB_PORT / MEMOH_WEB_PROXY_TARGET
+  -> pnpm dev (electron-vite)
+       - electron.vite.config.ts: MEMOH_WEB_PORT pins the Vite dev port
+       - src/main/local-server.ts: MEMOH_SLOT picks data dir / pid / log /
+         config name; MEMOH_SLOT_SERVER_PORT sets [server].addr and the
+         LOCAL_SERVER_BASE_URL the renderer reaches via desktop:api-base-url
+```
+
+Port registry: `cmd/agent slot` (Go, no external deps) owns
+`userData/dev-slots.json`. `slot resolve <name>` allocates the next free
+server/web ports from the 18731 / 8082 baselines (skipping registry-used and
+currently-bound ports), persists them, and reuses the same pair forever.
+`slot env <name>` prints `KEY=VALUE` lines for the mise task to `eval`;
+`slot list` shows all slots. Per-slot files under `userData`:
+`local-server.<slot>.pid.json`, `local-server.<slot>.log`,
+`local-server/config.<slot>.toml`, and data under
+`local-server/data/instances/<slot>/`.
+
+Port semantics: different keywords -> different ports, can run side by side;
+the same keyword must run in only one place at a time (it is one database).
+
+Known limitations (v1, dev-only):
+
+- Embedded Qdrant is shared across slots. It only cross-contaminates if you
+  duplicate a DB so two slots use identical bot ids and both write memory;
+  quitting one running instance stops the shared Qdrant for the others.
+- The provider OAuth callback proxy binds a single fixed port (1455); only
+  one running slot gets it.
+- The ACP tools proxy binds a single fixed port (18732), shared across slots.
+  The allocator reserves it so no slot's server is handed 18732, but the proxy
+  itself is not partitioned per slot.
+- The `memoh` CLI and the packaged app only target the default slot.
+- Renderer `localStorage` (token, selection) is not partitioned per slot, so
+  the first request after switching slots may 401 and require a re-login.
+
 ## Routing
 
 Both windows use `createMemoryHistory()` — the `file://` runtime makes
