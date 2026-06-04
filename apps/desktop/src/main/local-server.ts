@@ -109,13 +109,23 @@ function serverBinaryName(): string {
   return process.platform === 'win32' ? 'memoh-server.exe' : 'memoh-server'
 }
 
+// devServerBinDir is the directory the dev server binary is built into. The
+// default slot keeps the historical shared local-server/bin. A named slot gets
+// its own bin under the slot tree so two worktrees on different branches do not
+// build different binaries to the same path (clobbering each other, or — on
+// Windows — failing `go build -o` because a running slot locks the .exe).
+function devServerBinDir(cwd: string): string {
+  const slot = activeSlot()
+  return slot ? join(cwd, 'data', 'instances', slot, 'bin') : join(cwd, 'bin')
+}
+
 function devServerBinaryPath(cwd: string): string {
-  return join(cwd, 'bin', serverBinaryName())
+  return join(devServerBinDir(cwd), serverBinaryName())
 }
 
 function buildDevServerBinary(root: string, cwd: string): string {
   const binary = devServerBinaryPath(cwd)
-  mkdirSync(join(cwd, 'bin'), { recursive: true })
+  mkdirSync(devServerBinDir(cwd), { recursive: true })
   const result = spawnSync('go', ['build', '-o', binary, './cmd/agent'], {
     cwd: root,
     stdio: 'inherit',

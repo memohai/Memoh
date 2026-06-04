@@ -453,7 +453,9 @@ currently-bound ports), persists them, and reuses the same pair forever.
 `slot list` shows all slots. Per-slot files under `userData`:
 `local-server.<slot>.pid.json`, `local-server.<slot>.log`,
 `local-server/config.<slot>.toml`, and data under
-`local-server/data/instances/<slot>/`.
+`local-server/data/instances/<slot>/` (including the dev server binary at
+`.../<slot>/bin/memoh-server`, so parallel worktrees on different branches
+don't build different binaries to the same shared path).
 
 Port semantics: different keywords -> different ports, can run side by side;
 the same keyword must run in only one place at a time (it is one database).
