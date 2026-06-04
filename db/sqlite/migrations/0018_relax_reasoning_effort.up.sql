@@ -1,8 +1,9 @@
--- 0012_relax_reasoning_effort (down)
--- Restore the legacy low/medium/high CHECK constraint by rebuilding the table.
--- Rows with newer effort tiers must be reconciled before rolling back.
--- Preserves columns added by earlier migrations, including command_ui_language,
--- and keeps heartbeat_interval DEFAULT 1440.
+-- 0018_relax_reasoning_effort
+-- Reasoning effort is now a free-form tier string (minimal/low/medium/high/xhigh/max/none),
+-- driven by per-model capability discovery. SQLite cannot drop a CHECK
+-- constraint in place, so rebuild the bots table without bots_reasoning_effort_check.
+-- NOTE: this rebuild must preserve all columns added by earlier migrations,
+-- including command_ui_language, and keep heartbeat_interval DEFAULT 1440.
 -- Use the bots_new/copy/drop/rename pattern (as in 0013) rather than renaming
 -- bots to bots_old: on SQLite 3.26+, ALTER TABLE ... RENAME rewrites dependent
 -- child-table foreign keys to the new name even with foreign_keys=OFF, so
@@ -54,7 +55,6 @@ CREATE TABLE bots_new (
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
-  CONSTRAINT bots_reasoning_effort_check CHECK (reasoning_effort IN ('low', 'medium', 'high')),
   CONSTRAINT bots_name_format_check CHECK (
     name GLOB '[a-z0-9]*'
     AND name NOT GLOB '*[^a-z0-9-]*'

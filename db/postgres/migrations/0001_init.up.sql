@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS bots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
   CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
-  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0086).
+  -- reasoning_effort is a free-form capability-driven tier string; no CHECK constraint (see 0093).
   CONSTRAINT bots_name_format_check CHECK (name ~ '^[a-z0-9][a-z0-9-]{1,62}$')
 );
 
