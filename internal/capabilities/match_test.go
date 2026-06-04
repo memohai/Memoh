@@ -1,6 +1,9 @@
 package capabilities
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // registryCorpus is a representative subset of real LiteLLM registry keys,
 // including the bedrock/vertex/dotted prefix variants that exercise normalization.
@@ -188,6 +191,62 @@ func TestBuildIndex_SkipsGithubCopilotShells(t *testing.T) {
 	got, ok := idx.match("openai/gpt-5")
 	if !ok || got != "gpt-5" {
 		t.Fatalf("gpt-5 should resolve to the authoritative key, got %q,%v", got, ok)
+	}
+}
+
+// TestMatch_ModelFamilyNotStrippedToGenericTail guards against folding distinct
+// model families that share a generic suffix. The vendor brand (deepseek/qwen)
+// is part of a bare slug's identity; stripping it would collapse
+// "deepseek-coder" and "qwen-coder" to "coder" and cross-match unrelated models
+// (e.g. a non-reasoning coder borrowing a reasoning sibling's effort ladder).
+func TestMatch_ModelFamilyNotStrippedToGenericTail(t *testing.T) {
+	idx := buildIndex([]string{
+		"deepseek-coder",
+		"dashscope/qwen-coder",
+		"mistral-large",
+	})
+
+	// deepseek-coder (bare or provider-qualified) must resolve to a deepseek key,
+	// never the qwen "coder".
+	for _, in := range []string{"deepseek-coder", "deepseek/deepseek-coder"} {
+		got, ok := idx.match(in)
+		if !ok {
+			t.Fatalf("%q: expected a match", in)
+		}
+		if !strings.Contains(got, "deepseek") {
+			t.Fatalf("%q resolved to %q, expected a deepseek-coder key (cross-family fold)", in, got)
+		}
+	}
+
+	// qwen-coder still resolves to the qwen key.
+	if got, ok := idx.match("dashscope/qwen-coder"); !ok || !strings.Contains(got, "qwen") {
+		t.Fatalf("qwen-coder resolved to %q,%v, expected the qwen key", got, ok)
+	}
+
+	// The core guarantee: the two families never share a canonical, so neither
+	// can be the byCanonical representative of the other.
+	if c1, c2 := normalize("deepseek-coder").canonical, normalize("qwen-coder").canonical; c1 == c2 {
+		t.Fatalf("deepseek-coder and qwen-coder collapsed to the same canonical %q", c1)
+	}
+}
+
+// TestMatch_ExactProviderKeyWins guards provider-specific capability overrides:
+// when a fully-qualified id is itself a registry key (e.g. a Perplexity-routed
+// model that the registry marks supports_reasoning:false), it must resolve to
+// that exact key rather than being folded into the native model and inheriting
+// reasoning it does not actually expose.
+func TestMatch_ExactProviderKeyWins(t *testing.T) {
+	idx := buildIndex([]string{
+		"claude-haiku-4-5",
+		"perplexity/anthropic/claude-haiku-4-5",
+	})
+
+	if got, ok := idx.match("perplexity/anthropic/claude-haiku-4-5"); !ok || got != "perplexity/anthropic/claude-haiku-4-5" {
+		t.Fatalf("exact provider key = %q,%v; want the provider-qualified key itself", got, ok)
+	}
+	// The bare id (no provider context) still defaults to the native key.
+	if got, ok := idx.match("claude-haiku-4-5"); !ok || got != "claude-haiku-4-5" {
+		t.Fatalf("bare id = %q,%v; want native claude-haiku-4-5", got, ok)
 	}
 }
 

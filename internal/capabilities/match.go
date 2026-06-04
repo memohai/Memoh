@@ -34,6 +34,22 @@ var knownPrefixSegments = map[string]struct{}{
 	"sa": {}, "ca": {}, "me": {}, "emea": {},
 }
 
+// modelVendorSegments are the subset of knownPrefixSegments that double as a
+// model-family name (the producer's brand can be part of the model identity,
+// e.g. "deepseek-coder", "qwen-coder", "mistral-large", "meta-llama-3"). They
+// are still treated as ignorable noise for fuzzy subset matching (so
+// "anthropic/claude-opus" still matches "claude-opus"), but they must NOT be
+// stripped from a *bare* hyphenated slug in the post-unification re-strip step:
+// stripping them collapses distinct families to a shared generic tail (e.g.
+// "deepseek-coder" and "qwen-coder" both -> "coder"), cross-matching unrelated
+// models. Dotted/slashed gateway prefixes are still removed earlier where the
+// segment is unambiguously a routing prefix, not part of the model name.
+var modelVendorSegments = map[string]struct{}{
+	"anthropic": {}, "openai": {}, "google": {}, "gemini": {},
+	"deepseek": {}, "mistral": {}, "cohere": {}, "xai": {},
+	"qwen": {}, "alibaba": {}, "meta": {}, "meta_llama": {}, "moonshot": {},
+}
+
 // marketingSuffixTokens are pure release-channel / alias decorations that point
 // at the same underlying model and should not block a match. We deliberately do
 // NOT include capability-distinguishing tokens here: the LiteLLM registry is
@@ -163,15 +179,23 @@ func normalize(raw string) normalized {
 		}
 	}
 
-	// 6. Re-strip leading vendor prefixes that only surfaced after separator
-	//    unification (e.g. "anthropic-claude-..." from a dotted key).
+	// 6. Re-strip leading gateway/region prefixes that only surfaced after
+	//    separator unification (e.g. "vertex_ai-..." glued by '_'). Model-family
+	//    vendor tokens (deepseek/qwen/mistral/...) are NOT stripped here: on a
+	//    bare slug they are part of the model identity, and stripping them would
+	//    collapse distinct families ("deepseek-coder" and "qwen-coder" -> "coder")
+	//    into a single canonical and cross-match unrelated models. Same-vendor
+	//    redundant prefixes are still tolerated by the fuzzy matcher, which
+	//    treats these tokens as ignorable noise (see isIgnorableToken).
 	rawTokens := splitNonEmpty(s, "-")
 	for len(rawTokens) > 1 {
-		if _, ok := knownPrefixSegments[rawTokens[0]]; ok {
-			rawTokens = rawTokens[1:]
-			continue
+		if _, ok := knownPrefixSegments[rawTokens[0]]; !ok {
+			break
 		}
-		break
+		if _, vendor := modelVendorSegments[rawTokens[0]]; vendor {
+			break
+		}
+		rawTokens = rawTokens[1:]
 	}
 
 	tokens := make(map[string]struct{}, len(rawTokens))
@@ -209,6 +233,7 @@ func splitNonEmpty(s, sep string) []string {
 
 // index is a normalized lookup table over registry keys.
 type index struct {
+	byExact     map[string]string // lowercased/trimmed raw key -> registry key
 	byCanonical map[string]string // canonical -> registry key
 	entries     []indexEntry
 }
@@ -232,7 +257,10 @@ func isUntrustedRegistryKey(key string) bool {
 }
 
 func buildIndex(keys []string) *index {
-	idx := &index{byCanonical: make(map[string]string, len(keys))}
+	idx := &index{
+		byExact:     make(map[string]string, len(keys)),
+		byCanonical: make(map[string]string, len(keys)),
+	}
 	// Sort first: registry keys arrive from a map (random order). Sorting makes
 	// both the byCanonical representative choice and the fuzzy-tie winner in
 	// matchNorm deterministic across processes.
@@ -241,6 +269,16 @@ func buildIndex(keys []string) *index {
 	for _, k := range sorted {
 		if isUntrustedRegistryKey(k) {
 			continue
+		}
+		// Exact provider-qualified key match takes priority over canonical
+		// folding: a fully-specified id like "perplexity/anthropic/claude-haiku-4-5"
+		// (which the registry marks supports_reasoning:false) must resolve to its
+		// own entry, not be folded into the native "claude-haiku-4-5" (reasoning
+		// on) and silently over-enable thinking on a provider that disables it.
+		if exact := strings.ToLower(strings.TrimSpace(k)); exact != "" {
+			if _, exists := idx.byExact[exact]; !exists {
+				idx.byExact[exact] = k
+			}
 		}
 		n := normalize(k)
 		if n.canonical == "" {
@@ -265,6 +303,14 @@ func buildIndex(keys []string) *index {
 // Every fuzzy tier requires the version signatures to match exactly, so models
 // that differ only by version (4.8 vs 4.6) never collide.
 func (idx *index) match(raw string) (string, bool) {
+	// Exact key match wins: it is the most specific, authoritative resolution and
+	// cannot be wrong (the input string IS a registry key). This also preserves
+	// provider-specific capability overrides that canonical folding would lose.
+	if exact := strings.ToLower(strings.TrimSpace(raw)); exact != "" {
+		if key, ok := idx.byExact[exact]; ok {
+			return key, true
+		}
+	}
 	return idx.matchNorm(normalize(raw))
 }
 
