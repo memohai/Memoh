@@ -185,6 +185,25 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 	}
 }
 
+// Reasoning that streams before the answer text must keep a smaller block ID
+// than the text block: the frontend sorts blocks by ID, so an eagerly created
+// text block would pin the answer above the thinking that preceded it.
+func TestUIMessageStreamConverterKeepsReasoningBeforeText(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+
+	reasoning := converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_delta", Delta: "thinking first"})
+	if len(reasoning) != 1 || reasoning[0].Type != UIMessageReasoning {
+		t.Fatalf("reasoning messages = %#v", reasoning)
+	}
+	text := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "answer"})
+	if len(text) != 1 || text[0].Type != UIMessageText {
+		t.Fatalf("text messages = %#v", text)
+	}
+	if reasoning[0].ID >= text[0].ID {
+		t.Fatalf("reasoning id %d must sort before text id %d", reasoning[0].ID, text[0].ID)
+	}
+}
+
 func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 	converter := NewUIMessageStreamConverter()
 	messages := converter.HandleEvent(UIMessageStreamEvent{

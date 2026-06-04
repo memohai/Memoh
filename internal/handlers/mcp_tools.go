@@ -34,6 +34,16 @@ func (h *ContainerdHandler) SetToolSessionContextStore(store *mcpgw.ToolSessionC
 	h.toolContexts = store
 }
 
+// acpRuntimeContextResolver resolves the trusted tool context of a live ACP
+// runtime from its stable, server-generated runtime ID.
+type acpRuntimeContextResolver interface {
+	ResolveRuntimeToolContext(botID, runtimeID string) (mcpgw.ToolSessionContext, bool)
+}
+
+func (h *ContainerdHandler) SetACPRuntimeResolver(resolver acpRuntimeContextResolver) {
+	h.acpRuntimes = resolver
+}
+
 // HandleMCPTools godoc
 // @Summary Unified MCP tools gateway
 // @Description MCP endpoint for tool discovery and invocation.
@@ -57,6 +67,21 @@ func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 }
 
 func (h *ContainerdHandler) handleMCPToolsWithBotID(c echo.Context, botID string) error {
+	// ACP runtimes reference themselves by stable, server-generated runtime
+	// identity; their per-prompt context resolves from the live handle and
+	// the bot in the path must own the runtime. Fails closed: a dead or
+	// foreign runtime never falls back to header-supplied identity.
+	if runtimeID := strings.TrimSpace(c.Request().Header.Get(mcpgw.ToolHeaderRuntimeID)); runtimeID != "" {
+		if h.acpRuntimes == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+		}
+		session, ok := h.acpRuntimes.ResolveRuntimeToolContext(botID, runtimeID)
+		if !ok {
+			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+		}
+		mcpgw.ServeToolMCPHTTPWithoutContextMerge(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
+		return nil
+	}
 	session := h.buildToolSessionContext(c, botID)
 	mcpgw.ServeToolMCPHTTPWithoutContextMerge(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
 	return nil

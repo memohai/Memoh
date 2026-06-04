@@ -189,6 +189,45 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 			t.Fatalf("result events missing %s tool end: %#v", want, result.Events)
 		}
 	}
+	writeEvent := findStreamedToolEvent(streamedEventsSnapshot, StreamEventToolCallEnd, "write")
+	if writeEvent == nil {
+		t.Fatalf("streamed events missing write tool end: %#v", streamedEventsSnapshot)
+	}
+	writeInput, ok := writeEvent.Input.(map[string]any)
+	if !ok {
+		t.Fatalf("write input = %#v, want object", writeEvent.Input)
+	}
+	if writeInput["path"] == "" || writeInput["content"] != "written by fake agent\n" {
+		t.Fatalf("write input = %#v, want path and content", writeInput)
+	}
+}
+
+func TestWriteToolInputTruncatesLargeContent(t *testing.T) {
+	content := strings.Repeat("a", maxWriteToolContentPreview+1) + "\n"
+	input := writeToolInput("/data/large.txt", content)
+
+	if input["path"] != "/data/large.txt" {
+		t.Fatalf("path = %#v", input["path"])
+	}
+	if input["content_truncated"] != true {
+		t.Fatalf("content_truncated = %#v, want true", input["content_truncated"])
+	}
+	if input["content_bytes"] != len(content) {
+		t.Fatalf("content_bytes = %#v, want %d", input["content_bytes"], len(content))
+	}
+	if input["content_line_count"] != 2 {
+		t.Fatalf("content_line_count = %#v, want 2", input["content_line_count"])
+	}
+	preview, ok := input["content"].(string)
+	if !ok {
+		t.Fatalf("content = %#v, want string", input["content"])
+	}
+	if len(preview) > maxWriteToolContentPreview {
+		t.Fatalf("preview length = %d, want <= %d", len(preview), maxWriteToolContentPreview)
+	}
+	if preview == content {
+		t.Fatalf("preview should be truncated")
+	}
 }
 
 func TestSessionPromptBuildsEmbeddedContextResource(t *testing.T) {
@@ -307,12 +346,16 @@ func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
 }
 
 func hasStreamedToolEvent(events []StreamEvent, typ StreamEventType, toolName string) bool {
-	for _, event := range events {
-		if event.Type == typ && event.ToolName == toolName {
-			return true
+	return findStreamedToolEvent(events, typ, toolName) != nil
+}
+
+func findStreamedToolEvent(events []StreamEvent, typ StreamEventType, toolName string) *StreamEvent {
+	for i := range events {
+		if events[i].Type == typ && events[i].ToolName == toolName {
+			return &events[i]
 		}
 	}
-	return false
+	return nil
 }
 
 func TestRunnerStartSessionReadsProtocolModelsAndSetsModel(t *testing.T) {

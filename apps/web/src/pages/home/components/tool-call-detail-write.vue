@@ -1,5 +1,11 @@
 <template>
   <div class="space-y-1.5">
+    <p
+      v-if="contentTruncated"
+      class="rounded-sm border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
+    >
+      {{ t('chat.tools.detail.contentTruncated', { bytes: contentBytes }) }}
+    </p>
     <div
       v-if="content && shiki.loading.value"
       class="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -41,6 +47,17 @@ const filePath = computed(() => {
 const content = computed(() => {
   const input = props.block.input as Record<string, unknown> | undefined
   return (input?.content as string) ?? ''
+})
+
+const contentTruncated = computed(() => {
+  const input = props.block.input as Record<string, unknown> | undefined
+  return input?.content_truncated === true
+})
+
+const contentBytes = computed(() => {
+  const input = props.block.input as Record<string, unknown> | undefined
+  const bytes = input?.content_bytes
+  return typeof bytes === 'number' && Number.isFinite(bytes) ? bytes : 0
 })
 
 // Re-highlight whenever content arrives. Input now streams in after the tool

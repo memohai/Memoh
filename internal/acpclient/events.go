@@ -11,9 +11,10 @@ import (
 type StreamEventType string
 
 const (
-	StreamEventTextDelta     StreamEventType = "text_delta"
-	StreamEventToolCallStart StreamEventType = "tool_call_start"
-	StreamEventToolCallEnd   StreamEventType = "tool_call_end"
+	StreamEventTextDelta      StreamEventType = "text_delta"
+	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
+	StreamEventToolCallStart  StreamEventType = "tool_call_start"
+	StreamEventToolCallEnd    StreamEventType = "tool_call_end"
 
 	maxCollectedStreamEvents = 4096
 	maxTrackedACPToolStates  = 1024
@@ -125,8 +126,9 @@ func contentText(block acp.ContentBlock) string {
 }
 
 type acpToolEventMapper struct {
-	mu    sync.Mutex
-	tools map[string]*acpToolState
+	mu       sync.Mutex
+	tools    map[string]*acpToolState
+	lastPlan string
 }
 
 type acpToolState struct {
@@ -160,6 +162,17 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 			Type:  StreamEventTextDelta,
 			Delta: text,
 		}}
+	case update.AgentThoughtChunk != nil:
+		text := contentText(update.AgentThoughtChunk.Content)
+		if text == "" {
+			return nil
+		}
+		return []StreamEvent{{
+			Type:  StreamEventReasoningDelta,
+			Delta: text,
+		}}
+	case update.Plan != nil:
+		return m.applyPlan(*update.Plan)
 	case update.ToolCall != nil:
 		return m.applyToolCall(*update.ToolCall)
 	case update.ToolCallUpdate != nil:
@@ -167,6 +180,50 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 	default:
 		return nil
 	}
+}
+
+func (m *acpToolEventMapper) applyPlan(plan acp.SessionUpdatePlan) []StreamEvent {
+	text := formatPlanEntries(plan.Entries)
+	if text == "" {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if text == m.lastPlan {
+		return nil
+	}
+	prefix := "Plan:\n"
+	if m.lastPlan != "" {
+		prefix = "\nPlan updated:\n"
+	}
+	m.lastPlan = text
+	return []StreamEvent{{
+		Type:  StreamEventReasoningDelta,
+		Delta: prefix + text,
+	}}
+}
+
+func formatPlanEntries(entries []acp.PlanEntry) string {
+	var sb strings.Builder
+	for _, entry := range entries {
+		content := strings.TrimSpace(entry.Content)
+		if content == "" {
+			continue
+		}
+		status := strings.TrimSpace(string(entry.Status))
+		if status == "" {
+			status = "pending"
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString("- [")
+		sb.WriteString(status)
+		sb.WriteString("] ")
+		sb.WriteString(content)
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []StreamEvent {
@@ -299,16 +356,58 @@ func nativeToolFromACPState(state *acpToolState) (string, map[string]any, bool) 
 		return "exec", map[string]any{"command": command}, true
 	case string(acp.ToolKindRead):
 		path := pathFromACPInput(state.input)
-		if path == "" && len(state.locations) > 0 {
-			path = strings.TrimSpace(state.locations[0].Path)
+		if path == "" {
+			path = pathFromACPLocations(state.locations)
 		}
 		if path == "" {
 			return "", nil, false
 		}
 		return "read", map[string]any{"path": path}, true
+	case string(acp.ToolKindEdit):
+		return editToolFromACPState(state)
 	default:
 		return "", nil, false
 	}
+}
+
+func editToolFromACPState(state *acpToolState) (string, map[string]any, bool) {
+	path := pathFromACPInput(state.input)
+	if path == "" {
+		path = pathFromACPLocations(state.locations)
+	}
+	diff := firstACPToolDiff(state.content)
+	if path == "" && diff != nil {
+		path = strings.TrimSpace(diff.Path)
+	}
+	if path == "" {
+		return "", nil, false
+	}
+
+	if m, ok := state.input.(map[string]any); ok {
+		if content, ok := rawStringFromMap(m, "content", "text"); ok {
+			return "write", writeToolInput(path, content), true
+		}
+		oldText, hasOld := rawStringFromMap(m, "old_string", "oldString", "old_text", "oldText")
+		newText, hasNew := rawStringFromMap(m, "new_string", "newString", "new_text", "newText")
+		if hasOld || hasNew {
+			return "edit", map[string]any{
+				"path":     path,
+				"old_text": oldText,
+				"new_text": newText,
+			}, true
+		}
+	}
+	if diff != nil {
+		if diff.OldText == nil {
+			return "write", writeToolInput(path, diff.NewText), true
+		}
+		return "edit", map[string]any{
+			"path":     path,
+			"old_text": *diff.OldText,
+			"new_text": diff.NewText,
+		}, true
+	}
+	return "edit", map[string]any{"path": path}, true
 }
 
 func nativeToolResultFromACPState(state *acpToolState) any {
@@ -408,9 +507,27 @@ func commandFromACPTitle(title string) string {
 
 func pathFromACPInput(value any) string {
 	if m, ok := value.(map[string]any); ok {
-		return stringFromAny(firstPresent(m, "path", "file", "filename"))
+		return stringFromAny(firstPresent(m, "path", "file_path", "filePath", "file", "filename"))
 	}
 	return ""
+}
+
+func pathFromACPLocations(locations []acp.ToolCallLocation) string {
+	for _, location := range locations {
+		if path := strings.TrimSpace(location.Path); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func firstACPToolDiff(contents []acp.ToolCallContent) *acp.ToolCallContentDiff {
+	for i := range contents {
+		if contents[i].Diff != nil {
+			return contents[i].Diff
+		}
+	}
+	return nil
 }
 
 func toolContentText(contents []acp.ToolCallContent) string {
@@ -514,6 +631,23 @@ func rawStringFromAny(value any) string {
 		return s
 	}
 	return stringFromAny(value)
+}
+
+func rawStringFromMap(m map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		value, ok := m[key]
+		if !ok {
+			continue
+		}
+		if s, ok := value.(string); ok {
+			return s, true
+		}
+		text := rawStringFromAny(value)
+		if text != "" {
+			return text, true
+		}
+	}
+	return "", false
 }
 
 func numberFromAny(value any) (int, bool) {

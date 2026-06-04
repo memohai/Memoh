@@ -144,8 +144,10 @@ export type AclUpdateRuleRequest = {
 export type AcpagentRuntimeStatus = {
     acp_session_id?: string;
     agent_id?: string;
+    default_model_id?: string;
     models?: AcpclientModelState;
     project_path?: string;
+    runtime_id?: string;
     session_id?: string;
     state?: string;
 };
@@ -1496,6 +1498,11 @@ export type HandlersTriggerCompactResponse = {
     summary?: string;
 };
 
+export type HandlersAcpRuntimeCreateRequest = {
+    acp_agent_id?: string;
+    project_path?: string;
+};
+
 export type HandlersAcpRuntimeModelRequest = {
     model_id?: string;
 };
@@ -1517,6 +1524,12 @@ export type HandlersBrowserSessionKeepAliveResponse = {
 };
 
 export type HandlersCreateSessionRequest = {
+    /**
+     * ACPRuntimeID optionally binds a warm pre-session runtime (created via
+     * POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
+     * transient in-memory handle reference, never persisted in metadata.
+     */
+    acp_runtime_id?: string;
     channel_type?: string;
     metadata?: {
         [key: string]: unknown;
@@ -2808,6 +2821,178 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 };
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
+
+export type PostBotsByBotIdAcpRuntimesData = {
+    /**
+     * Runtime spec
+     */
+    body: HandlersAcpRuntimeCreateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes';
+};
+
+export type PostBotsByBotIdAcpRuntimesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Too Many Requests
+     */
+    429: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
+
+export type PostBotsByBotIdAcpRuntimesResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PostBotsByBotIdAcpRuntimesResponse = PostBotsByBotIdAcpRuntimesResponses[keyof PostBotsByBotIdAcpRuntimesResponses];
+
+export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
+};
+
+export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
+
+export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdAcpRuntimesByRuntimeIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
+};
+
+export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
+
+export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponse = GetBotsByBotIdAcpRuntimesByRuntimeIdResponses[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdResponses];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelData = {
+    /**
+     * Model selection
+     */
+    body: HandlersAcpRuntimeModelRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/model';
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses];
 
 export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
     body?: never;

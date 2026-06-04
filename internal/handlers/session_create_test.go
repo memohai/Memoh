@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -104,6 +105,116 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 	if got := string(queries.createParams.Metadata); !strings.Contains(got, `"acp_agent_id":"codex"`) || !strings.Contains(got, `"project_path":"/data/app"`) {
 		t.Fatalf("CreateSession metadata = %s", got)
+	}
+}
+
+func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				},
+			},
+		}),
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"}}`
+	if err := callCreateSession(handler, botID, body); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.createParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_project_mode"] != session.DefaultACPProjectMode {
+		t.Fatalf("CreateSession metadata = %#v, want default ACP project", metadata)
+	}
+}
+
+type recordingRuntimeBinder struct {
+	bindArgs []string
+	bindErr  error
+}
+
+func (*recordingRuntimeBinder) CloseSession(string) error { return nil }
+
+func (b *recordingRuntimeBinder) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath string) error {
+	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath}
+	return b.bindErr
+}
+
+func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				},
+			},
+		}),
+	}
+	binder := &recordingRuntimeBinder{}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		binder,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"},"acp_runtime_id":"rt_warm"}`
+	if err := callCreateSession(handler, botID, body); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath}
+	if len(binder.bindArgs) != len(want) {
+		t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
+	}
+	for i := range want {
+		if binder.bindArgs[i] != want[i] {
+			t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
+		}
+	}
+}
+
+func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				},
+			},
+		}),
+	}
+	binder := &recordingRuntimeBinder{bindErr: errors.New("runtime gone")}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		binder,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	// A failed bind must not fail session creation: the first prompt cold
+	// starts instead.
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"},"acp_runtime_id":"rt_gone"}`
+	if err := callCreateSession(handler, botID, body); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if !queries.createCalled {
+		t.Fatalf("session was not created")
 	}
 }
 

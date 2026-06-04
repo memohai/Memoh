@@ -104,6 +104,97 @@ func TestUpdateSessionSwitchesEmptyChatToACPAgent(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionDefaultsACPProjectPath(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:       testUUID(sessionID),
+			BotID:    testUUID(botID),
+			Type:     session.TypeChat,
+			Title:    "",
+			Metadata: testJSON(map[string]any{}),
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_project_mode"] != session.DefaultACPProjectMode {
+		t.Fatalf("metadata = %#v, want default ACP project", metadata)
+	}
+}
+
+func TestUpdateSessionDefaultsACPProjectPathBeforeAgentChangeCheck(t *testing.T) {
+	botID := "11111111-1111-1111-1111-111111111111"
+	sessionID := "22222222-2222-2222-2222-222222222222"
+	queries := &sessionUpdateQueries{
+		bot: testBotRow(botID, map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{"enabled": true},
+				},
+			},
+		}),
+		session: sqlc.BotSession{
+			ID:    testUUID(sessionID),
+			BotID: testUUID(botID),
+			Type:  session.TypeACPAgent,
+			Title: "",
+			Metadata: testJSON(map[string]any{
+				"acp_agent_id":     "codex",
+				"project_path":     session.DefaultACPProjectPath,
+				"acp_project_mode": session.DefaultACPProjectMode,
+			}),
+		},
+		messageCount: 1,
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		session.NewService(nil, queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+
+	rec, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`)
+	if err != nil {
+		t.Fatalf("UpdateSession() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.updateParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["project_path"] != session.DefaultACPProjectPath || metadata["acp_project_mode"] != session.DefaultACPProjectMode {
+		t.Fatalf("metadata = %#v, want default ACP project", metadata)
+	}
+}
+
 func TestUpdateSessionRejectsAgentChangeAfterFirstMessage(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "33333333-3333-3333-3333-333333333333"

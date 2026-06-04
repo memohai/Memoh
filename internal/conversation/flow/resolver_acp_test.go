@@ -261,6 +261,45 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	}
 }
 
+func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Resolver{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	err := resolver.persistACPRound(
+		context.Background(),
+		conversation.ChatRequest{BotID: "bot-1", SessionID: "session-1", Query: "inspect"},
+		"codex",
+		"/data/app",
+		acpclient.PromptResult{
+			Events: []acpclient.StreamEvent{
+				{Type: acpclient.StreamEventReasoningDelta, Delta: "I should inspect first."},
+				{Type: acpclient.StreamEventTextDelta, Delta: "Done"},
+			},
+			StopReason: "end_turn",
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("persistACPRound returned error: %v", err)
+	}
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
+	}
+	assistant := persistedModelMessage(t, messages.persisted[1].Content)
+	if got := assistant.TextContent(); got != "Done" {
+		t.Fatalf("assistant text = %q, want Done", got)
+	}
+	parts := assistant.ContentParts()
+	if len(parts) < 2 || parts[0].Type != "reasoning" || parts[0].Text != "I should inspect first." {
+		t.Fatalf("assistant parts = %#v, want leading reasoning part", parts)
+	}
+}
+
 func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 	t.Parallel()
 
@@ -453,6 +492,21 @@ func TestMapACPStandardToolCallEvent(t *testing.T) {
 	}
 	if events[0].Type != agentpkg.EventToolCallEnd || events[0].ToolName != "read" || events[0].ToolCallID != "read-1" {
 		t.Fatalf("event = %#v, want standard read tool end", events[0])
+	}
+}
+
+func TestMapACPReasoningDeltaEvent(t *testing.T) {
+	t.Parallel()
+
+	events := mapACPStreamEvent(acpclient.StreamEvent{
+		Type:  acpclient.StreamEventReasoningDelta,
+		Delta: "I should inspect the workspace first.",
+	})
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Type != agentpkg.EventReasoningDelta || events[0].Delta != "I should inspect the workspace first." {
+		t.Fatalf("event = %#v, want reasoning delta", events[0])
 	}
 }
 

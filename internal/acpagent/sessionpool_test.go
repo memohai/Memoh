@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,14 +28,24 @@ import (
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
 )
 
-func TestSessionPoolKeyedBySessionIDReuseAndClose(t *testing.T) {
+// injectRuntime registers a hand-built handle for tests that exercise
+// internal state without booting a real agent process.
+func injectRuntime(p *SessionPool, h *runtimeHandle) {
+	p.mu.Lock()
+	p.runtimes[h.id] = h
+	if h.boundSession != "" {
+		p.bySession[h.boundSession] = h.id
+	}
+	p.mu.Unlock()
+}
+
+func newFakeScriptPool(t *testing.T) *SessionPool {
+	t.Helper()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
 		t.Fatal(err)
 	}
-
-	client := newSessionPoolBridgeClient(t, root)
 	binDir := filepath.Join(root, "bin")
 	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -44,16 +53,20 @@ func TestSessionPoolKeyedBySessionIDReuseAndClose(t *testing.T) {
 	writeSessionPoolFakeAgentScript(t, binDir, "npx")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
-		client: client,
+		client: newSessionPoolBridgeClient(t, root),
 		info: bridge.WorkspaceInfo{
 			Backend:        bridge.WorkspaceBackendLocal,
 			DefaultWorkDir: root,
 		},
 	})
 	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	t.Cleanup(pool.CloseAll)
+	return pool
+}
+
+func TestSessionPoolPromptColdStartsBindsAndReuses(t *testing.T) {
+	pool := newFakeScriptPool(t)
 	pool.timeout = time.Hour
-	contexts := mcp.NewToolSessionContextStore()
-	pool.SetToolSessionContextStore(contexts)
 
 	input := PromptInput{
 		BotID:           "bot-1",
@@ -71,21 +84,30 @@ func TestSessionPoolKeyedBySessionIDReuseAndClose(t *testing.T) {
 	if !strings.Contains(result.Text, "session-pool-ok") {
 		t.Fatalf("first result text = %q", result.Text)
 	}
-	firstSession := pool.sessions["session-1"].session
-	if firstSession == nil {
-		t.Fatalf("session was not stored")
+	first := pool.sessionHandle("session-1")
+	if first == nil || first.session == nil {
+		t.Fatalf("cold start did not register a bound runtime")
 	}
-	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
-	if merged.StreamID != "stream-1" || merged.CurrentPlatform != "web" {
-		t.Fatalf("stored tool session = %#v", merged)
+	if !strings.HasPrefix(first.id, runtimeIDPrefix) {
+		t.Fatalf("runtime id = %q, want server-generated %q prefix", first.id, runtimeIDPrefix)
+	}
+	if first.boundSession != "session-1" {
+		t.Fatalf("cold-start runtime bound to %q, want session-1", first.boundSession)
+	}
+	first.state.Lock()
+	activeAfter := first.active
+	statusAfter := first.status
+	first.state.Unlock()
+	if activeAfter != nil || statusAfter != stateIdle {
+		t.Fatalf("per-prompt context not cleared after prompt: active=%v status=%q", activeAfter, statusAfter)
 	}
 
 	input.Prompt = "second prompt"
 	if _, err := pool.Prompt(context.Background(), input); err != nil {
 		t.Fatalf("Prompt(second) error = %v", err)
 	}
-	if got := pool.sessions["session-1"].session; got != firstSession {
-		t.Fatalf("same session_id started a new ACP process")
+	if got := pool.sessionHandle("session-1"); got != first {
+		t.Fatalf("same session started a new runtime")
 	}
 
 	input.SessionID = "session-2"
@@ -93,49 +115,31 @@ func TestSessionPoolKeyedBySessionIDReuseAndClose(t *testing.T) {
 	if _, err := pool.Prompt(context.Background(), input); err != nil {
 		t.Fatalf("Prompt(third) error = %v", err)
 	}
-	if got := pool.sessions["session-2"].session; got == nil || got == firstSession {
-		t.Fatalf("different session_id did not get an independent ACP session")
+	if got := pool.sessionHandle("session-2"); got == nil || got == first {
+		t.Fatalf("different session did not get an independent runtime")
 	}
 
 	status := pool.RuntimeStatus("session-1", "", "")
-	if status.State != "idle" || status.ACPSession == "" || status.ProjectPath != "/data/project" {
+	if status.State != "idle" || status.ACPSession == "" || status.ProjectPath != "/data/project" || status.RuntimeID != first.id {
 		t.Fatalf("RuntimeStatus() = %#v", status)
 	}
 	if err := pool.CloseSession("session-1"); err != nil {
 		t.Fatalf("CloseSession() error = %v", err)
 	}
-	if _, ok := pool.sessions["session-1"]; ok {
-		t.Fatalf("CloseSession did not remove the pooled session")
+	if pool.sessionHandle("session-1") != nil {
+		t.Fatalf("CloseSession did not remove the runtime")
 	}
-	merged = contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
-	if merged.StreamID != "" || merged.CurrentPlatform != "" {
-		t.Fatalf("CloseSession did not clear stored tool session: %#v", merged)
+	pool.mu.RLock()
+	_, stillRegistered := pool.runtimes[first.id]
+	pool.mu.RUnlock()
+	if stillRegistered {
+		t.Fatalf("CloseSession left the handle registered")
 	}
 }
 
 func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	if err := os.MkdirAll(project, 0o750); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
-
-	binDir := filepath.Join(root, "bin")
-	if err := os.MkdirAll(binDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	writeSessionPoolFakeAgentScript(t, binDir, "npx")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
-		client: newSessionPoolBridgeClient(t, root),
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
-		},
-	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newFakeScriptPool(t)
 
 	status, err := pool.Ensure(context.Background(), PromptInput{
 		BotID:       "bot-1",
@@ -149,37 +153,357 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 	if status.State != "idle" || status.ACPSession == "" {
 		t.Fatalf("Ensure() status = %#v, want idle runtime with ACP session id", status)
 	}
+	if !strings.HasPrefix(status.RuntimeID, runtimeIDPrefix) || status.SessionID != "session-1" {
+		t.Fatalf("Ensure() identity = %#v, want bound server-generated runtime", status)
+	}
 	if status.Models == nil || !status.Models.Supported || status.Models.CurrentModelID != "gpt-5.1-codex" {
 		t.Fatalf("Ensure() models = %#v, want protocol model state", status.Models)
 	}
 	if len(status.Models.Available) != 2 || status.Models.Available[0].ID != "gpt-5.1-codex" || status.Models.Available[1].ID != "gpt-5.1-codex-high" {
 		t.Fatalf("Ensure() available models = %#v", status.Models.Available)
 	}
+	if status.DefaultModelID != "gpt-5.1-codex" {
+		t.Fatalf("Ensure() default model = %q, want startup model", status.DefaultModelID)
+	}
+}
+
+func TestSessionPoolCreateRuntimeGeneratesIDAndReportsModels(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	pool := newFakeScriptPool(t)
+
+	status, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	if !strings.HasPrefix(status.RuntimeID, runtimeIDPrefix) {
+		t.Fatalf("runtime id = %q, want server-generated %q prefix", status.RuntimeID, runtimeIDPrefix)
+	}
+	if status.SessionID != "" {
+		t.Fatalf("fresh runtime should be unbound, got session %q", status.SessionID)
+	}
+	if status.State != "idle" || status.Models == nil || status.Models.CurrentModelID != "gpt-5.1-codex" {
+		t.Fatalf("CreateRuntime() status = %#v", status)
+	}
+	if status.DefaultModelID != "gpt-5.1-codex" {
+		t.Fatalf("default model = %q", status.DefaultModelID)
+	}
+
+	got, err := pool.RuntimeStatusByID("bot-1", status.RuntimeID)
+	if err != nil {
+		t.Fatalf("RuntimeStatusByID() error = %v", err)
+	}
+	if got.RuntimeID != status.RuntimeID || got.ACPSession == "" {
+		t.Fatalf("RuntimeStatusByID() = %#v", got)
+	}
+}
+
+func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	pool := newFakeScriptPool(t)
+
+	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	if _, err := pool.SetRuntimeModel(context.Background(), "bot-1", created.RuntimeID, "gpt-5.1-codex-high"); err != nil {
+		t.Fatalf("SetRuntimeModel() error = %v", err)
+	}
+
+	if err := pool.BindRuntime("bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "/data/project"); err != nil {
+		t.Fatalf("BindRuntime() error = %v", err)
+	}
+	h := pool.sessionHandle("session-1")
+	if h == nil || h.id != created.RuntimeID {
+		t.Fatalf("session index does not point at the bound runtime")
+	}
+
+	// The bound session reuses the warm process — including its model.
+	status, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if err != nil {
+		t.Fatalf("Ensure(bound) error = %v", err)
+	}
+	if status.RuntimeID != created.RuntimeID {
+		t.Fatalf("Ensure started a new runtime %q, want bound %q", status.RuntimeID, created.RuntimeID)
+	}
+	if status.Models == nil || status.Models.CurrentModelID != "gpt-5.1-codex-high" {
+		t.Fatalf("bound runtime lost its model: %#v", status.Models)
+	}
+	if status.DefaultModelID != "gpt-5.1-codex" {
+		t.Fatalf("default model = %q, want startup default", status.DefaultModelID)
+	}
+
+	// A bound runtime cannot be bound again.
+	if err := pool.BindRuntime("bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "/data/project"); !errors.Is(err, ErrRuntimeBindRejected) {
+		t.Fatalf("second BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
+	}
+}
+
+func TestSessionPoolSetRuntimeModelEmptyResetsToDefault(t *testing.T) {
+	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
+	pool := newFakeScriptPool(t)
+
+	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	status, err := pool.SetRuntimeModel(context.Background(), "bot-1", created.RuntimeID, "gpt-5.1-codex-high")
+	if err != nil {
+		t.Fatalf("SetRuntimeModel(high) error = %v", err)
+	}
+	if status.Models == nil || status.Models.CurrentModelID != "gpt-5.1-codex-high" {
+		t.Fatalf("model after set = %#v", status.Models)
+	}
+
+	status, err = pool.SetRuntimeModel(context.Background(), "bot-1", created.RuntimeID, "")
+	if err != nil {
+		t.Fatalf("SetRuntimeModel(reset) error = %v", err)
+	}
+	if status.Models == nil || status.Models.CurrentModelID != "gpt-5.1-codex" {
+		t.Fatalf("model after reset = %#v, want startup default", status.Models)
+	}
+}
+
+func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	live := &acpclient.Session{}
+	pending := &runtimeHandle{
+		id:          newRuntimeID(),
+		botID:       "bot-2",
+		agentID:     acpprofile.AgentCodexID,
+		projectPath: "/data",
+		session:     live,
+		status:      stateIdle,
+		lastActive:  time.Now(),
+	}
+	injectRuntime(pool, pending)
+
+	cases := []struct {
+		name                          string
+		botID, sessionID, agent, path string
+		wantErr                       error
+	}{
+		{"cross bot", "bot-1", "real", acpprofile.AgentCodexID, "/data", ErrRuntimeNotFound},
+		{"wrong agent", "bot-2", "real", acpprofile.AgentClaudeCodeID, "/data", ErrRuntimeBindRejected},
+		{"wrong project", "bot-2", "real", acpprofile.AgentCodexID, "/other", ErrRuntimeBindRejected},
+	}
+	for _, tc := range cases {
+		if err := pool.BindRuntime(tc.botID, pending.id, tc.sessionID, tc.agent, tc.path); !errors.Is(err, tc.wantErr) {
+			t.Fatalf("%s: BindRuntime() error = %v, want %v", tc.name, err, tc.wantErr)
+		}
+	}
+	if err := pool.BindRuntime("bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "/data"); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("missing runtime: BindRuntime() error = %v, want ErrRuntimeNotFound", err)
+	}
+
+	// Session already served by another runtime.
+	other := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", boundSession: "real", status: stateIdle}
+	injectRuntime(pool, other)
+	if err := pool.BindRuntime("bot-2", pending.id, "real", acpprofile.AgentCodexID, "/data"); !errors.Is(err, ErrRuntimeBindRejected) {
+		t.Fatalf("occupied session: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
+	}
+
+	// A still-starting runtime (no live process yet) is not bindable.
+	starting := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", agentID: acpprofile.AgentCodexID, projectPath: "/data", status: stateStarting}
+	injectRuntime(pool, starting)
+	if err := pool.BindRuntime("bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "/data"); !errors.Is(err, ErrRuntimeBindRejected) {
+		t.Fatalf("starting runtime: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
+	}
+
+	// Everything matching succeeds.
+	if err := pool.BindRuntime("bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "/data"); err != nil {
+		t.Fatalf("matching BindRuntime() error = %v", err)
+	}
+	if pool.sessionHandle("real-2") != pending {
+		t.Fatalf("bound session does not resolve to the runtime")
+	}
+}
+
+func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	foreign := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-2",
+		agentID:      acpprofile.AgentCodexID,
+		projectPath:  "/data",
+		session:      &acpclient.Session{},
+		status:       stateIdle,
+		lastActive:   time.Now(),
+		boundSession: "their-session",
+	}
+	injectRuntime(pool, foreign)
+
+	if _, err := pool.RuntimeStatusByID("bot-1", foreign.id); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("RuntimeStatusByID(cross bot) error = %v, want ErrRuntimeNotFound", err)
+	}
+	if _, err := pool.SetRuntimeModel(context.Background(), "bot-1", foreign.id, "gpt-5.1-codex"); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("SetRuntimeModel(cross bot) error = %v, want ErrRuntimeNotFound", err)
+	}
+	if err := pool.CloseRuntime("bot-1", foreign.id); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("CloseRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
+	}
+	if err := pool.BindRuntime("bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "/data"); !errors.Is(err, ErrRuntimeNotFound) {
+		t.Fatalf("BindRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
+	}
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id); ok {
+		t.Fatalf("ResolveRuntimeToolContext(cross bot) resolved")
+	}
+
+	// Zero side effects: the foreign runtime is fully intact.
+	pool.mu.RLock()
+	registered := pool.runtimes[foreign.id] == foreign
+	indexed := pool.bySession["their-session"] == foreign.id
+	pool.mu.RUnlock()
+	foreign.state.Lock()
+	untouched := !foreign.closed && foreign.session != nil && foreign.status == stateIdle
+	foreign.state.Unlock()
+	if !registered || !indexed || !untouched {
+		t.Fatalf("cross-bot operations disturbed the runtime: registered=%v indexed=%v untouched=%v", registered, indexed, untouched)
+	}
+
+	// The owner can close it.
+	if err := pool.CloseRuntime("bot-2", foreign.id); err != nil {
+		t.Fatalf("CloseRuntime(owner) error = %v", err)
+	}
+	if pool.sessionHandle("their-session") != nil {
+		t.Fatalf("owner close left the session index entry")
+	}
+}
+
+func TestSessionPoolUnboundCapEvictsOldestIdle(t *testing.T) {
+	pool := newFakeScriptPool(t)
+
+	now := time.Now()
+	for i := 0; i < maxUnboundRuntimesPerBot; i++ {
+		injectRuntime(pool, &runtimeHandle{
+			id:         fmt.Sprintf("rt_old-%d", i),
+			botID:      "bot-1",
+			agentID:    acpprofile.AgentCodexID,
+			status:     stateIdle,
+			lastActive: now.Add(-time.Duration(i+1) * time.Minute),
+		})
+	}
+	// Bound and other-bot runtimes must not count toward the cap.
+	injectRuntime(pool, &runtimeHandle{id: "rt_bound", botID: "bot-1", boundSession: "session-9", status: stateIdle, lastActive: now})
+	injectRuntime(pool, &runtimeHandle{id: "rt_other-bot", botID: "bot-9", status: stateIdle, lastActive: now.Add(-time.Minute)})
+
+	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+
+	pool.mu.RLock()
+	_, oldestAlive := pool.runtimes[fmt.Sprintf("rt_old-%d", maxUnboundRuntimesPerBot-1)]
+	_, newAlive := pool.runtimes[created.RuntimeID]
+	_, boundAlive := pool.runtimes["rt_bound"]
+	_, otherAlive := pool.runtimes["rt_other-bot"]
+	survivors := 0
+	for i := 0; i < maxUnboundRuntimesPerBot-1; i++ {
+		if _, ok := pool.runtimes[fmt.Sprintf("rt_old-%d", i)]; ok {
+			survivors++
+		}
+	}
+	pool.mu.RUnlock()
+	if oldestAlive {
+		t.Fatalf("oldest idle unbound runtime should be evicted")
+	}
+	if !newAlive || !boundAlive || !otherAlive || survivors != maxUnboundRuntimesPerBot-1 {
+		t.Fatalf("eviction touched the wrong runtimes: new=%v bound=%v other=%v survivors=%d", newAlive, boundAlive, otherAlive, survivors)
+	}
+}
+
+func TestSessionPoolUnboundCapErrorsWhenAllBusy(t *testing.T) {
+	pool := newSessionPool(nil, &recordingRunner{
+		info: bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
+	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})})
+	for i := 0; i < maxUnboundRuntimesPerBot; i++ {
+		injectRuntime(pool, &runtimeHandle{
+			id:         fmt.Sprintf("rt_busy-%d", i),
+			botID:      "bot-1",
+			status:     stateActive,
+			lastActive: time.Now(),
+		})
+	}
+
+	_, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
+		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	})
+	if !errors.Is(err, ErrTooManyRuntimes) {
+		t.Fatalf("CreateRuntime() error = %v, want ErrTooManyRuntimes", err)
+	}
+	pool.mu.RLock()
+	count := len(pool.runtimes)
+	pool.mu.RUnlock()
+	if count != maxUnboundRuntimesPerBot {
+		t.Fatalf("capped create registered a runtime: %d handles", count)
+	}
+}
+
+func TestSessionPoolEnsureReplacesMismatchedAgentRuntimeWithoutDeadlock(t *testing.T) {
+	pool := newFakeScriptPool(t)
+
+	// A stale bound runtime whose agent differs forces the replace path,
+	// which formerly deadlocked on the per-session lock.
+	injectRuntime(pool, &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		agentID:      acpprofile.AgentClaudeCodeID,
+		projectPath:  "/data/project",
+		status:       stateIdle,
+		lastActive:   time.Now(),
+		boundSession: "session-x",
+		session:      &acpclient.Session{},
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.Ensure(context.Background(), PromptInput{
+			BotID:       "bot-1",
+			SessionID:   "session-x",
+			AgentID:     acpprofile.AgentCodexID,
+			ProjectPath: "/data/project",
+		})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Ensure() error = %v", err)
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("Ensure() deadlocked while replacing a mismatched runtime")
+	}
+	replaced := pool.sessionHandle("session-x")
+	if replaced == nil || replaced.session == nil || replaced.agentID != acpprofile.AgentCodexID {
+		t.Fatalf("replaced runtime = %#v, want fresh codex runtime", replaced)
+	}
 }
 
 func TestSessionPoolSetModelUpdatesRuntimeModel(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	if err := os.MkdirAll(project, 0o750); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
-
-	binDir := filepath.Join(root, "bin")
-	if err := os.MkdirAll(binDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	writeSessionPoolFakeAgentScript(t, binDir, "npx")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	runner := acpclient.NewRunner(nil, sessionPoolWorkspace{
-		client: newSessionPoolBridgeClient(t, root),
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendLocal,
-			DefaultWorkDir: root,
-		},
-	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newFakeScriptPool(t)
 
 	status, err := pool.SetModel(context.Background(), PromptInput{
 		BotID:       "bot-1",
@@ -261,18 +585,18 @@ func TestSessionPoolCloseDuringColdStartPreventsReinsert(t *testing.T) {
 	)
 
 	type startResult struct {
-		session *acpclient.Session
-		err     error
+		handle *runtimeHandle
+		err    error
 	}
 	resultCh := make(chan startResult, 1)
 	go func() {
-		sess, err := pool.getOrStart(context.Background(), PromptInput{
+		h, err := pool.runtimeForSession(context.Background(), PromptInput{
 			BotID:       "bot-1",
 			SessionID:   "session-1",
 			AgentID:     "codex",
 			ProjectPath: "/data/project",
 		})
-		resultCh <- startResult{session: sess, err: err}
+		resultCh <- startResult{handle: h, err: err}
 	}()
 
 	select {
@@ -281,8 +605,28 @@ func TestSessionPoolCloseDuringColdStartPreventsReinsert(t *testing.T) {
 		t.Fatal("runner did not start")
 	}
 
-	if err := pool.CloseSession("session-1"); err != nil {
-		t.Fatalf("CloseSession() error = %v", err)
+	starting := pool.sessionHandle("session-1")
+	if starting == nil {
+		t.Fatal("starting handle was not registered in the session index")
+	}
+	closed := make(chan error, 1)
+	go func() {
+		closed <- pool.CloseSession("session-1")
+	}()
+	// Wait until CloseSession has aborted the start before releasing the
+	// runner, mirroring a close that lands mid-startup.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		starting.state.Lock()
+		aborted := starting.closed
+		starting.state.Unlock()
+		if aborted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("CloseSession did not abort the in-flight start")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	close(release)
 
@@ -290,16 +634,24 @@ func TestSessionPoolCloseDuringColdStartPreventsReinsert(t *testing.T) {
 	select {
 	case result = <-resultCh:
 	case <-time.After(2 * time.Second):
-		t.Fatal("getOrStart did not return")
+		t.Fatal("runtimeForSession did not return")
 	}
-	if result.session != nil {
-		t.Fatalf("getOrStart returned a session after CloseSession during startup")
+	if result.handle != nil {
+		t.Fatalf("runtimeForSession returned a handle after CloseSession during startup")
 	}
 	if result.err == nil || !strings.Contains(result.err.Error(), "closed during startup") {
-		t.Fatalf("getOrStart error = %v, want closed during startup", result.err)
+		t.Fatalf("runtimeForSession error = %v, want closed during startup", result.err)
 	}
-	if _, ok := pool.sessions["session-1"]; ok {
-		t.Fatalf("closed cold-start session was reinserted into the pool")
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("CloseSession() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CloseSession did not return")
+	}
+	if pool.sessionHandle("session-1") != nil {
+		t.Fatalf("closed cold-start runtime was reinserted into the pool")
 	}
 }
 
@@ -318,18 +670,18 @@ func TestSessionPoolCloseDuringColdStartCancelsStartup(t *testing.T) {
 	)
 
 	type startResult struct {
-		session *acpclient.Session
-		err     error
+		handle *runtimeHandle
+		err    error
 	}
 	resultCh := make(chan startResult, 1)
 	go func() {
-		sess, err := pool.getOrStart(context.Background(), PromptInput{
+		h, err := pool.runtimeForSession(context.Background(), PromptInput{
 			BotID:       "bot-1",
 			SessionID:   "session-1",
 			AgentID:     "codex",
 			ProjectPath: "/data/project",
 		})
-		resultCh <- startResult{session: sess, err: err}
+		resultCh <- startResult{handle: h, err: err}
 	}()
 
 	select {
@@ -338,9 +690,10 @@ func TestSessionPoolCloseDuringColdStartCancelsStartup(t *testing.T) {
 		t.Fatal("runner did not start")
 	}
 
-	if err := pool.CloseSession("session-1"); err != nil {
-		t.Fatalf("CloseSession() error = %v", err)
-	}
+	closed := make(chan error, 1)
+	go func() {
+		closed <- pool.CloseSession("session-1")
+	}()
 	select {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):
@@ -351,22 +704,38 @@ func TestSessionPoolCloseDuringColdStartCancelsStartup(t *testing.T) {
 	select {
 	case result = <-resultCh:
 	case <-time.After(2 * time.Second):
-		t.Fatal("getOrStart did not return after startup cancellation")
+		t.Fatal("runtimeForSession did not return after startup cancellation")
 	}
-	if result.session != nil {
-		t.Fatalf("getOrStart returned a session after startup cancellation")
+	if result.handle != nil {
+		t.Fatalf("runtimeForSession returned a handle after startup cancellation")
 	}
 	if !errors.Is(result.err, context.Canceled) {
-		t.Fatalf("getOrStart error = %v, want context.Canceled", result.err)
+		t.Fatalf("runtimeForSession error = %v, want context.Canceled", result.err)
 	}
-	if _, ok := pool.sessions["session-1"]; ok {
-		t.Fatalf("cancelled cold-start session remained in the pool")
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("CloseSession() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CloseSession did not return")
+	}
+	if pool.sessionHandle("session-1") != nil {
+		t.Fatalf("cancelled cold-start runtime remained in the pool")
 	}
 }
 
-func TestSessionPoolCloseSessionWaitsForInFlightSessionLock(t *testing.T) {
+func TestSessionPoolCloseSessionWaitsForInFlightOperation(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
-	unlock := pool.lockSession("session-1")
+	h := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		boundSession: "session-1",
+		status:       stateActive,
+		lastActive:   time.Now(),
+	}
+	injectRuntime(pool, h)
+	h.op.Lock()
 
 	closed := make(chan error, 1)
 	go func() {
@@ -375,11 +744,11 @@ func TestSessionPoolCloseSessionWaitsForInFlightSessionLock(t *testing.T) {
 
 	select {
 	case err := <-closed:
-		t.Fatalf("CloseSession returned before in-flight session lock released: %v", err)
+		t.Fatalf("CloseSession returned before the in-flight operation released: %v", err)
 	case <-time.After(25 * time.Millisecond):
 	}
 
-	unlock()
+	h.op.Unlock()
 
 	select {
 	case err := <-closed:
@@ -387,11 +756,11 @@ func TestSessionPoolCloseSessionWaitsForInFlightSessionLock(t *testing.T) {
 			t.Fatalf("CloseSession() error = %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("CloseSession did not unblock after releasing the session lock")
+		t.Fatal("CloseSession did not unblock after the operation released")
 	}
 }
 
-func TestSessionPoolSerializesColdStartForSameSessionID(t *testing.T) {
+func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -415,6 +784,7 @@ func TestSessionPoolSerializesColdStartForSameSessionID(t *testing.T) {
 		},
 	})
 	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	t.Cleanup(pool.CloseAll)
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
@@ -649,7 +1019,7 @@ func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 	}
 }
 
-func TestSessionPoolPassesToolHTTPURLAndSessionContext(t *testing.T) {
+func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	runner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
 		startErr: errors.New("started"),
@@ -684,15 +1054,20 @@ func TestSessionPoolPassesToolHTTPURLAndSessionContext(t *testing.T) {
 	if runner.req.ToolHTTPURL != "http://127.0.0.1:18732/mcp" {
 		t.Fatalf("ToolHTTPURL = %q", runner.req.ToolHTTPURL)
 	}
-	if runner.req.ToolSession.BotID != "bot-1" || runner.req.ToolSession.ChatID != "chat-1" || runner.req.ToolSession.SessionID != "session-1" || runner.req.ToolSession.RouteID != "route-1" {
-		t.Fatalf("ToolSession ids = %#v", runner.req.ToolSession)
+	// Only stable runtime identity may be baked into the process config: the
+	// per-prompt fields (stream, token, reply target...) change every turn
+	// and are resolved live from the handle instead.
+	baked := runner.req.ToolSession
+	if baked.BotID != "bot-1" || !strings.HasPrefix(baked.RuntimeID, runtimeIDPrefix) || baked.SessionType != sessionpkg.TypeACPAgent {
+		t.Fatalf("baked identity = %#v, want stable runtime identity", baked)
 	}
-	if runner.req.ToolSession.StreamID != "stream-1" || runner.req.ToolSession.ChannelIdentityID != "user-1" || runner.req.ToolSession.SessionToken != "token-1" || runner.req.ToolSession.CurrentPlatform != "web" || runner.req.ToolSession.ReplyTarget != "reply-1" || runner.req.ToolSession.ConversationType != "private" {
-		t.Fatalf("ToolSession metadata = %#v", runner.req.ToolSession)
+	if baked.SessionID != "" || baked.StreamID != "" || baked.SessionToken != "" || baked.ReplyTarget != "" || baked.RouteID != "" || baked.ChannelIdentityID != "" {
+		t.Fatalf("baked identity leaks per-prompt fields: %#v", baked)
 	}
+	// The pool no longer publishes ACP contexts into the shared store.
 	merged := contexts.Merge(mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1"})
 	if merged.StreamID != "" || merged.ConversationType != "" {
-		t.Fatalf("failed start did not clear stored tool session: %#v", merged)
+		t.Fatalf("ACP context leaked into the shared store: %#v", merged)
 	}
 }
 
@@ -700,10 +1075,7 @@ func TestSessionPoolUsesRequestToolURLForLocalWorkspace(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
 
-	got, err := pool.resolveToolHTTPURL(context.Background(), PromptInput{
-		BotID:       "bot-1",
-		ToolHTTPURL: "http://127.0.0.1:18731/bots/bot-1/tools",
-	}, bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal})
+	got, err := pool.resolveToolHTTPURL("http://127.0.0.1:18731/bots/bot-1/tools", bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,9 +1088,7 @@ func TestSessionPoolUsesWorkspaceACPToolsEndpointForContainer(t *testing.T) {
 	pool := newSessionPool(nil, nil, nil)
 	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
 
-	got, err := pool.resolveToolHTTPURL(context.Background(), PromptInput{
-		BotID: "bot-1",
-	}, bridge.WorkspaceInfo{
+	got, err := pool.resolveToolHTTPURL("", bridge.WorkspaceInfo{
 		Backend:         bridge.WorkspaceBackendContainer,
 		ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp",
 	})
@@ -730,27 +1100,81 @@ func TestSessionPoolUsesWorkspaceACPToolsEndpointForContainer(t *testing.T) {
 	}
 }
 
-func TestTrustedToolSessionContextForcesBaseIdentity(t *testing.T) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://memoh.test/mcp", nil)
-	if err != nil {
-		t.Fatal(err)
+func TestRuntimeHandleToolContextOverlaysActivePrompt(t *testing.T) {
+	h := &runtimeHandle{
+		id:           "rt_test",
+		botID:        "bot-1",
+		boundSession: "session-1",
 	}
-	req.Header.Set(mcp.ToolHeaderBotID, "spoofed-bot")
-	req.Header.Set(mcp.ToolHeaderSessionID, "spoofed-session")
-	req.Header.Set(mcp.ToolHeaderStreamID, "spoofed-stream")
-	req.Header.Set(mcp.ToolHeaderIsSubagent, "true")
 
-	got := trustedToolSessionContext(req, acpclient.ToolSessionContext{
-		BotID:       "bot-1",
-		SessionID:   "session-1",
-		StreamID:    "stream-1",
-		SessionType: "acp_agent",
-	})
-	if got.BotID != "bot-1" || got.SessionID != "session-1" || got.StreamID != "stream-1" || got.SessionType != "acp_agent" {
-		t.Fatalf("trusted context = %#v", got)
+	// Idle: stable identity plus the binding.
+	ctx := h.toolContext()
+	if ctx.BotID != "bot-1" || ctx.RuntimeID != "rt_test" || ctx.SessionID != "session-1" || ctx.SessionType != sessionpkg.TypeACPAgent {
+		t.Fatalf("idle tool context = %#v", ctx)
 	}
-	if got.IsSubagent {
-		t.Fatalf("trusted context should force is_subagent=false: %#v", got)
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.IsSubagent {
+		t.Fatalf("idle tool context leaks per-prompt fields: %#v", ctx)
+	}
+	if ctx.RuntimeActive {
+		t.Fatalf("idle tool context must not allow tools/call: %#v", ctx)
+	}
+
+	// During a prompt the live per-prompt fields overlay.
+	active := acpclient.ToolSessionContext{
+		ChatID:           "chat-1",
+		SessionID:        "session-1",
+		StreamID:         "stream-7",
+		SessionToken:     "token-7",
+		CurrentPlatform:  "web",
+		ReplyTarget:      "reply-7",
+		ConversationType: "private",
+	}
+	h.state.Lock()
+	h.active = &active
+	h.state.Unlock()
+	ctx = h.toolContext()
+	if ctx.StreamID != "stream-7" || ctx.SessionToken != "token-7" || ctx.ChatID != "chat-1" || ctx.ReplyTarget != "reply-7" || !ctx.RuntimeActive {
+		t.Fatalf("active tool context = %#v", ctx)
+	}
+	if ctx.RuntimeID != "rt_test" || ctx.IsSubagent {
+		t.Fatalf("active tool context lost stable identity: %#v", ctx)
+	}
+
+	// clearActive removes every per-prompt field again.
+	h.clearActive()
+	ctx = h.toolContext()
+	if ctx.StreamID != "" || ctx.SessionToken != "" || ctx.ChatID != "bot-1" || ctx.RuntimeActive {
+		t.Fatalf("cleared tool context = %#v", ctx)
+	}
+}
+
+func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	h := &runtimeHandle{
+		id:           "rt_live",
+		botID:        "bot-1",
+		boundSession: "session-1",
+		status:       stateIdle,
+		session:      &acpclient.Session{},
+	}
+	injectRuntime(pool, h)
+
+	ctx, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live")
+	if !ok || ctx.RuntimeID != "rt_live" || ctx.SessionID != "session-1" {
+		t.Fatalf("ResolveRuntimeToolContext() = %#v, %v", ctx, ok)
+	}
+	if _, ok := pool.ResolveRuntimeToolContext("bot-2", "rt_live"); ok {
+		t.Fatalf("cross-bot runtime context resolved")
+	}
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_missing"); ok {
+		t.Fatalf("missing runtime context resolved")
+	}
+
+	h.state.Lock()
+	h.closed = true
+	h.state.Unlock()
+	if _, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_live"); ok {
+		t.Fatalf("dead runtime context resolved; must fail closed")
 	}
 }
 
@@ -779,25 +1203,80 @@ func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 	}
 }
 
-func TestSessionPoolReapIdle(t *testing.T) {
-	pool := newSessionPool(nil, nil, nil)
-	pool.timeout = time.Minute
-	now := time.Now()
-	pool.sessions["idle"] = &pooledSession{status: "idle", lastActive: now.Add(-2 * time.Minute)}
-	pool.sessions["active"] = &pooledSession{status: "active", lastActive: now.Add(-2 * time.Minute)}
-	pool.sessions["fresh"] = &pooledSession{status: "idle", lastActive: now.Add(-30 * time.Second)}
+// Resolving a bound runtime (e.g. the UI keeping it ensured while the user
+// types) counts as activity and must defer idle reaping.
+func TestSessionPoolEnsureRefreshesIdleClock(t *testing.T) {
+	pool := newFakeScriptPool(t)
+	pool.timeout = 30 * time.Minute
 
-	if got := pool.reapIdle(now); got != 1 {
-		t.Fatalf("reapIdle() = %d, want 1", got)
+	stale := time.Now().Add(-29 * time.Minute)
+	h := &runtimeHandle{
+		id:           newRuntimeID(),
+		botID:        "bot-1",
+		agentID:      acpprofile.AgentCodexID,
+		projectPath:  "/data/project",
+		status:       stateIdle,
+		lastActive:   stale,
+		boundSession: "session-1",
+		session:      &acpclient.Session{},
 	}
-	if _, ok := pool.sessions["idle"]; ok {
-		t.Fatalf("stale idle session was not removed")
+	injectRuntime(pool, h)
+
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	}); err != nil {
+		t.Fatalf("Ensure() error = %v", err)
 	}
-	if _, ok := pool.sessions["active"]; !ok {
-		t.Fatalf("active session should not be reaped")
+
+	h.state.Lock()
+	refreshed := h.lastActive.After(stale)
+	h.state.Unlock()
+	if !refreshed {
+		t.Fatalf("Ensure did not refresh the idle clock")
 	}
-	if _, ok := pool.sessions["fresh"]; !ok {
-		t.Fatalf("fresh idle session should not be reaped")
+	// Two minutes later (31 minutes after the original activity) the runtime
+	// must survive the reaper because the ensure refreshed it.
+	if got := pool.reapIdle(time.Now().Add(2 * time.Minute)); got != 0 {
+		t.Fatalf("reapIdle() = %d, want 0 after ensure refresh", got)
+	}
+}
+
+func TestSessionPoolReapIdlePolicies(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil)
+	pool.timeout = 30 * time.Minute
+	now := time.Now()
+
+	injectRuntime(pool, &runtimeHandle{id: "rt_bound-stale", botID: "b", boundSession: "s1", status: stateIdle, lastActive: now.Add(-31 * time.Minute)})
+	injectRuntime(pool, &runtimeHandle{id: "rt_bound-active", botID: "b", boundSession: "s2", status: stateActive, lastActive: now.Add(-31 * time.Minute)})
+	injectRuntime(pool, &runtimeHandle{id: "rt_bound-fresh", botID: "b", boundSession: "s3", status: stateIdle, lastActive: now.Add(-30 * time.Second)})
+	injectRuntime(pool, &runtimeHandle{id: "rt_unbound-stale", botID: "b", status: stateIdle, lastActive: now.Add(-6 * time.Minute)})
+	injectRuntime(pool, &runtimeHandle{id: "rt_bound-6m", botID: "b", boundSession: "s4", status: stateIdle, lastActive: now.Add(-6 * time.Minute)})
+
+	if got := pool.reapIdle(now); got != 2 {
+		t.Fatalf("reapIdle() = %d, want 2", got)
+	}
+	pool.mu.RLock()
+	defer pool.mu.RUnlock()
+	if _, ok := pool.runtimes["rt_bound-stale"]; ok {
+		t.Fatalf("stale bound runtime was not reaped")
+	}
+	if _, ok := pool.runtimes["rt_unbound-stale"]; ok {
+		t.Fatalf("stale unbound runtime was not reaped (5 minute policy)")
+	}
+	if _, ok := pool.runtimes["rt_bound-active"]; !ok {
+		t.Fatalf("active runtime must not be reaped")
+	}
+	if _, ok := pool.runtimes["rt_bound-fresh"]; !ok {
+		t.Fatalf("fresh runtime must not be reaped")
+	}
+	if _, ok := pool.runtimes["rt_bound-6m"]; !ok {
+		t.Fatalf("bound runtime must use the 30 minute policy")
+	}
+	if _, ok := pool.bySession["s1"]; ok {
+		t.Fatalf("reap left the session index entry behind")
 	}
 }
 

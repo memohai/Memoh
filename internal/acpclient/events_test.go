@@ -84,6 +84,164 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	}
 }
 
+func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	start := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.StartToolCall(
+			acp.ToolCallId("write-1"),
+			"Write /data/test.txt",
+			acp.WithStartKind(acp.ToolKindEdit),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+			acp.WithStartRawInput(map[string]any{
+				"file_path": "/data/test.txt",
+				"content":   "hello from claude\n",
+			}),
+		),
+	})
+	if len(start) != 1 {
+		t.Fatalf("start events = %#v, want 1", start)
+	}
+	if start[0].Type != StreamEventToolCallStart || start[0].ToolName != "write" || start[0].ToolCallID != "write-1" {
+		t.Fatalf("start event = %#v, want native write start", start[0])
+	}
+	input, ok := start[0].Input.(map[string]any)
+	if !ok {
+		t.Fatalf("start input = %#v, want object", start[0].Input)
+	}
+	if input["path"] != "/data/test.txt" || input["content"] != "hello from claude\n" {
+		t.Fatalf("start input = %#v", input)
+	}
+	if input["content_bytes"] != len("hello from claude\n") || input["content_line_count"] != 2 {
+		t.Fatalf("start input content metadata = %#v", input)
+	}
+
+	end := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdateToolCall(
+			acp.ToolCallId("write-1"),
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+		),
+	})
+	if len(end) != 1 {
+		t.Fatalf("end events = %#v, want 1", end)
+	}
+	if end[0].Type != StreamEventToolCallEnd || end[0].ToolName != "write" || end[0].Error != "" {
+		t.Fatalf("end event = %#v, want native write end", end[0])
+	}
+}
+
+func TestACPGenericEditDiffMapsToNativeEditEvents(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdateToolCall(
+			acp.ToolCallId("edit-1"),
+			acp.WithUpdateKind(acp.ToolKindEdit),
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolDiffContent("/data/test.txt", "new text\n", "old text\n"),
+			}),
+		),
+	})
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want start + end", events)
+	}
+	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "edit" {
+		t.Fatalf("first event = %#v, want edit start", events[0])
+	}
+	input, ok := events[0].Input.(map[string]any)
+	if !ok {
+		t.Fatalf("start input = %#v, want object", events[0].Input)
+	}
+	if input["path"] != "/data/test.txt" || input["old_text"] != "old text\n" || input["new_text"] != "new text\n" {
+		t.Fatalf("start input = %#v", input)
+	}
+	if events[1].Type != StreamEventToolCallEnd || events[1].ToolName != "edit" {
+		t.Fatalf("second event = %#v, want edit end", events[1])
+	}
+}
+
+func TestACPGenericEditDiffWithoutOldTextMapsToNativeWriteEvents(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdateToolCall(
+			acp.ToolCallId("write-1"),
+			acp.WithUpdateKind(acp.ToolKindEdit),
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolDiffContent("/data/new.txt", "new file\n"),
+			}),
+		),
+	})
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want start + end", events)
+	}
+	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "write" {
+		t.Fatalf("first event = %#v, want write start", events[0])
+	}
+	input, ok := events[0].Input.(map[string]any)
+	if !ok {
+		t.Fatalf("start input = %#v, want object", events[0].Input)
+	}
+	if input["path"] != "/data/new.txt" || input["content"] != "new file\n" {
+		t.Fatalf("start input = %#v", input)
+	}
+	if events[1].Type != StreamEventToolCallEnd || events[1].ToolName != "write" {
+		t.Fatalf("second event = %#v, want write end", events[1])
+	}
+}
+
+func TestACPAgentThoughtMapsToReasoningDelta(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdateAgentThoughtText("I should inspect the workspace first."),
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1", events)
+	}
+	if events[0].Type != StreamEventReasoningDelta || events[0].Delta != "I should inspect the workspace first." {
+		t.Fatalf("event = %#v, want reasoning delta", events[0])
+	}
+}
+
+func TestACPPlanMapsToReasoningDelta(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdatePlan(
+			acp.PlanEntry{Content: "Inspect the workspace", Status: acp.PlanEntryStatusInProgress},
+			acp.PlanEntry{Content: "Apply the change", Status: acp.PlanEntryStatusPending},
+		),
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1", events)
+	}
+	if events[0].Type != StreamEventReasoningDelta {
+		t.Fatalf("event = %#v, want reasoning delta", events[0])
+	}
+	want := "Plan:\n- [in_progress] Inspect the workspace\n- [pending] Apply the change"
+	if events[0].Delta != want {
+		t.Fatalf("plan delta = %q, want %q", events[0].Delta, want)
+	}
+
+	repeated := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.UpdatePlan(
+			acp.PlanEntry{Content: "Inspect the workspace", Status: acp.PlanEntryStatusInProgress},
+			acp.PlanEntry{Content: "Apply the change", Status: acp.PlanEntryStatusPending},
+		),
+	})
+	if len(repeated) != 0 {
+		t.Fatalf("repeated plan events = %#v, want none", repeated)
+	}
+}
+
 func TestEventCollectorBoundsStoredEvents(t *testing.T) {
 	t.Parallel()
 

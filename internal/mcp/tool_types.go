@@ -13,6 +13,7 @@ import (
 type ToolSessionContext struct {
 	BotID             string
 	ChatID            string
+	RuntimeID         string
 	SessionID         string
 	StreamID          string
 	SessionType       string
@@ -23,6 +24,7 @@ type ToolSessionContext struct {
 	ReplyTarget       string
 	ConversationType  string
 	IsSubagent        bool
+	RuntimeActive     bool
 }
 
 // ToolDescriptor is the MCP tools/list item shape used by the gateway.

@@ -1,11 +1,14 @@
 import {
   getBots,
   deleteBotsByBotIdMessages,
+  deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
   getBotsByBotIdSessionsBySessionIdAcpRuntime,
+  postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
+  patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
   patchBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
 } from '@memohai/sdk'
@@ -16,6 +19,13 @@ export interface CreateSessionOptions {
   title?: string
   type?: string
   metadata?: Record<string, unknown>
+  /** Warm pre-session ACP runtime to bind at creation time. */
+  acpRuntimeId?: string
+}
+
+export interface CreateACPRuntimeOptions {
+  agentId: string
+  projectPath?: string
 }
 
 export async function fetchBots(): Promise<Bot[]> {
@@ -43,6 +53,7 @@ export async function createSession(botId: string, options?: string | CreateSess
         channel_type: 'local',
         type: options?.type,
         metadata: options?.metadata,
+        acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
@@ -93,6 +104,35 @@ export async function setACPRuntimeModel(botId: string, sessionId: string, model
     throwOnError: true,
   })
   return data as AcpagentRuntimeStatus
+}
+
+export async function createACPRuntime(botId: string, options: CreateACPRuntimeOptions): Promise<AcpagentRuntimeStatus> {
+  const { data } = await postBotsByBotIdAcpRuntimes({
+    path: { bot_id: botId.trim() },
+    body: {
+      acp_agent_id: options.agentId.trim(),
+      project_path: options.projectPath?.trim(),
+    },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
+export async function setACPRuntimeModelByID(botId: string, runtimeId: string, modelId: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdModel({
+    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
+    // An empty model_id resets the runtime to the agent default model.
+    body: { model_id: modelId.trim() },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
+export async function closeACPRuntime(botId: string, runtimeId: string): Promise<void> {
+  await deleteBotsByBotIdAcpRuntimesByRuntimeId({
+    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
+    throwOnError: true,
+  })
 }
 
 export async function deleteSession(botId: string, sessionId: string): Promise<void> {

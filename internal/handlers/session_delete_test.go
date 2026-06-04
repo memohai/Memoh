@@ -48,6 +48,10 @@ func (c *recordingACPSessionCloser) CloseSession(sessionID string) error {
 	return nil
 }
 
+func (*recordingACPSessionCloser) BindRuntime(_, _, _, _, _ string) error {
+	return nil
+}
+
 func (c *recordingACPSessionCloser) IsSessionActive(sessionID string) bool {
 	return c.active != nil && c.active[sessionID]
 }

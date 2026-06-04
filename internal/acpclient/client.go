@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	DefaultRunTimeout = 20 * time.Minute
+	DefaultRunTimeout          = 20 * time.Minute
+	maxWriteToolContentPreview = 64 * 1024
 )
 
 type Workspace interface {
@@ -249,7 +250,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	toolID := "write-" + uuid.NewString()
-	input := map[string]any{"path": p.Path}
+	input := writeToolInput(p.Path, p.Content)
 	c.emitToolCallStart(toolID, "write", input)
 	var toolErr error
 	defer func() {
@@ -270,6 +271,30 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	return acp.WriteTextFileResponse{}, nil
+}
+
+func writeToolInput(path, content string) map[string]any {
+	contentBytes := len(content)
+	input := map[string]any{
+		"path":               path,
+		"content":            content,
+		"content_bytes":      contentBytes,
+		"content_line_count": lineCount(content),
+	}
+	if contentBytes <= maxWriteToolContentPreview {
+		return input
+	}
+	preview := strings.ToValidUTF8(content[:maxWriteToolContentPreview], "")
+	input["content"] = preview
+	input["content_truncated"] = true
+	return input
+}
+
+func lineCount(value string) int {
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
 }
 
 func (c *clientCallbacks) emitToolCallStart(id, name string, input map[string]any) {

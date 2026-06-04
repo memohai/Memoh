@@ -9,7 +9,10 @@ import {
   createSession,
   deleteSession as requestDeleteSession,
   ensureACPRuntime as requestEnsureACPRuntime,
+  createACPRuntime as requestCreateACPRuntime,
   setACPRuntimeModel as requestSetACPRuntimeModel,
+  setACPRuntimeModelByID as requestSetACPRuntimeModelByID,
+  closeACPRuntime as requestCloseACPRuntime,
   updateSessionAgent as requestUpdateSessionAgent,
   updateSessionTitle as requestUpdateSessionTitle,
   fetchSessions,
@@ -41,7 +44,7 @@ import {
   connectWebSocket,
   locateMessageUI,
 } from '@/composables/api/useChat'
-import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 
 export type TextBlock = UITextMessage
@@ -151,8 +154,19 @@ export interface ACPAgentSessionInput {
   agentId: string
   projectPath?: string
   projectMode?: string
+  modelId?: string
   title?: string
   startRuntime?: boolean
+  /** Warm pre-session runtime to bind to the created session. */
+  runtimeId?: string
+}
+
+interface PendingACPStageSnapshot {
+  botId: string
+  generation: number
+  identityKey: string
+  runtimeId: string
+  modelId: string
 }
 
 interface StartupSendFailure {
@@ -239,6 +253,14 @@ export const useChatStore = defineStore('chat', () => {
   const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({})
   const acpRuntimePending = ref<Record<string, boolean>>({})
   const acpRuntimeRequests = new Map<string, Promise<AcpagentRuntimeStatus>>()
+  const pendingACPSessionInput = ref<ACPAgentSessionInput | null>(null)
+  // Server-generated ID of the staged runtime; the client never invents
+  // runtime identifiers.
+  const pendingACPRuntimeId = ref('')
+  const pendingACPCreating = ref(false)
+  let pendingACPCreateRequest: Promise<AcpagentRuntimeStatus | undefined> | null = null
+  let pendingACPCreateKey = ''
+  let pendingACPGeneration = 0
 
   const activeSession = computed(() =>
     sessions.value.find((s) => s.id === sessionId.value) ?? null,
@@ -1156,6 +1178,7 @@ export const useChatStore = defineStore('chat', () => {
     overrideReasoningEffort.value = ''
     startupSendFailure.value = null
     fsChangedAt.value = 0
+    clearPendingACPSession()
 
     pendingAssistantStreams.clear()
     pendingBackgroundEvents.clear()
@@ -1555,13 +1578,235 @@ export const useChatStore = defineStore('chat', () => {
 
   function acpSessionMetadata(input: ACPAgentSessionInput): Record<string, unknown> {
     const agentId = input.agentId.trim()
-    const projectMode = input.projectMode?.trim() || ACP_NO_PROJECT_MODE
-    const projectPath = input.projectPath?.trim() || createACPNoProjectPath()
+    const projectMode = input.projectMode?.trim() || ACP_DEFAULT_PROJECT_MODE
+    const projectPath = input.projectPath?.trim() || ACP_DEFAULT_PROJECT_PATH
     return {
       acp_agent_id: agentId,
       project_path: projectPath,
       acp_project_mode: projectMode,
     }
+  }
+
+  const pendingACPSessionMetadata = computed<Record<string, unknown> | null>(() =>
+    pendingACPSessionInput.value ? acpSessionMetadata(pendingACPSessionInput.value) : null,
+  )
+  const pendingACPModelId = computed(() => pendingACPSessionInput.value?.modelId?.trim() ?? '')
+  const pendingACPRuntimeStatus = computed(() => {
+    const bid = currentBotId.value ?? ''
+    const rid = pendingACPRuntimeId.value
+    const key = acpRuntimeKey(bid, rid)
+    return key ? acpRuntimeStatuses.value[key] : undefined
+  })
+  const pendingACPRuntimeEnsuring = computed(() => pendingACPCreating.value)
+
+  function pendingACPIdentityKey(botId: string, input: ACPAgentSessionInput): string {
+    return [botId, input.agentId, input.projectPath ?? '', input.projectMode ?? ''].join('\u0000')
+  }
+
+  function pendingACPStagingKey(snapshot: Pick<PendingACPStageSnapshot, 'identityKey' | 'generation'>): string {
+    return `${snapshot.generation}\u0000${snapshot.identityKey}`
+  }
+
+  function nextPendingACPGeneration() {
+    pendingACPGeneration += 1
+  }
+
+  function clearPendingACPCreateTracking() {
+    pendingACPCreateRequest = null
+    pendingACPCreateKey = ''
+    pendingACPCreating.value = false
+  }
+
+  function closeStagedRuntime(botId: string, runtimeId: string) {
+    const bid = botId.trim()
+    const rid = runtimeId.trim()
+    if (!bid || !rid) return
+    void requestCloseACPRuntime(bid, rid).catch(() => {})
+    clearACPRuntimeStatus(bid, rid)
+  }
+
+  function capturePendingACPStage(): PendingACPStageSnapshot | null {
+    const botId = currentBotId.value ?? ''
+    const pending = pendingACPSessionInput.value
+    if (!botId || !pending) return null
+    return {
+      botId,
+      generation: pendingACPGeneration,
+      identityKey: pendingACPIdentityKey(botId, pending),
+      runtimeId: pendingACPRuntimeId.value,
+      modelId: pending.modelId?.trim() ?? '',
+    }
+  }
+
+  function isPendingACPStageCurrent(snapshot: PendingACPStageSnapshot, modelId?: string): boolean {
+    const current = capturePendingACPStage()
+    if (!current) return false
+    return current.botId === snapshot.botId
+      && current.generation === snapshot.generation
+      && current.identityKey === snapshot.identityKey
+      && (modelId === undefined || current.modelId === modelId)
+  }
+
+  function stageACPSession(input: ACPAgentSessionInput) {
+    const metadata = acpSessionMetadata(input)
+    const existing = pendingACPSessionInput.value
+    const samePendingAgent = Boolean(existing
+      && existing.agentId === metadata.acp_agent_id
+      && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
+      && (existing.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode)
+    if (!samePendingAgent) {
+      nextPendingACPGeneration()
+      clearPendingACPCreateTracking()
+    }
+    pendingACPSessionInput.value = {
+      ...input,
+      agentId: String(metadata.acp_agent_id ?? ''),
+      projectPath: String(metadata.project_path ?? ''),
+      projectMode: String(metadata.acp_project_mode ?? ''),
+      modelId: input.modelId?.trim() || (samePendingAgent ? existing?.modelId : '') || '',
+    }
+    if (!samePendingAgent && pendingACPRuntimeId.value) {
+      const bid = currentBotId.value ?? ''
+      const runtimeId = pendingACPRuntimeId.value
+      pendingACPRuntimeId.value = ''
+      closeStagedRuntime(bid, runtimeId)
+    }
+  }
+
+  async function ensurePendingACPRuntime(): Promise<AcpagentRuntimeStatus | undefined> {
+    const snapshot = capturePendingACPStage()
+    const pending = pendingACPSessionInput.value
+    if (!snapshot || !pending) return undefined
+    if (snapshot.runtimeId) {
+      const key = acpRuntimeKey(snapshot.botId, snapshot.runtimeId)
+      return acpRuntimeStatuses.value[key]
+    }
+    const stagingKey = pendingACPStagingKey(snapshot)
+    if (pendingACPCreateRequest && pendingACPCreateKey === stagingKey) return pendingACPCreateRequest
+
+    pendingACPCreating.value = true
+    const request = requestCreateACPRuntime(snapshot.botId, {
+      agentId: pending.agentId,
+      projectPath: pending.projectPath,
+    })
+      .then((runtime) => {
+        const rid = runtime?.runtime_id?.trim() ?? ''
+        const current = capturePendingACPStage()
+        const stillStaged = !!current
+          && pendingACPStagingKey(current) === stagingKey
+          && !current.runtimeId
+        if (stillStaged && rid) {
+          pendingACPRuntimeId.value = rid
+          setACPRuntimeStatus(snapshot.botId, rid, runtime)
+        } else if (rid) {
+          // Staging changed while the runtime was starting: discard it.
+          closeStagedRuntime(snapshot.botId, rid)
+        }
+        return runtime
+      })
+      .catch((error) => {
+        if (!isPendingACPStageCurrent(snapshot)) return undefined
+        throw error
+      })
+      .finally(() => {
+        if (pendingACPCreateRequest === request) {
+          clearPendingACPCreateTracking()
+        }
+      })
+    pendingACPCreateRequest = request
+    pendingACPCreateKey = stagingKey
+    return request
+  }
+
+  async function setPendingACPModel(modelId: string) {
+    if (!pendingACPSessionInput.value) return
+    const mid = modelId.trim()
+    const previousModelId = pendingACPSessionInput.value.modelId?.trim() ?? ''
+    if (mid === previousModelId) return
+
+    pendingACPSessionInput.value = {
+      ...pendingACPSessionInput.value,
+      modelId: mid,
+    }
+
+    const initialSnapshot = capturePendingACPStage()
+    if (!initialSnapshot) return
+
+    try {
+      const runtimeId = await pendingACPModelRuntime(initialSnapshot, mid)
+      if (!runtimeId) return
+      await setPendingACPModelOnRuntime(initialSnapshot, runtimeId, mid)
+    } catch (error) {
+      if (!isPendingACPStageCurrent(initialSnapshot, mid)) return
+      if (pendingACPSessionInput.value?.modelId?.trim() === mid) {
+        pendingACPSessionInput.value = {
+          ...pendingACPSessionInput.value,
+          modelId: previousModelId,
+        }
+      }
+      throw error
+    }
+  }
+
+  async function pendingACPModelRuntime(snapshot: PendingACPStageSnapshot, modelId: string): Promise<string> {
+    const current = capturePendingACPStage()
+    if (!current || !isPendingACPStageCurrent(snapshot, modelId)) return ''
+    if (current.runtimeId || !modelId) return current.runtimeId
+    await ensurePendingACPRuntime()
+    if (!isPendingACPStageCurrent(snapshot, modelId)) return ''
+    return capturePendingACPStage()?.runtimeId ?? ''
+  }
+
+  async function setPendingACPModelOnRuntime(snapshot: PendingACPStageSnapshot, runtimeId: string, modelId: string) {
+    try {
+      const runtime = await requestSetACPRuntimeModelByID(snapshot.botId, runtimeId, modelId)
+      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      setACPRuntimeStatus(snapshot.botId, runtimeId, runtime)
+    } catch (error) {
+      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      if (!isRuntimeNotFoundError(error)) throw error
+      if (pendingACPRuntimeId.value !== runtimeId) return
+
+      clearACPRuntimeStatus(snapshot.botId, runtimeId)
+      pendingACPRuntimeId.value = ''
+
+      const freshId = await pendingACPModelRuntime(snapshot, modelId)
+      if (!freshId) return
+      const runtime = await requestSetACPRuntimeModelByID(snapshot.botId, freshId, modelId)
+      if (!isPendingACPStageCurrent(snapshot, modelId)) return
+      setACPRuntimeStatus(snapshot.botId, freshId, runtime)
+    }
+  }
+
+  // The runtime endpoints fail closed with this fixed message when the
+  // referenced runtime is gone (idle-reaped or never existed).
+  function isRuntimeNotFoundError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    const message = (error as { message?: unknown }).message
+    return typeof message === 'string' && message.includes('runtime not found')
+  }
+
+  function clearPendingACPSession() {
+    const bid = currentBotId.value ?? ''
+    const runtimeId = pendingACPRuntimeId.value
+    nextPendingACPGeneration()
+    clearPendingACPCreateTracking()
+    closeStagedRuntime(bid, runtimeId)
+    pendingACPSessionInput.value = null
+    pendingACPRuntimeId.value = ''
+  }
+
+  // Detaches the staged ACP session without closing its warm runtime, so the
+  // first send can bind the runtime to the real session.
+  function detachPendingACPSession(): { input: ACPAgentSessionInput; runtimeId: string } | null {
+    const pending = pendingACPSessionInput.value
+    if (!pending) return null
+    const runtimeId = pendingACPRuntimeId.value
+    nextPendingACPGeneration()
+    clearPendingACPCreateTracking()
+    pendingACPSessionInput.value = null
+    pendingACPRuntimeId.value = ''
+    return { input: { ...pending }, runtimeId }
   }
 
   function upsertSession(updated: SessionSummary) {
@@ -1572,15 +1817,27 @@ export const useChatStore = defineStore('chat', () => {
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     const metadata = acpSessionMetadata(input)
+    const runtimeId = input.runtimeId?.trim() ?? ''
+    // The warm staged runtime is bound server-side inside session creation;
+    // no separate adopt/bind round trip and nothing for a watcher to race.
     const created = await createSession(bid, {
       title: input.title ?? '',
       type: 'acp_agent',
       metadata,
+      acpRuntimeId: runtimeId || undefined,
     })
     upsertSession(created)
     sessionId.value = created.id
     replaceMessages([])
     hasMoreOlder.value = false
+    if (runtimeId) {
+      // The staged runtime now belongs to the session — reset local staging
+      // without closing it.
+      pendingACPSessionInput.value = null
+      pendingACPRuntimeId.value = ''
+    } else {
+      clearPendingACPSession()
+    }
     const runtime = input.startRuntime ? await ensureACPRuntime(created.id) : undefined
     return { session: created, runtime }
   }
@@ -1598,12 +1855,14 @@ export const useChatStore = defineStore('chat', () => {
     } else {
       upsertSession(updated)
     }
+    clearPendingACPSession()
     clearACPRuntimeStatus(bid, sid)
     const runtime = input.startRuntime ? await ensureACPRuntime(sid) : undefined
     return { session: updated, runtime }
   }
 
   async function updateCurrentSessionToMemoh(): Promise<SessionSummary | null> {
+    clearPendingACPSession()
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
     if (!bid || !sid) return null
@@ -1656,6 +1915,39 @@ export const useChatStore = defineStore('chat', () => {
 
   async function ensureActiveSession() {
     if (sessionId.value) return
+    if (pendingACPSessionInput.value) {
+      const detached = detachPendingACPSession()
+      if (!detached) return
+      const pending = detached.input
+      const pendingModelId = pending.modelId?.trim() ?? ''
+      const runtimeId = detached.runtimeId
+      let created: SessionSummary
+      try {
+        ({ session: created } = await createACPSession({ ...pending, runtimeId }))
+      } catch (error) {
+        // Session creation failed: restore the staged agent (and keep its
+        // warm runtime) so the user can simply retry.
+        if (!pendingACPSessionInput.value && !sessionId.value) {
+          pendingACPSessionInput.value = pending
+          pendingACPRuntimeId.value = runtimeId
+        }
+        throw error
+      }
+      const bid = currentBotId.value ?? ''
+      if (bid && runtimeId) {
+        clearACPRuntimeStatus(bid, runtimeId)
+      }
+      if (pendingModelId) {
+        // Bind carries the staged model with the runtime. Only when the bind
+        // fell back to a cold start does the model need re-applying.
+        const runtime = await ensureACPRuntime(created.id)
+        const currentModelId = runtime?.models?.current_model_id?.trim() ?? ''
+        if (currentModelId !== pendingModelId) {
+          await setACPRuntimeModel(pendingModelId)
+        }
+      }
+      return
+    }
     const bid = currentBotId.value ?? await ensureBot()
     if (!bid) throw new Error('Bot not ready')
     const created = await createSession(bid)
@@ -1677,6 +1969,7 @@ export const useChatStore = defineStore('chat', () => {
         messageEventsSince = ''
         sessions.value = []
         sessionId.value = null
+        clearPendingACPSession()
         replaceMessages([])
         hasMoreOlder.value = false
         return
@@ -1711,6 +2004,7 @@ export const useChatStore = defineStore('chat', () => {
     if (currentBotId.value === targetBotId) return
     abort()
     abortAllAssistantStreams()
+    clearPendingACPSession()
     currentBotId.value = targetBotId
     sessionId.value = null
     await initialize()
@@ -1720,6 +2014,7 @@ export const useChatStore = defineStore('chat', () => {
     const sid = targetSessionId.trim()
     if (!sid || sid === sessionId.value) return
     cacheCurrentMessages()
+    clearPendingACPSession()
     sessionId.value = sid
     loadingChats.value = true
     try {
@@ -1736,6 +2031,7 @@ export const useChatStore = defineStore('chat', () => {
     cacheCurrentMessages()
     const bid = await ensureBot()
     if (!bid) return
+    clearPendingACPSession()
     sessionId.value = null
     replaceMessages([])
     hasMoreOlder.value = false
@@ -1964,6 +2260,12 @@ export const useChatStore = defineStore('chat', () => {
     sessions,
     acpRuntimeStatuses,
     acpRuntimePending,
+    pendingACPSessionInput,
+    pendingACPSessionMetadata,
+    pendingACPModelId,
+    pendingACPRuntimeId,
+    pendingACPRuntimeStatus,
+    pendingACPRuntimeEnsuring,
     chats,
     chatId,
     sessionId,
@@ -1985,6 +2287,10 @@ export const useChatStore = defineStore('chat', () => {
     selectBot,
     selectSession,
     selectChat: selectSession,
+    stageACPSession,
+    ensurePendingACPRuntime,
+    setPendingACPModel,
+    clearPendingACPSession,
     createACPSession,
     updateCurrentSessionAgent,
     updateCurrentSessionToMemoh,

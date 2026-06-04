@@ -169,6 +169,42 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	}
 }
 
+func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
+	botID := "00000000-0000-0000-0000-000000000001"
+	botUUID := mustPGUUID(botID)
+	queries := &createACPQueries{
+		bot: sqlc.GetBotByIDRow{
+			ID: botUUID,
+			Metadata: mustSessionJSON(map[string]any{
+				acpprofile.MetadataKeyACP: map[string]any{
+					"agents": map[string]any{
+						acpprofile.AgentCodexID: map[string]any{"enabled": true},
+					},
+				},
+			}),
+		},
+	}
+	svc := NewService(nil, queries)
+
+	created, err := svc.Create(context.Background(), CreateInput{
+		BotID: botID,
+		Type:  TypeACPAgent,
+		Title: "Codex",
+		Metadata: map[string]any{
+			"acp_agent_id": acpprofile.AgentCodexID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create(acp_agent) error = %v", err)
+	}
+	if created.Metadata["project_path"] != DefaultACPProjectPath {
+		t.Fatalf("created metadata project_path = %#v, want %q", created.Metadata["project_path"], DefaultACPProjectPath)
+	}
+	if created.Metadata["acp_project_mode"] != DefaultACPProjectMode {
+		t.Fatalf("created metadata acp_project_mode = %#v, want %q", created.Metadata["acp_project_mode"], DefaultACPProjectMode)
+	}
+}
+
 func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	botID := "00000000-0000-0000-0000-000000000001"
 	sessionID := "00000000-0000-0000-0000-000000000002"
