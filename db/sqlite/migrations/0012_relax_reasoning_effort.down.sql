@@ -1,13 +1,16 @@
 -- 0012_relax_reasoning_effort (down)
 -- Restore the legacy low/medium/high CHECK constraint by rebuilding the table.
 -- Rows with newer effort tiers must be reconciled before rolling back.
--- Keeps heartbeat_interval DEFAULT 1440 (set by 0010) intact.
+-- Preserves columns added by earlier migrations, including command_ui_language,
+-- and keeps heartbeat_interval DEFAULT 1440.
+-- Use the bots_new/copy/drop/rename pattern (as in 0013) rather than renaming
+-- bots to bots_old: on SQLite 3.26+, ALTER TABLE ... RENAME rewrites dependent
+-- child-table foreign keys to the new name even with foreign_keys=OFF, so
+-- renaming the parent first would leave child FKs pointing at the dropped table.
 
 PRAGMA foreign_keys = OFF;
 
-ALTER TABLE bots RENAME TO bots_old;
-
-CREATE TABLE bots (
+CREATE TABLE bots_new (
   id TEXT PRIMARY KEY,
   owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
@@ -19,6 +22,7 @@ CREATE TABLE bots (
   status TEXT NOT NULL DEFAULT 'ready',
   acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   language TEXT NOT NULL DEFAULT 'auto',
+  command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_enabled INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
@@ -58,9 +62,9 @@ CREATE TABLE bots (
   )
 );
 
-INSERT INTO bots (
+INSERT INTO bots_new (
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
-  acl_default_effect, language, reasoning_enabled, reasoning_effort,
+  acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
   chat_model_id, search_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,
@@ -71,7 +75,7 @@ INSERT INTO bots (
 )
 SELECT
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
-  acl_default_effect, language, reasoning_enabled, reasoning_effort,
+  acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
   chat_model_id, search_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,
@@ -79,9 +83,10 @@ SELECT
   transcription_model_id, persist_full_tool_results, show_tool_calls_in_im,
   tool_approval_config, display_enabled, overlay_provider, overlay_enabled,
   overlay_config, metadata, created_at, updated_at
-FROM bots_old;
+FROM bots;
 
-DROP TABLE bots_old;
+DROP TABLE bots;
+ALTER TABLE bots_new RENAME TO bots;
 
 CREATE INDEX IF NOT EXISTS idx_bots_owner_user_id ON bots(owner_user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_name ON bots(name);
