@@ -23,7 +23,7 @@ const delegatedProps = reactiveOmit(props, 'class')
       'focus:relative focus:z-10 focus:border-2 focus:border-ring',
       'first:rounded-l-lg first:border-l',
       'last:rounded-r-lg',
-      'disabled:pointer-events-none disabled:opacity-50',
+      'disabled:pointer-events-none disabled:opacity-40',
       'placeholder:text-muted-foreground',
       props.class,
     )"

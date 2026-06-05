@@ -20,7 +20,7 @@ const forwardedProps = useForwardProps(delegatedProps)
       'text-muted-foreground',
       'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border',
       'focus-visible:ring-2 focus-visible:ring-ring/20',
-      'disabled:pointer-events-none disabled:opacity-50',
+      'disabled:pointer-events-none disabled:opacity-40',
       '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
       props.class,
     )"

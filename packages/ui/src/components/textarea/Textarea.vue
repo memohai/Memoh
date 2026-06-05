@@ -38,7 +38,7 @@ const sizeClass = computed(() => ({
       'flex field-sizing-content w-full rounded-md tracking-[0.01em] text-foreground',
       sizeClass,
       'outline-none resize-none',
-      'disabled:cursor-not-allowed disabled:opacity-50',
+      'disabled:cursor-not-allowed disabled:opacity-40',
       props.class
     )"
   />

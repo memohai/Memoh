@@ -224,44 +224,26 @@ const formSchema = {
       </Specimen>
 
       <Specimen
-        label="<NumberField> stepper A/B"
-        note="hover both — plain (bare ±) vs soft (rounded-rect + hover)"
+        label="<NumberField>"
+        note="ghost steppers · same field edge · sizes"
       >
-        <div class="flex w-full flex-col gap-3">
-          <div class="flex flex-col gap-1">
-            <span class="text-caption text-muted-foreground">plain</span>
-            <NumberField
-              v-model="quantity"
-              stepper="plain"
-              :min="0"
-              :max="10"
-              class="w-40"
-            />
-          </div>
-          <div class="flex flex-col gap-1">
-            <span class="text-caption text-muted-foreground">soft</span>
-            <NumberField
-              :default-value="2"
-              stepper="soft"
-              :min="0"
-              :max="10"
-              class="w-40"
-            />
-          </div>
-          <div class="flex items-end gap-2">
-            <NumberField
-              :default-value="5"
-              stepper="soft"
-              size="sm"
-              class="w-32"
-            />
-            <NumberField
-              :default-value="1"
-              stepper="soft"
-              disabled
-              class="w-32"
-            />
-          </div>
+        <div class="flex w-full flex-col gap-2">
+          <NumberField
+            v-model="quantity"
+            :min="0"
+            :max="10"
+            class="w-40"
+          />
+          <NumberField
+            :default-value="5"
+            size="sm"
+            class="w-32"
+          />
+          <NumberField
+            :default-value="1"
+            disabled
+            class="w-32"
+          />
         </div>
       </Specimen>
 

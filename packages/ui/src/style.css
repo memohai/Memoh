@@ -1000,7 +1000,10 @@
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
      Anchored to this app's reality — 12px (body) is the workhorse UI size.
-     Weight stays orthogonal (font-normal / font-medium / font-semibold). */
+     Weight stays orthogonal but ROLE-MAPPED (single source — do not free-style):
+       · font-semibold → surface / section titles (Card / Dialog / Sheet)
+       · font-medium   → labels, button text, badges, small/inline titles, emphasis
+       · font-normal   → body, descriptions, field values, placeholder, input text */
   --text-caption: 0.6875rem; /* 11px — badges, tiny meta */
   --text-caption--line-height: 1rem;
   --text-caption--letter-spacing: -0.04px;

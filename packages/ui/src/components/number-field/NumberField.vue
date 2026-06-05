@@ -11,26 +11,23 @@ import {
   useForwardPropsEmits,
 } from 'reka-ui'
 import { computed } from 'vue'
+import { Button } from '#/components/button'
 import { cn } from '#/lib/utils'
 
-// Numeric input with stepper controls. Self-contained: decrement | input |
-// increment inside the shared field edge. The edge (rest/focus/invalid) is
-// driven from style.css via [data-slot="number-field"], same as the other fields.
+// Numeric input with stepper controls. Self-contained: − | input | + inside the
+// shared field edge ([data-slot="number-field"] in style.css). The ± buttons are
+// the design system's ghost Button (via reka as-child), so their hover fill and
+// press live in one place and the glyph never moves on press.
 const props = withDefaults(defineProps<NumberFieldRootProps & {
   class?: HTMLAttributes['class']
   placeholder?: string
   size?: 'sm' | 'default' | 'lg'
-  // stepper button treatment:
-  //   plain — bare ±, only the glyph color shifts on hover (lowest chrome)
-  //   soft  — inset rounded-rect that fills on hover + presses on click
-  stepper?: 'plain' | 'soft'
 }>(), {
   size: 'default',
-  stepper: 'plain',
 })
 const emits = defineEmits<NumberFieldRootEmits>()
 
-const delegated = reactiveOmit(props, 'class', 'placeholder', 'size', 'stepper')
+const delegated = reactiveOmit(props, 'class', 'placeholder', 'size')
 const forwarded = useForwardPropsEmits(delegated, emits)
 
 const sizeClass = computed(() => ({
@@ -39,16 +36,15 @@ const sizeClass = computed(() => ({
   lg: 'h-10 text-[14px]',
 }[props.size]))
 
-const stepBase
-  = 'flex shrink-0 items-center justify-center text-muted-foreground transition-[color,background-color,transform] duration-75 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5'
-
-const decClass = computed(() => props.stepper === 'soft'
-  ? cn(stepBase, 'my-1 ml-1 aspect-square h-auto rounded-[6px] hover:bg-accent active:scale-90')
-  : cn(stepBase, 'h-full w-8 rounded-l-md'))
-
-const incClass = computed(() => props.stepper === 'soft'
-  ? cn(stepBase, 'my-1 mr-1 aspect-square h-auto rounded-[6px] hover:bg-accent active:scale-90')
-  : cn(stepBase, 'h-full w-8 rounded-r-md'))
+// Stepper box scales with field height; glyph stays a calm 14px. Radius is the
+// shared in-field small-control radius — the same 5px (calc(--radius)-5px) the
+// InputGroup clear/reveal buttons use — NOT a per-component concentric value:
+// a free-floating ~28px hover chip reads too sharp at the geometric 4px, and
+// keeping one value means every in-field control corner matches.
+const stepClass = computed(() => cn(
+  'p-0 rounded-[calc(var(--radius)-5px)] text-muted-foreground hover:text-foreground [&_svg]:size-3.5',
+  { sm: 'size-6', default: 'size-7', lg: 'size-8' }[props.size],
+))
 </script>
 
 <template>
@@ -62,22 +58,30 @@ const incClass = computed(() => props.stepper === 'soft'
       props.class,
     )"
   >
-    <NumberFieldDecrement
-      data-slot="number-field-decrement"
-      :class="decClass"
-    >
-      <Minus />
+    <NumberFieldDecrement as-child>
+      <Button
+        type="button"
+        variant="ghost"
+        tabindex="-1"
+        :class="cn('ml-1', stepClass)"
+      >
+        <Minus />
+      </Button>
     </NumberFieldDecrement>
     <NumberFieldInput
       data-slot="number-field-input"
       :placeholder="placeholder"
       class="w-full min-w-0 bg-transparent px-1 text-center tabular-nums text-foreground outline-none disabled:pointer-events-none"
     />
-    <NumberFieldIncrement
-      data-slot="number-field-increment"
-      :class="incClass"
-    >
-      <Plus />
+    <NumberFieldIncrement as-child>
+      <Button
+        type="button"
+        variant="ghost"
+        tabindex="-1"
+        :class="cn('mr-1', stepClass)"
+      >
+        <Plus />
+      </Button>
     </NumberFieldIncrement>
   </NumberFieldRoot>
 </template>

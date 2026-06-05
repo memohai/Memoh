@@ -32,7 +32,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       :class="cn(
         'flex h-10 w-full rounded-md bg-transparent py-3 text-body outline-hidden',
         'placeholder:text-muted-foreground',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'disabled:cursor-not-allowed disabled:opacity-40',
         props.class,
       )"
 

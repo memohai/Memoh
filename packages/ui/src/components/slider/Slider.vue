@@ -18,7 +18,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     v-slot="{ modelValue }"
     data-slot="slider"
     :class="cn(
-      'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
+      'relative flex w-full touch-none items-center select-none data-[disabled]:opacity-40 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col',
       props.class,
     )"
     v-bind="forwarded"
@@ -37,7 +37,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       v-for="(_, key) in modelValue"
       :key="key"
       data-slot="slider-thumb"
-      class="block shadow-sm size-4 shrink-0 rounded-full border border-foreground bg-white hover:ring-4 hover:ring-ring/20  hover:border-2 focus-visible:ring-4 focus-visible:ring-ring/20 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+      class="block shadow-sm size-4 shrink-0 rounded-full border border-foreground bg-white hover:ring-4 hover:ring-ring/20  hover:border-2 focus-visible:ring-4 focus-visible:ring-ring/20 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-40"
     />
   </SliderRoot>
 </template>

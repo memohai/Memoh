@@ -25,7 +25,7 @@ const forwardedProps = useForwardProps(delegatedProps)
       cn(
         'aspect-square size-4 shrink-0 rounded-full border border-border bg-background transition-all outline-none text-foreground',
         'focus-visible:ring-2 focus-visible:ring-ring/20',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'disabled:cursor-not-allowed disabled:opacity-40',
         props.class,
       )
     "
