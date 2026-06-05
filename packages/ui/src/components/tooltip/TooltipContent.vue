@@ -25,7 +25,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       data-slot="tooltip-content"
       v-bind="{ ...forwarded, ...$attrs }"
       :class="cn(
-        'z-50 w-fit max-w-80 rounded-lg border border-border px-3 py-2 text-xs whitespace-normal break-words',
+        'z-50 w-fit max-w-80 rounded-lg border border-border px-3 py-2 text-body whitespace-normal break-words',
         'bg-popover text-popover-foreground shadow-md',
         'animate-in fade-in-0 zoom-in-95',
         'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',

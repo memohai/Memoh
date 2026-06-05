@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import { cn } from '#/lib/utils'
 
 const badgeCountVariants = cva(
-  'inline-flex items-center justify-center rounded-full h-[18px] min-w-[18px] px-1 text-[11px] font-medium font-sans tabular-nums',
+  'inline-flex items-center justify-center rounded-full h-[18px] min-w-[18px] px-1 text-caption font-medium font-sans tabular-nums',
   {
     variants: {
       variant: {

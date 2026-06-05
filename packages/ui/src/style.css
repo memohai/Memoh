@@ -312,11 +312,19 @@
     font-weight: 475;
     letter-spacing: -0.16px;
     white-space: nowrap;
-    color: var(--muted-foreground);
+    /* idle label sits lighter than global muted for a cleaner, airier read;
+       active jumps to near-foreground for strong contrast. Hover nudges
+       darker. TODO: promote to --control-label* tokens once rolled to
+       toggle groups / tabs. */
+    color: oklch(0.64 0.004 95);
     cursor: pointer;
     transition: color 150ms ease;
   }
-  [data-slot="segmented"] [data-segment-item][data-active="true"] {
+  [data-slot="segmented"] [data-segment-item]:hover {
+    color: oklch(0.46 0.004 95);
+  }
+  [data-slot="segmented"] [data-segment-item][data-active="true"],
+  [data-slot="segmented"] [data-segment-item][data-active="true"]:hover {
     color: var(--foreground);
   }
   [data-slot="segmented"] [data-segment-item]::before {
@@ -920,19 +928,23 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
+     Anchored to this app's reality — 12px (body) is the workhorse UI size.
      Weight stays orthogonal (font-normal / font-medium / font-semibold). */
-  --text-caption: 0.75rem; /* 12px — meta, hints, timestamps */
+  --text-caption: 0.6875rem; /* 11px — badges, tiny meta */
   --text-caption--line-height: 1rem;
-  --text-caption--letter-spacing: -0.08px;
-  --text-label: 0.8125rem; /* 13px — labels, controls, dense UI */
+  --text-caption--letter-spacing: -0.04px;
+  --text-body: 0.75rem; /* 12px — default UI body (workhorse) */
+  --text-body--line-height: 1rem;
+  --text-body--letter-spacing: -0.08px;
+  --text-label: 0.8125rem; /* 13px — form labels, emphasized small */
   --text-label--line-height: 1.125rem;
-  --text-label--letter-spacing: -0.12px;
-  --text-body: 0.875rem; /* 14px — default body copy */
-  --text-body--line-height: 1.25rem;
-  --text-body--letter-spacing: -0.16px;
-  --text-title: 1rem; /* 16px — card / section titles */
+  --text-label--letter-spacing: -0.1px;
+  --text-control: 0.875rem; /* 14px — buttons, compact titles */
+  --text-control--line-height: 1.25rem;
+  --text-control--letter-spacing: -0.14px;
+  --text-title: 1rem; /* 16px — card / section / sheet titles */
   --text-title--line-height: 1.4rem;
-  --text-title--letter-spacing: -0.2px;
+  --text-title--letter-spacing: -0.18px;
   --text-heading: 1.125rem; /* 18px — dialog / page headings */
   --text-heading--line-height: 1.55rem;
   --text-heading--letter-spacing: -0.26px;

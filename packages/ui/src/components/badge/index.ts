@@ -5,7 +5,7 @@ export { default as Badge } from './Badge.vue'
 export { default as BadgeCount } from './BadgeCount.vue'
 
 export const badgeVariants = cva(
-  'inline-flex items-center justify-center rounded-sm border px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none transition-all overflow-hidden',
+  'inline-flex items-center justify-center rounded-sm border px-2.5 py-0.5 text-body font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none transition-all overflow-hidden',
   {
     variants: {
       variant: {
@@ -23,8 +23,8 @@ export const badgeVariants = cva(
           'text-foreground border-border bg-background [a&]:hover:bg-accent',
       },
       size: {
-        default: 'px-2.5 py-0.5 text-xs',
-        sm: 'px-2 py-0 text-[11px]',
+        default: 'px-2.5 py-0.5 text-body',
+        sm: 'px-2 py-0 text-caption',
       },
     },
     defaultVariants: {

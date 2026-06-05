@@ -14,12 +14,12 @@ defineProps<{
     class="scroll-mt-20"
   >
     <div class="mb-4 border-b border-border pb-2">
-      <h2 class="text-base font-semibold text-foreground">
+      <h2 class="text-title font-semibold text-foreground">
         {{ label }}
       </h2>
       <p
         v-if="description"
-        class="mt-0.5 text-xs text-muted-foreground"
+        class="mt-0.5 text-body text-muted-foreground"
       >
         {{ description }}
       </p>

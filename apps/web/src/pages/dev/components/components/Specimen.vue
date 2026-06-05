@@ -13,7 +13,7 @@ defineProps<{
 <template>
   <div class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
     <div class="flex flex-col gap-0.5">
-      <code class="text-[11px] font-mono text-muted-foreground break-words">{{ label }}</code>
+      <code class="text-caption font-mono text-muted-foreground break-words">{{ label }}</code>
       <span
         v-if="note"
         class="text-[10px] text-muted-foreground/70"
