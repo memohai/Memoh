@@ -1,11 +1,13 @@
 -- name: GetMCPConnectionByID :one
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = $1 AND id = $2
 LIMIT 1;
 
 -- name: ListMCPConnectionsByBotID :many
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = $1
 ORDER BY created_at DESC;
@@ -13,7 +15,17 @@ ORDER BY created_at DESC;
 -- name: CreateMCPConnection :one
 INSERT INTO mcp_connections (bot_id, name, type, config, is_active, auth_type)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+
+-- name: CreateManagedMCPConnection :one
+INSERT INTO mcp_connections (
+  bot_id, name, type, config, is_active, auth_type,
+  managed_by_plugin_installation_id, managed_resource_key, visible, metadata
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
 
 -- name: UpdateMCPConnection :one
 UPDATE mcp_connections
@@ -24,7 +36,20 @@ SET name = $3,
     auth_type = $7,
     updated_at = now()
 WHERE bot_id = $1 AND id = $2
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+
+-- name: UpdateMCPConnectionActive :exec
+UPDATE mcp_connections
+SET is_active = $3,
+    updated_at = now()
+WHERE bot_id = $1 AND id = $2;
+
+-- name: UpdateMCPConnectionsActiveByPlugin :exec
+UPDATE mcp_connections
+SET is_active = $3,
+    updated_at = now()
+WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2;
 
 -- name: UpdateMCPConnectionProbeResult :exec
 UPDATE mcp_connections
@@ -45,6 +70,10 @@ WHERE id = $1;
 DELETE FROM mcp_connections
 WHERE bot_id = $1 AND id = $2;
 
+-- name: DeleteMCPConnectionsByPlugin :exec
+DELETE FROM mcp_connections
+WHERE bot_id = $1 AND managed_by_plugin_installation_id = $2;
+
 -- name: UpsertMCPConnectionByName :one
 INSERT INTO mcp_connections (bot_id, name, type, config)
 VALUES ($1, $2, $3, $4)
@@ -52,4 +81,5 @@ ON CONFLICT (bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = now()
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;

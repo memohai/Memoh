@@ -172,12 +172,34 @@ const routes = [
         },
       },
       {
-        name: 'supermarket',
         path: 'supermarket',
-        component: () => import('@/pages/supermarket/index.vue'),
+        component: { render: () => h(RouterView) },
         meta: {
           breadcrumb: i18nRef('sidebar.supermarket'),
         },
+        children: [
+          {
+            name: 'supermarket',
+            path: '',
+            component: () => import('@/pages/supermarket/index.vue'),
+          },
+          {
+            name: 'supermarket-plugin-detail',
+            path: 'plugins/:pluginId',
+            component: () => import('@/pages/supermarket/plugin-detail.vue'),
+            meta: {
+              breadcrumb: (route: RouteLocationNormalized) => route.params.pluginId,
+            },
+          },
+          {
+            name: 'supermarket-skill-detail',
+            path: 'skills/:skillId',
+            component: () => import('@/pages/supermarket/skill-detail.vue'),
+            meta: {
+              breadcrumb: (route: RouteLocationNormalized) => route.params.skillId,
+            },
+          },
+        ],
       },
       {
         name: 'about',

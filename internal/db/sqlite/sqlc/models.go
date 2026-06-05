@@ -20,6 +20,7 @@ type Bot struct {
 	Status                 string         `json:"status"`
 	AclDefaultEffect       string         `json:"acl_default_effect"`
 	Language               string         `json:"language"`
+	CommandUiLanguage      string         `json:"command_ui_language"`
 	ReasoningEnabled       int64          `json:"reasoning_enabled"`
 	ReasoningEffort        string         `json:"reasoning_effort"`
 	ChatModelID            sql.NullString `json:"chat_model_id"`
@@ -48,7 +49,6 @@ type Bot struct {
 	Metadata               string         `json:"metadata"`
 	CreatedAt              string         `json:"created_at"`
 	UpdatedAt              string         `json:"updated_at"`
-	CommandUiLanguage      string         `json:"command_ui_language"`
 }
 
 type BotAclRule struct {
@@ -167,6 +167,33 @@ type BotHistoryMessageCompact struct {
 	ModelID      sql.NullString `json:"model_id"`
 	StartedAt    string         `json:"started_at"`
 	CompletedAt  sql.NullString `json:"completed_at"`
+}
+
+type BotPluginInstallation struct {
+	ID          string `json:"id"`
+	BotID       string `json:"bot_id"`
+	PluginID    string `json:"plugin_id"`
+	PluginName  string `json:"plugin_name"`
+	Version     string `json:"version"`
+	Status      string `json:"status"`
+	Enabled     int64  `json:"enabled"`
+	Config      string `json:"config"`
+	Metadata    string `json:"metadata"`
+	Manifest    string `json:"manifest"`
+	InstalledAt string `json:"installed_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type BotPluginResource struct {
+	ID             string `json:"id"`
+	InstallationID string `json:"installation_id"`
+	ResourceType   string `json:"resource_type"`
+	ResourceKey    string `json:"resource_key"`
+	ResourceID     string `json:"resource_id"`
+	Status         string `json:"status"`
+	Metadata       string `json:"metadata"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 type BotSession struct {
@@ -300,19 +327,23 @@ type LifecycleEvent struct {
 }
 
 type McpConnection struct {
-	ID            string         `json:"id"`
-	BotID         string         `json:"bot_id"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	Config        string         `json:"config"`
-	IsActive      int64          `json:"is_active"`
-	Status        string         `json:"status"`
-	ToolsCache    string         `json:"tools_cache"`
-	LastProbedAt  sql.NullString `json:"last_probed_at"`
-	StatusMessage string         `json:"status_message"`
-	AuthType      string         `json:"auth_type"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
+	ID                            string         `json:"id"`
+	BotID                         string         `json:"bot_id"`
+	Name                          string         `json:"name"`
+	Type                          string         `json:"type"`
+	Config                        string         `json:"config"`
+	IsActive                      int64          `json:"is_active"`
+	Status                        string         `json:"status"`
+	ToolsCache                    string         `json:"tools_cache"`
+	LastProbedAt                  sql.NullString `json:"last_probed_at"`
+	StatusMessage                 string         `json:"status_message"`
+	AuthType                      string         `json:"auth_type"`
+	ManagedByPluginInstallationID sql.NullString `json:"managed_by_plugin_installation_id"`
+	ManagedResourceKey            string         `json:"managed_resource_key"`
+	Visible                       int64          `json:"visible"`
+	Metadata                      string         `json:"metadata"`
+	CreatedAt                     string         `json:"created_at"`
+	UpdatedAt                     string         `json:"updated_at"`
 }
 
 type McpOauthToken struct {

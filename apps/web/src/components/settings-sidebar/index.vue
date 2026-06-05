@@ -121,6 +121,9 @@ function isItemActive(name: string): boolean {
   if (name === 'bots') {
     return route.path.startsWith('/settings/bots')
   }
+  if (name === 'supermarket') {
+    return route.path.startsWith('/settings/supermarket')
+  }
   return route.name === name
 }
 

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/mcp"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	skillset "github.com/memohai/memoh/internal/skills"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -27,7 +26,7 @@ import (
 type SupermarketHandler struct {
 	baseURL        string
 	httpClient     *http.Client
-	mcpService     *mcp.ConnectionService
+	pluginService  *pluginspkg.Service
 	containers     bridge.Provider
 	botService     *bots.Service
 	accountService *accounts.Service
@@ -37,7 +36,7 @@ type SupermarketHandler struct {
 func NewSupermarketHandler(
 	log *slog.Logger,
 	cfg config.Config,
-	mcpService *mcp.ConnectionService,
+	pluginService *pluginspkg.Service,
 	containers bridge.Provider,
 	botService *bots.Service,
 	accountService *accounts.Service,
@@ -45,7 +44,7 @@ func NewSupermarketHandler(
 	return &SupermarketHandler{
 		baseURL:        cfg.Supermarket.GetBaseURL(),
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		mcpService:     mcpService,
+		pluginService:  pluginService,
 		containers:     containers,
 		botService:     botService,
 		accountService: accountService,
@@ -55,14 +54,14 @@ func NewSupermarketHandler(
 
 func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g := e.Group("/supermarket")
-	g.GET("/mcps", h.ListMcps)
-	g.GET("/mcps/:id", h.GetMcp)
+	g.GET("/plugins", h.ListPlugins)
+	g.GET("/plugins/:id", h.GetPlugin)
 	g.GET("/skills", h.ListSkills)
 	g.GET("/skills/:id", h.GetSkill)
 	g.GET("/tags", h.ListTags)
 
 	ig := e.Group("/bots/:bot_id/supermarket")
-	ig.POST("/install-mcp", h.InstallMcp)
+	ig.POST("/install-plugin", h.InstallPlugin)
 	ig.POST("/install-skill", h.InstallSkill)
 }
 
@@ -104,32 +103,31 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	return nil
 }
 
-// ListMcps godoc
-// @Summary List MCPs from supermarket
+// ListPlugins godoc
+// @Summary List plugins from supermarket
 // @Tags supermarket
 // @Param q query string false "Search query"
 // @Param tag query string false "Filter by tag"
-// @Param transport query string false "Filter by transport type"
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
-// @Success 200 {object} SupermarketMcpListResponse
+// @Success 200 {object} SupermarketPluginListResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/mcps [get].
-func (h *SupermarketHandler) ListMcps(c echo.Context) error {
-	return h.proxy(c, "/api/mcps")
+// @Router /supermarket/plugins [get].
+func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
+	return h.proxy(c, "/api/plugins")
 }
 
-// GetMcp godoc
-// @Summary Get MCP detail from supermarket
+// GetPlugin godoc
+// @Summary Get plugin detail from supermarket
 // @Tags supermarket
-// @Param id path string true "MCP ID"
-// @Success 200 {object} SupermarketMcpEntry
+// @Param id path string true "Plugin ID"
+// @Success 200 {object} plugins.Manifest
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/mcps/{id} [get].
-func (h *SupermarketHandler) GetMcp(c echo.Context) error {
+// @Router /supermarket/plugins/{id} [get].
+func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
 	id := c.Param("id")
-	return h.proxy(c, "/api/mcps/"+id)
+	return h.proxy(c, "/api/plugins/"+id)
 }
 
 // ListSkills godoc
@@ -171,10 +169,10 @@ func (h *SupermarketHandler) ListTags(c echo.Context) error {
 
 // --- Install endpoints ---
 
-// InstallMcpRequest is the request body for installing an MCP from supermarket.
-type InstallMcpRequest struct {
-	McpID string            `json:"mcp_id"`
-	Env   map[string]string `json:"env,omitempty"`
+// InstallPluginRequest is the request body for installing a plugin from supermarket.
+type InstallPluginRequest struct {
+	PluginID  string            `json:"plugin_id"`
+	Variables map[string]string `json:"variables,omitempty"`
 }
 
 // InstallSkillRequest is the request body for installing a skill from supermarket.
@@ -182,41 +180,43 @@ type InstallSkillRequest struct {
 	SkillID string `json:"skill_id"`
 }
 
-// InstallMcp godoc
-// @Summary Install MCP from supermarket to bot
+// InstallPlugin godoc
+// @Summary Install plugin from supermarket to bot
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
-// @Param payload body InstallMcpRequest true "Install MCP request"
-// @Success 200 {object} mcp.Connection
+// @Param payload body InstallPluginRequest true "Install plugin request"
+// @Success 200 {object} plugins.Installation
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /bots/{bot_id}/supermarket/install-mcp [post].
-func (h *SupermarketHandler) InstallMcp(c echo.Context) error {
+// @Router /bots/{bot_id}/supermarket/install-plugin [post].
+func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
 
-	var req InstallMcpRequest
+	var req InstallPluginRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.McpID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "mcp_id is required")
+	if strings.TrimSpace(req.PluginID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is required")
 	}
 
-	entry, err := h.fetchMcpEntry(c, req.McpID)
+	manifest, err := h.fetchPluginEntry(c, req.PluginID)
 	if err != nil {
 		return err
 	}
 
-	upsert := h.mcpEntryToUpsert(entry, req.Env)
-	conn, err := h.mcpService.Create(c.Request().Context(), botID, upsert)
+	installation, err := h.pluginService.Install(c.Request().Context(), botID, pluginspkg.InstallRequest{
+		Manifest:  manifest,
+		Variables: req.Variables,
+	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return c.JSON(http.StatusOK, conn)
+	return c.JSON(http.StatusOK, installation)
 }
 
 // InstallSkill godoc
@@ -333,33 +333,11 @@ type SupermarketAuthor struct {
 	Email string `json:"email"`
 }
 
-type SupermarketConfigVar struct {
-	Key          string `json:"key"`
-	Description  string `json:"description"`
-	DefaultValue string `json:"defaultValue,omitempty"`
-}
-
-type SupermarketMcpEntry struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Author      SupermarketAuthor      `json:"author"`
-	Transport   string                 `json:"transport"`
-	Icon        string                 `json:"icon,omitempty"`
-	Homepage    string                 `json:"homepage,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	URL         string                 `json:"url,omitempty"`
-	Command     string                 `json:"command,omitempty"`
-	Args        []string               `json:"args,omitempty"`
-	Headers     []SupermarketConfigVar `json:"headers,omitempty"`
-	Env         []SupermarketConfigVar `json:"env,omitempty"`
-}
-
-type SupermarketMcpListResponse struct {
+type SupermarketPluginListResponse struct {
 	Total int                   `json:"total"`
 	Page  int                   `json:"page"`
 	Limit int                   `json:"limit"`
-	Data  []SupermarketMcpEntry `json:"data"`
+	Data  []pluginspkg.Manifest `json:"data"`
 }
 
 type SupermarketSkillMetadata struct {
@@ -390,76 +368,31 @@ type SupermarketTagsResponse struct {
 
 // --- Internal helpers ---
 
-func (h *SupermarketHandler) fetchMcpEntry(c echo.Context, mcpID string) (SupermarketMcpEntry, error) {
-	url := h.baseURL + "/api/mcps/" + mcpID
+func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (pluginspkg.Manifest, error) {
+	url := h.baseURL + "/api/plugins/" + pluginID
 	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
 	if err != nil {
-		return SupermarketMcpEntry{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
 	if err != nil {
-		h.logger.Error("supermarket fetch failed", slog.String("url", url), slog.Any("error", err))
-		return SupermarketMcpEntry{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		h.logger.Error("supermarket plugin fetch failed", slog.String("url", url), slog.Any("error", err))
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return SupermarketMcpEntry{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("MCP %q not found in supermarket", mcpID))
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return SupermarketMcpEntry{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
 	}
 
-	var entry SupermarketMcpEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-		return SupermarketMcpEntry{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
+	var manifest pluginspkg.Manifest
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
 	}
-	return entry, nil
+	return manifest, nil
 }
-
-func (*SupermarketHandler) mcpEntryToUpsert(entry SupermarketMcpEntry, envOverrides map[string]string) mcp.UpsertRequest {
-	headers := make(map[string]string, len(entry.Headers))
-	env := make(map[string]string, len(entry.Env))
-	for _, e := range entry.Env {
-		if override, ok := envOverrides[e.Key]; ok {
-			env[e.Key] = override
-		} else {
-			env[e.Key] = e.DefaultValue
-		}
-	}
-	for _, hdr := range entry.Headers {
-		headers[hdr.Key] = expandSupermarketTemplateVars(hdr.DefaultValue, env)
-	}
-
-	args := make([]string, 0, len(entry.Args))
-	for _, arg := range entry.Args {
-		args = append(args, expandSupermarketTemplateVars(arg, env))
-	}
-
-	return mcp.UpsertRequest{
-		Name:      entry.Name,
-		Command:   expandSupermarketTemplateVars(entry.Command, env),
-		Args:      args,
-		URL:       expandSupermarketTemplateVars(entry.URL, env),
-		Headers:   headers,
-		Env:       env,
-		Transport: entry.Transport,
-	}
-}
-
-func expandSupermarketTemplateVars(value string, vars map[string]string) string {
-	if value == "" || len(vars) == 0 {
-		return value
-	}
-	return supermarketTemplateVarPattern.ReplaceAllStringFunc(value, func(match string) string {
-		key := match[2 : len(match)-1]
-		if val, ok := vars[key]; ok {
-			return val
-		}
-		return match
-	})
-}
-
-var supermarketTemplateVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)

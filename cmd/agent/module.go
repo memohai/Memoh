@@ -24,6 +24,7 @@ import (
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/models"
+	pluginspkg "github.com/memohai/memoh/internal/plugins"
 	"github.com/memohai/memoh/internal/policy"
 	"github.com/memohai/memoh/internal/schedule"
 	"github.com/memohai/memoh/internal/searchproviders"
@@ -72,6 +73,8 @@ func options() fx.Option {
 			searchproviders.NewService,
 			policy.NewService,
 			mcp.NewConnectionService,
+			pluginspkg.NewOAuthClientRegistry,
+			pluginspkg.NewService,
 			mcp.NewToolSessionContextStore,
 			conversation.NewService,
 			identities.NewService,
@@ -151,6 +154,7 @@ func options() fx.Option {
 			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
+			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),
 			provideOAuthService,
 			provideServerHandler(handlers.NewTokenUsageHandler),

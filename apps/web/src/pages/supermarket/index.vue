@@ -52,19 +52,50 @@
       </div>
     </div>
 
-    <!-- Tabs: Skills / MCP -->
+    <!-- Tabs: Plugins / Skills -->
     <Tabs
-      default-value="skills"
+      default-value="plugins"
       class="w-full"
     >
       <TabsList>
+        <TabsTrigger value="plugins">
+          {{ $t('supermarket.pluginSection') }}
+        </TabsTrigger>
         <TabsTrigger value="skills">
           {{ $t('supermarket.skillsSection') }}
         </TabsTrigger>
-        <TabsTrigger value="mcp">
-          {{ $t('supermarket.mcpSection') }}
-        </TabsTrigger>
       </TabsList>
+
+      <!-- Plugins Tab -->
+      <TabsContent value="plugins">
+        <div
+          v-if="pluginsLoading"
+          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
+        >
+          <Spinner class="mr-2" />
+          {{ $t('common.loading') }}
+        </div>
+
+        <div
+          v-else-if="!plugins.length"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('supermarket.noPluginResults') }}
+        </div>
+
+        <div
+          v-else
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          <PluginCard
+            v-for="plugin in plugins"
+            :key="plugin.id"
+            :plugin="plugin"
+            @tag-click="setTag"
+            @install="openPluginInstall"
+          />
+        </div>
+      </TabsContent>
 
       <!-- Skills Tab -->
       <TabsContent value="skills">
@@ -96,43 +127,13 @@
           />
         </div>
       </TabsContent>
-
-      <!-- MCP Tab -->
-      <TabsContent value="mcp">
-        <div
-          v-if="mcpLoading"
-          class="flex items-center justify-center py-8 text-xs text-muted-foreground"
-        >
-          <Spinner class="mr-2" />
-          {{ $t('common.loading') }}
-        </div>
-
-        <div
-          v-else-if="!mcps.length"
-          class="py-8 text-center text-xs text-muted-foreground"
-        >
-          {{ $t('supermarket.noMcpResults') }}
-        </div>
-
-        <div
-          v-else
-          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          <McpCard
-            v-for="mcp in mcps"
-            :key="mcp.id"
-            :mcp="mcp"
-            @tag-click="setTag"
-            @install="openMcpInstall"
-          />
-        </div>
-      </TabsContent>
     </Tabs>
 
     <!-- Install Dialogs -->
-    <InstallMcpDialog
-      v-model:open="mcpDialogOpen"
-      :mcp="selectedMcp"
+    <InstallPluginDialog
+      v-model:open="pluginDialogOpen"
+      :plugin="selectedPlugin"
+      @installed="refreshAll"
     />
     <InstallSkillDialog
       v-model:open="skillDialogOpen"
@@ -148,16 +149,16 @@ import { useI18n } from 'vue-i18n'
 import { Search, X, Github } from 'lucide-vue-next'
 import { Input, Badge, Spinner, Button, Tabs, TabsList, TabsTrigger, TabsContent } from '@memohai/ui'
 import {
-  getSupermarketMcps,
+  getSupermarketPlugins,
   getSupermarketSkills,
-  type HandlersSupermarketMcpEntry,
   type HandlersSupermarketSkillEntry,
+  type PluginsManifest,
 } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import McpCard from './components/mcp-card.vue'
+import PluginCard from './components/plugin-card.vue'
 import SkillCard from './components/skill-card.vue'
-import InstallMcpDialog from './components/install-mcp-dialog.vue'
+import InstallPluginDialog from './components/install-plugin-dialog.vue'
 import InstallSkillDialog from './components/install-skill-dialog.vue'
 
 const { t } = useI18n()
@@ -166,14 +167,14 @@ const searchInput = ref('')
 const searchQuery = ref('')
 const activeTag = ref('')
 
-const mcps = ref<HandlersSupermarketMcpEntry[]>([])
+const plugins = ref<PluginsManifest[]>([])
 const skills = ref<HandlersSupermarketSkillEntry[]>([])
-const mcpLoading = ref(false)
+const pluginsLoading = ref(false)
 const skillsLoading = ref(false)
 
-const mcpDialogOpen = ref(false)
+const pluginDialogOpen = ref(false)
 const skillDialogOpen = ref(false)
-const selectedMcp = ref<HandlersSupermarketMcpEntry | null>(null)
+const selectedPlugin = ref<PluginsManifest | null>(null)
 const selectedSkill = ref<HandlersSupermarketSkillEntry | null>(null)
 
 function applySearch() {
@@ -196,9 +197,9 @@ function clearTag() {
   activeTag.value = ''
 }
 
-function openMcpInstall(mcp: HandlersSupermarketMcpEntry) {
-  selectedMcp.value = mcp
-  mcpDialogOpen.value = true
+function openPluginInstall(plugin: PluginsManifest) {
+  selectedPlugin.value = plugin
+  pluginDialogOpen.value = true
 }
 
 function openSkillInstall(skill: HandlersSupermarketSkillEntry) {
@@ -206,10 +207,10 @@ function openSkillInstall(skill: HandlersSupermarketSkillEntry) {
   skillDialogOpen.value = true
 }
 
-async function loadMcps() {
-  mcpLoading.value = true
+async function loadPlugins() {
+  pluginsLoading.value = true
   try {
-    const { data } = await getSupermarketMcps({
+    const { data } = await getSupermarketPlugins({
       query: {
         q: searchQuery.value || undefined,
         tag: activeTag.value || undefined,
@@ -217,11 +218,11 @@ async function loadMcps() {
       },
       throwOnError: true,
     })
-    mcps.value = data.data ?? []
+    plugins.value = data.data ?? []
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
-    mcpLoading.value = false
+    pluginsLoading.value = false
   }
 }
 
@@ -245,12 +246,12 @@ async function loadSkills() {
 }
 
 function refreshAll() {
-  loadMcps()
+  loadPlugins()
   loadSkills()
 }
 
 watch([searchQuery, activeTag], () => {
-  loadMcps()
+  loadPlugins()
   loadSkills()
 }, { immediate: true })
 </script>

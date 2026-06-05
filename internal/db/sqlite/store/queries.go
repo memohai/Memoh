@@ -5394,3 +5394,191 @@ func (q *Queries) UpdateUserInputToolResultMessage(ctx context.Context, arg pgsq
 	}
 	return result, nil
 }
+
+func (q *Queries) CreateBotPluginInstallation(ctx context.Context, arg pgsqlc.CreateBotPluginInstallationParams) (pgsqlc.BotPluginInstallation, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotPluginInstallation{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateBotPluginInstallationParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	out, err := q.store.queries.CreateBotPluginInstallation(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotPluginInstallation{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotPluginInstallation
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) GetBotPluginInstallationByID(ctx context.Context, arg pgsqlc.GetBotPluginInstallationByIDParams) (pgsqlc.BotPluginInstallation, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotPluginInstallation{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetBotPluginInstallationByIDParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	out, err := q.store.queries.GetBotPluginInstallationByID(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotPluginInstallation{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotPluginInstallation
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListBotPluginInstallations(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.BotPluginInstallation, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListBotPluginInstallations(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.BotPluginInstallation
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateBotPluginInstallationStatus(ctx context.Context, arg pgsqlc.UpdateBotPluginInstallationStatusParams) (pgsqlc.BotPluginInstallation, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotPluginInstallation{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateBotPluginInstallationStatusParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	out, err := q.store.queries.UpdateBotPluginInstallationStatus(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotPluginInstallation{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotPluginInstallation
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotPluginInstallation{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) DeleteBotPluginInstallation(ctx context.Context, arg pgsqlc.DeleteBotPluginInstallationParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.DeleteBotPluginInstallationParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.DeleteBotPluginInstallation(ctx, sqliteArg))
+}
+
+func (q *Queries) UpsertBotPluginResource(ctx context.Context, arg pgsqlc.UpsertBotPluginResourceParams) (pgsqlc.BotPluginResource, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotPluginResource{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpsertBotPluginResourceParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotPluginResource{}, err
+	}
+	out, err := q.store.queries.UpsertBotPluginResource(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotPluginResource{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotPluginResource
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotPluginResource{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) ListBotPluginResources(ctx context.Context, installationID pgtype.UUID) ([]pgsqlc.BotPluginResource, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteInstallationID string
+	if err := convertValue(installationID, &sqliteInstallationID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListBotPluginResources(ctx, sqliteInstallationID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.BotPluginResource
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) DeleteBotPluginResources(ctx context.Context, installationID pgtype.UUID) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteInstallationID string
+	if err := convertValue(installationID, &sqliteInstallationID); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.DeleteBotPluginResources(ctx, sqliteInstallationID))
+}
+
+func (q *Queries) CreateManagedMCPConnection(ctx context.Context, arg pgsqlc.CreateManagedMCPConnectionParams) (pgsqlc.McpConnection, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.McpConnection{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CreateManagedMCPConnectionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.McpConnection{}, err
+	}
+	out, err := q.store.queries.CreateManagedMCPConnection(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.McpConnection{}, mapQueryErr(err)
+	}
+	var result pgsqlc.McpConnection
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.McpConnection{}, err
+	}
+	return result, nil
+}
+
+func (q *Queries) UpdateMCPConnectionActive(ctx context.Context, arg pgsqlc.UpdateMCPConnectionActiveParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateMCPConnectionActiveParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.UpdateMCPConnectionActive(ctx, sqliteArg))
+}
+
+func (q *Queries) UpdateMCPConnectionsActiveByPlugin(ctx context.Context, arg pgsqlc.UpdateMCPConnectionsActiveByPluginParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpdateMCPConnectionsActiveByPluginParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.UpdateMCPConnectionsActiveByPlugin(ctx, sqliteArg))
+}
+
+func (q *Queries) DeleteMCPConnectionsByPlugin(ctx context.Context, arg pgsqlc.DeleteMCPConnectionsByPluginParams) error {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.DeleteMCPConnectionsByPluginParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return err
+	}
+	return mapQueryErr(q.store.queries.DeleteMCPConnectionsByPlugin(ctx, sqliteArg))
+}

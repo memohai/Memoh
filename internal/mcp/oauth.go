@@ -149,9 +149,16 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 
 // SaveDiscovery persists the discovery result for a connection.
 func (s *OAuthService) SaveDiscovery(ctx context.Context, connectionID string, result *DiscoveryResult) error {
+	if result == nil {
+		return errors.New("OAuth discovery result is required")
+	}
 	connUUID, err := db.ParseUUID(connectionID)
 	if err != nil {
 		return err
+	}
+	scopesSupported := result.ScopesSupported
+	if scopesSupported == nil {
+		scopesSupported = []string{}
 	}
 	_, err = s.queries.UpsertMCPOAuthDiscovery(ctx, sqlc.UpsertMCPOAuthDiscoveryParams{
 		ConnectionID:           connUUID,
@@ -160,7 +167,7 @@ func (s *OAuthService) SaveDiscovery(ctx context.Context, connectionID string, r
 		AuthorizationEndpoint:  result.AuthorizationEndpoint,
 		TokenEndpoint:          result.TokenEndpoint,
 		RegistrationEndpoint:   result.RegistrationEndpoint,
-		ScopesSupported:        result.ScopesSupported,
+		ScopesSupported:        scopesSupported,
 		ResourceUri:            result.ResourceURI,
 	})
 	return err

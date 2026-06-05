@@ -237,6 +237,25 @@ CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_user_id ON bot_acl_rules(user_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_channel_identity_id ON bot_acl_rules(channel_identity_id);
 
+CREATE TABLE IF NOT EXISTS bot_plugin_installations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  plugin_id TEXT NOT NULL,
+  plugin_name TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  manifest JSONB NOT NULL DEFAULT '{}'::jsonb,
+  installed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_plugin_installations_unique UNIQUE (bot_id, plugin_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_installations_bot_id ON bot_plugin_installations(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_installations_plugin_id ON bot_plugin_installations(plugin_id);
+
 CREATE TABLE IF NOT EXISTS mcp_connections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -249,6 +268,10 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
   last_probed_at TIMESTAMPTZ,
   status_message TEXT NOT NULL DEFAULT '',
   auth_type TEXT NOT NULL DEFAULT 'none',
+  managed_by_plugin_installation_id UUID REFERENCES bot_plugin_installations(id) ON DELETE SET NULL,
+  managed_resource_key TEXT NOT NULL DEFAULT '',
+  visible BOOLEAN NOT NULL DEFAULT true,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT mcp_connections_type_check CHECK (type IN ('stdio', 'http', 'sse')),
@@ -256,6 +279,23 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_connections_bot_id ON mcp_connections(bot_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_plugin_installation_id ON mcp_connections(managed_by_plugin_installation_id);
+
+CREATE TABLE IF NOT EXISTS bot_plugin_resources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  installation_id UUID NOT NULL REFERENCES bot_plugin_installations(id) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  resource_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_plugin_resources_unique UNIQUE (installation_id, resource_type, resource_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_installation_id ON bot_plugin_resources(installation_id);
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_resource ON bot_plugin_resources(resource_type, resource_id);
 
 CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
