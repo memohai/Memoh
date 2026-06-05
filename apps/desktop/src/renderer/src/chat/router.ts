@@ -79,6 +79,18 @@ const routes: RouteRecordRaw[] = [
     path: '/oauth/mcp/callback',
     component: () => import('@memohai/web/pages/oauth/mcp-callback.vue'),
   },
+  // Dev-only component wall / design-token reference. Registered only in dev
+  // builds. Open with Cmd/Ctrl+Shift+D (see chat/App.vue) or, from devtools,
+  // `window.__memohRouter.push('/dev/components')`.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          name: 'dev-components',
+          path: '/dev/components',
+          component: () => import('@memohai/web/pages/dev/components/index.vue'),
+        } satisfies RouteRecordRaw,
+      ]
+    : []),
   ...settingsStubs,
 ]
 
@@ -101,6 +113,11 @@ router.onError((error: Error) => {
 })
 
 router.beforeEach(async (to: RouteLocationNormalized) => {
+  // Dev component wall: allow in dev builds, never reachable in prod.
+  if (to.path.startsWith('/dev/')) {
+    return import.meta.env.DEV ? true : { path: '/' }
+  }
+
   if (to.path === '/connect') {
     return { name: 'Login' }
   }
@@ -157,5 +174,11 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
 
   return true
 })
+
+// Dev convenience: reach the component wall from devtools without a URL bar
+// (memory history). e.g. `window.__memohRouter.push('/dev/components')`.
+if (import.meta.env.DEV) {
+  ;(window as unknown as { __memohRouter?: typeof router }).__memohRouter = router
+}
 
 export default router

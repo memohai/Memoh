@@ -229,6 +229,18 @@ const routes = [
     path: '/oauth/mcp/callback',
     component: () => import('@/pages/oauth/mcp-callback.vue'),
   },
+  // Dev-only component wall. Registered ONLY in dev builds, so the chunk and
+  // its auth-bypass guard never exist in production. Reached by setting the
+  // `memoh:dev-tools` localStorage flag and navigating to /dev/components.
+  ...(import.meta.env.DEV
+    ? [
+        {
+          name: 'dev-components',
+          path: '/dev/components',
+          component: () => import('@/pages/dev/components/index.vue'),
+        },
+      ]
+    : []),
 ]
 
 const router = createRouter({
@@ -251,6 +263,14 @@ router.onError((error) => {
 })
 
 router.beforeEach(async (to) => {
+  // Dev component wall: only reachable in dev builds with the flag set.
+  if (to.path.startsWith('/dev/')) {
+    return import.meta.env.DEV
+      && localStorage.getItem('memoh:dev-tools') === '1'
+      ? true
+      : { path: '/' }
+  }
+
   const token = localStorage.getItem('token')
 
   if (to.fullPath === '/login') {

@@ -42,11 +42,13 @@ The system employs a **bimodal elevation strategy**:
 - **Badges**: 4px radius (`rounded-sm`). Default uses `secondary/secondary-foreground` with `border-border`. Secondary uses `accent/foreground`. Destructive, success, and warning map to global status tokens. Outline uses `background/border/foreground`. Supports `size="sm"` (`text-[11px] px-2`) alongside default.
 - **BadgeCount**: Circular numeric counter. `rounded-full`, `h-[18px] min-w-[18px] px-1`, `text-[11px] font-medium`. Uses the same base/status mapping as Badge. Values above 99 display as "99+".
 - **Buttons**:
-  - Default: 8px radius, `secondary` background, `secondary-foreground` text, and `border-border`. Flat.
-  - Secondary / Outline: 8px radius, `accent` / `background` colors, 1px `border` where applicable. Flat.
-  - Ghost: Icon buttons use `muted-foreground` defaulting to `foreground` on hover.
+  - Default / Primary: 8px radius, charcoal fill (`--btn-primary`) with hover/press ramps on the pseudo-element shell. This is the standard high-emphasis action; `default` and `primary` are visual aliases.
+  - Outline / Secondary: 8px radius, transparent rest state with a 1px inset ring, gray hover fill, and shell-only press scale. `outline` and `secondary` are visual aliases.
+  - Ghost: No chrome at rest; soft gray hover fill. Use for toolbar/icon actions that should not carry standalone affordance.
+  - Destructive: Text/icon turns destructive on hover with a light destructive hover fill; avoid solid red buttons for normal destructive actions.
+  - Link: Muted text by default, foreground on hover, with underline feedback. Avoid brand purple for ordinary text links.
   - Grouped (`ButtonGroup`): Unified outer border (`border-border`, 8px radius). Internal items divided by `border-r` or `border-b`, no individual borders or radiuses.
-  - Brand Primary: Use `variant="primary"` explicitly for Send button or active CTA. This maps directly to the active palette brand color.
+  - Brand: Use `variant="brand"` only for rare brand-colored actions (for example the chat Send button), following brand scarcity.
 - **Inputs**: Flat design. 1px `border`, pure `background` fill, 8px/10px outer radius. Text must be `text-[16px]`. Focus state uses a stark black/grey ring, **not** primary purple.
 - **Checkboxes/Radios**: Flat, soft background (`bg-background`). 1px `border`. The checked state marker (tick/dot) is `foreground` (charcoal), avoiding brand colors.
 - **Separators**: Uniformly use the 1px `border` color. Do not use padding/margins that detach them from the container edges (e.g., use full width `border-b` in menus instead of `<Separator mx-1>`).

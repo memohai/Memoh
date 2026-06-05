@@ -19,6 +19,7 @@
     "start": "vite preview"
   },
   "dependencies": {
+    "@lisse/vue": "^0.4.0",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
     "@memohai/ui": "workspace:*",

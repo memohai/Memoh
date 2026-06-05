@@ -21,6 +21,340 @@
   }
 }
 
+@layer components {
+  /* ── Button: PRIMARY high-emphasis interaction ──────────────────────────────
+     The fill + every state lives on a ::before shell (not the button box) so the
+     press-scale shrinks only the background — the label never moves or blurs.
+     Keyed off <Button variant="primary"> / default → data-variant. Pairs with
+     the --btn-primary ramp (light/dark) so it themes correctly. */
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]) {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: var(--btn-primary);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease-out;
+  }
+  /* hover: fill lightens (generic lighten-on-engage, not a sheen). */
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):hover::before {
+    background-color: var(--btn-primary-hover);
+  }
+  /* press — SMALL (default): scale DOWN 0.96. The scale IS the signal; fill holds
+     its hover color. */
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):active::before {
+    scale: 0.96;
+  }
+  /* press — BLOCK / full-width: scale would lurch, so the fill lightens to the
+     press color INSTANT (transition 0s), easing back on release. */
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])[data-block]:active::before {
+    scale: 1 1;
+    background-color: var(--btn-primary-active);
+    transition: background-color 0s;
+  }
+
+  /* ── Button: SECONDARY — ported verbatim from the contract bench ─────────────
+     Transparent at rest with a 1px inset ring; hover fills + the ring drops;
+     press scales down. All on ::before so the label never moves. This REPLACES
+     the old bg-accent/border library look. */
+  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]) {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.16);
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.11s ease-out,
+      box-shadow 0.11s ease-out;
+  }
+  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
+    background-color: oklch(0 0 0 / 0.12);
+    box-shadow: none;
+  }
+  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
+    scale: 0.974;
+    box-shadow: none;
+  }
+
+  /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
+     No chrome at rest; hover fills a soft gray (237, a touch deeper than
+     --accent — the tuned ghost hover); press scales down. */
+  [data-slot="button"][data-variant="ghost"] {
+    position: relative;
+    isolation: isolate;
+  }
+  [data-slot="button"][data-variant="ghost"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: transparent;
+    scale: 1 1;
+    transition:
+      scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
+      background-color 0.15s ease;
+  }
+  [data-slot="button"][data-variant="ghost"]:hover::before {
+    background-color: var(--btn-ghost-hover);
+  }
+  [data-slot="button"][data-variant="ghost"]:active::before {
+    scale: 0.974;
+    background-color: var(--btn-ghost-hover);
+  }
+
+  /* ── Button: LINK — ported from contract bench `link-fade` ────────────────
+     Inline-text link: muted text brightens on hover; underline is a ::after bar
+     that fades in without changing text opacity or layout. */
+  /* Geometry is the SINGLE source here (with !important) because the size axis
+     (h-9 / px-4 / py-2 / rounded-md) lives in Tailwind's utilities layer, which
+     wins over @layer components. Links are inline text, not button boxes: no
+     fixed height, no horizontal padding, no radius (square so the draw line is
+     not clipped at the ends). fade + draw add 3px bottom room for the underline;
+     static uses text-decoration + offset, so it needs no bottom padding. */
+  [data-slot="button"]:is([data-variant="link"], [data-variant="link-static"], [data-variant="link-draw"]) {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+  [data-slot="button"]:is([data-variant="link"], [data-variant="link-draw"]) {
+    padding-bottom: 3px !important;
+  }
+  [data-slot="button"][data-variant="link"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1.5px;
+    background-color: currentcolor;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+  }
+  [data-slot="button"][data-variant="link"]:hover::after {
+    opacity: 1;
+  }
+  [data-slot="button"][data-variant="link-draw"] {
+    background-image: linear-gradient(currentcolor, currentcolor);
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1.5px;
+    /* !important: the base `transition-all` utility (utilities layer) would
+       otherwise win over this component-layer rule and kill the draw animation. */
+    transition:
+      background-size 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      color 150ms ease !important;
+  }
+  [data-slot="button"][data-variant="link-draw"]:hover {
+    background-size: 100% 1.5px;
+  }
+
+  /* ── Button: BUSY (loading) — universal, variant-agnostic ────────────────────
+     The native [disabled] is set to swallow double-clicks, but a busy button must
+     NOT look faded — keep full color, the spinner is the only signal. The label is
+     hidden IN PLACE (visibility) and the spinner overlays it → zero layout shift,
+     any width, no glyph swap. */
+  [data-slot="button"][data-loading] {
+    position: relative;
+  }
+  [data-slot="button"][data-loading]:disabled {
+    opacity: 1;
+  }
+  [data-slot="button"][data-loading][data-loading-mode="overlay"] > [data-button-content] {
+    visibility: hidden;
+  }
+  [data-slot="button"][data-loading-mode="leading"] {
+    gap: 0;
+  }
+  [data-slot="button"] > [data-button-leading-spinner] {
+    display: inline-grid;
+    place-items: center;
+    width: 0;
+    opacity: 0;
+    translate: -5px 0;
+    overflow: hidden;
+    transition:
+      width 0.24s cubic-bezier(0.32, 0.72, 0, 1),
+      opacity 0.18s ease,
+      translate 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-slot="button"][data-loading][data-loading-mode="leading"] > [data-button-leading-spinner] {
+    width: 1.5rem;
+    opacity: 1;
+    translate: 0 0;
+  }
+  [data-slot="button"][data-loading][data-loading-mode="icon"] > [data-button-content] > svg:first-child {
+    animation: button-spin 1s linear infinite;
+  }
+  /* Busy holds the most-engaged color (no pop on the click→spin handoff). */
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])[data-block][data-loading]::before {
+    background-color: var(--btn-primary-active);
+  }
+  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):not([data-block])[data-loading]::before {
+    background-color: var(--btn-primary-hover);
+  }
+  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"])[data-loading]::before {
+    background-color: oklch(0 0 0 / 0.12);
+    box-shadow: none;
+  }
+  [data-slot="button"][data-variant="ghost"][data-loading]::before {
+    background-color: var(--btn-ghost-hover);
+  }
+}
+
+@keyframes button-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@layer components {
+  /* ── Toggle — gray-ladder press model (ported verbatim from the contract bench)
+     rest → hover 249 → press 237 (snappy) → on 243 → on+press 231. Press-down is
+     quick (40ms) and release eases (160ms) — the modern press feel. Fill is on the
+     element itself (toggles don't press-scale, so no ::before shell needed). */
+  [data-slot="toggle"] {
+    background-color: transparent;
+    transition:
+      background-color 160ms ease,
+      color 150ms ease;
+  }
+  [data-slot="toggle"]:hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="toggle"]:active {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+  [data-slot="toggle"][data-state="on"] {
+    background-color: var(--ui-selected);
+  }
+  [data-slot="toggle"][data-state="on"]:active {
+    background-color: var(--ui-selected-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* TINT variant — selection reads via COLOR (icon brightens), not a persistent
+     fill, so the gray hover goes straight to 243 (no reserved selected gray).
+     Order matters: :hover is declared AFTER [data-state=on] so an active+hovered
+     item still shows the 243 track. NOTE: the active tint uses --brand for now;
+     swap to a promoted accent token once the accent palette lands. */
+  [data-slot="toggle"][data-variant="tint"] {
+    color: var(--muted-foreground);
+  }
+  [data-slot="toggle"][data-variant="tint"][data-state="on"] {
+    color: var(--brand);
+    background-color: transparent;
+  }
+  [data-slot="toggle"][data-variant="tint"]:hover {
+    background-color: var(--ui-selected);
+  }
+  [data-slot="toggle"][data-variant="tint"]:active {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+
+  /* ── Segmented control — sliding thumb (ported verbatim from the contract bench)
+     The elevated thumb slides via translate + width; non-selected items darken the
+     track on hover and shrink slightly on press. Near-flat (faint shadow only).
+     Geometry of the thumb is measured + set inline by SegmentedControl.vue. */
+  [data-slot="segmented"] {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    border-radius: var(--radius);
+    background-color: var(--segment-track);
+  }
+  [data-slot="segmented"] [data-segment-thumb] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: calc(var(--radius) - 0.25rem);
+    background-color: var(--segment-thumb);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.08);
+    transition:
+      translate 0.25s cubic-bezier(0.32, 0.72, 0, 1),
+      width 0.25s cubic-bezier(0.32, 0.72, 0, 1),
+      scale 0.16s ease,
+      opacity 0.12s ease;
+  }
+  [data-slot="segmented"] [data-segment-item] {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    height: 1.75rem;
+    padding-inline: 0.75rem;
+    border-radius: calc(var(--radius) - 0.25rem);
+    font-size: 0.875rem;
+    font-weight: 475;
+    letter-spacing: -0.16px;
+    white-space: nowrap;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  [data-slot="segmented"] [data-segment-item][data-active="true"] {
+    color: var(--foreground);
+  }
+  [data-slot="segmented"] [data-segment-item]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: transparent;
+    transition:
+      background-color 150ms ease,
+      scale 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):hover::before {
+    background-color: oklch(0 0 0 / 0.05);
+  }
+  [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):active::before {
+    scale: 0.965;
+    background-color: oklch(0 0 0 / 0.08);
+  }
+  .dark [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):hover::before {
+    background-color: oklch(1 0 0 / 0.06);
+  }
+  .dark [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):active::before {
+    background-color: oklch(1 0 0 / 0.10);
+  }
+  [data-slot="segmented"] [data-segment-item]:disabled {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  [data-slot="segmented"] [data-segment-item]:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--segment-track),
+      0 0 0 4px var(--ring);
+  }
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(0.985 0.001 286);
@@ -66,6 +400,24 @@
   --brand-hover: oklch(0.49 0.23 290);
   --sidebar-primary: var(--brand);
   --sidebar-ring: var(--brand);
+  /* PRIMARY button ramp (charcoal high-emphasis CTA). rest → hover → press, each
+     step lighter (19 → 51 → 92 lighten). This is the default high-emphasis fill;
+     the scheme brand is reserved for variant="brand". */
+  --btn-primary: #131313;
+  --btn-primary-hover: #333333;
+  --btn-primary-active: #5c5c5c;
+  /* Interactive surface gray ladder (rgb 255 → 249 → 243 → 237 → 231) — the
+     SINGLE source for control hover/selected/press tints (toggle, segmented,
+     ghost, menu items). Promoted verbatim from the contract bench so colors
+     never fragment. 249 hover · 243 selected · 237 pressed · 231 sel+pressed. */
+  --ui-hover: oklch(0.978 0 0);
+  --ui-selected: oklch(0.962 0 0);
+  --ui-pressed: oklch(0.946 0 0);
+  --ui-selected-pressed: oklch(0.928 0 0);
+  --btn-ghost-hover: var(--ui-pressed);
+  /* Segmented control surfaces: recessed track + elevated sliding thumb. */
+  --segment-track: var(--ui-selected);
+  --segment-thumb: oklch(1 0 0);
   --success: oklch(0.62 0.16 150);
   --success-foreground: oklch(0.33 0.12 150);
   --success-solid-foreground: oklch(0.985 0.001 286);
@@ -173,6 +525,20 @@
   --brand-hover: oklch(0.78 0.15 290);
   --sidebar-primary: var(--brand);
   --sidebar-ring: var(--brand);
+  /* Dark mode: the primary CTA inverts to a light fill (text-background gives it
+     dark text automatically), still lightening rest → hover → press. */
+  --btn-primary: oklch(0.92 0 0);
+  --btn-primary-hover: oklch(0.84 0 0);
+  --btn-primary-active: oklch(0.76 0 0);
+  /* Dark: control tints LIGHTEN on engage. Anchored so pressed = 0.32 to keep
+     ghost hover identical to before. hover · selected · pressed · sel+pressed. */
+  --ui-hover: oklch(0.26 0 0);
+  --ui-selected: oklch(0.29 0 0);
+  --ui-pressed: oklch(0.32 0 0);
+  --ui-selected-pressed: oklch(0.36 0 0);
+  --btn-ghost-hover: var(--ui-pressed);
+  --segment-track: oklch(0.24 0 0);
+  --segment-thumb: oklch(0.40 0 0);
   --success: oklch(0.70 0.15 150);
   --success-foreground: oklch(0.82 0.13 150);
   --success-solid-foreground: var(--background);
