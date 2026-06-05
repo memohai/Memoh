@@ -20,12 +20,17 @@ const props = withDefaults(defineProps<NumberFieldRootProps & {
   class?: HTMLAttributes['class']
   placeholder?: string
   size?: 'sm' | 'default' | 'lg'
+  // stepper button treatment:
+  //   plain — bare ±, only the glyph color shifts on hover (lowest chrome)
+  //   soft  — inset rounded-rect that fills on hover + presses on click
+  stepper?: 'plain' | 'soft'
 }>(), {
   size: 'default',
+  stepper: 'plain',
 })
 const emits = defineEmits<NumberFieldRootEmits>()
 
-const delegated = reactiveOmit(props, 'class', 'placeholder', 'size')
+const delegated = reactiveOmit(props, 'class', 'placeholder', 'size', 'stepper')
 const forwarded = useForwardPropsEmits(delegated, emits)
 
 const sizeClass = computed(() => ({
@@ -34,8 +39,16 @@ const sizeClass = computed(() => ({
   lg: 'h-10 text-[14px]',
 }[props.size]))
 
-const stepBtn
-  = 'flex h-full w-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5'
+const stepBase
+  = 'flex shrink-0 items-center justify-center text-muted-foreground transition-[color,background-color,transform] duration-75 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-3.5'
+
+const decClass = computed(() => props.stepper === 'soft'
+  ? cn(stepBase, 'my-1 ml-1 aspect-square h-auto rounded-[6px] hover:bg-accent active:scale-90')
+  : cn(stepBase, 'h-full w-8 rounded-l-md'))
+
+const incClass = computed(() => props.stepper === 'soft'
+  ? cn(stepBase, 'my-1 mr-1 aspect-square h-auto rounded-[6px] hover:bg-accent active:scale-90')
+  : cn(stepBase, 'h-full w-8 rounded-r-md'))
 </script>
 
 <template>
@@ -51,7 +64,7 @@ const stepBtn
   >
     <NumberFieldDecrement
       data-slot="number-field-decrement"
-      :class="cn(stepBtn, 'rounded-l-md')"
+      :class="decClass"
     >
       <Minus />
     </NumberFieldDecrement>
@@ -62,7 +75,7 @@ const stepBtn
     />
     <NumberFieldIncrement
       data-slot="number-field-increment"
-      :class="cn(stepBtn, 'rounded-r-md')"
+      :class="incClass"
     >
       <Plus />
     </NumberFieldIncrement>
