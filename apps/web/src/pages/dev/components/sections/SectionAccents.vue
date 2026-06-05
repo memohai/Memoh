@@ -34,25 +34,43 @@ interface Accent {
   icon: typeof Star
 }
 
-// Light-theme values, mapped to our role names.
+// SINGLE SOURCE = style.css --accent-{hue}-{role}. This board only READS the
+// tokens (it must never re-declare hex), so the palette can never fragment.
 //   accent     — saturated, readable on white
 //   soft       — rest tint   softHover — hover   softActive — selected/pressed
 //   border     — hairline    deep      — darkest text tone
+function hue(name: string, icon: typeof Star): Accent {
+  return {
+    name,
+    icon,
+    accent: `var(--accent-${name})`,
+    soft: `var(--accent-${name}-soft)`,
+    softHover: `var(--accent-${name}-soft-hover)`,
+    softActive: `var(--accent-${name}-soft-active)`,
+    border: `var(--accent-${name}-border)`,
+    deep: `var(--accent-${name}-deep)`,
+  }
+}
+
 const accents: Accent[] = [
-  { name: 'gray', accent: '#5f5e59', soft: '#f9f8f7', softHover: '#f0efed', softActive: '#e6e5e3', border: '#d4d3cf', deep: '#494846', icon: Hash },
-  { name: 'brown', accent: '#9f765a', soft: '#faf8f6', softHover: '#f5ede9', softActive: '#ebdfd7', border: '#e0cdc0', deep: '#584437', icon: Bookmark },
-  { name: 'orange', accent: '#d9730d', soft: '#fcf7f4', softHover: '#fbebde', softActive: '#f3ddcb', border: '#eaccb2', deep: '#6a4222', icon: Flame },
-  { name: 'yellow', accent: '#cb912f', soft: '#fcfaef', softHover: '#f9f3dc', softActive: '#f2e3b7', border: '#e8d497', deep: '#655121', icon: Star },
-  { name: 'green', accent: '#448361', soft: '#f6f9f7', softHover: '#e8f1ec', softActive: '#d7e6dd', border: '#bed9c9', deep: '#2a533c', icon: Leaf },
-  { name: 'teal', accent: '#2c8b9e', soft: '#f3fafb', softHover: '#e0f3f7', softActive: '#cae9f0', border: '#b0dbe4', deep: '#18505b', icon: Check },
-  { name: 'blue', accent: '#2383e2', soft: '#f3f9fd', softHover: '#e5f2fc', softActive: '#cee3f7', border: '#b6d4f3', deep: '#264a72', icon: Cloud },
-  { name: 'purple', accent: '#9065b0', soft: '#faf7fc', softHover: '#f3ebf9', softActive: '#e8dbf2', border: '#dbc8e8', deep: '#553b69', icon: Sparkles },
-  { name: 'pink', accent: '#c14c8a', soft: '#fcf7f9', softHover: '#fae9f1', softActive: '#f4d8e4', border: '#eac4d5', deep: '#68354e', icon: Tag },
-  { name: 'red', accent: '#cd3c3a', soft: '#fdf6f6', softHover: '#fce9e7', softActive: '#f7d9d5', border: '#f0c5be', deep: '#6d3531', icon: Heart },
+  hue('gray', Hash),
+  hue('brown', Bookmark),
+  hue('orange', Flame),
+  hue('yellow', Star),
+  hue('green', Leaf),
+  hue('teal', Check),
+  hue('blue', Cloud),
+  hue('purple', Sparkles),
+  hue('pink', Tag),
+  hue('red', Heart),
 ]
 
 // blue is the one hue we also ship as a saturated FILL (white text).
-const blueFill = { rest: '#2383e2', hover: '#0077d4', press: '#006bc7' }
+const blueFill = {
+  rest: 'var(--accent-blue-fill)',
+  hover: 'var(--accent-blue-fill-hover)',
+  press: 'var(--accent-blue-fill-active)',
+}
 
 // live selected state for the menu-list demo
 const selectedHue = ref('blue')

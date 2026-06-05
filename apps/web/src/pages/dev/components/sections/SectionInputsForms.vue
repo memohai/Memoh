@@ -76,13 +76,13 @@ const formSchema = {
       </Specimen>
 
       <Specimen label="<Checkbox>">
-        <Label class="flex items-center gap-2">
+        <Label class="flex items-center gap-2 text-[13px]">
           <Checkbox v-model="checked" /> Checked
         </Label>
-        <Label class="flex items-center gap-2">
+        <Label class="flex items-center gap-2 text-[13px]">
           <Checkbox :model-value="false" /> Unchecked
         </Label>
-        <Label class="flex items-center gap-2 opacity-60">
+        <Label class="flex items-center gap-2 text-[13px] opacity-60">
           <Checkbox disabled /> Disabled
         </Label>
       </Specimen>

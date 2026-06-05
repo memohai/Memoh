@@ -75,7 +75,7 @@
     z-index: -1;
     border-radius: inherit;
     background-color: transparent;
-    box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.16);
+    box-shadow: var(--shadow-hairline);
     scale: 1 1;
     transition:
       scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
@@ -291,7 +291,7 @@
     pointer-events: none;
     border-radius: calc(var(--radius) - 0.25rem);
     background-color: var(--segment-thumb);
-    box-shadow: 0 1px 2px oklch(0 0 0 / 0.08);
+    box-shadow: var(--shadow-thumb);
     transition:
       translate 0.25s cubic-bezier(0.32, 0.72, 0, 1),
       width 0.25s cubic-bezier(0.32, 0.72, 0, 1),
@@ -353,24 +353,53 @@
       0 0 0 2px var(--segment-track),
       0 0 0 4px var(--ring);
   }
+
+  /* ── Checkbox ────────────────────────────────────────────────────────────
+     Rest reads as page background, separated only by the hairline border
+     (clean). Hover (unchecked) lifts to the gray-ladder hover. Checked flips
+     to the solid blue fill with a white check. Background transitions; the
+     check itself is instant (no indicator animation). */
+  [data-slot="checkbox"] {
+    background-color: transparent;
+    border-color: var(--border-hairline);
+    transition:
+      background-color 100ms ease,
+      border-color 100ms ease;
+  }
+  [data-slot="checkbox"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="checkbox"][data-state="checked"] {
+    background-color: var(--accent-blue-fill);
+    border-color: var(--accent-blue-fill);
+    color: #fff;
+  }
+  [data-slot="checkbox"][data-state="checked"]:not(:disabled):hover {
+    background-color: var(--accent-blue-fill-hover);
+    border-color: var(--accent-blue-fill-hover);
+  }
+  [data-slot="checkbox"][data-state="checked"]:not(:disabled):active {
+    background-color: var(--accent-blue-fill-active);
+    border-color: var(--accent-blue-fill-active);
+  }
 }
 
 :root {
   --radius: 0.625rem;
   --background: oklch(0.985 0.001 286);
-  --foreground: oklch(0.22 0.006 286);
+  --foreground: oklch(0.27 0.004 95);
   --card: oklch(0.995 0.001 286);
-  --card-foreground: oklch(0.22 0.006 286);
+  --card-foreground: oklch(0.27 0.004 95);
   --popover: oklch(0.995 0.001 286);
-  --popover-foreground: oklch(0.22 0.006 286);
+  --popover-foreground: oklch(0.27 0.004 95);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
   --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.22 0.006 286);
+  --secondary-foreground: oklch(0.27 0.004 95);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: #737373;
+  --muted-foreground: oklch(0.52 0.006 95);
   --accent: oklch(97.1% 0 0deg);
-  --accent-foreground: oklch(0.22 0.006 286);
+  --accent-foreground: oklch(0.27 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
   --border: oklch(0.92 0.004 286.32);
@@ -382,11 +411,11 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --sidebar: oklch(0.975 0.001 286);
-  --sidebar-foreground: oklch(0.22 0.006 286);
+  --sidebar-foreground: oklch(0.27 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0.001 286);
   --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.22 0.006 286);
+  --sidebar-accent-foreground: oklch(0.27 0.004 95);
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
@@ -418,6 +447,92 @@
   /* Segmented control surfaces: recessed track + elevated sliding thumb. */
   --segment-track: var(--ui-selected);
   --segment-thumb: oklch(1 0 0);
+  /* Shadows — tokenized so elevation/edge values never fragment. Same in both
+     schemes for now; add .dark overrides when dark elevation is tuned.
+       --shadow-hairline  1px inset edge (outline / secondary button chrome)
+       --shadow-thumb     subtle lift for the segmented sliding thumb */
+  /* Hairline edge color — shared by secondary/outline button chrome and small
+     control borders (checkbox). A future Design Token revision target. */
+  --border-hairline: oklch(0 0 0 / 0.16);
+  --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
+  --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
+  /* ── Accent palette ────────────────────────────────────────────────────
+     Unified hue ramps for colored surfaces (menu items, tags, status,
+     decorative icons, capability badges). Each hue ships our own role model:
+       --accent-{hue}             saturated icon / text color (state-constant)
+       --accent-{hue}-soft        rest background tint   (lightest)
+       --accent-{hue}-soft-hover  hover background       (one step deeper)
+       --accent-{hue}-soft-active selected / pressed bg  (deeper still)
+       --accent-{hue}-border      hairline
+       --accent-{hue}-deep        darkest text tone
+     3-layer model: a colored item's text/icon never changes on hover/select —
+     only the background deepens across soft → soft-hover → soft-active.
+     Light values are canonical here; dark-mode values are TODO (tune on a dark
+     accent board, then mirror into .dark). Promoted verbatim from the bench. */
+  --accent-gray: #5f5e59;
+  --accent-gray-soft: #f9f8f7;
+  --accent-gray-soft-hover: #f0efed;
+  --accent-gray-soft-active: #e6e5e3;
+  --accent-gray-border: #d4d3cf;
+  --accent-gray-deep: #494846;
+  --accent-brown: #9f765a;
+  --accent-brown-soft: #faf8f6;
+  --accent-brown-soft-hover: #f5ede9;
+  --accent-brown-soft-active: #ebdfd7;
+  --accent-brown-border: #e0cdc0;
+  --accent-brown-deep: #584437;
+  --accent-orange: #d9730d;
+  --accent-orange-soft: #fcf7f4;
+  --accent-orange-soft-hover: #fbebde;
+  --accent-orange-soft-active: #f3ddcb;
+  --accent-orange-border: #eaccb2;
+  --accent-orange-deep: #6a4222;
+  --accent-yellow: #cb912f;
+  --accent-yellow-soft: #fcfaef;
+  --accent-yellow-soft-hover: #f9f3dc;
+  --accent-yellow-soft-active: #f2e3b7;
+  --accent-yellow-border: #e8d497;
+  --accent-yellow-deep: #655121;
+  --accent-green: #448361;
+  --accent-green-soft: #f6f9f7;
+  --accent-green-soft-hover: #e8f1ec;
+  --accent-green-soft-active: #d7e6dd;
+  --accent-green-border: #bed9c9;
+  --accent-green-deep: #2a533c;
+  --accent-teal: #2c8b9e;
+  --accent-teal-soft: #f3fafb;
+  --accent-teal-soft-hover: #e0f3f7;
+  --accent-teal-soft-active: #cae9f0;
+  --accent-teal-border: #b0dbe4;
+  --accent-teal-deep: #18505b;
+  --accent-blue: #2383e2;
+  --accent-blue-soft: #f3f9fd;
+  --accent-blue-soft-hover: #e5f2fc;
+  --accent-blue-soft-active: #cee3f7;
+  --accent-blue-border: #b6d4f3;
+  --accent-blue-deep: #264a72;
+  --accent-purple: #9065b0;
+  --accent-purple-soft: #faf7fc;
+  --accent-purple-soft-hover: #f3ebf9;
+  --accent-purple-soft-active: #e8dbf2;
+  --accent-purple-border: #dbc8e8;
+  --accent-purple-deep: #553b69;
+  --accent-pink: #c14c8a;
+  --accent-pink-soft: #fcf7f9;
+  --accent-pink-soft-hover: #fae9f1;
+  --accent-pink-soft-active: #f4d8e4;
+  --accent-pink-border: #eac4d5;
+  --accent-pink-deep: #68354e;
+  --accent-red: #cd3c3a;
+  --accent-red-soft: #fdf6f6;
+  --accent-red-soft-hover: #fce9e7;
+  --accent-red-soft-active: #f7d9d5;
+  --accent-red-border: #f0c5be;
+  --accent-red-deep: #6d3531;
+  /* blue is the one hue we also ship as a saturated solid fill (white text) */
+  --accent-blue-fill: #2383e2;
+  --accent-blue-fill-hover: #0077d4;
+  --accent-blue-fill-active: #006bc7;
   --success: oklch(0.62 0.16 150);
   --success-foreground: oklch(0.33 0.12 150);
   --success-solid-foreground: oklch(0.985 0.001 286);
@@ -797,10 +912,34 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --radius-2xs: calc(var(--radius) - 7px);
+  --radius-xs: calc(var(--radius) - 6px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Type scale: semantic sizes with line-height + tracking baked in.
+     Weight stays orthogonal (font-normal / font-medium / font-semibold). */
+  --text-caption: 0.75rem; /* 12px — meta, hints, timestamps */
+  --text-caption--line-height: 1rem;
+  --text-caption--letter-spacing: -0.08px;
+  --text-label: 0.8125rem; /* 13px — labels, controls, dense UI */
+  --text-label--line-height: 1.125rem;
+  --text-label--letter-spacing: -0.12px;
+  --text-body: 0.875rem; /* 14px — default body copy */
+  --text-body--line-height: 1.25rem;
+  --text-body--letter-spacing: -0.16px;
+  --text-title: 1rem; /* 16px — card / section titles */
+  --text-title--line-height: 1.4rem;
+  --text-title--letter-spacing: -0.2px;
+  --text-heading: 1.125rem; /* 18px — dialog / page headings */
+  --text-heading--line-height: 1.55rem;
+  --text-heading--letter-spacing: -0.26px;
+  --text-display: 1.5rem; /* 24px — hero / empty-state */
+  --text-display--line-height: 1.85rem;
+  --text-display--letter-spacing: -0.4px;
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -874,6 +1013,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   * {
