@@ -20,8 +20,10 @@ func main() {
 		if err := runVersion(); err != nil {
 			os.Exit(1)
 		}
+	case "slot":
+		runSlot(os.Args[2:])
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: memoh-server <command>\n\nCommands:\n  serve     Start the server (default)\n  migrate   Run database migrations (up|down|version|force)\n  version   Print version information\n")
+		fmt.Fprintf(os.Stderr, "Usage: memoh-server <command>\n\nCommands:\n  serve     Start the server (default)\n  migrate   Run database migrations (up|down|version|force)\n  version   Print version information\n  slot      Desktop dev slot helper (resolve|env|list)\n")
 		os.Exit(1)
 	}
 }

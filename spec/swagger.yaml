@@ -230,9 +230,13 @@ definitions:
         type: string
       agent_id:
         type: string
+      default_model_id:
+        type: string
       models:
         $ref: '#/definitions/acpclient.ModelState'
       project_path:
+        type: string
+      runtime_id:
         type: string
       session_id:
         type: string
@@ -2546,6 +2550,13 @@ definitions:
       summary:
         type: string
     type: object
+  handlers.acpRuntimeCreateRequest:
+    properties:
+      acp_agent_id:
+        type: string
+      project_path:
+        type: string
+    type: object
   handlers.acpRuntimeModelRequest:
     properties:
       model_id:
@@ -2576,6 +2587,12 @@ definitions:
     type: object
   handlers.createSessionRequest:
     properties:
+      acp_runtime_id:
+        description: |-
+          ACPRuntimeID optionally binds a warm pre-session runtime (created via
+          POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
+          transient in-memory handle reference, never persisted in metadata.
+        type: string
       channel_type:
         type: string
       metadata:
@@ -4066,6 +4083,149 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
+  /bots/{bot_id}/acp-runtimes:
+    post:
+      description: Starts an agent runtime before any session exists. The runtime
+        ID is server generated; bind it to a session at creation time via acp_runtime_id.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Runtime spec
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.acpRuntimeCreateRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acpagent.RuntimeStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Create an unbound ACP runtime (pre-session model picker)
+      tags:
+      - acp
+  /bots/{bot_id}/acp-runtimes/{runtime_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Runtime ID
+        in: path
+        name: runtime_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Close an ACP runtime
+      tags:
+      - acp
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Runtime ID
+        in: path
+        name: runtime_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acpagent.RuntimeStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get ACP runtime state by runtime ID
+      tags:
+      - acp
+  /bots/{bot_id}/acp-runtimes/{runtime_id}/model:
+    patch:
+      description: An empty model_id resets the runtime to the agent default model.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Runtime ID
+        in: path
+        name: runtime_id
+        required: true
+        type: string
+      - description: Model selection
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.acpRuntimeModelRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/acpagent.RuntimeStatus'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Set (or reset) an ACP runtime's model
+      tags:
+      - acp
   /bots/{bot_id}/acp/claude-code/oauth/authorize:
     get:
       parameters:

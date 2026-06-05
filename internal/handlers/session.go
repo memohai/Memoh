@@ -25,6 +25,7 @@ type SessionHandler struct {
 
 type acpSessionCloser interface {
 	CloseSession(sessionID string) error
+	BindRuntime(botID, runtimeID, sessionID, agentID, projectPath string) error
 }
 
 // NewSessionHandler creates a SessionHandler.
@@ -53,6 +54,10 @@ type createSessionRequest struct {
 	Title       string         `json:"title"`
 	ChannelType string         `json:"channel_type,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+	// ACPRuntimeID optionally binds a warm pre-session runtime (created via
+	// POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
+	// transient in-memory handle reference, never persisted in metadata.
+	ACPRuntimeID string `json:"acp_runtime_id,omitempty"`
 }
 
 type updateSessionRequest struct {
@@ -95,6 +100,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		return err
 	}
 	if sessionType == session.TypeACPAgent {
+		req.Metadata = session.ApplyACPMetadataDefaults(req.Metadata)
 		if err := validateACPCreate(bot, req.Metadata); err != nil {
 			return err
 		}
@@ -109,6 +115,25 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	})
 	if err != nil {
 		return sessionServiceError(err)
+	}
+	// Best-effort bind of a warm pre-session runtime: the session lives in
+	// the database and the runtime in memory, so this is sequenced (bind only
+	// after a successful create), not transactional. A failed bind keeps the
+	// session — the first prompt simply cold starts a runtime.
+	if runtimeID := strings.TrimSpace(req.ACPRuntimeID); runtimeID != "" && sessionType == session.TypeACPAgent && h.acpPool != nil {
+		if bindErr := h.acpPool.BindRuntime(
+			bot.ID,
+			runtimeID,
+			sess.ID,
+			sessionMetadataString(sess.Metadata, "acp_agent_id"),
+			sessionMetadataString(sess.Metadata, "project_path"),
+		); bindErr != nil {
+			h.logger.Warn("failed to bind ACP runtime to new session; first prompt will cold start",
+				slog.String("session_id", sess.ID),
+				slog.String("runtime_id", runtimeID),
+				slog.Any("error", bindErr),
+			)
+		}
 	}
 	return c.JSON(http.StatusCreated, sess)
 }
@@ -230,6 +255,9 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		targetMetadata := cloneSessionMetadata(existing.Metadata)
 		if req.Metadata != nil {
 			targetMetadata = cloneSessionMetadata(req.Metadata)
+		}
+		if targetType == session.TypeACPAgent {
+			targetMetadata = session.ApplyACPMetadataDefaults(targetMetadata)
 		}
 		agentChanged := sessionAgentConfigChanged(existing.Type, existing.Metadata, targetType, targetMetadata)
 		if agentChanged {

@@ -16,6 +16,7 @@ const (
 	ToolHeaderAuthorization     = "Authorization" //nolint:gosec // G101: HTTP header name, not a credential.
 	ToolHeaderBotID             = "X-Memoh-Bot-Id"
 	ToolHeaderChatID            = "X-Memoh-Chat-Id"
+	ToolHeaderRuntimeID         = "X-Memoh-Runtime-Id"
 	ToolHeaderSessionID         = "X-Memoh-Session-Id"
 	ToolHeaderStreamID          = "X-Memoh-Stream-Id"
 	ToolHeaderSessionType       = "X-Memoh-Session-Type"
@@ -40,6 +41,7 @@ func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSes
 	return ToolSessionContext{
 		BotID:             sessionBotID,
 		ChatID:            chatID,
+		RuntimeID:         firstNonEmptyHTTPHeader(req, ToolHeaderRuntimeID),
 		SessionID:         firstNonEmptyHTTPHeader(req, ToolHeaderSessionID),
 		StreamID:          firstNonEmptyHTTPHeader(req, ToolHeaderStreamID),
 		SessionType:       firstNonEmptyHTTPHeader(req, ToolHeaderSessionType),
@@ -160,6 +162,9 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 					Tools: ConvertGatewayToolsToSDK(tools),
 				}, nil
 			case "tools/call":
+				if strings.TrimSpace(session.RuntimeID) != "" && !session.RuntimeActive {
+					return nil, errors.New("ACP runtime is not processing a prompt")
+				}
 				callReq, ok := req.(*sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRaw])
 				if !ok || callReq == nil || callReq.Params == nil {
 					return nil, errors.New("tools/call params is required")

@@ -35,12 +35,14 @@ type Session struct {
 }
 
 const (
-	TypeChat      = "chat"
-	TypeHeartbeat = "heartbeat"
-	TypeSchedule  = "schedule"
-	TypeSubagent  = "subagent"
-	TypeDiscuss   = "discuss"
-	TypeACPAgent  = "acp_agent"
+	TypeChat              = "chat"
+	TypeHeartbeat         = "heartbeat"
+	TypeSchedule          = "schedule"
+	TypeSubagent          = "subagent"
+	TypeDiscuss           = "discuss"
+	TypeACPAgent          = "acp_agent"
+	DefaultACPProjectMode = "project"
+	DefaultACPProjectPath = "/data"
 )
 
 var (
@@ -99,20 +101,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, fmt.Errorf("invalid route id: %w", err)
 	}
 
-	meta := input.Metadata
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	metaBytes, err := json.Marshal(meta)
-	if err != nil {
-		return Session{}, fmt.Errorf("marshal metadata: %w", err)
-	}
-
 	channelType := pgtype.Text{}
 	if ct := strings.TrimSpace(input.ChannelType); ct != "" {
 		channelType = pgtype.Text{String: ct, Valid: true}
 	}
 
+	meta := input.Metadata
+	if meta == nil {
+		meta = map[string]any{}
+	}
 	sessionType := strings.TrimSpace(input.Type)
 	if sessionType == "" {
 		sessionType = TypeChat
@@ -121,12 +118,17 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Session, error
 		return Session{}, fmt.Errorf("unknown session type %q", sessionType)
 	}
 	if sessionType == TypeACPAgent {
+		meta = ApplyACPMetadataDefaults(meta)
 		if err := validateACPMetadata(meta); err != nil {
 			return Session{}, err
 		}
 		if err := s.validateACPCreatePolicy(ctx, pgBotID, meta); err != nil {
 			return Session{}, err
 		}
+	}
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return Session{}, fmt.Errorf("marshal metadata: %w", err)
 	}
 
 	pgParentSessionID, err := parseOptionalUUID(input.ParentSessionID)
@@ -176,6 +178,7 @@ func (s *Service) UpdateTypeAndMetadata(ctx context.Context, sessionID, typ stri
 		return Session{}, err
 	}
 	if sessionType == TypeACPAgent {
+		metadata = ApplyACPMetadataDefaults(metadata)
 		if err := validateACPMetadata(metadata); err != nil {
 			return Session{}, err
 		}
@@ -440,6 +443,21 @@ func validateACPMetadata(meta map[string]any) error {
 		return ErrACPProjectPathMissing
 	}
 	return nil
+}
+
+// ApplyACPMetadataDefaults fills omitted ACP session project fields.
+func ApplyACPMetadataDefaults(meta map[string]any) map[string]any {
+	out := make(map[string]any, len(meta)+2)
+	for key, value := range meta {
+		out[key] = value
+	}
+	if strings.TrimSpace(metadataString(out, "project_path")) == "" {
+		out["project_path"] = DefaultACPProjectPath
+	}
+	if strings.TrimSpace(metadataString(out, "acp_project_mode")) == "" {
+		out["acp_project_mode"] = DefaultACPProjectMode
+	}
+	return out
 }
 
 func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any) error {

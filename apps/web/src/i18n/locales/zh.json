@@ -383,6 +383,7 @@
         "waitingOutput": "等待输出中…",
         "noChanges": "无变更",
         "noContent": "无内容",
+        "contentTruncated": "预览已截断，完整写入大小：{bytes} 字节。",
         "noTasks": "暂无任务",
         "noImage": "暂无图像",
         "noResults": "暂无结果",

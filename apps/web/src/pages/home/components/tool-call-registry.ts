@@ -116,6 +116,14 @@ function pickString(obj: Record<string, unknown>, ...keys: string[]): string {
   return ''
 }
 
+function pickNumber(obj: Record<string, unknown>, ...keys: string[]): number {
+  for (const k of keys) {
+    const v = obj[k]
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+  }
+  return 0
+}
+
 function truncate(s: string, max = 60): string {
   if (!s) return ''
   if (s.length <= max) return s
@@ -259,13 +267,14 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     case 'write': {
       const path = pickString(input, 'path')
       const content = pickString(input, 'content')
+      const contentLineCount = pickNumber(input, 'content_line_count')
       return {
         icon: FilePlus2,
         actionKey: 'write',
         target: path,
         detail: ToolCallDetailWrite,
         defaultOpen: true,
-        diffAdd: lineCount(content),
+        diffAdd: contentLineCount || lineCount(content),
         hideAction: true,
       }
     }

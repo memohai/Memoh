@@ -819,6 +819,220 @@
                 }
             }
         },
+        "/bots/{bot_id}/acp-runtimes": {
+            "post": {
+                "description": "Starts an agent runtime before any session exists. The runtime ID is server generated; bind it to a session at creation time via acp_runtime_id.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Create an unbound ACP runtime (pre-session model picker)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Runtime spec",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.acpRuntimeCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acpagent.RuntimeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp-runtimes/{runtime_id}": {
+            "get": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Get ACP runtime state by runtime ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "runtime_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acpagent.RuntimeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Close an ACP runtime",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "runtime_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp-runtimes/{runtime_id}/model": {
+            "patch": {
+                "description": "An empty model_id resets the runtime to the agent default model.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Set (or reset) an ACP runtime's model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "runtime_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Model selection",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.acpRuntimeModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acpagent.RuntimeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acp/claude-code/oauth/authorize": {
             "get": {
                 "tags": [
@@ -11014,10 +11228,16 @@
                 "agent_id": {
                     "type": "string"
                 },
+                "default_model_id": {
+                    "type": "string"
+                },
                 "models": {
                     "$ref": "#/definitions/acpclient.ModelState"
                 },
                 "project_path": {
+                    "type": "string"
+                },
+                "runtime_id": {
                     "type": "string"
                 },
                 "session_id": {
@@ -14483,6 +14703,17 @@
                 }
             }
         },
+        "handlers.acpRuntimeCreateRequest": {
+            "type": "object",
+            "properties": {
+                "acp_agent_id": {
+                    "type": "string"
+                },
+                "project_path": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.acpRuntimeModelRequest": {
             "type": "object",
             "properties": {
@@ -14530,6 +14761,10 @@
         "handlers.createSessionRequest": {
             "type": "object",
             "properties": {
+                "acp_runtime_id": {
+                    "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
+                    "type": "string"
+                },
                 "channel_type": {
                     "type": "string"
                 },

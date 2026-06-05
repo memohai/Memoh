@@ -344,10 +344,35 @@ echo '  Dev web UI will be available at http://localhost:18082'
 """
 
 [tasks."desktop:dev"]
-description = "Start Electron desktop app in dev mode (renderer reuses @memohai/web)"
+description = "Start Electron desktop app in dev mode (optional dev slot: mise run desktop:dev -- <keyword>)"
 dir = "{{config_root}}/apps/desktop"
-env = { MEMOH_WEB_PROXY_TARGET = "http://localhost:18731", CONFIG_PATH = "../../conf/app.local.toml" }
-run = "pnpm dev"
+env = { CONFIG_PATH = "../../conf/app.local.toml" }
+run = """
+#!/bin/bash
+set -euo pipefail
+
+SLOT="${1:-}"
+if [ -n "$SLOT" ]; then
+  # Per-keyword dev slot: resolve (and persist on first use) an isolated
+  # set of ports + data dir, then export them so both Vite and the
+  # Electron main process target this slot instead of the default 18731.
+  # Assign first so a failed resolve (e.g. invalid keyword) aborts here with
+  # the real error, instead of leaking through as a `set -u` unbound-variable
+  # error on the line below.
+  if ! SLOT_ENV="$(cd '{{config_root}}' && go run ./cmd/agent slot env "$SLOT")"; then
+    echo "desktop:dev: failed to resolve dev slot '$SLOT' (see error above)" >&2
+    exit 1
+  fi
+  eval "$SLOT_ENV"
+  export MEMOH_SLOT MEMOH_SLOT_SERVER_PORT MEMOH_WEB_PORT MEMOH_WEB_PROXY_TARGET
+  echo "desktop dev slot=$MEMOH_SLOT api=$MEMOH_WEB_PROXY_TARGET web=http://127.0.0.1:$MEMOH_WEB_PORT"
+else
+  # Default slot: unchanged historical behavior.
+  export MEMOH_WEB_PROXY_TARGET="http://localhost:18731"
+fi
+
+pnpm dev
+"""
 
 [tasks."desktop:qdrant:prepare"]
 description = "Download the Qdrant binary used by the Electron desktop app"

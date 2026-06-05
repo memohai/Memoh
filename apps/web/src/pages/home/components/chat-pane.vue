@@ -377,7 +377,7 @@
                       type="button"
                       size="sm"
                       variant="ghost"
-                      :disabled="!currentBotId || activeChatReadOnly || acpModelChanging || acpModelsLoading"
+                      :disabled="!currentBotId || activeChatReadOnly || acpModelChanging"
                       class="gap-0.5 text-muted-foreground max-w-40"
                     >
                       <LoaderCircle
@@ -393,7 +393,61 @@
                     align="start"
                   >
                     <div
-                      v-if="activeIsACP"
+                      v-if="activeIsPendingACP"
+                      class="max-h-80 overflow-y-auto p-1"
+                    >
+                      <button
+                        type="button"
+                        class="flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        @click="onPendingACPDefaultModelSelected"
+                      >
+                        <span class="min-w-0 flex-1 truncate">{{ $t('chat.modelDefault') }}</span>
+                        <Check
+                          v-if="!pendingACPModelId"
+                          class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                        />
+                      </button>
+                      <div
+                        v-if="acpModelsLoading"
+                        class="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+                      >
+                        <LoaderCircle class="size-3 animate-spin" />
+                        {{ $t('common.loading') }}
+                      </div>
+                      <div
+                        v-else-if="!pendingACPModelOptions.length"
+                        class="px-2 py-3 text-xs text-muted-foreground"
+                      >
+                        {{ $t('chat.noModels') }}
+                      </div>
+                      <template v-else>
+                        <button
+                          v-for="model in pendingACPModelOptions"
+                          :key="model.id || model.name"
+                          type="button"
+                          class="flex min-h-8 w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          @click="onACPModelSelected(model)"
+                        >
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate">
+                              {{ model.name || model.id }}
+                            </span>
+                            <span
+                              v-if="model.description"
+                              class="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+                            >
+                              {{ model.description }}
+                            </span>
+                          </span>
+                          <Check
+                            v-if="model.id === pendingACPModelId"
+                            class="mt-0.5 size-3 shrink-0 text-muted-foreground"
+                          />
+                        </button>
+                      </template>
+                    </div>
+                    <div
+                      v-else-if="activeIsACP"
                       class="max-h-80 overflow-y-auto p-1"
                     >
                       <div
@@ -565,7 +619,7 @@ import type { ChatAttachment, UIUserInput } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import type { ChatMessage } from '@/store/chat-list'
 import { useACPRuntime } from '@/composables/useACPRuntime'
-import { acpAgentDisplayName, acpAgentIcon, ACP_NO_PROJECT_MODE, createACPNoProjectPath, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentDisplayName, acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface ScrollSegment {
@@ -621,7 +675,11 @@ const {
   hasMoreOlder,
   overrideModelId,
   overrideReasoningEffort,
-  startupSendFailure
+  startupSendFailure,
+  pendingACPSessionMetadata,
+  pendingACPModelId,
+  pendingACPRuntimeStatus,
+  pendingACPRuntimeEnsuring,
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
@@ -736,9 +794,10 @@ const enabledACPProfiles = computed(() =>
 const activeSessionMetadata = computed<Record<string, unknown>>(() =>
   activeSession.value?.metadata && typeof activeSession.value.metadata === 'object'
     ? activeSession.value.metadata
-    : {},
+    : pendingACPSessionMetadata.value ?? {},
 )
-const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent')
+const activeIsPendingACP = computed(() => !activeSession.value && !!pendingACPSessionMetadata.value)
+const activeIsACP = computed(() => activeSession.value?.type === 'acp_agent' || activeIsPendingACP.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const selectedAgentIcon = computed(() => activeIsACP.value ? acpAgentIcon(activeACPAgentId.value, true) : MessageSquare)
 const selectedAgentLabel = computed(() =>
@@ -774,8 +833,14 @@ const {
 const models = computed<ModelsGetResponse[]>(() => modelData.value ?? [])
 const providers = computed<ProvidersGetResponse[]>(() => providerData.value ?? [])
 const acpModelsLoading = computed(() =>
-  activeIsACP.value && !acpRuntime.value?.models && (agentChanging.value || acpRuntimeEnsuring.value),
+  activeIsPendingACP.value
+    ? !pendingACPRuntimeStatus.value?.models && (agentChanging.value || pendingACPRuntimeEnsuring.value)
+    : activeIsACP.value && !acpRuntime.value?.models && (agentChanging.value || acpRuntimeEnsuring.value),
 )
+
+const pendingACPModelOptions = computed<AcpclientModelInfo[]>(() => {
+  return activeIsPendingACP.value ? pendingACPRuntimeStatus.value?.models?.available_models ?? [] : []
+})
 
 const activeModel = computed(() => {
   const id = overrideModelId.value || botSettings.value?.chat_model_id || ''
@@ -793,6 +858,14 @@ const availableReasoningEfforts = computed(() => {
 })
 
 const selectedModelLabel = computed(() => {
+  if (activeIsPendingACP.value) {
+    const pending = pendingACPModelId.value
+    if (pending) {
+      const current = pendingACPModelOptions.value.find(model => model.id === pending)
+      return current?.name || current?.id || pending
+    }
+    return t('chat.modelDefault')
+  }
   if (activeIsACP.value) {
     const current = acpModels.value.find(model => model.id === currentACPModelId.value)
     return current?.name || current?.id || currentACPModelId.value || t('chat.modelDefault')
@@ -837,6 +910,13 @@ watch(activeIsACP, (isACP) => {
   }
 })
 
+watch(activeIsPendingACP, (isPending) => {
+  if (!isPending) return
+  void chatStore.ensurePendingACPRuntime().catch((error) => {
+    composerError.value = resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
+  })
+}, { immediate: true })
+
 function normalizedProfileID(value: unknown): string {
   return normalizeACPAgentID(value)
 }
@@ -848,19 +928,15 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
   agentChanging.value = true
   composerError.value = ''
   try {
-    const projectPath = createACPNoProjectPath()
     if (chatStore.sessionId) {
       await chatStore.updateCurrentSessionAgent({
         agentId,
-        projectPath,
-        projectMode: ACP_NO_PROJECT_MODE,
       })
     } else {
-      await chatStore.createACPSession({
+      chatStore.stageACPSession({
         agentId,
-        projectPath,
-        projectMode: ACP_NO_PROJECT_MODE,
       })
+      await chatStore.ensurePendingACPRuntime()
     }
     pendingFiles.value = []
   } catch (error) {
@@ -873,7 +949,12 @@ async function selectACPAgent(profile: AcpprofilePublicProfile) {
 async function selectMemohAgent() {
   if (agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
-  if (!activeIsACP.value || !chatStore.sessionId) return
+  if (!activeIsACP.value) return
+  if (!chatStore.sessionId) {
+    chatStore.clearPendingACPSession()
+    pendingFiles.value = []
+    return
+  }
   agentChanging.value = true
   composerError.value = ''
   try {
@@ -896,10 +977,37 @@ async function onACPModelSelected(model: AcpclientModelInfo) {
   const modelId = (model.id ?? '').trim()
   if (!modelId || acpModelChanging.value) return
   modelPopoverOpen.value = false
+  if (activeIsPendingACP.value) {
+    acpModelChanging.value = true
+    composerError.value = ''
+    try {
+      await chatStore.setPendingACPModel(modelId)
+    } catch (error) {
+      composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
+    } finally {
+      acpModelChanging.value = false
+    }
+    return
+  }
   acpModelChanging.value = true
   composerError.value = ''
   try {
     await setActiveACPModel(modelId)
+  } catch (error) {
+    composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
+  } finally {
+    acpModelChanging.value = false
+  }
+}
+
+async function onPendingACPDefaultModelSelected() {
+  if (acpModelChanging.value) return
+  modelPopoverOpen.value = false
+  acpModelChanging.value = true
+  composerError.value = ''
+  try {
+    // May reset the warm runtime back to the agent default model.
+    await chatStore.setPendingACPModel('')
   } catch (error) {
     composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
   } finally {

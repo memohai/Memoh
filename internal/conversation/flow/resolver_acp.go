@@ -78,7 +78,10 @@ func (r *Resolver) streamACPAgentWS(ctx context.Context, req conversation.ChatRe
 	}
 
 	emit(agentpkg.StreamEvent{Type: agentpkg.EventAgentStart})
-	emit(agentpkg.StreamEvent{Type: agentpkg.EventTextStart})
+	// No eager text_start here: the UI message converter allocates block IDs
+	// in arrival order and the frontend sorts by ID, so pre-creating the text
+	// block would pin the answer text above any reasoning that streams first.
+	// The first text_delta lazily creates the text block instead.
 
 	result, err := r.acpPool.Prompt(streamCtx, acpagent.PromptInput{
 		BotID:             req.BotID,
@@ -134,6 +137,11 @@ func mapACPStreamEvent(event acpclient.StreamEvent) []agentpkg.StreamEvent {
 			return nil
 		}
 		return []agentpkg.StreamEvent{{Type: agentpkg.EventTextDelta, Delta: event.Delta}}
+	case acpclient.StreamEventReasoningDelta:
+		if event.Delta == "" {
+			return nil
+		}
+		return []agentpkg.StreamEvent{{Type: agentpkg.EventReasoningDelta, Delta: event.Delta}}
 	case acpclient.StreamEventToolCallStart:
 		return []agentpkg.StreamEvent{{
 			Type:       agentpkg.EventToolCallStart,
@@ -185,9 +193,17 @@ func (r *Resolver) persistACPRound(ctx context.Context, req conversation.ChatReq
 func acpResultOutputMessages(result acpclient.PromptResult) []conversation.ModelMessage {
 	output := make([]conversation.ModelMessage, 0)
 	assistantParts := make([]sdk.MessagePart, 0)
+	var reasoning strings.Builder
 	var text strings.Builder
 	sawTextDelta := false
 
+	flushReasoning := func() {
+		if reasoning.Len() == 0 {
+			return
+		}
+		assistantParts = append(assistantParts, sdk.ReasoningPart{Text: reasoning.String()})
+		reasoning.Reset()
+	}
 	flushText := func() {
 		if text.Len() == 0 {
 			return
@@ -204,6 +220,7 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		return false
 	}
 	flushAssistant := func() {
+		flushReasoning()
 		flushText()
 		if len(assistantParts) == 0 {
 			return
@@ -225,6 +242,15 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		sawTextDelta = true
 		text.WriteString(delta)
 	}
+	appendReasoning := func(delta string) {
+		if delta == "" {
+			return
+		}
+		if text.Len() > 0 || assistantHasToolCall() {
+			flushAssistant()
+		}
+		reasoning.WriteString(delta)
+	}
 	appendToolResult := func(event acpclient.StreamEvent) {
 		result := event.Result
 		isError := strings.TrimSpace(event.Error) != ""
@@ -244,9 +270,12 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 
 	for _, event := range result.Events {
 		switch event.Type {
+		case acpclient.StreamEventReasoningDelta:
+			appendReasoning(event.Delta)
 		case acpclient.StreamEventTextDelta:
 			appendText(event.Delta)
 		case acpclient.StreamEventToolCallStart:
+			flushReasoning()
 			flushText()
 			assistantParts = append(assistantParts, sdk.ToolCallPart{
 				ToolCallID: strings.TrimSpace(event.ToolCallID),

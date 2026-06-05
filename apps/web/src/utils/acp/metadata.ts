@@ -1,7 +1,8 @@
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 
 export const ACP_NO_PROJECT_MODE = 'none'
-export const ACP_NO_PROJECT_ROOT = '/data/.memoh/acp-work/no-project'
+export const ACP_DEFAULT_PROJECT_MODE = 'project'
+export const ACP_DEFAULT_PROJECT_PATH = '/data'
 
 export interface ACPAgentForm {
   enabled: boolean
@@ -147,10 +148,6 @@ export function isACPNoProject(metadata: Record<string, unknown> | undefined): b
   return metadata?.acp_project_mode === ACP_NO_PROJECT_MODE
 }
 
-export function createACPNoProjectPath(): string {
-  return `${ACP_NO_PROJECT_ROOT}/${randomID()}`
-}
-
 export function emptyACPAgentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
   return {
     enabled: false,
@@ -242,13 +239,6 @@ function existingManagedFields(metadata: Record<string, unknown> | undefined, ag
 
 function isSensitiveManagedField(field: AcpprofileManagedField): boolean {
   return field.sensitive === true || field.type === 'password'
-}
-
-function randomID(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

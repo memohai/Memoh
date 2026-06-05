@@ -370,10 +370,11 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, sessionService)
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
+	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			pool.StartReaper(ctx)
