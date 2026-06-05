@@ -227,6 +227,27 @@ func (s *Service) List(ctx context.Context) ([]ProviderGetResponse, error) {
 	return items, nil
 }
 
+func (s *Service) InstantiateAll(ctx context.Context) (int, error) {
+	rows, err := s.queries.ListMemoryProviders(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list memory providers: %w", err)
+	}
+	if s.registry == nil {
+		return 0, nil
+	}
+	loaded := 0
+	for _, row := range rows {
+		resp := s.toGetResponse(row)
+		if _, err := s.registry.Instantiate(resp.ID, resp.Provider, resp.Config); err != nil {
+			s.logger.Warn("auto-instantiate memory provider failed",
+				slog.String("id", resp.ID), slog.String("provider", resp.Provider), slog.Any("error", err))
+			continue
+		}
+		loaded++
+	}
+	return loaded, nil
+}
+
 func (s *Service) Update(ctx context.Context, id string, req ProviderUpdateRequest) (ProviderGetResponse, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {

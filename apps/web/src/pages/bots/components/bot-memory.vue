@@ -25,17 +25,24 @@
                       :open="compactPopoverOpen ? false : undefined"
                     >
                       <TooltipTrigger as-child>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          type="button"
-                          class="size-8 p-0 hover:bg-muted/50 group"
-                          :disabled="compactDisabled"
-                          :aria-label="$t('bots.memory.compact')"
-                          @click="openCompactDialog"
+                        <span
+                          class="inline-flex size-8"
+                          :tabindex="compactDisabled ? 0 : -1"
+                          :aria-label="compactDisabled ? compactTooltip : undefined"
                         >
-                          <Brain class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors" />
-                        </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            class="size-8 p-0 hover:bg-muted/50 group"
+                            :class="{ 'pointer-events-none': compactDisabled }"
+                            :disabled="compactDisabled"
+                            :aria-label="$t('bots.memory.compact')"
+                            @click="openCompactDialog"
+                          >
+                            <Brain class="size-3.5 text-foreground/70 group-hover:text-foreground transition-colors" />
+                          </Button>
+                        </span>
                       </TooltipTrigger>
                       <TooltipContent
                         side="bottom"

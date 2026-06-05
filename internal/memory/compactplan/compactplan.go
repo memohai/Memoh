@@ -30,6 +30,10 @@ type Result struct {
 }
 
 func Build(ctx context.Context, opts Options) (Result, error) {
+	opts.BotID = strings.TrimSpace(opts.BotID)
+	if opts.BotID == "" {
+		return Result{}, errors.New("memory compact requires bot id")
+	}
 	if opts.LLM == nil {
 		return Result{}, errors.New("memory compact requires an LLM")
 	}

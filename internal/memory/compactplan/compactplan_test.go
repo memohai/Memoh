@@ -35,6 +35,29 @@ func (*recordingLLM) DetectLanguage(context.Context, string) (string, error) {
 	return "", nil
 }
 
+func TestBuildRequiresBotID(t *testing.T) {
+	t.Parallel()
+
+	llm := &recordingLLM{}
+	_, err := Build(context.Background(), Options{
+		Items: []storefs.MemoryItem{{
+			ID:     "bot-1:mem_01",
+			Memory: "prefers compact facts with bot scope",
+		}},
+		Ratio: 0.5,
+		LLM:   llm,
+	})
+	if err == nil {
+		t.Fatal("expected BotID validation error")
+	}
+	if !strings.Contains(err.Error(), "bot id") {
+		t.Fatalf("error = %v, want bot id validation", err)
+	}
+	if len(llm.reqs) != 0 {
+		t.Fatalf("compact requests = %d, want 0", len(llm.reqs))
+	}
+}
+
 func TestBuildPassesBotIDToAllCompactRequests(t *testing.T) {
 	t.Parallel()
 
