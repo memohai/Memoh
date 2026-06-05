@@ -387,7 +387,6 @@
         "waitingOutput": "Waiting for output…",
         "noChanges": "No changes",
         "noContent": "No content",
-        "contentTruncated": "Preview truncated. Full write size: {bytes} bytes.",
         "noTasks": "No tasks",
         "noImage": "No image",
         "noResults": "No results",
@@ -1653,13 +1652,12 @@
       "desktopEnabledDescription": "Enable the VNC desktop. Memoh will automatically provision Debian/Ubuntu or Alpine workspaces if missing.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for sensitive write, edit, and exec tool calls, with bypass templates for safe paths or commands.",
-      "acpLocalModeHint": "Local workspaces use the agent command, login, and environment already available on this computer.",
       "acpSetupMode": "Setup",
       "acpSetupApiKey": "API Key",
       "acpSetupOAuth": "OAuth",
       "acpSetupChatGPT": "ChatGPT",
       "acpSetupClaude": "Claude",
-      "acpSetupSelf": "Self",
+      "acpSetupSelf": "Self-managed",
       "acpAuthType": "Authentication",
       "acpAuthApiKey": "API Key",
       "acpAuthChatGPT": "ChatGPT Account",
@@ -1677,7 +1675,7 @@
       "acpClaudeOAuthCodeRequired": "Paste the Claude authorization code.",
       "acpClaudeOAuthExchange": "Save Token",
       "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
-      "acpSelfModeHint": "Self-managed mode expects the agent to be configured inside the workspace runtime.",
+      "acpSelfModeHint": "Uses the ACP agent you've already configured inside the workspace runtime (e.g. an existing login).",
       "acpRequiredField": "{agent} requires {field}.",
       "toolApprovalBypass": "Bypass",
       "toolApprovalMustReview": "Must review",
@@ -2346,6 +2344,17 @@
         "manualAddBtn": "Add",
         "manualAddedCount": "{count} model(s) added",
         "removeModel": "Remove"
+      },
+      "acp": {
+        "setupMode": "Setup method",
+        "modeApiKey": "API key",
+        "modeChatGPT": "Sign in with ChatGPT",
+        "modeClaude": "Sign in with Claude",
+        "modeOAuth": "OAuth",
+        "modeSelf": "Local config",
+        "oauthDeferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
+        "selfHint": "Reuses the agent already configured in the workspace.",
+        "requiredError": "Please fill in \"{field}\""
       }
     },
     "bot": {
@@ -2355,6 +2364,21 @@
       "model": {
         "selectPlaceholder": "Select a model",
         "hint": "Pick the model your bot replies with. Recommended, but you can change it anytime in settings."
+      },
+      "acp": {
+        "banner": "This bot will use {agent} as its primary agent",
+        "oauthTitle": "Authorize {agent}",
+        "oauthAuthorized": "Authorized",
+        "oauthNotAuthorized": "Not authorized yet",
+        "oauthDescription": "Once authorized, {agent} can run inside this bot's workspace. You can also skip and finish authorization later in bot settings.",
+        "oauthAuthorizeChatGPT": "Sign in with ChatGPT",
+        "oauthAuthorizeClaude": "Sign in with Claude",
+        "oauthCodeHint": "After signing in on the popup, copy the authorization code and paste it below.",
+        "oauthCodePlaceholder": "Paste authorization code",
+        "oauthExchange": "Submit",
+        "oauthSkip": "Skip for now",
+        "oauthSuccess": "Authorization successful",
+        "oauthExchangeFailed": "Authorization failed, please try again"
       }
     },
     "im": {

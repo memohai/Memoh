@@ -34,14 +34,72 @@ func TestPrepareProcessEnvLocalPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareProcessEnv() error = %v", err)
 	}
-	if env != nil {
-		t.Fatalf("local env = %v, want nil pass-through", env)
+	// Local processes inherit the host env and get our managed overrides
+	// appended; HOME/PATH are never touched so the host toolchain keeps working.
+	assertEnvHas(t, env, "CUSTOM_FLAG=enabled")
+	if envHasKey(env, "HOME") || envHasKey(env, "PATH") {
+		t.Fatalf("local env must not override HOME/PATH: %v", env)
 	}
 	if cleanup != nil {
 		t.Fatalf("local cleanup should be nil")
 	}
 	if got := len(server.records()); got != 0 {
 		t.Fatalf("local backend executed %d bridge commands, want 0", got)
+	}
+}
+
+func TestPrepareProcessEnvLocalSelfHasNoOverrides(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "codex",
+		SetupMode:     SetupModeSelf,
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if env != nil {
+		t.Fatalf("local self env = %v, want nil (host login is used as-is)", env)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+}
+
+func TestPrepareProcessEnvLocalCodexSetsScopedCodexHome(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "codex",
+		SetupMode:     SetupModeOAuth,
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+	if got := envValue(env, "CODEX_HOME"); got != "/home/user/ws/.codex" {
+		t.Fatalf("local Codex CODEX_HOME = %q, want %q", got, "/home/user/ws/.codex")
+	}
+	if envHasKey(env, "HOME") {
+		t.Fatalf("local Codex must not override HOME: %v", env)
+	}
+}
+
+func TestPrepareProcessEnvLocalCodexRequiresWorkspaceRoot(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	// Without a workspace root we cannot isolate CODEX_HOME, so BYOK Codex must
+	// fail loudly rather than silently fall back to the user's real ~/.codex.
+	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:   WorkspaceBackendLocal,
+		AgentID:   "codex",
+		SetupMode: SetupModeOAuth,
+	})
+	if err == nil {
+		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
 	}
 }
 
@@ -164,11 +222,6 @@ func TestWriteCodexManagedConfigWritesFixedContainerConfig(t *testing.T) {
 	config := string(configWrite.Content)
 	for _, want := range []string{
 		`model_provider = "OpenAI"`,
-		`model_reasoning_effort = "xhigh"`,
-		`model_reasoning_summary = "detailed"`,
-		`model_supports_reasoning_summaries = true`,
-		`hide_agent_reasoning = false`,
-		`show_raw_agent_reasoning = false`,
 		`[model_providers.OpenAI]`,
 		`name = "OpenAI"`,
 		`base_url = "https://proxy.example.com/v1"`,
@@ -221,11 +274,6 @@ func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec /
 	config := string(configWrite.Content)
 	for _, want := range []string{
 		`model_provider = "chatgpt-http"`,
-		`model_reasoning_effort = "xhigh"`,
-		`model_reasoning_summary = "detailed"`,
-		`model_supports_reasoning_summaries = true`,
-		`hide_agent_reasoning = false`,
-		`show_raw_agent_reasoning = false`,
 		`[model_providers.chatgpt-http]`,
 		`name = "ChatGPT HTTP"`,
 		`base_url = "https://chatgpt.com/backend-api/codex"`,

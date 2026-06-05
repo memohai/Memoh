@@ -51,20 +51,4 @@ export const providerPresets: ProviderPreset[] = [
     baseUrl: 'https://api.moonshot.cn/v1',
     icon: 'moonshot',
   },
-  {
-    id: 'minimax',
-    name: 'MiniMax',
-    registryName: 'Minimax',
-    clientType: 'openai-completions',
-    baseUrl: 'https://api.minimaxi.com/v1',
-    icon: 'minimax-color',
-  },
-  {
-    id: 'xai',
-    name: 'xAI Grok',
-    registryName: 'xAI (Grok)',
-    clientType: 'openai-responses',
-    baseUrl: 'https://api.x.ai/v1',
-    icon: 'xai',
-  },
 ]

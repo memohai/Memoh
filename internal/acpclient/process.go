@@ -48,7 +48,11 @@ type processOptions struct {
 	AgentID   string
 	SetupMode SetupMode
 	Env       []string
-	NoTimeout bool
+	// WorkspaceRoot is the real (host) workspace root for local backends. It is
+	// used to point Codex at a bot-scoped CODEX_HOME so BYOK credentials stay
+	// isolated from the user's real ~/.codex.
+	WorkspaceRoot string
+	NoTimeout     bool
 }
 
 type bridgeProcess struct {
@@ -165,7 +169,11 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 
 func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir string, opts processOptions) ([]string, func(), error) {
 	if opts.Backend == WorkspaceBackendLocal {
-		return nil, nil, nil
+		env, err := prepareLocalProcessEnv(opts)
+		if err != nil {
+			return nil, nil, err
+		}
+		return env, nil, nil
 	}
 
 	mode := normalizeSetupMode(opts.SetupMode)
@@ -205,6 +213,36 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 	default:
 		return nil, nil, fmt.Errorf("unsupported ACP setup mode %q", mode)
 	}
+}
+
+// prepareLocalProcessEnv builds the managed env overrides for a local (desktop)
+// workspace. Local agents run as host processes that inherit the host
+// environment (the bridge appends our entries onto os.Environ), so we only add
+// the BYOK overrides and never touch HOME/PATH. Self mode returns no overrides
+// so the host's own agent login is used as-is.
+func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
+	mode := normalizeSetupMode(opts.SetupMode)
+	if mode == SetupModeSelf {
+		return nil, nil
+	}
+	env := append([]string(nil), opts.Env...)
+	if isCodexAgent(opts.AgentID) {
+		// Codex reads its config from $CODEX_HOME (falling back to ~/.codex).
+		// Point it at the bot-scoped managed dir written under the workspace
+		// root so BYOK credentials don't clobber the user's real ~/.codex. If
+		// the root is unknown we must fail loudly: silently skipping the
+		// override would leak BYOK credentials into the user's real ~/.codex.
+		root := strings.TrimSpace(opts.WorkspaceRoot)
+		if root == "" {
+			return nil, errors.New("local Codex BYOK requires a workspace root for CODEX_HOME isolation")
+		}
+		env = withoutEnvKeys(env, "CODEX_HOME")
+		env = append(env, "CODEX_HOME="+filepath.Join(root, ".codex"))
+	}
+	if len(env) == 0 {
+		return nil, nil
+	}
+	return env, nil
 }
 
 func normalizeSetupMode(mode SetupMode) SetupMode {

@@ -43,7 +43,6 @@
       :profiles="profiles"
       :form="form"
       :loading="profilesLoading"
-      :is-local-workspace="isLocalWorkspace"
     />
   </div>
 </template>
@@ -71,7 +70,6 @@ import {
 
 const props = defineProps<{
   botId: string
-  isLocalWorkspace?: boolean
 }>()
 
 const { t } = useI18n()
@@ -159,7 +157,7 @@ function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list
 }
 
 function validateForm(value: ACPForm, list: AcpprofilePublicProfile[]): string {
-  const missing = findMissingRequiredACPField(value, list, props.isLocalWorkspace)
+  const missing = findMissingRequiredACPField(value, list)
   if (!missing) return ''
   return t('bots.settings.acpRequiredField', {
     agent: missing.profile.display_name || missing.profile.id,

@@ -332,7 +332,7 @@ const tabList = computed(() => {
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
-    { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id, 'is-local-workspace': isLocalWorkspace.value } },
+    { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'heartbeat', label: 'bots.tabs.heartbeat', icon: HeartPulse, component: BotHeartbeat, params: { 'bot-id': bot_id } },

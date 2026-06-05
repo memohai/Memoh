@@ -22,7 +22,6 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -245,12 +244,11 @@ func (h *ACPClaudeCodeOAuthHandler) requireBotAccess(c echo.Context) (bots.Bot, 
 }
 
 func (h *ACPClaudeCodeOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {
-	info, err := h.acpWorkspace.WorkspaceInfo(ctx, botID)
-	if err != nil {
+	// Claude Code BYOK works on both container and local (desktop) workspaces:
+	// the OAuth token is persisted in bot metadata and injected via env
+	// (CLAUDE_CODE_OAUTH_TOKEN) at session start regardless of backend.
+	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if info.Backend == bridge.WorkspaceBackendLocal {
-		return echo.NewHTTPError(http.StatusBadRequest, "local workspace uses self-managed Claude Code auth")
 	}
 	return nil
 }

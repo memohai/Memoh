@@ -5,6 +5,7 @@ import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
+import { readACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { complete, completing } = useOnboarding()
@@ -21,7 +22,7 @@ const cards = [
 
 onMounted(() => {
   const count = Number.parseInt(sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount) ?? '0', 10)
-  hasProvider.value = Number.isFinite(count) && count > 0
+  hasProvider.value = (Number.isFinite(count) && count > 0) || !!readACPSelection()
   nextFrame(() => {
     visible.value = true
   })

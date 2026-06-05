@@ -167,11 +167,12 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:   backend,
-		AgentID:   req.AgentID,
-		SetupMode: req.SetupMode,
-		Env:       req.Env,
-		NoTimeout: true,
+		Backend:       backend,
+		AgentID:       req.AgentID,
+		SetupMode:     req.SetupMode,
+		Env:           req.Env,
+		WorkspaceRoot: root,
+		NoTimeout:     true,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {

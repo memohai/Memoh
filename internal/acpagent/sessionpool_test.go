@@ -59,7 +59,7 @@ func newFakeScriptPool(t *testing.T) *SessionPool {
 			DefaultWorkDir: root,
 		},
 	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
 	t.Cleanup(pool.CloseAll)
 	return pool
 }
@@ -783,7 +783,7 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 			DefaultWorkDir: root,
 		},
 	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
 	t.Cleanup(pool.CloseAll)
 
 	var wg sync.WaitGroup
@@ -900,11 +900,14 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", got)
 	}
 
+	// Desktop BYOK: local api_key now validates managed fields just like
+	// container. Codex carries no env (it is configured via CODEX_HOME files at
+	// the process layer), so req.Env stays empty even with a key set.
 	localRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
 		startErr: errors.New("started"),
 	}
-	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
 	_, err = localPool.Prompt(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
@@ -913,13 +916,29 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:      "run",
 	})
 	if err == nil || err.Error() != "started" {
-		t.Fatalf("local missing key error = %v, want runner start error", err)
+		t.Fatalf("local api_key error = %v, want runner start error", err)
 	}
 	if len(localRunner.req.Env) != 0 {
 		t.Fatalf("local backend injected env: %v", localRunner.req.Env)
 	}
 	if localRunner.req.LocalCommand != "npx" || len(localRunner.req.LocalArgs) == 0 {
 		t.Fatalf("local command not passed through: %#v", localRunner.req)
+	}
+
+	// Local api_key without a key must now be rejected (BYOK requires credentials).
+	localMissingPool := newSessionPool(nil, &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
+		startErr: errors.New("started"),
+	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	_, err = localMissingPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     "codex",
+		ProjectPath: "",
+		Prompt:      "run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_key required") {
+		t.Fatalf("local missing key error = %v, want api_key required validation", err)
 	}
 
 	claudeRunner := &recordingRunner{

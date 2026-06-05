@@ -462,6 +462,24 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	// Mirror UpdateBot: when a bot is created with ACP metadata (e.g. the
+	// onboarding flow creates the bot directly with an api_key agent), write the
+	// managed workspace config now so the first session has its credentials.
+	// This requires a ready workspace (the bridge must be reachable), which is
+	// only guaranteed when WaitForReady ran the lifecycle synchronously. For
+	// async creation the workspace isn't ready yet, so skip here and let the
+	// config be written on a later settings update.
+	//
+	// The bot row already exists at this point, so a failure here must NOT fail
+	// the request: returning 500 would orphan the created bot and a client retry
+	// would create a duplicate. Log and continue — the managed ACP config can be
+	// (re)written from the bot settings page.
+	if req.Metadata != nil && req.WaitForReady {
+		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
+			h.logger.Warn("write ACP workspace config after bot create failed",
+				slog.String("bot_id", resp.ID), slog.Any("error", err))
+		}
+	}
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
 }
 
@@ -656,13 +674,12 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 	if !setup.Enabled || mode == acpclient.SetupModeSelf {
 		return nil
 	}
-	info, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
-	if err != nil {
+	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID); err != nil {
 		return err
 	}
-	if info.Backend == bridge.WorkspaceBackendLocal {
-		return nil
-	}
+	// OAuth credentials are written by the dedicated OAuth callback handler, not
+	// here. For api_key mode we write the managed config now; on local (desktop
+	// BYOK) the bridge maps /data/.codex onto the bot's workspace .codex dir.
 	if mode == acpclient.SetupModeOAuth {
 		return nil
 	}

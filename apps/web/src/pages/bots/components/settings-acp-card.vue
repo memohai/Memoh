@@ -60,157 +60,148 @@
           v-if="agentForm(profile).enabled"
           class="space-y-3 border-t border-border/70 pt-3"
         >
-          <div
-            v-if="isLocalWorkspace"
-            class="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
-          >
-            {{ $t('bots.settings.acpLocalModeHint') }}
+          <div class="space-y-1.5">
+            <Label class="text-xs font-medium text-foreground">
+              {{ $t('bots.settings.acpSetupMode') }}
+            </Label>
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                v-for="mode in setupModes(profile)"
+                :key="mode"
+                type="button"
+                class="min-h-8 rounded-md border px-2 py-1 text-[11px] font-medium leading-tight transition-colors"
+                :class="agentForm(profile).setup_mode === mode ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-muted'"
+                @click="setSetupMode(profile, mode)"
+              >
+                {{ setupModeLabel(mode, profile) }}
+              </button>
+            </div>
           </div>
 
-          <template v-else>
-            <div class="space-y-1.5">
-              <Label class="text-xs font-medium text-foreground">
-                {{ $t('bots.settings.acpSetupMode') }}
-              </Label>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="mode in setupModes(profile)"
-                  :key="mode"
-                  type="button"
-                  class="min-h-8 rounded-md border px-2 py-1 text-[11px] font-medium leading-tight transition-colors"
-                  :class="agentForm(profile).setup_mode === mode ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-muted'"
-                  @click="setSetupMode(profile, mode)"
-                >
-                  {{ setupModeLabel(mode, profile) }}
-                </button>
-              </div>
-            </div>
-
+          <div
+            v-if="agentForm(profile).setup_mode !== 'self'"
+            class="space-y-3"
+          >
             <div
-              v-if="agentForm(profile).setup_mode !== 'self'"
-              class="space-y-3"
+              v-if="isCodexProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
+              class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
             >
-              <div
-                v-if="isCodexProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
-                class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <div
-                    class="min-w-0 text-[10px]"
-                    :class="codexOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
-                  >
-                    {{ codexOAuthStatusText() }}
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    class="h-7 shrink-0 text-xs shadow-none"
-                    :disabled="authorizingCodexOAuth"
-                    @click="handleAuthorize(profile)"
-                  >
-                    <LoaderCircle
-                      v-if="authorizingCodexOAuth"
-                      class="size-3 animate-spin"
-                    />
-                    {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
-                  </Button>
-                </div>
-              </div>
-
-              <div
-                v-if="isClaudeCodeProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
-                class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <div
-                    class="min-w-0 text-[10px]"
-                    :class="claudeOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
-                  >
-                    {{ claudeOAuthStatusText() }}
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    class="h-7 shrink-0 text-xs shadow-none"
-                    :disabled="authorizingClaudeOAuth"
-                    @click="handleAuthorizeClaude(profile)"
-                  >
-                    <LoaderCircle
-                      v-if="authorizingClaudeOAuth"
-                      class="size-3 animate-spin"
-                    />
-                    {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
-                  </Button>
-                </div>
-
+              <div class="flex items-center justify-between gap-3">
                 <div
-                  v-if="claudeOAuthSessionId && !claudeOAuthStatus?.has_token"
-                  class="space-y-2"
+                  class="min-w-0 text-[10px]"
+                  :class="codexOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
                 >
-                  <p class="text-[10px] text-muted-foreground">
-                    {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
-                  </p>
-                  <div class="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      v-model="claudeOAuthCode"
-                      :placeholder="$t('bots.settings.acpClaudeOAuthCodePlaceholder')"
-                      class="h-8 min-w-0 flex-1 text-xs shadow-none"
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      class="h-8 shrink-0 text-xs shadow-none"
-                      :disabled="exchangingClaudeOAuth"
-                      @click="handleExchangeClaudeOAuth(profile)"
-                    >
-                      <LoaderCircle
-                        v-if="exchangingClaudeOAuth"
-                        class="size-3 animate-spin"
-                      />
-                      {{ $t('bots.settings.acpClaudeOAuthExchange') }}
-                    </Button>
-                  </div>
+                  {{ codexOAuthStatusText() }}
                 </div>
-              </div>
-
-              <div
-                v-for="field in visibleManagedFields(profile)"
-                :key="field.id"
-                class="space-y-1.5"
-              >
-                <Label class="text-xs font-medium text-foreground">
-                  {{ field.label || field.id }}
-                </Label>
-                <Input
-                  :model-value="agentForm(profile).managed[field.id || ''] || ''"
-                  :type="inputType(field.type)"
-                  :name="managedFieldName(profile, field)"
-                  :autocomplete="managedFieldAutocomplete(field)"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                  :placeholder="field.placeholder"
-                  class="h-8 text-xs shadow-none"
-                  @update:model-value="(val) => setManagedField(profile, field.id, String(val ?? ''))"
-                />
-                <p
-                  v-if="field.help"
-                  class="text-[10px] text-muted-foreground"
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  class="h-7 shrink-0 text-xs shadow-none"
+                  :disabled="authorizingCodexOAuth"
+                  @click="handleAuthorize(profile)"
                 >
-                  {{ field.help }}
-                </p>
+                  <LoaderCircle
+                    v-if="authorizingCodexOAuth"
+                    class="size-3 animate-spin"
+                  />
+                  {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
+                </Button>
               </div>
             </div>
 
             <div
-              v-else
-              class="break-words rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+              v-if="isClaudeCodeProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
+              class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
             >
-              {{ $t('bots.settings.acpSelfModeHint') }}
+              <div class="flex items-center justify-between gap-3">
+                <div
+                  class="min-w-0 text-[10px]"
+                  :class="claudeOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
+                >
+                  {{ claudeOAuthStatusText() }}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  class="h-7 shrink-0 text-xs shadow-none"
+                  :disabled="authorizingClaudeOAuth"
+                  @click="handleAuthorizeClaude(profile)"
+                >
+                  <LoaderCircle
+                    v-if="authorizingClaudeOAuth"
+                    class="size-3 animate-spin"
+                  />
+                  {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
+                </Button>
+              </div>
+
+              <div
+                v-if="claudeOAuthSessionId && !claudeOAuthStatus?.has_token"
+                class="space-y-2"
+              >
+                <p class="text-[10px] text-muted-foreground">
+                  {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
+                </p>
+                <div class="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    v-model="claudeOAuthCode"
+                    :placeholder="$t('bots.settings.acpClaudeOAuthCodePlaceholder')"
+                    class="h-8 min-w-0 flex-1 text-xs shadow-none"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    class="h-8 shrink-0 text-xs shadow-none"
+                    :disabled="exchangingClaudeOAuth"
+                    @click="handleExchangeClaudeOAuth(profile)"
+                  >
+                    <LoaderCircle
+                      v-if="exchangingClaudeOAuth"
+                      class="size-3 animate-spin"
+                    />
+                    {{ $t('bots.settings.acpClaudeOAuthExchange') }}
+                  </Button>
+                </div>
+              </div>
             </div>
-          </template>
+
+            <div
+              v-for="field in visibleManagedFields(profile)"
+              :key="field.id"
+              class="space-y-1.5"
+            >
+              <Label class="text-xs font-medium text-foreground">
+                {{ field.label || field.id }}
+              </Label>
+              <Input
+                :model-value="agentForm(profile).managed[field.id || ''] || ''"
+                :type="inputType(field.type)"
+                :name="managedFieldName(profile, field)"
+                :autocomplete="managedFieldAutocomplete(field)"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                :placeholder="field.placeholder"
+                class="h-8 text-xs shadow-none"
+                @update:model-value="(val) => setManagedField(profile, field.id, String(val ?? ''))"
+              />
+              <p
+                v-if="field.help"
+                class="text-[10px] text-muted-foreground"
+              >
+                {{ field.help }}
+              </p>
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="break-words rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+          >
+            {{ $t('bots.settings.acpSelfModeHint') }}
+          </div>
         </div>
       </div>
     </template>
@@ -236,7 +227,6 @@ const props = defineProps<{
   profiles: AcpprofilePublicProfile[]
   form: ACPForm
   loading?: boolean
-  isLocalWorkspace?: boolean
 }>()
 
 const { t } = useI18n()
@@ -349,14 +339,14 @@ function visibleManagedFields(profile: AcpprofilePublicProfile): AcpprofileManag
 
 const codexOAuthActive = computed(() => {
   const profile = props.profiles.find(isCodexProfile)
-  if (!profile || props.isLocalWorkspace) return false
+  if (!profile) return false
   const form = agentForm(profile)
   return !!form.enabled && form.setup_mode === 'oauth'
 })
 
 const claudeOAuthActive = computed(() => {
   const profile = props.profiles.find(isClaudeCodeProfile)
-  if (!profile || props.isLocalWorkspace) return false
+  if (!profile) return false
   const form = agentForm(profile)
   return !!form.enabled && form.setup_mode === 'oauth'
 })

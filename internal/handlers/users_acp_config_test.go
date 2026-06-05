@@ -112,7 +112,7 @@ func TestPrepareACPWorkspaceConfigSkipsCodexOAuthConfig(t *testing.T) {
 	}
 }
 
-func TestPrepareACPWorkspaceConfigSkipsSelfAndLocal(t *testing.T) {
+func TestPrepareACPWorkspaceConfigSkipsSelf(t *testing.T) {
 	handler := &UsersHandler{acpWorkspace: &usersACPConfigWorkspace{backend: bridge.WorkspaceBackendLocal}}
 	selfBot := bots.Bot{
 		ID: "bot-1",
@@ -130,20 +130,40 @@ func TestPrepareACPWorkspaceConfigSkipsSelfAndLocal(t *testing.T) {
 	if err := handler.prepareACPWorkspaceConfig(context.Background(), selfBot); err != nil {
 		t.Fatalf("self setup should be skipped: %v", err)
 	}
+}
 
-	apiKeyLocalBot := selfBot
-	apiKeyLocalBot.Metadata = map[string]any{
-		acpprofile.MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				acpprofile.AgentCodexID: map[string]any{
-					"enabled":    true,
-					"setup_mode": "api_key",
+func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfigForLocalBYOK(t *testing.T) {
+	client, recorder := newUsersACPConfigBridgeClient(t)
+	handler := &UsersHandler{
+		acpWorkspace: &usersACPConfigWorkspace{
+			backend: bridge.WorkspaceBackendLocal,
+			client:  client,
+		},
+	}
+
+	err := handler.prepareACPWorkspaceConfig(context.Background(), bots.Bot{
+		ID: "bot-1",
+		Metadata: map[string]any{
+			acpprofile.MetadataKeyACP: map[string]any{
+				"agents": map[string]any{
+					acpprofile.AgentCodexID: map[string]any{
+						"enabled":    true,
+						"setup_mode": "api_key",
+						"managed": map[string]any{
+							"api_key": "sk-secret",
+						},
+					},
 				},
 			},
 		},
+	})
+	if err != nil {
+		t.Fatalf("prepareACPWorkspaceConfig() error = %v", err)
 	}
-	if err := handler.prepareACPWorkspaceConfig(context.Background(), apiKeyLocalBot); err != nil {
-		t.Fatalf("local backend should be skipped: %v", err)
+	// Desktop BYOK: local api_key config is written to the bot-scoped .codex dir
+	// (the bridge maps /data/.codex onto the workspace root on the local side).
+	if writes := recorder.writes(); len(writes) != 2 {
+		t.Fatalf("writes len = %d, want config.toml + auth.json: %#v", len(writes), writes)
 	}
 }
 

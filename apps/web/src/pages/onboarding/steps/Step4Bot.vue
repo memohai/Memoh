@@ -18,22 +18,25 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@memohai/ui'
-import { SquarePen, CircleHelp, Bot } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { SquarePen, CircleHelp, Bot, LoaderCircle } from 'lucide-vue-next'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, getAcpProfiles, putBotsByBotIdSettings, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
 import { useOnboarding } from '@/composables/useOnboarding'
+import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
+import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
+import { readACPSelection, type OnboardingACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
@@ -44,8 +47,46 @@ const { visible, exiting, leave } = useStepTransition()
 const workspaceVisible = ref(false)
 const submitting = ref(false)
 
+const acpSelection = ref<OnboardingACPSelection | null>(null)
+const acpProfiles = ref<AcpprofilePublicProfile[]>([])
+
+const isACPSelected = computed(() => !!acpSelection.value)
+const acpAgentId = computed(() => acpSelection.value?.agentId ?? '')
+const acpAgentName = computed(() => acpAgentDisplayName(acpAgentId.value))
+
+// OAuth runs only after the bot + workspace exist, so it lives in a post-create
+// phase of this step (bot-scoped endpoints have no user-scoped equivalent).
+const oauthPhase = ref<'idle' | 'pending'>('idle')
+const oauthVisible = ref(false)
+const oauthBotId = ref('')
+const claudeCode = ref('')
+const {
+  codexStatus,
+  claudeStatus,
+  authorizingCodex,
+  authorizingClaude,
+  exchangingClaude,
+  claudeSessionId,
+  loadCodexStatus,
+  loadClaudeStatus,
+  authorizeCodex,
+  authorizeClaude,
+  exchangeClaude,
+} = useACPOAuth(() => oauthBotId.value)
+
 onMounted(() => {
   void capabilities.load()
+  acpSelection.value = readACPSelection()
+  if (acpSelection.value) {
+    void (async () => {
+      try {
+        const { data } = await getAcpProfiles({ throwOnError: true })
+        acpProfiles.value = data?.items ?? []
+      } catch {
+        acpProfiles.value = []
+      }
+    })()
+  }
 })
 
 const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
@@ -126,29 +167,50 @@ const { mutateAsync: createBot } = useMutation({
   onSettled: () => queryCache.invalidateQueries({ key: getBotsQueryKey() }),
 })
 
+const isLocalWorkspace = computed(() => localWorkspaceEnabled.value && form.workspace_backend === 'local')
+
+function buildMetadata(): Record<string, unknown> | undefined {
+  let metadata: Record<string, unknown> = isLocalWorkspace.value
+    ? { workspace: { backend: 'local' } }
+    : {}
+
+  const selection = acpSelection.value
+  if (selection) {
+    const acpForm: ACPForm = {
+      agents: {
+        [selection.agentId]: {
+          enabled: true,
+          setup_mode: selection.setupMode,
+          managed: selection.setupMode === 'api_key' ? selection.managed : {},
+        },
+      },
+    }
+    metadata = withACPMetadata(metadata, acpForm, acpProfiles.value)
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined
+}
+
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
 
-  const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
-    ? {
-        workspace: {
-          backend: 'local' as const,
-        },
-      }
-    : undefined
-
-  const tz = undefined
-
   try {
+    // Ensure deployment capabilities are resolved (and the workspace-backend
+    // watcher has flushed) before reading isLocalWorkspace / building metadata,
+    // so a fast submit on desktop can't create a container bot or enter the
+    // OAuth phase the backend would reject.
+    await capabilities.load()
+    await nextTick()
+
     const bot = await createBot({
       body: {
         display_name: form.display_name.trim(),
         avatar_url: form.avatar_url.trim() || undefined,
-        timezone: tz,
+        timezone: undefined,
         is_active: true,
         acl_preset: defaultAclPreset,
-        metadata,
+        metadata: buildMetadata(),
         wait_for_ready: true,
       },
     })
@@ -172,12 +234,61 @@ async function handleSubmit() {
       }
     }
 
+    // OAuth (managed token injection) is BYOK: it works for both container and
+    // local/desktop workspaces. For local the token is written to the bot-scoped
+    // managed config, so this phase runs regardless of backend.
+    if (botId && acpSelection.value?.setupMode === 'oauth') {
+      enterOAuthPhase(botId)
+      return
+    }
+
     leave(nextStep)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     submitting.value = false
   }
+}
+
+function enterOAuthPhase(botId: string) {
+  oauthBotId.value = botId
+  oauthPhase.value = 'pending'
+  claudeCode.value = ''
+  oauthVisible.value = false
+  nextFrame(() => {
+    oauthVisible.value = true
+  })
+  if (isCodexAgent(acpAgentId.value)) void loadCodexStatus()
+  if (isClaudeCodeAgent(acpAgentId.value)) void loadClaudeStatus()
+}
+
+const oauthAuthorized = computed(() => {
+  if (isCodexAgent(acpAgentId.value)) return !!codexStatus.value?.has_token
+  if (isClaudeCodeAgent(acpAgentId.value)) return !!claudeStatus.value?.has_token
+  return false
+})
+
+async function authorizeCodexFlow() {
+  const ok = await authorizeCodex()
+  if (ok) toast.success(t('onboarding.bot.acp.oauthSuccess'))
+}
+
+async function authorizeClaudeFlow() {
+  await authorizeClaude()
+}
+
+async function exchangeClaudeFlow() {
+  const ok = await exchangeClaude(claudeCode.value)
+  if (ok) {
+    claudeCode.value = ''
+    toast.success(t('onboarding.bot.acp.oauthSuccess'))
+  } else {
+    toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
+  }
+}
+
+function continueFromOAuth() {
+  leave(nextStep)
 }
 </script>
 
@@ -195,7 +306,10 @@ async function handleSubmit() {
           {{ t('onboarding.bot.title') }}
         </h2>
 
-        <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
+        <div
+          v-show="oauthPhase !== 'pending'"
+          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
+        >
           <form
             @submit.prevent="handleSubmit"
           >
@@ -256,6 +370,20 @@ async function handleSubmit() {
             </div>
 
             <div
+              v-if="isACPSelected"
+              class="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5 transition-all duration-[350ms] ease-out delay-[120ms]"
+              :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+              <component
+                :is="acpAgentIcon(acpAgentId, true)"
+                class="size-5 shrink-0"
+              />
+              <p class="text-sm text-muted-foreground">
+                {{ t('onboarding.bot.acp.banner', { agent: acpAgentName }) }}
+              </p>
+            </div>
+            <div
+              v-else
               class="transition-all duration-[350ms] ease-out delay-[120ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
@@ -347,6 +475,108 @@ async function handleSubmit() {
         </div>
 
         <div
+          v-if="oauthPhase === 'pending'"
+          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
+        >
+          <div
+            class="flex items-center gap-3 transition-all duration-[350ms] ease-out"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <component
+              :is="acpAgentIcon(acpAgentId, true)"
+              class="size-7 shrink-0"
+            />
+            <div>
+              <h3 class="text-lg font-semibold">
+                {{ t('onboarding.bot.acp.oauthTitle', { agent: acpAgentName }) }}
+              </h3>
+              <p
+                class="text-xs"
+                :class="oauthAuthorized ? 'text-muted-foreground' : 'text-destructive'"
+              >
+                {{ oauthAuthorized ? t('onboarding.bot.acp.oauthAuthorized') : t('onboarding.bot.acp.oauthNotAuthorized') }}
+              </p>
+            </div>
+          </div>
+
+          <p
+            class="mt-4 text-sm text-muted-foreground leading-relaxed transition-all duration-[350ms] ease-out delay-[60ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            {{ t('onboarding.bot.acp.oauthDescription') }}
+          </p>
+
+          <div
+            v-if="isCodexAgent(acpAgentId)"
+            class="mt-5 transition-all duration-[350ms] ease-out delay-[100ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              class="h-10 shadow-none"
+              :disabled="authorizingCodex"
+              @click="authorizeCodexFlow"
+            >
+              <LoaderCircle
+                v-if="authorizingCodex"
+                class="size-4 animate-spin"
+              />
+              {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
+            </Button>
+          </div>
+
+          <div
+            v-else-if="isClaudeCodeAgent(acpAgentId)"
+            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
+            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <Button
+              type="button"
+              variant="outline"
+              class="h-10 shadow-none"
+              :disabled="authorizingClaude"
+              @click="authorizeClaudeFlow"
+            >
+              <LoaderCircle
+                v-if="authorizingClaude"
+                class="size-4 animate-spin"
+              />
+              {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
+            </Button>
+
+            <div
+              v-if="claudeSessionId && !oauthAuthorized"
+              class="space-y-2"
+            >
+              <p class="text-xs text-muted-foreground leading-relaxed">
+                {{ t('onboarding.bot.acp.oauthCodeHint') }}
+              </p>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  v-model="claudeCode"
+                  :placeholder="t('onboarding.bot.acp.oauthCodePlaceholder')"
+                  class="h-10 min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  class="h-10 shrink-0 shadow-none"
+                  :disabled="exchangingClaude"
+                  @click="exchangeClaudeFlow"
+                >
+                  <LoaderCircle
+                    v-if="exchangingClaude"
+                    class="size-4 animate-spin"
+                  />
+                  {{ t('onboarding.bot.acp.oauthExchange') }}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="oauthPhase !== 'pending'"
           class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[220ms]"
           :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
         >
@@ -378,6 +608,25 @@ async function handleSubmit() {
                 {{ ctaLabel }}
               </span>
             </Transition>
+          </button>
+        </div>
+
+        <div
+          v-else
+          class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[350ms] ease-out delay-[140ms]"
+          :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+        >
+          <button
+            class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            @click="continueFromOAuth"
+          >
+            {{ t('onboarding.bot.acp.oauthSkip') }}
+          </button>
+          <button
+            class="inline-flex h-[42px] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            @click="continueFromOAuth"
+          >
+            {{ t('onboarding.next') }}
           </button>
         </div>
 
