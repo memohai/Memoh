@@ -1040,4 +1040,404 @@ describe('chat-list store', () => {
     await first
     await second
   })
+
+  it('keeps a session busy while a background exec task is running', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-bg', bot_id: 'bot-1', title: 'Background task', type: 'chat' },
+    ])
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        role: 'assistant',
+        id: 'turn-bg',
+        timestamp: '2026-06-05T08:00:00.000Z',
+        messages: [
+          {
+            id: 1,
+            type: 'tool',
+            name: 'exec',
+            tool_call_id: 'call-bg',
+            input: { command: 'npm install' },
+            output: {
+              structuredContent: {
+                status: 'background_started',
+                task_id: 'bg_task_1',
+                output_file: '/tmp/memoh-bg/bg_task_1.log',
+              },
+            },
+            background_task: {
+              task_id: 'bg_task_1',
+              status: 'running',
+              command: 'npm install',
+              output_file: '/tmp/memoh-bg/bg_task_1.log',
+            },
+            running: true,
+          },
+        ],
+      },
+    ])
+
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+
+    expect(store.streaming).toBe(false)
+    expect(store.busy).toBe(true)
+    expect(store.isSessionBusy('session-bg')).toBe(true)
+
+    const blocked = await store.sendMessage('second request')
+    expect(blocked).toMatchObject({ ok: false, stage: 'startup' })
+    expect(sentWSMessages).toHaveLength(0)
+
+    messageEventsHandler?.({
+      type: 'background_task',
+      bot_id: 'bot-1',
+      event: 'completed',
+      task: {
+        task_id: 'bg_task_1',
+        session_id: 'session-bg',
+        status: 'completed',
+        command: 'npm install',
+        output_file: '/tmp/memoh-bg/bg_task_1.log',
+      },
+    } as MessageStreamEvent)
+
+    expect(store.busy).toBe(true)
+    expect(store.backgroundHandoff).toBe(true)
+    expect(store.isSessionBusy('session-bg')).toBe(true)
+
+    const stillBlocked = await store.sendMessage('third request')
+    expect(stillBlocked).toMatchObject({ ok: false, stage: 'startup' })
+    expect(sentWSMessages).toHaveLength(0)
+
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'start',
+        stream_id: 'stream-after-bg',
+        session_id: 'session-bg',
+      },
+    } as MessageStreamEvent)
+    expect(store.backgroundHandoff).toBe(false)
+    expect(store.busy).toBe(true)
+
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'message',
+        stream_id: 'stream-after-bg',
+        session_id: 'session-bg',
+        data: { id: 1, type: 'text', content: 'done' },
+      },
+    } as MessageStreamEvent)
+
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0]).toMatchObject({
+      role: 'assistant',
+      messages: [
+        expect.objectContaining({ type: 'tool', toolCallId: 'call-bg' }),
+        expect.objectContaining({ type: 'text', content: 'done' }),
+      ],
+    })
+
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'end',
+        stream_id: 'stream-after-bg',
+        session_id: 'session-bg',
+      },
+    } as MessageStreamEvent)
+    await flushPromises()
+
+    expect(store.busy).toBe(false)
+    expect(store.isSessionBusy('session-bg')).toBe(false)
+  })
+
+  it('keeps a session busy when a message refresh marks a background exec task completed', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-bg-refresh', bot_id: 'bot-1', title: 'Background task refresh', type: 'chat' },
+    ])
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      {
+        role: 'assistant',
+        id: 'turn-bg-refresh',
+        timestamp: '2026-06-05T08:00:00.000Z',
+        messages: [
+          {
+            id: 1,
+            type: 'tool',
+            name: 'exec',
+            tool_call_id: 'call-bg-refresh',
+            input: { command: 'pnpm install' },
+            output: {
+              structuredContent: {
+                status: 'background_started',
+                task_id: 'bg_task_refresh',
+                output_file: '/tmp/memoh-bg/bg_task_refresh.log',
+              },
+            },
+            background_task: {
+              task_id: 'bg_task_refresh',
+              status: 'running',
+              session_id: 'session-bg-refresh',
+              command: 'pnpm install',
+              output_file: '/tmp/memoh-bg/bg_task_refresh.log',
+            },
+            running: true,
+          },
+        ],
+      },
+    ])
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+
+    expect(store.busy).toBe(true)
+
+    vi.useFakeTimers()
+    try {
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          role: 'assistant',
+          id: 'turn-bg-refresh',
+          timestamp: '2026-06-05T08:00:00.000Z',
+          messages: [
+            {
+              id: 1,
+              type: 'tool',
+              name: 'exec',
+              tool_call_id: 'call-bg-refresh',
+              input: { command: 'pnpm install' },
+              output: {
+                structuredContent: {
+                  status: 'completed',
+                  task_id: 'bg_task_refresh',
+                  output_file: '/tmp/memoh-bg/bg_task_refresh.log',
+                },
+              },
+              background_task: {
+                task_id: 'bg_task_refresh',
+                status: 'completed',
+                session_id: 'session-bg-refresh',
+                command: 'pnpm install',
+                output_file: '/tmp/memoh-bg/bg_task_refresh.log',
+              },
+              running: false,
+            },
+          ],
+        },
+      ])
+
+      messageEventsHandler?.({
+        type: 'message_created',
+        bot_id: 'bot-1',
+        message: {
+          id: 'message-bg-refresh',
+          bot_id: 'bot-1',
+          session_id: 'session-bg-refresh',
+          role: 'assistant',
+          created_at: '2026-06-05T08:00:10.000Z',
+        },
+      })
+
+      await vi.advanceTimersByTimeAsync(100)
+      await Promise.resolve()
+
+      expect(store.busy).toBe(true)
+      expect(store.backgroundHandoff).toBe(true)
+      expect(store.isSessionBusy('session-bg-refresh')).toBe(true)
+      expect(store.messages).toHaveLength(1)
+      expect(store.messages[0]).toMatchObject({
+        role: 'assistant',
+        messages: [
+          expect.objectContaining({
+            type: 'tool',
+            toolCallId: 'call-bg-refresh',
+            running: false,
+            done: true,
+            backgroundTask: expect.objectContaining({ status: 'completed' }),
+          }),
+        ],
+      })
+
+      const stillBlocked = await store.sendMessage('third request')
+      expect(stillBlocked).toMatchObject({ ok: false, stage: 'startup' })
+      expect(sentWSMessages).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps thinking after a live exec tool starts a background task without a background_task field', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-live-bg', bot_id: 'bot-1', title: 'Live background task', type: 'chat' },
+    ])
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'start',
+        stream_id: 'stream-live-bg',
+        session_id: 'session-live-bg',
+      },
+    } as MessageStreamEvent)
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'message',
+        stream_id: 'stream-live-bg',
+        session_id: 'session-live-bg',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          tool_call_id: 'call-live-bg',
+          input: { command: 'sleep 10 && echo done' },
+          output: {
+            structuredContent: {
+              status: 'background_started',
+              task_id: 'bg_live_1',
+              output_file: '/tmp/memoh-bg/bg_live_1.log',
+            },
+          },
+          running: false,
+        },
+      },
+    } as MessageStreamEvent)
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'end',
+        stream_id: 'stream-live-bg',
+        session_id: 'session-live-bg',
+      },
+    } as MessageStreamEvent)
+
+    const assistant = store.messages.find(message => message.role === 'assistant')
+    const tool = assistant?.role === 'assistant' ? assistant.messages[0] : undefined
+
+    expect(store.streaming).toBe(false)
+    expect(store.busy).toBe(true)
+    expect(store.isSessionBusy('session-live-bg')).toBe(true)
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
+    expect(assistant).toMatchObject({ streaming: false })
+    expect(tool).toMatchObject({
+      type: 'tool',
+      toolCallId: 'call-live-bg',
+      running: true,
+      done: false,
+      backgroundTask: {
+        taskId: 'bg_live_1',
+        status: 'running',
+        command: 'sleep 10 && echo done',
+      },
+    })
+  })
+
+  it('keeps the handoff active when a refreshed system task notification completes a live background exec', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-live-refresh', bot_id: 'bot-1', title: 'Live background refresh', type: 'chat' },
+    ])
+    api.fetchMessagesUI.mockResolvedValueOnce([])
+
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'start',
+        stream_id: 'stream-live-refresh',
+        session_id: 'session-live-refresh',
+      },
+    } as MessageStreamEvent)
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'message',
+        stream_id: 'stream-live-refresh',
+        session_id: 'session-live-refresh',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          tool_call_id: 'call-live-refresh',
+          input: { command: 'sleep 10 && echo done' },
+          output: {
+            structuredContent: {
+              status: 'background_started',
+              task_id: 'bg_live_refresh',
+              output_file: '/tmp/memoh-bg/bg_live_refresh.log',
+            },
+          },
+          running: false,
+        },
+      },
+    } as MessageStreamEvent)
+    messageEventsHandler?.({
+      type: 'agent_stream',
+      bot_id: 'bot-1',
+      stream: {
+        type: 'end',
+        stream_id: 'stream-live-refresh',
+        session_id: 'session-live-refresh',
+      },
+    } as MessageStreamEvent)
+
+    expect(store.busy).toBe(true)
+    store.messages.splice(0, store.messages.length)
+    expect(store.isSessionBusy('session-live-refresh')).toBe(true)
+
+    vi.useFakeTimers()
+    try {
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          role: 'system',
+          kind: 'background_task',
+          id: 'notification-live-refresh',
+          timestamp: '2026-06-05T08:00:10.000Z',
+          background_task: {
+            task_id: 'bg_live_refresh',
+            status: 'completed',
+            session_id: 'session-live-refresh',
+            command: 'sleep 10 && echo done',
+            output_file: '/tmp/memoh-bg/bg_live_refresh.log',
+          },
+        },
+      ])
+
+      messageEventsHandler?.({
+        type: 'message_created',
+        bot_id: 'bot-1',
+        message: {
+          id: 'notification-live-refresh',
+          bot_id: 'bot-1',
+          session_id: 'session-live-refresh',
+          role: 'user',
+          created_at: '2026-06-05T08:00:10.000Z',
+        },
+      })
+
+      await vi.advanceTimersByTimeAsync(100)
+      await Promise.resolve()
+
+      expect(store.backgroundHandoff).toBe(true)
+      expect(store.busy).toBe(true)
+      expect(store.isSessionBusy('session-live-refresh')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

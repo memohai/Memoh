@@ -64,23 +64,9 @@
         {{ message.senderDisplayName || senderFallbackName }}
       </p> -->
 
-      <!-- Background task status -->
-      <div
-        v-if="message.role === 'system' && message.kind === 'background_task'"
-        class="space-y-1"
-      >
-        <BackgroundTaskBlock :task="message.backgroundTask" />
-        <p
-          class="text-xs text-muted-foreground/80 mt-1"
-          :title="fullTimestamp"
-        >
-          {{ relativeTimestamp }}
-        </p>
-      </div>
-
       <!-- Heartbeat trigger (replaces user message) -->
       <div
-        v-else-if="message.role === 'user' && sessionType === 'heartbeat'"
+        v-if="message.role === 'user' && sessionType === 'heartbeat'"
         class="space-y-2"
       >
         <HeartbeatTriggerBlock
@@ -295,7 +281,7 @@
 
         <!-- Streaming indicator -->
         <div
-          v-if="message.streaming && !hasVisibleAssistantBlocks"
+          v-if="showThinkingIndicator"
           class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
           <LoaderCircle class="size-3.5 animate-spin" />
@@ -322,7 +308,6 @@ import { useSettingsStore } from '@/store/settings'
 import ThinkingBlock from './thinking-block.vue'
 import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
-import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
 import ScheduleTriggerBlock from './schedule-trigger-block.vue'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
@@ -362,6 +347,7 @@ const props = defineProps<{
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
   isScrolling: boolean
+  handoffThinking?: boolean
 }>()
 
 const isVisible = useElementVisibility(messageEl, {
@@ -477,8 +463,52 @@ const hasVisibleAssistantBlocks = computed(() =>
   && props.message.messages.some(isVisibleAssistantBlock),
 )
 
+const hasActiveBackgroundTool = computed(() =>
+  props.message.role === 'assistant'
+  && props.message.messages.some((block) => {
+    if (block.type !== 'tool') return false
+    const status = (block.backgroundTask?.status ?? '').trim().toLowerCase()
+    return status === 'running' || status === 'stalled'
+  }),
+)
+
+function isTerminalBackgroundTool(block: ContentBlock | null): boolean {
+  if (!block || block.type !== 'tool') return false
+  const task = block.backgroundTask
+  if (!task?.taskId) return false
+  const status = (task.status ?? '').trim().toLowerCase()
+  return status === 'completed' || status === 'failed' || status === 'killed'
+}
+
+const lastVisibleAssistantBlock = computed(() => {
+  if (props.message.role !== 'assistant') return null
+  for (let i = props.message.messages.length - 1; i >= 0; i -= 1) {
+    const block = props.message.messages[i]
+    if (block && isVisibleAssistantBlock(block)) return block
+  }
+  return null
+})
+
+const showThinkingIndicator = computed(() =>
+  props.message.role === 'assistant'
+  && (
+    (props.message.streaming && !hasVisibleAssistantBlocks.value)
+    || hasActiveBackgroundTool.value
+    || props.handoffThinking === true
+    || (props.message.streaming && isTerminalBackgroundTool(lastVisibleAssistantBlock.value))
+  ),
+)
+
 const shouldRenderMessage = computed(() =>
-  props.message.role !== 'assistant' || hasVisibleAssistantBlocks.value || props.message.streaming,
+  props.message.role === 'system'
+    ? props.message.kind !== 'background_task'
+    : (
+        props.message.role !== 'assistant'
+        || hasVisibleAssistantBlocks.value
+        || props.message.streaming
+        || hasActiveBackgroundTool.value
+        || props.handoffThinking === true
+      ),
 )
 
 function isVisibleAssistantBlock(block: ContentBlock): boolean {
