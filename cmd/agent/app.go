@@ -1166,7 +1166,7 @@ func (c *lazyLLMClient) Decide(ctx context.Context, req memprovider.DecideReques
 }
 
 func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
-	client, err := c.resolve(ctx, "")
+	client, err := c.resolve(ctx, req.BotID)
 	if err != nil {
 		return memprovider.CompactResponse{}, err
 	}

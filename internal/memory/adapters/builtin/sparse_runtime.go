@@ -41,6 +41,7 @@ type sparseMemoryStore interface {
 	RemoveMemories(ctx context.Context, botID string, ids []string) error
 	RemoveAllMemories(ctx context.Context, botID string) error
 	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
+	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
 	SyncOverview(ctx context.Context, botID string) error
 	CountMemoryFiles(ctx context.Context, botID string) (int, error)
 }
@@ -302,6 +303,47 @@ func (r *sparseRuntime) Compact(ctx context.Context, filters map[string]any, rat
 		AfterCount:  len(kept),
 		Ratio:       ratio,
 		Results:     kept,
+	}, nil
+}
+
+func (r *sparseRuntime) CompactWithLLM(ctx context.Context, filters map[string]any, ratio float64, decayDays int, llm adapters.LLM) (adapters.CompactResult, error) {
+	botID, err := runtimeBotID("", filters)
+	if err != nil {
+		return adapters.CompactResult{}, err
+	}
+	if ratio <= 0 || ratio > 1 {
+		return adapters.CompactResult{}, errors.New("ratio must be in range (0, 1]")
+	}
+	all, err := r.store.ReadAllMemoryFiles(ctx, botID)
+	if err != nil {
+		return adapters.CompactResult{}, err
+	}
+	before := len(all)
+	if before == 0 {
+		return adapters.CompactResult{BeforeCount: 0, AfterCount: 0, Ratio: ratio, Results: []adapters.MemoryItem{}}, nil
+	}
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].UpdatedAt > all[j].UpdatedAt
+	})
+	compactedStore, archivedStore, err := compactStoreItemsWithLLM(ctx, botID, all, ratio, decayDays, llm)
+	if err != nil {
+		return adapters.CompactResult{}, err
+	}
+	if err := r.store.ArchiveAndRebuildFiles(ctx, botID, compactedStore, archivedStore, filters); err != nil {
+		return adapters.CompactResult{}, err
+	}
+	if _, err := r.Rebuild(ctx, botID); err != nil {
+		return adapters.CompactResult{}, err
+	}
+	compacted := make([]adapters.MemoryItem, 0, len(compactedStore))
+	for _, item := range compactedStore {
+		compacted = append(compacted, memoryItemFromStore(item))
+	}
+	return adapters.CompactResult{
+		BeforeCount: before,
+		AfterCount:  len(compacted),
+		Ratio:       ratio,
+		Results:     compacted,
 	}, nil
 }
 

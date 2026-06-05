@@ -212,6 +212,14 @@ export type AdaptersHealthStatus = {
     ok?: boolean;
 };
 
+export type AdaptersMemoryCompactCapability = {
+    archive?: boolean;
+    native?: boolean;
+    reason?: string;
+    rebuild_index?: boolean;
+    semantic?: boolean;
+};
+
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
@@ -231,6 +239,7 @@ export type AdaptersMemoryItem = {
 
 export type AdaptersMemoryStatusResponse = {
     can_manual_sync?: boolean;
+    compact?: AdaptersMemoryCompactCapability;
     encoder?: AdaptersHealthStatus;
     indexed_count?: number;
     markdown_file_count?: number;
@@ -5589,6 +5598,10 @@ export type PostBotsByBotIdMemoryCompactErrors = {
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Not Implemented
+     */
+    501: HandlersErrorResponse;
     /**
      * Service Unavailable
      */

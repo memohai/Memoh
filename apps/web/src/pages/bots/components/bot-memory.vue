@@ -30,7 +30,7 @@
                           size="sm"
                           type="button"
                           class="size-8 p-0 hover:bg-muted/50 group"
-                          :disabled="loading || compactLoading || memories.length === 0"
+                          :disabled="compactDisabled"
                           :aria-label="$t('bots.memory.compact')"
                           @click="openCompactDialog"
                         >
@@ -42,7 +42,7 @@
                         align="center"
                       >
                         <p class="text-[11px]">
-                          {{ $t('bots.memory.compact') }}
+                          {{ compactTooltip }}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -166,7 +166,7 @@
                     class="size-8 p-0 hover:bg-muted/50 group"
                     :disabled="loading"
                     :aria-label="$t('common.refresh')"
-                    @click="loadMemories"
+                    @click="refreshMemoryView"
                   >
                     <RefreshCw
                       :class="{ 'animate-spin': loading }"
@@ -622,6 +622,7 @@ import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatDateTimeSeconds } from '@/utils/date-time'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useSettingsStore } from '@/store/settings'
 
 use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent])
@@ -671,6 +672,7 @@ const compactLoading = ref(false)
 const denseSearchLoading = ref(false)
 const memories = ref<MemoryItem[]>([])
 const memoryStatus = ref<AdaptersMemoryStatusResponse | null>(null)
+const memoryStatusError = ref('')
 const denseSearchResults = ref<Array<{ id: string; memory: string; score: number }>>([])
 const searchQuery = ref('')
 const selectedId = ref<string | null>(null)
@@ -695,6 +697,24 @@ const hasSparseExplain = computed(() =>
   selectedTopKBuckets.value.length > 0 && selectedCdfCurve.value.length > 0,
 )
 const memoryMode = computed(() => memoryStatus.value?.memory_mode ?? 'off')
+const compactCapability = computed(() => memoryStatus.value?.compact)
+const canSemanticCompact = computed(() => compactCapability.value?.semantic === true)
+const compactUnavailableReason = computed(() => {
+  if (canSemanticCompact.value) return ''
+  const reason = compactCapability.value?.reason
+  if (typeof reason === 'string' && reason.trim()) return reason.trim()
+  if (memoryStatusError.value) return memoryStatusError.value
+  if (!memoryStatus.value) return t('bots.memory.compactChecking')
+  return t('bots.memory.compactUnsupported')
+})
+const compactDisabled = computed(() =>
+  loading.value || compactLoading.value || memories.value.length === 0 || !canSemanticCompact.value,
+)
+const compactTooltip = computed(() => {
+  if (!canSemanticCompact.value) return compactUnavailableReason.value
+  if (memories.value.length === 0) return t('bots.memory.compactNoMemories')
+  return t('bots.memory.compact')
+})
 const isDenseMode = computed(() => memoryMode.value === 'dense')
 const hasDenseExplain = computed(() => denseSearchResults.value.length > 0)
 const showChartSection = computed(() =>
@@ -1123,10 +1143,19 @@ async function loadMemoryStatus() {
       throwOnError: true,
     })
     memoryStatus.value = data ?? null
+    memoryStatusError.value = ''
   } catch (error) {
     console.error('Failed to load memory status:', error)
     memoryStatus.value = null
+    memoryStatusError.value = resolveApiErrorMessage(error, t('bots.memory.compactStatusUnavailable'))
   }
+}
+
+async function refreshMemoryView() {
+  await Promise.all([
+    loadMemories(),
+    loadMemoryStatus(),
+  ])
 }
 
 async function loadDenseSearchDiagnostics(memory: MemoryItem | null) {
@@ -1298,7 +1327,7 @@ async function handleDelete() {
 }
 
 function openCompactDialog() {
-  if (loading.value || compactLoading.value || memories.value.length === 0) return
+  if (compactDisabled.value) return
 
   if (!compactPopoverOpen.value) {
     compactRatio.value = '0.5'
@@ -1308,6 +1337,10 @@ function openCompactDialog() {
 }
 
 async function handleCompact() {
+  if (!canSemanticCompact.value) {
+    toast.error(compactUnavailableReason.value || t('bots.memory.compactUnsupported'))
+    return
+  }
   compactLoading.value = true
   try {
     await postBotsByBotIdMemoryCompact({
@@ -1324,7 +1357,7 @@ async function handleCompact() {
     selectedId.value = null
   } catch (error) {
     console.error('Failed to compact memory:', error)
-    toast.error(t('bots.memory.compactFailed'))
+    toast.error(resolveApiErrorMessage(error, t('bots.memory.compactFailed')))
   } finally {
     compactLoading.value = false
   }

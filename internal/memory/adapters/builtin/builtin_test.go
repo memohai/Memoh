@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/memohai/memoh/internal/config"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/sparse"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
 func TestBuiltinProviderNilService(t *testing.T) {
@@ -27,6 +29,38 @@ func TestBuiltinProviderNilService(t *testing.T) {
 	}
 	if result != nil {
 		t.Fatalf("expected nil result for nil service, got %+v", result)
+	}
+}
+
+func TestBuiltinProviderSemanticCompactCapability(t *testing.T) {
+	t.Parallel()
+	encoder := &fakeSparseEncoder{}
+	index := newFakeSparseIndex(encoder)
+	store := newFakeSparseStore()
+	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	p := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+
+	withoutLLM := p.SemanticCompactCapability()
+	if withoutLLM.Semantic {
+		t.Fatal("semantic compact should be unavailable without an LLM")
+	}
+	if withoutLLM.Reason == "" {
+		t.Fatal("expected unavailable semantic compact to explain why")
+	}
+
+	p.SetLLM(&fakeLLM{})
+	withLLM := p.SemanticCompactCapability()
+	if !withLLM.Semantic {
+		t.Fatalf("semantic compact should be available with LLM and runtime support: %+v", withLLM)
+	}
+	if !withLLM.Archive {
+		t.Fatalf("semantic compact should advertise source archive support: %+v", withLLM)
+	}
+	if !withLLM.RebuildIndex {
+		t.Fatalf("semantic compact should advertise index rebuild support for indexed runtime: %+v", withLLM)
+	}
+	if withLLM.Reason != "" {
+		t.Fatalf("available semantic compact should not include unavailable reason: %+v", withLLM)
 	}
 }
 
@@ -112,6 +146,169 @@ func TestBuiltinProviderApplyProviderConfigNil(t *testing.T) {
 	p.ApplyProviderConfig(nil)
 	if p.packer.TargetItems != defaultPackerConfig.TargetItems {
 		t.Fatalf("expected default TargetItems, got %d", p.packer.TargetItems)
+	}
+}
+
+func TestBuiltinProviderCompactUsesLLMResults(t *testing.T) {
+	t.Parallel()
+	encoder := &fakeSparseEncoder{}
+	index := newFakeSparseIndex(encoder)
+	store := newFakeSparseStore(
+		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes black tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_3", Memory: "Ran works in Berlin", CreatedAt: "2026-06-03T00:00:00Z", UpdatedAt: "2026-06-03T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_4", Memory: "Ran uses Vim", CreatedAt: "2026-06-04T00:00:00Z", UpdatedAt: "2026-06-04T00:00:00Z"},
+	)
+	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	llm := &fakeLLM{
+		compactFacts: []string{
+			"Ran likes tea, especially black tea and oolong.",
+			"Ran works in Berlin.",
+		},
+	}
+	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	provider.SetLLM(llm)
+
+	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 30)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if llm.compactCalls != 1 {
+		t.Fatalf("expected LLM compact to be called once, got %d", llm.compactCalls)
+	}
+	if len(llm.compactReqs) != 1 {
+		t.Fatalf("expected one compact request, got %d", len(llm.compactReqs))
+	}
+	req := llm.compactReqs[0]
+	if req.TargetCount != 2 {
+		t.Fatalf("expected target_count=2, got %d", req.TargetCount)
+	}
+	if req.DecayDays != 30 {
+		t.Fatalf("expected decay_days=30, got %d", req.DecayDays)
+	}
+	if len(req.Memories) != 4 {
+		t.Fatalf("expected 4 candidate memories, got %d", len(req.Memories))
+	}
+	if result.BeforeCount != 4 || result.AfterCount != 2 {
+		t.Fatalf("unexpected counts: before=%d after=%d", result.BeforeCount, result.AfterCount)
+	}
+	got := map[string]bool{}
+	for _, item := range store.items {
+		got[item.Memory] = true
+	}
+	for _, fact := range llm.compactFacts {
+		if !got[fact] {
+			t.Fatalf("expected compacted fact %q in store, got %#v", fact, got)
+		}
+	}
+	if len(store.archive) != 4 {
+		t.Fatalf("expected 4 archived source memories, got %d", len(store.archive))
+	}
+	for _, item := range store.archive {
+		if item.Metadata["compacted_at"] == nil {
+			t.Fatalf("expected archived memory %s to record compacted_at metadata: %#v", item.ID, item.Metadata)
+		}
+		if item.Metadata["superseded_by"] == nil {
+			t.Fatalf("expected archived memory %s to record superseded_by metadata: %#v", item.ID, item.Metadata)
+		}
+	}
+}
+
+func TestBuiltinProviderCompactRequiresSemanticCompactCapability(t *testing.T) {
+	t.Parallel()
+	encoder := &fakeSparseEncoder{}
+	index := newFakeSparseIndex(encoder)
+	store := newFakeSparseStore(
+		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Ran likes black tea", CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
+	)
+	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+
+	if _, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0); err == nil {
+		t.Fatal("expected compact without LLM to fail instead of truncating memories")
+	}
+}
+
+func TestBuiltinProviderCompactPreservesPinnedMemories(t *testing.T) {
+	t.Parallel()
+	encoder := &fakeSparseEncoder{}
+	index := newFakeSparseIndex(encoder)
+	store := newFakeSparseStore(
+		storefs.MemoryItem{ID: "bot-1:mem_1", Memory: "Pinned preference", Metadata: map[string]any{"pinned": true}, CreatedAt: "2026-06-01T00:00:00Z", UpdatedAt: "2026-06-01T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_2", Memory: "Read-only profile", Metadata: map[string]any{"read_only": "true"}, CreatedAt: "2026-06-02T00:00:00Z", UpdatedAt: "2026-06-02T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_3", Memory: "Ran likes green tea", CreatedAt: "2026-06-03T00:00:00Z", UpdatedAt: "2026-06-03T00:00:00Z"},
+		storefs.MemoryItem{ID: "bot-1:mem_4", Memory: "Ran likes oolong tea", CreatedAt: "2026-06-04T00:00:00Z", UpdatedAt: "2026-06-04T00:00:00Z"},
+	)
+	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	llm := &fakeLLM{compactFacts: []string{"Ran likes tea."}}
+	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	provider.SetLLM(llm)
+
+	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.5, 0)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if result.BeforeCount != 4 || result.AfterCount != 3 {
+		t.Fatalf("unexpected counts: before=%d after=%d", result.BeforeCount, result.AfterCount)
+	}
+	if len(llm.compactReqs) != 1 || len(llm.compactReqs[0].Memories) != 2 {
+		t.Fatalf("expected only 2 compactable memories sent to LLM, got %#v", llm.compactReqs)
+	}
+	if _, ok := store.items["bot-1:mem_1"]; !ok {
+		t.Fatal("expected pinned memory to remain active")
+	}
+	if _, ok := store.items["bot-1:mem_2"]; !ok {
+		t.Fatal("expected read-only memory to remain active")
+	}
+	if len(store.archive) != 2 {
+		t.Fatalf("expected only compactable memories archived, got %d", len(store.archive))
+	}
+}
+
+func TestBuiltinProviderCompactBatchesOversizedInputs(t *testing.T) {
+	t.Parallel()
+	encoder := &fakeSparseEncoder{}
+	index := newFakeSparseIndex(encoder)
+	items := make([]storefs.MemoryItem, 0, 24)
+	for i := 0; i < 24; i++ {
+		items = append(items, storefs.MemoryItem{
+			ID:        fmt.Sprintf("bot-1:mem_%02d", i),
+			Memory:    fmt.Sprintf("memory %02d %s", i, strings.Repeat("x", 1600)),
+			CreatedAt: "2026-06-01T00:00:00Z",
+			UpdatedAt: "2026-06-01T00:00:00Z",
+		})
+	}
+	store := newFakeSparseStore(items...)
+	runtime := &sparseRuntime{qdrant: index, encoder: encoder, store: store}
+	llm := &fakeLLM{}
+	llm.compactFunc = func(_ adapters.CompactRequest) adapters.CompactResponse {
+		return adapters.CompactResponse{Facts: []string{
+			fmt.Sprintf("summary call %02d a", llm.compactCalls),
+			fmt.Sprintf("summary call %02d b", llm.compactCalls),
+			fmt.Sprintf("summary call %02d c", llm.compactCalls),
+		}}
+	}
+	provider := NewBuiltinProvider(slog.Default(), runtime, nil, nil)
+	provider.SetLLM(llm)
+
+	result, err := provider.Compact(context.Background(), map[string]any{"bot_id": "bot-1"}, 0.25, 0)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if llm.compactCalls < 2 {
+		t.Fatalf("expected oversized input to be compacted in batches, got %d call(s)", llm.compactCalls)
+	}
+	for _, req := range llm.compactReqs {
+		if chars := compactCandidateChars(req.Memories); chars > compactMaxCandidateChars && len(req.Memories) > 1 {
+			t.Fatalf("compact request exceeded budget: chars=%d memories=%d", chars, len(req.Memories))
+		}
+	}
+	if result.AfterCount > 6 {
+		t.Fatalf("expected final compacted count <= 6, got %d", result.AfterCount)
+	}
+	if len(store.archive) != 24 {
+		t.Fatalf("expected all source memories archived, got %d", len(store.archive))
 	}
 }
 

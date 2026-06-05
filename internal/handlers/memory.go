@@ -94,10 +94,12 @@ func (h *MemoryHandler) SetSettingsService(svc *settings.Service) {
 	h.settingsService = svc
 }
 
-// resolveProvider returns the memory provider for a bot, or nil if not configured.
-func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) memprovider.Provider {
+// resolveProvider returns the memory provider for a bot. An explicitly selected
+// provider must be available; only bots without a selected provider may fall
+// back to the builtin default.
+func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memprovider.Provider, error) {
 	if h.memoryRegistry == nil {
-		return nil
+		return nil, nil
 	}
 	if h.settingsService != nil {
 		botSettings, err := h.settingsService.GetBot(ctx, botID)
@@ -106,17 +108,18 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) mempr
 			if providerID != "" {
 				p, getErr := h.memoryRegistry.Get(providerID)
 				if getErr == nil {
-					return p
+					return p, nil
 				}
 				h.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
+				return nil, fmt.Errorf("configured memory provider is unavailable: %w", getErr)
 			}
 		}
 	}
 	p, err := h.memoryRegistry.Get(defaultBuiltinProviderID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return p
+	return p, nil
 }
 
 // SetMCPClientProvider sets the gRPC client provider for filesystem persistence.
@@ -143,7 +146,11 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 }
 
 func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprovider.Provider, error) {
-	if p := h.resolveProvider(ctx, botID); p != nil {
+	p, err := h.resolveProvider(ctx, botID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
+	if p != nil {
 		return p, nil
 	}
 	return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory service not available")
@@ -422,6 +429,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
+// @Failure 501 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
 // @Router /bots/{bot_id}/memory/compact [post].
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
@@ -453,6 +461,14 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	provider, checkErr := h.checkService(c.Request().Context(), botID)
 	if checkErr != nil {
 		return checkErr
+	}
+	capability := semanticCompactCapability(provider)
+	if !capability.Semantic {
+		reason := strings.TrimSpace(capability.Reason)
+		if reason == "" {
+			reason = "selected memory provider does not support semantic compact"
+		}
+		return echo.NewHTTPError(http.StatusNotImplemented, reason)
 	}
 
 	scope := scopes[0]
@@ -579,6 +595,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	status.Compact = semanticCompactCapability(provider)
 	return c.JSON(http.StatusOK, status)
 }
 
@@ -633,6 +650,21 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 		}
 	}
 	return filters
+}
+
+func semanticCompactCapability(provider memprovider.Provider) memprovider.MemoryCompactCapability {
+	if provider == nil {
+		return memprovider.MemoryCompactCapability{Reason: "memory service not available"}
+	}
+	semanticProvider, ok := provider.(memprovider.SemanticCompactProvider)
+	if !ok {
+		return memprovider.MemoryCompactCapability{Reason: "selected memory provider does not support semantic compact"}
+	}
+	capability := semanticProvider.SemanticCompactCapability()
+	if !capability.Semantic && strings.TrimSpace(capability.Reason) == "" {
+		capability.Reason = "selected memory provider does not support semantic compact"
+	}
+	return capability
 }
 
 func deduplicateMemoryItems(items []memprovider.MemoryItem) []memprovider.MemoryItem {

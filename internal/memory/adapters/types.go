@@ -187,6 +187,7 @@ type DecideResponse struct {
 }
 
 type CompactRequest struct {
+	BotID       string            `json:"bot_id,omitempty"`
 	Memories    []CandidateMemory `json:"memories"`
 	TargetCount int               `json:"target_count"`
 	DecayDays   int               `json:"decay_days,omitempty"`
@@ -201,6 +202,14 @@ type CompactResult struct {
 	AfterCount  int          `json:"after_count"`
 	Ratio       float64      `json:"ratio"`
 	Results     []MemoryItem `json:"results"`
+}
+
+type MemoryCompactCapability struct {
+	Semantic     bool   `json:"semantic"`
+	Native       bool   `json:"native,omitempty"`
+	Archive      bool   `json:"archive,omitempty"`
+	RebuildIndex bool   `json:"rebuild_index,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type UsageResponse struct {
@@ -223,17 +232,18 @@ type HealthStatus struct {
 }
 
 type MemoryStatusResponse struct {
-	ProviderType      string       `json:"provider_type,omitempty"`
-	MemoryMode        string       `json:"memory_mode,omitempty"`
-	CanManualSync     bool         `json:"can_manual_sync"`
-	SourceDir         string       `json:"source_dir,omitempty"`
-	OverviewPath      string       `json:"overview_path,omitempty"`
-	MarkdownFileCount int          `json:"markdown_file_count,omitempty"`
-	SourceCount       int          `json:"source_count,omitempty"`
-	IndexedCount      int          `json:"indexed_count,omitempty"`
-	QdrantCollection  string       `json:"qdrant_collection,omitempty"`
-	Encoder           HealthStatus `json:"encoder"`
-	Qdrant            HealthStatus `json:"qdrant"`
+	ProviderType      string                  `json:"provider_type,omitempty"`
+	MemoryMode        string                  `json:"memory_mode,omitempty"`
+	Compact           MemoryCompactCapability `json:"compact"`
+	CanManualSync     bool                    `json:"can_manual_sync"`
+	SourceDir         string                  `json:"source_dir,omitempty"`
+	OverviewPath      string                  `json:"overview_path,omitempty"`
+	MarkdownFileCount int                     `json:"markdown_file_count,omitempty"`
+	SourceCount       int                     `json:"source_count,omitempty"`
+	IndexedCount      int                     `json:"indexed_count,omitempty"`
+	QdrantCollection  string                  `json:"qdrant_collection,omitempty"`
+	Encoder           HealthStatus            `json:"encoder"`
+	Qdrant            HealthStatus            `json:"qdrant"`
 }
 
 // Memory provider admin types.
