@@ -1,6 +1,8 @@
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 
 export const ACP_NO_PROJECT_MODE = 'none'
+export const ACP_DEFAULT_PROJECT_MODE = 'project'
+export const ACP_DEFAULT_PROJECT_PATH = '/data'
 export const ACP_NO_PROJECT_ROOT = '/data/.memoh/acp-work/no-project'
 
 export interface ACPAgentForm {
