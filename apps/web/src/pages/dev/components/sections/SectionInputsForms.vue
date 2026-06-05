@@ -6,6 +6,7 @@ import {
   Checkbox,
   Combobox, ComboboxAnchor, ComboboxEmpty, ComboboxGroup, ComboboxInput,
   ComboboxItem, ComboboxItemIndicator, ComboboxList, ComboboxTrigger,
+  Field, FieldDescription, FieldError, FieldLabel,
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
   Input,
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText, InputGroupTextarea,
@@ -21,7 +22,7 @@ import {
   Textarea,
   Button,
 } from '@memohai/ui'
-import { Check, ChevronsUpDown, Search } from 'lucide-vue-next'
+import { Check, ChevronsUpDown, Eye, EyeOff, Search, X } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 
@@ -41,6 +42,10 @@ const otp = ref('')
 const comboItems = ['Apple', 'Banana', 'Cherry', 'Dragonfruit']
 const comboVal = ref('')
 
+const clearable = ref('Clear me')
+const password = ref('hunter2')
+const showPassword = ref(false)
+
 const formSchema = {
   email: (value: string) => (value ? true : 'Email is required'),
 }
@@ -52,19 +57,140 @@ const formSchema = {
     label="Inputs & Forms"
     description="Text fields, choosers, and the vee-validate form stack."
   >
+    <!-- Input system — edge emphasis (2 states). Same field; focus only.
+         'solid' is the everyday default; 'subtle' is for search / low-chrome. -->
+    <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Specimen
+        label="emphasis solid (default)"
+        note="focus turns the edge black"
+      >
+        <Input
+          placeholder="Project name"
+          class="w-full"
+        />
+      </Specimen>
+      <Specimen
+        label="emphasis subtle"
+        note="focus barely deepens the edge"
+      >
+        <Input
+          emphasis="subtle"
+          placeholder="Search library"
+          class="w-full"
+        />
+      </Specimen>
+    </div>
+
+    <!-- Size scale + composition recipes. These are the usage patterns we WANT
+         people to copy, so their styling is tuned here once instead of ad-hoc. -->
+    <div class="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <Specimen
+        label="size scale"
+        note="sm · default · lg"
+      >
+        <div class="flex w-full flex-col gap-2">
+          <Input
+            size="sm"
+            placeholder="Small (sm) — 32px"
+          />
+          <Input placeholder="Default — 36px" />
+          <Input
+            size="lg"
+            placeholder="Large (lg) — 40px"
+          />
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<Field> wrapper"
+        note="label · control · description / error"
+      >
+        <div class="flex w-full flex-col gap-4">
+          <Field>
+            <FieldLabel for="f-email">
+              Email
+            </FieldLabel>
+            <Input
+              id="f-email"
+              type="email"
+              placeholder="you@example.com"
+            />
+            <FieldDescription>We'll never share it.</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel for="f-email-bad">
+              Email
+            </FieldLabel>
+            <Input
+              id="f-email-bad"
+              aria-invalid="true"
+              model-value="11"
+            />
+            <FieldError>Email is not valid.</FieldError>
+          </Field>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="recipes"
+        note="clearable · password reveal (InputGroup)"
+      >
+        <div class="flex w-full flex-col gap-2">
+          <InputGroup>
+            <InputGroupInput
+              v-model="clearable"
+              placeholder="Type to clear..."
+            />
+            <InputGroupAddon
+              v-if="clearable"
+              align="inline-end"
+            >
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Clear"
+                @click="clearable = ''"
+              >
+                <X />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+          <InputGroup>
+            <InputGroupInput
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Password"
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                @click="showPassword = !showPassword"
+              >
+                <EyeOff v-if="showPassword" />
+                <Eye v-else />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
+      </Specimen>
+    </div>
+
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Specimen label="<Input> states">
-        <div class="flex w-full flex-col gap-2">
+        <div class="flex w-full max-w-xs flex-col gap-2">
           <Input v-model="text" />
           <Input placeholder="Placeholder" />
           <Input
             disabled
             placeholder="Disabled"
           />
-          <Input
-            aria-invalid="true"
-            model-value="Invalid value"
-          />
+          <div class="flex flex-col gap-1.5">
+            <Input
+              aria-invalid="true"
+              model-value="11"
+            />
+            <FieldError>Email is not valid.</FieldError>
+          </div>
         </div>
       </Specimen>
 

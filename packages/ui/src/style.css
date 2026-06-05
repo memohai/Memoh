@@ -91,6 +91,60 @@
     box-shadow: none;
   }
 
+  /* ── Form fields: text input / textarea / select trigger / native select ─────
+     No fill — the field is defined purely by its edge so dense forms stay clean.
+     Rest: a light hairline edge (lighter than the secondary button, so the
+     resting box doesn't read as heavy). Hover & focus keep that edge and stack a
+     second 1px ring just OUTSIDE in near-black, for a crisp committed edge.
+     Inputs are replaced elements so the rings live on the element box directly. */
+  /* The edge is a single inset 1px hairline driven by one var (--field-edge).
+     Every state — focus, subtle, invalid — only swaps that one color in place.
+     No outer rings: the edge never stacks, it just changes color. */
+  [data-slot="input"],
+  [data-slot="textarea"],
+  [data-slot="select-trigger"],
+  [data-slot="native-select"],
+  [data-slot="input-group"] {
+    background-color: transparent;
+    --field-edge: var(--field-edge-rest);
+    box-shadow: inset 0 0 0 1px var(--field-edge);
+    transition: box-shadow 0.07s ease-out;
+  }
+  /* Placeholder: same type metrics as real input (size/weight/tracking) so the
+     hint sits on the exact same rhythm as typed text — only the color is lighter
+     so it reads as a soft hint rather than competing with real input. */
+  [data-slot="input"]::placeholder,
+  [data-slot="textarea"]::placeholder {
+    color: var(--field-placeholder);
+  }
+  /* Fields engage on FOCUS only — never on hover. A text field is a container
+     you click into; the meaningful signal is focus, and hover-darkening just
+     reads as twitchy noise as the pointer passes over. */
+  /* DEFAULT (solid): the hairline itself turns near-black on focus. */
+  [data-slot="input"]:focus,
+  [data-slot="textarea"]:focus,
+  [data-slot="select-trigger"]:focus-visible,
+  [data-slot="select-trigger"][data-state="open"],
+  [data-slot="native-select"]:focus-visible,
+  [data-slot="input-group"]:focus-within {
+    --field-edge: var(--field-edge-solid);
+  }
+  /* SUBTLE: the faintest deepen of the hairline — search / low-chrome. Extra
+     attribute = higher specificity, so it overrides the solid group above. */
+  [data-slot="input"][data-emphasis="subtle"]:focus,
+  [data-slot="textarea"][data-emphasis="subtle"]:focus {
+    --field-edge: var(--field-edge-engaged);
+  }
+  /* INVALID: the edge itself turns destructive — replaces the hairline, never
+     stacks outside it. */
+  [data-slot="input"][aria-invalid="true"],
+  [data-slot="textarea"][aria-invalid="true"],
+  [data-slot="select-trigger"][aria-invalid="true"],
+  [data-slot="native-select"][aria-invalid="true"],
+  [data-slot="input-group"]:has([aria-invalid="true"]) {
+    --field-edge: var(--destructive);
+  }
+
   /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
      No chrome at rest; hover fills a soft gray (237, a touch deeper than
      --accent — the tuned ghost hover); press scales down. */
@@ -464,6 +518,19 @@
   --border-hairline: oklch(0 0 0 / 0.16);
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
+  /* Form-field edge — text input / textarea / select. The edge is one inset
+     hairline whose color swaps per state (never an outer ring):
+       solid  (default) → the hairline turns near-black on focus
+       subtle            → the hairline barely deepens on focus
+       invalid           → the hairline turns destructive
+       --field-edge-rest     light resting hairline (lighter than the button edge)
+       --field-edge-engaged  SUBTLE focus — barely deeper than rest
+       --field-edge-solid    SOLID focus — the edge turns near-black in place
+       --field-placeholder   soft hint color — lighter/greyer than muted text */
+  --field-edge-rest: oklch(0 0 0 / 0.11);
+  --field-edge-engaged: oklch(0 0 0 / 0.17);
+  --field-edge-solid: oklch(0 0 0 / 0.78);
+  --field-placeholder: oklch(0.66 0.004 95);
   /* ── Accent palette ────────────────────────────────────────────────────
      Unified hue ramps for colored surfaces (menu items, tags, status,
      decorative icons, capability badges). Each hue ships our own role model:

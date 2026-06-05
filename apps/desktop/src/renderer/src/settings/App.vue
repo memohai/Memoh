@@ -68,7 +68,7 @@ const breadcrumbs = computed(() => {
 </script>
 
 <template>
-  <section class="[&_input]:shadow-none!">
+  <section>
     <!-- Invisible 16px drag strip pinned to the very top edge of the
          window. Sized to match the routed sections' `p-4` top
          padding so it sits entirely within the page's existing dead

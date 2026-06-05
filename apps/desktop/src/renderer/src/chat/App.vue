@@ -27,7 +27,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 </script>
 
 <template>
-  <section class="[&_input]:shadow-none!">
+  <section>
     <RouterView />
     <Toaster position="top-center" />
   </section>

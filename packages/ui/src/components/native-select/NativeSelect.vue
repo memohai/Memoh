@@ -3,13 +3,16 @@ import type { AcceptableValue } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit, useVModel } from '@vueuse/core'
 import { ChevronDownIcon } from 'lucide-vue-next'
+import { computed } from 'vue'
 import { cn } from '#/lib/utils'
 
 defineOptions({
   inheritAttrs: false,
 })
 
-const props = defineProps<{ modelValue?: AcceptableValue | AcceptableValue[], class?: HTMLAttributes['class'] }>()
+const props = withDefaults(defineProps<{ modelValue?: AcceptableValue | AcceptableValue[], class?: HTMLAttributes['class'], size?: 'sm' | 'default' | 'lg' }>(), {
+  size: 'default',
+})
 
 const emit = defineEmits<{
   'update:modelValue': AcceptableValue
@@ -20,7 +23,13 @@ const modelValue = useVModel(props, 'modelValue', emit, {
   defaultValue: '',
 })
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'size')
+
+const sizeClass = computed(() => ({
+  sm: 'h-8 pl-2.5 text-[12px]',
+  default: 'h-9 pl-3 text-[13px]',
+  lg: 'h-10 pl-3.5 text-[14px]',
+}[props.size]))
 </script>
 
 <template>
@@ -32,10 +41,10 @@ const delegatedProps = reactiveOmit(props, 'class')
       v-bind="{ ...$attrs, ...delegatedProps }"
       v-model="modelValue"
       data-slot="native-select"
+      :data-size="props.size"
       :class="cn(
-        'shadow-xs! border-border placeholder:text-muted-foreground selection:bg-foreground selection:text-background h-9 w-full min-w-0 appearance-none rounded-lg border bg-background px-3 py-2 pr-9 text-body transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed',
-        'focus-visible:border-ring focus-visible:ring-ring/20 focus-visible:ring-2',
-        'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+        'selection:bg-foreground selection:text-background w-full min-w-0 appearance-none rounded-md py-2 pr-9 tracking-[0.01em] outline-none disabled:pointer-events-none disabled:cursor-not-allowed',
+        sizeClass,
         props.class,
       )"
     >

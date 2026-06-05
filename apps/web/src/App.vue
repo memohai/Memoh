@@ -8,7 +8,7 @@ useSettingsStore()
 </script>
 
 <template>
-  <section class="[&_input]:shadow-none!">
+  <section>
     <RouterView />
     <Toaster position="top-center" />
   </section>

@@ -15,10 +15,13 @@ export const inputGroupAddonVariants = cva(
   {
     variants: {
       align: {
+        // Optical pull-in for trailing/leading controls. Kept as whole pixels
+        // (not 0.45rem = 7.2px) so the icon never lands on a sub-pixel — a 2px
+        // SVG stroke on a fractional device-pixel reads as blurry on retina.
         'inline-start':
-          'order-first pl-3 has-[>button]:ml-[-0.45rem] has-[>kbd]:ml-[-0.35rem]',
+          'order-first pl-3 has-[>button]:ml-[-7px] has-[>kbd]:ml-[-6px]',
         'inline-end':
-          'order-last pr-3 has-[>button]:mr-[-0.45rem] has-[>kbd]:mr-[-0.35rem]',
+          'order-last pr-3 has-[>button]:mr-[-7px] has-[>kbd]:mr-[-6px]',
         'block-start':
           'order-first w-full justify-start px-3 pt-3 [.border-b]:pb-3 group-has-[>input]/input-group:pt-2.5',
         'block-end':
