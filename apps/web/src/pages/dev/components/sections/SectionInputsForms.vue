@@ -6,13 +6,15 @@ import {
   Checkbox,
   Combobox, ComboboxAnchor, ComboboxEmpty, ComboboxGroup, ComboboxInput,
   ComboboxItem, ComboboxItemIndicator, ComboboxList, ComboboxTrigger,
-  Field, FieldDescription, FieldError, FieldLabel,
+  Field, FieldContent, FieldControl, FieldDescription, FieldError, FieldGroup,
+  FieldLabel, FieldLegend, FieldSeparator, FieldSet,
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
   Input,
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText, InputGroupTextarea,
   InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot,
   Label,
   NativeSelect, NativeSelectOptGroup, NativeSelectOption,
+  NumberField,
   PinInput, PinInputGroup, PinInputSeparator, PinInputSlot,
   RadioGroup, RadioGroupItem,
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue,
@@ -45,6 +47,9 @@ const comboVal = ref('')
 const clearable = ref('Clear me')
 const password = ref('hunter2')
 const showPassword = ref(false)
+
+const quantity = ref(2)
+const notify = ref(true)
 
 const formSchema = {
   email: (value: string) => (value ? true : 'Email is required'),
@@ -103,29 +108,28 @@ const formSchema = {
 
       <Specimen
         label="<Field> wrapper"
-        note="label · control · description / error"
+        note="auto-wires id / for / aria-* — no manual ids"
       >
         <div class="flex w-full flex-col gap-4">
           <Field>
-            <FieldLabel for="f-email">
+            <FieldLabel required>
               Email
             </FieldLabel>
-            <Input
-              id="f-email"
-              type="email"
-              placeholder="you@example.com"
-            />
+            <FieldControl>
+              <Input
+                type="email"
+                placeholder="you@example.com"
+              />
+            </FieldControl>
             <FieldDescription>We'll never share it.</FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel for="f-email-bad">
+          <Field invalid>
+            <FieldLabel optional>
               Email
             </FieldLabel>
-            <Input
-              id="f-email-bad"
-              aria-invalid="true"
-              model-value="11"
-            />
+            <FieldControl>
+              <Input model-value="11" />
+            </FieldControl>
             <FieldError>Email is not valid.</FieldError>
           </Field>
         </div>
@@ -217,6 +221,30 @@ const formSchema = {
         <Switch v-model="switched" />
         <Switch :model-value="false" />
         <Switch disabled />
+      </Specimen>
+
+      <Specimen
+        label="<NumberField>"
+        note="stepper · same field edge · sizes"
+      >
+        <div class="flex w-full flex-col gap-2">
+          <NumberField
+            v-model="quantity"
+            :min="0"
+            :max="10"
+            class="w-40"
+          />
+          <NumberField
+            :default-value="5"
+            size="sm"
+            class="w-40"
+          />
+          <NumberField
+            :default-value="1"
+            disabled
+            class="w-40"
+          />
+        </div>
       </Specimen>
 
       <Specimen label="<Slider> single / range / disabled">
@@ -421,6 +449,38 @@ const formSchema = {
           </InputGroup>
         </div>
       </Specimen>
+
+      <div class="lg:col-span-2">
+        <Specimen
+          label="<FieldSet> + <FieldGroup> (semantic grouping)"
+          note="legend · stacked fields · separator · horizontal row"
+        >
+          <FieldSet class="w-full max-w-md">
+            <FieldLegend>Notifications</FieldLegend>
+            <FieldGroup>
+              <Field>
+                <FieldLabel required>
+                  Display name
+                </FieldLabel>
+                <FieldControl>
+                  <Input placeholder="Ada Lovelace" />
+                </FieldControl>
+                <FieldDescription>Shown on your public profile.</FieldDescription>
+              </Field>
+
+              <FieldSeparator>then</FieldSeparator>
+
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <FieldLabel>Email notifications</FieldLabel>
+                  <FieldDescription>Get a digest whenever something changes.</FieldDescription>
+                </FieldContent>
+                <Switch v-model="notify" />
+              </Field>
+            </FieldGroup>
+          </FieldSet>
+        </Specimen>
+      </div>
 
       <div class="lg:col-span-2">
         <Specimen
