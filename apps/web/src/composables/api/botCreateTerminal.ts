@@ -67,10 +67,10 @@ export function appendBotCreateTerminalLine(
       }
       return pushBotCreateTerminalLine(lines, { kind: 'pulling', status: 'running', percent })
     }
-	case 'pull_skipped':
-	case 'pull_delegated':
-		// Image already present or pulled elsewhere, so close out the pull line.
-		return finalizeBotCreateTerminalLines(lines)
+    case 'pull_skipped':
+    case 'pull_delegated':
+      // Image already present or pulled elsewhere, so close out the pull line.
+      return finalizeBotCreateTerminalLines(lines)
     case 'creating':
       return pushBotCreateTerminalLine(lines, { kind: 'creating', status: 'running' })
     case 'restoring':

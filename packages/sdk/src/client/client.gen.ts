@@ -248,10 +248,13 @@ export const createClient = (config: Config = {}): Client => {
         let finalError = error;
         for (const fn of interceptors.error.fns) {
           if (fn) {
-            finalError = await fn(error, response as any, request as any, opts);
+            const nextError = await fn(finalError, response as any, request as any, opts);
+            if (nextError !== undefined && nextError !== null) {
+              finalError = nextError;
+            }
           }
         }
-        return finalError || ({} as unknown);
+        return finalError;
       },
       onRequest: async (url, init) => {
         let request = new Request(url, init);

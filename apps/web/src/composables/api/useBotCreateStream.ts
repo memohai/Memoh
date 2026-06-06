@@ -205,6 +205,7 @@ export async function postBotsStream(
         if (!isBotCreateStreamEvent(event)) {
           throw new Error('Invalid bot create stream event')
         }
+        streamError = undefined
         yield event
       }
 

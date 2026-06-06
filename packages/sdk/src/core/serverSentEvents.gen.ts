@@ -241,7 +241,17 @@ export const createSseClient = <TData = unknown>({
         break; // exit loop on normal completion
       } catch (error) {
         // connection failed or aborted; retry after delay
-        const finalError = onError ? await onError(error, response, request) : error;
+        let finalError = error;
+        if (onError) {
+          try {
+            const nextError = await onError(error, response, request);
+            if (nextError !== undefined && nextError !== null) {
+              finalError = nextError;
+            }
+          } catch {
+            finalError = error;
+          }
+        }
         onSseError?.(finalError);
 
         if (sseMaxRetryAttempts !== undefined && attempt >= sseMaxRetryAttempts) {

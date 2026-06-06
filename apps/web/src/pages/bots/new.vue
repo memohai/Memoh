@@ -609,7 +609,11 @@ async function handleSubmit() {
 
   // Container backend: hand the live stream off to the dedicated progress route.
   void store.start(payload, options)
-  router.push({ name: 'bot-create-progress' })
+  try {
+    await router.push({ name: 'bot-create-progress' })
+  } finally {
+    submitLoading.value = false
+  }
 }
 
 function finishLocalCreate() {

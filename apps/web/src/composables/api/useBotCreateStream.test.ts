@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BotsBot } from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
 import {
   collectBotCreateProgressStream,
+  postBotsStream,
   reduceBotCreateProgressEvent,
   type BotCreateStreamEvent,
 } from './useBotCreateStream'
 
 describe('useBotCreateStream', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('keeps the created bot when container setup reports an error', () => {
     const bot: BotsBot = { id: 'bot-1', name: 'stream-bot' }
 
@@ -76,5 +82,28 @@ describe('useBotCreateStream', () => {
     expect(result.bot).toEqual(bot)
     expect(result.setupError).toBeUndefined()
     expect(result.progress).toBeUndefined()
+  })
+
+  it('does not throw a stale SSE error after a later successful event', async () => {
+    const bot: BotsBot = { id: 'bot-1', name: 'stream-bot' }
+
+    vi.spyOn(client.sse, 'post').mockImplementation(async (options: Parameters<typeof client.sse.post>[0]) => {
+      options.onSseError?.(new Error('transient reset'))
+      return {
+        stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
+          yield { type: 'ready', bot }
+        })(),
+      }
+    })
+
+    const result = await postBotsStream({
+      body: { name: 'stream-bot', display_name: 'Stream Bot' },
+    })
+    const events: BotCreateStreamEvent[] = []
+    for await (const event of result.stream) {
+      events.push(event)
+    }
+
+    expect(events).toEqual([{ type: 'ready', bot }])
   })
 })
