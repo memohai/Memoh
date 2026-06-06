@@ -203,7 +203,7 @@ export function useACPOAuth(getBotId: () => string) {
       })
       claudeStatus.value = data ?? { configured: true, has_token: true }
       claudeSessionId.value = ''
-      return true
+      return !!claudeStatus.value.has_token
     } catch {
       return false
     } finally {

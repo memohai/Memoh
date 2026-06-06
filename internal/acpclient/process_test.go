@@ -222,6 +222,11 @@ func TestWriteCodexManagedConfigWritesFixedContainerConfig(t *testing.T) {
 	config := string(configWrite.Content)
 	for _, want := range []string{
 		`model_provider = "OpenAI"`,
+		`model_reasoning_effort = "xhigh"`,
+		`model_reasoning_summary = "detailed"`,
+		`model_supports_reasoning_summaries = true`,
+		`hide_agent_reasoning = false`,
+		`show_raw_agent_reasoning = false`,
 		`[model_providers.OpenAI]`,
 		`name = "OpenAI"`,
 		`base_url = "https://proxy.example.com/v1"`,
@@ -274,6 +279,11 @@ func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec /
 	config := string(configWrite.Content)
 	for _, want := range []string{
 		`model_provider = "chatgpt-http"`,
+		`model_reasoning_effort = "xhigh"`,
+		`model_reasoning_summary = "detailed"`,
+		`model_supports_reasoning_summaries = true`,
+		`hide_agent_reasoning = false`,
+		`show_raw_agent_reasoning = false`,
 		`[model_providers.chatgpt-http]`,
 		`name = "ChatGPT HTTP"`,
 		`base_url = "https://chatgpt.com/backend-api/codex"`,
