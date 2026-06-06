@@ -500,6 +500,36 @@
   [data-slot="radio-group-item"][data-state="checked"]:not(:disabled):active {
     border-color: var(--accent-blue-fill-active);
   }
+
+  /* ── Slider ──────────────────────────────────────────────────────────────
+     Neutral rail + blue filled range (same selection blue as the toggles). The
+     white knob carries a hairline border at rest; on hover the edge grows from a
+     thin gray hairline into a thin blue edge (1px → 2px border-width animation,
+     borrowing the RadioGroup idea but kept light — no size change on the knob).
+     Colors live here; geometry (rail height, knob size) lives in Slider.vue. */
+  [data-slot="slider-track"] {
+    background-color: var(--slider-track);
+  }
+  [data-slot="slider-range"] {
+    background-color: var(--slider-range);
+  }
+  [data-slot="slider-thumb"] {
+    background-color: var(--slider-thumb);
+    border-style: solid;
+    border-width: 1px;
+    border-color: var(--border-hairline);
+    transition:
+      border-width 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 150ms ease;
+  }
+  /* Hover only: the hairline grows into a thin blue edge (idea borrowed from
+     RadioGroup, kept light — no outer ring, no shadow). Focus is intentionally
+     not styled: reka keeps the thumb focused after a drag, so a focus style
+     would linger as a "stuck" blue edge until the user clicks elsewhere. */
+  [data-slot="slider-thumb"]:not(:disabled):hover {
+    border-width: 2px;
+    border-color: var(--accent-blue-fill);
+  }
 }
 
 :root {
@@ -687,6 +717,13 @@
      ramp): light red fill + deep red text. */
   --btn-destructive-hover-bg: #fae2e1;
   --btn-destructive-hover-text: #c0271e;
+  /* Slider — a light neutral rail; the FILLED range reuses the selection blue so
+     it ties to the switch/checkbox/radio family ("this portion is the active
+     value"); the knob is a white disc with a hairline edge that turns blue on
+     hover. */
+  --slider-track: oklch(0.91 0.004 286);
+  --slider-range: var(--accent-blue-fill);
+  --slider-thumb: #fff;
   --success: oklch(0.62 0.16 150);
   --success-foreground: oklch(0.33 0.12 150);
   --success-solid-foreground: oklch(0.985 0.001 286);
@@ -816,6 +853,9 @@
   /* Segmented engage overlays flip to white so they LIGHTEN on dark surfaces. */
   --segment-overlay-hover: oklch(1 0 0 / 0.06);
   --segment-overlay-active: oklch(1 0 0 / 0.10);
+  /* Slider (dark): a darker rail; range/thumb inherit (blue is theme-stable). */
+  --slider-track: oklch(0.32 0.004 286);
+  --slider-thumb: oklch(0.95 0 0);
   --success: oklch(0.70 0.15 150);
   --success-foreground: oklch(0.82 0.13 150);
   --success-solid-foreground: var(--background);
