@@ -70,7 +70,6 @@ const avatarFallback = useAvatarInitials(() => displayName.value)
 
 let navigated = false
 let readyRedirectTimer: ReturnType<typeof window.setTimeout> | null = null
-let resetTimer: ReturnType<typeof window.setTimeout> | null = null
 
 function clearReadyRedirectTimer() {
   if (readyRedirectTimer === null) return
@@ -78,18 +77,11 @@ function clearReadyRedirectTimer() {
   readyRedirectTimer = null
 }
 
-function clearResetTimer() {
-  if (resetTimer === null) return
-  window.clearTimeout(resetTimer)
-  resetTimer = null
-}
-
 function clearTimers() {
   clearReadyRedirectTimer()
-  clearResetTimer()
 }
 
-function goToBot() {
+async function goToBot() {
   if (navigated) return
   clearReadyRedirectTimer()
   navigated = true
@@ -100,16 +92,17 @@ function goToBot() {
     toast.success(t('bots.createBotSuccess'))
   }
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
-  if (target) {
-    router.replace({ name: 'bot-detail', params: { botName: target } })
-  } else {
-    router.replace({ name: 'bots' })
+  try {
+    await (target
+      ? router.replace({ name: 'bot-detail', params: { botName: target } })
+      : router.replace({ name: 'bots' }))
+  } catch {
+    // Navigation aborted/failed — keep the page as-is rather than blanking it.
+    return
   }
-  // Clear once the navigation is committed so a fresh create starts clean.
-  resetTimer = window.setTimeout(() => {
-    resetTimer = null
-    store.reset()
-  }, 0)
+  // Reset only after navigation has committed, so the still-mounted terminal
+  // never flashes empty before the view swaps.
+  store.reset()
 }
 
 function scheduleReadyRedirect() {
@@ -117,7 +110,7 @@ function scheduleReadyRedirect() {
   // Brief pause so the final "ready" line is visible before redirecting.
   readyRedirectTimer = window.setTimeout(() => {
     readyRedirectTimer = null
-    goToBot()
+    void goToBot()
   }, 700)
 }
 

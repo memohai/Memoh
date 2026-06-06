@@ -110,6 +110,8 @@ describe('bot create progress route', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     routerReplace.mockReset()
+    // Real vue-router returns a Promise that resolves when navigation commits.
+    routerReplace.mockResolvedValue(undefined)
     invalidateQueries.mockReset()
     document.body.innerHTML = ''
   })
@@ -128,6 +130,38 @@ describe('bot create progress route', () => {
 
     expect(routerReplace).not.toHaveBeenCalled()
     expect(invalidateQueries).not.toHaveBeenCalled()
+
+    mounted.app.unmount()
+    mounted.root.remove()
+  })
+
+  it('keeps the terminal intact until navigation commits, then resets', async () => {
+    let resolveReplace: (() => void) | undefined
+    routerReplace.mockImplementation(() => new Promise<void>((resolve) => {
+      resolveReplace = resolve
+    }))
+
+    const mounted = await mountKeptProgress()
+    mounted.store.status = 'ready'
+    mounted.store.lines = [{ id: 'ready', kind: 'ready', status: 'done' }]
+    await nextTick()
+
+    // Fire the 700ms ready redirect: goToBot() -> router.replace() (still pending).
+    await vi.advanceTimersByTimeAsync(700)
+
+    expect(routerReplace).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'prog' } })
+    // Navigation has not committed yet, so the store must stay intact — otherwise
+    // the still-visible terminal flashes empty before the view swaps.
+    expect(mounted.store.status).toBe('ready')
+    expect(mounted.store.lines).toHaveLength(1)
+
+    // Commit the navigation; only now should the store reset.
+    resolveReplace?.()
+    await nextTick()
+    await nextTick()
+
+    expect(mounted.store.status).toBe('idle')
+    expect(mounted.store.lines).toEqual([])
 
     mounted.app.unmount()
     mounted.root.remove()
