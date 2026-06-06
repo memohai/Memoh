@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+const CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL = 'workspace-tab:close-current'
+
 // Cross-window query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
 // serialization across the IPC boundary (no functions / predicates).
@@ -86,6 +88,11 @@ const api = {
     onChatNavigate: (cb: (target: string) => void): void => {
       ipcRenderer.on('chat:navigate', (_event: IpcRendererEvent, target: string) => {
         cb(target)
+      })
+    },
+    onCloseCurrentWorkspaceTab: (cb: () => void): void => {
+      ipcRenderer.on(CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL, () => {
+        cb()
       })
     },
   },

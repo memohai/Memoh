@@ -49,6 +49,13 @@ declare module '@memohai/web/store/settings' {
   export function useSettingsStore(): unknown
 }
 
+declare module '@memohai/web/store/workspace-tabs' {
+  export function useWorkspaceTabsStore(pinia?: unknown): {
+    activeId: string | null
+    closeTab: (id: string) => void
+  }
+}
+
 declare module '@memohai/web/store/user' {
   export function useUserStore(): {
     userInfo: {

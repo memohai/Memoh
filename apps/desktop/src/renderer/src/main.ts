@@ -9,6 +9,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
+import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 
 import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
@@ -19,6 +20,7 @@ import 'katex/dist/katex.min.css'
 import App from './chat/App.vue'
 import router from './chat/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
+import { registerWorkspaceTabCommands } from './chat/workspace-tab-commands'
 
 async function bootstrap() {
   const status = await window.api.desktop.getServerStatus()
@@ -36,8 +38,11 @@ async function bootstrap() {
     void router.push(target)
   })
 
+  const pinia = createPinia().use(piniaPluginPersistedstate)
+  registerWorkspaceTabCommands(window.api.window, useWorkspaceTabsStore(pinia))
+
   const app = createApp(App)
-    .use(createPinia().use(piniaPluginPersistedstate))
+    .use(pinia)
     .use(PiniaColada)
     .use(router)
     .use(i18n)

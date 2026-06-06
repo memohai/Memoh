@@ -35,6 +35,7 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
+import { closeFocusedTabOrWindow } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
@@ -788,6 +789,17 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
   window.webContents.send('settings:navigate', target)
 }
 
+function closeWindowMenuItem(): MenuItemConstructorOptions {
+  if (process.platform !== 'darwin') return { role: 'close' }
+  return {
+    label: 'Close',
+    accelerator: 'Command+W',
+    click: () => {
+      closeFocusedTabOrWindow(chatWindow, BrowserWindow.getFocusedWindow())
+    },
+  }
+}
+
 // CLI install / menu helpers — kept above the whenReady block so the
 // Promise chain can call them without forward-declaration noise.
 
@@ -913,7 +925,7 @@ async function rebuildAppMenu(): Promise<void> {
         label: 'Window',
         submenu: [
           { role: 'minimize' },
-          { role: 'close' },
+          closeWindowMenuItem(),
         ],
       },
     )
@@ -1016,7 +1028,7 @@ async function rebuildAppMenu(): Promise<void> {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
-        { role: 'close' },
+        closeWindowMenuItem(),
       ],
     },
   )
