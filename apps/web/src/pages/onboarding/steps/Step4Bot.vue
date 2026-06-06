@@ -641,7 +641,8 @@ function skipOAuth() {
             {{ t('onboarding.bot.acp.oauthSkip') }}
           </button>
           <button
-            class="inline-flex h-[42px] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            class="inline-flex h-[42px] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="!oauthAuthorized"
             @click="continueFromOAuth"
           >
             {{ t('onboarding.next') }}
