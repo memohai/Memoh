@@ -14,7 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBotsById } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { ACP_NO_PROJECT_MODE, normalizeACPAgentID } from '@/utils/acp'
+import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import { openInFileManagerKey } from './composables/useFileManagerProvider'
 import ChatSidebar from './components/chat-sidebar.vue'
 import ChatWorkspace from './components/chat-workspace.vue'
@@ -107,7 +107,7 @@ async function maybeStartACPSession() {
   const agentId = normalizeACPAgentID(raw)
   try {
     if (agentId) {
-      const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE })
+      const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE, projectPath: createACPNoProjectPath() })
       workspaceTabs.openChat(session.id, session.title)
     }
   } catch {
