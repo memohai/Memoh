@@ -108,6 +108,7 @@ dump.rdb
 memory.db
 
 config.toml
+conf/oauth-clients.toml
 
 .workdocs/
 data

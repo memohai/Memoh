@@ -20,6 +20,7 @@ SET status = 'canceled',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -104,6 +105,18 @@ INSERT INTO user_input_requests (
   ?13,
   ?14
 )
+ON CONFLICT (session_id, tool_call_id) DO UPDATE
+SET input_json = EXCLUDED.input_json,
+    ui_payload_json = EXCLUDED.ui_payload_json,
+    provider_metadata = EXCLUDED.provider_metadata,
+    requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+    source_platform = EXCLUDED.source_platform,
+    reply_target = EXCLUDED.reply_target,
+    conversation_type = EXCLUDED.conversation_type,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = CURRENT_TIMESTAMP
+WHERE user_input_requests.status = 'pending'
+  AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at = '' OR julianday(user_input_requests.expires_at) > julianday('now'))
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -181,6 +194,7 @@ SET status = 'failed',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?2
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -230,6 +244,7 @@ FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at DESC, short_id DESC
 LIMIT 1
 `
@@ -281,6 +296,7 @@ WHERE bot_id = ?
   AND session_id = ?
   AND prompt_external_message_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -333,6 +349,7 @@ WHERE bot_id = ?
   AND session_id = ?
   AND short_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 `
 
 type GetPendingUserInputBySessionShortIDParams struct {
@@ -417,12 +434,60 @@ func (q *Queries) GetUserInputRequest(ctx context.Context, id string) (UserInput
 	return i, err
 }
 
+const getUserInputRequestBySessionToolCall = `-- name: GetUserInputRequestBySessionToolCall :one
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
+FROM user_input_requests
+WHERE session_id = ?
+  AND tool_call_id = ?
+`
+
+type GetUserInputRequestBySessionToolCallParams struct {
+	SessionID  string `json:"session_id"`
+	ToolCallID string `json:"tool_call_id"`
+}
+
+func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg GetUserInputRequestBySessionToolCallParams) (UserInputRequest, error) {
+	row := q.db.QueryRowContext(ctx, getUserInputRequestBySessionToolCall, arg.SessionID, arg.ToolCallID)
+	var i UserInputRequest
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.RouteID,
+		&i.ChannelIdentityID,
+		&i.ToolCallID,
+		&i.ToolName,
+		&i.ShortID,
+		&i.Status,
+		&i.InputJson,
+		&i.UiPayloadJson,
+		&i.ResultJson,
+		&i.ProviderMetadata,
+		&i.RequestedByChannelIdentityID,
+		&i.RespondedByChannelIdentityID,
+		&i.AssistantMessageID,
+		&i.ToolResultMessageID,
+		&i.PromptMessageID,
+		&i.PromptExternalMessageID,
+		&i.SourcePlatform,
+		&i.ReplyTarget,
+		&i.ConversationType,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RespondedAt,
+		&i.CanceledAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listPendingUserInputsBySession = `-- name: ListPendingUserInputsBySession :many
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at ASC, short_id ASC
 `
 
@@ -555,6 +620,7 @@ SET status = 'submitted',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 

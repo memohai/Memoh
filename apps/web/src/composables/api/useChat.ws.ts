@@ -1,6 +1,13 @@
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
 import type { ChatAttachment, UIStreamEvent, UIStreamEventHandler } from './useChat.types'
 
+export interface WSUserInputAnswer {
+  question_id: string
+  option_ids?: string[]
+  custom_text?: string
+  text?: string
+}
+
 export interface WSClientMessage {
   type: 'message' | 'abort' | 'tool_approval_response' | 'user_input_response'
   stream_id?: string
@@ -15,8 +22,7 @@ export interface WSClientMessage {
   tool_call_id?: string
   decision?: 'approve' | 'reject'
   reason?: string
-  answer?: unknown
-  option_id?: string
+  answers?: WSUserInputAnswer[]
   canceled?: boolean
 }
 

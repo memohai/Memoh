@@ -996,7 +996,6 @@ import type {
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
-import { useSupermarketMcpDraft } from '@/stores/supermarket-mcp-draft'
 
 interface McpItem {
   id: string
@@ -1634,39 +1633,7 @@ async function handleOAuthRevoke() {
   }
 }
 
-const { consumePendingDraft } = useSupermarketMcpDraft()
-function applyPendingDraft() {
-  const entry = consumePendingDraft()
-  if (!entry) return
-  removeDraft()
-  const isStdio = entry.transport === 'stdio'
-  const env: Record<string, string> = {}
-  for (const e of entry.env ?? []) {
-    if (e.key) env[e.key] = e.defaultValue ?? ''
-  }
-  const headers: Record<string, string> = {}
-  for (const h of entry.headers ?? []) {
-    if (h.key) headers[h.key] = h.defaultValue ?? ''
-  }
-  const config: Record<string, unknown> = {}
-  if (isStdio) {
-    if (entry.command) config.command = entry.command
-    if (entry.args?.length) config.args = entry.args
-    if (Object.keys(env).length) config.env = env
-  } else {
-    if (entry.url) config.url = entry.url
-    if (Object.keys(env).length) config.env = env
-    if (Object.keys(headers).length) config.headers = headers
-  }
-  const draft: McpItem = {
-    id: DRAFT_ID, name: entry.name ?? '', type: isStdio ? 'stdio' : (entry.transport === 'sse' ? 'sse' : 'http'),
-    config, is_active: true, status: 'unknown', tools_cache: [], last_probed_at: null, status_message: '', auth_type: 'none'
-  }
-  items.value = [draft, ...items.value]
-  selectItem(draft)
-}
-
-watch(() => props.botId, async () => { if (props.botId) { await loadList(); applyPendingDraft() } }, { immediate: true })
+watch(() => props.botId, async () => { if (props.botId) await loadList() }, { immediate: true })
 
 watch(
   () => {

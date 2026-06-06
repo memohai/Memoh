@@ -115,6 +115,9 @@ providers_dir = "conf/providers"
 [supermarket]
 base_url = "https://supermarket.memoh.ai"
 
+[oauth_clients]
+config_path = "conf/oauth-clients.toml"
+
 [web]
 host = "127.0.0.1"
 port = 8082

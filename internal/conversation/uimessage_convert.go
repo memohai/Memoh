@@ -274,6 +274,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 						ToolCallID: call.ID,
 						Running:    uiBoolPtr(true),
 						Approval:   call.Approval,
+						UserInput:  call.UserInput,
 					}
 					appendPendingAssistantMessage(pending, block)
 					if call.ID != "" {
@@ -921,6 +922,10 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 		return
 	}
 	message.Output = output
+	// Finalize before any early return below: a background exec result is
+	// still a tool result, and replaying a pending user input would re-offer
+	// an already answered form.
+	finalizeInteractiveRequests(message, output)
 	if strings.EqualFold(strings.TrimSpace(message.Name), "exec") {
 		if task, ok := backgroundTaskFromExecToolResult(output); ok {
 			if task.Command == "" {
@@ -931,6 +936,12 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 		}
 	}
 	message.Running = uiBoolPtr(false)
+}
+
+// finalizeInteractiveRequests closes any pending ask_user state on a tool
+// block once its result exists. Every exit path of result application must go
+// through this, or stale pending requests resurface in the UI.
+func finalizeInteractiveRequests(message *UIMessage, output any) {
 	if message.UserInput != nil {
 		if payload, ok := toolResultMap(output); ok {
 			if status := stringFromMap(payload, "status"); status != "" {

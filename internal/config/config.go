@@ -41,24 +41,25 @@ const (
 )
 
 type Config struct {
-	Log         LogConfig         `toml:"log"`
-	Server      ServerConfig      `toml:"server"`
-	Admin       AdminConfig       `toml:"admin"`
-	Auth        AuthConfig        `toml:"auth"`
-	Timezone    string            `toml:"timezone"`
-	Database    DatabaseConfig    `toml:"database"`
-	Container   ContainerConfig   `toml:"container"`
-	Containerd  ContainerdConfig  `toml:"containerd"`
-	Docker      DockerConfig      `toml:"docker"`
-	Apple       AppleConfig       `toml:"apple"`
-	Local       LocalConfig       `toml:"local"`
-	Workspace   WorkspaceConfig   `toml:"workspace"`
-	Postgres    PostgresConfig    `toml:"postgres"`
-	SQLite      SQLiteConfig      `toml:"sqlite"`
-	Qdrant      QdrantConfig      `toml:"qdrant"`
-	Sparse      SparseConfig      `toml:"sparse"`
-	Registry    RegistryConfig    `toml:"registry"`
-	Supermarket SupermarketConfig `toml:"supermarket"`
+	Log          LogConfig          `toml:"log"`
+	Server       ServerConfig       `toml:"server"`
+	Admin        AdminConfig        `toml:"admin"`
+	Auth         AuthConfig         `toml:"auth"`
+	Timezone     string             `toml:"timezone"`
+	Database     DatabaseConfig     `toml:"database"`
+	Container    ContainerConfig    `toml:"container"`
+	Containerd   ContainerdConfig   `toml:"containerd"`
+	Docker       DockerConfig       `toml:"docker"`
+	Apple        AppleConfig        `toml:"apple"`
+	Local        LocalConfig        `toml:"local"`
+	Workspace    WorkspaceConfig    `toml:"workspace"`
+	Postgres     PostgresConfig     `toml:"postgres"`
+	SQLite       SQLiteConfig       `toml:"sqlite"`
+	Qdrant       QdrantConfig       `toml:"qdrant"`
+	Sparse       SparseConfig       `toml:"sparse"`
+	Registry     RegistryConfig     `toml:"registry"`
+	Supermarket  SupermarketConfig  `toml:"supermarket"`
+	OAuthClients OAuthClientsConfig `toml:"oauth_clients"`
 }
 
 type LogConfig struct {
@@ -294,7 +295,10 @@ func (c RegistryConfig) ProvidersPath() string {
 	return absPath(DefaultProvidersDir)
 }
 
-const DefaultSupermarketBaseURL = "https://supermarket.memoh.ai"
+const (
+	DefaultSupermarketBaseURL     = "https://supermarket.memoh.ai"
+	DefaultOAuthClientsConfigPath = "conf/oauth-clients.toml"
+)
 
 type SupermarketConfig struct {
 	BaseURL string `toml:"base_url"`
@@ -305,6 +309,17 @@ func (c SupermarketConfig) GetBaseURL() string {
 		return c.BaseURL
 	}
 	return DefaultSupermarketBaseURL
+}
+
+type OAuthClientsConfig struct {
+	ConfigPath string `toml:"config_path"`
+}
+
+func (c OAuthClientsConfig) Path() string {
+	if strings.TrimSpace(c.ConfigPath) != "" {
+		return absPath(c.ConfigPath)
+	}
+	return absPath(DefaultOAuthClientsConfigPath)
 }
 
 func Load(path string) (Config, error) {
@@ -419,6 +434,9 @@ func (cfg *Config) resolvePaths() {
 	}
 	if strings.TrimSpace(cfg.Registry.ProvidersDir) != "" {
 		cfg.Registry.ProvidersDir = cfg.Registry.ProvidersPath()
+	}
+	if strings.TrimSpace(cfg.OAuthClients.ConfigPath) != "" {
+		cfg.OAuthClients.ConfigPath = cfg.OAuthClients.Path()
 	}
 }
 

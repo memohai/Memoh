@@ -1,0 +1,273 @@
+<template>
+  <Dialog
+    :open="open"
+    @update:open="$emit('update:open', $event)"
+  >
+    <DialogContent class="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>{{ $t('supermarket.pluginInstallTitle') }}</DialogTitle>
+      </DialogHeader>
+      <div class="space-y-4 py-2">
+        <div class="space-y-1.5">
+          <label class="text-xs font-medium">{{ $t('supermarket.selectBot') }}</label>
+          <BotSelect
+            v-model="selectedBotId"
+            trigger-class="w-full"
+          />
+        </div>
+
+        <div
+          v-if="plugin"
+          class="rounded-md border border-border p-3 space-y-1"
+        >
+          <div class="flex items-center gap-2">
+            <p class="text-xs font-medium">
+              {{ plugin.name }}
+            </p>
+            <Badge
+              v-if="plugin.mcps?.length"
+              variant="outline"
+              size="sm"
+            >
+              {{ plugin.mcps.length }} MCPs
+            </Badge>
+          </div>
+          <p class="text-[11px] text-muted-foreground line-clamp-3">
+            {{ plugin.description }}
+          </p>
+        </div>
+
+        <div
+          v-if="variables.length"
+          class="space-y-3"
+        >
+          <div
+            v-for="item in variables"
+            :key="item.key"
+            class="space-y-1.5"
+          >
+            <label class="text-xs font-medium">
+              {{ item.key }}
+              <span
+                v-if="item.required"
+                class="text-destructive"
+              >*</span>
+            </label>
+            <Input
+              v-model="variableValues[item.key || '']"
+              :type="item.secret ? 'password' : 'text'"
+              class="h-8 text-xs"
+              :placeholder="item.description || item.key"
+            />
+          </div>
+        </div>
+      </div>
+      <DialogFooter>
+        <DialogClose as-child>
+          <Button
+            variant="outline"
+            :disabled="installing"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
+        </DialogClose>
+        <Button
+          :disabled="!canInstall || installing"
+          @click="handleInstall"
+        >
+          <Spinner
+            v-if="installing"
+            class="mr-2 size-4"
+          />
+          {{ installing ? $t('supermarket.installing') : $t('supermarket.install') }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+</template>
+
+<script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toast } from 'vue-sonner'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
+  Button, Spinner, Badge, Input,
+} from '@memohai/ui'
+import {
+  getBotsByBotIdPluginsByIdOauthStatus,
+  postBotsByBotIdPluginsByIdOauthAuthorize,
+  postBotsByBotIdSupermarketInstallPlugin,
+  type PluginsConfigVar,
+  type PluginsInstallation,
+  type PluginsManifest,
+} from '@memohai/sdk'
+import { client } from '@memohai/sdk/client'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import BotSelect from '@/components/bot-select/index.vue'
+
+const props = defineProps<{
+  open: boolean
+  plugin: PluginsManifest | null
+}>()
+
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+  'installed': []
+}>()
+
+const { t } = useI18n()
+
+const selectedBotId = ref('')
+const installing = ref(false)
+const variableValues = reactive<Record<string, string>>({})
+
+const variables = computed<PluginsConfigVar[]>(() => props.plugin?.variables ?? [])
+const requiresManagedOAuth = computed(() => {
+  return (props.plugin?.auth_requirements ?? []).some(item => item.type === 'managed_oauth')
+})
+const canInstall = computed(() => {
+  if (!selectedBotId.value || !props.plugin?.id) return false
+  return variables.value.every(item => !item.required || !!variableValues[item.key || '']?.trim())
+})
+
+watch(() => props.open, (open) => {
+  if (!open) {
+    selectedBotId.value = ''
+    installing.value = false
+    for (const key of Object.keys(variableValues)) delete variableValues[key]
+    return
+  }
+  for (const item of props.plugin?.variables ?? []) {
+    if (item.key) variableValues[item.key] = item.defaultValue || ''
+  }
+})
+
+async function handleInstall() {
+  if (!selectedBotId.value || !props.plugin?.id) return
+  const botId = selectedBotId.value
+  const oauthPopup = requiresManagedOAuth.value ? window.open('', 'mcp-oauth', 'width=600,height=700') : null
+  installing.value = true
+  try {
+    const { data } = await postBotsByBotIdSupermarketInstallPlugin({
+      path: { bot_id: botId },
+      body: {
+        plugin_id: props.plugin.id,
+        variables: Object.fromEntries(
+          Object.entries(variableValues).filter(([, value]) => value.trim() !== ''),
+        ),
+      },
+      throwOnError: true,
+    })
+    toast.success(t('supermarket.installSuccess'))
+    emit('update:open', false)
+    emit('installed')
+    if (data.status === 'needs_auth' && data.id) {
+      await startOAuthAfterInstall(botId, data, oauthPopup)
+    } else {
+      oauthPopup?.close()
+    }
+  } catch (error) {
+    oauthPopup?.close()
+    toast.error(resolveApiErrorMessage(error, t('supermarket.installFailed')))
+  } finally {
+    installing.value = false
+  }
+}
+
+function mcpOAuthCallbackUrl() {
+  const rawBase = String(client.getConfig().baseUrl || '/api')
+  const base = new URL(rawBase, window.location.origin)
+  const basePath = base.pathname.replace(/\/+$/, '')
+  base.pathname = `${basePath}/oauth/mcp/callback`
+  base.search = ''
+  base.hash = ''
+  return base.toString()
+}
+
+async function startOAuthAfterInstall(botId: string, installation: PluginsInstallation, popup: Window | null) {
+  try {
+    const { data } = await postBotsByBotIdPluginsByIdOauthAuthorize({
+      path: { bot_id: botId, id: installation.id! },
+      body: { callback_url: mcpOAuthCallbackUrl() },
+      throwOnError: true,
+    })
+    if (!data.authorization_url) throw new Error(t('mcp.oauth.flowInitFailed'))
+
+    if (popup && !popup.closed) {
+      popup.location.href = data.authorization_url
+    } else {
+      popup = window.open(data.authorization_url, 'mcp-oauth', 'width=600,height=700')
+    }
+
+    await waitForMCPOAuth(botId, installation.id!, popup)
+    const synced = await syncOAuthStatus(botId, installation.id!)
+    if (synced.status !== 'ready' && !synced.enabled) throw new Error(t('mcp.oauth.authFailed'))
+    toast.success(t('mcp.oauth.authSuccess'))
+    emit('installed')
+  } catch (error) {
+    const synced = await syncOAuthStatus(botId, installation.id!).catch(() => null)
+    if (synced?.status === 'ready' || synced?.enabled) {
+      toast.success(t('mcp.oauth.authSuccess'))
+      emit('installed')
+      return
+    }
+    popup?.close()
+    toast.error(resolveApiErrorMessage(error, t('mcp.oauth.flowInitFailed')))
+  }
+}
+
+function waitForMCPOAuth(botId: string, installationId: string, popup: Window | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let completed = false
+    const startedAt = Date.now()
+    let pollTimer: ReturnType<typeof setInterval> | undefined
+
+    const finish = (status: 'success' | 'error', error?: string) => {
+      if (completed) return
+      completed = true
+      if (pollTimer) clearInterval(pollTimer)
+      window.removeEventListener('message', onMessage)
+      if (status === 'success') {
+        resolve()
+      } else {
+        reject(new Error(error || t('mcp.oauth.authFailed')))
+      }
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'mcp-oauth-callback') return
+      finish(event.data.status === 'success' ? 'success' : 'error', event.data.error)
+    }
+
+    window.addEventListener('message', onMessage)
+    pollTimer = setInterval(() => {
+      getBotsByBotIdPluginsByIdOauthStatus({
+        path: { bot_id: botId, id: installationId },
+        throwOnError: true,
+      }).then(({ data }) => {
+        if (completed) return
+        if (data.status === 'ready' || data.enabled) {
+          finish('success')
+          return
+        }
+        if (popup?.closed || Date.now() - startedAt > 120_000) {
+          finish('error')
+        }
+      }).catch(() => {
+        if (!completed && (popup?.closed || Date.now() - startedAt > 120_000)) {
+          finish('error')
+        }
+      })
+    }, 2000)
+  })
+}
+
+async function syncOAuthStatus(botId: string, installationId: string): Promise<PluginsInstallation> {
+  const { data } = await getBotsByBotIdPluginsByIdOauthStatus({
+    path: { bot_id: botId, id: installationId },
+    throwOnError: true,
+  })
+  return data
+}
+</script>

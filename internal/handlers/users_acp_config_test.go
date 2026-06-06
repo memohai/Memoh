@@ -14,6 +14,7 @@ import (
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/acpprofile"
 	"github.com/memohai/memoh/internal/bots"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -178,6 +179,10 @@ func (w *usersACPConfigWorkspace) WorkspaceInfo(context.Context, string) (bridge
 
 func (w *usersACPConfigWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
 	return w.client, nil
+}
+
+func (*usersACPConfigWorkspace) SetupBotContainerWithProgress(context.Context, string, workspace.ContainerSetupProgress) error {
+	return nil
 }
 
 type usersACPConfigWrite struct {

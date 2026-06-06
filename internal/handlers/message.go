@@ -222,7 +222,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		}
 		if sessionID != "" && h.userInput != nil {
 			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeUserInputs(items, requests)
+				mergeUserInputs(items, requests, h.userInput.HasWaiter)
 			}
 		}
 		return c.JSON(http.StatusOK, map[string]any{
@@ -300,7 +300,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	}
 	if h.userInput != nil {
 		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeUserInputs(items, requests)
+			mergeUserInputs(items, requests, h.userInput.HasWaiter)
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{
@@ -388,7 +388,7 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 	}
 }
 
-func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request) {
+func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, hasWaiter func(requestID string) bool) {
 	if len(turns) == 0 || len(requests) == 0 {
 		return
 	}
@@ -413,27 +413,19 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request) 
 			}
 			running := false
 			msg.Running = &running
-			options := make([]conversation.UIUserInputOption, 0, len(req.UIPayload.Options))
-			for _, option := range req.UIPayload.Options {
-				options = append(options, conversation.UIUserInputOption{
-					ID:          option.ID,
-					Label:       option.Label,
-					Description: option.Description,
-					Value:       option.Value,
-					InputType:   option.InputType,
-					Placeholder: option.Placeholder,
-				})
+			canRespond := req.Status == userinput.StatusPending
+			// A waiter-backed request whose waiter is gone (timeout or
+			// process restart) would drop any submitted answer; never offer
+			// the form for it.
+			if canRespond && userinput.IsACPMCPRequest(req) && (hasWaiter == nil || !hasWaiter(req.ID)) {
+				canRespond = false
 			}
 			msg.UserInput = &conversation.UIUserInput{
 				UserInputID: req.ID,
 				ShortID:     req.ShortID,
 				Status:      req.Status,
-				Question:    req.UIPayload.Question,
-				Options:     options,
-				AllowCustom: req.UIPayload.AllowCustom,
-				InputType:   req.UIPayload.InputType,
-				Placeholder: req.UIPayload.Placeholder,
-				CanRespond:  req.Status == userinput.StatusPending,
+				Questions:   req.UIPayload.Questions,
+				CanRespond:  canRespond,
 			}
 		}
 	}

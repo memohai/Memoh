@@ -38,6 +38,18 @@ INSERT INTO user_input_requests (
   sqlc.arg(conversation_type),
   sqlc.narg(expires_at)
 )
+ON CONFLICT (session_id, tool_call_id) DO UPDATE
+SET input_json = EXCLUDED.input_json,
+    ui_payload_json = EXCLUDED.ui_payload_json,
+    provider_metadata = EXCLUDED.provider_metadata,
+    requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+    source_platform = EXCLUDED.source_platform,
+    reply_target = EXCLUDED.reply_target,
+    conversation_type = EXCLUDED.conversation_type,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = CURRENT_TIMESTAMP
+WHERE user_input_requests.status = 'pending'
+  AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at = '' OR julianday(user_input_requests.expires_at) > julianday('now'))
 RETURNING *;
 
 -- name: GetUserInputRequest :one
@@ -45,13 +57,20 @@ SELECT *
 FROM user_input_requests
 WHERE id = ?;
 
+-- name: GetUserInputRequestBySessionToolCall :one
+SELECT *
+FROM user_input_requests
+WHERE session_id = ?
+  AND tool_call_id = ?;
+
 -- name: GetPendingUserInputBySessionShortID :one
 SELECT *
 FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
   AND short_id = ?
-  AND status = 'pending';
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'));
 
 -- name: GetLatestPendingUserInputBySession :one
 SELECT *
@@ -59,6 +78,7 @@ FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at DESC, short_id DESC
 LIMIT 1;
 
@@ -69,6 +89,7 @@ WHERE bot_id = ?
   AND session_id = ?
   AND prompt_external_message_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -103,6 +124,7 @@ SET status = 'submitted',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING *;
 
 -- name: CancelUserInputRequest :one
@@ -115,6 +137,7 @@ SET status = 'canceled',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING *;
 
 -- name: FailUserInputRequest :one
@@ -124,6 +147,7 @@ SET status = 'failed',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = sqlc.arg(id)
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 RETURNING *;
 
 -- name: ListPendingUserInputsBySession :many
@@ -132,6 +156,7 @@ FROM user_input_requests
 WHERE bot_id = ?
   AND session_id = ?
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
 ORDER BY created_at ASC, short_id ASC;
 
 -- name: ListUserInputsBySession :many

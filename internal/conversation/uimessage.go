@@ -3,6 +3,8 @@ package conversation
 import (
 	"strings"
 	"time"
+
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // UIMessageType identifies the frontend-friendly message block type.
@@ -72,24 +74,11 @@ type UIToolApproval struct {
 }
 
 type UIUserInput struct {
-	UserInputID string              `json:"user_input_id"`
-	ShortID     int                 `json:"short_id,omitempty"`
-	Status      string              `json:"status"`
-	Question    string              `json:"question"`
-	Options     []UIUserInputOption `json:"options,omitempty"`
-	AllowCustom bool                `json:"allow_custom,omitempty"`
-	InputType   string              `json:"input_type,omitempty"`
-	Placeholder string              `json:"placeholder,omitempty"`
-	CanRespond  bool                `json:"can_respond,omitempty"`
-}
-
-type UIUserInputOption struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	Value       any    `json:"value,omitempty"`
-	InputType   string `json:"input_type,omitempty"`
-	Placeholder string `json:"placeholder,omitempty"`
+	UserInputID string                 `json:"user_input_id"`
+	ShortID     int                    `json:"short_id,omitempty"`
+	Status      string                 `json:"status"`
+	Questions   []userinput.UIQuestion `json:"questions,omitempty"`
+	CanRespond  bool                   `json:"can_respond,omitempty"`
 }
 
 // UITurn is the normalized chat turn used by the web frontend.

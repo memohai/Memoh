@@ -14,6 +14,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 type acpPrompter interface {
@@ -158,6 +159,19 @@ func mapACPStreamEvent(event acpclient.StreamEvent) []agentpkg.StreamEvent {
 			Result:     event.Result,
 			Error:      event.Error,
 		}}
+	case acpclient.StreamEventUserInputRequest:
+		// Same shape the in-process agent loop emits, so the stream converter
+		// attaches the pending question to the existing tool call block.
+		return []agentpkg.StreamEvent{{
+			Type:        agentpkg.EventUserInputRequest,
+			ToolName:    event.ToolName,
+			ToolCallID:  event.ToolCallID,
+			Input:       event.Input,
+			UserInputID: event.UserInputID,
+			ShortID:     event.ShortID,
+			Status:      event.Status,
+			Metadata:    event.Metadata,
+		}}
 	default:
 		return nil
 	}
@@ -267,7 +281,60 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		})
 		output = append(output, converted...)
 	}
-
+	attachToolMetadata := func(event acpclient.StreamEvent, key string, value map[string]any) {
+		toolCallID := strings.TrimSpace(event.ToolCallID)
+		toolName := strings.TrimSpace(event.ToolName)
+		for idx, part := range assistantParts {
+			toolCall, ok := part.(sdk.ToolCallPart)
+			if !ok {
+				continue
+			}
+			if toolCallID != "" && strings.TrimSpace(toolCall.ToolCallID) != toolCallID {
+				continue
+			}
+			if toolCallID == "" && toolName != "" && strings.TrimSpace(toolCall.ToolName) != toolName {
+				continue
+			}
+			if toolCall.ProviderMetadata == nil {
+				toolCall.ProviderMetadata = map[string]any{}
+			}
+			toolCall.ProviderMetadata[key] = value
+			if event.Input != nil {
+				toolCall.Input = event.Input
+			}
+			assistantParts[idx] = toolCall
+			return
+		}
+		if text.Len() > 0 || reasoning.Len() > 0 {
+			flushAssistant()
+		}
+		assistantParts = append(assistantParts, sdk.ToolCallPart{
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+			Input:      event.Input,
+			ProviderMetadata: map[string]any{
+				key: value,
+			},
+		})
+	}
+	userInputMetadata := func(event acpclient.StreamEvent) map[string]any {
+		status := strings.TrimSpace(event.Status)
+		if status == "" {
+			status = userinput.StatusPending
+		}
+		userInputID := strings.TrimSpace(event.UserInputID)
+		if userInputID == "" {
+			if value, _ := event.Metadata["user_input_id"].(string); value != "" {
+				userInputID = strings.TrimSpace(value)
+			}
+		}
+		return map[string]any{
+			"user_input_id": userInputID,
+			"short_id":      event.ShortID,
+			"status":        status,
+			"ui_payload":    event.Metadata["ui_payload"],
+		}
+	}
 	for _, event := range result.Events {
 		switch event.Type {
 		case acpclient.StreamEventReasoningDelta:
@@ -285,6 +352,8 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		case acpclient.StreamEventToolCallEnd:
 			flushAssistant()
 			appendToolResult(event)
+		case acpclient.StreamEventUserInputRequest:
+			attachToolMetadata(event, "user_input", userInputMetadata(event))
 		}
 	}
 	if !sawTextDelta {

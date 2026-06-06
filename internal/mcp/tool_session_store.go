@@ -29,6 +29,14 @@ type ToolStreamEvent struct {
 	Input      any    `json:"input,omitempty"`
 	Result     any    `json:"result,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// Interactive request fields (Type "user_input_request"). Carrying the
+	// pending interaction over the same channel as tool_call_start lets the UI
+	// attach it to the existing tool call block instead of rendering a
+	// separate synthetic message.
+	UserInputID string         `json:"user_input_id,omitempty"`
+	ShortID     int            `json:"short_id,omitempty"`
+	Status      string         `json:"status,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 func (s *ToolSessionContextStore) Put(session ToolSessionContext) {

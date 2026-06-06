@@ -326,8 +326,31 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 // Container lifecycle (bots.ContainerLifecycle interface)
 // ---------------------------------------------------------------------------
 
+type ContainerSetupEvent struct {
+	Type    string
+	Image   string
+	Message string
+	Layers  []ctr.LayerStatus
+}
+
+type ContainerSetupProgress func(ContainerSetupEvent)
+
 // SetupBotContainer creates/starts the container and upserts the DB record.
 func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
+	return m.setupBotContainer(ctx, botID, nil)
+}
+
+func (m *Manager) SetupBotContainerWithProgress(ctx context.Context, botID string, progress ContainerSetupProgress) error {
+	return m.setupBotContainer(ctx, botID, progress)
+}
+
+func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress ContainerSetupProgress) error {
+	emit := func(event ContainerSetupEvent) {
+		if progress != nil {
+			progress(event)
+		}
+	}
+
 	workspaceCfg, err := m.botWorkspaceStartPreference(ctx, botID)
 	if err != nil {
 		m.logger.Error("setup bot container: resolve workspace backend failed",
@@ -343,9 +366,13 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 		return err
 	}
 	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
+		emit(ContainerSetupEvent{Type: "pulling", Image: image})
 		result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
 			Unpack:        true,
 			StorageDriver: m.cfg.Snapshotter,
+			OnProgress: func(p ctr.PullProgress) {
+				emit(ContainerSetupEvent{Type: "pull_progress", Layers: p.Layers})
+			},
 		})
 		if err != nil {
 			m.logger.Error("setup bot container: prepare image failed",
@@ -357,12 +384,24 @@ func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
 		if strings.TrimSpace(result.ImageRef) != "" {
 			image = result.ImageRef
 		}
+		switch result.Mode {
+		case ImagePrepareSkipped:
+			emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: result.Message})
+		case ImagePrepareDelegated:
+			emit(ContainerSetupEvent{Type: "pull_delegated", Image: image, Message: result.Message})
+		}
 	} else {
 		image = "local"
+		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: "local workspace does not use container images"})
 	}
 	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
 	if err != nil {
 		return err
+	}
+
+	emit(ContainerSetupEvent{Type: "creating"})
+	if m.HasPreservedData(botID) {
+		emit(ContainerSetupEvent{Type: "restoring"})
 	}
 
 	if err := m.StartWithWorkspaceConfig(ctx, botID, image, gpu, workspaceCfg); err != nil {

@@ -1,11 +1,13 @@
 -- name: GetMCPConnectionByID :one
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id)
 LIMIT 1;
 
 -- name: ListMCPConnectionsByBotID :many
-SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at
+SELECT id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+       managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at
 FROM mcp_connections
 WHERE bot_id = sqlc.arg(bot_id)
 ORDER BY created_at DESC;
@@ -25,7 +27,33 @@ VALUES (
   sqlc.arg(is_active),
   sqlc.arg(auth_type)
 )
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+
+-- name: CreateManagedMCPConnection :one
+INSERT INTO mcp_connections (
+  id, bot_id, name, type, config, is_active, auth_type,
+  managed_by_plugin_installation_id, managed_resource_key, visible, metadata
+)
+VALUES (
+  lower(hex(randomblob(4))) || '-' ||
+  lower(hex(randomblob(2))) || '-' ||
+  '4' || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+  lower(hex(randomblob(6))),
+  sqlc.arg(bot_id),
+  sqlc.arg(name),
+  sqlc.arg(type),
+  sqlc.arg(config),
+  sqlc.arg(is_active),
+  sqlc.arg(auth_type),
+  sqlc.arg(managed_by_plugin_installation_id),
+  sqlc.arg(managed_resource_key),
+  sqlc.arg(visible),
+  sqlc.arg(metadata)
+)
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
 
 -- name: UpdateMCPConnection :one
 UPDATE mcp_connections
@@ -36,7 +64,20 @@ SET name = sqlc.arg(name),
     auth_type = sqlc.arg(auth_type),
     updated_at = CURRENT_TIMESTAMP
 WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id)
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;
+
+-- name: UpdateMCPConnectionActive :exec
+UPDATE mcp_connections
+SET is_active = sqlc.arg(is_active),
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id);
+
+-- name: UpdateMCPConnectionsActiveByPlugin :exec
+UPDATE mcp_connections
+SET is_active = sqlc.arg(is_active),
+    updated_at = CURRENT_TIMESTAMP
+WHERE bot_id = sqlc.arg(bot_id) AND managed_by_plugin_installation_id = sqlc.arg(managed_by_plugin_installation_id);
 
 -- name: UpdateMCPConnectionProbeResult :exec
 UPDATE mcp_connections
@@ -57,6 +98,10 @@ WHERE id = sqlc.arg(id);
 DELETE FROM mcp_connections
 WHERE bot_id = sqlc.arg(bot_id) AND id = sqlc.arg(id);
 
+-- name: DeleteMCPConnectionsByPlugin :exec
+DELETE FROM mcp_connections
+WHERE bot_id = sqlc.arg(bot_id) AND managed_by_plugin_installation_id = sqlc.arg(managed_by_plugin_installation_id);
+
 -- name: UpsertMCPConnectionByName :one
 INSERT INTO mcp_connections (id, bot_id, name, type, config)
 VALUES (
@@ -74,4 +119,5 @@ ON CONFLICT (bot_id, name)
 DO UPDATE SET type = EXCLUDED.type,
               config = EXCLUDED.config,
               updated_at = CURRENT_TIMESTAMP
-RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type, created_at, updated_at;
+RETURNING id, bot_id, name, type, config, is_active, status, tools_cache, last_probed_at, status_message, auth_type,
+          managed_by_plugin_installation_id, managed_resource_key, visible, metadata, created_at, updated_at;

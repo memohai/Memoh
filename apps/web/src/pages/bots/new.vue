@@ -313,25 +313,6 @@
       </div>
     </form>
 
-    <div
-      v-if="isCreateFlowBlocked"
-      class="absolute inset-0 z-10 flex items-start justify-center bg-background/70 pt-20 backdrop-blur-[1px]"
-      role="status"
-      aria-live="polite"
-    >
-      <div class="flex max-w-md items-start gap-3 rounded-md border bg-background px-4 py-3 shadow-sm">
-        <Spinner class="mt-0.5 shrink-0" />
-        <div class="min-w-0">
-          <p class="text-sm font-medium">
-            {{ $t('bots.createBotSetupTitle') }}
-          </p>
-          <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {{ $t('bots.createBotSetupDesc') }}
-          </p>
-        </div>
-      </div>
-    </div>
-
     <AvatarEditDialog
       v-model:open="avatarDialogOpen"
       v-model:avatar-url="form.avatar_url"
@@ -368,15 +349,16 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability, putBotsByBotIdSettings } from '@memohai/sdk'
-import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
+import type { BotsCreateBotRequest } from '@memohai/sdk'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
@@ -559,21 +541,9 @@ const canSubmit = computed(() => {
   return true
 })
 
-// Submit
-const { mutateAsync: createBot, isLoading: submitLoading } = useMutation({
-  ...postBotsMutation(),
-  onSettled: () => queryCache.invalidateQueries({ key: getBotsQueryKey() }),
-})
-
+const store = useBotCreateProgressStore()
+const submitLoading = ref(false)
 const isCreateFlowBlocked = computed(() => submitLoading.value)
-
-// Detect a name-uniqueness conflict (HTTP 409) from the create request, used as
-// a fallback when the realtime check raced with submission.
-function isNameConflict(error: unknown): boolean {
-  const e = error as { status?: number, response?: { status?: number } } | null
-  if (e?.status === 409 || e?.response?.status === 409) return true
-  return resolveApiErrorMessage(error, '').toLowerCase().includes('already taken')
-}
 
 // Import from backup
 function handleImported(botId: string) {
@@ -584,9 +554,7 @@ function handleImported(botId: string) {
   }
 }
 
-async function handleSubmit() {
-  if (!canSubmit.value || isCreateFlowBlocked.value) return
-
+function buildCreatePayload(): BotsCreateBotRequest {
   const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
     ? {
         workspace: {
@@ -595,53 +563,84 @@ async function handleSubmit() {
         },
       }
     : undefined
-
   const tz = form.timezone === emptyTimezoneValue ? undefined : form.timezone || undefined
 
+  return {
+    name: form.name.trim(),
+    display_name: form.display_name.trim(),
+    avatar_url: form.avatar_url.trim() || undefined,
+    timezone: tz,
+    is_active: true,
+    acl_preset: form.acl_preset,
+    metadata,
+    wait_for_ready: true,
+  }
+}
+
+function createStartOptions() {
+  return {
+    display: {
+      display_name: form.display_name.trim(),
+      name: form.name.trim(),
+      avatar_url: form.avatar_url.trim() || undefined,
+    },
+    settings: {
+      chat_model_id: form.chat_model_id || undefined,
+      memory_provider_id: form.memory_provider_id || undefined,
+    },
+  }
+}
+
+async function handleSubmit() {
+  if (!canSubmit.value || isCreateFlowBlocked.value) return
+  submitLoading.value = true
+
+  const payload = buildCreatePayload()
+  const options = createStartOptions()
+
+  // Local workspaces are near-instant and not sandboxed; skip the dedicated
+  // progress route and finish inline.
+  if (form.workspace_backend === 'local') {
+    await store.start(payload, options)
+    submitLoading.value = false
+    finishLocalCreate()
+    return
+  }
+
+  // Container backend: hand the live stream off to the dedicated progress route.
+  void store.start(payload, options)
   try {
-    const bot = await createBot({
-      body: {
-        name: form.name.trim(),
-        display_name: form.display_name.trim(),
-        avatar_url: form.avatar_url.trim() || undefined,
-        timezone: tz,
-        is_active: true,
-        acl_preset: form.acl_preset,
-        metadata,
-        wait_for_ready: true,
-      },
-    })
+    await router.push({ name: 'bot-create-progress' })
+  } finally {
+    submitLoading.value = false
+  }
+}
 
-    const botId = bot?.id
-    const botName = bot?.name ?? botId
-    if (botId && (form.chat_model_id || form.memory_provider_id)) {
-      try {
-        await putBotsByBotIdSettings({
-          path: { bot_id: botId },
-          body: {
-            ...(form.chat_model_id ? { chat_model_id: form.chat_model_id } : {}),
-            ...(form.memory_provider_id ? { memory_provider_id: form.memory_provider_id } : {}),
-          },
-          throwOnError: true,
-        })
-      } catch {
-        // Bot created successfully, settings save failed — non-fatal
-      }
-    }
-
-    toast.success(t('bots.createBotSuccess'))
-    if (botName) {
-      router.push({ name: 'bot-detail', params: { botName } })
-    } else {
-      router.push({ name: 'bots' })
-    }
-  } catch (error) {
-    if (isNameConflict(error)) {
+function finishLocalCreate() {
+  if (store.status === 'error') {
+    const message = store.setupError ?? ''
+    if (message.toLowerCase().includes('already taken')) {
       nameStatus.value = 'taken'
       toast.error(t('bots.nameStatus.taken'))
-      return
+    } else {
+      toast.error(message || t('common.saveFailed'))
     }
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+    store.reset()
+    return
+  }
+
+  if (store.setupError) {
+    toast.error(store.setupError)
+  } else {
+    toast.success(t('bots.createBotSuccess'))
+  }
+  const botName = store.bot?.name ?? store.bot?.id
+  void queryCache.invalidateQueries({ key: getBotsQueryKey() })
+  store.reset()
+  if (botName) {
+    router.push({ name: 'bot-detail', params: { botName } })
+  } else {
+    router.push({ name: 'bots' })
   }
 }
 </script>

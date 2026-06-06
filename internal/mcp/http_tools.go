@@ -180,7 +180,9 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 					ToolName:   payload.Name,
 					Input:      payload.Arguments,
 				})
-				result, err := gateway.CallTool(ctx, session, payload)
+				callSession := session
+				callSession.ToolCallID = toolCallID
+				result, err := gateway.CallTool(ctx, callSession, payload)
 				if err != nil {
 					recordToolEvent(contexts, session, ToolStreamEvent{
 						Type:       "tool_call_end",

@@ -1,5 +1,8 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
+import enMessages from '@/i18n/locales/en.json'
+import zhMessages from '@/i18n/locales/zh.json'
 import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -34,6 +37,7 @@ import {
   type UIToolApproval,
   type UIToolMessage,
   type UIUserInput,
+  type WSUserInputAnswer,
   type UITurn,
   type UIUserTurn,
   type UIStreamEvent,
@@ -124,6 +128,19 @@ export interface ChatSystemTurn {
 }
 
 export type ChatMessage = ChatUserTurn | ChatAssistantTurn | ChatSystemTurn
+
+function currentLocale() {
+  const storage = globalThis.localStorage
+  const locale = typeof storage?.getItem !== 'function'
+    ? ''
+    : storage.getItem('language')
+  return locale === 'zh' ? 'zh' : 'en'
+}
+
+function userInputConnectionLostMessage() {
+  const messages = currentLocale() === 'zh' ? zhMessages : enMessages
+  return messages.chat.tools.userInputConnectionLost
+}
 
 interface PendingAssistantStream {
   streamId: string
@@ -1020,7 +1037,10 @@ export const useChatStore = defineStore('chat', () => {
   function cloneUserInputState(userInput: UIUserInput): UIUserInput {
     return {
       ...userInput,
-      options: userInput.options?.map(option => ({ ...option })),
+      questions: userInput.questions?.map(question => ({
+        ...question,
+        options: question.options?.map(option => ({ ...option })),
+      })),
     }
   }
 
@@ -1121,11 +1141,13 @@ export const useChatStore = defineStore('chat', () => {
       case 'end':
         const endedSession = getAssistantStream(streamId)
         const endedBotId = endedSession?.botId ?? currentBotId.value ?? ''
-        const endedSessionId = sid || endedSession?.sessionId
+        const endedSessionId = (endedSession?.sessionId || sid || '').trim()
         pruneEmptyAssistantTurnIfPending(streamId)
         resolveAssistantStream(streamId)
         loading.value = isSessionStreaming(sessionId.value)
-        void refreshCurrentSession(endedBotId, endedSessionId)
+        if (!endedSessionId || !isSessionStreaming(endedSessionId)) {
+          void refreshCurrentSession(endedBotId, endedSessionId)
+        }
         break
       case 'error': {
         const session = getAssistantStream(streamId) ?? ensureDiscussStream(streamId, sid)
@@ -2198,18 +2220,29 @@ export const useChatStore = defineStore('chat', () => {
 
   async function respondUserInput(
     userInput: UIUserInput,
-    payload: { optionId?: string; answer?: unknown; canceled?: boolean; reason?: string },
+    payload: { answers?: WSUserInputAnswer[]; canceled?: boolean; reason?: string },
   ) {
     const bid = currentBotId.value ?? ''
     const sid = sessionId.value ?? ''
-    if (!bid || !sid || !userInput.user_input_id || streaming.value) return
+    if (!bid || !sid || !userInput.user_input_id) return
     const ws = ensureWebSocket(bid)
+    if (!ws?.connected) {
+      toast.error(userInputConnectionLostMessage())
+      return
+    }
     const streamId = createStreamId()
     const previousUserInputStates = snapshotUserInputStates(userInput.user_input_id)
     const assistantTurn = createOptimisticAssistantTurn()
     messages.push(assistantTurn)
     void trackAssistantStream(streamId, assistantTurn, bid, sid).catch((error: Error) => {
       finalizeStreamFailure(assistantTurn, bid, sid, error)
+      // While the main session stream is still active a refresh would
+      // clobber its in-flight state; roll back and let its end refresh
+      // bring truth.
+      if (isSessionStreaming(sid)) {
+        restoreUserInputStates(previousUserInputStates)
+        return
+      }
       void refreshCurrentSession(bid, sid).catch(() => {
         restoreUserInputStates(previousUserInputStates)
       })
@@ -2236,8 +2269,7 @@ export const useChatStore = defineStore('chat', () => {
       session_id: sid,
       user_input_id: userInput.user_input_id,
       short_id: userInput.short_id,
-      option_id: payload.optionId,
-      answer: payload.answer,
+      answers: payload.answers,
       canceled: payload.canceled === true,
       reason: payload.reason,
     })

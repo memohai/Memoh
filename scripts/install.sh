@@ -1,11 +1,11 @@
 #!/bin/sh
 set -e
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-PURPLE='\033[0;35m'
-RED='\033[0;31m'
-NC='\033[0m'
+GREEN=$(printf '\033[0;32m')
+YELLOW=$(printf '\033[1;33m')
+PURPLE=$(printf '\033[0;35m')
+RED=$(printf '\033[0;31m')
+NC=$(printf '\033[0m')
 
 GITHUB_REPO="memohai/Memoh"
 REPO="https://github.com/${GITHUB_REPO}.git"

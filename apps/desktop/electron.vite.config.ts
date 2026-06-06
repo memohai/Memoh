@@ -41,6 +41,14 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
     }
   }
 
+  // Dev slot override: when launched via `mise run desktop:dev -- <keyword>`,
+  // MEMOH_WEB_PORT pins the Vite dev server port for that slot so multiple
+  // worktrees/slots can run side by side without clashing on 8082.
+  const slotWebPort = Number.parseInt(process.env.MEMOH_WEB_PORT?.trim() ?? '', 10)
+  if (Number.isInteger(slotWebPort) && slotWebPort > 0) {
+    port = slotWebPort
+  }
+
   return { port, host, baseUrl }
 }
 

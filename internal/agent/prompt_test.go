@@ -174,11 +174,10 @@ func TestGenerateSystemPromptIncludesAskUserGuidance(t *testing.T) {
 		"## User Input",
 		"Use `ask_user` when you need the user to choose an option",
 		"If the user asks you to create a multiple-choice question",
-		"put only the question text in `question` and every answer choice in `options`",
-		"do not duplicate A/B/C choices inside `question`",
-		"include that option in `options` with `input_type: \"text\"`",
-		"set top-level `input_type: \"text\"` and omit `options`",
-		"Do not treat that request itself as the user's answer.",
+		"`single_select` for exactly one choice, `multi_select` for select-all-that-apply",
+		"never duplicate A/B/C choices inside the question text",
+		"Use `allow_custom: true` on a select question",
+		"do not treat that request itself as the user's answer",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected prompt to contain %q", want)

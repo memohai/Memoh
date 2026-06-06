@@ -34,6 +34,7 @@ import (
 	"github.com/memohai/memoh/internal/oauthctx"
 	pipelinepkg "github.com/memohai/memoh/internal/pipeline"
 	"github.com/memohai/memoh/internal/providers"
+	sessionpkg "github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
@@ -93,14 +94,17 @@ type Resolver struct {
 	streamHTTPClient  *http.Client
 	bgManager         *background.Manager
 	toolApproval      *toolapproval.Service
-	userInput         *userinput.Service
-	outboundFn        func(ctx context.Context, botID, channelType, target, text string) error
-	bgNotifDeferred   sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
-	sessionTurnMu     sync.Mutex
-	sessionTurnRefs   map[string]int // key: "botID:sessionID" → active turn refcount
-	timeout           time.Duration
-	clockLocation     *time.Location
-	logger            *slog.Logger
+	userInput         userInputService
+	// continueUserInputFn overrides the chat-flow resume after a user input
+	// response; nil means storeUserInputResultAndContinue. Test seam.
+	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
+	outboundFn          func(ctx context.Context, botID, channelType, target, text string) error
+	bgNotifDeferred     sync.Map // key: "botID:sessionID" → wake arrived while a session turn was active
+	sessionTurnMu       sync.Mutex
+	sessionTurnRefs     map[string]int // key: "botID:sessionID" → active turn refcount
+	timeout             time.Duration
+	clockLocation       *time.Location
+	logger              *slog.Logger
 }
 
 // NewResolver creates a Resolver that uses the internal agent directly.
@@ -195,6 +199,10 @@ func (r *Resolver) SetToolApprovalService(s *toolapproval.Service) {
 }
 
 func (r *Resolver) SetUserInputService(s *userinput.Service) {
+	if s == nil {
+		r.userInput = nil
+		return
+	}
 	r.userInput = s
 }
 
@@ -670,6 +678,9 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 					Reason:   "user input service is not configured",
 				}, nil
 			}
+			// No ExpiresAt here: chat-flow requests have no in-process
+			// waiter — the run pauses and resumes whenever the user answers,
+			// even much later. Only waiter-backed (ACP/MCP) requests expire.
 			req, err := r.userInput.CreatePending(ctx, userinput.CreatePendingInput{
 				BotID:                        p.BotID,
 				SessionID:                    p.SessionID,
@@ -685,6 +696,14 @@ func (r *Resolver) buildToolApprovalHandler(p baseRunConfigParams) func(context.
 			})
 			if err != nil {
 				return sdk.ToolApprovalResult{}, err
+			}
+			if req.Status != userinput.StatusPending {
+				return sdk.ToolApprovalResult{
+					Decision:   sdk.ToolApprovalDecisionRejected,
+					ApprovalID: req.ID,
+					Reason:     "ask_user request is already " + req.Status,
+					Metadata:   userinput.DeferredMetadata(req),
+				}, nil
 			}
 			if !isInteractiveApprovalSession(p.SessionType) {
 				canceled, err := r.userInput.Cancel(ctx, userinput.CancelInput{
@@ -778,6 +797,27 @@ func isInteractiveApprovalSession(sessionType string) bool {
 	}
 }
 
+func (r *Resolver) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || r == nil || r.sessionService == nil {
+		return sessionpkg.TypeChat
+	}
+	sess, err := r.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Warn("ResolveRunConfig: session lookup failed; falling back to chat session type",
+				slog.String("session_id", sessionID),
+				slog.Any("error", err),
+			)
+		}
+		return sessionpkg.TypeChat
+	}
+	if typ := strings.TrimSpace(sess.Type); typ != "" {
+		return typ
+	}
+	return sessionpkg.TypeChat
+}
+
 func buildModelSelectionRequest(p baseRunConfigParams, chatID string) conversation.ChatRequest {
 	return conversation.ChatRequest{
 		BotID:          p.BotID,
@@ -806,7 +846,7 @@ func (r *Resolver) ResolveRunConfig(ctx context.Context, botID, sessionID, chann
 		ReplyTarget:       replyTarget,
 		ConversationType:  conversationType,
 		SessionToken:      chatToken,
-		SessionType:       "discuss",
+		SessionType:       r.resolveRunConfigSessionType(ctx, sessionID),
 	})
 	if err != nil {
 		return pipelinepkg.ResolveRunConfigResult{}, err
