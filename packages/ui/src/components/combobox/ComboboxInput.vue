@@ -30,7 +30,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     <ComboboxInput
       data-slot="command-input"
       :class="cn(
-        'flex h-10 w-full rounded-md bg-transparent py-3 text-body outline-hidden',
+        'flex h-full w-full bg-transparent text-control outline-hidden',
         'placeholder:text-muted-foreground',
         'disabled:cursor-not-allowed disabled:opacity-40',
         props.class,

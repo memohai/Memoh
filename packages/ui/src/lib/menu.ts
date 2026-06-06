@@ -12,11 +12,13 @@
 // and is opt-in, because only trigger-anchored menus should drift in from a side —
 // a ContextMenu opens AT the cursor and must just fade. The border-color MUST be a
 // utility — an @layer components rule would silently lose to Tailwind's border
-// utility — so it is pinned here as border-[var(--border-menu)]. Size/position vars
-// (--reka-*-available-height, trigger-width, transform-origin) are reka-specific and
-// appended inline by each Content wrapper.
+// utility — so it is pinned here as border-[color:var(--border-menu)]. The explicit
+// `color:` hint is required: in Tailwind v4 a bare border-[var(--x)] is ambiguous
+// between width and color, so we type it the same way we do bg-[color:var(...)].
+// Size/position vars (--reka-*-available-height, trigger-width, transform-origin)
+// are reka-specific and appended inline by each Content wrapper.
 export const menuContentClass
-  = 'bg-popover text-popover-foreground border border-[var(--border-menu)] rounded-menu-shell shadow-[var(--shadow-dropdown)] z-50 overflow-x-hidden overflow-y-auto '
+  = 'bg-popover text-popover-foreground border border-[color:var(--border-menu)] rounded-menu-shell shadow-[var(--shadow-dropdown)] z-50 overflow-x-hidden overflow-y-auto '
     + 'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 '
     + 'duration-75'
 

@@ -3,6 +3,7 @@ import type { ComboboxGroupProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { ComboboxGroup, ComboboxLabel } from 'reka-ui'
+import { menuLabelClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<ComboboxGroupProps & {
@@ -17,11 +18,11 @@ const delegatedProps = reactiveOmit(props, 'class')
   <ComboboxGroup
     data-slot="combobox-group"
     v-bind="delegatedProps"
-    :class="cn('overflow-hidden p-1 text-foreground', props.class)"
+    :class="cn('text-foreground flex flex-col gap-0.5 overflow-hidden', props.class)"
   >
     <ComboboxLabel
       v-if="heading"
-      class="px-2 py-1.5 text-body font-medium text-muted-foreground"
+      :class="menuLabelClass"
     >
       {{ heading }}
     </ComboboxLabel>

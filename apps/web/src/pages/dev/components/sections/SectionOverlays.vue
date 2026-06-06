@@ -171,7 +171,7 @@ const showStatusBar = ref(true)
       <div class="lg:col-span-2">
         <Specimen label="<Command> inline + <CommandDialog>">
           <div class="flex w-full flex-col gap-3">
-            <Command class="max-w-sm border border-[var(--border-menu)] shadow-[var(--shadow-dropdown)]">
+            <Command class="max-w-sm border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]">
               <CommandInput placeholder="Type a command or search..." />
               <CommandList>
                 <CommandEmpty>No results found.</CommandEmpty>

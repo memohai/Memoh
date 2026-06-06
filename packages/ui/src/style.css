@@ -169,8 +169,8 @@
     box-shadow: inset 0 0 0 1px var(--destructive);
   }
 
-  /* Menu panel border lives on the Tailwind utility in SelectContent.vue
-     (border-[var(--border-menu)]). It MUST be a utility, not a rule here:
+  /* Menu panel border lives on the Tailwind utility in lib/menu.ts → menuContentClass
+     (border-[color:var(--border-menu)]). It MUST be a utility, not a rule here:
      @layer utilities always wins over @layer components, so any border-color set
      in this block would be silently overridden by the component's border utility.
      --border-menu is deeper than the hairline so the floating panel reads as a
