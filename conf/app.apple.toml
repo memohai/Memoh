@@ -62,3 +62,12 @@ timeout_seconds = 10
 
 [sparse]
 base_url = "http://127.0.0.1:8085"
+
+[registry]
+providers_dir = "conf/providers"
+
+[supermarket]
+base_url = "https://supermarket.memoh.ai"
+
+[oauth_clients]
+config_path = "conf/oauth-clients.toml"

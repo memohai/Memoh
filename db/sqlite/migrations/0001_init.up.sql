@@ -233,6 +233,25 @@ CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_channel_identity_id ON bot_acl_rules(channel_identity_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_subject_channel_type ON bot_acl_rules(subject_channel_type);
 
+CREATE TABLE IF NOT EXISTS bot_plugin_installations (
+  id TEXT PRIMARY KEY,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  plugin_id TEXT NOT NULL,
+  plugin_name TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ready',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  manifest TEXT NOT NULL DEFAULT '{}',
+  installed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT bot_plugin_installations_unique UNIQUE (bot_id, plugin_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_installations_bot_id ON bot_plugin_installations(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_installations_plugin_id ON bot_plugin_installations(plugin_id);
+
 CREATE TABLE IF NOT EXISTS mcp_connections (
   id TEXT PRIMARY KEY,
   bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -245,6 +264,10 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
   last_probed_at TEXT,
   status_message TEXT NOT NULL DEFAULT '',
   auth_type TEXT NOT NULL DEFAULT 'none',
+  managed_by_plugin_installation_id TEXT REFERENCES bot_plugin_installations(id) ON DELETE SET NULL,
+  managed_resource_key TEXT NOT NULL DEFAULT '',
+  visible INTEGER NOT NULL DEFAULT 1,
+  metadata TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT mcp_connections_type_check CHECK (type IN ('stdio', 'http', 'sse')),
@@ -252,6 +275,23 @@ CREATE TABLE IF NOT EXISTS mcp_connections (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_connections_bot_id ON mcp_connections(bot_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_plugin_installation_id ON mcp_connections(managed_by_plugin_installation_id);
+
+CREATE TABLE IF NOT EXISTS bot_plugin_resources (
+  id TEXT PRIMARY KEY,
+  installation_id TEXT NOT NULL REFERENCES bot_plugin_installations(id) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  resource_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT bot_plugin_resources_unique UNIQUE (installation_id, resource_type, resource_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_installation_id ON bot_plugin_resources(installation_id);
+CREATE INDEX IF NOT EXISTS idx_bot_plugin_resources_resource ON bot_plugin_resources(resource_type, resource_id);
 
 CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
   id TEXT PRIMARY KEY,

@@ -53,6 +53,7 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 // @Summary List MCP connections
 // @Description List MCP connections for a bot
 // @Tags mcp
+// @Param include_managed query bool false "Include plugin-managed hidden MCP connections"
 // @Success 200 {object} mcp.ListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -74,6 +75,16 @@ func (h *MCPHandler) List(c echo.Context) error {
 	items, err := h.service.ListByBot(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if strings.TrimSpace(strings.ToLower(c.QueryParam("include_managed"))) != "true" {
+		visible := make([]mcp.Connection, 0, len(items))
+		for _, item := range items {
+			if item.ManagedByPluginInstallationID != "" && !item.Visible {
+				continue
+			}
+			visible = append(visible, item)
+		}
+		items = visible
 	}
 	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
 }

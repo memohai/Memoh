@@ -1038,12 +1038,18 @@ export type GithubComMemohaiMemohInternalMcpConnection = {
     id?: string;
     is_active?: boolean;
     last_probed_at?: string;
+    managed_by_plugin_installation_id?: string;
+    managed_resource_key?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
     name?: string;
     status?: string;
     status_message?: string;
     tools_cache?: Array<McpToolDescriptor>;
     type?: string;
     updated_at?: string;
+    visible?: boolean;
 };
 
 export type HandlersAcpClaudeCodeOAuthAuthorizeResponse = {
@@ -1264,11 +1270,11 @@ export type HandlersGetContainerResponse = {
     workspace_backend?: string;
 };
 
-export type HandlersInstallMcpRequest = {
-    env?: {
+export type HandlersInstallPluginRequest = {
+    plugin_id?: string;
+    variables?: {
         [key: string]: string;
     };
-    mcp_id?: string;
 };
 
 export type HandlersInstallSkillRequest = {
@@ -1415,30 +1421,8 @@ export type HandlersSupermarketAuthor = {
     name?: string;
 };
 
-export type HandlersSupermarketConfigVar = {
-    defaultValue?: string;
-    description?: string;
-    key?: string;
-};
-
-export type HandlersSupermarketMcpEntry = {
-    args?: Array<string>;
-    author?: HandlersSupermarketAuthor;
-    command?: string;
-    description?: string;
-    env?: Array<HandlersSupermarketConfigVar>;
-    headers?: Array<HandlersSupermarketConfigVar>;
-    homepage?: string;
-    icon?: string;
-    id?: string;
-    name?: string;
-    tags?: Array<string>;
-    transport?: string;
-    url?: string;
-};
-
-export type HandlersSupermarketMcpListResponse = {
-    data?: Array<HandlersSupermarketMcpEntry>;
+export type HandlersSupermarketPluginListResponse = {
+    data?: Array<PluginsManifest>;
     limit?: number;
     page?: number;
     total?: number;
@@ -1854,6 +1838,133 @@ export type ModelsUpdateRequest = {
     name?: string;
     provider_id?: string;
     type?: ModelsModelType;
+};
+
+export type PluginsAuthRequirement = {
+    client_ref?: string;
+    key?: string;
+    scopes?: Array<string>;
+    type?: string;
+    variables?: Array<string>;
+};
+
+export type PluginsAuthor = {
+    email?: string;
+    name?: string;
+};
+
+export type PluginsConfigVar = {
+    defaultValue?: string;
+    description?: string;
+    key?: string;
+    required?: boolean;
+    secret?: boolean;
+};
+
+export type PluginsIcon = {
+    kind?: string;
+    name?: string;
+    url?: string;
+};
+
+export type PluginsInstallRequest = {
+    manifest?: PluginsManifest;
+    variables?: {
+        [key: string]: string;
+    };
+};
+
+export type PluginsInstallation = {
+    bot_id?: string;
+    config?: {
+        [key: string]: unknown;
+    };
+    enabled?: boolean;
+    id?: string;
+    installed_at?: string;
+    manifest?: PluginsManifest;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    plugin_id?: string;
+    plugin_name?: string;
+    resources?: Array<PluginsResource>;
+    status?: string;
+    updated_at?: string;
+    version?: string;
+};
+
+export type PluginsListResponse = {
+    items?: Array<PluginsInstallation>;
+};
+
+export type PluginsMcpResource = {
+    args?: Array<string>;
+    auth_ref?: string;
+    capabilities?: Array<string>;
+    command?: string;
+    cwd?: string;
+    description?: string;
+    display_name?: string;
+    env?: Array<PluginsConfigVar>;
+    headers?: Array<PluginsConfigVar>;
+    key?: string;
+    name?: string;
+    transport?: string;
+    url?: string;
+    visibility?: string;
+};
+
+export type PluginsManifest = {
+    auth_requirements?: Array<PluginsAuthRequirement>;
+    author?: PluginsAuthor;
+    bundled_skills?: Array<PluginsSkillEntry>;
+    capabilities?: Array<string>;
+    description?: string;
+    homepage?: string;
+    icon?: PluginsIcon;
+    id?: string;
+    mcps?: Array<PluginsMcpResource>;
+    name?: string;
+    schema_version?: string;
+    skills?: Array<PluginsSkillResource>;
+    tags?: Array<string>;
+    variables?: Array<PluginsConfigVar>;
+    version?: string;
+};
+
+export type PluginsOAuthAuthorizeRequest = {
+    callback_url?: string;
+};
+
+export type PluginsResource = {
+    created_at?: string;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    resource_id?: string;
+    resource_key?: string;
+    resource_type?: string;
+    status?: string;
+    updated_at?: string;
+};
+
+export type PluginsSkillEntry = {
+    content?: string;
+    description?: string;
+    files?: Array<string>;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+};
+
+export type PluginsSkillResource = {
+    key?: string;
+    name?: string;
+    path?: string;
 };
 
 export type ProvidersCountResponse = {
@@ -5016,7 +5127,12 @@ export type GetBotsByBotIdLocalWsError = GetBotsByBotIdLocalWsErrors[keyof GetBo
 export type GetBotsByBotIdMcpData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Include plugin-managed hidden MCP connections
+         */
+        include_managed?: boolean;
+    };
     url: '/bots/{bot_id}/mcp';
 };
 
@@ -6179,6 +6295,384 @@ export type GetBotsByBotIdMessagesLocateResponses = {
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
 
+export type GetBotsByBotIdPluginsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins';
+};
+
+export type GetBotsByBotIdPluginsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdPluginsError = GetBotsByBotIdPluginsErrors[keyof GetBotsByBotIdPluginsErrors];
+
+export type GetBotsByBotIdPluginsResponses = {
+    /**
+     * OK
+     */
+    200: PluginsListResponse;
+};
+
+export type GetBotsByBotIdPluginsResponse = GetBotsByBotIdPluginsResponses[keyof GetBotsByBotIdPluginsResponses];
+
+export type PostBotsByBotIdPluginsData = {
+    /**
+     * Plugin install request
+     */
+    body: PluginsInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins';
+};
+
+export type PostBotsByBotIdPluginsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdPluginsError = PostBotsByBotIdPluginsErrors[keyof PostBotsByBotIdPluginsErrors];
+
+export type PostBotsByBotIdPluginsResponses = {
+    /**
+     * Created
+     */
+    201: PluginsInstallation;
+};
+
+export type PostBotsByBotIdPluginsResponse = PostBotsByBotIdPluginsResponses[keyof PostBotsByBotIdPluginsResponses];
+
+export type DeleteBotsByBotIdPluginsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}';
+};
+
+export type DeleteBotsByBotIdPluginsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdPluginsByIdError = DeleteBotsByBotIdPluginsByIdErrors[keyof DeleteBotsByBotIdPluginsByIdErrors];
+
+export type DeleteBotsByBotIdPluginsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdPluginsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}';
+};
+
+export type GetBotsByBotIdPluginsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdPluginsByIdError = GetBotsByBotIdPluginsByIdErrors[keyof GetBotsByBotIdPluginsByIdErrors];
+
+export type GetBotsByBotIdPluginsByIdResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type GetBotsByBotIdPluginsByIdResponse = GetBotsByBotIdPluginsByIdResponses[keyof GetBotsByBotIdPluginsByIdResponses];
+
+export type PostBotsByBotIdPluginsByIdDisableData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/disable';
+};
+
+export type PostBotsByBotIdPluginsByIdDisableErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdPluginsByIdDisableError = PostBotsByBotIdPluginsByIdDisableErrors[keyof PostBotsByBotIdPluginsByIdDisableErrors];
+
+export type PostBotsByBotIdPluginsByIdDisableResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type PostBotsByBotIdPluginsByIdDisableResponse = PostBotsByBotIdPluginsByIdDisableResponses[keyof PostBotsByBotIdPluginsByIdDisableResponses];
+
+export type PostBotsByBotIdPluginsByIdEnableData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/enable';
+};
+
+export type PostBotsByBotIdPluginsByIdEnableErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdPluginsByIdEnableError = PostBotsByBotIdPluginsByIdEnableErrors[keyof PostBotsByBotIdPluginsByIdEnableErrors];
+
+export type PostBotsByBotIdPluginsByIdEnableResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type PostBotsByBotIdPluginsByIdEnableResponse = PostBotsByBotIdPluginsByIdEnableResponses[keyof PostBotsByBotIdPluginsByIdEnableResponses];
+
+export type PostBotsByBotIdPluginsByIdOauthAuthorizeData = {
+    /**
+     * OAuth authorize request
+     */
+    body?: PluginsOAuthAuthorizeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/oauth/authorize';
+};
+
+export type PostBotsByBotIdPluginsByIdOauthAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdPluginsByIdOauthAuthorizeError = PostBotsByBotIdPluginsByIdOauthAuthorizeErrors[keyof PostBotsByBotIdPluginsByIdOauthAuthorizeErrors];
+
+export type PostBotsByBotIdPluginsByIdOauthAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: McpAuthorizeResult;
+};
+
+export type PostBotsByBotIdPluginsByIdOauthAuthorizeResponse = PostBotsByBotIdPluginsByIdOauthAuthorizeResponses[keyof PostBotsByBotIdPluginsByIdOauthAuthorizeResponses];
+
+export type GetBotsByBotIdPluginsByIdOauthStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/oauth/status';
+};
+
+export type GetBotsByBotIdPluginsByIdOauthStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdPluginsByIdOauthStatusError = GetBotsByBotIdPluginsByIdOauthStatusErrors[keyof GetBotsByBotIdPluginsByIdOauthStatusErrors];
+
+export type GetBotsByBotIdPluginsByIdOauthStatusResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type GetBotsByBotIdPluginsByIdOauthStatusResponse = GetBotsByBotIdPluginsByIdOauthStatusResponses[keyof GetBotsByBotIdPluginsByIdOauthStatusResponses];
+
+export type PostBotsByBotIdPluginsByIdUninstallData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Plugin installation ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/plugins/{id}/uninstall';
+};
+
+export type PostBotsByBotIdPluginsByIdUninstallErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdPluginsByIdUninstallError = PostBotsByBotIdPluginsByIdUninstallErrors[keyof PostBotsByBotIdPluginsByIdUninstallErrors];
+
+export type PostBotsByBotIdPluginsByIdUninstallResponses = {
+    /**
+     * OK
+     */
+    200: PluginsInstallation;
+};
+
+export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
+
 export type GetBotsByBotIdScheduleData = {
     body?: never;
     path?: never;
@@ -6999,11 +7493,11 @@ export type PutBotsByBotIdSettingsResponses = {
 
 export type PutBotsByBotIdSettingsResponse = PutBotsByBotIdSettingsResponses[keyof PutBotsByBotIdSettingsResponses];
 
-export type PostBotsByBotIdSupermarketInstallMcpData = {
+export type PostBotsByBotIdSupermarketInstallPluginData = {
     /**
-     * Install MCP request
+     * Install plugin request
      */
-    body: HandlersInstallMcpRequest;
+    body: HandlersInstallPluginRequest;
     path: {
         /**
          * Bot ID
@@ -7011,10 +7505,10 @@ export type PostBotsByBotIdSupermarketInstallMcpData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/supermarket/install-mcp';
+    url: '/bots/{bot_id}/supermarket/install-plugin';
 };
 
-export type PostBotsByBotIdSupermarketInstallMcpErrors = {
+export type PostBotsByBotIdSupermarketInstallPluginErrors = {
     /**
      * Bad Request
      */
@@ -7029,16 +7523,16 @@ export type PostBotsByBotIdSupermarketInstallMcpErrors = {
     502: HandlersErrorResponse;
 };
 
-export type PostBotsByBotIdSupermarketInstallMcpError = PostBotsByBotIdSupermarketInstallMcpErrors[keyof PostBotsByBotIdSupermarketInstallMcpErrors];
+export type PostBotsByBotIdSupermarketInstallPluginError = PostBotsByBotIdSupermarketInstallPluginErrors[keyof PostBotsByBotIdSupermarketInstallPluginErrors];
 
-export type PostBotsByBotIdSupermarketInstallMcpResponses = {
+export type PostBotsByBotIdSupermarketInstallPluginResponses = {
     /**
      * OK
      */
-    200: GithubComMemohaiMemohInternalMcpConnection;
+    200: PluginsInstallation;
 };
 
-export type PostBotsByBotIdSupermarketInstallMcpResponse = PostBotsByBotIdSupermarketInstallMcpResponses[keyof PostBotsByBotIdSupermarketInstallMcpResponses];
+export type PostBotsByBotIdSupermarketInstallPluginResponse = PostBotsByBotIdSupermarketInstallPluginResponses[keyof PostBotsByBotIdSupermarketInstallPluginResponses];
 
 export type PostBotsByBotIdSupermarketInstallSkillData = {
     /**
@@ -10165,7 +10659,7 @@ export type GetSpeechProvidersByIdModelsResponses = {
 
 export type GetSpeechProvidersByIdModelsResponse = GetSpeechProvidersByIdModelsResponses[keyof GetSpeechProvidersByIdModelsResponses];
 
-export type GetSupermarketMcpsData = {
+export type GetSupermarketPluginsData = {
     body?: never;
     path?: never;
     query?: {
@@ -10178,10 +10672,6 @@ export type GetSupermarketMcpsData = {
          */
         tag?: string;
         /**
-         * Filter by transport type
-         */
-        transport?: string;
-        /**
          * Page number
          */
         page?: number;
@@ -10190,40 +10680,40 @@ export type GetSupermarketMcpsData = {
          */
         limit?: number;
     };
-    url: '/supermarket/mcps';
+    url: '/supermarket/plugins';
 };
 
-export type GetSupermarketMcpsErrors = {
+export type GetSupermarketPluginsErrors = {
     /**
      * Bad Gateway
      */
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketMcpsError = GetSupermarketMcpsErrors[keyof GetSupermarketMcpsErrors];
+export type GetSupermarketPluginsError = GetSupermarketPluginsErrors[keyof GetSupermarketPluginsErrors];
 
-export type GetSupermarketMcpsResponses = {
+export type GetSupermarketPluginsResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketMcpListResponse;
+    200: HandlersSupermarketPluginListResponse;
 };
 
-export type GetSupermarketMcpsResponse = GetSupermarketMcpsResponses[keyof GetSupermarketMcpsResponses];
+export type GetSupermarketPluginsResponse = GetSupermarketPluginsResponses[keyof GetSupermarketPluginsResponses];
 
-export type GetSupermarketMcpsByIdData = {
+export type GetSupermarketPluginsByIdData = {
     body?: never;
     path: {
         /**
-         * MCP ID
+         * Plugin ID
          */
         id: string;
     };
     query?: never;
-    url: '/supermarket/mcps/{id}';
+    url: '/supermarket/plugins/{id}';
 };
 
-export type GetSupermarketMcpsByIdErrors = {
+export type GetSupermarketPluginsByIdErrors = {
     /**
      * Not Found
      */
@@ -10234,16 +10724,16 @@ export type GetSupermarketMcpsByIdErrors = {
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketMcpsByIdError = GetSupermarketMcpsByIdErrors[keyof GetSupermarketMcpsByIdErrors];
+export type GetSupermarketPluginsByIdError = GetSupermarketPluginsByIdErrors[keyof GetSupermarketPluginsByIdErrors];
 
-export type GetSupermarketMcpsByIdResponses = {
+export type GetSupermarketPluginsByIdResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketMcpEntry;
+    200: PluginsManifest;
 };
 
-export type GetSupermarketMcpsByIdResponse = GetSupermarketMcpsByIdResponses[keyof GetSupermarketMcpsByIdResponses];
+export type GetSupermarketPluginsByIdResponse = GetSupermarketPluginsByIdResponses[keyof GetSupermarketPluginsByIdResponses];
 
 export type GetSupermarketSkillsData = {
     body?: never;

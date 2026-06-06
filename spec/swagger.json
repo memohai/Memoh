@@ -3476,6 +3476,14 @@
                     "mcp"
                 ],
                 "summary": "List MCP connections",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Include plugin-managed hidden MCP connections",
+                        "name": "include_managed",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4939,6 +4947,458 @@
                 }
             }
         },
+        "/bots/{bot_id}/plugins": {
+            "get": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "List bot plugins",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.ListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Install bot plugin from manifest",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Plugin install request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/plugins.InstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}": {
+            "get": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Get bot plugin installation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Purge bot plugin installation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}/disable": {
+            "post": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Disable bot plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}/enable": {
+            "post": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Enable bot plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}/oauth/authorize": {
+            "post": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Start managed OAuth for a bot plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "OAuth authorize request",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.OAuthAuthorizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.AuthorizeResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}/oauth/status": {
+            "get": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Refresh managed OAuth status for a bot plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/plugins/{id}/uninstall": {
+            "post": {
+                "tags": [
+                    "plugins"
+                ],
+                "summary": "Uninstall bot plugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Plugin installation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/plugins.Installation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/schedule": {
             "get": {
                 "description": "List schedules for current user",
@@ -5893,12 +6353,12 @@
                 }
             }
         },
-        "/bots/{bot_id}/supermarket/install-mcp": {
+        "/bots/{bot_id}/supermarket/install-plugin": {
             "post": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install MCP from supermarket to bot",
+                "summary": "Install plugin from supermarket to bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -5908,12 +6368,12 @@
                         "required": true
                     },
                     {
-                        "description": "Install MCP request",
+                        "description": "Install plugin request",
                         "name": "payload",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.InstallMcpRequest"
+                            "$ref": "#/definitions/handlers.InstallPluginRequest"
                         }
                     }
                 ],
@@ -5921,7 +6381,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/plugins.Installation"
                         }
                     },
                     "400": {
@@ -9805,12 +10265,12 @@
                 }
             }
         },
-        "/supermarket/mcps": {
+        "/supermarket/plugins": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "List MCPs from supermarket",
+                "summary": "List plugins from supermarket",
                 "parameters": [
                     {
                         "type": "string",
@@ -9822,12 +10282,6 @@
                         "type": "string",
                         "description": "Filter by tag",
                         "name": "tag",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Filter by transport type",
-                        "name": "transport",
                         "in": "query"
                     },
                     {
@@ -9847,7 +10301,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketMcpListResponse"
+                            "$ref": "#/definitions/handlers.SupermarketPluginListResponse"
                         }
                     },
                     "502": {
@@ -9859,16 +10313,16 @@
                 }
             }
         },
-        "/supermarket/mcps/{id}": {
+        "/supermarket/plugins/{id}": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Get MCP detail from supermarket",
+                "summary": "Get plugin detail from supermarket",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP ID",
+                        "description": "Plugin ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -9878,7 +10332,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketMcpEntry"
+                            "$ref": "#/definitions/plugins.Manifest"
                         }
                     },
                     "404": {
@@ -13493,6 +13947,16 @@
                 "last_probed_at": {
                     "type": "string"
                 },
+                "managed_by_plugin_installation_id": {
+                    "type": "string"
+                },
+                "managed_resource_key": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "name": {
                     "type": "string"
                 },
@@ -13513,6 +13977,9 @@
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "visible": {
+                    "type": "boolean"
                 }
             }
         },
@@ -14054,17 +14521,17 @@
                 }
             }
         },
-        "handlers.InstallMcpRequest": {
+        "handlers.InstallPluginRequest": {
             "type": "object",
             "properties": {
-                "env": {
+                "plugin_id": {
+                    "type": "string"
+                },
+                "variables": {
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
                     }
-                },
-                "mcp_id": {
-                    "type": "string"
                 }
             }
         },
@@ -14433,83 +14900,13 @@
                 }
             }
         },
-        "handlers.SupermarketConfigVar": {
-            "type": "object",
-            "properties": {
-                "defaultValue": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "key": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.SupermarketMcpEntry": {
-            "type": "object",
-            "properties": {
-                "args": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "author": {
-                    "$ref": "#/definitions/handlers.SupermarketAuthor"
-                },
-                "command": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "env": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.SupermarketConfigVar"
-                    }
-                },
-                "headers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.SupermarketConfigVar"
-                    }
-                },
-                "homepage": {
-                    "type": "string"
-                },
-                "icon": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "transport": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.SupermarketMcpListResponse": {
+        "handlers.SupermarketPluginListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.SupermarketMcpEntry"
+                        "$ref": "#/definitions/plugins.Manifest"
                     }
                 },
                 "limit": {
@@ -15557,6 +15954,360 @@
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "plugins.AuthRequirement": {
+            "type": "object",
+            "properties": {
+                "client_ref": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "plugins.Author": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.ConfigVar": {
+            "type": "object",
+            "properties": {
+                "defaultValue": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "secret": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "plugins.Icon": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.InstallRequest": {
+            "type": "object",
+            "properties": {
+                "manifest": {
+                    "$ref": "#/definitions/plugins.Manifest"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "plugins.Installation": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "manifest": {
+                    "$ref": "#/definitions/plugins.Manifest"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "plugin_id": {
+                    "type": "string"
+                },
+                "plugin_name": {
+                    "type": "string"
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.Resource"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.ListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.Installation"
+                    }
+                }
+            }
+        },
+        "plugins.MCPResource": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "auth_ref": {
+                    "type": "string"
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "command": {
+                    "type": "string"
+                },
+                "cwd": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.ConfigVar"
+                    }
+                },
+                "headers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.ConfigVar"
+                    }
+                },
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.Manifest": {
+            "type": "object",
+            "properties": {
+                "auth_requirements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.AuthRequirement"
+                    }
+                },
+                "author": {
+                    "$ref": "#/definitions/plugins.Author"
+                },
+                "bundled_skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.SkillEntry"
+                    }
+                },
+                "capabilities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "homepage": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/plugins.Icon"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "mcps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.MCPResource"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.SkillResource"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "variables": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/plugins.ConfigVar"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.OAuthAuthorizeRequest": {
+            "type": "object",
+            "properties": {
+                "callback_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.Resource": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "resource_id": {
+                    "type": "string"
+                },
+                "resource_key": {
+                    "type": "string"
+                },
+                "resource_type": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.SkillEntry": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "plugins.SkillResource": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
                 }
             }
         },

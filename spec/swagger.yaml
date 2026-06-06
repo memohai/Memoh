@@ -1766,6 +1766,13 @@ definitions:
         type: boolean
       last_probed_at:
         type: string
+      managed_by_plugin_installation_id:
+        type: string
+      managed_resource_key:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       name:
         type: string
       status:
@@ -1780,6 +1787,8 @@ definitions:
         type: string
       updated_at:
         type: string
+      visible:
+        type: boolean
     type: object
   handlers.ACPClaudeCodeOAuthAuthorizeResponse:
     properties:
@@ -2128,14 +2137,14 @@ definitions:
       workspace_backend:
         type: string
     type: object
-  handlers.InstallMcpRequest:
+  handlers.InstallPluginRequest:
     properties:
-      env:
+      plugin_id:
+        type: string
+      variables:
         additionalProperties:
           type: string
         type: object
-      mcp_id:
-        type: string
     type: object
   handlers.InstallSkillRequest:
     properties:
@@ -2374,57 +2383,11 @@ definitions:
       name:
         type: string
     type: object
-  handlers.SupermarketConfigVar:
-    properties:
-      defaultValue:
-        type: string
-      description:
-        type: string
-      key:
-        type: string
-    type: object
-  handlers.SupermarketMcpEntry:
-    properties:
-      args:
-        items:
-          type: string
-        type: array
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      command:
-        type: string
-      description:
-        type: string
-      env:
-        items:
-          $ref: '#/definitions/handlers.SupermarketConfigVar'
-        type: array
-      headers:
-        items:
-          $ref: '#/definitions/handlers.SupermarketConfigVar'
-        type: array
-      homepage:
-        type: string
-      icon:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      transport:
-        type: string
-      url:
-        type: string
-    type: object
-  handlers.SupermarketMcpListResponse:
+  handlers.SupermarketPluginListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/handlers.SupermarketMcpEntry'
+          $ref: '#/definitions/plugins.Manifest'
         type: array
       limit:
         type: integer
@@ -3116,6 +3079,239 @@ definitions:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
+    type: object
+  plugins.AuthRequirement:
+    properties:
+      client_ref:
+        type: string
+      key:
+        type: string
+      scopes:
+        items:
+          type: string
+        type: array
+      type:
+        type: string
+      variables:
+        items:
+          type: string
+        type: array
+    type: object
+  plugins.Author:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+    type: object
+  plugins.ConfigVar:
+    properties:
+      defaultValue:
+        type: string
+      description:
+        type: string
+      key:
+        type: string
+      required:
+        type: boolean
+      secret:
+        type: boolean
+    type: object
+  plugins.Icon:
+    properties:
+      kind:
+        type: string
+      name:
+        type: string
+      url:
+        type: string
+    type: object
+  plugins.InstallRequest:
+    properties:
+      manifest:
+        $ref: '#/definitions/plugins.Manifest'
+      variables:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  plugins.Installation:
+    properties:
+      bot_id:
+        type: string
+      config:
+        additionalProperties: {}
+        type: object
+      enabled:
+        type: boolean
+      id:
+        type: string
+      installed_at:
+        type: string
+      manifest:
+        $ref: '#/definitions/plugins.Manifest'
+      metadata:
+        additionalProperties: {}
+        type: object
+      plugin_id:
+        type: string
+      plugin_name:
+        type: string
+      resources:
+        items:
+          $ref: '#/definitions/plugins.Resource'
+        type: array
+      status:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: string
+    type: object
+  plugins.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/plugins.Installation'
+        type: array
+    type: object
+  plugins.MCPResource:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      auth_ref:
+        type: string
+      capabilities:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      cwd:
+        type: string
+      description:
+        type: string
+      display_name:
+        type: string
+      env:
+        items:
+          $ref: '#/definitions/plugins.ConfigVar'
+        type: array
+      headers:
+        items:
+          $ref: '#/definitions/plugins.ConfigVar'
+        type: array
+      key:
+        type: string
+      name:
+        type: string
+      transport:
+        type: string
+      url:
+        type: string
+      visibility:
+        type: string
+    type: object
+  plugins.Manifest:
+    properties:
+      auth_requirements:
+        items:
+          $ref: '#/definitions/plugins.AuthRequirement'
+        type: array
+      author:
+        $ref: '#/definitions/plugins.Author'
+      bundled_skills:
+        items:
+          $ref: '#/definitions/plugins.SkillEntry'
+        type: array
+      capabilities:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/plugins.Icon'
+      id:
+        type: string
+      mcps:
+        items:
+          $ref: '#/definitions/plugins.MCPResource'
+        type: array
+      name:
+        type: string
+      schema_version:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/plugins.SkillResource'
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      variables:
+        items:
+          $ref: '#/definitions/plugins.ConfigVar'
+        type: array
+      version:
+        type: string
+    type: object
+  plugins.OAuthAuthorizeRequest:
+    properties:
+      callback_url:
+        type: string
+    type: object
+  plugins.Resource:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      resource_id:
+        type: string
+      resource_key:
+        type: string
+      resource_type:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  plugins.SkillEntry:
+    properties:
+      content:
+        type: string
+      description:
+        type: string
+      files:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+    type: object
+  plugins.SkillResource:
+    properties:
+      key:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
     type: object
   providers.CountResponse:
     properties:
@@ -5841,6 +6037,11 @@ paths:
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
+      parameters:
+      - description: Include plugin-managed hidden MCP connections
+        in: query
+        name: include_managed
+        type: boolean
       responses:
         "200":
           description: OK
@@ -6828,6 +7029,304 @@ paths:
       summary: Locate a bot history message
       tags:
       - messages
+  /bots/{bot_id}/plugins:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.ListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List bot plugins
+      tags:
+      - plugins
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin install request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/plugins.InstallRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Install bot plugin from manifest
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Purge bot plugin installation
+      tags:
+      - plugins
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get bot plugin installation
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}/disable:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Disable bot plugin
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}/enable:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Enable bot plugin
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}/oauth/authorize:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: OAuth authorize request
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/plugins.OAuthAuthorizeRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.AuthorizeResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Start managed OAuth for a bot plugin
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}/oauth/status:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Refresh managed OAuth status for a bot plugin
+      tags:
+      - plugins
+  /bots/{bot_id}/plugins/{id}/uninstall:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Plugin installation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/plugins.Installation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Uninstall bot plugin
+      tags:
+      - plugins
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user
@@ -7462,7 +7961,7 @@ paths:
       summary: Update user settings
       tags:
       - settings
-  /bots/{bot_id}/supermarket/install-mcp:
+  /bots/{bot_id}/supermarket/install-plugin:
     post:
       parameters:
       - description: Bot ID
@@ -7470,17 +7969,17 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Install MCP request
+      - description: Install plugin request
         in: body
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/handlers.InstallMcpRequest'
+          $ref: '#/definitions/handlers.InstallPluginRequest'
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/plugins.Installation'
         "400":
           description: Bad Request
           schema:
@@ -7493,7 +7992,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install MCP from supermarket to bot
+      summary: Install plugin from supermarket to bot
       tags:
       - supermarket
   /bots/{bot_id}/supermarket/install-skill:
@@ -10176,7 +10675,7 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
-  /supermarket/mcps:
+  /supermarket/plugins:
     get:
       parameters:
       - description: Search query
@@ -10186,10 +10685,6 @@ paths:
       - description: Filter by tag
         in: query
         name: tag
-        type: string
-      - description: Filter by transport type
-        in: query
-        name: transport
         type: string
       - description: Page number
         in: query
@@ -10203,18 +10698,18 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketMcpListResponse'
+            $ref: '#/definitions/handlers.SupermarketPluginListResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List MCPs from supermarket
+      summary: List plugins from supermarket
       tags:
       - supermarket
-  /supermarket/mcps/{id}:
+  /supermarket/plugins/{id}:
     get:
       parameters:
-      - description: MCP ID
+      - description: Plugin ID
         in: path
         name: id
         required: true
@@ -10223,7 +10718,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketMcpEntry'
+            $ref: '#/definitions/plugins.Manifest'
         "404":
           description: Not Found
           schema:
@@ -10232,7 +10727,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get MCP detail from supermarket
+      summary: Get plugin detail from supermarket
       tags:
       - supermarket
   /supermarket/skills:

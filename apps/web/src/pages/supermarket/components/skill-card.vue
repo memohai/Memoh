@@ -1,5 +1,12 @@
 <template>
-  <Card class="flex flex-col">
+  <Card
+    class="flex flex-col cursor-pointer hover:border-foreground/20 hover:bg-accent/20"
+    role="button"
+    tabindex="0"
+    @click="openDetail"
+    @keydown.enter.prevent="openDetail"
+    @keydown.space.prevent="openDetail"
+  >
     <CardHeader class="pb-3">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2 min-w-0">
@@ -66,11 +73,12 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { Zap, Download, ExternalLink } from 'lucide-vue-next'
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, Badge, Button } from '@memohai/ui'
 import type { HandlersSupermarketSkillEntry } from '@memohai/sdk'
 
-defineProps<{
+const props = defineProps<{
   skill: HandlersSupermarketSkillEntry
 }>()
 
@@ -78,4 +86,11 @@ defineEmits<{
   'tag-click': [tag: string]
   'install': [skill: HandlersSupermarketSkillEntry]
 }>()
+
+const router = useRouter()
+
+function openDetail() {
+  if (!props.skill.id) return
+  router.push({ name: 'supermarket-skill-detail', params: { skillId: props.skill.id } })
+}
 </script>

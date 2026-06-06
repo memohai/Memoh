@@ -608,7 +608,7 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	if strings.HasPrefix(host, ":") {
 		host = "localhost" + host
 	}
-	callbackURL := "http://" + host + "/api/oauth/mcp/callback"
+	callbackURL := "http://" + host + "/oauth/mcp/callback"
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
