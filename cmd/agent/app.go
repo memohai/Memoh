@@ -955,9 +955,24 @@ func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, que
 			if len(defs) == 0 {
 				return nil
 			}
+			defs = providerBootstrapDefinitions(defs)
+			if len(defs) == 0 {
+				return nil
+			}
 			return registry.Sync(ctx, log, queries, defs)
 		},
 	})
+}
+
+func providerBootstrapDefinitions(defs []registry.ProviderDefinition) []registry.ProviderDefinition {
+	filtered := make([]registry.ProviderDefinition, 0, len(defs))
+	for _, def := range defs {
+		if models.IsLLMClientType(models.ClientType(def.ClientType)) {
+			continue
+		}
+		filtered = append(filtered, def)
+	}
+	return filtered
 }
 
 func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *audiopkg.Registry) {

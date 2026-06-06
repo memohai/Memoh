@@ -72,6 +72,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
+		if isProviderNameConflict(err) {
+			if provider, ok, activateErr := s.activateHiddenRegistryTemplate(ctx, req, clientType, icon, configJSON, metadataJSON); ok {
+				if activateErr != nil {
+					return GetResponse{}, activateErr
+				}
+				return s.toGetResponse(provider), nil
+			}
+		}
 		return GetResponse{}, fmt.Errorf("create provider: %w", err)
 	}
 
@@ -112,6 +120,9 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 
 	results := make([]GetResponse, 0, len(providers))
 	for _, p := range providers {
+		if isHiddenRegistryTemplate(p) {
+			continue
+		}
 		results = append(results, s.toGetResponse(p))
 	}
 	return results, nil
@@ -202,14 +213,19 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 // Count returns the total count of providers.
 func (s *Service) Count(ctx context.Context) (int64, error) {
-	count, err := s.queries.CountProviders(ctx)
+	providers, err := s.List(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("count providers: %w", err)
 	}
-	return count, nil
+	return int64(len(providers)), nil
 }
 
 const probeTimeout = models.DefaultProviderProbeTimeout
+
+const (
+	registryMetadataKey = "registry"
+	metadataSourceKey   = "source"
+)
 
 // Test probes the provider using the Twilight AI SDK to check
 // reachability and authentication.
@@ -522,4 +538,69 @@ func maskAPIKey(apiKey string) string {
 		return strings.Repeat("*", len(apiKey))
 	}
 	return apiKey[:8] + strings.Repeat("*", len(apiKey)-8)
+}
+
+func (s *Service) activateHiddenRegistryTemplate(
+	ctx context.Context,
+	req CreateRequest,
+	clientType string,
+	icon pgtype.Text,
+	configJSON []byte,
+	metadataJSON []byte,
+) (sqlc.Provider, bool, error) {
+	existing, err := s.queries.GetProviderByName(ctx, req.Name)
+	if err != nil {
+		return sqlc.Provider{}, false, nil
+	}
+	if !isHiddenRegistryTemplate(existing) {
+		return sqlc.Provider{}, false, nil
+	}
+	if !icon.Valid {
+		icon = existing.Icon
+	}
+
+	updated, err := s.queries.UpdateProvider(ctx, sqlc.UpdateProviderParams{
+		ID:         existing.ID,
+		Name:       req.Name,
+		ClientType: clientType,
+		Icon:       icon,
+		Enable:     true,
+		Config:     configJSON,
+		Metadata:   metadataJSON,
+	})
+	if err != nil {
+		return sqlc.Provider{}, true, fmt.Errorf("activate registry provider template: %w", err)
+	}
+	return updated, true, nil
+}
+
+func isProviderNameConflict(err error) bool {
+	if db.IsUniqueViolation(err) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique") &&
+		strings.Contains(message, "providers") &&
+		strings.Contains(message, "name")
+}
+
+func isHiddenRegistryTemplate(provider sqlc.Provider) bool {
+	if provider.Enable || registryMetadataSource(provider.Metadata) == "" {
+		return false
+	}
+	cfg := providerConfig(provider.Config)
+	return strings.TrimSpace(configString(cfg, "api_key")) == "" &&
+		strings.TrimSpace(configString(cfg, configOAuthClientSecretKey)) == ""
+}
+
+func registryMetadataSource(raw []byte) string {
+	return metadataSectionSource(providerMetadata(raw), registryMetadataKey)
+}
+
+func metadataSectionSource(metadata map[string]any, section string) string {
+	nested, _ := metadata[section].(map[string]any)
+	if nested == nil {
+		return ""
+	}
+	return strings.TrimSpace(stringValue(nested, metadataSourceKey))
 }

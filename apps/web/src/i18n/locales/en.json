@@ -623,6 +623,13 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "preset": "Preset",
+    "presetPlaceholder": "Select preset or custom provider",
+    "presetSearchPlaceholder": "Search presets...",
+    "presetNoResults": "No matching presets",
+    "presetGroupCustom": "Custom",
+    "presetGroupBuiltIn": "Presets",
+    "customProvider": "Custom Provider",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",
     "url": "Base URL",
