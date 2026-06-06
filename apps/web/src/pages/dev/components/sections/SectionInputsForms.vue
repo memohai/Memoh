@@ -44,6 +44,10 @@ const otp = ref('')
 const comboItems = ['Apple', 'Banana', 'Cherry', 'Dragonfruit']
 const comboVal = ref('')
 const comboOpen = ref(false)
+// Multi-select: same Popover + Command surface, but Command runs in `multiple` mode so
+// the model is an array and picking a row toggles it without closing the panel.
+const comboMultiVal = ref<string[]>(['Apple'])
+const comboMultiOpen = ref(false)
 
 const clearable = ref('Clear me')
 const password = ref('hunter2')
@@ -413,6 +417,65 @@ const formSchema = {
                     {{ item }}
                     <Check
                       v-if="comboVal === item"
+                      class="ml-auto"
+                    />
+                  </CommandItem>
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      </Specimen>
+
+      <Specimen
+        label="<Combobox> · multiple"
+        note="Command in multiple mode — array model, toggle rows, panel stays open"
+      >
+        <Popover v-model:open="comboMultiOpen">
+          <PopoverTrigger as-child>
+            <button
+              data-slot="select-trigger"
+              data-size="default"
+              type="button"
+              :class="[
+                'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
+                '[&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+                comboMultiVal.length ? '' : 'text-muted-foreground',
+              ]"
+            >
+              <span class="line-clamp-1">{{ comboMultiVal.length ? comboMultiVal.join(', ') : 'Select fruits' }}</span>
+              <ChevronsUpDown class="opacity-50" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            menu
+            align="start"
+            class="w-[var(--reka-popover-trigger-width)]"
+          >
+            <Command
+              v-model="comboMultiVal"
+              multiple
+              highlight-on-hover
+              :highlight-first-on-open="false"
+              class="border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]"
+            >
+              <CommandInput
+                :search-icon="false"
+                size="md"
+                placeholder="Search fruit..."
+                class="placeholder:text-muted-foreground/80"
+              />
+              <CommandList>
+                <CommandEmpty>No fruit found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem
+                    v-for="item in comboItems"
+                    :key="item"
+                    :value="item"
+                  >
+                    {{ item }}
+                    <Check
+                      v-if="comboMultiVal.includes(item)"
                       class="ml-auto"
                     />
                   </CommandItem>

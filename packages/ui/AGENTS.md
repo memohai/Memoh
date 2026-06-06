@@ -128,6 +128,16 @@ numbers are not.
   icon-only buttons `icon-sm` 32 / `icon` 36 / `icon-lg` 40.
 - Icon glyph sizes scale with the control: default **16px** (`[&_svg]:size-4`);
   small in-field controls **14px** (`size-3.5`). Don't free-set icon sizes.
+- **Icons are always components, never literal text glyphs.** Use a
+  `lucide-vue-next` component (`<Plus/>`, `<X/>`, `<ChevronDown/>`) — never a typed
+  character (`"+"`, `"×"`, `"▾"`, `"✓"`) standing in for an icon. A glyph is just
+  text: it can't receive `[&_svg]:size-4` / the 16px control sizing or the 2px
+  lucide stroke, so it renders tiny and visually inconsistent inside a 32–40px
+  button (this is exactly the "+ looks lost in the hover button" bug). It also
+  carries no semantics. The container's `[&_svg]:size-4` / `size-3.5` rules only
+  reach real `<svg>` children, which is another reason the component form is the
+  contract. (Real text content — labels, the Kbd `/`, `⌘` — stays as text.)
+- Icon-only buttons (no visible label) MUST carry an `aria-label` for the action.
 - Decorative / status icons use `--accent-{hue}` and are **state-constant** (color
   does not change on hover/select).
 

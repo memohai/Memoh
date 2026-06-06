@@ -27,11 +27,11 @@
      press-scale shrinks only the background — the label never moves or blurs.
      Keyed off <Button variant="primary"> / default → data-variant. Pairs with
      the --btn-primary ramp (light/dark) so it themes correctly. */
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]) {
+  [data-button]:is([data-variant="default"], [data-variant="primary"]) {
     position: relative;
     isolation: isolate;
   }
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -44,17 +44,17 @@
       background-color 0.15s ease-out;
   }
   /* hover: fill lightens (generic lighten-on-engage, not a sheen). */
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):hover::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):hover::before {
     background-color: var(--btn-primary-hover);
   }
   /* press — SMALL (default): scale DOWN 0.96. The scale IS the signal; fill holds
      its hover color. */
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):active::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):active::before {
     scale: 0.96;
   }
   /* press — BLOCK / full-width: scale would lurch, so the fill lightens to the
      press color INSTANT (transition 0s), easing back on release. */
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])[data-block]:active::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block]:active::before {
     scale: 1 1;
     background-color: var(--btn-primary-active);
     transition: background-color 0s;
@@ -64,11 +64,11 @@
      Transparent at rest with a 1px inset ring; hover fills + the ring drops;
      press scales down. All on ::before so the label never moves. This REPLACES
      the old bg-accent/border library look. */
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]) {
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]) {
     position: relative;
     isolation: isolate;
   }
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"])::before {
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -82,11 +82,11 @@
       background-color 0.11s ease-out,
       box-shadow 0.11s ease-out;
   }
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
     background-color: var(--btn-secondary-overlay);
     box-shadow: none;
   }
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
     scale: 0.974;
     box-shadow: none;
   }
@@ -102,7 +102,6 @@
      No outer rings: the edge never stacks, it just changes color. */
   [data-slot="input"],
   [data-slot="textarea"],
-  [data-slot="native-select"],
   [data-slot="input-group"],
   [data-slot="number-field"] {
     background-color: transparent;
@@ -123,7 +122,6 @@
   /* DEFAULT (solid): the hairline itself turns near-black on focus. */
   [data-slot="input"]:focus,
   [data-slot="textarea"]:focus,
-  [data-slot="native-select"]:focus-visible,
   [data-slot="input-group"]:focus-within,
   [data-slot="number-field"]:focus-within {
     --field-edge: var(--field-edge-solid);
@@ -138,7 +136,6 @@
      stacks outside it. */
   [data-slot="input"][aria-invalid="true"],
   [data-slot="textarea"][aria-invalid="true"],
-  [data-slot="native-select"][aria-invalid="true"],
   [data-slot="input-group"]:has([aria-invalid="true"]),
   [data-slot="number-field"][aria-invalid="true"],
   [data-slot="number-field"]:has([aria-invalid="true"]) {
@@ -169,6 +166,27 @@
     box-shadow: inset 0 0 0 1px var(--destructive);
   }
 
+  /* ── NativeSelect — the same chooser language as the Select trigger (a BUTTON, not
+     a field): transparent fill, faint resting hairline, gray fill on hover, and NO
+     focus edge. A native <select> matches :focus-visible even on a mouse click
+     (selects are the browser exception), so any focus box-shadow would paint a
+     near-black "stuck" ring on click — exactly what the reka Select avoids. Keyboard
+     users open the native dropdown, which is the affordance; outline-none on the
+     element kills the default ring so the resting hairline is the only chrome. */
+  [data-slot="native-select"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--field-edge-rest);
+    transition:
+      background-color 110ms ease,
+      box-shadow 110ms ease;
+  }
+  [data-slot="native-select"]:hover:not(:disabled) {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="native-select"][aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px var(--destructive);
+  }
+
   /* Menu panel border lives on the Tailwind utility in lib/menu.ts → menuContentClass
      (border-[color:var(--border-menu)]). It MUST be a utility, not a rule here:
      @layer utilities always wins over @layer components, so any border-color set
@@ -187,11 +205,11 @@
   /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
      No chrome at rest; hover fills a soft gray (237, a touch deeper than
      --accent — the tuned ghost hover); press scales down. */
-  [data-slot="button"][data-variant="ghost"] {
+  [data-button][data-variant="ghost"] {
     position: relative;
     isolation: isolate;
   }
-  [data-slot="button"][data-variant="ghost"]::before {
+  [data-button][data-variant="ghost"]::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -203,10 +221,10 @@
       scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
       background-color 0.15s ease;
   }
-  [data-slot="button"][data-variant="ghost"]:hover::before {
+  [data-button][data-variant="ghost"]:hover::before {
     background-color: var(--btn-ghost-hover);
   }
-  [data-slot="button"][data-variant="ghost"]:active::before {
+  [data-button][data-variant="ghost"]:active::before {
     scale: 0.974;
     background-color: var(--btn-ghost-hover);
   }
@@ -220,16 +238,16 @@
      fixed height, no horizontal padding, no radius (square so the draw line is
      not clipped at the ends). fade + draw add 3px bottom room for the underline;
      static uses text-decoration + offset, so it needs no bottom padding. */
-  [data-slot="button"]:is([data-variant="link"], [data-variant="link-static"], [data-variant="link-draw"]) {
+  [data-button]:is([data-variant="link"], [data-variant="link-static"], [data-variant="link-draw"]) {
     height: auto !important;
     min-height: 0 !important;
     padding: 0 !important;
     border-radius: 0 !important;
   }
-  [data-slot="button"]:is([data-variant="link"], [data-variant="link-draw"]) {
+  [data-button]:is([data-variant="link"], [data-variant="link-draw"]) {
     padding-bottom: 3px !important;
   }
-  [data-slot="button"][data-variant="link"]::after {
+  [data-button][data-variant="link"]::after {
     content: "";
     position: absolute;
     left: 0;
@@ -240,10 +258,10 @@
     opacity: 0;
     transition: opacity 0.18s ease;
   }
-  [data-slot="button"][data-variant="link"]:hover::after {
+  [data-button][data-variant="link"]:hover::after {
     opacity: 1;
   }
-  [data-slot="button"][data-variant="link-draw"] {
+  [data-button][data-variant="link-draw"] {
     background-image: linear-gradient(currentcolor, currentcolor);
     background-repeat: no-repeat;
     background-position: 0 100%;
@@ -254,7 +272,7 @@
       background-size 0.3s cubic-bezier(0.4, 0, 0.2, 1),
       color 150ms ease !important;
   }
-  [data-slot="button"][data-variant="link-draw"]:hover {
+  [data-button][data-variant="link-draw"]:hover {
     background-size: 100% 1.5px;
   }
 
@@ -263,19 +281,19 @@
      NOT look faded — keep full color, the spinner is the only signal. The label is
      hidden IN PLACE (visibility) and the spinner overlays it → zero layout shift,
      any width, no glyph swap. */
-  [data-slot="button"][data-loading] {
+  [data-button][data-loading] {
     position: relative;
   }
-  [data-slot="button"][data-loading]:disabled {
+  [data-button][data-loading]:disabled {
     opacity: 1;
   }
-  [data-slot="button"][data-loading][data-loading-mode="overlay"] > [data-button-content] {
+  [data-button][data-loading][data-loading-mode="overlay"] > [data-button-content] {
     visibility: hidden;
   }
-  [data-slot="button"][data-loading-mode="leading"] {
+  [data-button][data-loading-mode="leading"] {
     gap: 0;
   }
-  [data-slot="button"] > [data-button-leading-spinner] {
+  [data-button] > [data-button-leading-spinner] {
     display: inline-grid;
     place-items: center;
     width: 0;
@@ -287,26 +305,26 @@
       opacity 0.18s ease,
       translate 0.24s cubic-bezier(0.32, 0.72, 0, 1);
   }
-  [data-slot="button"][data-loading][data-loading-mode="leading"] > [data-button-leading-spinner] {
+  [data-button][data-loading][data-loading-mode="leading"] > [data-button-leading-spinner] {
     width: 1.5rem;
     opacity: 1;
     translate: 0 0;
   }
-  [data-slot="button"][data-loading][data-loading-mode="icon"] > [data-button-content] > svg:first-child {
+  [data-button][data-loading][data-loading-mode="icon"] > [data-button-content] > svg:first-child {
     animation: button-spin 1s linear infinite;
   }
   /* Busy holds the most-engaged color (no pop on the click→spin handoff). */
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"])[data-block][data-loading]::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"])[data-block][data-loading]::before {
     background-color: var(--btn-primary-active);
   }
-  [data-slot="button"]:is([data-variant="default"], [data-variant="primary"]):not([data-block])[data-loading]::before {
+  [data-button]:is([data-variant="default"], [data-variant="primary"]):not([data-block])[data-loading]::before {
     background-color: var(--btn-primary-hover);
   }
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"])[data-loading]::before {
+  [data-button]:is([data-variant="outline"], [data-variant="secondary"])[data-loading]::before {
     background-color: var(--btn-secondary-overlay);
     box-shadow: none;
   }
-  [data-slot="button"][data-variant="ghost"][data-loading]::before {
+  [data-button][data-variant="ghost"][data-loading]::before {
     background-color: var(--btn-ghost-hover);
   }
 }
@@ -314,6 +332,25 @@
 @keyframes button-spin {
   to {
     rotate: 360deg;
+  }
+}
+
+/* Accordion height tween — reka exposes the measured content height as
+   --reka-accordion-content-height; we animate height between 0 and that. */
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--reka-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--reka-accordion-content-height);
+  }
+  to {
+    height: 0;
   }
 }
 
@@ -618,6 +655,12 @@
   --btn-primary: #131313;
   --btn-primary-hover: #333333;
   --btn-primary-active: #5c5c5c;
+  /* Tooltip ink — a terse inverted hint reads as TRUE black, deeper than the
+     charcoal CTA (--btn-primary) so it never looks like a washed-out gray bubble.
+     Standalone token (not foreground/primary) so the upcoming black-system pass can
+     retune it in one place. Flips to a light fill in dark mode below. */
+  --tooltip: #09090b;
+  --tooltip-foreground: oklch(0.985 0.001 286);
   /* Interactive surface gray ladder (rgb 255 → 249 → 243 → 237 → 231) — the
      SINGLE source for control hover/selected/press tints (toggle, segmented,
      ghost, menu items). Promoted verbatim from the contract bench so colors
@@ -879,6 +922,9 @@
   --btn-primary: oklch(0.92 0 0);
   --btn-primary-hover: oklch(0.84 0 0);
   --btn-primary-active: oklch(0.76 0 0);
+  /* Dark: the tooltip inverts to a near-white bubble with dark text. */
+  --tooltip: oklch(0.92 0 0);
+  --tooltip-foreground: oklch(0.21 0.006 285);
   /* Dark: control tints LIGHTEN on engage. Anchored so pressed = 0.32 to keep
      ghost hover identical to before. hover · selected · pressed · sel+pressed. */
   --ui-hover: oklch(0.26 0 0);
@@ -1166,6 +1212,11 @@
   /* Menu geometry from the Scale bench: row = 8px, shell = row + 4px. */
   --radius-menu: calc(var(--radius) - 2px);
   --radius-menu-shell: calc(var(--radius) + 2px);
+
+  /* Accordion open/close — height tween driven by reka's measured content height.
+     Kept short (matches the menu/fast-motion budget) so sections feel snappy. */
+  --animate-accordion-down: accordion-down 0.18s ease-out;
+  --animate-accordion-up: accordion-up 0.18s ease-out;
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
      Anchored to this app's reality — 12px (body) is the workhorse UI size.

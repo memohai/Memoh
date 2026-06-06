@@ -53,8 +53,15 @@ const buttonClass = computed(() =>
 </script>
 
 <template>
+  <!-- data-button is a STABLE chrome anchor: when this Button is the child of a
+       reka `as-child` trigger (DialogTrigger, DropdownMenuTrigger, …) the trigger's
+       own data-slot ("dialog-trigger", …) overrides data-slot="button", which would
+       otherwise strip every fill/ring/press rule (all keyed off [data-slot=button]).
+       The trigger never sets data-button, so it survives the merge and the button
+       chrome in style.css keys off [data-button] instead. -->
   <Primitive
     data-slot="button"
+    data-button=""
     :as="as"
     :as-child="asChild"
     :data-variant="resolvedVariant"

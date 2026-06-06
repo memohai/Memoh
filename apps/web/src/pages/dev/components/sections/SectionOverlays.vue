@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Overlays: trigger-driven floating surfaces. Dialog and the command palette
 // use local open refs; the rest open via their own triggers.
+import { Plus } from 'lucide-vue-next'
 import { ref } from 'vue'
 import {
   Button,
@@ -10,6 +11,8 @@ import {
   ContextMenuLabel, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger,
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
+  HoverCard, HoverCardContent, HoverCardTrigger,
+  Kbd,
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger,
   Popover, PopoverContent, PopoverTrigger,
@@ -35,7 +38,7 @@ const showStatusBar = ref(true)
       <Specimen label="<Dialog>">
         <Dialog v-model:open="dialogOpen">
           <DialogTrigger as-child>
-            <Button variant="outline">
+            <Button variant="default">
               Open dialog
             </Button>
           </DialogTrigger>
@@ -64,7 +67,7 @@ const showStatusBar = ref(true)
       <Specimen label="<Sheet>">
         <Sheet v-model:open="sheetOpen">
           <SheetTrigger as-child>
-            <Button variant="outline">
+            <Button variant="default">
               Open sheet
             </Button>
           </SheetTrigger>
@@ -90,7 +93,7 @@ const showStatusBar = ref(true)
       <Specimen label="<Popover>">
         <Popover>
           <PopoverTrigger as-child>
-            <Button variant="outline">
+            <Button variant="default">
               Open popover
             </Button>
           </PopoverTrigger>
@@ -107,10 +110,34 @@ const showStatusBar = ref(true)
         </Popover>
       </Specimen>
 
+      <Specimen
+        label="<HoverCard>"
+        note="opens on hover (not click) — same surface as Popover"
+      >
+        <HoverCard>
+          <HoverCardTrigger as-child>
+            <Button variant="link">
+              @memoh
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent>
+            <div class="text-sm">
+              <p class="font-medium">
+                Memoh
+              </p>
+              <p class="mt-1 text-muted-foreground">
+                Multi-member, structured long-memory AI agent platform. Hover previews
+                open without a click.
+              </p>
+            </div>
+          </HoverCardContent>
+        </HoverCard>
+      </Specimen>
+
       <Specimen label="<DropdownMenu>">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <Button variant="outline">
+            <Button variant="default">
               Open menu
             </Button>
           </DropdownMenuTrigger>
@@ -155,16 +182,37 @@ const showStatusBar = ref(true)
         </ContextMenu>
       </Specimen>
 
-      <Specimen label="<Tooltip>">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button variant="outline">
-                Hover me
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Tooltip content</TooltipContent>
-          </Tooltip>
+      <Specimen
+        label="<Tooltip>"
+        note="terse inverted hint — optional Kbd shortcut chip"
+      >
+        <TooltipProvider :delay-duration="0">
+          <div class="flex items-center gap-3">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="outline">
+                  Hover me
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Tooltip content</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Add files and more"
+                >
+                  <Plus />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent class="flex items-center gap-1.5">
+                Add files and more
+                <Kbd>/</Kbd>
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </TooltipProvider>
       </Specimen>
 
@@ -195,7 +243,7 @@ const showStatusBar = ref(true)
 
             <div>
               <Button
-                variant="outline"
+                variant="default"
                 @click="cmdOpen = true"
               >
                 Open command dialog

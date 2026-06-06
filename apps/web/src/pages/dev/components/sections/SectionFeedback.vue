@@ -5,9 +5,11 @@ import {
   Alert, AlertDescription, AlertTitle,
   Button,
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
+  Progress,
 } from '@memohai/ui'
 import { toast } from 'vue-sonner'
 import { AlertCircle, Inbox, Terminal } from 'lucide-vue-next'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 import VariantMatrix from '../components/VariantMatrix.vue'
@@ -19,6 +21,19 @@ function runPromiseToast() {
     { loading: 'Saving...', success: 'Saved!', error: 'Failed' },
   )
 }
+
+// Live bar — mimics the container image pull / create SSE progress the server
+// streams, looping 0 → 100 so the transition reads at a glance.
+const liveProgress = ref(8)
+let progressTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  progressTimer = setInterval(() => {
+    // Land exactly on 100 (clamp the last step), then loop back to 0 — reka's
+    // ProgressRoot rejects any value above max (100).
+    liveProgress.value = liveProgress.value >= 100 ? 0 : Math.min(100, liveProgress.value + 12)
+  }, 900)
+})
+onBeforeUnmount(() => clearInterval(progressTimer))
 </script>
 
 <template>
@@ -103,6 +118,20 @@ function runPromiseToast() {
           >
             Promise
           </Button>
+        </Specimen>
+      </div>
+
+      <div class="lg:col-span-2">
+        <Specimen
+          label="<Progress>"
+          note="neutral rail + selection-blue fill — container pull / upload progress"
+        >
+          <div class="flex w-full max-w-md flex-col gap-4">
+            <Progress :model-value="30" />
+            <Progress :model-value="66" />
+            <Progress :model-value="100" />
+            <Progress :model-value="liveProgress" />
+          </div>
         </Specimen>
       </div>
 

@@ -48,8 +48,14 @@ export const menuItemClass
 // dimmed so it separates without competing with the rows.
 export const menuSeparatorClass = 'bg-border/60 pointer-events-none my-1 h-px'
 
-// Section heading inside a menu — a quiet, muted group marker. Shares the rows'
-// px-2.5 so its text starts on the same left edge as every item, but stays short
-// (py-1) and one notch smaller/dimmer (text-body, medium) so it reads as a header
-// without the heavy full-height band the old menus had.
-export const menuLabelClass = 'text-muted-foreground px-2.5 py-1 text-body font-medium'
+// Section heading inside a menu — a quiet, muted group marker. One notch
+// smaller/dimmer than rows (text-body, medium) and short (py-1) so it reads as a
+// header, not the heavy full-height band the old menus had.
+// cursor-default + select-none: a heading is NOT interactive, so it must show the
+// arrow (not the I-beam that `cursor: auto` paints over selectable text) and not be
+// selectable — same as every menu row.
+// pl-2 (not the rows' px-2.5): optical-alignment compensation. The heading is a
+// smaller type size than the rows, so matching the box padding makes it read as
+// sitting slightly RIGHT of the row text; trimming 2px pulls its left edge back so
+// the heading and the row labels line up to the eye.
+export const menuLabelClass = 'text-muted-foreground cursor-default pr-2.5 pl-2 py-1 text-body font-medium select-none'

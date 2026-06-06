@@ -2,6 +2,7 @@
 // Layout / structure.
 import { ref } from 'vue'
 import {
+  Accordion, AccordionContent, AccordionItem, AccordionTrigger,
   Button,
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from '@memohai/ui'
@@ -44,6 +45,38 @@ const open = ref(false)
             </div>
           </CollapsibleContent>
         </Collapsible>
+      </Specimen>
+
+      <Specimen
+        label="<Accordion type=single collapsible>"
+        note="height tween · chevron flips · hairline row dividers"
+      >
+        <Accordion
+          type="single"
+          collapsible
+          default-value="item-1"
+          class="max-w-sm"
+        >
+          <AccordionItem value="item-1">
+            <AccordionTrigger>What is a workspace runtime?</AccordionTrigger>
+            <AccordionContent>
+              An isolated container (or trusted local sandbox) where a bot can edit files,
+              run commands, and host tools.
+            </AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-2">
+            <AccordionTrigger>Which channels are supported?</AccordionTrigger>
+            <AccordionContent>
+              Telegram, Discord, Lark, DingTalk, WeChat, Matrix, Email, and more.
+            </AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-3">
+            <AccordionTrigger>Can I run it locally?</AccordionTrigger>
+            <AccordionContent>
+              Yes — the desktop app runs a local server with embedded Qdrant and a bundled CLI.
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </Specimen>
     </div>
   </SectionShell>
