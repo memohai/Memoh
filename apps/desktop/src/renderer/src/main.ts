@@ -20,6 +20,7 @@ import 'katex/dist/katex.min.css'
 import App from './chat/App.vue'
 import router from './chat/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
+import { createKeyboardCommandRegistry } from './keyboard-command-registry'
 import { registerWorkspaceTabCommands } from './chat/workspace-tab-commands'
 
 async function bootstrap() {
@@ -39,7 +40,9 @@ async function bootstrap() {
   })
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
-  registerWorkspaceTabCommands(window.api.window, useWorkspaceTabsStore(pinia))
+  const keyboardCommands = createKeyboardCommandRegistry()
+  keyboardCommands.connect(window.api.window)
+  registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
 
   const app = createApp(App)
     .use(pinia)

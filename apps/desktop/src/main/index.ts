@@ -35,7 +35,8 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
-import { closeFocusedTabOrWindow } from './window-commands'
+import { desktopKeyboardCommands } from '../shared/keyboard-commands'
+import { dispatchFocusedWindowCommand } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
@@ -795,7 +796,11 @@ function closeWindowMenuItem(): MenuItemConstructorOptions {
     label: 'Close',
     accelerator: 'Command+W',
     click: () => {
-      closeFocusedTabOrWindow(chatWindow, BrowserWindow.getFocusedWindow())
+      dispatchFocusedWindowCommand(
+        chatWindow,
+        BrowserWindow.getFocusedWindow(),
+        desktopKeyboardCommands.closeCurrentWorkspaceTab,
+      )
     },
   }
 }

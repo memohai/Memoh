@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-
-const CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL = 'workspace-tab:close-current'
+import {
+  DESKTOP_KEYBOARD_COMMAND_CHANNEL,
+  isDesktopKeyboardCommand,
+  type DesktopKeyboardCommand,
+} from '../shared/keyboard-commands'
 
 // Cross-window query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -90,10 +93,14 @@ const api = {
         cb(target)
       })
     },
-    onCloseCurrentWorkspaceTab: (cb: () => void): void => {
-      ipcRenderer.on(CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL, () => {
-        cb()
-      })
+    onKeyboardCommand: (cb: (command: DesktopKeyboardCommand) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, command: unknown) => {
+        if (isDesktopKeyboardCommand(command)) cb(command)
+      }
+      ipcRenderer.on(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
+      }
     },
   },
 }

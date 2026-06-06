@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { closeFocusedTabOrWindow, CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL } from './window-commands'
+import { DESKTOP_KEYBOARD_COMMAND_CHANNEL, desktopKeyboardCommands } from '../shared/keyboard-commands'
+import { dispatchFocusedWindowCommand } from './window-commands'
 
 function createWindow() {
   return {
@@ -11,22 +12,33 @@ function createWindow() {
   }
 }
 
-describe('closeFocusedTabOrWindow', () => {
-  it('asks the chat renderer to close the current workspace tab', () => {
+describe('dispatchFocusedWindowCommand', () => {
+  it('dispatches keyboard commands to the chat renderer', () => {
     const chatWindow = createWindow()
 
-    const handled = closeFocusedTabOrWindow(chatWindow, chatWindow)
+    const handled = dispatchFocusedWindowCommand(
+      chatWindow,
+      chatWindow,
+      desktopKeyboardCommands.closeCurrentWorkspaceTab,
+    )
 
     expect(handled).toBe(true)
-    expect(chatWindow.webContents.send).toHaveBeenCalledWith(CLOSE_CURRENT_WORKSPACE_TAB_CHANNEL)
+    expect(chatWindow.webContents.send).toHaveBeenCalledWith(
+      DESKTOP_KEYBOARD_COMMAND_CHANNEL,
+      desktopKeyboardCommands.closeCurrentWorkspaceTab,
+    )
     expect(chatWindow.close).not.toHaveBeenCalled()
   })
 
-  it('closes the focused non-chat window', () => {
+  it('keeps the close-tab command mapped to native close for non-chat windows', () => {
     const chatWindow = createWindow()
     const settingsWindow = createWindow()
 
-    const handled = closeFocusedTabOrWindow(chatWindow, settingsWindow)
+    const handled = dispatchFocusedWindowCommand(
+      chatWindow,
+      settingsWindow,
+      desktopKeyboardCommands.closeCurrentWorkspaceTab,
+    )
 
     expect(handled).toBe(true)
     expect(settingsWindow.close).toHaveBeenCalledOnce()
