@@ -697,7 +697,15 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 
 	mode := acpclient.SetupMode(setup.Mode)
 	if mode == "" {
-		mode = acpclient.SetupModeAPIKey
+		// Legacy bots created before setup_mode was introduced have no explicit
+		// mode. For local workspaces the host already has Codex/Claude configured,
+		// so default to self (use host credentials). For container workspaces
+		// default to api_key to preserve the original validation behaviour.
+		if workspaceInfo.Backend == bridge.WorkspaceBackendLocal {
+			mode = acpclient.SetupModeSelf
+		} else {
+			mode = acpclient.SetupModeAPIKey
+		}
 	}
 	if mode != acpclient.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
