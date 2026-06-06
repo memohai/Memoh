@@ -112,10 +112,7 @@ func TestCreateBotStreamRequiresWorkspaceLifecycle(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateBot() error = nil, want workspace lifecycle configuration error")
 	}
-	httpErr, ok := err.(*echo.HTTPError)
-	if !ok {
-		t.Fatalf("CreateBot() error type = %T, want *echo.HTTPError", err)
-	}
+	httpErr := requireHTTPError(t, err)
 	if httpErr.Code != http.StatusInternalServerError {
 		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusInternalServerError)
 	}
@@ -225,10 +222,7 @@ func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("GetMe() error = nil, want unauthorized")
 	}
-	httpErr, ok := err.(*echo.HTTPError)
-	if !ok {
-		t.Fatalf("GetMe() error type = %T, want *echo.HTTPError", err)
-	}
+	httpErr := requireHTTPError(t, err)
 	if httpErr.Code != http.StatusUnauthorized {
 		t.Fatalf("GetMe() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
 	}
@@ -257,13 +251,19 @@ func TestCreateBotStreamReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) 
 	if err == nil {
 		t.Fatal("CreateBot() error = nil, want unauthorized")
 	}
-	httpErr, ok := err.(*echo.HTTPError)
-	if !ok {
-		t.Fatalf("CreateBot() error type = %T, want *echo.HTTPError", err)
-	}
+	httpErr := requireHTTPError(t, err)
 	if httpErr.Code != http.StatusUnauthorized {
 		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
 	}
+}
+
+func requireHTTPError(t *testing.T, err error) *echo.HTTPError {
+	t.Helper()
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	return httpErr
 }
 
 func decodeSSEEvents(t *testing.T, raw string) []map[string]any {
@@ -316,11 +316,11 @@ type createBotStreamWorkspace struct {
 	err    error
 }
 
-func (w *createBotStreamWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
+func (*createBotStreamWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
 	return nil, nil
 }
 
-func (w *createBotStreamWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+func (*createBotStreamWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
 	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer}, nil
 }
 
@@ -356,7 +356,7 @@ type createBotStreamDB struct {
 	botID   string
 }
 
-func (d *createBotStreamDB) Exec(_ context.Context, _ string, _ ...interface{}) (pgconn.CommandTag, error) {
+func (*createBotStreamDB) Exec(_ context.Context, _ string, _ ...interface{}) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
 }
 
