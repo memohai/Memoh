@@ -23,22 +23,17 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders } from '@memohai/sdk'
 import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
+import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
-import {
-  botCreateProgressPercent,
-  collectBotCreateProgressStream,
-  postBotsStream,
-  type BotCreateProgressState,
-} from '@/composables/api/useBotCreateStream'
+import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
-import ContainerCreateProgress from '@/pages/bots/components/container-create-progress.vue'
+import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
@@ -52,9 +47,8 @@ const { visible, exiting, leave } = useStepTransition()
 const workspaceVisible = ref(false)
 const submitting = ref(false)
 
-const createState = ref<BotCreateProgressState>({})
-const createProgress = computed(() => createState.value.progress ?? null)
-const createProgressPercent = computed(() => botCreateProgressPercent(createProgress.value))
+const store = useBotCreateProgressStore()
+const { lines: terminalLines, status: createStatus } = storeToRefs(store)
 
 onMounted(() => {
   void capabilities.load()
@@ -133,24 +127,9 @@ const ctaLabel = computed(() => {
   return t('onboarding.next')
 })
 
-async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotCreateProgressState> {
-  const { stream } = await postBotsStream({
-    body,
-    throwOnError: true,
-  })
-
-  return collectBotCreateProgressStream(stream, {
-    initialState: createState.value,
-    onState: (state) => {
-      createState.value = state
-    },
-  })
-}
-
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
-  createState.value = form.workspace_backend === 'local' ? {} : { progress: { phase: 'pulling' } }
 
   const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
     ? {
@@ -160,53 +139,45 @@ async function handleSubmit() {
       }
     : undefined
 
-  const tz = undefined
+  const payload: BotsCreateBotRequest = {
+    display_name: form.display_name.trim(),
+    avatar_url: form.avatar_url.trim() || undefined,
+    timezone: undefined,
+    is_active: true,
+    acl_preset: defaultAclPreset,
+    metadata,
+    wait_for_ready: true,
+  }
 
-  try {
-    const result = await createBotWithProgress({
+  // The store drives the inline terminal reactively while we await completion.
+  await store.start(payload, {
+    display: {
       display_name: form.display_name.trim(),
       avatar_url: form.avatar_url.trim() || undefined,
-      timezone: tz,
-      is_active: true,
-      acl_preset: defaultAclPreset,
-      metadata,
-      wait_for_ready: true,
-    })
+    },
+    settings: {
+      chat_model_id: form.chat_model_id || undefined,
+      memory_provider_id: form.memory_provider_id || undefined,
+    },
+  })
+  submitting.value = false
 
-    const bot = result.bot
-    const botId = bot?.id
-    if (!botId) {
-      throw new Error(t('common.saveFailed'))
-    }
-    if (botId) {
-      sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
-    }
-    if (botId && (form.chat_model_id || form.memory_provider_id)) {
-      try {
-        await putBotsByBotIdSettings({
-          path: { bot_id: botId },
-          body: {
-            ...(form.chat_model_id ? { chat_model_id: form.chat_model_id } : {}),
-            ...(form.memory_provider_id ? { memory_provider_id: form.memory_provider_id } : {}),
-          },
-          throwOnError: true,
-        })
-      } catch {
-        // Bot created successfully, settings save failed — non-fatal
-      }
-    }
-
-    if (result.setupError) {
-      toast.error(result.setupError)
-    }
-    leave(nextStep)
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  } finally {
-    submitting.value = false
-    createState.value = {}
-    void queryCache.invalidateQueries({ key: getBotsQueryKey() })
+  if (store.status === 'error') {
+    toast.error(store.setupError ?? t('common.saveFailed'))
+    store.reset()
+    return
   }
+
+  const botId = store.bot?.id
+  if (botId) {
+    sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
+  }
+  if (store.setupError) {
+    toast.error(store.setupError)
+  }
+  void queryCache.invalidateQueries({ key: getBotsQueryKey() })
+  leave(nextStep)
+  store.reset()
 }
 </script>
 
@@ -373,15 +344,11 @@ async function handleSubmit() {
               {{ $t('bots.createBotWaitHint') }}
             </div>
             <div
-              v-if="createProgress && form.workspace_backend !== 'local'"
+              v-if="form.workspace_backend !== 'local' && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
               class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
-              <ContainerCreateProgress
-                :phase="createProgress.phase"
-                :percent="createProgressPercent"
-                :error="createProgress.error"
-              />
+              <BotCreateTerminal :lines="terminalLines" />
             </div>
           </form>
         </div>

@@ -73,6 +73,14 @@ const routes = [
             },
           },
           {
+            name: 'bot-create-progress',
+            path: 'new/progress',
+            component: () => import('@/pages/bots/new-progress.vue'),
+            meta: {
+              breadcrumb: i18nRef('bots.createBot'),
+            },
+          },
+          {
             name: 'bot-detail',
             path: ':botName',
             component: () => import('@/pages/bots/detail.vue'),

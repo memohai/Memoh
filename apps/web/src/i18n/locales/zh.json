@@ -1113,6 +1113,23 @@
       "settingsDesc": "时区等"
     },
     "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
+    "create": {
+      "terminalTitle": "正在准备 {name}",
+      "terminalSubtitle": "正在创建工作区容器。准备完成后会自动打开这个 Bot。",
+      "failedSubtitle": "准备工作区时出现问题。",
+      "failedTitle": "准备失败",
+      "retry": "重试",
+      "back": "返回表单",
+      "line": {
+        "command": "正在创建 Bot「{name}」",
+        "botCreated": "已创建 Bot 记录",
+        "pulling": "正在拉取基础镜像",
+        "creating": "正在创建容器",
+        "restoring": "正在恢复记忆与数据",
+        "ready": "Bot 已就绪",
+        "applyingSettings": "正在应用模型与记忆设置"
+      }
+    },
     "workspaceBackend": "工作区",
     "workspaceBackendHint": "容器工作区提供隔离；本地文件夹会直接在宿主机上运行。",
     "workspaceBackends": {

@@ -89,6 +89,7 @@ export function reduceBotCreateProgressEvent(
 export type CollectBotCreateProgressStreamOptions = {
   initialState?: BotCreateProgressState
   onState?: (state: BotCreateProgressState) => void
+  onEvent?: (event: BotCreateStreamEvent) => void
 }
 
 export async function collectBotCreateProgressStream(
@@ -105,6 +106,7 @@ export async function collectBotCreateProgressStream(
 
   try {
     for await (const event of stream) {
+      options.onEvent?.(event)
       if (event.type === 'ready') {
         ready = true
       }

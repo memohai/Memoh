@@ -1117,6 +1117,23 @@
       "settingsDesc": "Timezone and more"
     },
     "createBotLocalHint": "Local bots use a folder on this computer and are not sandboxed.",
+    "create": {
+      "terminalTitle": "Setting up {name}",
+      "terminalSubtitle": "Provisioning the workspace container. You'll be taken to your bot automatically when it's ready.",
+      "failedSubtitle": "Something went wrong while setting up the workspace.",
+      "failedTitle": "Setup failed",
+      "retry": "Retry",
+      "back": "Back to form",
+      "line": {
+        "command": "Creating bot \"{name}\"",
+        "botCreated": "Bot record created",
+        "pulling": "Pulling base image",
+        "creating": "Creating container",
+        "restoring": "Restoring memory & data",
+        "ready": "Bot is ready",
+        "applyingSettings": "Applying model & memory settings"
+      }
+    },
     "workspaceBackend": "Workspace",
     "workspaceBackendHint": "Container workspaces are isolated. Local workspaces run directly on this computer.",
     "workspaceBackends": {

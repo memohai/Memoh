@@ -45,6 +45,23 @@ describe('useBotCreateStream', () => {
     })
   })
 
+  it('calls onEvent for each event in order', async () => {
+    const bot: BotsBot = { id: 'bot-1', name: 'stream-bot' }
+
+    async function* stream(): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
+      yield { type: 'bot_created', bot }
+      yield { type: 'creating' }
+      yield { type: 'ready', bot }
+    }
+
+    const seen: string[] = []
+    await collectBotCreateProgressStream(stream(), {
+      onEvent: event => seen.push(event.type),
+    })
+
+    expect(seen).toEqual(['bot_created', 'creating', 'ready'])
+  })
+
   it('ignores stream failures after ready', async () => {
     const bot: BotsBot = { id: 'bot-1', name: 'stream-bot' }
 
