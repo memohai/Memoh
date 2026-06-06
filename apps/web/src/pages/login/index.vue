@@ -1,5 +1,8 @@
 <template>
-  <main class="w-screen h-screen flex *:m-auto bg-background relative p-4">
+  <main
+    class="w-screen h-screen flex *:m-auto bg-background relative p-4"
+    :aria-busy="isSubmitting"
+  >
     <header class="absolute top-6 right-6 flex items-center gap-2">
       <Select
         :model-value="language"
@@ -48,7 +51,7 @@
         </h1>
       </section>
       <form
-        @submit="login"
+        @submit.prevent="login"
       >
         <Card class="py-14">
           <CardContent class="flex flex-col [&_input]:py-5 gap-4">
@@ -69,6 +72,7 @@
                     id="username"
                     type="text"
                     :placeholder="$t('auth.username')"
+                    :disabled="isSubmitting"
                     autocomplete="new-password"
                   />
                 </FormControl>
@@ -91,6 +95,7 @@
                     type="password"
                     :placeholder="$t('auth.password')"
                     autocomplete="new-password"
+                    :disabled="isSubmitting"
                     v-bind="componentField"
                   />
                 </FormControl>
@@ -99,14 +104,13 @@
           </CardContent>
 
           <CardFooter>
-            <Button
+            <LoadingButton
               class="w-full"
               type="submit"
-              @click="login"
+              :loading="isSubmitting"
             >
-              <Spinner v-if="loading" />
               {{ $t('auth.login') }}
-            </Button>
+            </LoadingButton>
           </CardFooter>
         </Card>
       </form>
@@ -125,7 +129,6 @@ import {
   FormField,
   FormItem,
   Label,
-  Spinner,
   Select,
   SelectContent,
   SelectGroup,
@@ -146,6 +149,8 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { postAuthLogin } from '@memohai/sdk'
 import type { Locale } from '@/i18n'
+import LoadingButton from '@/components/loading-button/index.vue'
+import { submitLogin } from './login-submit'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -166,31 +171,18 @@ const form = useForm({
 })
 
 const { login: loginHandle } = useUserStore()
-const loading = ref(false)
+const isSubmitting = ref(false)
 
 const login = form.handleSubmit(async (values) => {
-  try {
-    loading.value = true
-    const { data } = await postAuthLogin({ body: values })
-    if (data?.access_token && data?.user_id) {
-      loginHandle({
-        id: data.user_id,
-        username: data.username,
-        displayName: data.display_name ?? '',
-        role: data.role ?? '',
-        avatarUrl: data.avatar_url ?? '',
-        timezone: data.timezone ?? 'UTC',
-      }, data.access_token)
-    } else {
-      throw new Error(t('auth.loginFailed'))
-    }
-    router.replace({ path: '/' })
-  } catch {
-    toast.error(t('auth.invalidCredentials'), {
-      description: t('auth.retryHint'),
-    })
-  } finally {
-    loading.value = false
-  }
+  await submitLogin(values, isSubmitting, {
+    authenticate: (body) => postAuthLogin({ body }),
+    applyLogin: loginHandle,
+    navigateHome: () => router.replace({ path: '/' }),
+    notifyInvalidCredentials: () => {
+      toast.error(t('auth.invalidCredentials'), {
+        description: t('auth.retryHint'),
+      })
+    },
+  })
 })
 </script>
