@@ -21,7 +21,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     :data-size="size"
     v-bind="forwardedProps"
     :class="cn(
-      'flex w-fit items-center justify-between gap-2 rounded-md px-3 py-2 tracking-[0.01em] whitespace-nowrap outline-none',
+      'flex w-fit items-center justify-between gap-2 rounded-md px-3 py-2 tracking-[0.01em] whitespace-nowrap outline-none select-none',
       'data-[placeholder]:text-muted-foreground',
       '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
       'disabled:cursor-not-allowed disabled:opacity-40',

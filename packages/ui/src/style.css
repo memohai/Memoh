@@ -102,7 +102,6 @@
      No outer rings: the edge never stacks, it just changes color. */
   [data-slot="input"],
   [data-slot="textarea"],
-  [data-slot="select-trigger"],
   [data-slot="native-select"],
   [data-slot="input-group"],
   [data-slot="number-field"] {
@@ -124,8 +123,6 @@
   /* DEFAULT (solid): the hairline itself turns near-black on focus. */
   [data-slot="input"]:focus,
   [data-slot="textarea"]:focus,
-  [data-slot="select-trigger"]:focus-visible,
-  [data-slot="select-trigger"][data-state="open"],
   [data-slot="native-select"]:focus-visible,
   [data-slot="input-group"]:focus-within,
   [data-slot="number-field"]:focus-within {
@@ -141,12 +138,56 @@
      stacks outside it. */
   [data-slot="input"][aria-invalid="true"],
   [data-slot="textarea"][aria-invalid="true"],
-  [data-slot="select-trigger"][aria-invalid="true"],
   [data-slot="native-select"][aria-invalid="true"],
   [data-slot="input-group"]:has([aria-invalid="true"]),
   [data-slot="number-field"][aria-invalid="true"],
   [data-slot="number-field"]:has([aria-invalid="true"]) {
     --field-edge: var(--destructive);
+  }
+
+  /* ── Select — a BUTTON, not a field. The trigger wears light secondary-button
+     chrome: a faint resting hairline plus a gray fill on hover, instead of the
+     input field-edge that flashed a near-black committed border. */
+  [data-slot="select-trigger"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--field-edge-rest);
+    transition:
+      background-color 110ms ease,
+      box-shadow 110ms ease;
+  }
+  /* Hover only fills when CLOSED. With the menu open the pointer is still over
+     the trigger, and a gray fill under an open menu reads as a stuck "active"
+     button — so the open trigger stays untouched, just the resting hairline. */
+  [data-slot="select-trigger"]:hover:not([data-state="open"]) {
+    background-color: var(--ui-hover);
+  }
+  /* No focus ring: reka returns DOM focus to the trigger after a mouse pick,
+     and the browser then paints :focus-visible — which left a near-black ring
+     stuck on the closed trigger ("triggered" look). The resting hairline plus
+     the menu itself are the affordance. */
+  [data-slot="select-trigger"][aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px var(--destructive);
+  }
+
+  /* Menu panel border lives on the Tailwind utility in SelectContent.vue
+     (border-[var(--border-strong)]). It MUST be a utility, not a rule here:
+     @layer utilities always wins over @layer components, so any border-color set
+     in this block would be silently overridden by the component's border utility.
+     --border-strong is deeper than the hairline so the floating panel reads as a
+     crisp, higher-contrast cutout — not the same faint line as a flat field. */
+
+  /* Menu rows — exactly shadcn's model: one rule, highlight = reka's roving focus
+     ([data-highlighted], the reka/Radix equivalent of shadcn's focus:bg-accent).
+     reka moves DOM focus to the pointed/keyboard-navigated row, so the highlight
+     simply FOLLOWS the pointer. The selected value is shown by the check icon, not
+     a background. No checked floor, no :has() suppressor, no sticky — those were
+     home-grown and fought each other. */
+  [data-slot="select-item"] {
+    background-color: transparent;
+    transition: background-color 60ms ease;
+  }
+  [data-slot="select-item"][data-highlighted] {
+    background-color: var(--ui-selected);
   }
 
   /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
@@ -598,12 +639,19 @@
   /* Shadows — tokenized so elevation/edge values never fragment. Same in both
      schemes for now; add .dark overrides when dark elevation is tuned.
        --shadow-hairline  1px inset edge (outline / secondary button chrome)
-       --shadow-thumb     subtle lift for the segmented sliding thumb */
+       --shadow-thumb     subtle lift for the segmented sliding thumb
+       --shadow-dropdown  Scale bench dropdown elevation for menu surfaces */
   /* Hairline edge color — shared by secondary/outline button chrome and small
      control borders (checkbox). A future Design Token revision target. */
   --border-hairline: oklch(0 0 0 / 0.16);
+  /* Edge for ELEVATED surfaces (dropdown / popover menus). A neutral hairline a
+     touch stronger than the field/button edge (--field-edge-rest 0.11) so the
+     floating panel reads with slightly more contrast than the flat trigger below
+     it; the cutout depth still comes mostly from --shadow-dropdown. */
+  --border-menu: oklch(0 0 0 / 0.13);
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
+  --shadow-dropdown: 0 1px 2px 0 oklch(0 0 0 / 0.04), 0 6px 18px -6px oklch(0 0 0 / 0.08);
   /* Form-field edge — text input / textarea / select. The edge is one inset
      hairline whose color swaps per state (never an outer ring):
        solid  (default) → the hairline turns near-black on focus
@@ -805,6 +853,7 @@
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0.001 286);
   --border: oklch(1 0 0 / 10%);
+  --border-menu: oklch(1 0 0 / 0.14);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.86 0.005 285);
   --chart-1: oklch(0.488 0.243 264.376);
@@ -1120,6 +1169,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* Menu geometry from the Scale bench: row = 8px, shell = row + 4px. */
+  --radius-menu: calc(var(--radius) - 2px);
+  --radius-menu-shell: calc(var(--radius) + 2px);
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
      Anchored to this app's reality — 12px (body) is the workhorse UI size.

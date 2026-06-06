@@ -24,8 +24,11 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-body outline-hidden select-none transition-colors',
-        'focus:bg-accent focus:text-accent-foreground',
+        // Highlight fill + transition live in style.css (select-item contract):
+        // a single [data-highlighted] rule, exactly like shadcn's focus:bg-accent.
+        // reka moves DOM focus to the pointed/navigated row, so the highlight just
+        // follows the pointer — no checked floor, no sticky, no onItemLeave hacks.
+        'relative flex w-full cursor-default items-center gap-2 rounded-menu py-1.5 pr-8 pl-2.5 text-sm outline-hidden select-none',
         '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
