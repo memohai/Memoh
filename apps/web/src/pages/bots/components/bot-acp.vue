@@ -58,6 +58,7 @@ import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk
 import type { Ref } from 'vue'
 import SettingsAcpCard from './settings-acp-card.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
 import {
   emptyACPAgentForm,
   findMissingRequiredACPField,
@@ -126,7 +127,7 @@ const hasChanges = computed(() => {
 async function handleSave() {
   try {
     const normalized = normalizeACPForm(form, profiles.value)
-    const validationError = validateForm(normalized, profiles.value)
+    const validationError = validateForm(normalized, profiles.value, isLocalWorkspaceBot(bot.value?.metadata))
     if (validationError) {
       toast.error(validationError)
       return
@@ -156,8 +157,8 @@ function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list
   }
 }
 
-function validateForm(value: ACPForm, list: AcpprofilePublicProfile[]): string {
-  const missing = findMissingRequiredACPField(value, list)
+function validateForm(value: ACPForm, list: AcpprofilePublicProfile[], isLocalWorkspace = false): string {
+  const missing = findMissingRequiredACPField(value, list, isLocalWorkspace)
   if (!missing) return ''
   return t('bots.settings.acpRequiredField', {
     agent: missing.profile.display_name || missing.profile.id,
