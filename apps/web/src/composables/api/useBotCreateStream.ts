@@ -86,6 +86,48 @@ export function reduceBotCreateProgressEvent(
   }
 }
 
+export type CollectBotCreateProgressStreamOptions = {
+  initialState?: BotCreateProgressState
+  onState?: (state: BotCreateProgressState) => void
+}
+
+export async function collectBotCreateProgressStream(
+  stream: AsyncGenerator<BotCreateStreamEvent, void, unknown>,
+  options: CollectBotCreateProgressStreamOptions = {},
+): Promise<BotCreateProgressState> {
+  let state = options.initialState ?? {}
+  let ready = false
+
+  const update = (next: BotCreateProgressState) => {
+    state = next
+    options.onState?.(state)
+  }
+
+  try {
+    for await (const event of stream) {
+      if (event.type === 'ready') {
+        ready = true
+      }
+      update(reduceBotCreateProgressEvent(state, event))
+    }
+  } catch (error) {
+    if (!state.bot) {
+      throw error
+    }
+    if (ready) {
+      return state
+    }
+    const message = toError(error).message
+    update({
+      ...state,
+      setupError: message,
+      progress: { phase: 'error', error: message },
+    })
+  }
+
+  return state
+}
+
 function isLayerStatus(value: unknown): value is ContainerCreateLayerStatus {
   return !!value
     && typeof value === 'object'

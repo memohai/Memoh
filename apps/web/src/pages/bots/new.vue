@@ -390,8 +390,8 @@ import { emptyTimezoneValue } from '@/utils/timezones'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import {
   botCreateProgressPercent,
+  collectBotCreateProgressStream,
   postBotsStream,
-  reduceBotCreateProgressEvent,
   type BotCreateProgressState,
 } from '@/composables/api/useBotCreateStream'
 import ModelSelect from './components/model-select.vue'
@@ -607,10 +607,12 @@ async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotCre
     throwOnError: true,
   })
 
-  for await (const event of stream) {
-    createState.value = reduceBotCreateProgressEvent(createState.value, event)
-  }
-  return createState.value
+  return collectBotCreateProgressStream(stream, {
+    initialState: createState.value,
+    onState: (state) => {
+      createState.value = state
+    },
+  })
 }
 
 async function handleSubmit() {

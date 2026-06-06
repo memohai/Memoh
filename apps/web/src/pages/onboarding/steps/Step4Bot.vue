@@ -33,8 +33,8 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import {
   botCreateProgressPercent,
+  collectBotCreateProgressStream,
   postBotsStream,
-  reduceBotCreateProgressEvent,
   type BotCreateProgressState,
 } from '@/composables/api/useBotCreateStream'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
@@ -139,10 +139,12 @@ async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotCre
     throwOnError: true,
   })
 
-  for await (const event of stream) {
-    createState.value = reduceBotCreateProgressEvent(createState.value, event)
-  }
-  return createState.value
+  return collectBotCreateProgressStream(stream, {
+    initialState: createState.value,
+    onState: (state) => {
+      createState.value = state
+    },
+  })
 }
 
 async function handleSubmit() {
