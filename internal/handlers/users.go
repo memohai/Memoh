@@ -798,22 +798,33 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 		return nil
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, acpprofile.AgentCodexID)
-	mode := acpclient.SetupMode(setup.Mode)
-	if mode == "" {
-		mode = acpclient.SetupModeAPIKey
-	}
-	if !setup.Enabled || mode == acpclient.SetupModeSelf {
+	if !setup.Enabled {
 		return nil
 	}
-	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID); err != nil {
+	workspaceInfo, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
+	if err != nil {
 		return err
+	}
+	mode := acpclient.SetupMode(setup.Mode)
+	if !setup.ModeSet {
+		// Legacy bots predate explicit setup_mode. Local workspaces use the
+		// host's configured credentials (self); container workspaces have no
+		// credentials to write, so skip in both cases.
+		if workspaceInfo.Backend == bridge.WorkspaceBackendLocal {
+			mode = acpclient.SetupModeSelf
+		}
+		// container legacy bots: nothing to write either
+		if mode != acpclient.SetupModeSelf {
+			return nil
+		}
+	}
+	// self and oauth modes: credentials are not managed here.
+	if mode == acpclient.SetupModeSelf || mode == acpclient.SetupModeOAuth {
+		return nil
 	}
 	// OAuth credentials are written by the dedicated OAuth callback handler, not
 	// here. For api_key mode we write the managed config now; on local (desktop
 	// BYOK) the bridge maps /data/.codex onto the bot's workspace .codex dir.
-	if mode == acpclient.SetupModeOAuth {
-		return nil
-	}
 	client, err := h.acpWorkspace.MCPClient(ctx, bot.ID)
 	if err != nil {
 		return err
