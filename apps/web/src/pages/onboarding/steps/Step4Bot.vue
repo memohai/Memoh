@@ -38,7 +38,7 @@ import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
-import { readACPSelection, type OnboardingACPSelection } from './useACPSetup'
+import { clearACPSelection, readACPSelection, type OnboardingACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
@@ -291,6 +291,14 @@ async function exchangeClaudeFlow() {
 }
 
 function continueFromOAuth() {
+  leave(nextStep)
+}
+
+function skipOAuth() {
+  // User skipped OAuth — clear ACP selection so the completion step does not
+  // redirect with ?acp=<agent>. Starting an ACP session without a token would
+  // fail on the first prompt; the user can authorize later via bot settings.
+  clearACPSelection()
   leave(nextStep)
 }
 </script>
@@ -628,7 +636,7 @@ function continueFromOAuth() {
         >
           <button
             class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            @click="continueFromOAuth"
+            @click="skipOAuth"
           >
             {{ t('onboarding.bot.acp.oauthSkip') }}
           </button>
