@@ -355,7 +355,7 @@ onMounted(() => {
         </button>
         <button
           class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="leave(nextStep)"
+          @click="onSkipStep"
         >
           {{ ctaLabel }}
         </button>
@@ -375,6 +375,7 @@ onMounted(() => {
           type="button"
           class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           :disabled="submitting"
+          :aria-label="t('onboarding.prev')"
           @click="backToList"
         >
           <ArrowLeft class="size-4" />
@@ -632,6 +633,7 @@ onMounted(() => {
           type="button"
           class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           :disabled="acpSubmitting"
+          :aria-label="t('onboarding.prev')"
           @click="backToList"
         >
           <ArrowLeft class="size-4" />
