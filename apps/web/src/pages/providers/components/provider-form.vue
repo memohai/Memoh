@@ -54,7 +54,7 @@
       </FormField>
 
       <FormField
-        v-if="!['openai-codex', 'github-copilot'].includes(form.values.client_type)"
+        v-if="!isProviderOAuthClientType(form.values.client_type)"
         v-slot="{ componentField }"
         name="api_key"
       >
@@ -108,7 +108,7 @@
       </FormField>
 
       <section
-        v-if="['openai-codex', 'github-copilot'].includes(form.values.client_type)"
+        v-if="isProviderOAuthClientType(form.values.client_type)"
         class="md:col-span-2 rounded-lg border p-4 space-y-3 text-xs"
       >
         <div class="space-y-1">
@@ -213,7 +213,7 @@
         <div class="flex gap-2">
           <LoadingButton
             v-if="props.provider?.id
-              && ['openai-codex', 'github-copilot'].includes(form.values.client_type)
+              && isProviderOAuthClientType(form.values.client_type)
               && !(
                 form.values.client_type === 'github-copilot'
                 && oauthStatus?.device?.pending
@@ -224,13 +224,21 @@
               && (!oauthStatus?.has_token || oauthExpired)"
             type="button"
             variant="outline"
-            :disabled="!props.provider?.id || !['openai-codex', 'github-copilot'].includes(form.values.client_type) || oauthStatusLoading"
+            :disabled="!props.provider?.id || !isProviderOAuthClientType(form.values.client_type) || oauthStatusLoading"
             :loading="authorizeLoading"
             @click="handleAuthorize"
           >
             <KeyRound />
             {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.deviceAuthorize' : 'provider.oauth.authorize') }}
           </LoadingButton>
+          <Button
+            v-if="webOAuthFlow"
+            type="button"
+            variant="ghost"
+            @click="cancelWebOAuthAuthorization"
+          >
+            {{ $t('common.cancel') }}
+          </Button>
           <LoadingButton
             v-if="oauthStatus?.has_token"
             type="button"
@@ -361,6 +369,7 @@ import type {
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 
 const { t } = useI18n()
 const { copyText } = useClipboard()
@@ -387,6 +396,10 @@ function supportsPromptCache(clientType: string | undefined): boolean {
   return !!clientType && PROMPT_CACHE_CLIENT_TYPES.has(clientType)
 }
 
+function isProviderOAuthClientType(clientType: string | undefined): boolean {
+  return clientType === 'openai-codex' || clientType === 'github-copilot'
+}
+
 const props = defineProps<{
   provider: ProviderWithAuth | undefined
   editLoading: boolean
@@ -406,7 +419,7 @@ const oauthStatusLoading = ref(false)
 const authorizeLoading = ref(false)
 const revokeLoading = ref(false)
 const devicePollTimer = ref<number | null>(null)
-const webPollTimer = ref<number | null>(null)
+const webOAuthFlow = ref<OAuthPopupFlowController | null>(null)
 const webOAuthPollIntervalMs = 2000
 const webOAuthPollTimeoutMs = 5 * 60 * 1000
 
@@ -488,7 +501,7 @@ watch(() => props.provider, (newVal) => {
 }, { immediate: true })
 
 watch(() => form.values.client_type, (clientType) => {
-  if (!['openai-codex', 'github-copilot'].includes(clientType)) {
+  if (!isProviderOAuthClientType(clientType)) {
     oauthStatus.value = null
   }
   if (clientType === 'openai-codex' && !form.values.base_url) {
@@ -570,10 +583,8 @@ function clearDevicePollTimer() {
 }
 
 function clearWebPollTimer() {
-  if (webPollTimer.value !== null) {
-    window.clearTimeout(webPollTimer.value)
-    webPollTimer.value = null
-  }
+  webOAuthFlow.value?.cancel()
+  webOAuthFlow.value = null
 }
 
 function clearPollTimers() {
@@ -639,22 +650,8 @@ onBeforeUnmount(() => {
   clearPollTimers()
 })
 
-function scheduleWebOAuthStatusPoll(startedAt: number, onAuthorized: () => Promise<void>) {
-  clearWebPollTimer()
-  webPollTimer.value = window.setTimeout(() => {
-    void (async () => {
-      const status = await fetchOAuthStatus()
-      if (status?.has_token && !status.expired) {
-        await onAuthorized()
-        return
-      }
-      if (Date.now() - startedAt >= webOAuthPollTimeoutMs) {
-        authorizeLoading.value = false
-        return
-      }
-      scheduleWebOAuthStatusPoll(startedAt, onAuthorized)
-    })()
-  }, webOAuthPollIntervalMs)
+function cancelWebOAuthAuthorization() {
+  webOAuthFlow.value?.cancel()
 }
 
 async function handleAuthorize() {
@@ -681,23 +678,30 @@ async function handleAuthorize() {
     }
     if (!result.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(result.auth_url, 'provider-oauth', 'width=600,height=720')
-    let completed = false
-    const completeAuthorization = async () => {
-      if (completed) return
-      completed = true
-      clearWebPollTimer()
-      window.removeEventListener('message', listener)
-      popup?.close()
-      toast.success(t('provider.oauth.authorizeSuccess'))
-      await fetchOAuthStatus()
-      authorizeLoading.value = false
-    }
-    const listener = async (event: MessageEvent) => {
-      if (event.data?.type !== 'memoh-provider-oauth-success') return
-      await completeAuthorization()
-    }
-    window.addEventListener('message', listener)
-    scheduleWebOAuthStatusPoll(Date.now(), completeAuthorization)
+    if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
+    webOAuthFlow.value?.cancel()
+    webOAuthFlow.value = startOAuthPopupFlow<ProvidersOAuthStatus>({
+      popup,
+      target: window,
+      messageType: 'memoh-provider-oauth-success',
+      pollIntervalMs: webOAuthPollIntervalMs,
+      timeoutMs: webOAuthPollTimeoutMs,
+      pollStatus: fetchOAuthStatus,
+      isAuthorized: status => Boolean(status?.has_token && !status.expired),
+      onAuthorized: async () => {
+        webOAuthFlow.value = null
+        toast.success(t('provider.oauth.authorizeSuccess'))
+        await fetchOAuthStatus()
+        authorizeLoading.value = false
+      },
+      onAborted: (reason) => {
+        webOAuthFlow.value = null
+        authorizeLoading.value = false
+        if (reason === 'timeout') {
+          toast.error(t('provider.oauth.authorizeTimedOut'))
+        }
+      },
+    })
   } catch (error) {
     clearWebPollTimer()
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))

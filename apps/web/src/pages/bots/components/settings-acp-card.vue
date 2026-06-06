@@ -107,6 +107,16 @@
                   />
                   {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
                 </Button>
+                <Button
+                  v-if="codexOAuthFlow"
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  class="h-7 shrink-0 text-xs shadow-none"
+                  @click="cancelCodexOAuthAuthorization"
+                >
+                  {{ $t('common.cancel') }}
+                </Button>
               </div>
             </div>
 
@@ -209,7 +219,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useQueryCache } from '@pinia/colada'
@@ -221,6 +231,7 @@ import {
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
 import { acpAgentIcon, ensureACPAgentForm, normalizeACPAgentID, type ACPAgentForm, type ACPForm } from '@/utils/acp'
+import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 
 const props = defineProps<{
   botId: string
@@ -234,12 +245,15 @@ const queryCache = useQueryCache()
 const codexOAuthStatus = ref<ACPCodexOAuthStatus | null>(null)
 const codexOAuthStatusLoading = ref(false)
 const authorizingCodexOAuth = ref(false)
+const codexOAuthFlow = ref<OAuthPopupFlowController | null>(null)
 const claudeOAuthStatus = ref<ACPClaudeCodeOAuthStatus | null>(null)
 const claudeOAuthStatusLoading = ref(false)
 const authorizingClaudeOAuth = ref(false)
 const exchangingClaudeOAuth = ref(false)
 const claudeOAuthSessionId = ref('')
 const claudeOAuthCode = ref('')
+const codexOAuthPollIntervalMs = 1500
+const codexOAuthPollTimeoutMs = 5 * 60 * 1000
 
 interface ACPCodexOAuthStatus {
   configured: boolean
@@ -359,6 +373,10 @@ watch([() => props.botId, claudeOAuthActive], () => {
   if (claudeOAuthActive.value) void loadClaudeOAuthStatus()
 }, { immediate: true })
 
+onBeforeUnmount(() => {
+  cancelCodexOAuthAuthorization()
+})
+
 function codexOAuthStatusText(): string {
   return oauthStatusText(codexOAuthStatusLoading.value, codexOAuthStatus.value, 'bots.settings.acpOAuthUnavailable')
 }
@@ -416,8 +434,13 @@ async function loadClaudeOAuthStatus(): Promise<ACPClaudeCodeOAuthStatus | null>
   }
 }
 
+function cancelCodexOAuthAuthorization() {
+  codexOAuthFlow.value?.cancel()
+}
+
 async function handleAuthorize(profile: AcpprofilePublicProfile) {
   try {
+    if (!props.botId) return
     agentForm(profile).setup_mode = 'oauth'
     authorizingCodexOAuth.value = true
     const { data } = await client.get<{ 200: ACPCodexOAuthAuthorizeResponse }, unknown, true>({
@@ -427,38 +450,33 @@ async function handleAuthorize(profile: AcpprofilePublicProfile) {
     })
     if (!data?.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(data.auth_url, 'acp-codex-oauth', 'width=600,height=720')
-    const startedAt = Date.now()
-    let completed = false
-    const finish = async () => {
-      if (completed) return
-      completed = true
-      window.removeEventListener('message', listener)
-      popup?.close()
-      await loadOAuthStatus()
-      toast.success(t('provider.oauth.authorizeSuccess'))
-      authorizingCodexOAuth.value = false
-    }
-    const poll = () => {
-      window.setTimeout(() => {
-        void (async () => {
-          const status = await loadOAuthStatus()
-          if (status?.has_token) {
-            await finish()
-            return
-          }
-          if (Date.now() - startedAt < 120_000 && !completed) poll()
-          else authorizingCodexOAuth.value = false
-        })()
-      }, 1_500)
-    }
-    const listener = (event: MessageEvent) => {
-      if (event.data?.type === 'memoh-acp-codex-oauth-success' && event.data?.botId === props.botId) {
-        void finish()
-      }
-    }
-    window.addEventListener('message', listener)
-    poll()
+    if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
+    codexOAuthFlow.value?.cancel()
+    codexOAuthFlow.value = startOAuthPopupFlow<ACPCodexOAuthStatus>({
+      popup,
+      target: window,
+      messageType: 'memoh-acp-codex-oauth-success',
+      messageMatches: event => event.data?.botId === props.botId,
+      pollIntervalMs: codexOAuthPollIntervalMs,
+      timeoutMs: codexOAuthPollTimeoutMs,
+      pollStatus: loadOAuthStatus,
+      isAuthorized: status => Boolean(status?.has_token),
+      onAuthorized: async () => {
+        codexOAuthFlow.value = null
+        await loadOAuthStatus()
+        toast.success(t('provider.oauth.authorizeSuccess'))
+        authorizingCodexOAuth.value = false
+      },
+      onAborted: (reason) => {
+        codexOAuthFlow.value = null
+        authorizingCodexOAuth.value = false
+        if (reason === 'timeout') {
+          toast.error(t('provider.oauth.authorizeTimedOut'))
+        }
+      },
+    })
   } catch (error) {
+    cancelCodexOAuthAuthorization()
     authorizingCodexOAuth.value = false
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
   }

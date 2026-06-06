@@ -667,6 +667,7 @@
       "authorize": "授权",
       "deviceAuthorize": "启动设备授权",
       "authorizeFailed": "启动授权失败",
+      "authorizeTimedOut": "授权超时，请重试。",
       "authorizeSuccess": "授权成功",
       "revoke": "撤销授权",
       "revokeFailed": "撤销授权失败",
