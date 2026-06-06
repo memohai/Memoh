@@ -600,6 +600,16 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		sendError("ready status update failed: " + err.Error())
 		return nil
 	}
+	// Mirror the non-streaming path: write ACP workspace config (e.g.
+	// /data/.codex/auth.json) now that the workspace is ready. A failure here
+	// must NOT abort the stream — the bot exists and the config can be
+	// (re)written from the bot settings page.
+	if req.Metadata != nil {
+		if err := h.prepareACPWorkspaceConfig(lifecycleCtx, readyBot); err != nil {
+			h.logger.Warn("write ACP workspace config after stream bot create failed",
+				slog.String("bot_id", readyBot.ID), slog.Any("error", err))
+		}
+	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
 }
