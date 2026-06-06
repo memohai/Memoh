@@ -22,6 +22,7 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/memory/adapters/builtin"
+	storefs "github.com/memohai/memoh/internal/memory/storefs"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -36,6 +37,28 @@ func (q *memoryCompactDevQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (
 
 func (*memoryCompactDevQueries) GetContainerByBotID(context.Context, pgtype.UUID) (sqlc.Container, error) {
 	return sqlc.Container{}, pgx.ErrNoRows
+}
+
+type fakeCompactLLM struct {
+	facts []string
+	reqs  []memprovider.CompactRequest
+}
+
+func (*fakeCompactLLM) Extract(context.Context, memprovider.ExtractRequest) (memprovider.ExtractResponse, error) {
+	return memprovider.ExtractResponse{}, nil
+}
+
+func (*fakeCompactLLM) Decide(context.Context, memprovider.DecideRequest) (memprovider.DecideResponse, error) {
+	return memprovider.DecideResponse{}, nil
+}
+
+func (f *fakeCompactLLM) Compact(_ context.Context, req memprovider.CompactRequest) (memprovider.CompactResponse, error) {
+	f.reqs = append(f.reqs, req)
+	return memprovider.CompactResponse{Facts: f.facts}, nil
+}
+
+func (*fakeCompactLLM) DetectLanguage(context.Context, string) (string, error) {
+	return "", nil
 }
 
 func TestChatCompactDevFlowCompactsAndArchivesFileMemory(t *testing.T) {
@@ -56,7 +79,7 @@ func TestChatCompactDevFlowCompactsAndArchivesFileMemory(t *testing.T) {
 	})
 	t.Cleanup(pool.CloseAll)
 
-	runtime := NewBuiltinMemoryRuntime(pool)
+	runtime := builtin.NewFileRuntime(storefs.New(slog.Default(), pool))
 	provider := builtin.NewBuiltinProvider(slog.Default(), runtime, nil, nil)
 	llm := &fakeCompactLLM{facts: []string{
 		"Ran likes tea, especially green and oolong tea.",
