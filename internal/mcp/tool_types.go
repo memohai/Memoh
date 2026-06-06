@@ -16,6 +16,7 @@ type ToolSessionContext struct {
 	RuntimeID         string
 	SessionID         string
 	StreamID          string
+	ToolCallID        string
 	SessionType       string
 	RouteID           string
 	ChannelIdentityID string

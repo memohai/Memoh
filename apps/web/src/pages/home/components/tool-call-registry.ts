@@ -116,6 +116,12 @@ function pickString(obj: Record<string, unknown>, ...keys: string[]): string {
   return ''
 }
 
+function firstQuestionText(input: Record<string, unknown>): string {
+  const questions = input.questions
+  if (!Array.isArray(questions) || questions.length === 0) return ''
+  return pickString(asObject(questions[0]), 'text')
+}
+
 function pickNumber(obj: Record<string, unknown>, ...keys: string[]): number {
   for (const k of keys) {
     const v = obj[k]
@@ -250,7 +256,8 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   
   switch (block.toolName) {
     case 'ask_user': {
-      const question = block.userInput?.question || pickString(input, 'question')
+      // pickString covers pre-v2 history where input was { question: "..." }.
+      const question = block.userInput?.questions?.[0]?.text || firstQuestionText(input) || pickString(input, 'question')
       const showQuestionInBody = block.userInput?.status === 'pending'
       return {
         icon: TextCursorInput,

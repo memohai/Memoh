@@ -5281,6 +5281,25 @@ func (q *Queries) GetUserInputRequest(ctx context.Context, id pgtype.UUID) (pgsq
 	return result, nil
 }
 
+func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg pgsqlc.GetUserInputRequestBySessionToolCallParams) (pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.UserInputRequest{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.GetUserInputRequestBySessionToolCallParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	out, err := q.store.queries.GetUserInputRequestBySessionToolCall(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.UserInputRequest{}, mapQueryErr(err)
+	}
+	var result pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.UserInputRequest{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListPendingUserInputsBySession(ctx context.Context, arg pgsqlc.ListPendingUserInputsBySessionParams) ([]pgsqlc.UserInputRequest, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

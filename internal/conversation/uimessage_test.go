@@ -129,6 +129,58 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	}
 }
 
+func TestConvertMessagesToUITurnsKeepsUserInputMetadata(t *testing.T) {
+	t.Parallel()
+
+	messages := []messagepkg.Message{{
+		ID:        "assistant-1",
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Role:      "assistant",
+		Content: mustUIMessageJSON(t, ModelMessage{
+			Role: "assistant",
+			Content: mustUIRawJSON(t, []map[string]any{{
+				"type":       "tool-call",
+				"toolCallId": "call-ask",
+				"toolName":   "ask_user",
+				"input":      map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
+				"providerMetadata": map[string]any{
+					"user_input": map[string]any{
+						"user_input_id": "input-1",
+						"short_id":      2,
+						"status":        "pending",
+						"ui_payload": map[string]any{
+							"version": 2,
+							"questions": []any{map[string]any{
+								"id":   "q1",
+								"text": "Which plan?",
+								"kind": "single_select",
+								"options": []any{
+									map[string]any{"id": "q1.o1", "label": "Plan A"},
+									map[string]any{"id": "q1.o2", "label": "Plan B"},
+								},
+							}},
+						},
+					},
+				},
+			}}),
+		}),
+		CreatedAt: time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC),
+	}}
+
+	turns := ConvertMessagesToUITurns(messages)
+	if len(turns) != 1 || len(turns[0].Messages) != 1 {
+		t.Fatalf("unexpected turns: %#v", turns)
+	}
+	block := turns[0].Messages[0]
+	if block.UserInput == nil || block.UserInput.UserInputID != "input-1" {
+		t.Fatalf("persisted user_input metadata must survive UITurn conversion: %#v", block)
+	}
+	if len(block.UserInput.Questions) != 1 || block.UserInput.Questions[0].Kind != "single_select" {
+		t.Fatalf("unexpected questions: %#v", block.UserInput.Questions)
+	}
+}
+
 func TestConvertMessagesToUITurnsStripsUserYAMLHeaderFallback(t *testing.T) {
 	now := time.Now().UTC()
 	turns := ConvertMessagesToUITurns([]messagepkg.Message{{
@@ -213,14 +265,22 @@ func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 		UserInputID: "input-1",
 		ShortID:     3,
 		Status:      "pending",
-		Input:       map[string]any{"question": "Which plan?"},
+		Input:       map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "multi_select"}}},
 		Metadata: map[string]any{
 			"user_input_id": "input-1",
 			"ui_payload": map[string]any{
-				"question": "Which plan?",
-				"options": []any{
-					map[string]any{"id": "a", "label": "Plan A", "value": "A"},
-					map[string]any{"id": "custom", "label": "Custom answer", "input_type": "text", "placeholder": "Type an answer"},
+				"version": 2,
+				"questions": []any{
+					map[string]any{
+						"id":   "q1",
+						"text": "Which plan?",
+						"kind": "multi_select",
+						"options": []any{
+							map[string]any{"id": "q1.o1", "label": "Plan A"},
+							map[string]any{"id": "q1.o2", "label": "Plan B"},
+						},
+						"allow_custom": true,
+					},
 				},
 			},
 		},
@@ -233,8 +293,15 @@ func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 	if msg.UserInput == nil {
 		t.Fatalf("missing user input: %#v", msg)
 	}
-	if msg.UserInput.UserInputID != "input-1" || msg.UserInput.Question != "Which plan?" {
+	if msg.UserInput.UserInputID != "input-1" || len(msg.UserInput.Questions) != 1 {
 		t.Fatalf("unexpected user input: %#v", msg.UserInput)
+	}
+	question := msg.UserInput.Questions[0]
+	if question.Text != "Which plan?" || question.Kind != "multi_select" || !question.AllowCustom {
+		t.Fatalf("unexpected question: %#v", question)
+	}
+	if len(question.Options) != 2 || question.Options[0].ID != "q1.o1" {
+		t.Fatalf("unexpected options: %#v", question.Options)
 	}
 	if msg.Running == nil || *msg.Running {
 		t.Fatalf("expected tool to stop running while waiting: %#v", msg)
@@ -255,7 +322,8 @@ func TestConvertModelMessagesToUIAssistantMessagesIncludesUserInputMetadata(t *t
 					"short_id":      2,
 					"status":        "pending",
 					"ui_payload": map[string]any{
-						"question": "Which plan?",
+						"question":       "Which plan?",
+						"selection_type": "multi_select",
 						"options": []any{
 							map[string]any{"id": "a", "label": "Plan A", "value": "A"},
 							map[string]any{"id": "custom", "label": "Custom answer", "input_type": "text", "placeholder": "Type an answer"},
@@ -276,11 +344,17 @@ func TestConvertModelMessagesToUIAssistantMessagesIncludesUserInputMetadata(t *t
 	if userInput.UserInputID != "input-1" || userInput.ShortID != 2 || !userInput.CanRespond {
 		t.Fatalf("unexpected user input: %#v", userInput)
 	}
-	if len(userInput.Options) != 2 || userInput.Options[0].ID != "a" {
-		t.Fatalf("unexpected options: %#v", userInput.Options)
+	// Stored legacy (v1) payloads upgrade on read: selection_type becomes
+	// multi_select and the v1 custom-text option becomes allow_custom.
+	if len(userInput.Questions) != 1 {
+		t.Fatalf("expected one upgraded question: %#v", userInput.Questions)
 	}
-	if userInput.Options[1].InputType != "text" || userInput.Options[1].Placeholder != "Type an answer" {
-		t.Fatalf("unexpected text input option: %#v", userInput.Options[1])
+	question := userInput.Questions[0]
+	if question.Kind != "multi_select" || !question.AllowCustom || question.Placeholder != "Type an answer" {
+		t.Fatalf("unexpected legacy upgrade: %#v", question)
+	}
+	if len(question.Options) != 1 || question.Options[0].ID != "a" || question.Options[0].Label != "Plan A" {
+		t.Fatalf("unexpected options: %#v", question.Options)
 	}
 }
 

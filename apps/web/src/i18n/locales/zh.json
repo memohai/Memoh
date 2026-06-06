@@ -367,8 +367,10 @@
       "userInputFailed": "失败",
       "userInputExpired": "已过期",
       "userInputPlaceholder": "输入回答",
+      "userInputCustomOption": "其他…",
       "submitUserInput": "提交",
       "cancelUserInput": "取消",
+      "userInputConnectionLost": "连接已断开，请重连后重试。",
       "pending": {
         "generic": "处理中…",
         "write": "正在写入文件…",

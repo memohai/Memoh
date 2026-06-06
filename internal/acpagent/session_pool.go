@@ -1209,6 +1209,17 @@ func (s *promptToolEventSink) EmitToolStreamEvent(event mcp.ToolStreamEvent) {
 			Result:     event.Result,
 			Error:      event.Error,
 		})
+	case acpclient.StreamEventUserInputRequest:
+		s.EmitACPEvent(acpclient.StreamEvent{
+			Type:        typ,
+			ToolCallID:  event.ToolCallID,
+			ToolName:    event.ToolName,
+			Input:       event.Input,
+			UserInputID: event.UserInputID,
+			ShortID:     event.ShortID,
+			Status:      event.Status,
+			Metadata:    event.Metadata,
+		})
 	}
 }
 

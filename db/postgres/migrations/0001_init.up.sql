@@ -523,7 +523,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
+  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
+  CONSTRAINT user_input_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created

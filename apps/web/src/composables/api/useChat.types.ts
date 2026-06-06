@@ -179,21 +179,23 @@ export interface UIUserInput {
   user_input_id: string
   short_id?: number
   status: string
-  question: string
+  questions?: UIUserInputQuestion[]
+  can_respond?: boolean
+}
+
+export interface UIUserInputQuestion {
+  id: string
+  text: string
+  kind: 'single_select' | 'multi_select' | 'text'
   options?: UIUserInputOption[]
   allow_custom?: boolean
-  input_type?: string
   placeholder?: string
-  can_respond?: boolean
 }
 
 export interface UIUserInputOption {
   id: string
   label: string
   description?: string
-  value?: unknown
-  input_type?: string
-  placeholder?: string
 }
 
 export interface UIAttachmentsMessage {

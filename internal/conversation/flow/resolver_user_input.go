@@ -12,6 +12,17 @@ import (
 	"github.com/memohai/memoh/internal/userinput"
 )
 
+// userInputService is the slice of *userinput.Service the resolver depends
+// on, kept as an interface so the respond/resume routing can be tested with
+// fakes.
+type userInputService interface {
+	CreatePending(ctx context.Context, input userinput.CreatePendingInput) (userinput.Request, error)
+	ResolveTarget(ctx context.Context, input userinput.ResolveInput) (userinput.Request, error)
+	Submit(ctx context.Context, input userinput.SubmitInput) (userinput.Request, error)
+	Cancel(ctx context.Context, input userinput.CancelInput) (userinput.Request, error)
+	HasWaiter(requestID string) bool
+}
+
 type UserInputResponseInput struct {
 	BotID                  string
 	SessionID              string
@@ -19,8 +30,7 @@ type UserInputResponseInput struct {
 	UserInputID            string
 	ExplicitID             string
 	ReplyExternalMessageID string
-	Answer                 any
-	OptionID               string
+	Answers                []userinput.QuestionAnswer
 	Canceled               bool
 	Reason                 string
 	ChatToken              string
@@ -40,6 +50,20 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		return err
 	}
 
+	if userinput.IsACPMCPRequest(target) && !input.Canceled && !r.userInput.HasWaiter(target.ID) {
+		// No waiter is blocked on this request in this process (its timeout
+		// fired, or the process restarted). Submitting would record an
+		// answer nobody consumes — close it out honestly instead.
+		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
+			RequestID:              target.ID,
+			ActorChannelIdentityID: input.ActorChannelIdentityID,
+			Reason:                 "user input expired: the requesting tool call is no longer waiting",
+		}); err != nil && !errors.Is(err, userinput.ErrAlreadyDecided) {
+			return err
+		}
+		return emitApprovalAck(ctx, eventCh)
+	}
+
 	var resolved userinput.Request
 	if input.Canceled {
 		resolved, err = r.userInput.Cancel(ctx, userinput.CancelInput{
@@ -48,19 +72,22 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			Reason:                 input.Reason,
 		})
 	} else {
-		submit := userinput.SubmitInput{
+		resolved, err = r.userInput.Submit(ctx, userinput.SubmitInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
-			Answer:                 input.Answer,
-			OptionID:               input.OptionID,
-		}
-		if submit.OptionID != "" {
-			submit.OptionValue = responseOptionValue(target, submit.OptionID)
-		}
-		resolved, err = r.userInput.Submit(ctx, submit)
+			Answers:                input.Answers,
+		})
 	}
 	if err != nil {
+		if userinput.IsACPMCPRequest(target) && errors.Is(err, userinput.ErrAlreadyDecided) {
+			return emitApprovalAck(ctx, eventCh)
+		}
 		return err
+	}
+	if userinput.IsACPMCPRequest(resolved) {
+		// An ACP/MCP waiter is blocked on this request and resumes the run
+		// itself; only acknowledge here instead of continuing the session.
+		return emitApprovalAck(ctx, eventCh)
 	}
 
 	toolResult := sdk.ToolResultPart{
@@ -69,32 +96,11 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		Result:     resolved.Result,
 		IsError:    false,
 	}
-	return r.storeUserInputResultAndContinue(ctx, resolved, input, toolResult, eventCh)
-}
-
-func optionValue(req userinput.Request, optionID string) any {
-	for _, option := range req.UIPayload.Options {
-		if option.ID == optionID {
-			return option.Value
-		}
+	continueFn := r.continueUserInputFn
+	if continueFn == nil {
+		continueFn = r.storeUserInputResultAndContinue
 	}
-	return nil
-}
-
-func optionRequiresText(req userinput.Request, optionID string) bool {
-	for _, option := range req.UIPayload.Options {
-		if option.ID == optionID {
-			return option.InputType == "text"
-		}
-	}
-	return false
-}
-
-func responseOptionValue(req userinput.Request, optionID string) any {
-	if optionRequiresText(req, optionID) {
-		return nil
-	}
-	return optionValue(req, optionID)
+	return continueFn(ctx, resolved, input, toolResult, eventCh)
 }
 
 func (r *Resolver) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {

@@ -609,11 +609,13 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, eventHub *event.Hub) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, eventHub *event.Hub) *agenttools.NativeToolSource {
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
 		AllowAll:          true,
 		Approval:          toolApproval,
 		ApprovalPublisher: eventHub,
+		UserInput:         userInput,
+		ToolEvents:        toolContexts,
 	})
 }
 
@@ -636,9 +638,6 @@ func acpToolProviders(providers []agenttools.ToolProvider) []agenttools.ToolProv
 	filtered := make([]agenttools.ToolProvider, 0, len(providers))
 	for _, provider := range providers {
 		if provider == nil {
-			continue
-		}
-		if _, ok := provider.(*agenttools.AskUserProvider); ok {
 			continue
 		}
 		if _, ok := provider.(*agenttools.FederationProvider); ok {

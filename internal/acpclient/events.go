@@ -11,10 +11,11 @@ import (
 type StreamEventType string
 
 const (
-	StreamEventTextDelta      StreamEventType = "text_delta"
-	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
-	StreamEventToolCallStart  StreamEventType = "tool_call_start"
-	StreamEventToolCallEnd    StreamEventType = "tool_call_end"
+	StreamEventTextDelta        StreamEventType = "text_delta"
+	StreamEventReasoningDelta   StreamEventType = "reasoning_delta"
+	StreamEventToolCallStart    StreamEventType = "tool_call_start"
+	StreamEventToolCallEnd      StreamEventType = "tool_call_end"
+	StreamEventUserInputRequest StreamEventType = "user_input_request"
 
 	maxCollectedStreamEvents = 4096
 	maxTrackedACPToolStates  = 1024
@@ -28,6 +29,11 @@ type StreamEvent struct {
 	Input      any             `json:"input,omitempty"`
 	Result     any             `json:"result,omitempty"`
 	Error      string          `json:"error,omitempty"`
+	// Interactive request fields (Type StreamEventUserInputRequest).
+	UserInputID string         `json:"user_input_id,omitempty"`
+	ShortID     int            `json:"short_id,omitempty"`
+	Status      string         `json:"status,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type EventSink interface {

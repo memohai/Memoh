@@ -371,8 +371,10 @@
       "userInputFailed": "failed",
       "userInputExpired": "expired",
       "userInputPlaceholder": "Answer",
+      "userInputCustomOption": "Other…",
       "submitUserInput": "Submit",
       "cancelUserInput": "Cancel",
+      "userInputConnectionLost": "Connection lost. Reconnect and try again.",
       "pending": {
         "generic": "Working…",
         "write": "Writing file…",

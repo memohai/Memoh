@@ -517,6 +517,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS user_input_tool_call_unique
+  ON user_input_requests(session_id, tool_call_id);
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created
   ON user_input_requests(bot_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_user_input_session_status_created

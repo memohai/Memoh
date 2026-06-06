@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { MessageStreamEvent, UIStreamEvent, UIStreamEventHandler } from '@/composables/api/useChat'
+import type { MessageStreamEvent, UIStreamEvent, UIStreamEventHandler, UIUserInput } from '@/composables/api/useChat'
 import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useChatStore } from './chat-list'
 
@@ -22,10 +22,55 @@ const api = vi.hoisted(() => ({
   locateMessageUI: vi.fn(),
 }))
 
+const toast = vi.hoisted(() => ({
+  error: vi.fn(),
+}))
+
 vi.mock('@/composables/api/useChat', () => api)
+vi.mock('vue-sonner', () => ({ toast }))
 
 function flushPromises() {
   return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function singleSelectUserInput(id = 'input-1'): UIUserInput {
+  return {
+    user_input_id: id,
+    short_id: id === 'input-1' ? 4 : 5,
+    status: 'pending',
+    questions: [{
+      id: 'q1',
+      text: id === 'input-1' ? 'Which plan?' : 'Second question?',
+      kind: 'single_select',
+      options: [
+        { id: 'q1.o1', label: id === 'input-1' ? 'Plan A' : 'Plan B' },
+        { id: 'q1.o2', label: id === 'input-1' ? 'Plan B' : 'Plan C' },
+      ],
+    }],
+    can_respond: true,
+  }
+}
+
+function askUserTurn(userInput: UIUserInput, toolCallId = 'call-ask') {
+  return {
+    id: 'assistant-1',
+    role: 'assistant' as const,
+    messages: [{
+      id: 1,
+      type: 'tool' as const,
+      name: 'ask_user',
+      input: { questions: [{ text: userInput.questions?.[0]?.text ?? 'Question?', kind: 'single_select' }] },
+      tool_call_id: toolCallId,
+      toolCallId,
+      toolName: 'ask_user',
+      running: false,
+      done: true,
+      result: null,
+      userInput,
+    }],
+    timestamp: new Date().toISOString(),
+    streaming: false,
+  }
 }
 
 describe('chat-list store', () => {
@@ -700,35 +745,10 @@ describe('chat-list store', () => {
     const store = useChatStore()
 
     await store.selectBot('bot-1')
-    const userInput = {
-      user_input_id: 'input-1',
-      short_id: 4,
-      status: 'pending',
-      question: 'Which plan?',
-      options: [{ id: 'a', label: 'Plan A', value: 'A' }],
-      can_respond: true,
-    }
-    store.messages.push({
-      id: 'assistant-1',
-      role: 'assistant',
-      messages: [{
-        id: 1,
-        type: 'tool',
-        name: 'ask_user',
-        input: { question: 'Which plan?' },
-        tool_call_id: 'call-ask',
-        toolCallId: 'call-ask',
-        toolName: 'ask_user',
-        running: false,
-        done: true,
-        result: null,
-        userInput,
-      }],
-      timestamp: new Date().toISOString(),
-      streaming: false,
-    })
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
 
-    await store.respondUserInput(userInput, { optionId: 'a', answer: 'A' })
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
 
     expect(sentWSMessages.at(-1)).toMatchObject({
@@ -736,8 +756,7 @@ describe('chat-list store', () => {
       session_id: 'session-1',
       user_input_id: 'input-1',
       short_id: 4,
-      option_id: 'a',
-      answer: 'A',
+      answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }],
       canceled: false,
     })
     const block = store.messages[0]?.role === 'assistant'
@@ -750,10 +769,81 @@ describe('chat-list store', () => {
     }
   })
 
-  it('refreshes pending user input after response stream failure', async () => {
+  it('cancels user input over websocket and marks the block canceled', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
     ])
+    sendEvents = [{ type: 'agent_end' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+
+    await store.respondUserInput(userInput, { canceled: true, reason: 'user_canceled' })
+    await flushPromises()
+
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'user_input_response',
+      session_id: 'session-1',
+      user_input_id: 'input-1',
+      short_id: 4,
+      canceled: true,
+      reason: 'user_canceled',
+    })
+    const block = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('canceled')
+      expect(block.userInput?.can_respond).toBe(false)
+    }
+  })
+
+  it('does not optimistically submit user input while websocket is disconnected', async () => {
+    api.connectWebSocket.mockImplementationOnce((_botId: string, _onStreamEvent: UIStreamEventHandler) => ({
+      get connected() {
+        return false
+      },
+      send: vi.fn((message: Record<string, unknown>) => {
+        sentWSMessages.push(message)
+      }),
+      abort: vi.fn(),
+      close: vi.fn(),
+      onOpen: null,
+      onClose: null,
+    }))
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    await flushPromises()
+
+    expect(sentWSMessages).toHaveLength(0)
+    expect(toast.error).toHaveBeenCalledWith('Connection lost. Reconnect and try again.')
+    expect(store.messages).toHaveLength(1)
+    const block = store.messages[0]?.role === 'assistant'
+      ? store.messages[0].messages[0]
+      : null
+    expect(block?.type).toBe('tool')
+    if (block?.type === 'tool') {
+      expect(block.userInput?.status).toBe('pending')
+      expect(block.userInput?.can_respond).toBe(true)
+    }
+  })
+
+  it('responds to multi-select and text questions over websocket', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    sendEvents = [{ type: 'end' } as UIStreamEvent]
     const store = useChatStore()
 
     await store.selectBot('bot-1')
@@ -761,8 +851,22 @@ describe('chat-list store', () => {
       user_input_id: 'input-1',
       short_id: 4,
       status: 'pending',
-      question: 'Which plan?',
-      options: [{ id: 'a', label: 'Plan A', value: 'A' }],
+      questions: [
+        {
+          id: 'q1',
+          text: 'Which plans?',
+          kind: 'multi_select' as const,
+          options: [
+            { id: 'q1.o1', label: 'Plan A' },
+            { id: 'q1.o2', label: 'Plan B' },
+          ],
+        },
+        {
+          id: 'q2',
+          text: 'Anything else?',
+          kind: 'text' as const,
+        },
+      ],
       can_respond: true,
     }
     store.messages.push({
@@ -772,7 +876,7 @@ describe('chat-list store', () => {
         id: 1,
         type: 'tool',
         name: 'ask_user',
-        input: { question: 'Which plan?' },
+        input: { questions: [{ text: 'Which plans?', kind: 'multi_select' }] },
         tool_call_id: 'call-ask',
         toolCallId: 'call-ask',
         toolName: 'ask_user',
@@ -784,6 +888,84 @@ describe('chat-list store', () => {
       timestamp: new Date().toISOString(),
       streaming: false,
     })
+
+    await store.respondUserInput(userInput, {
+      answers: [
+        { question_id: 'q1', option_ids: ['q1.o1', 'q1.o2'] },
+        { question_id: 'q2', text: 'nothing else' },
+      ],
+    })
+    await flushPromises()
+
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'user_input_response',
+      session_id: 'session-1',
+      user_input_id: 'input-1',
+      answers: [
+        { question_id: 'q1', option_ids: ['q1.o1', 'q1.o2'] },
+        { question_id: 'q2', text: 'nothing else' },
+      ],
+      canceled: false,
+    })
+  })
+
+  it('does not refresh a user input response stream while the original session stream is still active', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    sendEvents = [{ type: 'end' } as UIStreamEvent]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    api.fetchMessagesUI.mockClear()
+
+    streamHandler?.({ type: 'start', stream_id: 'main-stream', session_id: 'session-1' } as UIStreamEvent)
+    expect(store.isSessionStreaming('session-1')).toBe(true)
+
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
+
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+
+    streamHandler?.({
+      type: 'message',
+      stream_id: 'main-stream',
+      session_id: 'session-1',
+      data: {
+        id: 2,
+        type: 'tool',
+        name: 'ask_user',
+        input: { questions: [{ text: 'Second question?', kind: 'single_select' }] },
+        tool_call_id: 'call-ask-2',
+        running: false,
+        user_input: singleSelectUserInput('input-2'),
+      },
+    } as UIStreamEvent)
+
+    const hasSecondPendingInput = store.messages.some(message => message.role === 'assistant' && message.messages.some((block) => {
+      return block.type === 'tool' && block.userInput?.user_input_id === 'input-2' && block.userInput.status === 'pending'
+    }))
+    expect(hasSecondPendingInput).toBe(true)
+    expect(api.fetchMessagesUI).not.toHaveBeenCalled()
+
+    streamHandler?.({ type: 'end', stream_id: 'main-stream', session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
+
+    expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes pending user input after response stream failure', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const userInput = singleSelectUserInput()
+    store.messages.push(askUserTurn(userInput))
     api.fetchMessagesUI.mockResolvedValueOnce([{
       id: 'assistant-1',
       role: 'assistant',
@@ -791,7 +973,7 @@ describe('chat-list store', () => {
         id: 1,
         type: 'tool',
         name: 'ask_user',
-        input: { question: 'Which plan?' },
+        input: { questions: [{ text: 'Which plan?', kind: 'single_select' }] },
         tool_call_id: 'call-ask',
         running: false,
         user_input: userInput,
@@ -799,7 +981,7 @@ describe('chat-list store', () => {
       timestamp: new Date().toISOString(),
     }])
 
-    await store.respondUserInput(userInput, { optionId: 'a', answer: 'A' })
+    await store.respondUserInput(userInput, { answers: [{ question_id: 'q1', option_ids: ['q1.o1'] }] })
     await flushPromises()
     await flushPromises()
 
