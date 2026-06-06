@@ -217,10 +217,39 @@ const formSchema = {
         </Label>
       </Specimen>
 
-      <Specimen label="<Switch>">
-        <Switch v-model="switched" />
-        <Switch :model-value="false" />
-        <Switch disabled />
+      <Specimen
+        label="<Switch>"
+        note="on = palette blue · off = gray · hover deepens/brightens · sizes sm / default"
+      >
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center gap-3">
+            <Switch
+              :default-value="true"
+              size="sm"
+            />
+            <Switch
+              :model-value="false"
+              size="sm"
+            />
+            <span class="text-[11px] text-muted-foreground">sm · 32×20</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <Switch v-model="switched" />
+            <Switch :model-value="false" />
+            <span class="text-[11px] text-muted-foreground">default · 36×20</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <Switch
+              :default-value="true"
+              disabled
+            />
+            <Switch
+              :model-value="false"
+              disabled
+            />
+            <span class="text-[11px] text-muted-foreground">disabled</span>
+          </div>
+        </div>
       </Specimen>
 
       <Specimen

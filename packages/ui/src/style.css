@@ -83,7 +83,7 @@
       box-shadow 0.11s ease-out;
   }
   [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
-    background-color: oklch(0 0 0 / 0.12);
+    background-color: var(--btn-secondary-overlay);
     box-shadow: none;
   }
   [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
@@ -268,7 +268,7 @@
     background-color: var(--btn-primary-hover);
   }
   [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"])[data-loading]::before {
-    background-color: oklch(0 0 0 / 0.12);
+    background-color: var(--btn-secondary-overlay);
     box-shadow: none;
   }
   [data-slot="button"][data-variant="ghost"][data-loading]::before {
@@ -371,15 +371,13 @@
     letter-spacing: -0.16px;
     white-space: nowrap;
     /* idle label sits lighter than global muted for a cleaner, airier read;
-       active jumps to near-foreground for strong contrast. Hover nudges
-       darker. TODO: promote to --control-label* tokens once rolled to
-       toggle groups / tabs. */
-    color: oklch(0.64 0.004 95);
+       active jumps to near-foreground for strong contrast. Hover nudges darker. */
+    color: var(--control-label);
     cursor: pointer;
     transition: color 150ms ease;
   }
   [data-slot="segmented"] [data-segment-item]:hover {
-    color: oklch(0.46 0.004 95);
+    color: var(--control-label-hover);
   }
   [data-slot="segmented"] [data-segment-item][data-active="true"],
   [data-slot="segmented"] [data-segment-item][data-active="true"]:hover {
@@ -397,17 +395,11 @@
       scale 0.2s cubic-bezier(0.32, 0.72, 0, 1);
   }
   [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):hover::before {
-    background-color: oklch(0 0 0 / 0.05);
+    background-color: var(--segment-overlay-hover);
   }
   [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):active::before {
     scale: 0.965;
-    background-color: oklch(0 0 0 / 0.08);
-  }
-  .dark [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):hover::before {
-    background-color: oklch(1 0 0 / 0.06);
-  }
-  .dark [data-slot="segmented"] [data-segment-item]:not([data-active="true"]):active::before {
-    background-color: oklch(1 0 0 / 0.10);
+    background-color: var(--segment-overlay-active);
   }
   [data-slot="segmented"] [data-segment-item]:disabled {
     pointer-events: none;
@@ -438,7 +430,7 @@
   [data-slot="checkbox"][data-state="checked"] {
     background-color: var(--accent-blue-fill);
     border-color: var(--accent-blue-fill);
-    color: #fff;
+    color: var(--accent-blue-foreground);
   }
   [data-slot="checkbox"][data-state="checked"]:not(:disabled):hover {
     background-color: var(--accent-blue-fill-hover);
@@ -447,6 +439,35 @@
   [data-slot="checkbox"][data-state="checked"]:not(:disabled):active {
     background-color: var(--accent-blue-fill-active);
     border-color: var(--accent-blue-fill-active);
+  }
+
+  /* ── Switch ──────────────────────────────────────────────────────────────
+     Pure COLOR switch — no track outline at all. Off = a clear gray pill, on =
+     the solid palette blue (same --accent-blue-fill as the checkbox, one blue
+     across selection controls). Hover deepens the gray and brightens the blue.
+     The puck is a plain white disc (drop shadow only, no ring). Geometry
+     (size/thumb/travel) is in Switch.vue; this is the single source for color. */
+  [data-slot="switch"] {
+    background-color: var(--switch-off);
+    /* synced with the thumb glide so track color + puck move as one motion;
+       80ms alone read as an instant snap, 150 dragged. */
+    transition: background-color 110ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  [data-slot="switch"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--switch-off-hover);
+  }
+  [data-slot="switch"][data-state="checked"] {
+    background-color: var(--accent-blue-fill);
+  }
+  [data-slot="switch"][data-state="checked"]:not(:disabled):hover {
+    background-color: var(--switch-on-hover);
+  }
+  [data-slot="switch-thumb"] {
+    background-color: var(--switch-thumb);
+    /* synced with the track color (110ms) so the toggle reads as one motion.
+       NB: Tailwind v4 translate-x-* sets the `translate` property (not
+       `transform`), so the transition must target `translate`. */
+    transition: translate 110ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
@@ -612,6 +633,29 @@
   --accent-blue-fill: #2383e2;
   --accent-blue-fill-hover: #0077d4;
   --accent-blue-fill-active: #006bc7;
+  /* Switch — pure color toggle, no outline. Off = a clear gray that deepens on
+     hover; ON reuses --accent-blue-fill (one blue across selection controls) and
+     BRIGHTENS on hover (unlike checkbox, which deepens); puck = a white disc. */
+  --switch-off: oklch(0.82 0.005 286);
+  --switch-off-hover: oklch(0.73 0.006 286);
+  --switch-on-hover: color-mix(in oklab, var(--accent-blue-fill), white 14%);
+  --switch-thumb: #fff;
+  /* Foreground (check / glyph) sitting on the solid --accent-blue-fill. */
+  --accent-blue-foreground: #fff;
+  /* Translucent ink overlays for engage states layered OVER a surface (the
+     secondary button shell; segmented items). Black in light mode; the .dark
+     block flips the segmented ones to white so they lighten instead. */
+  --btn-secondary-overlay: oklch(0 0 0 / 0.12);
+  --segment-overlay-hover: oklch(0 0 0 / 0.05);
+  --segment-overlay-active: oklch(0 0 0 / 0.08);
+  /* Segmented idle / hover label — lighter than global muted for an airier read;
+     active jumps to --foreground (handled inline). */
+  --control-label: oklch(0.64 0.004 95);
+  --control-label-hover: oklch(0.46 0.004 95);
+  /* Destructive ghost button hover — a bespoke soft-red chip (not the accent-red
+     ramp): light red fill + deep red text. */
+  --btn-destructive-hover-bg: #fae2e1;
+  --btn-destructive-hover-text: #c0271e;
   --success: oklch(0.62 0.16 150);
   --success-foreground: oklch(0.33 0.12 150);
   --success-solid-foreground: oklch(0.985 0.001 286);
@@ -733,6 +777,14 @@
   --btn-ghost-hover: var(--ui-pressed);
   --segment-track: oklch(0.24 0 0);
   --segment-thumb: oklch(0.40 0 0);
+  /* Switch (dark): off gray LIGHTENS on hover (like the other dark control
+     tints); on/thumb inherit the light tokens but off needs its own dark grays. */
+  --switch-off: oklch(0.34 0.005 286);
+  --switch-off-hover: oklch(0.42 0.006 286);
+  --switch-thumb: oklch(0.92 0 0);
+  /* Segmented engage overlays flip to white so they LIGHTEN on dark surfaces. */
+  --segment-overlay-hover: oklch(1 0 0 / 0.06);
+  --segment-overlay-active: oklch(1 0 0 / 0.10);
   --success: oklch(0.70 0.15 150);
   --success-foreground: oklch(0.82 0.13 150);
   --success-solid-foreground: var(--background);

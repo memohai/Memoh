@@ -11,9 +11,17 @@
 // HARD FAIL (exit 1):
 //   1. disabled-context opacity that is not 40   → disabled is opacity-40 everywhere
 //   2. arbitrary radius rounded-[Npx] / rounded-[calc(...)] → use rounded-sm/md/lg
+//   5. raw color in a .vue arbitrary class       → use a palette token
+//   6. raw color in the style.css COMPONENT layer → define + use a token
+//   7. box-shadow with a raw color               → never invent chrome (use a token)
 // WARN (exit 0):
 //   3. OFF-SCALE raw text-[Npx] (not on the type scale) → use a type token
 //   4. likely hand-rolled icon-button hover      → reuse <Button variant="ghost">
+//
+// Rules 5/6/7 are HARD now that the pre-contract debt is fully migrated (the
+// library has zero raw values outside token blocks). Token DEFINITION blocks
+// (:root / .dark / @theme) are where raw values belong, so they're skipped.
+// If a legitimate raw value ever needs to ship, promote it to a token instead.
 //
 // Run: node scripts/check-ui-contract.mjs   (wired into `mise run lint`)
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -68,6 +76,9 @@ function scan(file) {
       const tx = tok.match(/text-\[(\d+)(?:\.\d+)?px\]/)
       if (tx && !TYPE_SCALE_PX.has(Number(tx[1])))
         warn.push(`${rel}:${ln}  off-scale font size (use a type token) → ${tok}`)
+      // 5. raw color in a Tailwind arbitrary class (bg-[#..], text-[oklch(..)], …)
+      if (/-\[(?:#|(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\()/.test(tok))
+        hard.push(`${rel}:${ln}  raw color in arbitrary class (use a palette token) → ${tok}`)
     }
     // 4. likely hand-rolled icon-button hover (icon present + ad-hoc hover fill)
     if (/\[&[_>]svg/.test(line) && /hover:bg-(accent|\[)/.test(line) && !/data-slot="button"/.test(line))
@@ -75,7 +86,46 @@ function scan(file) {
   })
 }
 
+// style.css is where tokens are DEFINED (raw values legal in :root/.dark/@theme)
+// and where component styling is AUTHORED (raw values illegal there). Scan it with
+// block awareness so we only flag raw color / invented box-shadow in the
+// component layer, never in the token-definition blocks.
+const COLOR_FN = /(?:^|[^\w-])(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\s*\(/
+const HEX = /#[0-9a-fA-F]{3,8}\b/
+function scanCss(file) {
+  const rel = relative(ROOT, file)
+  const lines = readFileSync(file, 'utf8').split('\n')
+  let depth = 0
+  let tokenBlockDepth = -1 // depth at which the active token-definition block opened
+  lines.forEach((line, i) => {
+    const ln = i + 1
+    const trimmed = line.trim()
+    const isComment = trimmed.startsWith('/*') || trimmed.startsWith('*') || trimmed.startsWith('//')
+    const inTokenBlock = tokenBlockDepth !== -1
+    const opensTokenBlock = /^(?::root|\.dark|@theme)\b/.test(trimmed) && line.includes('{')
+    if (!inTokenBlock && !isComment) {
+      // 6. raw color literal in the component layer → must be a token
+      if (HEX.test(line) || COLOR_FN.test(line))
+        hard.push(`${rel}:${ln}  raw color in component CSS (define a token) → ${trimmed.slice(0, 64)}`)
+      // 7. box-shadow with a RAW color = invented chrome. A shadow built purely
+      //    from var() tokens (e.g. the field edge: var(--field-edge)) is fine.
+      const bs = line.match(/box-shadow:\s*([^;]+);?/)
+      if (bs && (HEX.test(bs[1]) || COLOR_FN.test(bs[1])))
+        hard.push(`${rel}:${ln}  box-shadow with raw color (use a token) → ${bs[1].trim().slice(0, 50)}`)
+    }
+    if (opensTokenBlock && tokenBlockDepth === -1) tokenBlockDepth = depth
+    for (const ch of line) {
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (tokenBlockDepth !== -1 && depth <= tokenBlockDepth) tokenBlockDepth = -1
+      }
+    }
+  })
+}
+
 for (const d of SCAN_DIRS) walk(join(ROOT, d))
+scanCss(join(ROOT, 'packages/ui/src/style.css'))
 
 if (warn.length) {
   console.warn(`\n⚠ UI contract — ${warn.length} warning(s):`)
