@@ -274,10 +274,12 @@ const oauthAuthorized = computed(() => {
 async function authorizeCodexFlow() {
   const ok = await authorizeCodex()
   if (ok) toast.success(t('onboarding.bot.acp.oauthSuccess'))
+  else toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
 }
 
 async function authorizeClaudeFlow() {
-  await authorizeClaude()
+  const ok = await authorizeClaude()
+  if (ok === false) toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
 }
 
 async function exchangeClaudeFlow() {
