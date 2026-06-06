@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { Avatar, AvatarImage, AvatarFallback, Button } from '@memohai/ui'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -69,9 +69,29 @@ const displayName = computed(() => display.value?.display_name || '')
 const avatarFallback = useAvatarInitials(() => displayName.value)
 
 let navigated = false
+let readyRedirectTimer: ReturnType<typeof window.setTimeout> | null = null
+let resetTimer: ReturnType<typeof window.setTimeout> | null = null
+
+function clearReadyRedirectTimer() {
+  if (readyRedirectTimer === null) return
+  window.clearTimeout(readyRedirectTimer)
+  readyRedirectTimer = null
+}
+
+function clearResetTimer() {
+  if (resetTimer === null) return
+  window.clearTimeout(resetTimer)
+  resetTimer = null
+}
+
+function clearTimers() {
+  clearReadyRedirectTimer()
+  clearResetTimer()
+}
 
 function goToBot() {
   if (navigated) return
+  clearReadyRedirectTimer()
   navigated = true
   const target = bot.value?.name ?? bot.value?.id
   if (setupError.value) {
@@ -86,15 +106,38 @@ function goToBot() {
     router.replace({ name: 'bots' })
   }
   // Clear once the navigation is committed so a fresh create starts clean.
-  window.setTimeout(() => store.reset(), 0)
+  resetTimer = window.setTimeout(() => {
+    resetTimer = null
+    store.reset()
+  }, 0)
+}
+
+function scheduleReadyRedirect() {
+  clearReadyRedirectTimer()
+  // Brief pause so the final "ready" line is visible before redirecting.
+  readyRedirectTimer = window.setTimeout(() => {
+    readyRedirectTimer = null
+    goToBot()
+  }, 700)
+}
+
+function guardLiveProgress() {
+  if (status.value === 'idle') {
+    router.replace({ name: 'bot-new' })
+    return
+  }
+  if (status.value === 'ready' && !navigated) {
+    scheduleReadyRedirect()
+  }
 }
 
 watch(
   status,
   (value) => {
     if (value === 'ready') {
-      // Brief pause so the final "ready" line is visible before redirecting.
-      window.setTimeout(goToBot, 700)
+      scheduleReadyRedirect()
+    } else {
+      clearReadyRedirectTimer()
     }
   },
   { immediate: true },
@@ -103,10 +146,12 @@ watch(
 onMounted(() => {
   // Direct navigation or a refresh drops the in-memory stream, so send the user
   // back to the form rather than showing an empty terminal.
-  if (status.value === 'idle') {
-    router.replace({ name: 'bot-new' })
-  }
+  guardLiveProgress()
 })
+
+onActivated(guardLiveProgress)
+onDeactivated(clearTimers)
+onBeforeUnmount(clearTimers)
 
 function handleRetry() {
   navigated = false

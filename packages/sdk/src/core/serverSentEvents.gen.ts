@@ -16,6 +16,14 @@ export type ServerSentEventsOptions<TData = unknown> = Omit<RequestInit, 'method
      */
     onRequest?: (url: string, init: RequestInit) => Promise<Request>;
     /**
+     * Implementing clients can call response interceptors inside this hook.
+     */
+    onResponse?: (response: Response, request: Request) => Promise<Response>;
+    /**
+     * Implementing clients can call error interceptors inside this hook.
+     */
+    onError?: (error: unknown, response?: Response, request?: Request) => Promise<unknown>;
+    /**
      * Callback invoked when a network or parsing error occurs during streaming.
      *
      * This option applies only if the endpoint returns a stream of events.
@@ -80,7 +88,9 @@ export type ServerSentEventsResult<TData = unknown, TReturn = void, TNext = unkn
 };
 
 export const createSseClient = <TData = unknown>({
+  onError,
   onRequest,
+  onResponse,
   onSseError,
   onSseEvent,
   responseTransformer,
@@ -115,6 +125,9 @@ export const createSseClient = <TData = unknown>({
         headers.set('Last-Event-ID', lastEventId);
       }
 
+      let request: Request | undefined;
+      let response: Response | undefined;
+
       try {
         const requestInit: RequestInit = {
           redirect: 'follow',
@@ -123,14 +136,18 @@ export const createSseClient = <TData = unknown>({
           headers,
           signal,
         };
-        let request = new Request(url, requestInit);
+        request = new Request(url, requestInit);
         if (onRequest) {
           request = await onRequest(url, requestInit);
         }
         // fetch must be assigned here, otherwise it would throw the error:
         // TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation
         const _fetch = options.fetch ?? globalThis.fetch;
-        const response = await _fetch(request);
+        response = await _fetch(request);
+
+        if (onResponse) {
+          response = await onResponse(response, request);
+        }
 
         if (!response.ok) throw new Error(`SSE failed: ${response.status} ${response.statusText}`);
 
@@ -224,7 +241,8 @@ export const createSseClient = <TData = unknown>({
         break; // exit loop on normal completion
       } catch (error) {
         // connection failed or aborted; retry after delay
-        onSseError?.(error);
+        const finalError = onError ? await onError(error, response, request) : error;
+        onSseError?.(finalError);
 
         if (sseMaxRetryAttempts !== undefined && attempt >= sseMaxRetryAttempts) {
           break; // stop after firing error
