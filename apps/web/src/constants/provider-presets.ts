@@ -162,8 +162,6 @@ const onboardingPresetIds = new Set([
   'google',
   'deepseek',
   'moonshot',
-  'minimax',
-  'xai',
 ])
 
 export const onboardingProviderPresets = providerPresets.filter(preset =>
