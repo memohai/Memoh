@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // Inputs & Forms. Local refs back every v-model so the controls are
 // interactive on the wall (drag sliders, type, add tags).
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import {
   Checkbox,
-  Combobox, ComboboxAnchor, ComboboxEmpty, ComboboxGroup, ComboboxInput,
-  ComboboxItem, ComboboxItemIndicator, ComboboxList, ComboboxTrigger,
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
   Field, FieldContent, FieldControl, FieldDescription, FieldError, FieldGroup,
   FieldLabel, FieldLegend, FieldSeparator, FieldSet,
   Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
@@ -16,6 +15,7 @@ import {
   NativeSelect, NativeSelectOptGroup, NativeSelectOption,
   NumberField,
   PinInput, PinInputGroup, PinInputSeparator, PinInputSlot,
+  Popover, PopoverContent, PopoverTrigger,
   RadioGroup, RadioGroupItem,
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue,
   Switch,
@@ -43,6 +43,7 @@ const otp = ref('')
 
 const comboItems = ['Apple', 'Banana', 'Cherry', 'Dragonfruit']
 const comboVal = ref('')
+const comboOpen = ref(false)
 
 const clearable = ref('Clear me')
 const password = ref('hunter2')
@@ -365,43 +366,61 @@ const formSchema = {
 
       <Specimen
         label="<Combobox>"
-        note="reka-ui contract — first to eyeball-check"
+        note="Popover + Command — select-style trigger, search lives in the panel"
       >
-        <Combobox
-          v-model="comboVal"
-          class="w-56"
-        >
-          <ComboboxAnchor class="w-56">
-            <div class="relative w-full items-center">
-              <ComboboxInput
-                class="pl-9"
-                :display-value="(v) => (v as string) ?? ''"
+        <Popover v-model:open="comboOpen">
+          <PopoverTrigger as-child>
+            <button
+              data-slot="select-trigger"
+              data-size="default"
+              type="button"
+              :class="[
+                'flex h-9 w-56 items-center justify-between gap-2 rounded-md px-3 py-2 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
+                '[&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+                comboVal ? '' : 'text-muted-foreground',
+              ]"
+            >
+              <span class="line-clamp-1">{{ comboVal || 'Select fruit' }}</span>
+              <ChevronsUpDown class="opacity-50" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            menu
+            align="start"
+            class="w-[var(--reka-popover-trigger-width)]"
+          >
+            <Command
+              v-model="comboVal"
+              highlight-on-hover
+              :highlight-first-on-open="false"
+              class="border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]"
+              @update:model-value="() => nextTick(() => (comboOpen = false))"
+            >
+              <CommandInput
+                :search-icon="false"
+                size="md"
                 placeholder="Search fruit..."
+                class="placeholder:text-muted-foreground/80"
               />
-              <span class="absolute inset-y-0 start-0 flex items-center justify-center px-3">
-                <Search class="size-4 text-muted-foreground" />
-              </span>
-              <ComboboxTrigger class="absolute inset-y-0 end-0 flex items-center px-2">
-                <ChevronsUpDown class="size-4 text-muted-foreground" />
-              </ComboboxTrigger>
-            </div>
-          </ComboboxAnchor>
-          <ComboboxList>
-            <ComboboxEmpty>No fruit found.</ComboboxEmpty>
-            <ComboboxGroup>
-              <ComboboxItem
-                v-for="item in comboItems"
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-                <ComboboxItemIndicator>
-                  <Check class="size-4" />
-                </ComboboxItemIndicator>
-              </ComboboxItem>
-            </ComboboxGroup>
-          </ComboboxList>
-        </Combobox>
+              <CommandList>
+                <CommandEmpty>No fruit found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem
+                    v-for="item in comboItems"
+                    :key="item"
+                    :value="item"
+                  >
+                    {{ item }}
+                    <Check
+                      v-if="comboVal === item"
+                      class="ml-auto"
+                    />
+                  </CommandItem>
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
       </Specimen>
 
       <Specimen label="<TagsInput>">

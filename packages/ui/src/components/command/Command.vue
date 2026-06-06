@@ -3,17 +3,24 @@ import type { ListboxRootEmits, ListboxRootProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { ListboxRoot, useFilter, useForwardPropsEmits } from 'reka-ui'
-import { reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { cn } from '#/lib/utils'
 import { provideCommandContext } from '.'
 
-const props = withDefaults(defineProps<ListboxRootProps & { class?: HTMLAttributes['class'] }>(), {
+const props = withDefaults(defineProps<ListboxRootProps & {
+  class?: HTMLAttributes['class']
+  // cmdk-style palettes pre-highlight the first row on open so Enter selects it.
+  // Combobox-style pickers set this false: opening should land on NOTHING (the
+  // value-less default), and the highlight should only follow the pointer/arrows.
+  highlightFirstOnOpen?: boolean
+}>(), {
   modelValue: '',
+  highlightFirstOnOpen: true,
 })
 
 const emits = defineEmits<ListboxRootEmits>()
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'highlightFirstOnOpen')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
@@ -74,13 +81,53 @@ provideCommandContext({
   allGroups,
   filterState,
 })
+
+// Combobox pickers (highlightFirstOnOpen=false) must open with NO row highlighted.
+// reka pre-highlights the first row two ways: (1) an immediate watch that, lacking a
+// selected value, falls back to collection[0]; (2) RovingFocus "entry focus" firing
+// when the filter input autofocuses, which re-highlights the first/previous row.
+//
+// (2) is blocked by preventing the cancelable entryFocus event. With it gone, the
+// ONLY automatic highlight left is (1), which fires exactly once on open. So we arm a
+// one-shot and undo it on that first `highlight` emit — nulling reka's highlightedElement
+// (exposed ref) synchronously in the same tick reka set it, before first paint (no
+// flash). Clearing the real state, not just visuals, means a bare Enter on a fresh,
+// untouched picker selects nothing. Every later highlight is user-driven (pointer /
+// arrows) and passes through. A real selection is preserved: the one-shot is never armed
+// when a value is present, so the selected row stays highlighted on reopen.
+const listboxRef = ref<{ highlightedElement: HTMLElement | null } | null>(null)
+let clearInitialHighlight = false
+
+function onEntryFocus(event: Event) {
+  if (!props.highlightFirstOnOpen)
+    event.preventDefault()
+}
+
+function onHighlight() {
+  if (!clearInitialHighlight)
+    return
+  clearInitialHighlight = false
+  if (listboxRef.value)
+    listboxRef.value.highlightedElement = null
+}
+
+onMounted(() => {
+  if (props.highlightFirstOnOpen)
+    return
+  const v = props.modelValue
+  const hasValue = Array.isArray(v) ? v.length > 0 : v != null && v !== ''
+  clearInitialHighlight = !hasValue
+})
 </script>
 
 <template>
   <ListboxRoot
+    ref="listboxRef"
     data-slot="command"
     v-bind="forwarded"
     :class="cn('bg-popover text-popover-foreground flex h-full w-full flex-col overflow-hidden rounded-menu-shell', props.class)"
+    @entry-focus="onEntryFocus"
+    @highlight="onHighlight"
   >
     <slot />
   </ListboxRoot>
