@@ -206,13 +206,13 @@ const formSchema = {
       </Specimen>
 
       <Specimen label="<Checkbox>">
-        <Label class="flex items-center gap-2 text-[13px]">
+        <Label class="flex items-center gap-2 text-label">
           <Checkbox v-model="checked" /> Checked
         </Label>
-        <Label class="flex items-center gap-2 text-[13px]">
+        <Label class="flex items-center gap-2 text-label">
           <Checkbox :model-value="false" /> Unchecked
         </Label>
-        <Label class="flex items-center gap-2 text-[13px] opacity-60">
+        <Label class="flex items-center gap-2 text-label opacity-60">
           <Checkbox disabled /> Disabled
         </Label>
       </Specimen>
@@ -295,19 +295,28 @@ const formSchema = {
         </div>
       </Specimen>
 
-      <Specimen label="<RadioGroup>">
+      <Specimen
+        label="<RadioGroup>"
+        note="select grows the edge — thin gray ring animates into a thick blue ring (and back)"
+      >
         <RadioGroup
           v-model="radioVal"
           class="gap-2"
         >
-          <Label class="flex items-center gap-2">
+          <Label class="flex items-center gap-2 text-label">
             <RadioGroupItem value="comfortable" /> Comfortable
           </Label>
-          <Label class="flex items-center gap-2">
+          <Label class="flex items-center gap-2 text-label">
             <RadioGroupItem value="compact" /> Compact
           </Label>
-          <Label class="flex items-center gap-2">
+          <Label class="flex items-center gap-2 text-label">
             <RadioGroupItem value="spacious" /> Spacious
+          </Label>
+          <Label class="flex items-center gap-2 text-label opacity-60">
+            <RadioGroupItem
+              value="disabled"
+              disabled
+            /> Disabled
           </Label>
         </RadioGroup>
       </Specimen>

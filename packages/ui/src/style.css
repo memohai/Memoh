@@ -469,6 +469,37 @@
        `transform`), so the transition must target `translate`. */
     transition: translate 110ms cubic-bezier(0.4, 0, 0.2, 1);
   }
+
+  /* ── Radio ───────────────────────────────────────────────────────────────
+     Same blue selection token as the checkbox, but the SELECT is expressed by
+     GROWING the edge: a thin gray hairline ring thickens into a thick blue ring
+     (box-border, so it grows inward — the bg-colored center hole becomes the
+     dot). border-width + color are animated so select/deselect glide instead of
+     snapping. The edge is owned here (no Tailwind `border` utility) so the width
+     can transition. Geometry (size) lives in RadioGroupItem.vue. */
+  [data-slot="radio-group-item"] {
+    border-style: solid;
+    border-width: 1px;
+    border-color: var(--border-hairline);
+    background-color: transparent;
+    transition:
+      border-width 150ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 150ms ease,
+      background-color 120ms ease;
+  }
+  [data-slot="radio-group-item"]:not(:disabled):not([data-state="checked"]):hover {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="radio-group-item"][data-state="checked"] {
+    border-width: 4px;
+    border-color: var(--accent-blue-fill);
+  }
+  [data-slot="radio-group-item"][data-state="checked"]:not(:disabled):hover {
+    border-color: var(--accent-blue-fill-hover);
+  }
+  [data-slot="radio-group-item"][data-state="checked"]:not(:disabled):active {
+    border-color: var(--accent-blue-fill-active);
+  }
 }
 
 :root {

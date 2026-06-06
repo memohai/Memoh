@@ -2,9 +2,7 @@
 import type { RadioGroupItemProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { CircleIcon } from 'lucide-vue-next'
 import {
-  RadioGroupIndicator,
   RadioGroupItem,
   useForwardProps,
 } from 'reka-ui'
@@ -23,20 +21,18 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'aspect-square size-4 shrink-0 rounded-full border border-border bg-background transition-all outline-none text-foreground',
+        // No `border` utility on purpose: the edge width/color is owned by
+        // style.css so it can animate thin↔thick on select (utilities would
+        // win over the component layer and pin width to 1px).
+        'relative size-3.5 shrink-0 rounded-full bg-transparent outline-none cursor-pointer',
+        // hit-slop: clickable area extends well beyond the visual circle
+        `before:absolute before:-inset-2 before:content-['']`,
         'focus-visible:ring-2 focus-visible:ring-ring/20',
         'disabled:cursor-not-allowed disabled:opacity-40',
         props.class,
       )
     "
   >
-    <RadioGroupIndicator
-      data-slot="radio-group-indicator"
-      class="relative flex items-center justify-center"
-    >
-      <slot>
-        <CircleIcon class="fill-foreground absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2" />
-      </slot>
-    </RadioGroupIndicator>
+    <slot />
   </RadioGroupItem>
 </template>
