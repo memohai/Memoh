@@ -9,6 +9,7 @@ import {
   SelectItemText,
   useForwardProps,
 } from 'reka-ui'
+import { menuItemClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<SelectItemProps & { class?: HTMLAttributes['class'] }>()
@@ -24,14 +25,9 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        // Highlight fill + transition live in style.css (select-item contract):
-        // a single [data-highlighted] rule, exactly like shadcn's focus:bg-accent.
-        // reka moves DOM focus to the pointed/navigated row, so the highlight just
-        // follows the pointer — no checked floor, no sticky, no onItemLeave hacks.
-        'relative flex w-full cursor-default items-center gap-2 rounded-menu py-1.5 pr-8 pl-2.5 text-sm outline-hidden select-none',
-        '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
-        'data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
-        '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+        // Shared menu row (lib/menu.ts). Right-side check ⇒ pr-8.
+        menuItemClass,
+        'pr-8',
         '*:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2',
         props.class,
       )

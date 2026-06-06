@@ -8,6 +8,7 @@ import {
   SelectViewport,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { menuContentClass, menuSlideClass, menuViewportClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 import { SelectScrollDownButton, SelectScrollUpButton } from '.'
 
@@ -52,18 +53,16 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       data-slot="select-content"
       v-bind="{ ...$attrs, ...forwarded }"
       :class="cn(
-        'bg-popover text-popover-foreground border border-[var(--border-menu)]',
-        'duration-100 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-[0.98] data-[state=open]:zoom-in-[0.98]',
-        'data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1',
-        'relative z-50 max-h-(--reka-select-content-available-height) min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-menu-shell shadow-[var(--shadow-dropdown)]',
+        menuContentClass,
+        'relative max-h-(--reka-select-content-available-height) min-w-[8rem]',
         position === 'popper'
-          && 'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
+          && cn(menuSlideClass, 'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1'),
         props.class,
       )
       "
     >
       <SelectScrollUpButton />
-      <SelectViewport :class="cn('flex flex-col gap-0.5 p-1.5', position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')">
+      <SelectViewport :class="cn(menuViewportClass, position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')">
         <slot />
       </SelectViewport>
       <SelectScrollDownButton />

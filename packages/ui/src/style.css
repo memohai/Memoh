@@ -170,25 +170,19 @@
   }
 
   /* Menu panel border lives on the Tailwind utility in SelectContent.vue
-     (border-[var(--border-strong)]). It MUST be a utility, not a rule here:
+     (border-[var(--border-menu)]). It MUST be a utility, not a rule here:
      @layer utilities always wins over @layer components, so any border-color set
      in this block would be silently overridden by the component's border utility.
-     --border-strong is deeper than the hairline so the floating panel reads as a
+     --border-menu is deeper than the hairline so the floating panel reads as a
      crisp, higher-contrast cutout — not the same faint line as a flat field. */
 
-  /* Menu rows — exactly shadcn's model: one rule, highlight = reka's roving focus
-     ([data-highlighted], the reka/Radix equivalent of shadcn's focus:bg-accent).
-     reka moves DOM focus to the pointed/keyboard-navigated row, so the highlight
-     simply FOLLOWS the pointer. The selected value is shown by the check icon, not
-     a background. No checked floor, no :has() suppressor, no sticky — those were
-     home-grown and fought each other. */
-  [data-slot="select-item"] {
-    background-color: transparent;
-    transition: background-color 60ms ease;
-  }
-  [data-slot="select-item"][data-highlighted] {
-    background-color: var(--ui-selected);
-  }
+  /* Menu rows live in the shared menu recipe (lib/menu.ts → menuItemClass):
+     a single utility, highlight = reka's roving focus
+     (data-[highlighted]:bg-[var(--ui-selected)], the reka/Radix equivalent of
+     shadcn's focus:bg-accent). The highlight simply FOLLOWS the pointer; the
+     selected value is shown by the check icon, not a background. Select,
+     DropdownMenu, ContextMenu, … all reuse that one class — no per-slot rule
+     here, no checked floor / :has() suppressor / sticky home-grown hacks. */
 
   /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
      No chrome at rest; hover fills a soft gray (237, a touch deeper than

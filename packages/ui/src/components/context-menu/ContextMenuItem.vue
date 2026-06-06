@@ -6,6 +6,7 @@ import {
   ContextMenuItem,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { menuItemClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = withDefaults(defineProps<ContextMenuItemProps & {
@@ -29,13 +30,9 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     :data-variant="variant"
     v-bind="forwarded"
     :class="cn(
-      'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-body outline-hidden select-none transition-colors',
-      'focus:bg-accent focus:text-accent-foreground',
-      'data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-accent data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive',
-      '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
-      'data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
+      menuItemClass,
       'data-[inset]:pl-8',
-      '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+      'data-[variant=destructive]:text-destructive data-[variant=destructive]:[&_svg]:!text-destructive',
       props.class,
     )"
   >
