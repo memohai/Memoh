@@ -389,6 +389,7 @@
         "waitingOutput": "Waiting for output…",
         "noChanges": "No changes",
         "noContent": "No content",
+        "contentTruncated": "Preview truncated. Full write size: {bytes} bytes.",
         "noTasks": "No tasks",
         "noImage": "No image",
         "noResults": "No results",
