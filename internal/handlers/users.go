@@ -108,6 +108,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 // @Tags users
 // @Success 200 {object} accounts.Account
 // @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /users/me [get].
 func (h *UsersHandler) GetMe(c echo.Context) error {
@@ -117,6 +118,9 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 	}
 	resp, err := h.service.Get(c.Request().Context(), channelIdentityID)
 	if err != nil {
+		if accountNotFound(err) {
+			return echo.NewHTTPError(http.StatusUnauthorized, "current user not found, please login again")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -450,7 +454,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	if ownerFromToken {
 		if _, err := h.service.Get(c.Request().Context(), ownerID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if accountNotFound(err) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			} else {
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -469,6 +473,10 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 
 func acceptsEventStream(c echo.Context) bool {
 	return strings.Contains(strings.ToLower(c.Request().Header.Get(echo.HeaderAccept)), "text/event-stream")
+}
+
+func accountNotFound(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound)
 }
 
 func createBotHTTPError(err error, ownerFromToken bool) error {

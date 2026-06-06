@@ -18,6 +18,7 @@ import (
 	"github.com/memohai/memoh/internal/accounts"
 	"github.com/memohai/memoh/internal/bots"
 	ctr "github.com/memohai/memoh/internal/container"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -209,6 +210,62 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	}
 }
 
+func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000105"
+
+	handler := &UsersHandler{
+		service: accounts.NewService(nil, createBotMissingAccountStore{}),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/users/me", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	err := handler.GetMe(ctx)
+	if err == nil {
+		t.Fatal("GetMe() error = nil, want unauthorized")
+	}
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("GetMe() error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusUnauthorized {
+		t.Fatalf("GetMe() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestCreateBotStreamReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000105"
+
+	handler := &UsersHandler{
+		service:    accounts.NewService(nil, createBotMissingAccountStore{}),
+		botService: bots.NewService(nil, nil),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+		"name": "stale-token-bot",
+		"display_name": "Stale Token Bot",
+		"acl_preset": "allow_all",
+		"wait_for_ready": true
+	}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	err := handler.CreateBot(ctx)
+	if err == nil {
+		t.Fatal("CreateBot() error = nil, want unauthorized")
+	}
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("CreateBot() error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusUnauthorized {
+		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusUnauthorized)
+	}
+}
+
 func decodeSSEEvents(t *testing.T, raw string) []map[string]any {
 	t.Helper()
 	events := make([]map[string]any, 0)
@@ -284,6 +341,14 @@ func (s createBotAccountStore) GetByUserID(_ context.Context, userID string) (db
 		return dbstore.AccountRecord{}, pgx.ErrNoRows
 	}
 	return dbstore.AccountRecord{ID: userID, Role: "member", IsActive: true}, nil
+}
+
+type createBotMissingAccountStore struct {
+	dbstore.AccountStore
+}
+
+func (createBotMissingAccountStore) GetByUserID(context.Context, string) (dbstore.AccountRecord, error) {
+	return dbstore.AccountRecord{}, db.ErrNotFound
 }
 
 type createBotStreamDB struct {

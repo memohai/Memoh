@@ -581,7 +581,7 @@ func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) erro
 	}
 	_, err := s.queries.GetUserByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return ErrOwnerUserNotFound
 		}
 		return err
