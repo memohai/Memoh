@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +36,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 			ownerID: ownerID,
 			botID:   botID,
 		}))),
+		acpWorkspace: &createBotStreamWorkspace{},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -82,6 +85,41 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 	}
 }
 
+func TestCreateBotStreamRequiresWorkspaceLifecycle(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000103"
+
+	handler := &UsersHandler{
+		service: newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
+			ownerID: ownerID,
+			botID:   "00000000-0000-0000-0000-000000000203",
+		}))),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+		"name": "misconfigured-bot",
+		"display_name": "Misconfigured Bot",
+		"acl_preset": "allow_all",
+		"wait_for_ready": true
+	}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	err := handler.CreateBot(ctx)
+	if err == nil {
+		t.Fatal("CreateBot() error = nil, want workspace lifecycle configuration error")
+	}
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("CreateBot() error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateBot() status = %d, want %d", httpErr.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000102"
 	botID := "00000000-0000-0000-0000-000000000202"
@@ -119,6 +157,55 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 		if !hasEventType(events, eventType) {
 			t.Fatalf("missing %q event: %#v", eventType, events)
 		}
+	}
+}
+
+func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000104"
+	botID := "00000000-0000-0000-0000-000000000204"
+
+	handler := &UsersHandler{
+		logger:  slog.Default(),
+		service: newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
+			ownerID: ownerID,
+			botID:   botID,
+		}))),
+		acpWorkspace: &createBotStreamWorkspace{err: errors.New("image pull failed")},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+		"name": "setup-failed-bot",
+		"display_name": "Setup Failed Bot",
+		"acl_preset": "allow_all",
+		"wait_for_ready": true
+	}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	if err := handler.CreateBot(ctx); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+
+	events := decodeSSEEvents(t, rec.Body.String())
+	if len(events) < 2 {
+		t.Fatalf("events len = %d, want bot_created and error: %#v", len(events), events)
+	}
+	if events[0]["type"] != "bot_created" {
+		t.Fatalf("first event type = %#v, want bot_created; events=%#v", events[0]["type"], events)
+	}
+	if got := eventBotID(events[0]); got != botID {
+		t.Fatalf("created bot id = %q, want %q", got, botID)
+	}
+	last := events[len(events)-1]
+	if last["type"] != "error" {
+		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
+	}
+	message, _ := last["message"].(string)
+	if !strings.Contains(message, "container setup failed: image pull failed") {
+		t.Fatalf("error message = %q, want setup failure details", message)
 	}
 }
 
@@ -169,6 +256,7 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
+	err    error
 }
 
 func (w *createBotStreamWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
@@ -183,7 +271,7 @@ func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Conte
 	for _, event := range w.events {
 		progress(event)
 	}
-	return nil
+	return w.err
 }
 
 type createBotAccountStore struct {

@@ -32,7 +32,7 @@ type acpWorkspaceConfigProvider interface {
 	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
 }
 
-type botCreateProgressWorkspace interface {
+type botCreateWorkspace interface {
 	acpWorkspaceConfigProvider
 	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
 }
@@ -51,12 +51,12 @@ type UsersHandler struct {
 	channelLifecycle *channel.Lifecycle
 	channelManager   *channel.Manager
 	registry         *channel.Registry
-	acpWorkspace     acpWorkspaceConfigProvider
+	acpWorkspace     botCreateWorkspace
 	logger           *slog.Logger
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, acpWorkspace acpWorkspaceConfigProvider) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, acpWorkspace botCreateWorkspace) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -495,6 +495,9 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
+	if h.acpWorkspace == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
 
 	req.WaitForReady = false
 	req.SkipLifecycle = true
@@ -532,36 +535,34 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Minute)
 	defer cancel()
 
-	if workspaceWithProgress, ok := h.acpWorkspace.(botCreateProgressWorkspace); ok {
-		if err := workspaceWithProgress.SetupBotContainerWithProgress(lifecycleCtx, bot.ID, func(event workspace.ContainerSetupEvent) {
-			switch event.Type {
-			case "pulling":
-				send(createContainerPullingEvent{Type: "pulling", Image: event.Image})
-			case "pull_progress":
-				send(createContainerPullProgressEvent{Type: "pull_progress", Layers: event.Layers})
-			case "pull_skipped", "pull_delegated":
-				send(createContainerPullStatusEvent{Type: event.Type, Image: event.Image, Message: event.Message})
-			case "creating":
-				send(createContainerCreatingEvent{Type: "creating"})
-			case "restoring":
-				send(createContainerRestoringEvent{Type: "restoring"})
-			}
-		}); err != nil {
-			h.logger.Error("bot container setup failed",
+	if err := h.acpWorkspace.SetupBotContainerWithProgress(lifecycleCtx, bot.ID, func(event workspace.ContainerSetupEvent) {
+		switch event.Type {
+		case "pulling":
+			send(createContainerPullingEvent{Type: "pulling", Image: event.Image})
+		case "pull_progress":
+			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: event.Layers})
+		case "pull_skipped", "pull_delegated":
+			send(createContainerPullStatusEvent{Type: event.Type, Image: event.Image, Message: event.Message})
+		case "creating":
+			send(createContainerCreatingEvent{Type: "creating"})
+		case "restoring":
+			send(createContainerRestoringEvent{Type: "restoring"})
+		}
+	}); err != nil {
+		h.logger.Error("bot container setup failed",
+			slog.String("bot_id", bot.ID),
+			slog.Any("error", err),
+		)
+		if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
+			h.logger.Error("failed to update bot status to ready after stream create failure",
 				slog.String("bot_id", bot.ID),
-				slog.Any("error", err),
+				slog.Any("error", readyErr),
 			)
-			if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
-				h.logger.Error("failed to update bot status to ready after stream create failure",
-					slog.String("bot_id", bot.ID),
-					slog.Any("error", readyErr),
-				)
-				sendError("container setup failed: " + err.Error() + "; ready status update failed: " + readyErr.Error())
-				return nil
-			}
-			sendError("container setup failed: " + err.Error())
+			sendError("container setup failed: " + err.Error() + "; ready status update failed: " + readyErr.Error())
 			return nil
 		}
+		sendError("container setup failed: " + err.Error())
+		return nil
 	}
 
 	readyBot, err := h.botService.MarkReady(lifecycleCtx, bot.ID)

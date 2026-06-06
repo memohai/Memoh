@@ -20,6 +20,72 @@ export type BotCreateStreamResult = {
   stream: AsyncGenerator<BotCreateStreamEvent, void, unknown>
 }
 
+export type BotCreateProgress = {
+  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
+  layers?: ContainerCreateLayerStatus[]
+  image?: string
+  error?: string
+}
+
+export type BotCreateProgressState = {
+  bot?: BotsBot
+  progress?: BotCreateProgress
+  setupError?: string
+}
+
+export function botCreateProgressPercent(progress: BotCreateProgress | null | undefined): number {
+  const layers = progress?.layers
+  if (!layers || layers.length === 0) return 0
+  let totalOffset = 0
+  let totalSize = 0
+  for (const layer of layers) {
+    totalOffset += layer.offset
+    totalSize += layer.total
+  }
+  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
+}
+
+export function reduceBotCreateProgressEvent(
+  state: BotCreateProgressState,
+  event: BotCreateStreamEvent,
+): BotCreateProgressState {
+  switch (event.type) {
+    case 'bot_created':
+      return { ...state, bot: event.bot }
+    case 'pulling':
+      return { ...state, progress: { phase: 'pulling', image: event.image } }
+    case 'pull_progress':
+      return {
+        ...state,
+        progress: {
+          phase: 'pulling',
+          image: state.progress?.image,
+          layers: event.layers,
+        },
+      }
+    case 'pull_skipped':
+    case 'pull_delegated':
+      return {
+        ...state,
+        progress: event.image === 'local'
+          ? { phase: 'creating' }
+          : { phase: 'pulling', image: event.image },
+      }
+    case 'creating':
+      return { ...state, progress: { phase: 'creating' } }
+    case 'restoring':
+      return { ...state, progress: { phase: 'restoring' } }
+    case 'ready':
+      return { ...state, bot: event.bot }
+    case 'error':
+      return {
+        ...state,
+        setupError: event.message,
+        progress: { phase: 'error', error: event.message },
+      }
+  }
+}
+
 function isLayerStatus(value: unknown): value is ContainerCreateLayerStatus {
   return !!value
     && typeof value === 'object'

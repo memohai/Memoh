@@ -24,15 +24,19 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, putBotsByBotIdSettings } from '@memohai/sdk'
-import type { BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
+import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { defaultAclPreset } from '@/constants/acl-presets'
-import { postBotsStream, type BotCreateStreamEvent } from '@/composables/api/useBotCreateStream'
-import type { ContainerCreateLayerStatus } from '@/composables/api/useContainerStream'
+import {
+  botCreateProgressPercent,
+  postBotsStream,
+  reduceBotCreateProgressEvent,
+  type BotCreateProgressState,
+} from '@/composables/api/useBotCreateStream'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import ContainerCreateProgress from '@/pages/bots/components/container-create-progress.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
@@ -48,26 +52,9 @@ const { visible, exiting, leave } = useStepTransition()
 const workspaceVisible = ref(false)
 const submitting = ref(false)
 
-type CreateProgress = {
-  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
-  layers?: ContainerCreateLayerStatus[]
-  image?: string
-  error?: string
-}
-
-const createProgress = ref<CreateProgress | null>(null)
-
-const createProgressPercent = computed(() => {
-  const layers = createProgress.value?.layers
-  if (!layers || layers.length === 0) return 0
-  let totalOffset = 0
-  let totalSize = 0
-  for (const layer of layers) {
-    totalOffset += layer.offset
-    totalSize += layer.total
-  }
-  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
-})
+const createState = ref<BotCreateProgressState>({})
+const createProgress = computed(() => createState.value.progress ?? null)
+const createProgressPercent = computed(() => botCreateProgressPercent(createProgress.value))
 
 onMounted(() => {
   void capabilities.load()
@@ -146,57 +133,22 @@ const ctaLabel = computed(() => {
   return t('onboarding.next')
 })
 
-function applyCreateBotEvent(event: BotCreateStreamEvent): BotsBot | undefined {
-  switch (event.type) {
-    case 'bot_created':
-      return event.bot
-    case 'pulling':
-      createProgress.value = { phase: 'pulling', image: event.image }
-      return undefined
-    case 'pull_progress':
-      createProgress.value = {
-        phase: 'pulling',
-        image: createProgress.value?.image,
-        layers: event.layers,
-      }
-      return undefined
-    case 'pull_skipped':
-    case 'pull_delegated':
-      createProgress.value = event.image === 'local'
-        ? { phase: 'creating' }
-        : { phase: 'pulling', image: event.image }
-      return undefined
-    case 'creating':
-      createProgress.value = { phase: 'creating' }
-      return undefined
-    case 'restoring':
-      createProgress.value = { phase: 'restoring' }
-      return undefined
-    case 'ready':
-      return event.bot
-    case 'error':
-      createProgress.value = { phase: 'error', error: event.message }
-      throw new Error(event.message || 'Unknown error')
-  }
-}
-
-async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotsBot | undefined> {
+async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotCreateProgressState> {
   const { stream } = await postBotsStream({
     body,
     throwOnError: true,
   })
 
-  let bot: BotsBot | undefined
   for await (const event of stream) {
-    bot = applyCreateBotEvent(event) ?? bot
+    createState.value = reduceBotCreateProgressEvent(createState.value, event)
   }
-  return bot
+  return createState.value
 }
 
 async function handleSubmit() {
   if (!canSubmit.value || submitting.value) return
   submitting.value = true
-  createProgress.value = form.workspace_backend === 'local' ? null : { phase: 'pulling' }
+  createState.value = form.workspace_backend === 'local' ? {} : { progress: { phase: 'pulling' } }
 
   const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
     ? {
@@ -209,7 +161,7 @@ async function handleSubmit() {
   const tz = undefined
 
   try {
-    const bot = await createBotWithProgress({
+    const result = await createBotWithProgress({
       display_name: form.display_name.trim(),
       avatar_url: form.avatar_url.trim() || undefined,
       timezone: tz,
@@ -219,7 +171,11 @@ async function handleSubmit() {
       wait_for_ready: true,
     })
 
+    const bot = result.bot
     const botId = bot?.id
+    if (!botId) {
+      throw new Error(t('common.saveFailed'))
+    }
     if (botId) {
       sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
     }
@@ -238,12 +194,15 @@ async function handleSubmit() {
       }
     }
 
+    if (result.setupError) {
+      toast.error(result.setupError)
+    }
     leave(nextStep)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
     submitting.value = false
-    createProgress.value = null
+    createState.value = {}
     void queryCache.invalidateQueries({ key: getBotsQueryKey() })
   }
 }
