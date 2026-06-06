@@ -16,19 +16,27 @@ defineOptions({
   inheritAttrs: false,
 })
 
-const props = withDefaults(defineProps<DialogContentProps & { class?: HTMLAttributes['class'], showCloseButton?: boolean }>(), {
+const props = withDefaults(defineProps<DialogContentProps & {
+  class?: HTMLAttributes['class']
+  showCloseButton?: boolean
+  // Optional override for the backdrop dimming. Defaults to the standard heavy
+  // scrim; surfaces that float a light menu (CommandDialog) pass a lighter scrim
+  // so the panel's hairline + dropdown shadow stay readable instead of being
+  // swallowed by the dark overlay.
+  overlayClass?: HTMLAttributes['class']
+}>(), {
   showCloseButton: true,
 })
 const emits = defineEmits<DialogContentEmits>()
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'overlayClass')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay :class="overlayClass" />
     <DialogContent
       data-slot="dialog-content"
       v-bind="{ ...$attrs, ...forwarded }"

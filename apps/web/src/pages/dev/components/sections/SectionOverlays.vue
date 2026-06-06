@@ -217,10 +217,18 @@ const showStatusBar = ref(true)
       </Specimen>
 
       <div class="lg:col-span-2">
-        <Specimen label="<Command> inline + <CommandDialog>">
+        <Specimen
+          label="<Command> inline + <CommandDialog>"
+          note="same menu surface as DropdownMenu — rows highlight on hover; dialog mirrors the inline preview"
+        >
           <div class="flex w-full flex-col gap-3">
-            <Command class="max-w-sm border border-[color:var(--border-menu)] shadow-[var(--shadow-dropdown)]">
-              <CommandInput placeholder="Type a command or search..." />
+            <Command class="max-w-sm">
+              <CommandInput
+                :search-icon="false"
+                size="md"
+                placeholder="Type a command or search..."
+                class="placeholder:text-muted-foreground/80"
+              />
               <CommandList>
                 <CommandEmpty>No results found.</CommandEmpty>
                 <CommandGroup heading="Suggestions">
@@ -249,15 +257,27 @@ const showStatusBar = ref(true)
                 Open command dialog
               </Button>
               <CommandDialog v-model:open="cmdOpen">
-                <CommandInput placeholder="Type a command..." />
+                <CommandInput
+                  :search-icon="false"
+                  size="md"
+                  placeholder="Type a command or search..."
+                  class="placeholder:text-muted-foreground/80"
+                />
                 <CommandList>
                   <CommandEmpty>No results found.</CommandEmpty>
                   <CommandGroup heading="Suggestions">
-                    <CommandItem value="new">
-                      New file
+                    <CommandItem value="calendar">
+                      Calendar
                     </CommandItem>
-                    <CommandItem value="open">
-                      Open...
+                    <CommandItem value="search">
+                      Search
+                      <CommandShortcut>⌘S</CommandShortcut>
+                    </CommandItem>
+                  </CommandGroup>
+                  <CommandSeparator />
+                  <CommandGroup heading="Settings">
+                    <CommandItem value="profile">
+                      Profile
                     </CommandItem>
                   </CommandGroup>
                 </CommandList>

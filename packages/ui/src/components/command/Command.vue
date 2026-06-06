@@ -9,13 +9,19 @@ import { provideCommandContext } from '.'
 
 const props = withDefaults(defineProps<ListboxRootProps & {
   class?: HTMLAttributes['class']
-  // cmdk-style palettes pre-highlight the first row on open so Enter selects it.
-  // Combobox-style pickers set this false: opening should land on NOTHING (the
-  // value-less default), and the highlight should only follow the pointer/arrows.
+  // Default OFF, matching Select/Combobox: opening lands on NOTHING (the value-less
+  // default) and the highlight only follows the pointer/arrows. Opening a fresh
+  // Select never auto-picks the first option, so neither should a Command palette.
+  // Set true only for a true cmdk palette that wants Enter to fire the first row.
   highlightFirstOnOpen?: boolean
 }>(), {
   modelValue: '',
-  highlightFirstOnOpen: true,
+  highlightFirstOnOpen: false,
+  // Rows must highlight under the pointer, exactly like Select / DropdownMenu /
+  // Combobox. reka's ListboxRoot ships this OFF, which made a command surface read
+  // as "click-only" (the highlight only followed the keyboard). Default it ON so
+  // every Command — inline, dialog, combobox — shares the one menu-row interaction.
+  highlightOnHover: true,
 })
 
 const emits = defineEmits<ListboxRootEmits>()
@@ -76,10 +82,30 @@ watch(() => filterState.search, () => {
   filterItems()
 })
 
+// reka's ListboxRoot exposes its live highlight as a writable ref; we drive it for
+// both the open-with-no-highlight one-shot (below) and the leave-clears-highlight
+// parity with Select (next).
+const listboxRef = ref<{ highlightedElement: HTMLElement | null } | null>(null)
+
+// Select clears its row highlight the instant the pointer leaves a row (its
+// SelectItem blurs via onItemLeave), so hovering the gap/separator between rows
+// shows NOTHING highlighted. reka's Listbox does not — it only ever MOVES the
+// highlight to the next hovered row and never clears it, so the last row stays lit
+// while the pointer sits on a separator. We restore Select's behaviour: each
+// CommandItem reports its own pointerleave, and we null reka's highlight if (and
+// only if) the leaving row is the one currently lit. Entering the next row re-lights
+// it through reka's own pointermove, so adjacent moves are seamless and only the
+// dead space (separators / padding) reads as un-highlighted — exactly like Select.
+function onItemPointerLeave(el: HTMLElement | null) {
+  if (el && listboxRef.value && listboxRef.value.highlightedElement === el)
+    listboxRef.value.highlightedElement = null
+}
+
 provideCommandContext({
   allItems,
   allGroups,
   filterState,
+  onItemPointerLeave,
 })
 
 // Combobox pickers (highlightFirstOnOpen=false) must open with NO row highlighted.
@@ -95,7 +121,6 @@ provideCommandContext({
 // untouched picker selects nothing. Every later highlight is user-driven (pointer /
 // arrows) and passes through. A real selection is preserved: the one-shot is never armed
 // when a value is present, so the selected row stays highlighted on reopen.
-const listboxRef = ref<{ highlightedElement: HTMLElement | null } | null>(null)
 let clearInitialHighlight = false
 
 function onEntryFocus(event: Event) {
@@ -125,7 +150,17 @@ onMounted(() => {
     ref="listboxRef"
     data-slot="command"
     v-bind="forwarded"
-    :class="cn('bg-popover text-popover-foreground flex h-full w-full flex-col overflow-hidden rounded-menu-shell', props.class)"
+    :class="cn(
+      // Command IS a floating menu surface, so it owns the exact same chrome as
+      // DropdownMenu/Select (lib/menu.ts: bg-popover, border-menu hairline,
+      // dropdown shadow, menu-shell radius). Owning it here — instead of letting
+      // each call site hand-roll border/shadow — is what guarantees the inline
+      // command, the Combobox (Popover + Command), and the CommandDialog all read
+      // identically. A host that supplies its own elevation (e.g. CommandDialog's
+      // transparent DialogContent) just lets this surface show through.
+      'bg-popover text-popover-foreground border border-[color:var(--border-menu)] rounded-menu-shell shadow-[var(--shadow-dropdown)] flex h-full w-full flex-col overflow-hidden',
+      props.class,
+    )"
     @entry-focus="onEntryFocus"
     @highlight="onHighlight"
   >

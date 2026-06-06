@@ -686,9 +686,20 @@
      floating panel reads with slightly more contrast than the flat trigger below
      it; the cutout depth still comes mostly from --shadow-dropdown. */
   --border-menu: oklch(0 0 0 / 0.13);
+  /* Edge for a MODAL menu surface (CommandDialog) floating over a dimmed scrim.
+     A touch stronger than --border-menu so the palette's outline stays crisp
+     against the darkened background instead of dissolving into it. */
+  --border-menu-elevated: oklch(0 0 0 / 0.22);
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-dropdown: 0 1px 2px 0 oklch(0 0 0 / 0.04), 0 6px 18px -6px oklch(0 0 0 / 0.08);
+  /* Same menu family as --shadow-dropdown, but lifted for a MODAL menu surface
+     (CommandDialog) that floats over a dimmed scrim. The standard dropdown shadow
+     is tuned to read on a plain light page; over the overlay it flattens out, so a
+     palette gets this deeper cast to separate cleanly from the darkened background.
+     The surface promotes to its own GPU layer while the dialog scales open, so this
+     larger blur rasterizes once instead of repainting per animation frame. */
+  --shadow-dropdown-elevated: 0 4px 10px -2px oklch(0 0 0 / 0.13), 0 24px 50px -12px oklch(0 0 0 / 0.30);
   /* Form-field edge — text input / textarea / select. The edge is one inset
      hairline whose color swaps per state (never an outer ring):
        solid  (default) → the hairline turns near-black on focus
@@ -891,6 +902,11 @@
   --destructive-foreground: oklch(0.985 0.001 286);
   --border: oklch(1 0 0 / 10%);
   --border-menu: oklch(1 0 0 / 0.14);
+  /* Dark: elevated menu edge is a WHITE hairline (light-on-dark), a touch stronger
+     than --border-menu — mirroring the light-mode --border-menu-elevated. Without
+     this dark override the modal palette would inherit the light black edge and
+     render NO visible outline on the dark surface. */
+  --border-menu-elevated: oklch(1 0 0 / 0.22);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.86 0.005 285);
   --chart-1: oklch(0.488 0.243 264.376);

@@ -16,7 +16,7 @@ const delegatedProps = reactiveOmit(props, 'class')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 const id = useId()
-const { filterState, allItems, allGroups } = useCommand()
+const { filterState, allItems, allGroups, onItemPointerLeave } = useCommand()
 const groupContext = useCommandGroup()
 
 const isRender = computed(() => {
@@ -71,6 +71,7 @@ onUnmounted(() => {
     @select="() => {
       filterState.search = ''
     }"
+    @pointerleave="(e: PointerEvent) => onItemPointerLeave(e.currentTarget as HTMLElement)"
   >
     <slot />
   </ListboxItem>
