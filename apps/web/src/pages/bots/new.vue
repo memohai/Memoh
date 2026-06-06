@@ -328,6 +328,16 @@
           <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
             {{ $t('bots.createBotSetupDesc') }}
           </p>
+          <div
+            v-if="createProgress && form.workspace_backend !== 'local'"
+            class="mt-3 w-full"
+          >
+            <ContainerCreateProgress
+              :phase="createProgress.phase"
+              :percent="createProgressPercent"
+              :error="createProgress.error"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -368,19 +378,23 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability, putBotsByBotIdSettings } from '@memohai/sdk'
-import { postBotsMutation, getBotsQueryKey } from '@memohai/sdk/colada'
+import type { BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
+import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { postBotsStream, type BotCreateStreamEvent } from '@/composables/api/useBotCreateStream'
+import type { ContainerCreateLayerStatus } from '@/composables/api/useContainerStream'
 import ModelSelect from './components/model-select.vue'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import BotImportPanel from './components/bot-import-panel.vue'
+import ContainerCreateProgress from './components/container-create-progress.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -560,12 +574,28 @@ const canSubmit = computed(() => {
 })
 
 // Submit
-const { mutateAsync: createBot, isLoading: submitLoading } = useMutation({
-  ...postBotsMutation(),
-  onSettled: () => queryCache.invalidateQueries({ key: getBotsQueryKey() }),
-})
+type CreateProgress = {
+  phase: 'preserving' | 'pulling' | 'creating' | 'restoring' | 'complete' | 'error'
+  layers?: ContainerCreateLayerStatus[]
+  image?: string
+  error?: string
+}
 
+const submitLoading = ref(false)
+const createProgress = ref<CreateProgress | null>(null)
 const isCreateFlowBlocked = computed(() => submitLoading.value)
+
+const createProgressPercent = computed(() => {
+  const layers = createProgress.value?.layers
+  if (!layers || layers.length === 0) return 0
+  let totalOffset = 0
+  let totalSize = 0
+  for (const layer of layers) {
+    totalOffset += layer.offset
+    totalSize += layer.total
+  }
+  return totalSize > 0 ? Math.round((totalOffset / totalSize) * 100) : 0
+})
 
 // Detect a name-uniqueness conflict (HTTP 409) from the create request, used as
 // a fallback when the realtime check raced with submission.
@@ -584,8 +614,57 @@ function handleImported(botId: string) {
   }
 }
 
+function applyCreateBotEvent(event: BotCreateStreamEvent): BotsBot | undefined {
+  switch (event.type) {
+    case 'bot_created':
+      return event.bot
+    case 'pulling':
+      createProgress.value = { phase: 'pulling', image: event.image }
+      return undefined
+    case 'pull_progress':
+      createProgress.value = {
+        phase: 'pulling',
+        image: createProgress.value?.image,
+        layers: event.layers,
+      }
+      return undefined
+    case 'pull_skipped':
+    case 'pull_delegated':
+      createProgress.value = event.image === 'local'
+        ? { phase: 'creating' }
+        : { phase: 'pulling', image: event.image }
+      return undefined
+    case 'creating':
+      createProgress.value = { phase: 'creating' }
+      return undefined
+    case 'restoring':
+      createProgress.value = { phase: 'restoring' }
+      return undefined
+    case 'ready':
+      return event.bot
+    case 'error':
+      createProgress.value = { phase: 'error', error: event.message }
+      throw new Error(event.message || 'Unknown error')
+  }
+}
+
+async function createBotWithProgress(body: BotsCreateBotRequest): Promise<BotsBot | undefined> {
+  const { stream } = await postBotsStream({
+    body,
+    throwOnError: true,
+  })
+
+  let bot: BotsBot | undefined
+  for await (const event of stream) {
+    bot = applyCreateBotEvent(event) ?? bot
+  }
+  return bot
+}
+
 async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
+  submitLoading.value = true
+  createProgress.value = form.workspace_backend === 'local' ? null : { phase: 'pulling' }
 
   const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
     ? {
@@ -599,17 +678,15 @@ async function handleSubmit() {
   const tz = form.timezone === emptyTimezoneValue ? undefined : form.timezone || undefined
 
   try {
-    const bot = await createBot({
-      body: {
-        name: form.name.trim(),
-        display_name: form.display_name.trim(),
-        avatar_url: form.avatar_url.trim() || undefined,
-        timezone: tz,
-        is_active: true,
-        acl_preset: form.acl_preset,
-        metadata,
-        wait_for_ready: true,
-      },
+    const bot = await createBotWithProgress({
+      name: form.name.trim(),
+      display_name: form.display_name.trim(),
+      avatar_url: form.avatar_url.trim() || undefined,
+      timezone: tz,
+      is_active: true,
+      acl_preset: form.acl_preset,
+      metadata,
+      wait_for_ready: true,
     })
 
     const botId = bot?.id
@@ -642,6 +719,10 @@ async function handleSubmit() {
       return
     }
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    submitLoading.value = false
+    createProgress.value = null
+    void queryCache.invalidateQueries({ key: getBotsQueryKey() })
   }
 }
 </script>

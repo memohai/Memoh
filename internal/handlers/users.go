@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -20,12 +23,23 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/identity"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type acpWorkspaceConfigProvider interface {
 	bridge.Provider
 	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
+}
+
+type botCreateProgressWorkspace interface {
+	acpWorkspaceConfigProvider
+	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
+}
+
+type createBotStreamBotEvent struct {
+	Type string   `json:"type"`
+	Bot  bots.Bot `json:"bot"`
 }
 
 // UsersHandler manages user/account CRUD and bot operations via REST API.
@@ -443,26 +457,124 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			}
 		}
 	}
+	if acceptsEventStream(c) {
+		return h.createBotStream(c, ownerID, ownerFromToken, req)
+	}
 	resp, err := h.botService.Create(c.Request().Context(), ownerID, req)
 	if err != nil {
-		if errors.Is(err, bots.ErrOwnerUserNotFound) {
-			if ownerFromToken {
-				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
-			}
-			return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
-		}
-		if errors.Is(err, acl.ErrUnknownPreset) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, bots.ErrBotNameTaken) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-		if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return createBotHTTPError(err, ownerFromToken)
 	}
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
+}
+
+func acceptsEventStream(c echo.Context) bool {
+	return strings.Contains(strings.ToLower(c.Request().Header.Get(echo.HeaderAccept)), "text/event-stream")
+}
+
+func createBotHTTPError(err error, ownerFromToken bool) error {
+	if errors.Is(err, bots.ErrOwnerUserNotFound) {
+		if ownerFromToken {
+			return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+	}
+	if errors.Is(err, acl.ErrUnknownPreset) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, bots.ErrBotNameTaken) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+}
+
+func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest) error {
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	}
+
+	req.WaitForReady = false
+	req.SkipLifecycle = true
+	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	if err != nil {
+		return createBotHTTPError(err, ownerFromToken)
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+	writer := bufio.NewWriter(c.Response().Writer)
+
+	var mu sync.Mutex
+	var writeErr error
+	send := func(payload any) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if writeErr != nil {
+			return false
+		}
+		if err := writeSSEJSON(writer, flusher, payload); err != nil {
+			writeErr = err
+			return false
+		}
+		return true
+	}
+	sendError := func(message string) {
+		_ = send(createContainerErrorEvent{Type: "error", Message: message})
+	}
+
+	send(createBotStreamBotEvent{Type: "bot_created", Bot: scrubBotForResponse(bot)})
+
+	lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Minute)
+	defer cancel()
+
+	if workspaceWithProgress, ok := h.acpWorkspace.(botCreateProgressWorkspace); ok {
+		if err := workspaceWithProgress.SetupBotContainerWithProgress(lifecycleCtx, bot.ID, func(event workspace.ContainerSetupEvent) {
+			switch event.Type {
+			case "pulling":
+				send(createContainerPullingEvent{Type: "pulling", Image: event.Image})
+			case "pull_progress":
+				send(createContainerPullProgressEvent{Type: "pull_progress", Layers: event.Layers})
+			case "pull_skipped", "pull_delegated":
+				send(createContainerPullStatusEvent{Type: event.Type, Image: event.Image, Message: event.Message})
+			case "creating":
+				send(createContainerCreatingEvent{Type: "creating"})
+			case "restoring":
+				send(createContainerRestoringEvent{Type: "restoring"})
+			}
+		}); err != nil {
+			h.logger.Error("bot container setup failed",
+				slog.String("bot_id", bot.ID),
+				slog.Any("error", err),
+			)
+			if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
+				h.logger.Error("failed to update bot status to ready after stream create failure",
+					slog.String("bot_id", bot.ID),
+					slog.Any("error", readyErr),
+				)
+				sendError("container setup failed: " + err.Error() + "; ready status update failed: " + readyErr.Error())
+				return nil
+			}
+			sendError("container setup failed: " + err.Error())
+			return nil
+		}
+	}
+
+	readyBot, err := h.botService.MarkReady(lifecycleCtx, bot.ID)
+	if err != nil {
+		h.logger.Error("failed to update bot status to ready after stream create",
+			slog.String("bot_id", bot.ID),
+			slog.Any("error", err),
+		)
+		sendError("ready status update failed: " + err.Error())
+		return nil
+	}
+	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
+	return nil
 }
 
 // CheckBotName godoc
