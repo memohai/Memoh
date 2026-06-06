@@ -59,6 +59,11 @@ type AgentSetup struct {
 	AgentID string
 	Enabled bool
 	Mode    string
+	// ModeSet is true only when setup_mode was explicitly present in the bot
+	// metadata. When false the Mode field carries the package default (api_key)
+	// and callers that need to distinguish "explicitly api_key" from "legacy /
+	// unset" should check this flag rather than comparing Mode directly.
+	ModeSet bool
 	Managed map[string]string
 }
 
@@ -227,6 +232,7 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 			}
 			if mode, ok := agentConfig["setup_mode"].(string); ok && strings.TrimSpace(mode) != "" {
 				setup.Mode = strings.TrimSpace(strings.ToLower(mode))
+				setup.ModeSet = true
 			}
 			if managed, ok := metadataRecord(agentConfig["managed"]); ok {
 				for key, value := range managed {

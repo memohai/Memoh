@@ -696,7 +696,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 
 	mode := acpclient.SetupMode(setup.Mode)
-	if mode == "" {
+	if !setup.ModeSet {
 		// Legacy bots created before setup_mode was introduced have no explicit
 		// mode. For local workspaces the host already has Codex/Claude configured,
 		// so default to self (use host credentials). For container workspaces
