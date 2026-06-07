@@ -331,10 +331,18 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 // ---------------------------------------------------------------------------
 
 type ContainerSetupEvent struct {
-	Type    string
-	Image   string
-	Message string
-	Layers  []ctr.LayerStatus
+	Type             string
+	Image            string
+	Message          string
+	Layers           []ctr.LayerStatus
+	ContainerID      string
+	WorkspaceBackend string
+	RuntimeBackend   string
+	ContainerPath    string
+	CDIDevices       []string
+	Started          bool
+	DataRestored     bool
+	HasPreservedData bool
 }
 
 type ContainerSetupProgress func(ContainerSetupEvent)
@@ -404,7 +412,8 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 	}
 
 	emit(ContainerSetupEvent{Type: "creating"})
-	if m.HasPreservedData(botID) {
+	hadPreservedData := m.HasPreservedData(botID)
+	if hadPreservedData {
 		emit(ContainerSetupEvent{Type: "restoring"})
 	}
 
@@ -433,6 +442,24 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 
 	containerID := m.resolveContainerID(ctx, botID)
 	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+	event := ContainerSetupEvent{
+		Type:             "complete",
+		Image:            image,
+		ContainerID:      containerID,
+		WorkspaceBackend: workspaceBackendFromRecord(workspaceCfg.Backend, containerID),
+		Started:          true,
+		DataRestored:     hadPreservedData && !m.HasPreservedData(botID),
+		HasPreservedData: m.HasPreservedData(botID),
+	}
+	if status, err := m.GetContainerInfo(ctx, botID); err == nil {
+		event.ContainerID = status.ContainerID
+		event.WorkspaceBackend = status.WorkspaceBackend
+		event.RuntimeBackend = status.RuntimeBackend
+		event.ContainerPath = status.ContainerPath
+		event.CDIDevices = status.CDIDevices
+		event.HasPreservedData = status.HasPreservedData
+	}
+	emit(event)
 	return nil
 }
 

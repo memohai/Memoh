@@ -84,7 +84,7 @@ assert_sse_data_restored() {
 assert_sse_complete_runtime_backend() {
   local file="$1"
   if ! read_sse_payloads "$file" | jq -e "select(.type == \"complete\") | .container.runtime_backend == \"$EXPECTED_RUNTIME\" and .container.workspace_backend == \"$EXPECTED_WORKSPACE_BACKEND\"" >/dev/null; then
-    echo "ERROR: container recreate complete event did not report the expected runtime backend" >&2
+    echo "ERROR: container complete event did not report the expected runtime backend" >&2
     read_sse_payloads "$file" | jq . >&2
     exit 1
   fi
@@ -177,6 +177,7 @@ write_evidence() {
     --arg final_container_id "$FINAL_CONTAINER_ID" \
     --argjson verify_data_preservation "$VERIFY_DATA_PRESERVATION" \
     --argjson data_restored "$DATA_RESTORED" \
+    --argjson create_runtime_backend_reported "$CREATE_RUNTIME_BACKEND_REPORTED" \
     --argjson container_deleted_before_recreate "$CONTAINER_DELETED_BEFORE_RECREATE" \
     --argjson recreate_stream_completed "$RECREATE_STREAM_COMPLETED" \
     --argjson recreate_runtime_backend_reported "$RECREATE_RUNTIME_BACKEND_REPORTED" \
@@ -236,6 +237,7 @@ write_evidence() {
         storage_soft_limit_preserved: ($final_metrics[0].resource_limits.desired.storage_bytes == $storage_bytes),
         storage_hard_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.hard_limit_supported,
         storage_soft_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.soft_limit_supported,
+        create_runtime_backend_reported: $create_runtime_backend_reported,
         container_deleted_before_recreate: $container_deleted_before_recreate,
         recreate_stream_completed: $recreate_stream_completed,
         recreate_runtime_backend_reported: $recreate_runtime_backend_reported,
@@ -308,6 +310,7 @@ TOKEN=""
 BOT_ID=""
 PRESERVED_DATA_CREATED=0
 DATA_RESTORED=false
+CREATE_RUNTIME_BACKEND_REPORTED=false
 CONTAINER_DELETED_BEFORE_RECREATE=false
 RECREATE_STREAM_COMPLETED=false
 RECREATE_RUNTIME_BACKEND_REPORTED=false
@@ -363,6 +366,8 @@ if ! read_sse_payloads "$CREATE_STREAM" | jq -e 'select(.type == "ready")' >/dev
   read_sse_payloads "$CREATE_STREAM" | jq . >&2
   exit 1
 fi
+assert_sse_complete_runtime_backend "$CREATE_STREAM"
+CREATE_RUNTIME_BACKEND_REPORTED=true
 
 CONTAINER_INFO_JSON="$TMPDIR/container.initial.json"
 fetch_container_info "$CONTAINER_INFO_JSON"

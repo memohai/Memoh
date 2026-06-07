@@ -80,6 +80,7 @@ assert_evidence ".checks.memory_limit_applied == true" "memory limit must be app
 assert_evidence ".checks.storage_soft_limit_preserved == true" "storage soft limit must be preserved"
 assert_evidence ".checks.storage_hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard-limit support must be $EXPECTED_STORAGE_HARD_LIMIT"
 assert_evidence ".checks.storage_soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft-limit support must be $EXPECTED_STORAGE_SOFT_LIMIT"
+assert_evidence ".checks.create_runtime_backend_reported == true" "bot create stream must report runtime backend"
 assert_evidence ".checks.container_deleted_before_recreate == true" "container must be deleted before recreate"
 assert_evidence ".checks.recreate_stream_completed == true" "container recreate stream must complete"
 assert_evidence ".checks.recreate_runtime_backend_reported == true" "container recreate stream must report runtime backend"

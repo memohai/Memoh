@@ -60,6 +60,7 @@ write_evidence() {
         storage_soft_limit_preserved: true,
         storage_hard_limit_supported: false,
         storage_soft_limit_supported: true,
+        create_runtime_backend_reported: true,
         container_deleted_before_recreate: true,
         recreate_stream_completed: true,
         recreate_runtime_backend_reported: true,
@@ -233,6 +234,10 @@ expect_failure "resource update response must require recreate" \
 
 jq '.resource_limits.update_response.runtime_backend = "io.containerd.runc.v2"' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
 expect_failure "resource update response runtime must match target runtime" \
+  scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
+
+jq '.checks.create_runtime_backend_reported = false' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
+expect_failure "create stream runtime backend evidence must be enforced" \
   scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
 
 jq '.checks.recreate_runtime_backend_reported = false' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"

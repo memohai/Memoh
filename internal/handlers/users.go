@@ -573,6 +573,21 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			send(createContainerCreatingEvent{Type: "creating"})
 		case "restoring":
 			send(createContainerRestoringEvent{Type: "restoring"})
+		case "complete":
+			send(createContainerCompleteEvent{
+				Type: "complete",
+				Container: CreateContainerResponse{
+					ContainerID:      event.ContainerID,
+					WorkspaceBackend: event.WorkspaceBackend,
+					RuntimeBackend:   event.RuntimeBackend,
+					ContainerPath:    event.ContainerPath,
+					Image:            event.Image,
+					CDIDevices:       event.CDIDevices,
+					Started:          event.Started,
+					DataRestored:     event.DataRestored,
+					HasPreservedData: event.HasPreservedData,
+				},
+			})
 		}
 	}); err != nil {
 		h.logger.Error("bot container setup failed",

@@ -188,6 +188,8 @@ A valid test run must prove all of the following:
 - `ctr containers info <workspace-id>` returns
   `Runtime.Name = "io.containerd.kata.v2"`.
 - `GET /bots/{id}/container/metrics` reports the same runtime backend.
+- `POST /bots` creation SSE emits a container `complete` event with
+  `container.runtime_backend = "io.containerd.kata.v2"`.
 - `POST /bots/{id}/container` recreate SSE completes with
   `container.runtime_backend = "io.containerd.kata.v2"`.
 - CPU and memory resource limits become `status = "applied"` after recreate.
@@ -200,8 +202,8 @@ A valid test run must prove all of the following:
 The `test:kata:e2e` and `test:kata:compose:e2e` tasks perform these checks.
 Their evidence JSON records the target runtime, container IDs, direct
 `ctr containers info` runtime names, delete-before-recreate proof, final
-resource-limit state, recreate SSE runtime reporting, and data restore result
-without storing the admin password or access token.
+resource-limit state, create/recreate SSE runtime reporting, and data restore
+result without storing the admin password or access token.
 The running-stack verifier and E2E tasks also run
 `scripts/validate-kata-evidence.sh` against the saved API evidence and
 `scripts/validate-containerd-smoke-evidence.sh` against the saved smoke
