@@ -124,6 +124,9 @@ func TestLoadReadsBackendSpecificConfigs(t *testing.T) {
 
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	data := []byte(`
+[containerd]
+runtime_type = "io.containerd.kata.v2"
+
 [docker]
 host = "unix:///var/run/docker.sock"
 
@@ -139,6 +142,9 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
+	if cfg.Containerd.RuntimeType != "io.containerd.kata.v2" {
+		t.Fatalf("containerd runtime type = %q", cfg.Containerd.RuntimeType)
+	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)
 	}
@@ -147,6 +153,21 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	}
 	if cfg.Apple.BinaryPath != "/opt/homebrew/bin/socktainer" {
 		t.Fatalf("apple binary path = %q", cfg.Apple.BinaryPath)
+	}
+}
+
+func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Containerd.RuntimeType != DefaultContainerdRuntimeType {
+		t.Fatalf("containerd runtime type = %q, want %q", cfg.Containerd.RuntimeType, DefaultContainerdRuntimeType)
+	}
+	if got := cfg.Containerd.RuntimeTypeOrDefault(); got != DefaultContainerdRuntimeType {
+		t.Fatalf("runtime type default = %q, want %q", got, DefaultContainerdRuntimeType)
 	}
 }
 
