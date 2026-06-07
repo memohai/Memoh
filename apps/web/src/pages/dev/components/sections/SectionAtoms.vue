@@ -5,6 +5,7 @@ import {
   Avatar, AvatarFallback, AvatarImage,
   Badge, BadgeCount,
   Button,
+  Input,
   Kbd, KbdGroup,
   Label,
   SegmentedControl,
@@ -611,10 +612,20 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         </div>
       </Specimen>
 
-      <Specimen label="<Spinner>">
+      <Specimen
+        label="<Spinner>"
+        note="rarely standalone — prefer a Button's own loading state (e.g. a Continue CTA) for action feedback; a bare Spinner is for full-pane / initial loads only. Inherits currentColor (size via class), never brand purple."
+      >
         <Spinner />
         <Spinner class="size-6" />
-        <Spinner class="size-8 text-brand" />
+        <Spinner class="size-8" />
+        <Button
+          variant="default"
+          :loading="true"
+          loading-mode="leading"
+        >
+          Continue
+        </Button>
       </Specimen>
 
       <Specimen
@@ -693,25 +704,46 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         </div>
       </Specimen>
 
-      <Specimen label="<Toggle> disabled">
-        <Toggle
-          disabled
-          aria-label="Bold"
-        >
-          <Bold /> Disabled
-        </Toggle>
-        <Toggle
-          disabled
-          :default-pressed="true"
-          aria-label="Bold"
-        >
-          <Bold /> On
-        </Toggle>
+      <Specimen
+        label="<Toggle> disabled"
+        note="a toggle lives in a toolbar — disabled = unavailable in place (off or on), dimmed and unpressable, not a standalone gray pill"
+      >
+        <div class="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+          <Toggle
+            size="sm"
+            aria-label="Bold"
+          >
+            <Bold />
+          </Toggle>
+          <Toggle
+            disabled
+            size="sm"
+            aria-label="Italic (unavailable)"
+          >
+            <Italic />
+          </Toggle>
+          <Toggle
+            disabled
+            :default-pressed="true"
+            size="sm"
+            aria-label="Underline (locked on)"
+          >
+            <Underline />
+          </Toggle>
+        </div>
       </Specimen>
 
-      <Specimen label="<Label>">
-        <Label>Standalone label</Label>
-        <Label for="atoms-demo-input">Bound to input</Label>
+      <Specimen
+        label="<Label>"
+        note="a real form label: clicking it focuses the bound control (for=) and screen readers announce the two as one field — not just styled text"
+      >
+        <div class="flex flex-col gap-1.5">
+          <Label for="atoms-demo-input">Display name</Label>
+          <Input
+            id="atoms-demo-input"
+            placeholder="Click the label above to focus me"
+          />
+        </div>
       </Specimen>
 
       <div class="lg:col-span-2">

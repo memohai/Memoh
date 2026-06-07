@@ -21,10 +21,17 @@ const props = withDefaults(defineProps<{
       // edge near-black in place; invalid turns it destructive. No hover, no outer
       // ring — those are intentionally gone from the design language.
       'group/input-group relative flex w-full items-center rounded-md outline-none',
-      'min-w-0 has-[>textarea]:h-auto',
+      'min-w-0',
 
-      // Size scale — height + inner control type, mirrors Input.
-      'data-[size=sm]:h-8 data-[size=default]:h-9 data-[size=lg]:h-10',
+      // Multiline (textarea) groups grow with content and TOP-align: items-stretch
+      // lets the textarea fill the box so its own py defines where text starts,
+      // instead of items-center stranding a short field in the middle of the box.
+      'has-[>textarea]:h-auto has-[>textarea]:items-stretch',
+
+      // Size scale — fixed height for single-line groups only. Gated behind
+      // :not(:has(>textarea)) so it never fights the auto-height of a textarea
+      // group (otherwise [data-size] out-specifies :has() and re-pins the height).
+      '[&:not(:has(>textarea))]:data-[size=sm]:h-8 [&:not(:has(>textarea))]:data-[size=default]:h-9 [&:not(:has(>textarea))]:data-[size=lg]:h-10',
       'data-[size=sm]:[&_[data-slot=input-group-control]]:text-[12px]',
       'data-[size=lg]:[&_[data-slot=input-group-control]]:text-[14px]',
 
