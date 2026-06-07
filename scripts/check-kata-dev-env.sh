@@ -3,6 +3,7 @@ set -euo pipefail
 
 KATA_SHIM_PATH="${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}"
 KATA_CONFIG_DIR="${MEMOH_KATA_CONFIG_DIR:-/etc/kata-containers}"
+KATA_CONFIG_FILE="$KATA_CONFIG_DIR/configuration.toml"
 KATA_SHARE_DIR="${MEMOH_KATA_SHARE_DIR:-/usr/share/kata-containers}"
 KATA_OPT_DIR="${MEMOH_KATA_OPT_DIR:-/opt/kata}"
 KATA_DEV_IMAGE="${MEMOH_KATA_DEV_IMAGE:-memoh-dev-server-kata}"
@@ -50,7 +51,9 @@ check_container_shim() {
 
   "${docker_args[@]}" "$KATA_DEV_IMAGE" -lc '
 set -euo pipefail
+config=/etc/kata-containers/configuration.toml
 test -x /usr/local/bin/containerd-shim-kata-v2
+test -f "$config"
 set +e
 output="$(/usr/local/bin/containerd-shim-kata-v2 --version 2>&1)"
 status=$?
@@ -63,6 +66,28 @@ if [ "$status" -ne 0 ]; then
   printf "WARN: containerd-shim-kata-v2 returned %s for --version; binary executed, continuing.\n" "$status" >&2
 else
   printf "%s\n" "$output" | sed -n "1,3p"
+fi
+
+paths="$(sed -E "/^[[:space:]]*#/d; s/[[:space:]]+#.*$//" "$config" | grep -Eo "\"/[^\"]+\"" | tr -d "\"" | sort -u || true)"
+missing="$(mktemp)"
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  case "$path" in
+    /dev/*|/proc/*|/run/*|/sys/*|/tmp/*)
+      continue
+      ;;
+  esac
+  if [ ! -e "$path" ]; then
+    printf "%s\n" "$path" >>"$missing"
+  fi
+done <<EOF
+$paths
+EOF
+if [ -s "$missing" ]; then
+  echo "ERROR: Kata config references paths that are missing inside the dev server image:" >&2
+  sed "s/^/  /" "$missing" >&2
+  echo "Mount the referenced Kata runtime assets or use an official /opt/kata install." >&2
+  exit 1
 fi
 '
 }
@@ -79,6 +104,7 @@ if [ ! -f "$KATA_SHIM_PATH" ]; then
 fi
 [ -x "$KATA_SHIM_PATH" ] || fail "Kata shim at $KATA_SHIM_PATH is not executable."
 [ -d "$KATA_CONFIG_DIR" ] || fail "Kata config directory not found at $KATA_CONFIG_DIR. Set MEMOH_KATA_CONFIG_DIR if your install uses another path."
+[ -f "$KATA_CONFIG_FILE" ] || fail "Kata configuration not found at $KATA_CONFIG_FILE. Set MEMOH_KATA_CONFIG_DIR to a directory containing configuration.toml."
 
 [ -d "$KATA_OPT_DIR" ] || fail "Kata opt directory not found at $KATA_OPT_DIR. Set MEMOH_KATA_OPT_DIR to an existing Kata directory used by your config."
 [ -d "$KATA_SHARE_DIR" ] || fail "Kata share directory not found at $KATA_SHARE_DIR. Set MEMOH_KATA_SHARE_DIR to an existing Kata directory used by your config."
@@ -86,6 +112,7 @@ fi
 echo "Kata dev host preflight passed:"
 echo "  MEMOH_KATA_SHIM_PATH=$KATA_SHIM_PATH"
 echo "  MEMOH_KATA_CONFIG_DIR=$KATA_CONFIG_DIR"
+echo "  MEMOH_KATA_CONFIG_FILE=$KATA_CONFIG_FILE"
 echo "  MEMOH_KATA_SHARE_DIR=$KATA_SHARE_DIR"
 echo "  MEMOH_KATA_OPT_DIR=$KATA_OPT_DIR"
 echo "  MEMOH_KATA_DEV_IMAGE=$KATA_DEV_IMAGE"
