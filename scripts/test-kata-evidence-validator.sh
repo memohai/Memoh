@@ -206,6 +206,7 @@ VALID_EVIDENCE_DIR="$TMPDIR/evidence-dir"
 STALE_EVIDENCE_DIR="$TMPDIR/stale-evidence-dir"
 RUNC_NO_KVM_RUN_DIR="$TMPDIR/runc-no-kvm-run-dir"
 KATA_NO_KVM_RUN_DIR="$TMPDIR/kata-no-kvm-run-dir"
+FAILURE_CONTEXT_DIR="$TMPDIR/failure-context-dir"
 RUNC_EVIDENCE_DIR="$TMPDIR/runc-evidence-dir"
 MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
 MISMATCH_EVIDENCE_DIR="$TMPDIR/mismatch-evidence-dir"
@@ -289,6 +290,27 @@ expect_failure "kata run bundle must require KVM evidence" \
   scripts/validate-kata-evidence-run-dir.sh \
   "$KATA_NO_KVM_RUN_DIR/kata-dev.json" \
   "$KATA_NO_KVM_RUN_DIR/kata-dev.smoke.json"
+
+fake_compose="$TMPDIR/fake-compose.sh"
+cat >"$fake_compose" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'fake compose command:'
+printf ' %s' "$@"
+printf '\n'
+EOF
+chmod +x "$fake_compose"
+scripts/write-kata-compose-failure-context.sh \
+  "$FAILURE_CONTEXT_DIR" \
+  42 \
+  1 \
+  "Test Kata failure" \
+  -- \
+  "$fake_compose" >/dev/null
+grep -q '^label=Test Kata failure$' "$FAILURE_CONTEXT_DIR/failure-context.txt" || { echo "ERROR: failure context missing label" >&2; exit 1; }
+grep -q '^status=42$' "$FAILURE_CONTEXT_DIR/failure-context.txt" || { echo "ERROR: failure context missing status" >&2; exit 1; }
+grep -q '^started=1$' "$FAILURE_CONTEXT_DIR/failure-context.txt" || { echo "ERROR: failure context missing started" >&2; exit 1; }
+grep -q 'fake compose command: logs --no-color --tail=300 migrate server' "$FAILURE_CONTEXT_DIR/compose-logs.txt" || { echo "ERROR: failure context missing compose logs" >&2; exit 1; }
 
 mkdir -p "$RUNC_EVIDENCE_DIR"
 write_environment_summary "$RUNC_EVIDENCE_DIR/environment.txt"

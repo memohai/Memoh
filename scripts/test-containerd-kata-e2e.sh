@@ -43,8 +43,17 @@ cleanup() {
 
 on_exit() {
   local status=$?
-  if [ "$status" -ne 0 ] && [ "$STARTED" = "1" ]; then
-    dump_logs
+  if [ "$status" -ne 0 ]; then
+    scripts/write-kata-compose-failure-context.sh \
+      "$EVIDENCE_RUN_DIR" \
+      "$status" \
+      "$STARTED" \
+      "Kata dev E2E" \
+      -- \
+      "${COMPOSE[@]}" || true
+    if [ "$STARTED" = "1" ]; then
+      dump_logs
+    fi
   fi
   cleanup
   exit "$status"

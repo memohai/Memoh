@@ -24,6 +24,7 @@ on:
       - "scripts/validate-kata-evidence-run-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
+      - "scripts/write-kata-compose-failure-context.sh"
       - "scripts/write-kata-evidence-environment.sh"
   pull_request:
     branches: ["main"]
@@ -48,6 +49,7 @@ on:
       - "scripts/validate-kata-evidence-run-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
+      - "scripts/write-kata-compose-failure-context.sh"
       - "scripts/write-kata-evidence-environment.sh"
   workflow_dispatch:
     inputs:
@@ -93,6 +95,7 @@ jobs:
             scripts/validate-kata-evidence-run-dir.sh \
             scripts/validate-kata-evidence.sh \
             scripts/verify-containerd-kata.sh \
+            scripts/write-kata-compose-failure-context.sh \
             scripts/write-kata-evidence-environment.sh
 
       - name: Validate evidence checks

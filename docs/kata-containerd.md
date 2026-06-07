@@ -98,6 +98,9 @@ one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check, plus
 `environment.txt` from `scripts/write-kata-evidence-environment.sh`. Set
 `MEMOH_KATA_EVIDENCE_DIR`, `MEMOH_VERIFY_EVIDENCE_FILE`, or
 `MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE` to choose another location.
+When an E2E task fails, it also writes `failure-context.txt` and, if the stack
+started, `compose-logs.txt` into the same evidence directory so the uploaded
+artifact contains the basic failure context.
 The evidence validator itself can be regression-tested locally with
 `mise run test:kata:evidence`. The running-stack verifier and both E2E tasks
 validate their own evidence bundles before reporting success; the GitHub
