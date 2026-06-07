@@ -1,8 +1,25 @@
 <template>
   <aside class="relative h-full">
+    <header
+      v-if="macTopInset"
+      class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) flex items-center pl-[78px] pr-2 gap-1 bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
+    >
+      <div class="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-6 text-muted-foreground hover:text-foreground shrink-0"
+          :aria-label="t('bots.createBot')"
+          @click="router.push('/settings/bots')"
+        >
+          <Plus class="size-3.5" />
+        </Button>
+      </div>
+    </header>
+
     <Sidebar
       :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
+      :class="macTopInset ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
     >
       <SidebarHeader
         v-if="!desktopShell"
@@ -119,6 +136,11 @@ const route = useRoute()
 const { t } = useI18n()
 const { toggleSidebar } = useSidebar()
 const desktopShell = inject(DesktopShellKey, false)
+const macTopInset = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
 const { sortBots } = usePinnedBots()
 
 const { data: botData, isLoading } = useQuery(getBotsQuery())

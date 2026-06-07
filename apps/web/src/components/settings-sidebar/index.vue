@@ -1,8 +1,13 @@
 <template>
   <aside class="relative h-full">
+    <header
+      v-if="macTopInset"
+      class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
+    />
+
     <Sidebar
       :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
+      :class="macTopInset ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
     >
       <SidebarHeader
         v-if="!hideHeader"
@@ -84,6 +89,11 @@ const props = withDefaults(defineProps<{
 })
 
 const desktopShell = inject(DesktopShellKey, false)
+const macTopInset = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
 
 const router = useRouter()
 const route = useRoute()
