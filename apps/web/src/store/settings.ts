@@ -4,11 +4,33 @@ import { defineStore } from 'pinia'
 import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
+import { isFontId, getFontById, type FontId } from '@/constants/fonts'
 
 export interface Settings {
   language: Locale;
   theme: 'light' | 'dark';
   colorScheme: ColorSchemeId;
+  fontFamily: FontId;
+}
+
+const loadedFontHrefs = new Set<string>()
+
+export function loadFontStylesheet(href: string) {
+  if (typeof document === 'undefined') return
+  if (loadedFontHrefs.has(href)) return
+  loadedFontHrefs.add(href)
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = href
+  document.head.appendChild(link)
+}
+
+function applyFontFamily(id: FontId) {
+  if (typeof document === 'undefined') return
+  const font = getFontById(id)
+  if (!font) return
+  if (font.href) loadFontStylesheet(font.href)
+  document.documentElement.style.setProperty('--font-sans', font.family)
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -18,6 +40,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const theme = useStorage<'light' | 'dark'>('theme',
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
+  const fontFamily = useStorage<FontId>('font-family', 'system')
 
   const applyColorScheme = (value: ColorSchemeId) => {
     if (typeof document === 'undefined') return
@@ -26,6 +49,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   if (!isColorSchemeId(colorScheme.value)) {
     colorScheme.value = 'memoh'
+  }
+
+  if (!isFontId(fontFamily.value)) {
+    fontFamily.value = 'system'
   }
 
   watch(theme, (value) => {
@@ -44,6 +71,14 @@ export const useSettingsStore = defineStore('settings', () => {
     applyColorScheme(value)
   }, { immediate: true })
 
+  watch(fontFamily, (value) => {
+    if (!isFontId(value)) {
+      fontFamily.value = 'system'
+      return
+    }
+    applyFontFamily(value)
+  }, { immediate: true })
+
   const setLanguage = (value: Locale) => {
     language.value = value
   }
@@ -58,8 +93,6 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const setTheme = (value: 'light' | 'dark') => {
     withViewTransition(() => {
-      // Toggle the class synchronously inside the callback so the View
-      // Transitions API captures the before/after states correctly.
       document.documentElement.classList.toggle('dark', value === 'dark')
       theme.value = value
     })
@@ -72,12 +105,19 @@ export const useSettingsStore = defineStore('settings', () => {
     })
   }
 
+  const setFontFamily = (value: FontId) => {
+    fontFamily.value = value
+    applyFontFamily(value)
+  }
+
   return {
     language,
     theme,
     colorScheme,
+    fontFamily,
     setLanguage,
     setTheme,
     setColorScheme,
+    setFontFamily,
   }
 })

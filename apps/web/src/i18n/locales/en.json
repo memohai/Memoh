@@ -170,6 +170,22 @@
         "forest": "Subtle green tones",
         "rose": "Warm accents and soft contrast",
         "amber": "Golden highlights with clear status indicators"
+      },
+      "fontFamily": "Font",
+      "fontFamilyDescription": "Switch fonts to preview how each one feels across the interface. The selected font is applied globally.",
+      "fontCjkUnified": "CJK unified",
+      "fontCjkSystem": "system CJK",
+      "fonts": {
+        "system": "System",
+        "noto-sans-sc": "Noto Sans SC",
+        "misans": "MiSans",
+        "harmony-sans": "HarmonyOS Sans",
+        "oppo-sans": "OPPO Sans",
+        "inter": "Inter",
+        "geist": "Geist",
+        "plus-jakarta-sans": "Plus Jakarta Sans",
+        "dm-sans": "DM Sans",
+        "outfit": "Outfit"
       }
     },
     "langZh": "中文",

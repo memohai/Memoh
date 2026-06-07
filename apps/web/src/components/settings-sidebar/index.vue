@@ -1,25 +1,29 @@
 <template>
-  <aside class="relative h-full">
+  <aside
+    class="relative h-full"
+    style="--sidebar-width: 17rem"
+  >
+    <!-- macTopInset drag overlay only when we own the header (hideHeader=false) -->
     <header
-      v-if="macTopInset"
+      v-if="macTopInset && !hideHeader"
       class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
     />
 
     <Sidebar
       :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="macTopInset ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
+      :class="(macTopInset && !hideHeader) ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
     >
       <SidebarHeader
         v-if="!hideHeader"
-        class="px-4 pt-2 pb-6 border-0"
+        class="px-2 pt-2 pb-5 border-0"
       >
         <SidebarMenu>
           <SidebarMenuItem>
             <Button
               variant="ghost"
               block
-              class="justify-start font-semibold group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
-              @click="router.push(backToChatRoute)"
+              class="justify-start font-[450] group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+              @click="router.push(_backToChatRoute)"
             >
               <ChevronLeft class="size-3.5 shrink-0" />
               <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
@@ -29,9 +33,10 @@
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup class="px-4 py-0">
+        <!-- Core group: no label -->
+        <SidebarGroup class="px-3 pt-3 pb-0">
           <SidebarGroupContent>
-            <SidebarMenu class="gap-2">
+            <SidebarMenu class="gap-0.5">
               <SidebarMenuItem
                 v-for="item in coreNavItems"
                 :key="item.name"
@@ -39,7 +44,7 @@
                 <Button
                   variant="ghost"
                   block
-                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
                   :class="isItemActive(item.name) && 'bg-sidebar-accent'"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
                   @click="router.push({ name: item.name })"
@@ -51,15 +56,16 @@
           </SidebarGroupContent>
         </SidebarGroup>
 
+        <!-- Integrations group -->
         <SidebarGroup
           v-if="integrationsNavItems.length"
-          class="px-4 pt-4 pb-0"
+          class="px-3 pt-4 pb-0"
         >
-          <SidebarGroupLabel class="group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="px-0! group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.integrations') }}
           </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu class="gap-2">
+          <SidebarGroupContent class="pt-1">
+            <SidebarMenu class="gap-0.5">
               <SidebarMenuItem
                 v-for="item in integrationsNavItems"
                 :key="item.name"
@@ -67,7 +73,7 @@
                 <Button
                   variant="ghost"
                   block
-                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
                   :class="isItemActive(item.name) && 'bg-sidebar-accent'"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
                   @click="router.push({ name: item.name })"
@@ -79,15 +85,16 @@
           </SidebarGroupContent>
         </SidebarGroup>
 
+        <!-- Account group -->
         <SidebarGroup
           v-if="accountNavItems.length"
-          class="px-4 pt-4 pb-0"
+          class="px-3 pt-4 pb-0"
         >
-          <SidebarGroupLabel class="group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="px-0! group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.account') }}
           </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu class="gap-2">
+          <SidebarGroupContent class="pt-1">
+            <SidebarMenu class="gap-0.5">
               <SidebarMenuItem
                 v-for="item in accountNavItems"
                 :key="item.name"
@@ -95,7 +102,7 @@
                 <Button
                   variant="ghost"
                   block
-                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
                   :class="isItemActive(item.name) && 'bg-sidebar-accent'"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
                   @click="router.push({ name: item.name })"
@@ -144,6 +151,8 @@ const props = withDefaults(defineProps<{
   excludeItems: () => [],
 })
 
+defineEmits<{ back: [] }>()
+
 const desktopShell = inject(DesktopShellKey, false)
 const macTopInset = computed(() =>
   desktopShell
@@ -161,14 +170,12 @@ const { bots } = storeToRefs(chatStore)
 const userStore = useUserStore()
 const { userInfo } = storeToRefs(userStore)
 
-const backToChatRoute = computed(() => {
+// kept for when hideHeader=false (sidebar is used standalone)
+const _backToChatRoute = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
   if (!botId) return { name: 'home' as const }
   const botName = bots.value.find((b) => b.id === botId)?.name ?? botId
-  return {
-    name: 'bot' as const,
-    params: { botName },
-  }
+  return { name: 'bot' as const, params: { botName } }
 })
 
 function isItemActive(name: string): boolean {
