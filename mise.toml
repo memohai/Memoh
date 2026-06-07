@@ -96,6 +96,15 @@ set -e
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml up --build
 """
 
+[tasks."dev:kata"]
+description = "Start Linux/KVM development environment with containerd Kata runtime"
+run = """
+#!/bin/bash
+set -euo pipefail
+scripts/check-kata-dev-env.sh
+docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml up --build
+"""
+
 [tasks."dev:down"]
 description = "Stop development environment"
 run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
@@ -111,6 +120,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml down --remove-o
 [tasks."dev:down:selinux"]
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
+
+[tasks."dev:down:kata"]
+description = "Stop Linux/KVM Kata development environment"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml down --remove-orphans"
 
 [tasks."dev:logs"]
 description = "View development logs"
@@ -128,6 +141,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml logs -f"
 description = "View development logs on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml logs -f"
 
+[tasks."dev:logs:kata"]
+description = "View Linux/KVM Kata development logs"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml logs -f"
+
 [tasks."dev:restart"]
 description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
@@ -143,6 +160,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml restart $@"
 [tasks."dev:restart:selinux"]
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
+
+[tasks."dev:restart:kata"]
+description = "Restart a service in the Linux/KVM Kata dev environment (usage: mise run dev:restart:kata -- server)"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml restart $@"
 
 [tasks."local:dev"]
 description = "Start the server locally with Docker and local workspaces enabled"

@@ -1,0 +1,28 @@
+# Linux/KVM override for validating Memoh workspace containers with Kata.
+#
+# Host prerequisites:
+# - /dev/kvm is available to Docker.
+# - Kata is installed on the host.
+# - MEMOH_KATA_SHIM_PATH points to containerd-shim-kata-v2.
+#   Default: /opt/kata/bin/containerd-shim-kata-v2
+#
+# Start:
+#   mise run dev:kata
+# Verify:
+#   mise run test:kata
+
+services:
+  migrate:
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
+
+  server:
+    environment:
+      CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}:/usr/local/bin/containerd-shim-kata-v2:ro
+      - ${MEMOH_KATA_CONFIG_DIR:-/etc/kata-containers}:/etc/kata-containers:ro
+      - ${MEMOH_KATA_SHARE_DIR:-/usr/share/kata-containers}:/usr/share/kata-containers:ro
+      - ${MEMOH_KATA_OPT_DIR:-/opt/kata}:/opt/kata:ro
