@@ -199,6 +199,10 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
   sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
+[tasks."test:kata"]
+description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
+run = "scripts/verify-containerd-kata.sh"
+
 [tasks.db-up]
 description = "Initialize and Migrate Database"
 run = "scripts/db-up.sh"
