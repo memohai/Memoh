@@ -21,6 +21,7 @@ on:
       - "scripts/test-kata-evidence-validator.sh"
       - "scripts/validate-containerd-smoke-evidence.sh"
       - "scripts/validate-kata-evidence-dir.sh"
+      - "scripts/validate-kata-evidence-run-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
       - "scripts/write-kata-evidence-environment.sh"
@@ -44,6 +45,7 @@ on:
       - "scripts/test-kata-evidence-validator.sh"
       - "scripts/validate-containerd-smoke-evidence.sh"
       - "scripts/validate-kata-evidence-dir.sh"
+      - "scripts/validate-kata-evidence-run-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
       - "scripts/write-kata-evidence-environment.sh"
@@ -88,6 +90,7 @@ jobs:
             scripts/test-kata-evidence-validator.sh \
             scripts/validate-containerd-smoke-evidence.sh \
             scripts/validate-kata-evidence-dir.sh \
+            scripts/validate-kata-evidence-run-dir.sh \
             scripts/validate-kata-evidence.sh \
             scripts/verify-containerd-kata.sh \
             scripts/write-kata-evidence-environment.sh

@@ -73,7 +73,10 @@ fi
 if [ -z "$SMOKE_EVIDENCE_FILE" ]; then
   SMOKE_EVIDENCE_FILE="${EVIDENCE_FILE%.json}.smoke.json"
 fi
-scripts/write-kata-evidence-environment.sh "$EVIDENCE_DIR"
+EVIDENCE_RUN_DIR="$(dirname "$EVIDENCE_FILE")"
+SMOKE_EVIDENCE_DIR="$(dirname "$SMOKE_EVIDENCE_FILE")"
+mkdir -p "$EVIDENCE_RUN_DIR" "$SMOKE_EVIDENCE_DIR"
+scripts/write-kata-evidence-environment.sh "$EVIDENCE_RUN_DIR"
 
 trap on_exit EXIT
 
@@ -95,6 +98,7 @@ MEMOH_VERIFY_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
 MEMOH_VERIFY_EVIDENCE_FILE="$EVIDENCE_FILE" \
   scripts/verify-containerd-kata.sh
 scripts/validate-kata-evidence.sh "$EVIDENCE_FILE"
+scripts/validate-kata-evidence-run-dir.sh "$EVIDENCE_FILE" "$SMOKE_EVIDENCE_FILE"
 
 echo "Kata E2E verification passed."
 echo "Kata E2E evidence: $EVIDENCE_FILE"

@@ -202,6 +202,7 @@ BROKEN_SMOKE_EVIDENCE="$TMPDIR/broken-smoke.json"
 SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
 CUSTOM_SMOKE_EVIDENCE="$TMPDIR/custom-smoke.json"
 VALID_EVIDENCE_DIR="$TMPDIR/evidence-dir"
+STALE_EVIDENCE_DIR="$TMPDIR/stale-evidence-dir"
 RUNC_EVIDENCE_DIR="$TMPDIR/runc-evidence-dir"
 MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
 MISMATCH_EVIDENCE_DIR="$TMPDIR/mismatch-evidence-dir"
@@ -258,6 +259,16 @@ cp "$KATA_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-compose.json"
 cp "$KATA_SMOKE_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-compose.smoke.json"
 MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=2 \
   scripts/validate-kata-evidence-dir.sh "$VALID_EVIDENCE_DIR" >/dev/null
+
+mkdir -p "$STALE_EVIDENCE_DIR"
+write_environment_summary "$STALE_EVIDENCE_DIR/environment.txt"
+cp "$KATA_EVIDENCE" "$STALE_EVIDENCE_DIR/kata-dev.json"
+cp "$KATA_SMOKE_EVIDENCE" "$STALE_EVIDENCE_DIR/kata-dev.smoke.json"
+cp "$RUNC_EVIDENCE" "$STALE_EVIDENCE_DIR/stale-runc.json"
+cp "$RUNC_SMOKE_EVIDENCE" "$STALE_EVIDENCE_DIR/stale-runc.smoke.json"
+scripts/validate-kata-evidence-run-dir.sh \
+  "$STALE_EVIDENCE_DIR/kata-dev.json" \
+  "$STALE_EVIDENCE_DIR/kata-dev.smoke.json" >/dev/null
 
 mkdir -p "$RUNC_EVIDENCE_DIR"
 write_environment_summary "$RUNC_EVIDENCE_DIR/environment.txt"

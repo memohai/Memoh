@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+API_EVIDENCE_FILE="${1:-}"
+SMOKE_EVIDENCE_FILE="${2:-}"
+
+usage() {
+  echo "usage: scripts/validate-kata-evidence-run-dir.sh <api-evidence.json> <smoke-evidence.json>" >&2
+}
+
+if [ -z "$API_EVIDENCE_FILE" ] || [ -z "$SMOKE_EVIDENCE_FILE" ]; then
+  usage
+  exit 1
+fi
+
+[ -f "$API_EVIDENCE_FILE" ] || { echo "ERROR: API evidence file not found: $API_EVIDENCE_FILE" >&2; exit 1; }
+[ -f "$SMOKE_EVIDENCE_FILE" ] || { echo "ERROR: smoke evidence file not found: $SMOKE_EVIDENCE_FILE" >&2; exit 1; }
+
+api_name="$(basename "$API_EVIDENCE_FILE")"
+case "$api_name" in
+  *.json)
+    ;;
+  *)
+    echo "ERROR: API evidence file must end with .json: $API_EVIDENCE_FILE" >&2
+    exit 1
+    ;;
+esac
+
+source_dir="$(dirname "$API_EVIDENCE_FILE")"
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-evidence-run.XXXXXX")"
+status=0
+
+cp "$API_EVIDENCE_FILE" "$tmpdir/$api_name"
+cp "$SMOKE_EVIDENCE_FILE" "$tmpdir/${api_name%.json}.smoke.json"
+if [ -f "$source_dir/environment.txt" ]; then
+  cp "$source_dir/environment.txt" "$tmpdir/environment.txt"
+fi
+
+MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=1 \
+  scripts/validate-kata-evidence-dir.sh "$tmpdir" || status=$?
+
+rm -rf "$tmpdir"
+exit "$status"
