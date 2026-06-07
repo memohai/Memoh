@@ -99,6 +99,24 @@ one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check. Set
 The evidence validator itself can be regression-tested locally with
 `mise run test:kata:evidence`.
 
+## GitHub Actions Test Environment
+
+The `Kata Runtime` workflow always runs static validation on GitHub-hosted
+Ubuntu. Real Kata verification is opt-in because it needs a self-hosted
+Linux/KVM runner with Docker, Docker Compose v2, Kata Containers, `curl`, and
+`jq` installed.
+
+Register the runner with these labels:
+
+```text
+self-hosted, linux, x64, kvm, kata
+```
+
+Then run the workflow manually and enable `run_kata_e2e`. The job executes
+`scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is enabled, it also
+executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload their
+API and smoke evidence JSON files as the `kata-evidence` artifact.
+
 For manual production deployment, copy and edit the Kata config first:
 
 ```bash

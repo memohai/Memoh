@@ -44,6 +44,17 @@ on:
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
   workflow_dispatch:
+    inputs:
+      run_kata_e2e:
+        description: "Run Linux/KVM Kata E2E on a self-hosted runner"
+        required: true
+        type: boolean
+        default: false
+      run_compose_e2e:
+        description: "Also run the production Compose Kata E2E"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -96,3 +107,34 @@ jobs:
 
       - name: Check server-kata Dockerfile target
         run: docker build --check --target server-kata -f docker/Dockerfile.server .
+
+  kata-e2e:
+    name: Linux/KVM E2E
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_kata_e2e }}
+    needs: static
+    runs-on: [self-hosted, linux, x64, kvm, kata]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Kata host prerequisites
+        run: scripts/check-kata-dev-env.sh
+
+      - name: Run dev Kata E2E
+        run: scripts/test-containerd-kata-e2e.sh
+        env:
+          MEMOH_KATA_EVIDENCE_DIR: tmp/kata-evidence
+
+      - name: Run production Compose Kata E2E
+        if: ${{ inputs.run_compose_e2e }}
+        run: scripts/test-containerd-kata-compose-e2e.sh
+        env:
+          MEMOH_KATA_EVIDENCE_DIR: tmp/kata-evidence
+
+      - name: Upload Kata evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kata-evidence
+          path: tmp/kata-evidence/*.json
+          if-no-files-found: warn
