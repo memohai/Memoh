@@ -37,6 +37,7 @@ cleanup() {
   run_ctr tasks kill "$CONTAINER_ID" >/dev/null 2>&1 || true
   run_ctr tasks rm "$CONTAINER_ID" >/dev/null 2>&1 || true
   run_ctr containers rm "$CONTAINER_ID" >/dev/null 2>&1 || true
+  run_ctr snapshots --snapshotter "$SNAPSHOTTER" rm "$CONTAINER_ID" >/dev/null 2>&1 || true
 }
 
 validate_bool MEMOH_CONTAINERD_SMOKE_PULL "$PULL_IMAGE"
@@ -52,15 +53,13 @@ echo "  snapshotter=$SNAPSHOTTER"
 run_ctr version >/dev/null
 
 if [ "$PULL_IMAGE" = "true" ]; then
-  if ! run_ctr images info "$IMAGE" >/dev/null 2>&1; then
-    pull_log="$(mktemp "${TMPDIR:-/tmp}/memoh-runtime-smoke-pull.XXXXXX")"
-    if ! run_ctr images pull --snapshotter "$SNAPSHOTTER" "$IMAGE" >"$pull_log" 2>&1; then
-      cat "$pull_log" >&2
-      rm -f "$pull_log"
-      exit 1
-    fi
+  pull_log="$(mktemp "${TMPDIR:-/tmp}/memoh-runtime-smoke-pull.XXXXXX")"
+  if ! run_ctr images pull --snapshotter "$SNAPSHOTTER" "$IMAGE" >"$pull_log" 2>&1; then
+    cat "$pull_log" >&2
     rm -f "$pull_log"
+    exit 1
   fi
+  rm -f "$pull_log"
 fi
 
 run_ctr run \
