@@ -1,6 +1,6 @@
 import { client } from '@memohai/sdk/client'
 import type { Options } from '@memohai/sdk'
-import type { BotsBot, PostBotsData } from '@memohai/sdk'
+import type { BotsBot, HandlersCreateContainerResponse, PostBotsData } from '@memohai/sdk'
 import type { ContainerCreateLayerStatus } from './useContainerStream'
 
 // codesync(bot-create-stream): keep these manual SSE payload types in sync
@@ -13,6 +13,7 @@ export type BotCreateStreamEvent =
   | { type: 'pull_delegated'; image: string; message?: string }
   | { type: 'creating' }
   | { type: 'restoring' }
+  | { type: 'complete'; container: HandlersCreateContainerResponse }
   | { type: 'ready'; bot: BotsBot }
   | { type: 'error'; message: string }
 
@@ -75,6 +76,8 @@ export function reduceBotCreateProgressEvent(
       return { ...state, progress: { phase: 'creating' } }
     case 'restoring':
       return { ...state, progress: { phase: 'restoring' } }
+    case 'complete':
+      return { ...state, progress: { phase: 'complete' } }
     case 'ready':
       return { ...state, bot: event.bot }
     case 'error':
@@ -161,6 +164,8 @@ function isBotCreateStreamEvent(value: unknown): value is BotCreateStreamEvent {
     case 'creating':
     case 'restoring':
       return true
+    case 'complete':
+      return !!event.container && typeof event.container === 'object'
     case 'error':
       return typeof event.message === 'string'
     default:

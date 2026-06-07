@@ -39,6 +39,15 @@ describe('useBotCreateProgressStore', () => {
       { type: 'pulling', image: 'img' },
       { type: 'pull_progress', layers: [{ ref: 'a', offset: 100, total: 100 }] },
       { type: 'creating' },
+      {
+        type: 'complete',
+        container: {
+          container_id: 'workspace-bot-1',
+          workspace_backend: 'container',
+          runtime_backend: 'io.containerd.kata.v2',
+          started: true,
+        },
+      },
       { type: 'ready', bot },
     ]))
 

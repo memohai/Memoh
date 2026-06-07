@@ -57,6 +57,15 @@ describe('useBotCreateStream', () => {
     async function* stream(): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
       yield { type: 'bot_created', bot }
       yield { type: 'creating' }
+      yield {
+        type: 'complete',
+        container: {
+          container_id: 'workspace-bot-1',
+          workspace_backend: 'container',
+          runtime_backend: 'io.containerd.kata.v2',
+          started: true,
+        },
+      }
       yield { type: 'ready', bot }
     }
 
@@ -65,7 +74,7 @@ describe('useBotCreateStream', () => {
       onEvent: event => seen.push(event.type),
     })
 
-    expect(seen).toEqual(['bot_created', 'creating', 'ready'])
+    expect(seen).toEqual(['bot_created', 'creating', 'complete', 'ready'])
   })
 
   it('ignores stream failures after ready', async () => {
