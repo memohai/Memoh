@@ -4,7 +4,7 @@ import {
   Badge,
   Button,
   ButtonGroup, ButtonGroupSeparator, ButtonGroupText,
-  Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+  Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
   Table, TableBody, TableCaption, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
@@ -28,34 +28,23 @@ const invoices = [
     description="Cards, items, tables, and grouped controls."
   >
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Specimen label="<Card>">
-        <Card class="w-full max-w-sm">
+      <Specimen
+        label="<Card>"
+        note="an inline surface that lives in the page (settings sections, dashboards, detail panes) — not a popup. it shares Dialog's surface: same bg-card, same rounded-xl, same header/content/footer anatomy. a Dialog is essentially this Card lifted onto a backdrop. use Card for persistent content, Dialog for transient decisions."
+      >
+        <Card class="w-full max-w-sm gap-4">
           <CardHeader>
-            <CardTitle>Card title</CardTitle>
-            <CardDescription>Card description text.</CardDescription>
-            <CardAction>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-              >
-                <Star />
-              </Button>
-            </CardAction>
+            <CardTitle>Workspace name</CardTitle>
+            <CardDescription>Used across the dashboard and CLI</CardDescription>
           </CardHeader>
-          <CardContent class="text-sm text-muted-foreground">
-            Main card body content.
+          <CardContent class="text-control text-muted-foreground">
+            Pick a short, recognizable name. You can change it at any time.
           </CardContent>
-          <CardFooter class="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-            >
+          <CardFooter class="justify-end gap-2">
+            <Button variant="outline">
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-            >
+            <Button variant="primary">
               Save
             </Button>
           </CardFooter>
