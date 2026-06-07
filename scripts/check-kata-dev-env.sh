@@ -52,8 +52,11 @@ check_container_shim() {
   "${docker_args[@]}" "$KATA_DEV_IMAGE" -lc '
 set -euo pipefail
 config=/etc/kata-containers/configuration.toml
-test -x /usr/local/bin/containerd-shim-kata-v2
-test -f "$config"
+[ -x /usr/local/bin/containerd-shim-kata-v2 ] || { echo "ERROR: Kata shim is not executable inside the dev server image." >&2; exit 1; }
+[ -f "$config" ] || { echo "ERROR: $config is missing inside the dev server image." >&2; exit 1; }
+[ -e /dev/kvm ] || { echo "ERROR: /dev/kvm is missing inside the dev server image." >&2; exit 1; }
+[ -r /dev/kvm ] || { echo "ERROR: /dev/kvm is not readable inside the dev server image." >&2; exit 1; }
+[ -w /dev/kvm ] || { echo "ERROR: /dev/kvm is not writable inside the dev server image." >&2; exit 1; }
 set +e
 output="$(/usr/local/bin/containerd-shim-kata-v2 --version 2>&1)"
 status=$?
