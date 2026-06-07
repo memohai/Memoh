@@ -10,6 +10,9 @@ EXPECTED_WORKSPACE_BACKEND="${MEMOH_VERIFY_EXPECTED_WORKSPACE_BACKEND:-container
 EXPECTED_STORAGE_HARD_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT:-false}"
 EXPECTED_STORAGE_SOFT_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT:-true}"
 VERIFY_DATA_PRESERVATION="${MEMOH_VERIFY_DATA_PRESERVATION:-true}"
+VERIFY_CONTAINERD_RUNTIME="${MEMOH_VERIFY_CONTAINERD_RUNTIME:-false}"
+VERIFY_CTR_COMMAND="${MEMOH_VERIFY_CTR_COMMAND:-ctr}"
+VERIFY_CTR_NAMESPACE="${MEMOH_VERIFY_CONTAINERD_NAMESPACE:-default}"
 CPU_MILLICORES="${MEMOH_VERIFY_CPU_MILLICORES:-500}"
 MEMORY_BYTES="${MEMOH_VERIFY_MEMORY_BYTES:-134217728}"
 STORAGE_BYTES="${MEMOH_VERIFY_STORAGE_BYTES:-33554432}"
@@ -92,6 +95,42 @@ assert_file_content() {
   fi
 }
 
+quote_shell() {
+  printf "%q" "$1"
+}
+
+verify_containerd_runtime() {
+  local container_id="$1"
+  local out_file="$2"
+  local cmd
+
+  if [ "$VERIFY_CONTAINERD_RUNTIME" != "true" ]; then
+    return 0
+  fi
+  if [ -z "$container_id" ]; then
+    echo "ERROR: cannot verify containerd runtime without a container id" >&2
+    exit 1
+  fi
+
+  cmd="$VERIFY_CTR_COMMAND -n $(quote_shell "$VERIFY_CTR_NAMESPACE") containers info $(quote_shell "$container_id")"
+  echo "Verifying containerd runtime with: $cmd"
+  if ! bash -lc "$cmd" >"$out_file"; then
+    echo "ERROR: failed to read containerd container info for $container_id" >&2
+    exit 1
+  fi
+  assert_json "$out_file" ".ID == \"$container_id\"" "containerd container id must be $container_id"
+  assert_json "$out_file" ".Runtime.Name == \"$EXPECTED_RUNTIME\"" "containerd runtime must be $EXPECTED_RUNTIME"
+}
+
+fetch_container_info() {
+  local out_file="$1"
+  curl_json "$BASE_URL/bots/$BOT_ID/container" \
+    -H "Authorization: Bearer $TOKEN" \
+    >"$out_file"
+  assert_json "$out_file" ".container_id | length > 0" "container info must include container_id"
+  assert_json "$out_file" ".workspace_backend == \"$EXPECTED_WORKSPACE_BACKEND\"" "container workspace backend must be $EXPECTED_WORKSPACE_BACKEND"
+}
+
 validate_bool() {
   case "$2" in
     true|false)
@@ -126,6 +165,7 @@ require_cmd jq
 validate_bool MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT "$EXPECTED_STORAGE_HARD_LIMIT"
 validate_bool MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT "$EXPECTED_STORAGE_SOFT_LIMIT"
 validate_bool MEMOH_VERIFY_DATA_PRESERVATION "$VERIFY_DATA_PRESERVATION"
+validate_bool MEMOH_VERIFY_CONTAINERD_RUNTIME "$VERIFY_CONTAINERD_RUNTIME"
 
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-verify.XXXXXX")"
 TOKEN=""
@@ -147,6 +187,11 @@ echo "  expected_backend=$EXPECTED_BACKEND"
 echo "  expected_workspace_backend=$EXPECTED_WORKSPACE_BACKEND"
 echo "  expected_runtime=$EXPECTED_RUNTIME"
 echo "  verify_data_preservation=$VERIFY_DATA_PRESERVATION"
+echo "  verify_containerd_runtime=$VERIFY_CONTAINERD_RUNTIME"
+if [ "$VERIFY_CONTAINERD_RUNTIME" = "true" ]; then
+  echo "  ctr_command=$VERIFY_CTR_COMMAND"
+  echo "  ctr_namespace=$VERIFY_CTR_NAMESPACE"
+fi
 check_server_ready
 
 echo "Logging in to $BASE_URL as $USERNAME..."
@@ -179,6 +224,10 @@ if ! read_sse_payloads "$CREATE_STREAM" | jq -e 'select(.type == "ready")' >/dev
   exit 1
 fi
 
+CONTAINER_INFO_JSON="$TMPDIR/container.initial.json"
+fetch_container_info "$CONTAINER_INFO_JSON"
+CONTAINER_ID="$(json_field '.container_id' "$CONTAINER_INFO_JSON")"
+
 SENTINEL_PATH="/data/$BOT_NAME.txt"
 SENTINEL_CONTENT="memoh kata data preservation $BOT_ID"
 
@@ -197,6 +246,7 @@ assert_json "$METRICS_JSON" ".resource_limits.capabilities.cpu.hard_limit_suppor
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.memory.hard_limit_supported == true" "memory hard limit must be supported"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability must be $EXPECTED_STORAGE_HARD_LIMIT"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability must be $EXPECTED_STORAGE_SOFT_LIMIT"
+verify_containerd_runtime "$CONTAINER_ID" "$TMPDIR/ctr.initial.json"
 
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   WRITE_JSON="$TMPDIR/fs.write.json"
@@ -274,6 +324,10 @@ assert_json "$FINAL_METRICS_JSON" 'if .resource_limits.desired.storage_bytes > 0
 if [ "$EXPECTED_STORAGE_HARD_LIMIT" = "true" ]; then
   assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.storage_bytes == $STORAGE_BYTES" "storage limit was not applied"
 fi
+FINAL_CONTAINER_INFO_JSON="$TMPDIR/container.final.json"
+fetch_container_info "$FINAL_CONTAINER_INFO_JSON"
+FINAL_CONTAINER_ID="$(json_field '.container_id' "$FINAL_CONTAINER_INFO_JSON")"
+verify_containerd_runtime "$FINAL_CONTAINER_ID" "$TMPDIR/ctr.final.json"
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   RESTORED_READ_JSON="$TMPDIR/fs.read.restored.json"
   curl_json --get "$BASE_URL/bots/$BOT_ID/container/fs/read" \
