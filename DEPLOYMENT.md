@@ -61,12 +61,19 @@ MEMOH_CONFIG=./config.kata.toml \
   docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build -d
 ```
 
-For a full host, container, runtime, API, resource-limit, and data-restore
-verification run on a dedicated Linux/KVM test host:
+Before using this path for production, run the full host, container, runtime,
+API, resource-limit, and data-restore verification on a dedicated clean
+Linux/KVM test host:
 
 ```bash
 mise run test:kata:compose:e2e
 ```
+
+The E2E task starts and tears down the root Compose stack itself. It refuses to
+run if root Compose containers such as `memoh-server` or `memoh-postgres`
+already exist, so run it before starting a manual production stack. For an
+already-running stack, use the manual production verification commands in the
+Kata runtime guide.
 
 See [docs/kata-containerd.md](docs/kata-containerd.md) for host requirements,
 custom Kata paths, dev validation, production verification, and the exact
