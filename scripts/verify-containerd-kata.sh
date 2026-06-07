@@ -81,6 +81,15 @@ assert_sse_data_restored() {
   fi
 }
 
+assert_sse_complete_runtime_backend() {
+  local file="$1"
+  if ! read_sse_payloads "$file" | jq -e "select(.type == \"complete\") | .container.runtime_backend == \"$EXPECTED_RUNTIME\" and .container.workspace_backend == \"$EXPECTED_WORKSPACE_BACKEND\"" >/dev/null; then
+    echo "ERROR: container recreate complete event did not report the expected runtime backend" >&2
+    read_sse_payloads "$file" | jq . >&2
+    exit 1
+  fi
+}
+
 assert_file_content() {
   local file="$1"
   local expected="$2"
@@ -170,6 +179,7 @@ write_evidence() {
     --argjson data_restored "$DATA_RESTORED" \
     --argjson container_deleted_before_recreate "$CONTAINER_DELETED_BEFORE_RECREATE" \
     --argjson recreate_stream_completed "$RECREATE_STREAM_COMPLETED" \
+    --argjson recreate_runtime_backend_reported "$RECREATE_RUNTIME_BACKEND_REPORTED" \
     --argjson cpu_millicores "$CPU_MILLICORES" \
     --argjson memory_bytes "$MEMORY_BYTES" \
     --argjson storage_bytes "$STORAGE_BYTES" \
@@ -228,6 +238,7 @@ write_evidence() {
         storage_soft_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.soft_limit_supported,
         container_deleted_before_recreate: $container_deleted_before_recreate,
         recreate_stream_completed: $recreate_stream_completed,
+        recreate_runtime_backend_reported: $recreate_runtime_backend_reported,
         data_preservation_checked: $verify_data_preservation,
         data_restored: (if $verify_data_preservation then $data_restored else null end)
       },
@@ -299,6 +310,7 @@ PRESERVED_DATA_CREATED=0
 DATA_RESTORED=false
 CONTAINER_DELETED_BEFORE_RECREATE=false
 RECREATE_STREAM_COMPLETED=false
+RECREATE_RUNTIME_BACKEND_REPORTED=false
 trap cleanup EXIT
 
 if [[ "$EXPECTED_RUNTIME" == *kata* ]]; then
@@ -438,6 +450,8 @@ if ! read_sse_payloads "$RECREATE_STREAM" | jq -e 'select(.type == "complete")' 
   exit 1
 fi
 RECREATE_STREAM_COMPLETED=true
+assert_sse_complete_runtime_backend "$RECREATE_STREAM"
+RECREATE_RUNTIME_BACKEND_REPORTED=true
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   assert_sse_data_restored "$RECREATE_STREAM"
   DATA_RESTORED=true

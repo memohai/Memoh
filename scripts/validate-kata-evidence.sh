@@ -82,6 +82,7 @@ assert_evidence ".checks.storage_hard_limit_supported == $EXPECTED_STORAGE_HARD_
 assert_evidence ".checks.storage_soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft-limit support must be $EXPECTED_STORAGE_SOFT_LIMIT"
 assert_evidence ".checks.container_deleted_before_recreate == true" "container must be deleted before recreate"
 assert_evidence ".checks.recreate_stream_completed == true" "container recreate stream must complete"
+assert_evidence ".checks.recreate_runtime_backend_reported == true" "container recreate stream must report runtime backend"
 
 if [ "$EXPECTED_CTR_RUNTIME" = "true" ]; then
   assert_evidence ".target.verify_containerd_runtime == true" "containerd runtime verification must be enabled"
