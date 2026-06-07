@@ -2,6 +2,7 @@
 // Wall toolbar: theme + color-scheme switching (reusing the app's settings
 // store, zero new state). Flipping either restyles every specimen and swatch
 // live.
+import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Moon, Sun, Palette } from 'lucide-vue-next'
 import {
@@ -14,21 +15,35 @@ import {
 } from '@memohai/ui'
 import { useSettingsStore } from '@/store/settings'
 import { colorSchemes, type ColorSchemeId } from '@/constants/color-schemes'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 
 const settings = useSettingsStore()
 const { theme, colorScheme } = storeToRefs(settings)
 const { setTheme, setColorScheme } = settings
+
+// In the Electron desktop shell the titlebar is hidden, so this toolbar is the
+// only chrome at the top of the window. Make its empty space a drag handle and
+// clear the macOS traffic lights so they don't overlap the brand label.
+const desktopShell = inject(DesktopShellKey, false)
+const macTopInset = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
 </script>
 
 <template>
-  <header class="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-border bg-background/90 px-4 py-2.5 backdrop-blur">
+  <header
+    class="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-border bg-background/90 px-4 py-2.5 backdrop-blur [-webkit-app-region:drag]"
+    :class="macTopInset ? 'pl-[84px]' : ''"
+  >
     <div class="flex items-center gap-1.5">
       <Palette class="size-4 text-brand" />
       <span class="text-sm font-semibold">Component Wall</span>
       <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">dev</span>
     </div>
 
-    <div class="ml-auto flex flex-wrap items-center gap-2">
+    <div class="ml-auto flex flex-wrap items-center gap-2 [-webkit-app-region:no-drag]">
       <!-- Theme -->
       <div class="flex items-center gap-1 rounded-lg border border-border p-0.5">
         <Button

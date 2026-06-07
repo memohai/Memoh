@@ -2,7 +2,7 @@
   <div class="flex items-center h-12 shrink-0 border-b border-border bg-background gap-1 [-webkit-app-region:drag]">
     <div
       ref="tabsContainerRef"
-      class="flex items-center h-full flex-1  min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap [-webkit-app-region:no-drag]"
+      class="flex items-center h-full flex-1  min-w-0 px-1.5 pt-1 pb-1 gap-1 overflow-x-auto overflow-y-hidden whitespace-nowrap"
     >
       <button
         v-for="tab in tabs"
