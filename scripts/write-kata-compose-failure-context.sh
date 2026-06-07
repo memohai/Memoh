@@ -10,6 +10,14 @@ usage() {
   echo "usage: scripts/write-kata-compose-failure-context.sh <evidence-dir> <status> <started> <label> -- <compose-command...>" >&2
 }
 
+redact_sensitive() {
+  sed -E \
+    -e 's/([Pp]assword[[:space:]]*[:=][[:space:]]*)[^[:space:],;]+/\1[redacted]/g' \
+    -e 's/([Jj][Ww][Tt][-_ ]?[Ss]ecret[[:space:]]*[:=][[:space:]]*)[^[:space:],;]+/\1[redacted]/g' \
+    -e 's/([Aa]uthorization[[:space:]]*[:=][[:space:]]*)[Bb]earer[[:space:]]+[A-Za-z0-9._-]+/\1Bearer [redacted]/g' \
+    -e 's/[Bb]earer[[:space:]]+[A-Za-z0-9._-]+/Bearer [redacted]/g'
+}
+
 if [ -z "$EVIDENCE_DIR" ] || [ -z "$STATUS" ] || [ -z "$STARTED" ]; then
   usage
   exit 1
@@ -31,6 +39,7 @@ fi
 mkdir -p "$EVIDENCE_DIR"
 context_file="$EVIDENCE_DIR/failure-context.txt"
 logs_file="$EVIDENCE_DIR/compose-logs.txt"
+logs_tmp="$logs_file.tmp"
 
 {
   printf 'label=%s\n' "$LABEL"
@@ -44,7 +53,9 @@ logs_file="$EVIDENCE_DIR/compose-logs.txt"
 
 case "$STARTED" in
   1|true)
-    "$@" logs --no-color --tail="${MEMOH_KATA_FAILURE_LOG_TAIL:-300}" migrate server >"$logs_file" 2>&1 || true
+    "$@" logs --no-color --tail="${MEMOH_KATA_FAILURE_LOG_TAIL:-300}" migrate server >"$logs_tmp" 2>&1 || true
+    redact_sensitive <"$logs_tmp" >"$logs_file"
+    rm -f "$logs_tmp"
     ;;
 esac
 

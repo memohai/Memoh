@@ -100,7 +100,8 @@ one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check, plus
 `MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE` to choose another location.
 When an E2E task fails, it also writes `failure-context.txt` and, if the stack
 started, `compose-logs.txt` into the same evidence directory so the uploaded
-artifact contains the basic failure context.
+artifact contains the basic failure context. The compose logs are redacted for
+common password, JWT secret, and bearer-token patterns before they are saved.
 The evidence validator itself can be regression-tested locally with
 `mise run test:kata:evidence`. The running-stack verifier and both E2E tasks
 validate their own evidence bundles before reporting success; the GitHub

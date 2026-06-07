@@ -298,6 +298,7 @@ set -euo pipefail
 printf 'fake compose command:'
 printf ' %s' "$@"
 printf '\n'
+printf 'password=admin123 jwt_secret=devsecret Authorization: Bearer abc.def.ghi\n'
 EOF
 chmod +x "$fake_compose"
 scripts/write-kata-compose-failure-context.sh \
@@ -311,6 +312,13 @@ grep -q '^label=Test Kata failure$' "$FAILURE_CONTEXT_DIR/failure-context.txt" |
 grep -q '^status=42$' "$FAILURE_CONTEXT_DIR/failure-context.txt" || { echo "ERROR: failure context missing status" >&2; exit 1; }
 grep -q '^started=1$' "$FAILURE_CONTEXT_DIR/failure-context.txt" || { echo "ERROR: failure context missing started" >&2; exit 1; }
 grep -q 'fake compose command: logs --no-color --tail=300 migrate server' "$FAILURE_CONTEXT_DIR/compose-logs.txt" || { echo "ERROR: failure context missing compose logs" >&2; exit 1; }
+grep -q 'password=\[redacted\]' "$FAILURE_CONTEXT_DIR/compose-logs.txt" || { echo "ERROR: failure logs did not redact password" >&2; exit 1; }
+grep -q 'jwt_secret=\[redacted\]' "$FAILURE_CONTEXT_DIR/compose-logs.txt" || { echo "ERROR: failure logs did not redact jwt_secret" >&2; exit 1; }
+grep -q 'Authorization: Bearer \[redacted\]' "$FAILURE_CONTEXT_DIR/compose-logs.txt" || { echo "ERROR: failure logs did not redact bearer token" >&2; exit 1; }
+if grep -Eq '(admin123|devsecret|abc\.def\.ghi)' "$FAILURE_CONTEXT_DIR/compose-logs.txt"; then
+  echo "ERROR: failure logs contain unredacted sensitive text" >&2
+  exit 1
+fi
 
 mkdir -p "$RUNC_EVIDENCE_DIR"
 write_environment_summary "$RUNC_EVIDENCE_DIR/environment.txt"
