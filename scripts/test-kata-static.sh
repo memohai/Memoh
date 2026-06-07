@@ -61,9 +61,11 @@ grep -F 'kata-static:' .github/workflows/docker.yml
 grep -F 'needs.detect-changes.outputs.kata' .github/workflows/docker.yml
 grep -F "'scripts/audit-kata-github-verification.sh'" .github/workflows/docker.yml
 grep -F "'scripts/check-kata-runner-ready.sh'" .github/workflows/docker.yml
+grep -F "'scripts/diagnose-kata-dev-stack.sh'" .github/workflows/docker.yml
 grep -F "'scripts/prepare-kata-github-runner.sh'" .github/workflows/docker.yml
 grep -F "'scripts/run-kata-github-e2e.sh'" .github/workflows/docker.yml
 grep -F "'scripts/validate-kata-runner-readiness.sh'" .github/workflows/docker.yml
+grep -F '"scripts/diagnose-kata-dev-stack.sh"' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/docker.yml
 grep -F 'scripts/audit-kata-github-verification.sh' docs/kata-containerd.md
 grep -F 'scripts/prepare-kata-github-runner.sh' docs/kata-containerd.md
@@ -76,6 +78,26 @@ grep -F 'check_runner_capabilities()' scripts/prepare-kata-github-runner.sh
 grep -F 'runner host must be x86_64/amd64' scripts/prepare-kata-github-runner.sh
 grep -F 'do not register this host with the kvm label' scripts/prepare-kata-github-runner.sh
 grep -F 'Kata uses container_backend=containerd' scripts/diagnose-kata-dev-stack.sh
+
+if awk '
+  /^  kata-static:/ { in_job = 1; next }
+  in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 }
+  in_job && /docker\/setup-buildx-action@v3/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' .github/workflows/docker.yml; then
+  echo "ERROR: Docker workflow kata-static job should not depend on docker/setup-buildx-action." >&2
+  exit 1
+fi
+
+if awk '
+  /^  static:/ { in_job = 1; next }
+  in_job && /^  [A-Za-z0-9_-]+:/ { in_job = 0 }
+  in_job && /docker\/setup-buildx-action@v3/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' .github/workflows/kata-runtime.yml; then
+  echo "ERROR: Kata Runtime static job should not depend on docker/setup-buildx-action." >&2
+  exit 1
+fi
 
 echo "Validating containerd runtime wiring..."
 if ! awk '

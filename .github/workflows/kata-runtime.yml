@@ -15,6 +15,7 @@ on:
       - "mise.toml"
       - "scripts/audit-kata-github-verification.sh"
       - "scripts/check-kata-dev-env.sh"
+      - "scripts/diagnose-kata-dev-stack.sh"
       - "scripts/prepare-kata-github-runner.sh"
       - "scripts/run-kata-github-e2e.sh"
       - "scripts/smoke-containerd-runtime.sh"
@@ -46,6 +47,7 @@ on:
       - "mise.toml"
       - "scripts/audit-kata-github-verification.sh"
       - "scripts/check-kata-dev-env.sh"
+      - "scripts/diagnose-kata-dev-stack.sh"
       - "scripts/prepare-kata-github-runner.sh"
       - "scripts/run-kata-github-e2e.sh"
       - "scripts/smoke-containerd-runtime.sh"
@@ -95,8 +97,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
 
       - name: Run Kata static validation
         run: scripts/test-kata-static.sh
