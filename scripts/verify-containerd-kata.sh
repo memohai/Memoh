@@ -5,6 +5,10 @@ BASE_URL="${MEMOH_VERIFY_BASE_URL:-http://127.0.0.1:${MEMOH_DEV_SERVER_PORT:-180
 USERNAME="${MEMOH_VERIFY_ADMIN_USERNAME:-admin}"
 PASSWORD="${MEMOH_VERIFY_ADMIN_PASSWORD:-admin123}"
 EXPECTED_RUNTIME="${MEMOH_VERIFY_EXPECTED_RUNTIME:-io.containerd.kata.v2}"
+EXPECTED_BACKEND="${MEMOH_VERIFY_EXPECTED_BACKEND:-containerd}"
+EXPECTED_WORKSPACE_BACKEND="${MEMOH_VERIFY_EXPECTED_WORKSPACE_BACKEND:-container}"
+EXPECTED_STORAGE_HARD_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT:-false}"
+EXPECTED_STORAGE_SOFT_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT:-true}"
 CPU_MILLICORES="${MEMOH_VERIFY_CPU_MILLICORES:-500}"
 MEMORY_BYTES="${MEMOH_VERIFY_MEMORY_BYTES:-134217728}"
 STORAGE_BYTES="${MEMOH_VERIFY_STORAGE_BYTES:-33554432}"
@@ -50,6 +54,17 @@ assert_no_sse_error() {
   fi
 }
 
+validate_bool() {
+  case "$2" in
+    true|false)
+      ;;
+    *)
+      echo "ERROR: $1 must be true or false, got: $2" >&2
+      exit 1
+      ;;
+  esac
+}
+
 cleanup() {
   if [ -n "${BOT_ID:-}" ]; then
     curl -fsS -X DELETE "$BASE_URL/bots/$BOT_ID/container?preserve_data=false" \
@@ -62,6 +77,8 @@ cleanup() {
 
 require_cmd curl
 require_cmd jq
+validate_bool MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT "$EXPECTED_STORAGE_HARD_LIMIT"
+validate_bool MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT "$EXPECTED_STORAGE_SOFT_LIMIT"
 
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-verify.XXXXXX")"
 TOKEN=""
@@ -111,13 +128,16 @@ curl_json "$BASE_URL/bots/$BOT_ID/container/metrics" \
   -H "Authorization: Bearer $TOKEN" \
   >"$METRICS_JSON"
 assert_json "$METRICS_JSON" ".supported == true" "container metrics must be supported"
+assert_json "$METRICS_JSON" ".backend == \"$EXPECTED_BACKEND\"" "metrics backend must be $EXPECTED_BACKEND"
 assert_json "$METRICS_JSON" ".status.exists == true" "container must exist"
 assert_json "$METRICS_JSON" ".status.task_running == true" "container task must be running"
+assert_json "$METRICS_JSON" ".resource_limits.backend == \"$EXPECTED_BACKEND\"" "resource limit backend must be $EXPECTED_BACKEND"
+assert_json "$METRICS_JSON" ".resource_limits.workspace_backend == \"$EXPECTED_WORKSPACE_BACKEND\"" "workspace backend must be $EXPECTED_WORKSPACE_BACKEND"
 assert_json "$METRICS_JSON" ".resource_limits.runtime_backend == \"$EXPECTED_RUNTIME\"" "runtime_backend must be $EXPECTED_RUNTIME"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.cpu.hard_limit_supported == true" "CPU hard limit must be supported"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.memory.hard_limit_supported == true" "memory hard limit must be supported"
-assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == false" "storage hard limit must remain disabled"
-assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == true" "storage soft limit must remain supported"
+assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability must be $EXPECTED_STORAGE_HARD_LIMIT"
+assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability must be $EXPECTED_STORAGE_SOFT_LIMIT"
 
 echo "Applying resource limits and recreating the workspace..."
 UPDATE_JSON="$TMPDIR/metrics.update.json"
@@ -160,7 +180,11 @@ assert_json "$FINAL_METRICS_JSON" ".resource_limits.status == \"applied\"" "reso
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.cpu_millicores == $CPU_MILLICORES" "CPU limit was not applied"
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.memory_bytes == $MEMORY_BYTES" "memory limit was not applied"
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.desired.storage_bytes == $STORAGE_BYTES" "storage soft limit was not preserved"
-assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == false" "storage hard limit must remain disabled after recreate"
+assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability changed after recreate"
+assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability changed after recreate"
+if [ "$EXPECTED_STORAGE_HARD_LIMIT" = "true" ]; then
+  assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.storage_bytes == $STORAGE_BYTES" "storage limit was not applied"
+fi
 
 echo "Verified $EXPECTED_RUNTIME workspace runtime for bot $BOT_ID."
 echo "Final resource limit state:"

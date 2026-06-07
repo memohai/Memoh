@@ -102,6 +102,8 @@ run = """
 #!/bin/bash
 set -euo pipefail
 scripts/check-kata-dev-env.sh
+docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml build migrate server
+MEMOH_KATA_CHECK_CONTAINER=1 scripts/check-kata-dev-env.sh
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml up --build
 """
 
