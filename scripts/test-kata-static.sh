@@ -32,6 +32,16 @@ bash -n \
 echo "Validating Kata evidence checks..."
 scripts/test-kata-evidence-validator.sh
 
+echo "Validating Kata workflow wiring..."
+grep -F 'name: Kata Runtime' .github/workflows/kata-runtime.yml
+grep -F 'run_kata_e2e:' .github/workflows/kata-runtime.yml
+grep -F 'runs-on: [self-hosted, linux, x64, kvm, kata]' .github/workflows/kata-runtime.yml
+grep -F 'run: scripts/test-kata-static.sh' .github/workflows/kata-runtime.yml
+grep -F 'run: scripts/test-containerd-kata-e2e.sh' .github/workflows/kata-runtime.yml
+grep -F 'run: scripts/test-containerd-kata-compose-e2e.sh' .github/workflows/kata-runtime.yml
+grep -F 'scripts/validate-kata-evidence-dir.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
+grep -F 'uses: actions/upload-artifact@v4' .github/workflows/kata-runtime.yml
+
 echo "Validating Kata config templates..."
 grep -F 'backend = "containerd"' devenv/app.kata.dev.toml
 grep -F 'runtime_type = "io.containerd.kata.v2"' devenv/app.kata.dev.toml
