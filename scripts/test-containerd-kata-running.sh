@@ -21,6 +21,7 @@ fi
 if [ -z "$SMOKE_EVIDENCE_FILE" ]; then
   SMOKE_EVIDENCE_FILE="${EVIDENCE_FILE%.json}.smoke.json"
 fi
+scripts/write-kata-evidence-environment.sh "$(dirname "$EVIDENCE_FILE")"
 
 echo "Running containerd runtime verification against an existing Memoh stack:"
 echo "  base_url=$BASE_URL"

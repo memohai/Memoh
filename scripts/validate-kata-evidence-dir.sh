@@ -99,10 +99,12 @@ for api_file in "${api_files[@]}"; do
   smoke_file="${api_file%.json}.smoke.json"
   [ -f "$smoke_file" ] || { echo "ERROR: missing paired smoke evidence for $api_file" >&2; exit 1; }
 
-  scripts/validate-kata-evidence.sh "$api_file" >/dev/null
-  scripts/validate-containerd-smoke-evidence.sh "$smoke_file" >/dev/null
-
   api_runtime="$(jq -er '.target.expected_runtime' "$api_file")"
+  MEMOH_KATA_EVIDENCE_EXPECTED_RUNTIME="$api_runtime" \
+    scripts/validate-kata-evidence.sh "$api_file" >/dev/null
+  MEMOH_CONTAINERD_SMOKE_EVIDENCE_EXPECTED_RUNTIME="$api_runtime" \
+    scripts/validate-containerd-smoke-evidence.sh "$smoke_file" >/dev/null
+
   smoke_runtime="$(jq -er '.target.runtime' "$smoke_file")"
   if [ "$api_runtime" != "$smoke_runtime" ]; then
     echo "ERROR: runtime mismatch between $api_file and $smoke_file: $api_runtime != $smoke_runtime" >&2

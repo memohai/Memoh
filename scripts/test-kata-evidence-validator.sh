@@ -202,7 +202,9 @@ BROKEN_SMOKE_EVIDENCE="$TMPDIR/broken-smoke.json"
 SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
 CUSTOM_SMOKE_EVIDENCE="$TMPDIR/custom-smoke.json"
 VALID_EVIDENCE_DIR="$TMPDIR/evidence-dir"
+RUNC_EVIDENCE_DIR="$TMPDIR/runc-evidence-dir"
 MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
+MISMATCH_EVIDENCE_DIR="$TMPDIR/mismatch-evidence-dir"
 
 write_evidence "$KATA_EVIDENCE" "io.containerd.kata.v2"
 scripts/validate-kata-evidence.sh "$KATA_EVIDENCE" >/dev/null
@@ -257,10 +259,24 @@ cp "$KATA_SMOKE_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-compose.smoke.json"
 MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=2 \
   scripts/validate-kata-evidence-dir.sh "$VALID_EVIDENCE_DIR" >/dev/null
 
+mkdir -p "$RUNC_EVIDENCE_DIR"
+write_environment_summary "$RUNC_EVIDENCE_DIR/environment.txt"
+cp "$RUNC_EVIDENCE" "$RUNC_EVIDENCE_DIR/runc.json"
+cp "$RUNC_SMOKE_EVIDENCE" "$RUNC_EVIDENCE_DIR/runc.smoke.json"
+MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=1 \
+  scripts/validate-kata-evidence-dir.sh "$RUNC_EVIDENCE_DIR" >/dev/null
+
 mkdir -p "$MISSING_PAIR_EVIDENCE_DIR"
 write_environment_summary "$MISSING_PAIR_EVIDENCE_DIR/environment.txt"
 cp "$KATA_EVIDENCE" "$MISSING_PAIR_EVIDENCE_DIR/kata-dev.json"
 expect_failure "directory evidence must require paired smoke evidence" \
   scripts/validate-kata-evidence-dir.sh "$MISSING_PAIR_EVIDENCE_DIR"
+
+mkdir -p "$MISMATCH_EVIDENCE_DIR"
+write_environment_summary "$MISMATCH_EVIDENCE_DIR/environment.txt"
+cp "$KATA_EVIDENCE" "$MISMATCH_EVIDENCE_DIR/kata-dev.json"
+cp "$RUNC_SMOKE_EVIDENCE" "$MISMATCH_EVIDENCE_DIR/kata-dev.smoke.json"
+expect_failure "directory evidence must reject runtime mismatches" \
+  scripts/validate-kata-evidence-dir.sh "$MISMATCH_EVIDENCE_DIR"
 
 echo "Kata evidence validator regression passed."

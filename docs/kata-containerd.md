@@ -69,7 +69,8 @@ mise run test:kata
 
 `test:kata` uses the running dev stack instead of rebuilding it, but it still
 generates and validates both the API verifier evidence and the direct
-containerd smoke evidence under `tmp/kata-evidence/` by default.
+containerd smoke evidence under `tmp/kata-evidence/` by default, and writes the
+same `environment.txt` summary used by the E2E tasks.
 
 ## Production Compose E2E
 
