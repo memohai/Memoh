@@ -13,10 +13,16 @@
 
 services:
   migrate:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server.kata
     environment:
       CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
 
   server:
+    build:
+      context: ..
+      dockerfile: devenv/Dockerfile.server.kata
     environment:
       CONFIG_PATH: /workspace/devenv/app.kata.dev.toml
     devices:
