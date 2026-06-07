@@ -57,6 +57,11 @@ on:
       - "scripts/write-kata-evidence-environment.sh"
   workflow_dispatch:
     inputs:
+      run_runner_readiness:
+        description: "Run only the Linux/KVM runner readiness check"
+        required: true
+        type: boolean
+        default: false
       run_kata_e2e:
         description: "Run Linux/KVM Kata E2E on a self-hosted runner"
         required: true
@@ -87,6 +92,29 @@ jobs:
 
       - name: Run Kata static validation
         run: scripts/test-kata-static.sh
+
+  runner-readiness:
+    name: Linux/KVM runner readiness
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runner_readiness && !inputs.run_kata_e2e }}
+    needs: static
+    runs-on: [self-hosted, linux, x64, kvm, kata]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare evidence directory
+        run: rm -rf tmp/kata-runner-readiness
+
+      - name: Check Kata runner readiness
+        run: scripts/check-kata-runner-ready.sh tmp/kata-runner-readiness
+
+      - name: Upload Kata runner readiness evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kata-runner-readiness
+          path: tmp/kata-runner-readiness
+          if-no-files-found: warn
 
   kata-e2e:
     name: Linux/KVM E2E

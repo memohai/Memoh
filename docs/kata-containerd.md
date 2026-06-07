@@ -153,17 +153,23 @@ Register the runner with these labels:
 self-hosted, linux, x64, kvm, kata
 ```
 
-Then run the workflow manually and enable `run_kata_e2e`. The job executes
-`scripts/check-kata-runner-ready.sh` first so runner, Docker, KVM, and Kata
-installation failures are reported before the Memoh stack starts. It then
-executes `scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is enabled,
-it also executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload
-their API and smoke evidence JSON files as the `kata-evidence` artifact. The job
-clears `tmp/kata-evidence/` before each run on the self-hosted runner and also
-uploads `environment.txt` with the runner, Docker, KVM, and Kata shim summary.
-Before uploading, it runs `scripts/validate-kata-evidence-dir.sh` to ensure the
-artifact has the expected number of API evidence files, matching `.smoke.json`
-files, and a Linux/KVM environment summary.
+To check a newly registered runner without starting the Memoh stack, run the
+workflow manually with `run_runner_readiness=true` and `run_kata_e2e=false`.
+This runs only `scripts/check-kata-runner-ready.sh` and uploads a
+`kata-runner-readiness` artifact containing the environment summary.
+
+For full verification, run the workflow manually with `run_kata_e2e=true`. The
+E2E job executes `scripts/check-kata-runner-ready.sh` first so runner, Docker,
+KVM, and Kata installation failures are reported before the Memoh stack starts.
+It then executes `scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is
+enabled, it also executes `scripts/test-containerd-kata-compose-e2e.sh`. Both
+runs upload their API and smoke evidence JSON files as the `kata-evidence`
+artifact. The job clears `tmp/kata-evidence/` before each run on the
+self-hosted runner and also uploads `environment.txt` with the runner, Docker,
+KVM, and Kata shim summary. Before uploading, it runs
+`scripts/validate-kata-evidence-dir.sh` to ensure the artifact has the expected
+number of API evidence files, matching `.smoke.json` files, and a Linux/KVM
+environment summary.
 
 For manual production deployment, copy and edit the Kata config first:
 

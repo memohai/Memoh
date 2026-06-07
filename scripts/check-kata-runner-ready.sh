@@ -27,10 +27,6 @@ validate_bool() {
 
 validate_bool MEMOH_KATA_RUNNER_CHECK_CONTAINER "$CHECK_CONTAINER"
 
-require_cmd curl
-require_cmd docker
-require_cmd jq
-
 mkdir -p "$EVIDENCE_DIR"
 scripts/write-kata-evidence-environment.sh "$EVIDENCE_DIR"
 
@@ -40,6 +36,10 @@ echo "  runner_name=${RUNNER_NAME:-local}"
 echo "  runner_os=${RUNNER_OS:-$(uname -s 2>/dev/null || echo unknown)}"
 echo "  runner_arch=${RUNNER_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
 echo "  check_container=$CHECK_CONTAINER"
+
+require_cmd curl
+require_cmd docker
+require_cmd jq
 
 docker info >/dev/null
 docker compose version >/dev/null

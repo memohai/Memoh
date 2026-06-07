@@ -35,9 +35,12 @@ scripts/test-kata-evidence-validator.sh
 
 echo "Validating Kata workflow wiring..."
 grep -F 'name: Kata Runtime' .github/workflows/kata-runtime.yml
+grep -F 'run_runner_readiness:' .github/workflows/kata-runtime.yml
 grep -F 'run_kata_e2e:' .github/workflows/kata-runtime.yml
 grep -F 'runs-on: [self-hosted, linux, x64, kvm, kata]' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/kata-runtime.yml
+grep -F 'name: Linux/KVM runner readiness' .github/workflows/kata-runtime.yml
+grep -F 'name: kata-runner-readiness' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/check-kata-runner-ready.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-containerd-kata-e2e.sh' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-containerd-kata-compose-e2e.sh' .github/workflows/kata-runtime.yml
