@@ -88,6 +88,7 @@ jobs:
               - 'scripts/audit-kata-github-verification.sh'
               - 'scripts/check-kata-dev-env.sh'
               - 'scripts/check-kata-runner-ready.sh'
+              - 'scripts/run-kata-github-e2e.sh'
               - 'scripts/smoke-containerd-runtime.sh'
               - 'scripts/test-containerd-kata-compose-e2e.sh'
               - 'scripts/test-containerd-kata-e2e.sh'

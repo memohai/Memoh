@@ -250,6 +250,10 @@ run = "scripts/test-kata-evidence-validator.sh"
 description = "Audit GitHub PR checks for complete Linux/KVM Kata verification"
 run = "scripts/audit-kata-github-verification.sh"
 
+[tasks."test:kata:github:e2e"]
+description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata E2E workflow"
+run = "scripts/run-kata-github-e2e.sh"
+
 [tasks."test:kata:smoke:runc"]
 description = "Run the containerd runtime smoke check against the default runc dev runtime"
 run = """

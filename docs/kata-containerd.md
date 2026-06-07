@@ -173,6 +173,21 @@ KVM, and Kata shim summary. Before uploading, it runs
 number of API evidence files, matching `.smoke.json` files, and a Linux/KVM
 environment summary.
 
+Once a runner with the required labels is registered, this command can dispatch
+the full workflow from the PR branch, wait for it to finish, and audit the PR
+checks:
+
+```bash
+scripts/run-kata-github-e2e.sh <pr-number>
+```
+
+Set `MEMOH_KATA_GITHUB_READINESS_ONLY=true` to dispatch only the runner
+readiness job. Set `MEMOH_KATA_GITHUB_COMPOSE_E2E=false` to skip the production
+Compose E2E and run only the dev-stack E2E. The `mise` equivalent is
+`mise run test:kata:github:e2e -- <pr-number>`. Because GitHub requires
+`workflow_dispatch` workflows to exist on the default branch, this command will
+fail fast until `.github/workflows/kata-runtime.yml` has landed on `main`.
+
 To audit whether a PR head has actually reached the full Kata verification
 bar, run:
 
