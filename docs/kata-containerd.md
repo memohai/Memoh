@@ -90,6 +90,8 @@ the dev E2E. By default it tears the stack down when it exits. Set
 Both E2E tasks write machine-readable verification evidence under
 `tmp/kata-evidence/` by default. Set `MEMOH_KATA_EVIDENCE_DIR` or
 `MEMOH_VERIFY_EVIDENCE_FILE` to choose another location.
+The evidence validator itself can be regression-tested locally with
+`mise run test:kata:evidence`.
 
 For manual production deployment, copy and edit the Kata config first:
 

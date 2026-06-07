@@ -242,6 +242,10 @@ run = "scripts/test-containerd-kata-e2e.sh"
 description = "Build, start, verify, and tear down the production Docker Compose Kata deployment"
 run = "scripts/test-containerd-kata-compose-e2e.sh"
 
+[tasks."test:kata:evidence"]
+description = "Run local regression tests for Kata evidence validation"
+run = "scripts/test-kata-evidence-validator.sh"
+
 [tasks."test:kata:smoke:runc"]
 description = "Run the containerd runtime smoke check against the default runc dev runtime"
 run = """
