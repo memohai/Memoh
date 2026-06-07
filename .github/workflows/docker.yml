@@ -86,6 +86,7 @@ jobs:
               - 'docs/kata-containerd.md'
               - 'mise.toml'
               - 'scripts/check-kata-dev-env.sh'
+              - 'scripts/check-kata-runner-ready.sh'
               - 'scripts/smoke-containerd-runtime.sh'
               - 'scripts/test-containerd-kata-compose-e2e.sh'
               - 'scripts/test-containerd-kata-e2e.sh'

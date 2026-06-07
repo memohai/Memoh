@@ -15,6 +15,7 @@ on:
       - "mise.toml"
       - "scripts/check-kata-dev-env.sh"
       - "scripts/smoke-containerd-runtime.sh"
+      - "scripts/check-kata-runner-ready.sh"
       - "scripts/test-containerd-kata-compose-e2e.sh"
       - "scripts/test-containerd-kata-e2e.sh"
       - "scripts/test-containerd-kata-running.sh"
@@ -41,6 +42,7 @@ on:
       - "mise.toml"
       - "scripts/check-kata-dev-env.sh"
       - "scripts/smoke-containerd-runtime.sh"
+      - "scripts/check-kata-runner-ready.sh"
       - "scripts/test-containerd-kata-compose-e2e.sh"
       - "scripts/test-containerd-kata-e2e.sh"
       - "scripts/test-containerd-kata-running.sh"
@@ -98,10 +100,9 @@ jobs:
       - name: Prepare evidence directory
         run: |
           rm -rf tmp/kata-evidence
-          scripts/write-kata-evidence-environment.sh tmp/kata-evidence
 
-      - name: Check Kata host prerequisites
-        run: scripts/check-kata-dev-env.sh
+      - name: Check Kata runner readiness
+        run: scripts/check-kata-runner-ready.sh tmp/kata-evidence
 
       - name: Run dev Kata E2E
         run: scripts/test-containerd-kata-e2e.sh

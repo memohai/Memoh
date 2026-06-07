@@ -230,6 +230,10 @@ run = "scripts/test-containerd-kata-running.sh"
 description = "Run static validation for Kata configs, compose overrides, scripts, and evidence checks"
 run = "scripts/test-kata-static.sh"
 
+[tasks."test:kata:runner"]
+description = "Check that the current Linux/KVM host is ready to run Kata E2E"
+run = "scripts/check-kata-runner-ready.sh"
+
 [tasks."test:kata:e2e"]
 description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
 run = "scripts/test-containerd-kata-e2e.sh"

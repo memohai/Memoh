@@ -63,10 +63,19 @@ directly to reproduce the same static checks locally.
 Use this on a dedicated Linux/KVM development host:
 
 ```bash
+mise run test:kata:runner
 mise run test:kata:e2e
 ```
 
 The task performs the full dev validation:
+
+`test:kata:runner` is a lightweight readiness check for the runner or
+development host. It writes `tmp/kata-evidence/environment.txt`, verifies
+Docker and Docker Compose are usable, then checks Linux, `/dev/kvm`, the Kata
+shim, Kata config, and Kata runtime asset directories before any Memoh stack is
+started.
+
+`test:kata:e2e` performs the full dev validation:
 
 1. Checks the host has Linux, `/dev/kvm`, Kata shim/config/assets.
 2. Builds the Kata dev server image.
@@ -145,9 +154,11 @@ self-hosted, linux, x64, kvm, kata
 ```
 
 Then run the workflow manually and enable `run_kata_e2e`. The job executes
-`scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is enabled, it also
-executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload their
-API and smoke evidence JSON files as the `kata-evidence` artifact. The job
+`scripts/check-kata-runner-ready.sh` first so runner, Docker, KVM, and Kata
+installation failures are reported before the Memoh stack starts. It then
+executes `scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is enabled,
+it also executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload
+their API and smoke evidence JSON files as the `kata-evidence` artifact. The job
 clears `tmp/kata-evidence/` before each run on the self-hosted runner and also
 uploads `environment.txt` with the runner, Docker, KVM, and Kata shim summary.
 Before uploading, it runs `scripts/validate-kata-evidence-dir.sh` to ensure the
@@ -185,6 +196,8 @@ scripts/validate-kata-evidence-run-dir.sh \
 
 A valid test run must prove all of the following:
 
+- `scripts/check-kata-runner-ready.sh` passes on the Linux/KVM runner and writes
+  an environment summary proving Linux and `/dev/kvm`.
 - `scripts/check-kata-dev-env.sh` passes on the Linux/KVM host.
 - `scripts/check-kata-dev-env.sh` passes with `MEMOH_KATA_CHECK_CONTAINER=1`
   after the target server image is built.
