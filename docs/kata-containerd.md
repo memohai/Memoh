@@ -173,6 +173,18 @@ KVM, and Kata shim summary. Before uploading, it runs
 number of API evidence files, matching `.smoke.json` files, and a Linux/KVM
 environment summary.
 
+To audit whether a PR head has actually reached the full Kata verification
+bar, run:
+
+```bash
+scripts/audit-kata-github-verification.sh <pr-number>
+```
+
+The audit exits successfully only when the Kata static check is successful and
+the `Linux/KVM E2E` check has succeeded for that PR head. A PR where static
+checks are green but `Linux/KVM E2E` is skipped or missing is still unverified.
+Use `mise run test:kata:github -- <pr-number>` as the task equivalent.
+
 For manual production deployment, copy and edit the Kata config first:
 
 ```bash

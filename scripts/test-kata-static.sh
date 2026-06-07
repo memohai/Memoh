@@ -15,6 +15,7 @@ require_cmd jq
 
 echo "Checking Kata shell scripts..."
 bash -n \
+  scripts/audit-kata-github-verification.sh \
   scripts/check-kata-dev-env.sh \
   scripts/check-kata-runner-ready.sh \
   scripts/smoke-containerd-runtime.sh \
@@ -38,6 +39,7 @@ echo "Validating Kata workflow wiring..."
 grep -F 'name: Kata Runtime' .github/workflows/kata-runtime.yml
 grep -F 'run_runner_readiness:' .github/workflows/kata-runtime.yml
 grep -F 'run_kata_e2e:' .github/workflows/kata-runtime.yml
+grep -F 'scripts/audit-kata-github-verification.sh' .github/workflows/kata-runtime.yml
 grep -F 'runs-on: [self-hosted, linux, x64, kvm, kata]' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/kata-runtime.yml
 grep -F 'name: Linux/KVM runner readiness' .github/workflows/kata-runtime.yml
@@ -51,9 +53,12 @@ grep -F 'scripts/validate-kata-evidence-dir.sh tmp/kata-evidence' .github/workfl
 grep -F 'uses: actions/upload-artifact@v4' .github/workflows/kata-runtime.yml
 grep -F 'kata-static:' .github/workflows/docker.yml
 grep -F 'needs.detect-changes.outputs.kata' .github/workflows/docker.yml
+grep -F "'scripts/audit-kata-github-verification.sh'" .github/workflows/docker.yml
 grep -F "'scripts/check-kata-runner-ready.sh'" .github/workflows/docker.yml
 grep -F "'scripts/validate-kata-runner-readiness.sh'" .github/workflows/docker.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/docker.yml
+grep -F 'scripts/audit-kata-github-verification.sh' docs/kata-containerd.md
+grep -F '[tasks."test:kata:github"]' mise.toml
 
 echo "Validating Kata config templates..."
 grep -F 'backend = "containerd"' devenv/app.kata.dev.toml

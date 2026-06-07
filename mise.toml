@@ -246,6 +246,10 @@ run = "scripts/test-containerd-kata-compose-e2e.sh"
 description = "Run local regression tests for Kata evidence validation"
 run = "scripts/test-kata-evidence-validator.sh"
 
+[tasks."test:kata:github"]
+description = "Audit GitHub PR checks for complete Linux/KVM Kata verification"
+run = "scripts/audit-kata-github-verification.sh"
+
 [tasks."test:kata:smoke:runc"]
 description = "Run the containerd runtime smoke check against the default runc dev runtime"
 run = """

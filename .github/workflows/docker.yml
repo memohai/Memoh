@@ -85,6 +85,7 @@ jobs:
               - 'docker-compose.kata.yml'
               - 'docs/kata-containerd.md'
               - 'mise.toml'
+              - 'scripts/audit-kata-github-verification.sh'
               - 'scripts/check-kata-dev-env.sh'
               - 'scripts/check-kata-runner-ready.sh'
               - 'scripts/smoke-containerd-runtime.sh'
