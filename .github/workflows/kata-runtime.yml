@@ -1,0 +1,92 @@
+name: Kata Runtime
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/kata-runtime.yml"
+      - "conf/app.kata.docker.toml"
+      - "devenv/app.kata.dev.toml"
+      - "devenv/Dockerfile.server.kata"
+      - "devenv/docker-compose.kata.yml"
+      - "docker/Dockerfile.server"
+      - "docker-compose.kata.yml"
+      - "docs/kata-containerd.md"
+      - "mise.toml"
+      - "scripts/check-kata-dev-env.sh"
+      - "scripts/smoke-containerd-runtime.sh"
+      - "scripts/test-containerd-kata-compose-e2e.sh"
+      - "scripts/test-containerd-kata-e2e.sh"
+      - "scripts/test-kata-evidence-validator.sh"
+      - "scripts/validate-kata-evidence.sh"
+      - "scripts/verify-containerd-kata.sh"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/kata-runtime.yml"
+      - "conf/app.kata.docker.toml"
+      - "devenv/app.kata.dev.toml"
+      - "devenv/Dockerfile.server.kata"
+      - "devenv/docker-compose.kata.yml"
+      - "docker/Dockerfile.server"
+      - "docker-compose.kata.yml"
+      - "docs/kata-containerd.md"
+      - "mise.toml"
+      - "scripts/check-kata-dev-env.sh"
+      - "scripts/smoke-containerd-runtime.sh"
+      - "scripts/test-containerd-kata-compose-e2e.sh"
+      - "scripts/test-containerd-kata-e2e.sh"
+      - "scripts/test-kata-evidence-validator.sh"
+      - "scripts/validate-kata-evidence.sh"
+      - "scripts/verify-containerd-kata.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Check shell scripts
+        run: |
+          bash -n \
+            scripts/check-kata-dev-env.sh \
+            scripts/smoke-containerd-runtime.sh \
+            scripts/test-containerd-kata-compose-e2e.sh \
+            scripts/test-containerd-kata-e2e.sh \
+            scripts/test-kata-evidence-validator.sh \
+            scripts/validate-kata-evidence.sh \
+            scripts/verify-containerd-kata.sh
+
+      - name: Validate evidence checks
+        run: scripts/test-kata-evidence-validator.sh
+
+      - name: Render Kata compose configs
+        run: |
+          docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml config > /tmp/memoh-kata-dev-compose.yml
+          docker compose -f docker-compose.yml -f docker-compose.kata.yml config > /tmp/memoh-kata-compose.yml
+
+          grep -F 'target: server-kata' /tmp/memoh-kata-compose.yml
+          grep -F 'image: memohai/server:kata' /tmp/memoh-kata-compose.yml
+          grep -F 'source: /dev/kvm' /tmp/memoh-kata-compose.yml
+          grep -F 'target: /dev/kvm' /tmp/memoh-kata-compose.yml
+          grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' /tmp/memoh-kata-compose.yml
+          grep -F 'create_host_path: false' /tmp/memoh-kata-compose.yml
+
+          grep -F 'image: memoh-dev-server-kata' /tmp/memoh-kata-dev-compose.yml
+          grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' /tmp/memoh-kata-dev-compose.yml
+          grep -F 'create_host_path: false' /tmp/memoh-kata-dev-compose.yml
+
+      - name: Check server-kata Dockerfile target
+        run: docker build --check --target server-kata -f docker/Dockerfile.server .
