@@ -99,9 +99,10 @@ one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check, plus
 `MEMOH_KATA_EVIDENCE_DIR`, `MEMOH_VERIFY_EVIDENCE_FILE`, or
 `MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE` to choose another location.
 The evidence validator itself can be regression-tested locally with
-`mise run test:kata:evidence`. Each E2E task validates its own evidence bundle
-before reporting success; the GitHub workflow also validates the full uploaded
-artifact directory after all selected E2E tasks finish.
+`mise run test:kata:evidence`. The running-stack verifier and both E2E tasks
+validate their own evidence bundles before reporting success; the GitHub
+workflow also validates the full uploaded artifact directory after all selected
+E2E tasks finish.
 
 ## GitHub Actions Test Environment
 
@@ -180,10 +181,11 @@ Their evidence JSON records the target runtime, container IDs, direct
 `ctr containers info` runtime names, delete-before-recreate proof, final
 resource-limit state, and data restore result without storing the admin
 password or access token.
-The E2E tasks also run `scripts/validate-kata-evidence.sh` against the saved
-API evidence and `scripts/validate-containerd-smoke-evidence.sh` against the
-saved smoke evidence, then validate the API evidence, paired smoke evidence,
-and environment summary together with `scripts/validate-kata-evidence-run-dir.sh`
+The running-stack verifier and E2E tasks also run
+`scripts/validate-kata-evidence.sh` against the saved API evidence and
+`scripts/validate-containerd-smoke-evidence.sh` against the saved smoke
+evidence, then validate the API evidence, paired smoke evidence, and
+environment summary together with `scripts/validate-kata-evidence-run-dir.sh`
 before reporting success.
 
 ## Troubleshooting

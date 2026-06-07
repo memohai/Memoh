@@ -45,6 +45,8 @@ MEMOH_VERIFY_EVIDENCE_FILE="$EVIDENCE_FILE" \
   scripts/verify-containerd-kata.sh
 MEMOH_KATA_EVIDENCE_EXPECTED_RUNTIME="$EXPECTED_RUNTIME" \
   scripts/validate-kata-evidence.sh "$EVIDENCE_FILE"
+MEMOH_KATA_EVIDENCE_EXPECTED_RUNTIME="$EXPECTED_RUNTIME" \
+  scripts/validate-kata-evidence-run-dir.sh "$EVIDENCE_FILE" "$SMOKE_EVIDENCE_FILE"
 
 echo "Containerd runtime verification passed."
 echo "API evidence: $EVIDENCE_FILE"

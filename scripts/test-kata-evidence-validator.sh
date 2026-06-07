@@ -154,8 +154,9 @@ write_smoke_evidence() {
 
 write_environment_summary() {
   local file="$1"
+  local kvm_present="${2:-true}"
 
-  cat >"$file" <<'EOF'
+  cat >"$file" <<EOF
 run_id=12345
 run_attempt=1
 runner_name=kata-runner
@@ -164,7 +165,7 @@ runner_arch=X64
 uname=Linux kata-runner 6.8.0 #1 SMP x86_64 GNU/Linux
 docker=Docker version 27.0.0
 docker_compose=Docker Compose version v2.29.0
-kvm_present=true
+kvm_present=$kvm_present
 kata_shim=/opt/kata/bin/containerd-shim-kata-v2
 EOF
 }
@@ -203,6 +204,8 @@ SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
 CUSTOM_SMOKE_EVIDENCE="$TMPDIR/custom-smoke.json"
 VALID_EVIDENCE_DIR="$TMPDIR/evidence-dir"
 STALE_EVIDENCE_DIR="$TMPDIR/stale-evidence-dir"
+RUNC_NO_KVM_RUN_DIR="$TMPDIR/runc-no-kvm-run-dir"
+KATA_NO_KVM_RUN_DIR="$TMPDIR/kata-no-kvm-run-dir"
 RUNC_EVIDENCE_DIR="$TMPDIR/runc-evidence-dir"
 MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
 MISMATCH_EVIDENCE_DIR="$TMPDIR/mismatch-evidence-dir"
@@ -269,6 +272,23 @@ cp "$RUNC_SMOKE_EVIDENCE" "$STALE_EVIDENCE_DIR/stale-runc.smoke.json"
 scripts/validate-kata-evidence-run-dir.sh \
   "$STALE_EVIDENCE_DIR/kata-dev.json" \
   "$STALE_EVIDENCE_DIR/kata-dev.smoke.json" >/dev/null
+
+mkdir -p "$RUNC_NO_KVM_RUN_DIR"
+write_environment_summary "$RUNC_NO_KVM_RUN_DIR/environment.txt" false
+cp "$RUNC_EVIDENCE" "$RUNC_NO_KVM_RUN_DIR/runc.json"
+cp "$RUNC_SMOKE_EVIDENCE" "$RUNC_NO_KVM_RUN_DIR/runc.smoke.json"
+scripts/validate-kata-evidence-run-dir.sh \
+  "$RUNC_NO_KVM_RUN_DIR/runc.json" \
+  "$RUNC_NO_KVM_RUN_DIR/runc.smoke.json" >/dev/null
+
+mkdir -p "$KATA_NO_KVM_RUN_DIR"
+write_environment_summary "$KATA_NO_KVM_RUN_DIR/environment.txt" false
+cp "$KATA_EVIDENCE" "$KATA_NO_KVM_RUN_DIR/kata-dev.json"
+cp "$KATA_SMOKE_EVIDENCE" "$KATA_NO_KVM_RUN_DIR/kata-dev.smoke.json"
+expect_failure "kata run bundle must require KVM evidence" \
+  scripts/validate-kata-evidence-run-dir.sh \
+  "$KATA_NO_KVM_RUN_DIR/kata-dev.json" \
+  "$KATA_NO_KVM_RUN_DIR/kata-dev.smoke.json"
 
 mkdir -p "$RUNC_EVIDENCE_DIR"
 write_environment_summary "$RUNC_EVIDENCE_DIR/environment.txt"

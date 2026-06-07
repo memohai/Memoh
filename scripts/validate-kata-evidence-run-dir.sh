@@ -3,6 +3,7 @@ set -euo pipefail
 
 API_EVIDENCE_FILE="${1:-}"
 SMOKE_EVIDENCE_FILE="${2:-}"
+EXPECT_KVM="${MEMOH_KATA_EVIDENCE_EXPECT_KVM:-}"
 
 usage() {
   echo "usage: scripts/validate-kata-evidence-run-dir.sh <api-evidence.json> <smoke-evidence.json>" >&2
@@ -30,12 +31,25 @@ source_dir="$(dirname "$API_EVIDENCE_FILE")"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-evidence-run.XXXXXX")"
 status=0
 
+if [ -z "$EXPECT_KVM" ]; then
+  api_runtime="$(jq -er '.target.expected_runtime' "$API_EVIDENCE_FILE")"
+  case "$api_runtime" in
+    *kata*)
+      EXPECT_KVM=true
+      ;;
+    *)
+      EXPECT_KVM=false
+      ;;
+  esac
+fi
+
 cp "$API_EVIDENCE_FILE" "$tmpdir/$api_name"
 cp "$SMOKE_EVIDENCE_FILE" "$tmpdir/${api_name%.json}.smoke.json"
 if [ -f "$source_dir/environment.txt" ]; then
   cp "$source_dir/environment.txt" "$tmpdir/environment.txt"
 fi
 
+MEMOH_KATA_EVIDENCE_EXPECT_KVM="$EXPECT_KVM" \
 MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=1 \
   scripts/validate-kata-evidence-dir.sh "$tmpdir" || status=$?
 
