@@ -226,6 +226,14 @@ jq '.checks.container_deleted_before_recreate = false' "$KATA_EVIDENCE" >"$BROKE
 expect_failure "delete-before-recreate evidence must be enforced" \
   scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
 
+jq '.resource_limits.update_response.status = "applied"' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
+expect_failure "resource update response must require recreate" \
+  scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
+
+jq '.resource_limits.update_response.runtime_backend = "io.containerd.runc.v2"' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
+expect_failure "resource update response runtime must match target runtime" \
+  scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
+
 jq '.debug.password = "admin123"' "$KATA_EVIDENCE" >"$SENSITIVE_EVIDENCE"
 expect_failure "sensitive evidence must be rejected" \
   scripts/validate-kata-evidence.sh "$SENSITIVE_EVIDENCE"
