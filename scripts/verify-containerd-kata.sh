@@ -9,6 +9,7 @@ EXPECTED_BACKEND="${MEMOH_VERIFY_EXPECTED_BACKEND:-containerd}"
 EXPECTED_WORKSPACE_BACKEND="${MEMOH_VERIFY_EXPECTED_WORKSPACE_BACKEND:-container}"
 EXPECTED_STORAGE_HARD_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT:-false}"
 EXPECTED_STORAGE_SOFT_LIMIT="${MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT:-true}"
+VERIFY_DATA_PRESERVATION="${MEMOH_VERIFY_DATA_PRESERVATION:-true}"
 CPU_MILLICORES="${MEMOH_VERIFY_CPU_MILLICORES:-500}"
 MEMORY_BYTES="${MEMOH_VERIFY_MEMORY_BYTES:-134217728}"
 STORAGE_BYTES="${MEMOH_VERIFY_STORAGE_BYTES:-33554432}"
@@ -54,6 +55,30 @@ assert_no_sse_error() {
   fi
 }
 
+assert_sse_data_restored() {
+  local file="$1"
+  if ! read_sse_payloads "$file" | jq -e 'select(.type == "complete") | .container.data_restored == true' >/dev/null; then
+    echo "ERROR: container recreate did not report restored data" >&2
+    read_sse_payloads "$file" | jq . >&2
+    exit 1
+  fi
+}
+
+assert_file_content() {
+  local file="$1"
+  local expected="$2"
+  local got
+  got="$(json_field '.content' "$file")"
+  if [ "$got" != "$expected" ]; then
+    echo "ERROR: restored file content mismatch" >&2
+    echo "Expected:" >&2
+    printf '%s\n' "$expected" >&2
+    echo "Got:" >&2
+    printf '%s\n' "$got" >&2
+    exit 1
+  fi
+}
+
 validate_bool() {
   case "$2" in
     true|false)
@@ -67,6 +92,14 @@ validate_bool() {
 
 cleanup() {
   if [ -n "${BOT_ID:-}" ]; then
+    if [ "${PRESERVED_DATA_CREATED:-0}" = "1" ]; then
+      curl -fsS -N -X POST "$BASE_URL/bots/$BOT_ID/container" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H 'Content-Type: application/json' \
+        -H 'Accept: text/event-stream' \
+        -d '{"restore_data":true}' >/dev/null 2>&1 || true
+      PRESERVED_DATA_CREATED=0
+    fi
     curl -fsS -X DELETE "$BASE_URL/bots/$BOT_ID/container?preserve_data=false" \
       -H "Authorization: Bearer $TOKEN" >/dev/null 2>&1 || true
     curl -fsS -X DELETE "$BASE_URL/bots/$BOT_ID" \
@@ -79,10 +112,12 @@ require_cmd curl
 require_cmd jq
 validate_bool MEMOH_VERIFY_EXPECT_STORAGE_HARD_LIMIT "$EXPECTED_STORAGE_HARD_LIMIT"
 validate_bool MEMOH_VERIFY_EXPECT_STORAGE_SOFT_LIMIT "$EXPECTED_STORAGE_SOFT_LIMIT"
+validate_bool MEMOH_VERIFY_DATA_PRESERVATION "$VERIFY_DATA_PRESERVATION"
 
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-verify.XXXXXX")"
 TOKEN=""
 BOT_ID=""
+PRESERVED_DATA_CREATED=0
 trap cleanup EXIT
 
 if [[ "$EXPECTED_RUNTIME" == *kata* ]]; then
@@ -123,6 +158,9 @@ if ! read_sse_payloads "$CREATE_STREAM" | jq -e 'select(.type == "ready")' >/dev
   exit 1
 fi
 
+SENTINEL_PATH="/data/$BOT_NAME.txt"
+SENTINEL_CONTENT="memoh kata data preservation $BOT_ID"
+
 METRICS_JSON="$TMPDIR/metrics.initial.json"
 curl_json "$BASE_URL/bots/$BOT_ID/container/metrics" \
   -H "Authorization: Bearer $TOKEN" \
@@ -139,6 +177,23 @@ assert_json "$METRICS_JSON" ".resource_limits.capabilities.memory.hard_limit_sup
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability must be $EXPECTED_STORAGE_HARD_LIMIT"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability must be $EXPECTED_STORAGE_SOFT_LIMIT"
 
+if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
+  WRITE_JSON="$TMPDIR/fs.write.json"
+  curl_json -X POST "$BASE_URL/bots/$BOT_ID/container/fs/write" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg path "$SENTINEL_PATH" --arg content "$SENTINEL_CONTENT" '{path: $path, content: $content}')" \
+    >"$WRITE_JSON"
+  assert_json "$WRITE_JSON" ".ok == true" "failed to write sentinel file"
+
+  READ_JSON="$TMPDIR/fs.read.initial.json"
+  curl_json --get "$BASE_URL/bots/$BOT_ID/container/fs/read" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data-urlencode "path=$SENTINEL_PATH" \
+    >"$READ_JSON"
+  assert_file_content "$READ_JSON" "$SENTINEL_CONTENT"
+fi
+
 echo "Applying resource limits and recreating the workspace..."
 UPDATE_JSON="$TMPDIR/metrics.update.json"
 curl_json -X PUT "$BASE_URL/bots/$BOT_ID/container/metrics" \
@@ -154,21 +209,33 @@ assert_json "$UPDATE_JSON" ".resource_limits.desired.cpu_millicores == $CPU_MILL
 assert_json "$UPDATE_JSON" ".resource_limits.desired.memory_bytes == $MEMORY_BYTES" "desired memory limit was not saved"
 assert_json "$UPDATE_JSON" ".resource_limits.desired.storage_bytes == $STORAGE_BYTES" "desired storage limit was not saved"
 
-curl_json -X DELETE "$BASE_URL/bots/$BOT_ID/container?preserve_data=false" \
+PRESERVE_QUERY="preserve_data=false"
+if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
+  PRESERVE_QUERY="preserve_data=true"
+fi
+
+curl_json -X DELETE "$BASE_URL/bots/$BOT_ID/container?$PRESERVE_QUERY" \
   -H "Authorization: Bearer $TOKEN" >/dev/null
+if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
+  PRESERVED_DATA_CREATED=1
+fi
 
 RECREATE_STREAM="$TMPDIR/recreate-container.sse"
 curl -fsS -N -X POST "$BASE_URL/bots/$BOT_ID/container" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: text/event-stream' \
-  -d '{}' \
+  -d "$(jq -cn --argjson restore "$VERIFY_DATA_PRESERVATION" '{restore_data: $restore}')" \
   >"$RECREATE_STREAM"
 assert_no_sse_error "$RECREATE_STREAM"
 if ! read_sse_payloads "$RECREATE_STREAM" | jq -e 'select(.type == "complete")' >/dev/null; then
   echo "ERROR: container recreate stream did not complete" >&2
   read_sse_payloads "$RECREATE_STREAM" | jq . >&2
   exit 1
+fi
+if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
+  assert_sse_data_restored "$RECREATE_STREAM"
+  PRESERVED_DATA_CREATED=0
 fi
 
 FINAL_METRICS_JSON="$TMPDIR/metrics.final.json"
@@ -184,6 +251,14 @@ assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.hard_li
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability changed after recreate"
 if [ "$EXPECTED_STORAGE_HARD_LIMIT" = "true" ]; then
   assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.storage_bytes == $STORAGE_BYTES" "storage limit was not applied"
+fi
+if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
+  RESTORED_READ_JSON="$TMPDIR/fs.read.restored.json"
+  curl_json --get "$BASE_URL/bots/$BOT_ID/container/fs/read" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data-urlencode "path=$SENTINEL_PATH" \
+    >"$RESTORED_READ_JSON"
+  assert_file_content "$RESTORED_READ_JSON" "$SENTINEL_CONTENT"
 fi
 
 echo "Verified $EXPECTED_RUNTIME workspace runtime for bot $BOT_ID."

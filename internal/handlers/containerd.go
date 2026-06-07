@@ -431,7 +431,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 
 	// Notify the client before starting if data migration will happen,
 	// since restoring a large /data volume can take a while.
-	if h.manager.HasPreservedData(botID) {
+	willRestoreData := h.manager.HasPreservedData(botID)
+	if willRestoreData {
 		send(createContainerRestoringEvent{Type: "restoring"})
 	}
 
@@ -463,7 +464,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return nil
 	}
 
-	dataRestored := false
+	dataRestored := willRestoreData && !h.manager.HasPreservedData(botID)
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
 			h.logger.Error("restore preserved data failed",
