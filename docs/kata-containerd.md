@@ -108,6 +108,7 @@ MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
 MEMOH_VERIFY_CTR_COMMAND='docker compose -f docker-compose.yml -f docker-compose.kata.yml exec -T server ctr' \
 MEMOH_VERIFY_EVIDENCE_FILE=tmp/kata-evidence/kata-compose-manual.json \
   scripts/verify-containerd-kata.sh
+scripts/validate-kata-evidence.sh tmp/kata-evidence/kata-compose-manual.json
 ```
 
 ## Evidence Required To Call Kata Verified
@@ -134,6 +135,8 @@ The `test:kata:e2e` and `test:kata:compose:e2e` tasks perform these checks.
 Their evidence JSON records the target runtime, container IDs, direct
 `ctr containers info` runtime names, final resource-limit state, and data
 restore result without storing the admin password or access token.
+The E2E tasks also run `scripts/validate-kata-evidence.sh` against the saved
+evidence before reporting success.
 
 ## Troubleshooting
 

@@ -108,6 +108,7 @@ MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
 MEMOH_VERIFY_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
 MEMOH_VERIFY_EVIDENCE_FILE="$EVIDENCE_FILE" \
   scripts/verify-containerd-kata.sh
+scripts/validate-kata-evidence.sh "$EVIDENCE_FILE"
 
 echo "Kata production Compose E2E verification passed."
 echo "Kata production Compose E2E evidence: $EVIDENCE_FILE"
