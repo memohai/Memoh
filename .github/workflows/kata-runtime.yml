@@ -98,6 +98,13 @@ jobs:
       - name: Validate evidence checks
         run: scripts/test-kata-evidence-validator.sh
 
+      - name: Validate Kata configs
+        run: |
+          grep -F 'backend = "containerd"' devenv/app.kata.dev.toml
+          grep -F 'runtime_type = "io.containerd.kata.v2"' devenv/app.kata.dev.toml
+          grep -F 'backend = "containerd"' conf/app.kata.docker.toml
+          grep -F 'runtime_type = "io.containerd.kata.v2"' conf/app.kata.docker.toml
+
       - name: Render Kata compose configs
         run: |
           docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml config > /tmp/memoh-kata-dev-compose.yml
