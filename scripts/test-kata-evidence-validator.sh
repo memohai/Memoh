@@ -36,13 +36,17 @@ write_evidence() {
           id: "workspace-bot-id",
           workspace_backend: "container",
           runtime_backend: $runtime,
-          ctr_runtime: $runtime
+          ctr_runtime: $runtime,
+          created_at: "2026-06-07T00:00:00Z",
+          updated_at: "2026-06-07T00:00:00Z"
         },
         final: {
           id: "workspace-bot-id",
           workspace_backend: "container",
           runtime_backend: $runtime,
-          ctr_runtime: $runtime
+          ctr_runtime: $runtime,
+          created_at: "2026-06-07T00:00:02Z",
+          updated_at: "2026-06-07T00:00:02Z"
         }
       },
       checks: {
@@ -56,6 +60,8 @@ write_evidence() {
         storage_soft_limit_preserved: true,
         storage_hard_limit_supported: false,
         storage_soft_limit_supported: true,
+        container_deleted_before_recreate: true,
+        recreate_stream_completed: true,
         data_preservation_checked: true,
         data_restored: true
       },
@@ -188,6 +194,10 @@ MEMOH_KATA_EVIDENCE_EXPECTED_RUNTIME=io.containerd.runc.v2 \
 
 jq '.checks.cpu_limit_applied = false' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
 expect_failure "CPU limit evidence must be enforced" \
+  scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
+
+jq '.checks.container_deleted_before_recreate = false' "$KATA_EVIDENCE" >"$BROKEN_EVIDENCE"
+expect_failure "delete-before-recreate evidence must be enforced" \
   scripts/validate-kata-evidence.sh "$BROKEN_EVIDENCE"
 
 jq '.debug.password = "admin123"' "$KATA_EVIDENCE" >"$SENSITIVE_EVIDENCE"

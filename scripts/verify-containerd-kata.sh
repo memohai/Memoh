@@ -96,6 +96,27 @@ assert_file_content() {
   fi
 }
 
+assert_container_deleted() {
+  local out_file="$1"
+  local http_status
+
+  set +e
+  http_status="$(
+    curl -sS -o "$out_file" -w "%{http_code}" "$BASE_URL/bots/$BOT_ID/container" \
+      -H "Authorization: Bearer $TOKEN"
+  )"
+  local curl_status=$?
+  set -e
+
+  if [ "$curl_status" -ne 0 ] || [ "$http_status" != "404" ]; then
+    echo "ERROR: container was not deleted before recreate; expected HTTP 404, got $http_status" >&2
+    if [ -s "$out_file" ]; then
+      cat "$out_file" >&2
+    fi
+    exit 1
+  fi
+}
+
 quote_shell() {
   printf "%q" "$1"
 }
@@ -147,6 +168,8 @@ write_evidence() {
     --arg final_container_id "$FINAL_CONTAINER_ID" \
     --argjson verify_data_preservation "$VERIFY_DATA_PRESERVATION" \
     --argjson data_restored "$DATA_RESTORED" \
+    --argjson container_deleted_before_recreate "$CONTAINER_DELETED_BEFORE_RECREATE" \
+    --argjson recreate_stream_completed "$RECREATE_STREAM_COMPLETED" \
     --argjson cpu_millicores "$CPU_MILLICORES" \
     --argjson memory_bytes "$MEMORY_BYTES" \
     --argjson storage_bytes "$STORAGE_BYTES" \
@@ -179,13 +202,17 @@ write_evidence() {
           id: $initial_container_id,
           workspace_backend: $initial_container[0].workspace_backend,
           runtime_backend: $initial_container[0].runtime_backend,
-          ctr_runtime: ($initial_ctr[0].Runtime.Name // null)
+          ctr_runtime: ($initial_ctr[0].Runtime.Name // null),
+          created_at: $initial_container[0].created_at,
+          updated_at: $initial_container[0].updated_at
         },
         final: {
           id: $final_container_id,
           workspace_backend: $final_container[0].workspace_backend,
           runtime_backend: $final_container[0].runtime_backend,
-          ctr_runtime: ($final_ctr[0].Runtime.Name // null)
+          ctr_runtime: ($final_ctr[0].Runtime.Name // null),
+          created_at: $final_container[0].created_at,
+          updated_at: $final_container[0].updated_at
         }
       },
       checks: {
@@ -199,6 +226,8 @@ write_evidence() {
         storage_soft_limit_preserved: ($final_metrics[0].resource_limits.desired.storage_bytes == $storage_bytes),
         storage_hard_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.hard_limit_supported,
         storage_soft_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.soft_limit_supported,
+        container_deleted_before_recreate: $container_deleted_before_recreate,
+        recreate_stream_completed: $recreate_stream_completed,
         data_preservation_checked: $verify_data_preservation,
         data_restored: (if $verify_data_preservation then $data_restored else null end)
       },
@@ -268,6 +297,8 @@ TOKEN=""
 BOT_ID=""
 PRESERVED_DATA_CREATED=0
 DATA_RESTORED=false
+CONTAINER_DELETED_BEFORE_RECREATE=false
+RECREATE_STREAM_COMPLETED=false
 trap cleanup EXIT
 
 if [[ "$EXPECTED_RUNTIME" == *kata* ]]; then
@@ -389,6 +420,9 @@ curl_json -X DELETE "$BASE_URL/bots/$BOT_ID/container?$PRESERVE_QUERY" \
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   PRESERVED_DATA_CREATED=1
 fi
+DELETED_CONTAINER_JSON="$TMPDIR/container.after-delete.json"
+assert_container_deleted "$DELETED_CONTAINER_JSON"
+CONTAINER_DELETED_BEFORE_RECREATE=true
 
 RECREATE_STREAM="$TMPDIR/recreate-container.sse"
 curl -fsS -N -X POST "$BASE_URL/bots/$BOT_ID/container" \
@@ -403,6 +437,7 @@ if ! read_sse_payloads "$RECREATE_STREAM" | jq -e 'select(.type == "complete")' 
   read_sse_payloads "$RECREATE_STREAM" | jq . >&2
   exit 1
 fi
+RECREATE_STREAM_COMPLETED=true
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   assert_sse_data_restored "$RECREATE_STREAM"
   DATA_RESTORED=true

@@ -140,13 +140,16 @@ A valid test run must prove all of the following:
 - `GET /bots/{id}/container/metrics` reports the same runtime backend.
 - CPU and memory resource limits become `status = "applied"` after recreate.
 - Storage remains a soft limit for this containerd/Kata path.
+- After the verifier deletes the workspace for resource-limit recreate,
+  `GET /bots/{id}/container` returns 404 before the workspace is recreated.
 - A file written under `/data` survives delete/recreate when
   `preserve_data=true` and `restore_data=true` are used.
 
 The `test:kata:e2e` and `test:kata:compose:e2e` tasks perform these checks.
 Their evidence JSON records the target runtime, container IDs, direct
-`ctr containers info` runtime names, final resource-limit state, and data
-restore result without storing the admin password or access token.
+`ctr containers info` runtime names, delete-before-recreate proof, final
+resource-limit state, and data restore result without storing the admin
+password or access token.
 The E2E tasks also run `scripts/validate-kata-evidence.sh` against the saved
 API evidence and `scripts/validate-containerd-smoke-evidence.sh` against the
 saved smoke evidence before reporting success.
