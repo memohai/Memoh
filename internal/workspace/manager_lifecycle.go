@@ -257,8 +257,10 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)
 			if dbErr == nil {
 				cdiDevices := []string(nil)
+				runtimeBackend := ""
 				if liveInfo, liveErr := m.service.GetContainer(ctx, row.ContainerID); liveErr == nil {
 					cdiDevices = workspaceCDIDevicesFromLabels(liveInfo.Labels)
+					runtimeBackend = liveInfo.Runtime.Name
 				}
 				createdAt := time.Time{}
 				if row.CreatedAt.Valid {
@@ -276,6 +278,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
 					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend, row.ContainerID),
+					RuntimeBackend:   runtimeBackend,
 					Image:            row.Image,
 					Status:           status,
 					Namespace:        row.Namespace,
@@ -310,6 +313,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	return &ContainerStatus{
 		ContainerID:      info.ID,
 		WorkspaceBackend: workspaceBackendFromRecord("", info.ID),
+		RuntimeBackend:   info.Runtime.Name,
 		Image:            info.Image,
 		Status:           status,
 		Namespace:        m.namespace,

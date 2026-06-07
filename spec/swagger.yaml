@@ -1982,6 +1982,8 @@ definitions:
         type: boolean
       image:
         type: string
+      runtime_backend:
+        type: string
       snapshotter:
         type: string
       started:
@@ -2173,6 +2175,8 @@ definitions:
       legacy:
         type: boolean
       namespace:
+        type: string
+      runtime_backend:
         type: string
       status:
         type: string

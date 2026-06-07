@@ -60,6 +60,7 @@ type CreateContainerRequest struct {
 type CreateContainerResponse struct {
 	ContainerID      string   `json:"container_id"`
 	WorkspaceBackend string   `json:"workspace_backend"`
+	RuntimeBackend   string   `json:"runtime_backend,omitempty"`
 	ContainerPath    string   `json:"container_path"`
 	Image            string   `json:"image"`
 	Snapshotter      string   `json:"snapshotter"`
@@ -108,6 +109,7 @@ type createContainerErrorEvent struct {
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
 	WorkspaceBackend string    `json:"workspace_backend"`
+	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -485,10 +487,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	cdiDevices := gpu.Devices
 	containerPath := ""
 	responseBackend := workspaceBackend
+	runtimeBackend := ""
 	if status != nil {
 		cdiDevices = status.CDIDevices
 		containerPath = status.ContainerPath
 		responseBackend = status.WorkspaceBackend
+		runtimeBackend = status.RuntimeBackend
 	}
 
 	// Phase 3: Complete
@@ -497,6 +501,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		Container: CreateContainerResponse{
 			ContainerID:      containerID,
 			WorkspaceBackend: responseBackend,
+			RuntimeBackend:   runtimeBackend,
 			ContainerPath:    containerPath,
 			Image:            image,
 			Snapshotter:      snapshotter,
@@ -533,6 +538,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	return c.JSON(http.StatusOK, GetContainerResponse{
 		ContainerID:      status.ContainerID,
 		WorkspaceBackend: status.WorkspaceBackend,
+		RuntimeBackend:   status.RuntimeBackend,
 		Image:            status.Image,
 		Status:           status.Status,
 		Namespace:        status.Namespace,

@@ -14319,6 +14319,9 @@
                 "image": {
                     "type": "string"
                 },
+                "runtime_backend": {
+                    "type": "string"
+                },
                 "snapshotter": {
                     "type": "string"
                 },
@@ -14614,6 +14617,9 @@
                     "type": "boolean"
                 },
                 "namespace": {
+                    "type": "string"
+                },
+                "runtime_backend": {
                     "type": "string"
                 },
                 "status": {

@@ -129,6 +129,7 @@ fetch_container_info() {
     >"$out_file"
   assert_json "$out_file" ".container_id | length > 0" "container info must include container_id"
   assert_json "$out_file" ".workspace_backend == \"$EXPECTED_WORKSPACE_BACKEND\"" "container workspace backend must be $EXPECTED_WORKSPACE_BACKEND"
+  assert_json "$out_file" ".runtime_backend == \"$EXPECTED_RUNTIME\"" "container runtime backend must be $EXPECTED_RUNTIME"
 }
 
 validate_bool() {

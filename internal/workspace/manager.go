@@ -46,6 +46,7 @@ var ErrContainerNotFound = errors.New("container not found for bot")
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
 	WorkspaceBackend string    `json:"workspace_backend"`
+	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`

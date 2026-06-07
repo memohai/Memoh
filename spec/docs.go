@@ -14328,6 +14328,9 @@ const docTemplate = `{
                 "image": {
                     "type": "string"
                 },
+                "runtime_backend": {
+                    "type": "string"
+                },
                 "snapshotter": {
                     "type": "string"
                 },
@@ -14623,6 +14626,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "namespace": {
+                    "type": "string"
+                },
+                "runtime_backend": {
                     "type": "string"
                 },
                 "status": {
