@@ -86,6 +86,7 @@ wait_server_ready
 MEMOH_CONTAINERD_SMOKE_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
 MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE="$SMOKE_EVIDENCE_FILE" \
   scripts/smoke-containerd-runtime.sh
+scripts/validate-containerd-smoke-evidence.sh "$SMOKE_EVIDENCE_FILE"
 
 MEMOH_VERIFY_BASE_URL="$BASE_URL" \
 MEMOH_VERIFY_CONTAINERD_RUNTIME=true \

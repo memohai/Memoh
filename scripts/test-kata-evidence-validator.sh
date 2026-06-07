@@ -119,6 +119,33 @@ write_evidence() {
     }' >"$file"
 }
 
+write_smoke_evidence() {
+  local file="$1"
+  local runtime="$2"
+
+  jq -n \
+    --arg runtime "$runtime" \
+    '{
+      schema_version: 1,
+      generated_at: "2026-06-07T00:00:00Z",
+      target: {
+        ctr_command: "ctr",
+        namespace: "default",
+        runtime: $runtime,
+        image: "docker.io/library/alpine:3.22",
+        snapshotter: "overlayfs",
+        container_id: "memoh-runtime-smoke-test",
+        pulled: true
+      },
+      checks: {
+        ctr_reachable: true,
+        image_available: true,
+        runtime_started: true,
+        command_output: "runtime-smoke-ok"
+      }
+    }' >"$file"
+}
+
 expect_failure() {
   local message="$1"
   shift
@@ -146,6 +173,10 @@ KATA_EVIDENCE="$TMPDIR/kata.json"
 RUNC_EVIDENCE="$TMPDIR/runc.json"
 BROKEN_EVIDENCE="$TMPDIR/broken.json"
 SENSITIVE_EVIDENCE="$TMPDIR/sensitive.json"
+KATA_SMOKE_EVIDENCE="$TMPDIR/kata-smoke.json"
+RUNC_SMOKE_EVIDENCE="$TMPDIR/runc-smoke.json"
+BROKEN_SMOKE_EVIDENCE="$TMPDIR/broken-smoke.json"
+SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
 
 write_evidence "$KATA_EVIDENCE" "io.containerd.kata.v2"
 scripts/validate-kata-evidence.sh "$KATA_EVIDENCE" >/dev/null
@@ -161,5 +192,20 @@ expect_failure "CPU limit evidence must be enforced" \
 jq '.debug.password = "admin123"' "$KATA_EVIDENCE" >"$SENSITIVE_EVIDENCE"
 expect_failure "sensitive evidence must be rejected" \
   scripts/validate-kata-evidence.sh "$SENSITIVE_EVIDENCE"
+
+write_smoke_evidence "$KATA_SMOKE_EVIDENCE" "io.containerd.kata.v2"
+scripts/validate-containerd-smoke-evidence.sh "$KATA_SMOKE_EVIDENCE" >/dev/null
+
+write_smoke_evidence "$RUNC_SMOKE_EVIDENCE" "io.containerd.runc.v2"
+MEMOH_CONTAINERD_SMOKE_EVIDENCE_EXPECTED_RUNTIME=io.containerd.runc.v2 \
+  scripts/validate-containerd-smoke-evidence.sh "$RUNC_SMOKE_EVIDENCE" >/dev/null
+
+jq '.checks.runtime_started = false' "$KATA_SMOKE_EVIDENCE" >"$BROKEN_SMOKE_EVIDENCE"
+expect_failure "smoke runtime_started must be enforced" \
+  scripts/validate-containerd-smoke-evidence.sh "$BROKEN_SMOKE_EVIDENCE"
+
+jq '.debug.password = "admin123"' "$KATA_SMOKE_EVIDENCE" >"$SENSITIVE_SMOKE_EVIDENCE"
+expect_failure "sensitive smoke evidence must be rejected" \
+  scripts/validate-containerd-smoke-evidence.sh "$SENSITIVE_SMOKE_EVIDENCE"
 
 echo "Kata evidence validator regression passed."

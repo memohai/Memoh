@@ -18,6 +18,7 @@ on:
       - "scripts/test-containerd-kata-compose-e2e.sh"
       - "scripts/test-containerd-kata-e2e.sh"
       - "scripts/test-kata-evidence-validator.sh"
+      - "scripts/validate-containerd-smoke-evidence.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
   pull_request:
@@ -37,6 +38,7 @@ on:
       - "scripts/test-containerd-kata-compose-e2e.sh"
       - "scripts/test-containerd-kata-e2e.sh"
       - "scripts/test-kata-evidence-validator.sh"
+      - "scripts/validate-containerd-smoke-evidence.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
   workflow_dispatch:
@@ -66,6 +68,7 @@ jobs:
             scripts/test-containerd-kata-compose-e2e.sh \
             scripts/test-containerd-kata-e2e.sh \
             scripts/test-kata-evidence-validator.sh \
+            scripts/validate-containerd-smoke-evidence.sh \
             scripts/validate-kata-evidence.sh \
             scripts/verify-containerd-kata.sh
 
