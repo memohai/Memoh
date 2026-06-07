@@ -11,6 +11,7 @@ require_cmd() {
 require_cmd bash
 require_cmd docker
 require_cmd grep
+require_cmd awk
 require_cmd jq
 
 echo "Checking Kata shell scripts..."
@@ -72,6 +73,29 @@ grep -F '[tasks."test:kata:github:runner"]' mise.toml
 grep -F 'check_runner_capabilities()' scripts/prepare-kata-github-runner.sh
 grep -F 'runner host must be x86_64/amd64' scripts/prepare-kata-github-runner.sh
 grep -F 'do not register this host with the kvm label' scripts/prepare-kata-github-runner.sh
+
+echo "Validating containerd runtime wiring..."
+if ! awk '
+  /func \(s \*DefaultService\) CreateContainer\(/,/^}/ {
+    if (index($0, "containerd.WithRuntime(s.runtimeTypeOrDefault(), nil)") > 0) found = 1
+  }
+  END { exit found ? 0 : 1 }
+' internal/container/containerd/service.go; then
+  echo "ERROR: CreateContainer must pass configured runtime_type to containerd.WithRuntime" >&2
+  exit 1
+fi
+
+if ! awk '
+  /func \(s \*DefaultService\) RestoreContainer\(/,/^}/ {
+    if (index($0, "containerd.WithRuntime(s.runtimeTypeOrDefault(), nil)") > 0) found = 1
+  }
+  END { exit found ? 0 : 1 }
+' internal/container/containerd/service.go; then
+  echo "ERROR: RestoreContainer must pass configured runtime_type to containerd.WithRuntime" >&2
+  exit 1
+fi
+grep -F 'func TestNewDefaultServiceUsesConfiguredRuntimeType' internal/container/containerd/service_test.go
+grep -F 'RuntimeType: "io.containerd.kata.v2"' internal/container/containerd/service_test.go
 
 echo "Validating Kata config templates..."
 grep -F 'backend = "containerd"' devenv/app.kata.dev.toml
