@@ -6,6 +6,7 @@ BASE_URL="${MEMOH_VERIFY_BASE_URL:-http://127.0.0.1:${MEMOH_DOCKER_SERVER_PORT:-
 SERVER_IMAGE="${MEMOH_KATA_SERVER_IMAGE:-memohai/server:kata}"
 EVIDENCE_DIR="${MEMOH_KATA_EVIDENCE_DIR:-tmp/kata-evidence}"
 EVIDENCE_FILE="${MEMOH_VERIFY_EVIDENCE_FILE:-}"
+SMOKE_EVIDENCE_FILE="${MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE:-}"
 COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.kata.yml"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.kata.yml)
 STARTED=0
@@ -87,6 +88,9 @@ if [ -z "$EVIDENCE_FILE" ]; then
   mkdir -p "$EVIDENCE_DIR"
   EVIDENCE_FILE="$EVIDENCE_DIR/kata-compose-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
 fi
+if [ -z "$SMOKE_EVIDENCE_FILE" ]; then
+  SMOKE_EVIDENCE_FILE="${EVIDENCE_FILE%.json}.smoke.json"
+fi
 
 trap on_exit EXIT
 
@@ -101,6 +105,7 @@ STARTED=1
 wait_server_ready
 
 MEMOH_CONTAINERD_SMOKE_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
+MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE="$SMOKE_EVIDENCE_FILE" \
   scripts/smoke-containerd-runtime.sh
 
 MEMOH_VERIFY_BASE_URL="$BASE_URL" \
@@ -112,3 +117,4 @@ scripts/validate-kata-evidence.sh "$EVIDENCE_FILE"
 
 echo "Kata production Compose E2E verification passed."
 echo "Kata production Compose E2E evidence: $EVIDENCE_FILE"
+echo "Kata production Compose E2E smoke evidence: $SMOKE_EVIDENCE_FILE"
