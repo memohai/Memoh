@@ -153,6 +153,19 @@ Register the runner with these labels:
 self-hosted, linux, x64, kvm, kata
 ```
 
+On the Linux/KVM host, this command can run the readiness preflight and generate
+a runner registration script that adds the required `kvm,kata` labels without
+writing the short-lived GitHub registration token into the generated file:
+
+```bash
+scripts/prepare-kata-github-runner.sh
+```
+
+Set `MEMOH_KATA_RUNNER_NAME`, `MEMOH_KATA_RUNNER_DIR`, or
+`MEMOH_KATA_RUNNER_SCRIPT` to override the generated runner name, install
+directory, or output script. The `mise` equivalent is
+`mise run test:kata:github:runner`.
+
 To check a newly registered runner without starting the Memoh stack, run the
 workflow manually with `run_runner_readiness=true` and `run_kata_e2e=false`.
 This runs only `scripts/check-kata-runner-ready.sh` and uploads a
