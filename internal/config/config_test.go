@@ -239,6 +239,37 @@ func TestLoadAppKataDevTemplate(t *testing.T) {
 	}
 }
 
+func TestLoadAppKataDockerTemplate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "conf", "app.kata.docker.toml"))
+	if err != nil {
+		t.Fatalf("read app.kata.docker.toml: %v", err)
+	}
+	configPath := filepath.Join(t.TempDir(), "app.kata.docker.toml")
+	//nolint:gosec // configPath is rooted at t.TempDir() with a literal filename; the rendered template content is not used as a path.
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatalf("write rendered app.kata.docker.toml: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load app.kata.docker.toml: %v", err)
+	}
+	if cfg.Container.Backend != "containerd" {
+		t.Fatalf("container backend = %q, want containerd", cfg.Container.Backend)
+	}
+	if cfg.Containerd.RuntimeTypeOrDefault() != "io.containerd.kata.v2" {
+		t.Fatalf("containerd runtime type = %q, want io.containerd.kata.v2", cfg.Containerd.RuntimeTypeOrDefault())
+	}
+	if cfg.Database.DriverOrDefault() != "postgres" {
+		t.Fatalf("database driver = %q, want postgres", cfg.Database.DriverOrDefault())
+	}
+	if !filepath.IsAbs(cfg.Workspace.DataRoot) {
+		t.Fatalf("workspace data_root = %q, want absolute path", cfg.Workspace.DataRoot)
+	}
+	if !filepath.IsAbs(cfg.Workspace.RuntimeDir) {
+		t.Fatalf("workspace runtime_dir = %q, want absolute path", cfg.Workspace.RuntimeDir)
+	}
+}
+
 func TestLoadResolvesRelativeLocalPaths(t *testing.T) {
 	t.Parallel()
 
