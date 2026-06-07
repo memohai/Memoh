@@ -11,6 +11,7 @@ import {
   Separator,
   Skeleton,
   Spinner,
+  TextButton,
   TextGenerateEffect,
   Toggle,
 } from '@memohai/ui'
@@ -428,6 +429,30 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
                 <Button variant="link-draw">
                   View docs <ExternalLink />
                 </Button>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-3 border-t border-border pt-6">
+              <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Text button · &lt;TextButton&gt; — clickable text with a hover chip (ghost @ text scale)</span>
+              <div class="flex flex-wrap items-center gap-2">
+                <TextButton>Rename</TextButton>
+                <TextButton>
+                  <Settings />
+                  Settings
+                </TextButton>
+                <TextButton>
+                  Appearance
+                  <ChevronDown />
+                </TextButton>
+                <TextButton
+                  as="a"
+                  href="#atoms"
+                >
+                  Open as link
+                </TextButton>
+                <TextButton disabled>
+                  Disabled
+                </TextButton>
               </div>
             </div>
 

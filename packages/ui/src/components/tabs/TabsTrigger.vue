@@ -16,10 +16,10 @@ const forwardedProps = useForwardProps(delegatedProps)
   <TabsTrigger
     data-slot="tabs-trigger"
     :class="cn(
-      'inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-body font-medium whitespace-nowrap transition-all',
-      'text-muted-foreground',
-      'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:border-border',
-      'focus-visible:ring-2 focus-visible:ring-ring/20',
+      'relative -mb-px inline-flex h-9 items-center justify-center gap-1.5 border-b-2 border-transparent px-1 text-body font-medium whitespace-nowrap transition-colors',
+      'text-muted-foreground hover:text-foreground cursor-pointer',
+      'data-[state=active]:border-foreground data-[state=active]:text-foreground',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:rounded-xs',
       'disabled:pointer-events-none disabled:opacity-40',
       '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
       props.class,

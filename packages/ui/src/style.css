@@ -204,7 +204,10 @@
 
   /* ── Button: GHOST — ported verbatim from the contract bench ─────────────────
      No chrome at rest; hover fills a soft gray (237, a touch deeper than
-     --accent — the tuned ghost hover); press scales down. */
+     --accent — the tuned ghost hover); press scales down. A ghost that is a menu
+     /popover/select trigger holds that same hover chip while it is open
+     (data-state=open / aria-expanded) — an open trigger reads as active, so the
+     fill must not vanish the moment the pointer leaves. */
   [data-button][data-variant="ghost"] {
     position: relative;
     isolation: isolate;
@@ -221,7 +224,9 @@
       scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
       background-color 0.15s ease;
   }
-  [data-button][data-variant="ghost"]:hover::before {
+  [data-button][data-variant="ghost"]:hover::before,
+  [data-button][data-variant="ghost"][data-state="open"]::before,
+  [data-button][data-variant="ghost"][aria-expanded="true"]::before {
     background-color: var(--btn-ghost-hover);
   }
   [data-button][data-variant="ghost"]:active::before {

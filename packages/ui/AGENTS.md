@@ -41,6 +41,59 @@ SegmentedControl's elevated sliding thumb). The rule is only that the personalit
 must be expressed **through tokens**, never raw values. Distinctive is fine; raw
 numbers are not.
 
+### Tabs vs SegmentedControl — distinct LOOK, distinct ROLE
+
+They used to look identical (both an enclosed pill row), which made one of them
+look redundant. They are NOT interchangeable, so they are now visually split:
+
+- **SegmentedControl** = the enclosed pill with the sliding thumb. It is a single
+  **value/mode/filter selector** (`role="radiogroup"`) — it returns a value and
+  owns **no** content. Reach for it for Day/Week/Month, List/Board, view toggles.
+- **Tabs** = **underline** section navigation (active = `border-foreground`
+  bottom border, idle muted → hover foreground). It owns **tabpanels + the tab
+  a11y contract** (roving focus, `aria-controls`, panel show/hide) that the
+  SegmentedControl deliberately lacks. Reach for it when switching **panels**.
+
+Do not re-skin Tabs back into a pill — that reintroduces the "why do we have
+both?" ambiguity. If you only need to pick a value (no panels), use
+SegmentedControl, not Tabs.
+
+### Breadcrumb & Pagination — interaction comes from `[data-button]`, not classes
+
+Pagination controls (first/prev/page/next/last) render the real `<Button>` via
+reka `as-child`, so they inherit the full `[data-button]` chrome (hover fill /
+press-scale / focus ring / disabled fade). Applying `buttonVariants()` **classes**
+to a bare reka primitive only carries layout — the interaction lives on
+`[data-button]` in `style.css` and was never reached (that was the "pagination has
+no hover" bug). Edges are icon-only ghost buttons; the active page is the `outline`
+chip (`aria-current="page"`). Breadcrumb separators are a literal `/` (not a
+chevron); each crumb is a `<TextButton>` (see below), so its hover/press is the
+single-sourced ghost chrome — there is no breadcrumb-only hover rule.
+
+### "Clickable text with a hover chip" = `<TextButton>` (ghost @ `size="text"`)
+
+The recurring "low-emphasis text you can click, with a padded hover hit-area
+bigger than the glyphs" affordance (breadcrumb crumbs, inline dropdown triggers,
+compact labels/actions) is NOT a new interaction — it is the ghost `<Button>` at
+the compact `text` size. `size="text"` = `h-auto` / `rounded-sm` (6px, the
+compact-chip radius — not a control's `rounded-md`, not an invented `rounded-xs`) /
+the base `text-control` (14px, the standard button text size) / **`size-3` (12px)
+icons** (the text/badge rung of the icon ladder — see § Sizing & icons — one notch
+under the cap height so the glyph reads quietly, not as a chunky control icon).
+Padding is asymmetric on purpose — tight horizontally (`px-1.5`) with a hair more
+vertical room (`py-[5px]`) — so the ghost hover/press chip breathes ever so slightly
+above and below the text without becoming a tall pill. Pair it with `variant="ghost"` and the existing
+`[data-button][data-variant="ghost"]` hover/press/ring chrome applies unchanged.
+(One Tailwind gotcha: the icon-size override is written `[&_svg:not([class*=size-])]`
+with an **unquoted** attribute value. `tailwind-merge` strips the base `size-4`, so
+the replacement must actually generate CSS — and the escaped-quote form
+`[class*=\'size-\']` inside a single-quoted TS string is not extracted by the JIT,
+which silently leaves the SVG at its 24px intrinsic size.)
+`<TextButton>` is the named, discoverable wrapper that defaults to exactly that
+(overridable `variant`/`size`, supports `as` / `as-child`). Reach for it instead
+of hand-rolling a hover on text. For an underlined inline link inside running
+prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
+
 ## Reference status (new vs legacy)
 
 > Confirm / extend this list with the maintainer before treating anything as gospel.
@@ -126,8 +179,12 @@ numbers are not.
 
 - Control height ladder: `sm` h-8 (32) · default h-9 (36) · `lg` h-10 (40);
   icon-only buttons `icon-sm` 32 / `icon` 36 / `icon-lg` 40.
-- Icon glyph sizes scale with the control: default **16px** (`[&_svg]:size-4`);
-  small in-field controls **14px** (`size-3.5`). Don't free-set icon sizes.
+- Icon glyph sizes scale with the control on ONE shared ladder — don't free-set
+  icon sizes, pick the rung: default control **16px** (`[&_svg]:size-4`); small
+  in-field controls **14px** (`size-3.5`); text-scale affordances (TextButton /
+  breadcrumb crumbs) and badges **12px** (`size-3`, one notch under the 14px text so
+  the glyph reads quietly rather than as a chunky control icon). TextButton does NOT
+  get a bespoke icon standard — it is just the bottom rung of this same ladder.
 - **Icons are always components, never literal text glyphs.** Use a
   `lucide-vue-next` component (`<Plus/>`, `<X/>`, `<ChevronDown/>`) — never a typed
   character (`"+"`, `"×"`, `"▾"`, `"✓"`) standing in for an icon. A glyph is just

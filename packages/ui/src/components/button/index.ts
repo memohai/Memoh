@@ -54,6 +54,23 @@ export const buttonVariants = cva(
         icon: 'size-9',
         'icon-sm': 'size-8',
         'icon-lg': 'size-10',
+        // TEXT = inline/compact affordance. Uses the base text-control (14px) type —
+        // the standard button text size — so it reads as real clickable text, with a
+        // 12px icon (size-3): the text-scale rung of the icon ladder (16 control / 14
+        // in-field / 12 text & badge), so the glyph sits one notch under the cap height
+        // and reads quietly instead of as a chunky control icon. rounded-sm (6px) is
+        // the compact-chip radius (NOT a control's rounded-md, NOT an invented
+        // rounded-xs). Horizontal padding stays tight (px-1.5); vertical is py-[5px] —
+        // a hair more than py-1 so the ghost hover/press chip breathes ever so slightly
+        // above/below the text without ballooning into a tall pill. leading-none is
+        // REQUIRED: text-control otherwise drags in a 20px line-height that inflates
+        // the box and makes the chip look tall — and left the height context-dependent
+        // (a crumb inherited a tight line-height while a bare TextButton did not, so
+        // they rendered different heights). Pinning the line-height to the text height
+        // makes the box stable everywhere. Pairs with variant="ghost" to get "clickable
+        // text with a hover chip" (see <TextButton>); the ghost ::before hover/press
+        // chrome from style.css applies unchanged.
+        text: 'h-auto gap-1.5 rounded-sm px-1.5 py-[5px] leading-none [&_svg:not([class*=size-])]:size-3',
       },
     },
     defaultVariants: {
@@ -88,4 +105,5 @@ export const buttonSizeKeys = [
   'icon',
   'icon-sm',
   'icon-lg',
+  'text',
 ] as const satisfies readonly NonNullable<ButtonVariants['size']>[]

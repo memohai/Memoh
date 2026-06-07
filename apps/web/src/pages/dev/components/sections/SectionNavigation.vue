@@ -4,8 +4,10 @@
 // viewport.
 import { ref } from 'vue'
 import {
-  Breadcrumb, BreadcrumbEllipsis, BreadcrumbItem, BreadcrumbLink,
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink,
   BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
   Pagination, PaginationContent, PaginationEllipsis, PaginationFirst,
   PaginationItem, PaginationLast, PaginationNext, PaginationPrevious,
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -13,8 +15,9 @@ import {
   SidebarMenuButton, SidebarMenuItem, SidebarMenuSkeleton, SidebarMenuSub,
   SidebarMenuSubButton, SidebarMenuSubItem, SidebarProvider, SidebarSeparator, SidebarTrigger,
   Tabs, TabsContent, TabsList, TabsTrigger,
+  TextButton,
 } from '@memohai/ui'
-import { Home, Inbox, MoreHorizontal, Settings } from 'lucide-vue-next'
+import { Archive, ChevronDown, FolderOpen, GitFork, Home, Inbox, MoreHorizontal, Settings, SquarePen, Trash2 } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 
@@ -28,17 +31,17 @@ const currentPage = ref(2)
     description="Breadcrumbs, pagination, tabs, and the sidebar system."
   >
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Specimen label="<Breadcrumb>">
+      <Specimen
+        label="<Breadcrumb>"
+        note="slash separators · icon crumb · hover fill · plain current page"
+      >
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink href="#">
+                <Home />
                 Home
               </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbEllipsis />
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
@@ -48,7 +51,64 @@ const currentPage = ref(2)
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbPage>Appearance</BreadcrumbPage>
+              <BreadcrumbPage>
+                Appearance
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      </Specimen>
+
+      <Specimen
+        label="<Breadcrumb> · menu crumb"
+        note="last crumb is the current chat — a real dropdown trigger, not a decorative arrow"
+      >
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink href="#">
+                Workspace
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink href="#">
+                Chats
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <TextButton class="text-foreground">
+                    Project kickoff
+                    <ChevronDown />
+                  </TextButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem>
+                    <FolderOpen />
+                    Open
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <SquarePen />
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <GitFork />
+                    Fork
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
+                    <Archive />
+                    Archive
+                  </DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive">
+                    <Trash2 />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
@@ -87,7 +147,10 @@ const currentPage = ref(2)
       </Specimen>
 
       <div class="lg:col-span-2">
-        <Specimen label="<Tabs>">
+        <Specimen
+          label="<Tabs>"
+          note="underline section nav (owns tabpanels + a11y) — distinct from SegmentedControl, the enclosed pill value/mode selector"
+        >
           <Tabs
             default-value="account"
             class="w-full max-w-md"
