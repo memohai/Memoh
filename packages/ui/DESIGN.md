@@ -49,6 +49,10 @@ The system employs a **bimodal elevation strategy**:
   - Link: Muted text by default, foreground on hover, with underline feedback. Avoid brand purple for ordinary text links.
   - Grouped (`ButtonGroup`): Unified outer border (`border-border`, 8px radius). Internal items divided by `border-r` or `border-b`, no individual borders or radiuses.
   - Brand: Use `variant="brand"` only for rare brand-colored actions (for example the chat Send button), following brand scarcity.
+- **In-capsule icon affordance** (the X on a tag/chip, a clear button inside a pill): a small icon button (`size-4`, `size-3` lucide glyph) that **follows the shape of its host container**. This is a deliberate split from the standalone ghost icon Button:
+  - Inside a **rounded-rectangle** surface (toolbar, input row, card) the hover chip is a **rounded rectangle** (matches the host's `rounded-md`).
+  - Inside a **pill / capsule** (a tag chip, a count-style pill) the hover chip is a **pure circle** (`rounded-full`) — never a rounded rectangle. The hover chip must echo the curvature of the thing it sits in.
+  - **Colour is never hand-rolled.** The hover fill deepens along the *same ramp the host capsule is built from*: a gray chip (`--accent-gray-soft-active`) deepens to that ramp's next stop (`--accent-gray-border`). Do not borrow the standalone ghost `--btn-ghost-hover` here — it is tuned for a white page and disappears on an already-tinted chip. Icon is `muted-foreground` at rest, `foreground` on hover/focus.
 - **Inputs**: Flat design. 1px `border`, pure `background` fill, 8px/10px outer radius. Text must be `text-[16px]`. Focus state uses a stark black/grey ring, **not** primary purple.
 - **Checkboxes/Radios**: Flat, soft background (`bg-background`). 1px `border`. The checked state marker (tick/dot) is `foreground` (charcoal), avoiding brand colors.
 - **Separators**: Uniformly use the 1px `border` color. Do not use padding/margins that detach them from the container edges (e.g., use full width `border-b` in menus instead of `<Separator mx-1>`).

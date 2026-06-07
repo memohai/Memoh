@@ -129,16 +129,19 @@
   [data-slot="input"]:focus,
   [data-slot="textarea"]:focus,
   [data-slot="input-group"]:focus-within,
-  [data-slot="tags-input"]:focus-within,
   [data-slot="number-field"]:focus-within,
   [data-slot="pin-input-slot"]:focus,
   [data-slot="input-otp-slot"][data-active="true"] {
     --field-edge: var(--field-edge-solid);
   }
-  /* SUBTLE: the faintest deepen of the hairline — search / low-chrome. Extra
-     attribute = higher specificity, so it overrides the solid group above. */
+  /* SUBTLE: the faintest deepen of the hairline — search / low-chrome, and the
+     tags field. The near-black solid edge is a strong, decided signal we reserve
+     for single-line fields; on a big tag container it reads as a heavy box, so
+     tags-input only nudges the edge to engaged on focus.
+     Extra attribute (or distinct slot) = higher specificity than the solid group. */
   [data-slot="input"][data-emphasis="subtle"]:focus,
-  [data-slot="textarea"][data-emphasis="subtle"]:focus {
+  [data-slot="textarea"][data-emphasis="subtle"]:focus,
+  [data-slot="tags-input"]:focus-within {
     --field-edge: var(--field-edge-engaged);
   }
   /* INVALID: the edge itself turns destructive — replaces the hairline, never
