@@ -48,12 +48,28 @@ export const useSettingsStore = defineStore('settings', () => {
     language.value = value
   }
 
+  const withViewTransition = (fn: () => void) => {
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as Document & { startViewTransition: (cb: () => void) => unknown }).startViewTransition(fn)
+    } else {
+      fn()
+    }
+  }
+
   const setTheme = (value: 'light' | 'dark') => {
-    theme.value = value
+    withViewTransition(() => {
+      // Toggle the class synchronously inside the callback so the View
+      // Transitions API captures the before/after states correctly.
+      document.documentElement.classList.toggle('dark', value === 'dark')
+      theme.value = value
+    })
   }
 
   const setColorScheme = (value: ColorSchemeId) => {
-    colorScheme.value = value
+    withViewTransition(() => {
+      colorScheme.value = value
+      applyColorScheme(value)
+    })
   }
 
   return {
