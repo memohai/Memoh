@@ -404,7 +404,7 @@
                       />
                       <span
                         class="text-[11px] font-semibold min-w-[42px] transition-colors"
-                        :class="item.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground/70'"
+                        :class="item.enabled ? 'text-success-foreground' : 'text-foreground/70'"
                       >
                         {{ item.enabled ? $t('common.enabled') : $t('common.disabled') }}
                       </span>
