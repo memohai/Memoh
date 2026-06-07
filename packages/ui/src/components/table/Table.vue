@@ -14,7 +14,7 @@ const props = defineProps<{
   >
     <table
       data-slot="table"
-      :class="cn('w-full caption-bottom text-body', props.class)"
+      :class="cn('w-full caption-top text-label', props.class)"
     >
       <slot />
     </table>

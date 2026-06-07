@@ -7,7 +7,7 @@ import {
   Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
-  Table, TableBody, TableCaption, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
 } from '@memohai/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
@@ -151,11 +151,10 @@ const invoices = [
       <div class="lg:col-span-2">
         <Specimen
           label="<Table> + <TableEmpty>"
-          note="transparent surface + hairline border · quiet muted header · transient --ui-hover; selected row uses a subtle --ui-selected tint — the data-grid exception where a row tint IS the scanning affordance"
+          note="a quiet report table: transparent surface + hairline rows + 13px body. rows are inert by default — no decorative hover. a row only earns an interaction color when it is genuinely clickable (<TableRow interactive>), matching the <Item> contract. the title lives outside the table, not as a height-padding <caption>."
         >
-          <div class="flex w-full flex-col gap-6">
+          <div class="flex w-full max-w-2xl flex-col gap-6">
             <Table>
-              <TableCaption>Recent invoices</TableCaption>
               <TableHeader>
                 <TableRow>
                   <TableHead>Invoice</TableHead>
@@ -169,7 +168,6 @@ const invoices = [
                 <TableRow
                   v-for="inv in invoices"
                   :key="inv.id"
-                  :data-state="inv.id === 'INV-002' ? 'selected' : undefined"
                 >
                   <TableCell class="font-medium">
                     {{ inv.id }}
