@@ -25,26 +25,57 @@ const props = withDefaults(
     // the same whether it's a Select or a Combobox. The inner surface (Command) brings
     // its own border/shadow/radius, so this wrapper stays transparent and unpadded.
     menu?: boolean
+    // Entrance motion for a CHROMED popover (ignored when `menu` is set — a host
+    // always uses menu motion):
+    //   'menu' (default) — the menu-family feel: fade + 1-unit slide at duration-75,
+    //                      NO zoom. Same motion as DropdownMenu/Select/HoverCard, so an
+    //                      anchored popover reads as part of the one menu language.
+    //   'zoom'           — the older generic-popover feel: fade + 2-unit slide +
+    //                      zoom-95. Opt-in only, for a panel that should read as
+    //                      growing out of nothing rather than as a menu.
+    motion?: 'zoom' | 'menu'
   }>(),
   {
     align: 'center',
     sideOffset: 4,
+    motion: 'menu',
   },
 )
 const emits = defineEmits<PopoverContentEmits>()
 
-const delegatedProps = reactiveOmit(props, 'class', 'menu')
+const delegatedProps = reactiveOmit(props, 'class', 'menu', 'motion')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
-const baseClass = computed(() => props.menu
+// Card chrome is dropped only for the menu HOST (`menu`), which lets its inner
+// surface own the border/shadow/radius. Otherwise the popover wears the SAME
+// tokenised menu surface as DropdownMenu/Select/HoverCard — hairline (--border-menu),
+// shell radius and dropdown shadow — so the popover stopped being the odd one out on
+// the un-refactored rounded-lg / border-border / shadow-md generic card.
+const chromeClass = computed(() => props.menu
+  ? ''
+  : 'bg-popover text-popover-foreground w-72 rounded-menu-shell border border-[color:var(--border-menu)] p-4 shadow-[var(--shadow-dropdown)]')
+
+// Menu motion when hosting a menu surface OR when explicitly opted in via motion.
+const motionClass = computed(() => (props.menu || props.motion === 'menu')
   ? cn(
-    'z-50 origin-(--reka-popover-content-transform-origin) outline-hidden',
     'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 duration-75',
     menuSlideClass,
-    'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
   )
-  : 'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-72 rounded-lg border p-4 shadow-md origin-(--reka-popover-content-transform-origin) outline-hidden')
+  : 'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2')
+
+// Menu HOST keeps its original resting directional offset (1 unit off the trigger
+// side) so the Combobox panel sits exactly where it did before this refactor.
+const hostOffsetClass = computed(() => props.menu
+  ? 'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1'
+  : '')
+
+const baseClass = computed(() => cn(
+  'z-50 origin-(--reka-popover-content-transform-origin) outline-hidden',
+  chromeClass.value,
+  motionClass.value,
+  hostOffsetClass.value,
+))
 </script>
 
 <template>

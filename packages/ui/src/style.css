@@ -718,30 +718,34 @@
      floating panel reads with slightly more contrast than the flat trigger below
      it; the cutout depth still comes mostly from --shadow-dropdown. */
   --border-menu: oklch(0 0 0 / 0.13);
-  /* Edge for a MODAL menu surface (CommandDialog) floating over a dimmed scrim.
-     A touch stronger than --border-menu so the palette's outline stays crisp
-     against the darkened background instead of dissolving into it. */
-  --border-menu-elevated: oklch(0 0 0 / 0.22);
+  /* Shared edge for every MODAL surface floating over a dimmed scrim — the card
+     Dialog / DialogScrollContent AND the CommandDialog palette all use it so the modal
+     edge never fragments.
+     LIGHT mode: NO border. These surfaces are WHITE and the scrim is dark, so they
+     already separate at maximum contrast; a dark semi-transparent hairline here is the
+     SAME darkness as the scrim, so instead of drawing a crisp edge it dissolves INTO
+     the dimmed background and reads as a muddy smudge. We let the white surface +
+     --shadow-modal carry the separation (Spotlight/Raycast do the same). Dark mode
+     keeps a white hairline (see .dark) because a dark surface on a dark scrim needs
+     one to separate. */
+  --border-menu-elevated: transparent;
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-dropdown: 0 1px 2px 0 oklch(0 0 0 / 0.04), 0 6px 18px -6px oklch(0 0 0 / 0.08);
   /* Elevation for any surface floating in the MODAL layer over a scrim — the card
      Dialog / Sheet panels AND the CommandDialog menu palette all share it so modal
      depth never fragments (was: per-component shadow-2xl / shadow-lg / a bespoke
-     dropdown-elevated). It is the --shadow-dropdown family deepened: the flat
-     dropdown cast washes out against a dimmed background, so the modal layer gets
-     this stronger drop to separate cleanly from the scrim. Surfaces that scale on
-     open promote to their own GPU layer (will-change-transform), so this larger
-     blur rasterizes once instead of repainting per animation frame. */
-  --shadow-modal: 0 4px 10px -2px oklch(0 0 0 / 0.13), 0 24px 50px -12px oklch(0 0 0 / 0.30);
-  /* Backdrop scrim behind modal surfaces. ONE standard dim for card modals (Dialog,
-     Sheet) so they stop fragmenting (was bg-black/80 on Dialog vs bg-black/30 on
-     Sheet). --scrim-soft is the lighter dim reserved for a floating MENU palette
-     (CommandDialog): a heavy scrim swallowed the palette's hairline + shadow and
-     made it look edgeless, so it dims just enough to focus without erasing the
-     surface chrome. Black-alpha reads in both schemes, so no .dark override. */
+     dropdown-elevated). Both layers carry a STRONG negative spread (-10 / -16) so the
+     drop concentrates BELOW the panel and barely bleeds out the sides — that sideways
+     bleed is what made the soft gray haze sit right next to the 1px hairline and read
+     as a dirty doubled edge in light mode. Now the hairline border is the only crisp
+     edge and the shadow is a clean float that still separates from the scrim. */
+  --shadow-modal: 0 8px 16px -10px oklch(0 0 0 / 0.18), 0 24px 48px -16px oklch(0 0 0 / 0.26);
+  /* ONE backdrop dim behind EVERY modal surface — Dialog, DialogScrollContent, Sheet
+     AND the CommandDialog palette (was fragmented: bg-black/80 on Dialog, /30 on Sheet,
+     /40 on CommandDialog). A single scrim keeps the modal layer reading as one layer.
+     Black-alpha reads in both schemes, so no .dark override. */
   --scrim: oklch(0 0 0 / 0.5);
-  --scrim-soft: oklch(0 0 0 / 0.4);
   /* Form-field edge — text input / textarea / select. The edge is one inset
      hairline whose color swaps per state (never an outer ring):
        solid  (default) → the hairline turns near-black on focus
@@ -949,10 +953,10 @@
   --border: oklch(1 0 0 / 10%);
   --border-hairline: oklch(0.422 0 0);
   --border-menu: oklch(1 0 0 / 0.14);
-  /* Dark: elevated menu edge is a WHITE hairline (light-on-dark), a touch stronger
-     than --border-menu — mirroring the light-mode --border-menu-elevated. Without
-     this dark override the modal palette would inherit the light black edge and
-     render NO visible outline on the dark surface. */
+  /* Dark: a dark palette on a dark scrim DOES need an edge, so here the elevated
+     menu border is a WHITE hairline (light-on-dark), a touch stronger than
+     --border-menu. (Light mode drops this border entirely — a white palette already
+     separates from the scrim; see :root.) */
   --border-menu-elevated: oklch(1 0 0 / 0.22);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.86 0.005 285);

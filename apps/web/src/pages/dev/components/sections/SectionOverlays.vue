@@ -12,7 +12,9 @@ import {
   Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
   HoverCard, HoverCardContent, HoverCardTrigger,
+  Input,
   Kbd,
+  Label,
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger,
   Popover, PopoverContent, PopoverTrigger,
@@ -35,19 +37,22 @@ const showStatusBar = ref(true)
     description="Dialogs, sheets, menus, command palette, tooltips. Click triggers to open."
   >
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Specimen label="<Dialog>">
+      <Specimen
+        label="<Dialog>"
+        note="no corner X by default — dismiss via Cancel/Confirm (or Esc/outside-click); keep description rare"
+      >
         <Dialog v-model:open="dialogOpen">
           <DialogTrigger as-child>
             <Button variant="default">
               Open dialog
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent :show-close-button="false">
             <DialogHeader>
               <DialogTitle>Dialog title</DialogTitle>
               <DialogDescription>A short description of what this dialog is for.</DialogDescription>
             </DialogHeader>
-            <p class="text-sm text-muted-foreground">
+            <p class="text-body text-muted-foreground">
               Body content goes here.
             </p>
             <DialogFooter>
@@ -56,15 +61,20 @@ const showStatusBar = ref(true)
                   Cancel
                 </Button>
               </DialogClose>
-              <Button variant="primary">
-                Confirm
-              </Button>
+              <DialogClose as-child>
+                <Button variant="primary">
+                  Confirm
+                </Button>
+              </DialogClose>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </Specimen>
 
-      <Specimen label="<Sheet>">
+      <Specimen
+        label="<Sheet>"
+        note="use sparingly — prefer an in-page push panel; reserve for full-context drawers (mobile nav, deep settings)"
+      >
         <Sheet v-model:open="sheetOpen">
           <SheetTrigger as-child>
             <Button variant="default">
@@ -90,21 +100,55 @@ const showStatusBar = ref(true)
         </Sheet>
       </Specimen>
 
-      <Specimen label="<Popover>">
+      <Specimen
+        label="<Popover>"
+        note="anchored inline editor — menu-family surface + motion (fade + 1px slide, 75ms, no zoom), same as DropdownMenu/HoverCard"
+      >
         <Popover>
           <PopoverTrigger as-child>
-            <Button variant="default">
-              Open popover
+            <Button variant="outline">
+              Dimensions
             </Button>
           </PopoverTrigger>
-          <PopoverContent class="w-64">
-            <div class="text-sm">
-              <p class="font-medium">
-                Popover
-              </p>
-              <p class="mt-1 text-muted-foreground">
-                Floating panel anchored to the trigger.
-              </p>
+          <PopoverContent class="w-80">
+            <div class="flex flex-col gap-3">
+              <div class="flex flex-col gap-1">
+                <p class="text-label font-medium">
+                  Dimensions
+                </p>
+                <p class="text-body text-muted-foreground">
+                  Set the size for the selected layer.
+                </p>
+              </div>
+              <div class="grid gap-2">
+                <div class="grid grid-cols-3 items-center gap-3">
+                  <Label for="po-width">Width</Label>
+                  <Input
+                    id="po-width"
+                    size="sm"
+                    model-value="100%"
+                    class="col-span-2"
+                  />
+                </div>
+                <div class="grid grid-cols-3 items-center gap-3">
+                  <Label for="po-max">Max. width</Label>
+                  <Input
+                    id="po-max"
+                    size="sm"
+                    model-value="320px"
+                    class="col-span-2"
+                  />
+                </div>
+                <div class="grid grid-cols-3 items-center gap-3">
+                  <Label for="po-height">Height</Label>
+                  <Input
+                    id="po-height"
+                    size="sm"
+                    model-value="24px"
+                    class="col-span-2"
+                  />
+                </div>
+              </div>
             </div>
           </PopoverContent>
         </Popover>
