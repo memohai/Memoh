@@ -322,6 +322,9 @@ func (s *Service) waitForResponse(ctx context.Context, requestID string) (Reques
 
 	req, err := s.Get(ctx, requestID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return s.resolvedAfterContextDone(ctx, requestID, resolved)
+		}
 		return Request{}, err
 	}
 	if req.Status != StatusPending {
@@ -333,20 +336,7 @@ func (s *Service) waitForResponse(ctx context.Context, requestID string) (Reques
 	for {
 		select {
 		case <-ctx.Done():
-			// A resolution may have landed at the same instant (select picks
-			// randomly among ready cases) or committed without its
-			// notification delivered yet; prefer the answer over the timeout.
-			select {
-			case req := <-resolved:
-				return req, nil
-			default:
-			}
-			finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			defer cancel()
-			if req, err := s.Get(finalCtx, requestID); err == nil && req.Status != StatusPending {
-				return req, nil
-			}
-			return Request{}, ctx.Err()
+			return s.resolvedAfterContextDone(ctx, requestID, resolved)
 		case req := <-resolved:
 			return req, nil
 		case <-ticker.C:
@@ -359,6 +349,23 @@ func (s *Service) waitForResponse(ctx context.Context, requestID string) (Reques
 			}
 		}
 	}
+}
+
+func (s *Service) resolvedAfterContextDone(ctx context.Context, requestID string, resolved <-chan Request) (Request, error) {
+	// A resolution may have landed at the same instant (select picks randomly
+	// among ready cases) or committed before its notification was delivered.
+	// Prefer the answer over the caller's cancellation.
+	select {
+	case req := <-resolved:
+		return req, nil
+	default:
+	}
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if req, err := s.Get(finalCtx, requestID); err == nil && req.Status != StatusPending {
+		return req, nil
+	}
+	return Request{}, ctx.Err()
 }
 
 func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error) {
