@@ -224,15 +224,7 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 
 [tasks."test:kata"]
 description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
-run = """
-#!/bin/bash
-set -euo pipefail
-MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml exec -T server ctr' \
-scripts/smoke-containerd-runtime.sh
-MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
-MEMOH_VERIFY_CTR_COMMAND='docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml exec -T server ctr' \
-scripts/verify-containerd-kata.sh
-"""
+run = "scripts/test-containerd-kata-running.sh"
 
 [tasks."test:kata:e2e"]
 description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
@@ -262,9 +254,8 @@ run = """
 #!/bin/bash
 set -euo pipefail
 MEMOH_VERIFY_EXPECTED_RUNTIME=io.containerd.runc.v2 \
-MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
-MEMOH_VERIFY_CTR_COMMAND='docker compose -f devenv/docker-compose.yml exec -T server ctr' \
-scripts/verify-containerd-kata.sh
+MEMOH_KATA_RUNNING_COMPOSE_CMD='docker compose -f devenv/docker-compose.yml' \
+scripts/test-containerd-kata-running.sh
 """
 
 [tasks.db-up]

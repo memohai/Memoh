@@ -177,6 +177,7 @@ KATA_SMOKE_EVIDENCE="$TMPDIR/kata-smoke.json"
 RUNC_SMOKE_EVIDENCE="$TMPDIR/runc-smoke.json"
 BROKEN_SMOKE_EVIDENCE="$TMPDIR/broken-smoke.json"
 SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
+CUSTOM_SMOKE_EVIDENCE="$TMPDIR/custom-smoke.json"
 
 write_evidence "$KATA_EVIDENCE" "io.containerd.kata.v2"
 scripts/validate-kata-evidence.sh "$KATA_EVIDENCE" >/dev/null
@@ -199,6 +200,13 @@ scripts/validate-containerd-smoke-evidence.sh "$KATA_SMOKE_EVIDENCE" >/dev/null
 write_smoke_evidence "$RUNC_SMOKE_EVIDENCE" "io.containerd.runc.v2"
 MEMOH_CONTAINERD_SMOKE_EVIDENCE_EXPECTED_RUNTIME=io.containerd.runc.v2 \
   scripts/validate-containerd-smoke-evidence.sh "$RUNC_SMOKE_EVIDENCE" >/dev/null
+
+jq '.target.namespace = "testing" | .target.image = "example.local/alpine:custom" | .target.snapshotter = "native"' \
+  "$KATA_SMOKE_EVIDENCE" >"$CUSTOM_SMOKE_EVIDENCE"
+MEMOH_CONTAINERD_SMOKE_NAMESPACE=testing \
+MEMOH_CONTAINERD_SMOKE_IMAGE=example.local/alpine:custom \
+MEMOH_CONTAINERD_SMOKE_SNAPSHOTTER=native \
+  scripts/validate-containerd-smoke-evidence.sh "$CUSTOM_SMOKE_EVIDENCE" >/dev/null
 
 jq '.checks.runtime_started = false' "$KATA_SMOKE_EVIDENCE" >"$BROKEN_SMOKE_EVIDENCE"
 expect_failure "smoke runtime_started must be enforced" \

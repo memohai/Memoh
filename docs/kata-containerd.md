@@ -67,6 +67,10 @@ mise run dev:kata
 mise run test:kata
 ```
 
+`test:kata` uses the running dev stack instead of rebuilding it, but it still
+generates and validates both the API verifier evidence and the direct
+containerd smoke evidence under `tmp/kata-evidence/` by default.
+
 ## Production Compose E2E
 
 Use this on a dedicated Linux/KVM host because the root compose file uses fixed
