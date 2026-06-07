@@ -23,6 +23,7 @@ on:
       - "scripts/validate-kata-evidence-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
+      - "scripts/write-kata-evidence-environment.sh"
   pull_request:
     branches: ["main"]
     paths:
@@ -45,6 +46,7 @@ on:
       - "scripts/validate-kata-evidence-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
+      - "scripts/write-kata-evidence-environment.sh"
   workflow_dispatch:
     inputs:
       run_kata_e2e:
@@ -87,7 +89,8 @@ jobs:
             scripts/validate-containerd-smoke-evidence.sh \
             scripts/validate-kata-evidence-dir.sh \
             scripts/validate-kata-evidence.sh \
-            scripts/verify-containerd-kata.sh
+            scripts/verify-containerd-kata.sh \
+            scripts/write-kata-evidence-environment.sh
 
       - name: Validate evidence checks
         run: scripts/test-kata-evidence-validator.sh
@@ -123,22 +126,7 @@ jobs:
       - name: Prepare evidence directory
         run: |
           rm -rf tmp/kata-evidence
-          mkdir -p tmp/kata-evidence
-          {
-            echo "run_id=${GITHUB_RUN_ID}"
-            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
-            echo "runner_name=${RUNNER_NAME}"
-            echo "runner_os=${RUNNER_OS}"
-            echo "runner_arch=${RUNNER_ARCH}"
-            echo "uname=$(uname -a)"
-            echo "docker=$(docker --version)"
-            echo "docker_compose=$(docker compose version)"
-            echo "kvm_present=$([ -e /dev/kvm ] && echo true || echo false)"
-            echo "kata_shim=${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}"
-            if [ -x "${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}" ]; then
-              "${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}" --version || true
-            fi
-          } > tmp/kata-evidence/environment.txt
+          scripts/write-kata-evidence-environment.sh tmp/kata-evidence
 
       - name: Check Kata host prerequisites
         run: scripts/check-kata-dev-env.sh

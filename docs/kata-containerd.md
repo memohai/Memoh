@@ -93,7 +93,8 @@ the dev E2E. By default it tears the stack down when it exits. Set
 
 Both E2E tasks write machine-readable verification evidence under
 `tmp/kata-evidence/` by default: one JSON file for the Memoh API verifier and
-one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check. Set
+one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check, plus
+`environment.txt` from `scripts/write-kata-evidence-environment.sh`. Set
 `MEMOH_KATA_EVIDENCE_DIR`, `MEMOH_VERIFY_EVIDENCE_FILE`, or
 `MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE` to choose another location.
 The evidence validator itself can be regression-tested locally with
