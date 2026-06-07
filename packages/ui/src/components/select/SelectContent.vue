@@ -24,11 +24,11 @@ const props = withDefaults(
     // solely by reka's bodyLock (it sets overflow:hidden on <body>), so we turn
     // ONLY that off. We deliberately LEAVE disableOutsidePointerEvents at reka's
     // default (true): it sets pointer-events:none on <body>, which does NOT block
-    // wheel scrolling but DOES make the trigger inert while the menu is open. That
-    // inertness matters — with it off, the still-live trigger steals focus from
-    // the row reka focuses on open, which made the highlight flicker on/off (and
-    // left the trigger looking "triggered"). Matching shadcn's default here fixes
-    // both. The popper still follows the trigger; an outside click still dismisses.
+    // wheel scrolling but keeps the rest of the page inert so an outside click
+    // still dismisses. Turning it fully off (page-wide live) made reka's focus
+    // dance with the trigger and flickered the row highlight. We instead re-enable
+    // pointer-events on the TRIGGER ALONE in style.css (so its hover tracks the
+    // pointer), leaving everything else inert. The popper still follows the trigger.
     bodyLock: false,
     // Shift the WHOLE menu left so the first row's text lands under the trigger
     // text — without touching the menu's internal proportions. The menu's text

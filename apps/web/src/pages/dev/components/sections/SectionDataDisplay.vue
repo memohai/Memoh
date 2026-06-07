@@ -3,7 +3,7 @@
 import {
   Badge,
   Button,
-  ButtonGroup, ButtonGroupSeparator, ButtonGroupText,
+  ButtonGroup, ButtonGroupText,
   Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
@@ -211,17 +211,16 @@ const invoices = [
         </Specimen>
       </div>
 
-      <Specimen label="<ButtonGroup :orientation :size>">
+      <Specimen
+        label="<ButtonGroup :orientation>"
+        note="The group owns one flat border + internal dividers; height comes from the buttons (the group has no size of its own). Grouped buttons drop their own edge so there is no double line."
+      >
         <VariantMatrix
           :variants="variantSpecs.buttonGroup.variants"
-          :sizes="variantSpecs.buttonGroup.sizes"
           axis-label="orientation"
         >
-          <template #default="{ variant, size }">
-            <ButtonGroup
-              :orientation="variant"
-              :size="size"
-            >
+          <template #default="{ variant }">
+            <ButtonGroup :orientation="variant">
               <Button variant="outline">
                 One
               </Button>
@@ -236,12 +235,14 @@ const invoices = [
         </VariantMatrix>
       </Specimen>
 
-      <Specimen label="<ButtonGroup> separator + text">
+      <Specimen
+        label="<ButtonGroup> with text"
+        note="ButtonGroupText is a quiet inline label cell (muted, no fill/shadow) sharing the group's dividers — not a pressed gray pill."
+      >
         <ButtonGroup>
           <Button variant="outline">
             Copy
           </Button>
-          <ButtonGroupSeparator />
           <ButtonGroupText>or</ButtonGroupText>
           <Button variant="outline">
             Paste
@@ -250,19 +251,24 @@ const invoices = [
       </Specimen>
 
       <div class="lg:col-span-2">
-        <Specimen label="<ScrollArea> vertical + horizontal">
+        <Specimen
+          label="<ScrollArea> vertical + horizontal"
+          note="The viewport IS the card: border + radius on the ScrollArea, content padding lives on the inner wrapper, so the scrollbar hugs the card edge instead of a nested inset region."
+        >
           <div class="flex w-full flex-wrap gap-6">
-            <ScrollArea class="h-40 w-56 rounded-md border border-border p-3">
-              <p
-                v-for="i in 20"
-                :key="i"
-                class="py-1 text-xs text-muted-foreground"
-              >
-                Scrollable row {{ i }}
-              </p>
+            <ScrollArea class="h-48 w-64 rounded-md border border-border">
+              <div class="p-3">
+                <p
+                  v-for="i in 20"
+                  :key="i"
+                  class="py-1 text-xs text-muted-foreground"
+                >
+                  Scrollable row {{ i }}
+                </p>
+              </div>
             </ScrollArea>
-            <ScrollArea class="w-72 whitespace-nowrap rounded-md border border-border p-3">
-              <div class="flex gap-3">
+            <ScrollArea class="h-48 w-80 whitespace-nowrap rounded-md border border-border">
+              <div class="flex gap-3 p-3">
                 <div
                   v-for="i in 12"
                   :key="i"

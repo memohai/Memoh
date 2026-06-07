@@ -33,7 +33,6 @@ export const variantSpecs = {
   buttonGroup: {
     axis: 'orientation',
     variants: ['horizontal', 'vertical'],
-    sizes: ['sm', 'default', 'lg'],
   },
   alert: {
     axis: 'variant',

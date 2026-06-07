@@ -94,6 +94,31 @@
     box-shadow: none;
   }
 
+  /* ── Buttons inside a ButtonGroup — a "joined" relative of Toggle ────────────
+     The group (button-group/index.ts) draws the single outer border + internal
+     dividers, so grouped buttons drop their standalone ::before chrome and adopt
+     the Toggle gray-ladder press model instead. Two reasons the standalone model
+     can't survive in a group: (1) the hairline ring would double the group
+     border, and (2) a standalone outline button's press signal is PURELY the
+     scale-down — hover and :active share one fill — but a shrinking fill pulls
+     away from the fixed divider and fights it. So we kill the scale and make the
+     press read through COLOR like Toggle does: hover 249 → press 237, distinct
+     and snappy. Specificity ties the standalone selectors and wins by source
+     order (these rules come later). */
+  [data-slot="button-group"] > [data-button]:active::before {
+    scale: 1;
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
+    box-shadow: none;
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
+    background-color: var(--ui-hover);
+  }
+  [data-slot="button-group"] > [data-button]:is([data-variant="outline"], [data-variant="secondary"]):active::before {
+    background-color: var(--ui-pressed);
+    transition-duration: 40ms;
+  }
+
   /* ── Form fields: text input / textarea / select trigger / native select ─────
      No fill — the field is defined purely by its edge so dense forms stay clean.
      Rest: a light hairline edge (lighter than the secondary button, so the
@@ -167,11 +192,18 @@
     transition:
       background-color 110ms ease,
       box-shadow 110ms ease;
+    /* Hover is PURELY pointer-driven (pointer on = fill, off = none). Reka sets
+       pointer-events:none on the page while the menu is open, which would make
+       the trigger inert (unhoverable) — and, on close, the page stays inert for
+       the ~75ms close animation AFTER the trigger's [data-state] already flipped,
+       so a state-keyed re-enable left a gap where :hover dropped → a white flash.
+       Keeping the trigger ALWAYS pointer-events:auto (a child opts back in under
+       an inert ancestor) removes that gap entirely: the rest of the page stays
+       inert so outside-click still dismisses, but the trigger's fill tracks the
+       pointer continuously through open and close. */
+    pointer-events: auto;
   }
-  /* Hover only fills when CLOSED. With the menu open the pointer is still over
-     the trigger, and a gray fill under an open menu reads as a stuck "active"
-     button — so the open trigger stays untouched, just the resting hairline. */
-  [data-slot="select-trigger"]:hover:not([data-state="open"]) {
+  [data-slot="select-trigger"]:hover {
     background-color: var(--ui-hover);
   }
   /* No focus ring: reka returns DOM focus to the trigger after a mouse pick,
@@ -427,7 +459,7 @@
     transition-duration: 40ms;
   }
   [data-slot="toggle"][data-state="on"] {
-    background-color: var(--ui-selected);
+    background-color: var(--ui-on);
   }
   [data-slot="toggle"][data-state="on"]:active {
     background-color: var(--ui-selected-pressed);
@@ -435,10 +467,11 @@
   }
 
   /* TINT variant — selection reads via COLOR (icon brightens), not a persistent
-     fill, so the gray hover goes straight to 243 (no reserved selected gray).
-     Order matters: :hover is declared AFTER [data-state=on] so an active+hovered
-     item still shows the 243 track. NOTE: the active tint uses --brand for now;
-     swap to a promoted accent token once the accent palette lands. */
+     fill, so there's no reserved selected gray: hover/press just borrow the
+     control hover→press ladder like the default toggle. Order matters: :hover is
+     declared AFTER [data-state=on] so an active+hovered item still shows the
+     track. NOTE: the active tint uses --brand for now; swap to a promoted accent
+     token once the accent palette lands. */
   [data-slot="toggle"][data-variant="tint"] {
     color: var(--muted-foreground);
   }
@@ -447,7 +480,7 @@
     background-color: transparent;
   }
   [data-slot="toggle"][data-variant="tint"]:hover {
-    background-color: var(--ui-selected);
+    background-color: var(--ui-hover);
   }
   [data-slot="toggle"][data-variant="tint"]:active {
     background-color: var(--ui-pressed);
@@ -745,15 +778,22 @@
      retune it in one place. Flips to a light fill in dark mode below. */
   --tooltip: #09090b;
   --tooltip-foreground: oklch(0.985 0.001 286);
-  /* Interactive surface gray ladder (rgb 255 → 249 → 243 → 237 → 231) — the
-     SINGLE source for control hover/selected/press tints (toggle, segmented,
-     ghost, menu items). Promoted verbatim from the contract bench so colors
-     never fragment. 249 hover · 243 selected · 237 pressed · 231 sel+pressed. */
-  --ui-hover: oklch(0.978 0 0);
-  --ui-selected: oklch(0.962 0 0);
-  --ui-pressed: oklch(0.946 0 0);
-  --ui-selected-pressed: oklch(0.928 0 0);
-  --btn-ghost-hover: var(--ui-pressed);
+  /* Interactive gray ladder. TWO contexts share one neutral material:
+       · MENU context (settled): --ui-selected (≈243) tints highlighted menu rows
+         (menuItemClass) + the segmented track. Light, single-state. Untouched.
+       · CONTROL context (no-scale hover→press surfaces: Select trigger, Toggle,
+         ButtonGroup, NativeSelect, checkbox/radio box): a DEEPER ladder so the
+         old near-invisible hover (was 249) actually reads.
+     --ui-on is split OUT of --ui-selected so deepening the Toggle's selected step
+     (≈234) never drags the menu highlight (≈243) with it. Ghost is button-tier
+     (own press-scale), so its hover is pinned to its OWN step, not the control
+     press. Steps (rgb): hover 239 · on 234 · pressed 224 · on+pressed 218. */
+  --ui-hover: oklch(0.951 0 0); /* ≈239 — control hover */
+  --ui-selected: oklch(0.962 0 0); /* ≈243 — MENU highlight + segmented track (unchanged) */
+  --ui-on: oklch(0.934 0 0); /* ≈234 — control SELECTED (Toggle on) */
+  --ui-pressed: oklch(0.910 0 0); /* ≈224 — control press */
+  --ui-selected-pressed: oklch(0.893 0 0); /* ≈218 — control on+press */
+  --btn-ghost-hover: oklch(0.946 0 0); /* ≈237 — ghost (button-tier), its own step */
   /* Segmented control surfaces: recessed track + elevated sliding thumb. */
   --segment-track: var(--ui-selected);
   --segment-thumb: oklch(1 0 0);
@@ -1058,13 +1098,17 @@
   /* Dark: the tooltip inverts to a near-white bubble with dark text. */
   --tooltip: oklch(0.22 0 0);
   --tooltip-foreground: oklch(0.92 0 0);
-  /* Dark: control tints LIGHTEN on engage. Anchored so pressed = 0.32 to keep
-     ghost hover identical to before. hover · selected · pressed · sel+pressed. */
-  --ui-hover: oklch(0.26 0 0);
-  --ui-selected: oklch(0.29 0 0);
-  --ui-pressed: oklch(0.32 0 0);
-  --ui-selected-pressed: oklch(0.36 0 0);
-  --btn-ghost-hover: var(--ui-pressed);
+  /* Dark: control tints LIGHTEN on engage. Mirrors the deeper light ladder — the
+     control hover lifts more off the surface so it actually reads, while the MENU
+     highlight (--ui-selected) stays put. --ui-on is the control SELECTED step
+     (split from the menu token); ghost keeps its own pinned step. Monotonic:
+     hover < on < pressed < on+pressed. */
+  --ui-hover: oklch(0.30 0 0); /* control hover */
+  --ui-selected: oklch(0.29 0 0); /* MENU highlight (unchanged) */
+  --ui-on: oklch(0.34 0 0); /* control SELECTED (Toggle on) */
+  --ui-pressed: oklch(0.38 0 0); /* control press */
+  --ui-selected-pressed: oklch(0.42 0 0); /* control on+press */
+  --btn-ghost-hover: oklch(0.32 0 0); /* ghost (button-tier), its own step */
   --segment-track: oklch(0.24 0 0);
   --segment-thumb: oklch(0.40 0 0);
   /* Switch (dark): off gray LIGHTENS on hover (like the other dark control

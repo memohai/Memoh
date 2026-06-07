@@ -38,7 +38,7 @@ The system employs a **bimodal elevation strategy**:
 
 ### Base Atoms
 
-- **Avatars**: 26px rounded full. Default fallback uses `accent`. Status badges require a 2px knockout border matching the background.
+- **Avatars**: `size-8` (32px) `rounded-full`, `overflow-hidden`, `shrink-0`; the size is overridable per call site via `class` (e.g. `class="size-6"` / `size-10"`). Fallback is a paired step of the warm-gray ramp — `bg-[--accent-gray-soft-active]` fill + `text-[--accent-gray-deep]` `font-medium` initials, centered and `select-none`. (The old `bg-muted`/`text-muted-foreground` was too light to read as a present circle and the cool muted-foreground initials looked murky; the ramp pair gives a deliberate placeholder, not an empty/disabled blob.) Still neutral — no per-identity accent tint. Status dots/badges are composed at the call site and need a 2px knockout border matching the surface behind the avatar.
 - **Badges**: 4px radius (`rounded-sm`). Default uses `secondary/secondary-foreground` with `border-border`. Secondary uses `accent/foreground`. Destructive, success, and warning map to global status tokens. Outline uses `background/border/foreground`. Supports `size="sm"` (`text-[11px] px-2`) alongside default.
 - **BadgeCount**: Circular numeric counter. `rounded-full`, `h-[18px] min-w-[18px] px-1`, `text-[11px] font-medium`. Uses the same base/status mapping as Badge. Values above 99 display as "99+".
 - **Buttons**:

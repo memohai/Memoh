@@ -19,9 +19,9 @@ const delegatedProps = reactiveOmit(props, 'class')
     :class="
       cn('flex touch-none p-0.5 transition-colors select-none justify-center',
          orientation === 'vertical'
-           && 'h-full w-2 border-l border-l-transparent',
+           && 'h-full w-3 border-l border-l-transparent',
          orientation === 'horizontal'
-           && 'h-2 flex-col border-t border-t-transparent',
+           && 'h-3 flex-col border-t border-t-transparent',
          props.class)"
   >
     <ScrollAreaThumb

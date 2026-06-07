@@ -140,10 +140,17 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 - **Selection blue is `--accent-blue-fill`** (`#2383e2`) — the single blue across
   Checkbox / Switch. Its ramp: `--accent-blue-fill-hover` (deeper) /
   `--accent-blue-fill-active` (deeper still).
-- **Interactive surface gray ladder** — the single source for hover/selected/
-  press tints (Toggle, Ghost button, SegmentedControl, menu items):
-  `--ui-hover` (lightest) · `--ui-selected` · `--ui-pressed` ·
-  `--ui-selected-pressed`. Dark mode lightens instead of darkens.
+- **Interactive surface gray ladder** — one neutral material, two contexts:
+  - **Menu context** (light, single-state): `--ui-selected` (≈243) tints
+    highlighted menu rows (`menuItemClass`) + the SegmentedControl track.
+  - **Control context** (deeper hover→press, no scale: Toggle, ButtonGroup,
+    Select/Native-select trigger, Checkbox/Radio box): `--ui-hover` (≈239) ·
+    `--ui-on` (≈234, the control SELECTED step — Toggle on) · `--ui-pressed`
+    (≈224) · `--ui-selected-pressed` (≈218, on+press).
+  `--ui-on` is split from `--ui-selected` so deepening the control ladder never
+  drags the menu highlight. Ghost is button-tier (own press-scale), so its hover
+  is pinned to its OWN step `--btn-ghost-hover` (≈237), not `--ui-pressed`. Dark
+  mode lightens instead of darkens.
 - **Accent palette** — 11 hues, each with a 6-role ramp: `--accent-{hue}` (icon/
   text, **state-constant**), `-soft` (rest bg), `-soft-hover`, `-soft-active`,
   `-border`, `-deep`. 3-layer model: a colored item's text/icon **never** changes

@@ -564,8 +564,11 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         </div>
       </Specimen>
 
-      <Specimen label="<Avatar> image + fallback">
-        <Avatar>
+      <Specimen
+        label="<Avatar> image + fallback"
+        note="Base is size-8 (32px) rounded-full; override the size per call site via class. Fallback shows when the image is missing/broken — neutral muted, never an accent tint."
+      >
+        <Avatar class="size-6">
           <AvatarImage
             src="https://avatars.githubusercontent.com/u/9919?v=4"
             alt="avatar"
@@ -573,6 +576,20 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
           <AvatarFallback>MH</AvatarFallback>
         </Avatar>
         <Avatar>
+          <AvatarImage
+            src="https://avatars.githubusercontent.com/u/9919?v=4"
+            alt="avatar"
+          />
+          <AvatarFallback>MH</AvatarFallback>
+        </Avatar>
+        <Avatar class="size-10">
+          <AvatarImage
+            src="https://avatars.githubusercontent.com/u/9919?v=4"
+            alt="avatar"
+          />
+          <AvatarFallback>MH</AvatarFallback>
+        </Avatar>
+        <Avatar class="size-10">
           <AvatarFallback>MH</AvatarFallback>
         </Avatar>
       </Specimen>
