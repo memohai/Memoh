@@ -115,7 +115,9 @@ self-hosted, linux, x64, kvm, kata
 Then run the workflow manually and enable `run_kata_e2e`. The job executes
 `scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is enabled, it also
 executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload their
-API and smoke evidence JSON files as the `kata-evidence` artifact.
+API and smoke evidence JSON files as the `kata-evidence` artifact. The job
+clears `tmp/kata-evidence/` before each run on the self-hosted runner and also
+uploads `environment.txt` with the runner, Docker, KVM, and Kata shim summary.
 
 For manual production deployment, copy and edit the Kata config first:
 

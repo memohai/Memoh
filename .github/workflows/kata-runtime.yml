@@ -117,6 +117,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare evidence directory
+        run: |
+          rm -rf tmp/kata-evidence
+          mkdir -p tmp/kata-evidence
+          {
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "runner_name=${RUNNER_NAME}"
+            echo "runner_os=${RUNNER_OS}"
+            echo "runner_arch=${RUNNER_ARCH}"
+            echo "uname=$(uname -a)"
+            echo "docker=$(docker --version)"
+            echo "docker_compose=$(docker compose version)"
+            echo "kvm_present=$([ -e /dev/kvm ] && echo true || echo false)"
+            echo "kata_shim=${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}"
+            if [ -x "${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}" ]; then
+              "${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}" --version || true
+            fi
+          } > tmp/kata-evidence/environment.txt
+
       - name: Check Kata host prerequisites
         run: scripts/check-kata-dev-env.sh
 
@@ -136,5 +156,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: kata-evidence
-          path: tmp/kata-evidence/*.json
+          path: tmp/kata-evidence
           if-no-files-found: warn
