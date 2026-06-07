@@ -17,12 +17,13 @@ const delegatedProps = reactiveOmit(props, 'class')
     v-bind="delegatedProps"
     data-slot="pin-input-slot"
     :class="cn(
-      'size-9 bg-background text-center text-body text-foreground shadow-none',
-      'border-y border-r border-border',
-      'transition-all outline-none',
-      'focus:relative focus:z-10 focus:border-2 focus:border-ring',
-      'first:rounded-l-lg first:border-l',
-      'last:rounded-r-lg',
+      // Each cell is its OWN mini field box: the edge is the shared --field-edge
+      // inset hairline from style.css (pixel-identical to <Input> — same mechanism,
+      // so no border-miter corner darkening, no doubled dividers). Cells are spaced
+      // by the group's gap, so every corner is rounded like a small input and focus
+      // deepens the whole edge in place (no ring, no :has neighbour trick).
+      'size-8 rounded-md bg-transparent text-center text-body text-foreground',
+      'outline-none',
       'disabled:pointer-events-none disabled:opacity-40',
       'placeholder:text-muted-foreground',
       props.class,

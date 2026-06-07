@@ -16,7 +16,13 @@ const forwardedProps = useForwardProps(delegatedProps)
 <template>
   <TagsInputItem
     v-bind="forwardedProps"
-    :class="cn('flex h-5 items-center rounded-md bg-secondary data-[state=active]:ring-ring data-[state=active]:ring-2 data-[state=active]:ring-offset-2 ring-offset-background', props.class)"
+    :class="cn(
+      'flex h-5 items-center rounded-md bg-secondary text-secondary-foreground',
+      // Active (selected, about-to-delete) marks itself with ONE inset near-black
+      // hairline — no offset ring — to match the field edge language.
+      'data-[state=active]:shadow-[inset_0_0_0_1px_var(--field-edge-solid)]',
+      props.class,
+    )"
   >
     <slot />
   </TagsInputItem>

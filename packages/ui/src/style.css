@@ -106,7 +106,10 @@
   [data-slot="input"],
   [data-slot="textarea"],
   [data-slot="input-group"],
-  [data-slot="number-field"] {
+  [data-slot="tags-input"],
+  [data-slot="number-field"],
+  [data-slot="pin-input-slot"],
+  [data-slot="input-otp-slot"] {
     background-color: transparent;
     --field-edge: var(--field-edge-rest);
     box-shadow: inset 0 0 0 1px var(--field-edge);
@@ -126,7 +129,10 @@
   [data-slot="input"]:focus,
   [data-slot="textarea"]:focus,
   [data-slot="input-group"]:focus-within,
-  [data-slot="number-field"]:focus-within {
+  [data-slot="tags-input"]:focus-within,
+  [data-slot="number-field"]:focus-within,
+  [data-slot="pin-input-slot"]:focus,
+  [data-slot="input-otp-slot"][data-active="true"] {
     --field-edge: var(--field-edge-solid);
   }
   /* SUBTLE: the faintest deepen of the hairline — search / low-chrome. Extra
@@ -140,8 +146,12 @@
   [data-slot="input"][aria-invalid="true"],
   [data-slot="textarea"][aria-invalid="true"],
   [data-slot="input-group"]:has([aria-invalid="true"]),
+  [data-slot="tags-input"][aria-invalid="true"],
+  [data-slot="tags-input"]:has([aria-invalid="true"]),
   [data-slot="number-field"][aria-invalid="true"],
-  [data-slot="number-field"]:has([aria-invalid="true"]) {
+  [data-slot="number-field"]:has([aria-invalid="true"]),
+  [data-slot="pin-input-slot"][aria-invalid="true"],
+  [data-slot="input-otp-slot"][aria-invalid="true"] {
     --field-edge: var(--destructive);
   }
 

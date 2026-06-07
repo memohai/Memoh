@@ -17,10 +17,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
   <TagsInputRoot
     v-slot="slotProps"
     v-bind="forwarded"
+    data-slot="tags-input"
     :class="cn(
-      'flex flex-wrap gap-2 items-center rounded-lg border border-input bg-background px-2 py-1 text-body transition-[color,box-shadow] outline-none',
-      'focus-within:border-ring focus-within:ring-ring/20 focus-within:ring-2',
-      'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+      // Same field language as Input/Textarea/InputGroup — transparent fill + one
+      // inset --field-edge hairline (driven by style.css), focus-within deepens the
+      // edge near-black IN PLACE, invalid turns it destructive. No outer ring, no
+      // bg-background, no rounded-lg: was the old border-input + focus ring-2 card.
+      'flex flex-wrap items-center gap-2 rounded-md px-2 py-1 text-body outline-none',
       props.class)"
   >
     <slot v-bind="slotProps" />

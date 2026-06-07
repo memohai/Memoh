@@ -504,22 +504,15 @@ const formSchema = {
       </Specimen>
 
       <Specimen label="<PinInput>">
-        <PinInput
-          v-model="pin"
-          placeholder="○"
-        >
+        <PinInput v-model="pin">
           <PinInputGroup>
-            <PinInputSlot
-              v-for="i in 2"
-              :key="i"
-              :index="i - 1"
-            />
-            <PinInputSeparator />
-            <PinInputSlot
-              v-for="i in 2"
-              :key="i + 2"
-              :index="i + 1"
-            />
+            <PinInputSlot :index="0" />
+            <PinInputSlot :index="1" />
+          </PinInputGroup>
+          <PinInputSeparator />
+          <PinInputGroup>
+            <PinInputSlot :index="2" />
+            <PinInputSlot :index="3" />
           </PinInputGroup>
         </PinInput>
       </Specimen>
