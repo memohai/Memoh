@@ -1,4 +1,5 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import type { PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { createRequire } from 'node:module'
@@ -77,9 +78,19 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
   return { port, host, baseUrl }
 }
 
-export default defineConfig(({ command }) => {
+export default defineConfig(async ({ command }) => {
   const { port, host, baseUrl } = resolveProxyTarget(command)
   const bundledElectronToolkit = ['@electron-toolkit/preload', '@electron-toolkit/utils']
+
+  const devtoolsPlugins: PluginOption[] = []
+  if (command !== 'build') {
+    try {
+      const { default: vueDevTools } = await import('vite-plugin-vue-devtools')
+      devtoolsPlugins.push(vueDevTools())
+    } catch {
+      // DevTools is optional — never block startup.
+    }
+  }
 
   return {
     main: {
@@ -102,7 +113,7 @@ export default defineConfig(({ command }) => {
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
       publicDir: resolve(__dirname, '../web/public'),
-      plugins: [vue(), tailwindcss()],
+      plugins: [...devtoolsPlugins, vue(), tailwindcss()],
       resolve: {
         alias: {
           '@renderer': fileURLToPath(new URL('./src/renderer/src', import.meta.url)),
@@ -122,7 +133,6 @@ export default defineConfig(({ command }) => {
         rollupOptions: {
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
-            settings: resolve(__dirname, 'src/renderer/settings.html'),
           },
         },
       },
