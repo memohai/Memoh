@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+require_cmd bash
+require_cmd docker
+require_cmd grep
+
+echo "Checking Kata shell scripts..."
+bash -n \
+  scripts/check-kata-dev-env.sh \
+  scripts/smoke-containerd-runtime.sh \
+  scripts/test-containerd-kata-compose-e2e.sh \
+  scripts/test-containerd-kata-e2e.sh \
+  scripts/test-containerd-kata-running.sh \
+  scripts/test-kata-evidence-validator.sh \
+  scripts/validate-containerd-smoke-evidence.sh \
+  scripts/validate-kata-evidence-dir.sh \
+  scripts/validate-kata-evidence-run-dir.sh \
+  scripts/validate-kata-evidence.sh \
+  scripts/verify-containerd-kata.sh \
+  scripts/write-kata-compose-failure-context.sh \
+  scripts/write-kata-evidence-environment.sh
+
+echo "Validating Kata evidence checks..."
+scripts/test-kata-evidence-validator.sh
+
+echo "Validating Kata config templates..."
+grep -F 'backend = "containerd"' devenv/app.kata.dev.toml
+grep -F 'runtime_type = "io.containerd.kata.v2"' devenv/app.kata.dev.toml
+grep -F 'backend = "containerd"' conf/app.kata.docker.toml
+grep -F 'runtime_type = "io.containerd.kata.v2"' conf/app.kata.docker.toml
+
+dev_compose="$(mktemp "${TMPDIR:-/tmp}/memoh-kata-dev-compose.XXXXXX.yml")"
+prod_compose="$(mktemp "${TMPDIR:-/tmp}/memoh-kata-compose.XXXXXX.yml")"
+cleanup() {
+  rm -f "$dev_compose" "$prod_compose"
+}
+trap cleanup EXIT
+
+echo "Rendering Kata compose configs..."
+docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml config >"$dev_compose"
+docker compose -f docker-compose.yml -f docker-compose.kata.yml config >"$prod_compose"
+
+grep -F 'target: server-kata' "$prod_compose"
+grep -F 'image: memohai/server:kata' "$prod_compose"
+grep -F 'source: /dev/kvm' "$prod_compose"
+grep -F 'target: /dev/kvm' "$prod_compose"
+grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$prod_compose"
+grep -F 'create_host_path: false' "$prod_compose"
+
+grep -F 'image: memoh-dev-server-kata' "$dev_compose"
+grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$dev_compose"
+grep -F 'create_host_path: false' "$dev_compose"
+
+echo "Checking server-kata Dockerfile target..."
+docker build --check --target server-kata -f docker/Dockerfile.server .
+
+echo "Kata static validation passed."

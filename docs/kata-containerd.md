@@ -41,6 +41,21 @@ MEMOH_KATA_OPT_DIR=/opt/kata
 If your Kata install uses different paths, export those variables before
 running the dev or production compose commands.
 
+## Static Validation
+
+This can run on macOS, Docker Desktop, or GitHub-hosted Ubuntu. It does not
+prove that Kata works, but it checks the shell scripts, evidence validators,
+Kata config templates, compose overrides, and the `server-kata` Dockerfile
+target:
+
+```bash
+mise run test:kata:static
+```
+
+The GitHub `Kata Runtime` workflow uses the same script for its static job.
+Until that workflow file exists on the default branch, use this task directly
+to reproduce the static checks.
+
 ## Development E2E
 
 Use this on a dedicated Linux/KVM development host:

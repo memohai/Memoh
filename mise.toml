@@ -226,6 +226,10 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
 run = "scripts/test-containerd-kata-running.sh"
 
+[tasks."test:kata:static"]
+description = "Run static validation for Kata configs, compose overrides, scripts, and evidence checks"
+run = "scripts/test-kata-static.sh"
+
 [tasks."test:kata:e2e"]
 description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
 run = "scripts/test-containerd-kata-e2e.sh"
