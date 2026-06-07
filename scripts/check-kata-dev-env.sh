@@ -80,12 +80,8 @@ fi
 [ -x "$KATA_SHIM_PATH" ] || fail "Kata shim at $KATA_SHIM_PATH is not executable."
 [ -d "$KATA_CONFIG_DIR" ] || fail "Kata config directory not found at $KATA_CONFIG_DIR. Set MEMOH_KATA_CONFIG_DIR if your install uses another path."
 
-if [ ! -d "$KATA_OPT_DIR" ]; then
-  warn "Kata opt directory not found at $KATA_OPT_DIR. This is OK only if your Kata config points elsewhere."
-fi
-if [ ! -d "$KATA_SHARE_DIR" ]; then
-  warn "Kata share directory not found at $KATA_SHARE_DIR. This is OK only if your Kata config points elsewhere."
-fi
+[ -d "$KATA_OPT_DIR" ] || fail "Kata opt directory not found at $KATA_OPT_DIR. Set MEMOH_KATA_OPT_DIR to an existing Kata directory used by your config."
+[ -d "$KATA_SHARE_DIR" ] || fail "Kata share directory not found at $KATA_SHARE_DIR. Set MEMOH_KATA_SHARE_DIR to an existing Kata directory used by your config."
 
 echo "Kata dev host preflight passed:"
 echo "  MEMOH_KATA_SHIM_PATH=$KATA_SHIM_PATH"
