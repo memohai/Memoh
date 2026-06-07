@@ -5,11 +5,10 @@ import {
   Button,
   ButtonGroup, ButtonGroupSeparator, ButtonGroupText,
   Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
-  Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemSeparator, ItemTitle,
+  Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
   Table, TableBody, TableCaption, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
 } from '@memohai/ui'
-import { Archive, Folder, Star } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 import VariantMatrix from '../components/VariantMatrix.vue'
@@ -63,47 +62,108 @@ const invoices = [
         </Card>
       </Specimen>
 
-      <Specimen label="<Item> / <ItemGroup>">
-        <ItemGroup class="w-full max-w-sm">
-          <Item variant="default">
-            <ItemMedia variant="icon">
-              <Folder />
-            </ItemMedia>
+      <Specimen
+        label="<Item> outline — standalone row"
+        note="outline is the only variant: a self-contained hairline-bordered row whose fill inherits the surface. a bare <Item> (no variant) is transparent and belongs inside an <ItemGroup>."
+      >
+        <Item
+          variant="outline"
+          class="w-full max-w-sm"
+        >
+          <ItemContent>
+            <ItemTitle>Workspace runtime</ItemTitle>
+            <ItemDescription>Apple Virtualization · 2 vCPU</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              Configure
+            </Button>
+          </ItemActions>
+        </Item>
+      </Specimen>
+
+      <Specimen
+        label="<ItemGroup> — action list"
+        note="the real pattern: each row is a function — title + description on the left, the action (button) on the right. hairline separators inside one bordered surface, no leading icons"
+      >
+        <ItemGroup class="w-full max-w-sm rounded-lg border">
+          <Item>
             <ItemContent>
-              <ItemTitle>Documents</ItemTitle>
-              <ItemDescription>12 files</ItemDescription>
+              <ItemTitle>Pro plan</ItemTitle>
+              <ItemDescription>Unlimited workspaces & priority models</ItemDescription>
             </ItemContent>
             <ItemActions>
               <Button
-                variant="ghost"
-                size="icon-sm"
+                variant="primary"
+                size="sm"
               >
-                <Star />
+                Upgrade
               </Button>
             </ItemActions>
           </Item>
           <ItemSeparator />
-          <Item variant="outline">
-            <ItemMedia variant="icon">
-              <Archive />
-            </ItemMedia>
+          <Item>
             <ItemContent>
-              <ItemTitle>Archive</ItemTitle>
-              <ItemDescription>variant="outline"</ItemDescription>
+              <ItemTitle>Team members</ItemTitle>
+              <ItemDescription>3 of 5 seats used</ItemDescription>
             </ItemContent>
+            <ItemActions>
+              <Button
+                variant="outline"
+                size="sm"
+              >
+                Invite
+              </Button>
+            </ItemActions>
           </Item>
           <ItemSeparator />
-          <Item variant="muted">
+          <Item>
             <ItemContent>
-              <ItemTitle>Muted item</ItemTitle>
-              <ItemDescription>variant="muted"</ItemDescription>
+              <ItemTitle>API keys</ItemTitle>
+              <ItemDescription>2 active</ItemDescription>
             </ItemContent>
+            <ItemActions>
+              <Button
+                variant="outline"
+                size="sm"
+              >
+                Manage
+              </Button>
+            </ItemActions>
           </Item>
         </ItemGroup>
       </Specimen>
 
+      <Specimen
+        label="<Item> single line — message + action"
+        note="no description: a one-line notice (text left, action right). kept to a normal row width so the standard sm button stays in proportion — no hand-tuned one-off button"
+      >
+        <Item
+          variant="outline"
+          class="w-full"
+        >
+          <ItemContent>
+            <ItemTitle>The response was interrupted</ItemTitle>
+          </ItemContent>
+          <ItemActions>
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              Retry
+            </Button>
+          </ItemActions>
+        </Item>
+      </Specimen>
+
       <div class="lg:col-span-2">
-        <Specimen label="<Table> + <TableEmpty>">
+        <Specimen
+          label="<Table> + <TableEmpty>"
+          note="transparent surface + hairline border · quiet muted header · transient --ui-hover; selected row uses a subtle --ui-selected tint — the data-grid exception where a row tint IS the scanning affordance"
+        >
           <div class="flex w-full flex-col gap-6">
             <Table>
               <TableCaption>Recent invoices</TableCaption>
@@ -120,6 +180,7 @@ const invoices = [
                 <TableRow
                   v-for="inv in invoices"
                   :key="inv.id"
+                  :data-state="inv.id === 'INV-002' ? 'selected' : undefined"
                 >
                   <TableCell class="font-medium">
                     {{ inv.id }}

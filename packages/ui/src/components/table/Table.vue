@@ -10,7 +10,7 @@ const props = defineProps<{
 <template>
   <div
     data-slot="table-container"
-    class="relative w-full overflow-auto border border-border rounded-sm"
+    class="relative w-full overflow-auto rounded-lg border border-border"
   >
     <table
       data-slot="table"
