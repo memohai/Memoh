@@ -20,6 +20,7 @@ on:
       - "scripts/test-containerd-kata-running.sh"
       - "scripts/test-kata-evidence-validator.sh"
       - "scripts/validate-containerd-smoke-evidence.sh"
+      - "scripts/validate-kata-evidence-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
   pull_request:
@@ -41,6 +42,7 @@ on:
       - "scripts/test-containerd-kata-running.sh"
       - "scripts/test-kata-evidence-validator.sh"
       - "scripts/validate-containerd-smoke-evidence.sh"
+      - "scripts/validate-kata-evidence-dir.sh"
       - "scripts/validate-kata-evidence.sh"
       - "scripts/verify-containerd-kata.sh"
   workflow_dispatch:
@@ -83,6 +85,7 @@ jobs:
             scripts/test-containerd-kata-running.sh \
             scripts/test-kata-evidence-validator.sh \
             scripts/validate-containerd-smoke-evidence.sh \
+            scripts/validate-kata-evidence-dir.sh \
             scripts/validate-kata-evidence.sh \
             scripts/verify-containerd-kata.sh
 
@@ -150,6 +153,15 @@ jobs:
         run: scripts/test-containerd-kata-compose-e2e.sh
         env:
           MEMOH_KATA_EVIDENCE_DIR: tmp/kata-evidence
+
+      - name: Validate Kata evidence artifact
+        run: |
+          expected_runs=1
+          if [ "${{ inputs.run_compose_e2e }}" = "true" ]; then
+            expected_runs=2
+          fi
+          MEMOH_KATA_EVIDENCE_EXPECTED_RUNS="$expected_runs" \
+            scripts/validate-kata-evidence-dir.sh tmp/kata-evidence
 
       - name: Upload Kata evidence
         if: ${{ always() }}

@@ -152,6 +152,23 @@ write_smoke_evidence() {
     }' >"$file"
 }
 
+write_environment_summary() {
+  local file="$1"
+
+  cat >"$file" <<'EOF'
+run_id=12345
+run_attempt=1
+runner_name=kata-runner
+runner_os=Linux
+runner_arch=X64
+uname=Linux kata-runner 6.8.0 #1 SMP x86_64 GNU/Linux
+docker=Docker version 27.0.0
+docker_compose=Docker Compose version v2.29.0
+kvm_present=true
+kata_shim=/opt/kata/bin/containerd-shim-kata-v2
+EOF
+}
+
 expect_failure() {
   local message="$1"
   shift
@@ -184,6 +201,8 @@ RUNC_SMOKE_EVIDENCE="$TMPDIR/runc-smoke.json"
 BROKEN_SMOKE_EVIDENCE="$TMPDIR/broken-smoke.json"
 SENSITIVE_SMOKE_EVIDENCE="$TMPDIR/sensitive-smoke.json"
 CUSTOM_SMOKE_EVIDENCE="$TMPDIR/custom-smoke.json"
+VALID_EVIDENCE_DIR="$TMPDIR/evidence-dir"
+MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
 
 write_evidence "$KATA_EVIDENCE" "io.containerd.kata.v2"
 scripts/validate-kata-evidence.sh "$KATA_EVIDENCE" >/dev/null
@@ -225,5 +244,23 @@ expect_failure "smoke runtime_started must be enforced" \
 jq '.debug.password = "admin123"' "$KATA_SMOKE_EVIDENCE" >"$SENSITIVE_SMOKE_EVIDENCE"
 expect_failure "sensitive smoke evidence must be rejected" \
   scripts/validate-containerd-smoke-evidence.sh "$SENSITIVE_SMOKE_EVIDENCE"
+
+mkdir -p "$VALID_EVIDENCE_DIR"
+write_environment_summary "$VALID_EVIDENCE_DIR/environment.txt"
+cp "$KATA_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-dev.json"
+cp "$KATA_SMOKE_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-dev.smoke.json"
+MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=1 \
+  scripts/validate-kata-evidence-dir.sh "$VALID_EVIDENCE_DIR" >/dev/null
+
+cp "$KATA_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-compose.json"
+cp "$KATA_SMOKE_EVIDENCE" "$VALID_EVIDENCE_DIR/kata-compose.smoke.json"
+MEMOH_KATA_EVIDENCE_EXPECTED_RUNS=2 \
+  scripts/validate-kata-evidence-dir.sh "$VALID_EVIDENCE_DIR" >/dev/null
+
+mkdir -p "$MISSING_PAIR_EVIDENCE_DIR"
+write_environment_summary "$MISSING_PAIR_EVIDENCE_DIR/environment.txt"
+cp "$KATA_EVIDENCE" "$MISSING_PAIR_EVIDENCE_DIR/kata-dev.json"
+expect_failure "directory evidence must require paired smoke evidence" \
+  scripts/validate-kata-evidence-dir.sh "$MISSING_PAIR_EVIDENCE_DIR"
 
 echo "Kata evidence validator regression passed."

@@ -118,6 +118,9 @@ executes `scripts/test-containerd-kata-compose-e2e.sh`. Both runs upload their
 API and smoke evidence JSON files as the `kata-evidence` artifact. The job
 clears `tmp/kata-evidence/` before each run on the self-hosted runner and also
 uploads `environment.txt` with the runner, Docker, KVM, and Kata shim summary.
+Before uploading, it runs `scripts/validate-kata-evidence-dir.sh` to ensure the
+artifact has the expected number of API evidence files, matching `.smoke.json`
+files, and a Linux/KVM environment summary.
 
 For manual production deployment, copy and edit the Kata config first:
 
