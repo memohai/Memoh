@@ -32,6 +32,7 @@ check_container_shim() {
   fi
 
   docker_args=(
+    docker
     run
     --rm
     --entrypoint
@@ -77,7 +78,7 @@ missing="$(mktemp)"
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    /dev/*|/proc/*|/run/*|/sys/*|/tmp/*)
+    /dev/*|/proc/*|/run/*|/sys/*|/tmp/*|/var/lib/kubelet|/var/run/*)
       continue
       ;;
   esac

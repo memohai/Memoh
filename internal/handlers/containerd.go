@@ -447,6 +447,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		sendError("container start failed: " + err.Error())
 		return nil
 	}
+	if workspaceBackend != "local" {
+		if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
+			h.logger.Error("container bridge not ready",
+				slog.String("bot_id", botID), slog.Any("error", err))
+			sendError("container bridge not ready: " + err.Error())
+			return nil
+		}
+	}
 	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
 		h.logger.Warn("remember workspace image failed",
 			slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))

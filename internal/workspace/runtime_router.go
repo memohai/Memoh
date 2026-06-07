@@ -21,6 +21,13 @@ func (r *RuntimeRouter) LocalEnabled() bool {
 	return r.localEnabled()
 }
 
+func (r *RuntimeRouter) RuntimeType() string {
+	if provider, ok := r.container.(interface{ RuntimeType() string }); ok {
+		return provider.RuntimeType()
+	}
+	return ""
+}
+
 func (r *RuntimeRouter) DefaultLocalWorkspacePath(botID, displayName string) string {
 	if !r.localEnabled() {
 		return ""

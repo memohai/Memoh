@@ -24,6 +24,7 @@ type containerWorkspace interface {
 	HasPreservedData(botID string) bool
 	StartWithResolvedConfig(ctx context.Context, botID, image string, gpu workspace.WorkspaceGPUConfig) error
 	StartWithWorkspaceConfig(ctx context.Context, botID, image string, gpu workspace.WorkspaceGPUConfig, workspaceCfg workspace.WorkspaceStartConfig) error
+	WaitForWorkspaceReady(ctx context.Context, botID string) error
 	RememberWorkspaceImage(ctx context.Context, botID, image string) error
 	RememberWorkspaceGPU(ctx context.Context, botID string, gpu workspace.WorkspaceGPUConfig) error
 	RestorePreservedData(ctx context.Context, botID string) error

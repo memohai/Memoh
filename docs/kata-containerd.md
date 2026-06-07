@@ -21,6 +21,13 @@ Kata is still driven through containerd snapshots in this implementation. CPU
 and memory limits are hard limits. Storage is saved and reported as a soft
 limit until a VM disk quota or block-device quota implementation is added.
 
+Kata workspaces use the bridge TCP listener (`BRIDGE_TCP_ADDR=:9090`) instead
+of the Unix socket bridge. The Unix socket can appear on the host through the
+Kata shared filesystem, but it is not a usable connection boundary across the
+guest VM. Memoh routes Kata bridge traffic to the workspace CNI IP and disables
+HTTP proxy use for bridge gRPC dials so proxy settings on the server container
+do not intercept private workspace addresses.
+
 ## Host Requirements
 
 - Linux host with KVM available at `/dev/kvm`.
@@ -36,10 +43,33 @@ MEMOH_KATA_SHIM_PATH=/opt/kata/bin/containerd-shim-kata-v2
 MEMOH_KATA_CONFIG_DIR=/etc/kata-containers
 MEMOH_KATA_SHARE_DIR=/usr/share/kata-containers
 MEMOH_KATA_OPT_DIR=/opt/kata
+MEMOH_KATA_SYSLOG_SOCKET=/run/systemd/journal/dev-log
 ```
 
 If your Kata install uses different paths, export those variables before
-running the dev or production compose commands.
+running the dev or production compose commands. The syslog socket is mounted
+into the server container as `/dev/log` so the Kata shim can initialize logging.
+On non-systemd hosts, set `MEMOH_KATA_SYSLOG_SOCKET` to the host's syslog
+socket path.
+
+The Dockerized Memoh server runs a nested containerd for workspace containers.
+The Kata compose overrides therefore set `cgroup: host` and `shm_size: 1gb` on
+the server service. The host cgroup namespace lets the nested Kata runtime
+create sandbox cgroup controllers, and the larger shared-memory segment avoids
+QEMU/KVM boot failures caused by Docker's small default `/dev/shm`.
+
+If the Linux/KVM host needs a proxy during Docker image builds, set the build
+proxy variables before running the Kata compose tasks:
+
+```bash
+export MEMOH_KATA_BUILD_HTTP_PROXY=http://172.17.0.1:7890
+export MEMOH_KATA_BUILD_HTTPS_PROXY=http://172.17.0.1:7890
+export MEMOH_KATA_BUILD_NO_PROXY=127.0.0.1,localhost
+```
+
+Use a host address that is reachable from Docker build containers. On Linux,
+`localhost` inside a Dockerfile `RUN` step is the build container, not the
+host.
 
 ## Static Validation
 

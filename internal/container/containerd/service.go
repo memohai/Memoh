@@ -75,6 +75,10 @@ func (s *DefaultService) runtimeTypeOrDefault() string {
 	return runtimeType
 }
 
+func (s *DefaultService) RuntimeType() string {
+	return s.runtimeTypeOrDefault()
+}
+
 func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullImageOptions) (ImageInfo, error) {
 	if ref == "" {
 		return ImageInfo{}, ErrInvalidArgument

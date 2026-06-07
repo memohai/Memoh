@@ -80,6 +80,7 @@ jobs:
               - 'conf/app.kata.docker.toml'
               - 'devenv/app.kata.dev.toml'
               - 'devenv/Dockerfile.server.kata'
+              - 'devenv/docker-compose.yml'
               - 'devenv/docker-compose.kata.yml'
               - 'docker/Dockerfile.server'
               - 'docker-compose.kata.yml'

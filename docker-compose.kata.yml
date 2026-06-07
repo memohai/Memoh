@@ -12,6 +12,14 @@
 #     docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build
 #   mise run test:kata:compose:e2e
 
+x-kata-build-proxy: &kata-build-proxy
+  HTTP_PROXY: ${MEMOH_KATA_BUILD_HTTP_PROXY:-}
+  HTTPS_PROXY: ${MEMOH_KATA_BUILD_HTTPS_PROXY:-}
+  NO_PROXY: ${MEMOH_KATA_BUILD_NO_PROXY:-}
+  http_proxy: ${MEMOH_KATA_BUILD_HTTP_PROXY:-}
+  https_proxy: ${MEMOH_KATA_BUILD_HTTPS_PROXY:-}
+  no_proxy: ${MEMOH_KATA_BUILD_NO_PROXY:-}
+
 services:
   migrate:
     image: ${MEMOH_KATA_SERVER_IMAGE:-memohai/server:kata}
@@ -19,6 +27,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.server
       target: server-kata
+      args: *kata-build-proxy
     volumes:
       - ${MEMOH_CONFIG:-./conf/app.kata.docker.toml}:/app/config.toml:ro
 
@@ -28,6 +37,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile.server
       target: server-kata
+      args: *kata-build-proxy
+    cgroup: host
+    shm_size: 1gb
     volumes:
       - ${MEMOH_CONFIG:-./conf/app.kata.docker.toml}:/app/config.toml:ro
       - type: bind
@@ -51,6 +63,12 @@ services:
       - type: bind
         source: ${MEMOH_KATA_OPT_DIR:-/opt/kata}
         target: /opt/kata
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MEMOH_KATA_SYSLOG_SOCKET:-/run/systemd/journal/dev-log}
+        target: /dev/log
         read_only: true
         bind:
           create_host_path: false

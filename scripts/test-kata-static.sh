@@ -62,9 +62,11 @@ grep -F 'needs.detect-changes.outputs.kata' .github/workflows/docker.yml
 grep -F "'scripts/audit-kata-github-verification.sh'" .github/workflows/docker.yml
 grep -F "'scripts/check-kata-runner-ready.sh'" .github/workflows/docker.yml
 grep -F "'scripts/diagnose-kata-dev-stack.sh'" .github/workflows/docker.yml
+grep -F "'devenv/docker-compose.yml'" .github/workflows/docker.yml
 grep -F "'scripts/prepare-kata-github-runner.sh'" .github/workflows/docker.yml
 grep -F "'scripts/run-kata-github-e2e.sh'" .github/workflows/docker.yml
 grep -F "'scripts/validate-kata-runner-readiness.sh'" .github/workflows/docker.yml
+grep -F '"devenv/docker-compose.yml"' .github/workflows/kata-runtime.yml
 grep -F '"scripts/diagnose-kata-dev-stack.sh"' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/docker.yml
 grep -F 'scripts/audit-kata-github-verification.sh' docs/kata-containerd.md
@@ -78,6 +80,10 @@ grep -F 'check_runner_capabilities()' scripts/prepare-kata-github-runner.sh
 grep -F 'runner host must be x86_64/amd64' scripts/prepare-kata-github-runner.sh
 grep -F 'do not register this host with the kvm label' scripts/prepare-kata-github-runner.sh
 grep -F 'Kata uses container_backend=containerd' scripts/diagnose-kata-dev-stack.sh
+grep -F 'docker_args=(' scripts/check-kata-dev-env.sh
+grep -F '    docker' scripts/check-kata-dev-env.sh
+grep -F '    run' scripts/check-kata-dev-env.sh
+grep -F '/var/lib/kubelet' scripts/check-kata-dev-env.sh
 
 if awk '
   /^  kata-static:/ { in_job = 1; next }
@@ -122,11 +128,34 @@ fi
 grep -F 'func TestNewDefaultServiceUsesConfiguredRuntimeType' internal/container/containerd/service_test.go
 grep -F 'RuntimeType: "io.containerd.kata.v2"' internal/container/containerd/service_test.go
 
+echo "Validating Kata bridge routing..."
+grep -F 'func (m *Manager) usesKataRuntime() bool' internal/workspace/manager.go
+grep -F 'BRIDGE_TCP_ADDR' internal/workspace/manager.go
+grep -F 'passthrough:///%s:%d' internal/workspace/manager.go
+grep -F 'grpc.WithNoProxy()' internal/workspace/bridge/client.go
+grep -F 'Kata workspaces use the bridge TCP listener' docs/kata-containerd.md
+
 echo "Validating Kata config templates..."
 grep -F 'backend = "containerd"' devenv/app.kata.dev.toml
 grep -F 'runtime_type = "io.containerd.kata.v2"' devenv/app.kata.dev.toml
 grep -F 'backend = "containerd"' conf/app.kata.docker.toml
 grep -F 'runtime_type = "io.containerd.kata.v2"' conf/app.kata.docker.toml
+grep -F 'x-kata-build-proxy:' devenv/docker-compose.kata.yml
+grep -F 'args: *kata-build-proxy' devenv/docker-compose.kata.yml
+grep -F 'x-kata-build-proxy:' docker-compose.kata.yml
+grep -F 'args: *kata-build-proxy' docker-compose.kata.yml
+grep -F 'MEMOH_KATA_BUILD_HTTP_PROXY' docs/kata-containerd.md
+grep -F 'MEMOH_KATA_SYSLOG_SOCKET' docs/kata-containerd.md
+grep -F 'cgroup: host' docs/kata-containerd.md
+grep -F 'shm_size: 1gb' docs/kata-containerd.md
+grep -F 'cgroup: host' devenv/docker-compose.kata.yml
+grep -F 'shm_size: 1gb' devenv/docker-compose.kata.yml
+grep -F 'cgroup: host' docker-compose.kata.yml
+grep -F 'shm_size: 1gb' docker-compose.kata.yml
+grep -F 'target: /dev/log' devenv/docker-compose.kata.yml
+grep -F 'target: /dev/log' docker-compose.kata.yml
+grep -F 'host.docker.internal:host-gateway' devenv/docker-compose.yml
+grep -F 'HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"' devenv/docker-compose.yml
 
 dev_compose="$(mktemp "${TMPDIR:-/tmp}/memoh-kata-dev-compose.XXXXXX.yml")"
 prod_compose="$(mktemp "${TMPDIR:-/tmp}/memoh-kata-compose.XXXXXX.yml")"
@@ -142,26 +171,32 @@ docker compose -f docker-compose.yml -f docker-compose.kata.yml config >"$prod_c
 grep -F 'target: server-kata' "$prod_compose"
 grep -F 'image: memohai/server:kata' "$prod_compose"
 grep -F 'source: /dev/kvm' "$prod_compose"
+grep -F 'cgroup: host' "$prod_compose"
+grep -F 'shm_size:' "$prod_compose"
 grep -F 'target: /dev/kvm' "$prod_compose"
 grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$prod_compose"
 grep -F 'target: /etc/kata-containers' "$prod_compose"
 grep -F 'target: /usr/share/kata-containers' "$prod_compose"
 grep -F 'target: /opt/kata' "$prod_compose"
+grep -F 'target: /dev/log' "$prod_compose"
 
 grep -F 'image: memoh-dev-server-kata' "$dev_compose"
 grep -F 'source: /dev/kvm' "$dev_compose"
+grep -F 'cgroup: host' "$dev_compose"
+grep -F 'shm_size:' "$dev_compose"
 grep -F 'target: /dev/kvm' "$dev_compose"
 grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$dev_compose"
 grep -F 'target: /etc/kata-containers' "$dev_compose"
 grep -F 'target: /usr/share/kata-containers' "$dev_compose"
 grep -F 'target: /opt/kata' "$dev_compose"
+grep -F 'target: /dev/log' "$dev_compose"
 
-if [ "$(grep -cF 'create_host_path: false' docker-compose.kata.yml)" -lt 4 ]; then
+if [ "$(grep -cF 'create_host_path: false' docker-compose.kata.yml)" -lt 5 ]; then
   echo "ERROR: docker-compose.kata.yml must disable host path creation for Kata host mounts" >&2
   exit 1
 fi
 
-if [ "$(grep -cF 'create_host_path: false' devenv/docker-compose.kata.yml)" -lt 4 ]; then
+if [ "$(grep -cF 'create_host_path: false' devenv/docker-compose.kata.yml)" -lt 5 ]; then
   echo "ERROR: devenv/docker-compose.kata.yml must disable host path creation for Kata host mounts" >&2
   exit 1
 fi

@@ -58,9 +58,17 @@ services:
     working_dir: /workspace
     entrypoint: []
     command: ["go", "run", "./cmd/agent", "migrate", "up"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
+      HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,qdrant,sparse,server,web,migrate,deps,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps"
+      http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
+      https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,qdrant,sparse,server,web,migrate,deps,memoh-dev-postgres,memoh-dev-qdrant,memoh-dev-sparse,memoh-dev-server,memoh-dev-web,memoh-dev-migrate,memoh-dev-deps"
     volumes:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod

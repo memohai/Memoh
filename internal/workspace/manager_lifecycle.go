@@ -135,8 +135,9 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 	if err != nil {
 		return err
 	}
-	// Legacy containers use TCP gRPC — cache their IP for the pool.
-	if m.IsLegacyContainer(ctx, containerID) {
+	// Legacy and VM-backed containers use TCP gRPC because host UDS cannot cross
+	// a VM boundary.
+	if m.usesTCPBridge(ctx, containerID) {
 		m.SetLegacyIP(botID, ip)
 	}
 	return nil
@@ -422,6 +423,14 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 			slog.String("bot_id", botID),
 			slog.Any("error", err))
 		return err
+	}
+	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
+		if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
+			m.logger.Error("setup bot container: bridge not ready",
+				slog.String("bot_id", botID),
+				slog.Any("error", err))
+			return err
+		}
 	}
 	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
 		if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
