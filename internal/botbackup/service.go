@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
 	"github.com/memohai/memoh/internal/db"
+	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/mcp"
@@ -142,6 +144,11 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 	}
+	if opts.wants(SectionSettings) || opts.wants(SectionWorkspace) {
+		if err := writer.writeJSON("bot/workspace_resource_limits.json", "bot_workspace_resource_limits", data.WorkspaceResourceLimits, opts); err != nil {
+			return err
+		}
+	}
 	if opts.wants(SectionACL) {
 		if err := writer.writeJSON("bot/acl_rules.json", "bot_acl_rules", data.ACLRules, opts); err != nil {
 			return err
@@ -245,6 +252,11 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 	}
 	data := backupData{Profile: bot, Settings: cfg}
 	warnings := []string(nil)
+	if limits, err := s.collectWorkspaceResourceLimits(ctx, botID); err == nil {
+		data.WorkspaceResourceLimits = &limits
+	} else {
+		warnings = append(warnings, "workspace resource limits export failed: "+err.Error())
+	}
 
 	if s.acl != nil {
 		if rows, err := s.acl.ListRules(ctx, botID); err == nil {
@@ -300,6 +312,32 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 		Checksums:     map[string]string{},
 	}
 	return data, manifest, nil
+}
+
+func (s *Service) collectWorkspaceResourceLimits(ctx context.Context, botID string) (backupWorkspaceResourceLimits, error) {
+	if s.queries == nil {
+		return backupWorkspaceResourceLimits{}, errors.New("queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return backupWorkspaceResourceLimits{}, err
+	}
+	row, err := s.queries.GetBotWorkspaceResourceLimits(ctx, pgBotID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return backupWorkspaceResourceLimits{}, nil
+		}
+		return backupWorkspaceResourceLimits{}, err
+	}
+	return backupWorkspaceResourceLimitsFromRow(row), nil
+}
+
+func backupWorkspaceResourceLimitsFromRow(row dbsqlc.BotWorkspaceResourceLimit) backupWorkspaceResourceLimits {
+	return backupWorkspaceResourceLimits{
+		CPUMillicores: row.CpuMillicores,
+		MemoryBytes:   row.MemoryBytes,
+		StorageBytes:  row.StorageBytes,
+	}
 }
 
 func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings, data backupData) (backupDependencies, []string) {

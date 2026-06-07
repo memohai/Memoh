@@ -390,10 +390,17 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 	if err != nil {
 		return err
 	}
+	limits, err := m.resourceLimitsForCreate(ctx, botID)
+	if err != nil {
+		return err
+	}
 
 	labels := map[string]string{
 		BotLabelKey:       botID,
 		WorkspaceLabelKey: WorkspaceLabelValue,
+	}
+	for k, v := range resourceLimitLabels(limits) {
+		labels[k] = v
 	}
 	if value := workspaceCDIDevicesLabelValue(gpu.Devices); value != "" {
 		labels[WorkspaceCDIDevicesLabelKey] = value
@@ -404,6 +411,7 @@ func (m *Manager) ensureBotWithImage(ctx context.Context, botID, image string, g
 		ImageRef:        image,
 		ImagePullPolicy: m.cfg.EffectiveImagePullPolicy(),
 		StorageRef:      ctr.StorageRef{Driver: m.cfg.Snapshotter, Kind: "active"},
+		ResourceLimits:  limits,
 		Labels:          labels,
 		Spec:            spec,
 	})

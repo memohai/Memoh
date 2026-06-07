@@ -1122,6 +1122,31 @@ export type HandlersContainerMetricsStatusResponse = {
     task_running?: boolean;
 };
 
+export type HandlersContainerResourceLimitCapabilitiesResponse = {
+    cpu?: HandlersContainerResourceLimitCapabilityResponse;
+    memory?: HandlersContainerResourceLimitCapabilityResponse;
+    storage?: HandlersContainerResourceLimitCapabilityResponse;
+};
+
+export type HandlersContainerResourceLimitCapabilityResponse = {
+    hard_limit_supported?: boolean;
+    soft_limit_supported?: boolean;
+};
+
+export type HandlersContainerResourceLimitObservedResponse = {
+    cpu_usage_percent?: number;
+    memory_limit_bytes?: number;
+    memory_usage_bytes?: number;
+    storage_over_soft_limit?: boolean;
+    storage_used_bytes?: number;
+};
+
+export type HandlersContainerResourceLimitValuesResponse = {
+    cpu_millicores?: number;
+    memory_bytes?: number;
+    storage_bytes?: number;
+};
+
 export type HandlersContainerStorageMetricsResponse = {
     path?: string;
     used_bytes?: number;
@@ -1240,10 +1265,23 @@ export type HandlersFsWriteRequest = {
 export type HandlersGetContainerMetricsResponse = {
     backend?: string;
     metrics?: HandlersContainerMetricsPayloadResponse;
+    resource_limits?: HandlersGetContainerResourceLimitsResponse;
     sampled_at?: string;
     status?: HandlersContainerMetricsStatusResponse;
     supported?: boolean;
     unsupported_reason?: string;
+};
+
+export type HandlersGetContainerResourceLimitsResponse = {
+    applied?: HandlersContainerResourceLimitValuesResponse;
+    backend?: string;
+    capabilities?: HandlersContainerResourceLimitCapabilitiesResponse;
+    desired?: HandlersContainerResourceLimitValuesResponse;
+    observed?: HandlersContainerResourceLimitObservedResponse;
+    requires_recreate?: boolean;
+    runtime_backend?: string;
+    status?: string;
+    workspace_backend?: string;
 };
 
 export type HandlersGetContainerResponse = {
@@ -1480,6 +1518,16 @@ export type HandlersTriggerCompactResponse = {
     message_count?: number;
     status?: string;
     summary?: string;
+};
+
+export type HandlersUpdateContainerMetricsRequest = {
+    resource_limits?: HandlersUpdateContainerResourceLimitsRequest;
+};
+
+export type HandlersUpdateContainerResourceLimitsRequest = {
+    cpu_millicores?: number;
+    memory_bytes?: number;
+    storage_bytes?: number;
 };
 
 export type HandlersAcpRuntimeCreateRequest = {
@@ -4298,6 +4346,43 @@ export type GetBotsByBotIdContainerMetricsResponses = {
 };
 
 export type GetBotsByBotIdContainerMetricsResponse = GetBotsByBotIdContainerMetricsResponses[keyof GetBotsByBotIdContainerMetricsResponses];
+
+export type PutBotsByBotIdContainerMetricsData = {
+    /**
+     * Metrics settings payload
+     */
+    body: HandlersUpdateContainerMetricsRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/metrics';
+};
+
+export type PutBotsByBotIdContainerMetricsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdContainerMetricsError = PutBotsByBotIdContainerMetricsErrors[keyof PutBotsByBotIdContainerMetricsErrors];
+
+export type PutBotsByBotIdContainerMetricsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGetContainerMetricsResponse;
+};
+
+export type PutBotsByBotIdContainerMetricsResponse = PutBotsByBotIdContainerMetricsResponses[keyof PutBotsByBotIdContainerMetricsResponses];
 
 export type DeleteBotsByBotIdContainerSkillsData = {
     /**

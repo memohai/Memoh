@@ -21,6 +21,7 @@ import (
 	"github.com/memohai/memoh/internal/botbackup/secure"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channel"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	emailpkg "github.com/memohai/memoh/internal/email"
 	"github.com/memohai/memoh/internal/mcp"
@@ -529,6 +530,13 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 			return err
 		}
 	}
+	if (opts.wants(SectionSettings) || opts.wants(SectionWorkspace)) && hasEntry(state.entries, "bot/workspace_resource_limits.json") {
+		if err := restore("workspace resource limits import failed", func() error {
+			return s.restoreWorkspaceResourceLimits(ctx, targetBotID, state)
+		}); err != nil {
+			return err
+		}
+	}
 	if opts.wants(SectionACL) {
 		if opts.strategyFor(SectionACL) == StrategyReplace {
 			s.clearACL(ctx, targetBotID)
@@ -853,6 +861,32 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		OverlayConfig:          eff.OverlayConfig,
 	})
 	return err
+}
+
+func (s *Service) restoreWorkspaceResourceLimits(ctx context.Context, botID string, state *importState) error {
+	if s.queries == nil {
+		return errors.New("queries not configured")
+	}
+	limits, err := readEntry[backupWorkspaceResourceLimits](state, "bot/workspace_resource_limits.json")
+	if err != nil {
+		return err
+	}
+	if limits.CPUMillicores < 0 || limits.MemoryBytes < 0 || limits.StorageBytes < 0 {
+		return errors.New("resource limits must be non-negative")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	if _, err := s.queries.UpsertBotWorkspaceResourceLimits(ctx, sqlc.UpsertBotWorkspaceResourceLimitsParams{
+		BotID:         pgBotID,
+		CpuMillicores: limits.CPUMillicores,
+		MemoryBytes:   limits.MemoryBytes,
+		StorageBytes:  limits.StorageBytes,
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) restoreACL(ctx context.Context, botID, actorUserID string, state *importState) error {

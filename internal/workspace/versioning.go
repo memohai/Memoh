@@ -415,12 +415,21 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	if err != nil {
 		return err
 	}
+	limits, err := m.resourceLimitsForCreate(ctx, botID)
+	if err != nil {
+		return err
+	}
+	labels := cloneStringMap(info.Labels)
+	for k, v := range resourceLimitLabels(limits) {
+		labels[k] = v
+	}
 	if _, err := m.service.RestoreContainer(ctx, ctr.CreateContainerRequest{
-		ID:         containerID,
-		ImageRef:   info.Image,
-		StorageRef: ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
-		Labels:     info.Labels,
-		Spec:       spec,
+		ID:             containerID,
+		ImageRef:       info.Image,
+		StorageRef:     ctr.StorageRef{Driver: info.StorageRef.Driver, Key: activeSnapshotName, Kind: "active"},
+		ResourceLimits: limits,
+		Labels:         labels,
+		Spec:           spec,
 	}); err != nil {
 		return err
 	}

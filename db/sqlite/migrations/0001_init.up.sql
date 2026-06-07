@@ -547,6 +547,20 @@ CREATE TABLE IF NOT EXISTS containers (
 
 CREATE INDEX IF NOT EXISTS idx_containers_bot_id ON containers(bot_id);
 
+-- bot_workspace_resource_limits: desired per-bot workspace resource limits.
+-- A value of 0 means unlimited for that resource.
+CREATE TABLE IF NOT EXISTS bot_workspace_resource_limits (
+  bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+  cpu_millicores INTEGER NOT NULL DEFAULT 0,
+  memory_bytes INTEGER NOT NULL DEFAULT 0,
+  storage_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT bot_workspace_resource_limits_cpu_check CHECK (cpu_millicores >= 0),
+  CONSTRAINT bot_workspace_resource_limits_memory_check CHECK (memory_bytes >= 0),
+  CONSTRAINT bot_workspace_resource_limits_storage_check CHECK (storage_bytes >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY,
   container_id TEXT NOT NULL REFERENCES containers(container_id) ON DELETE CASCADE,

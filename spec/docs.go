@@ -2482,6 +2482,50 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "put": {
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Update container metrics settings for bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Metrics settings payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UpdateContainerMetricsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.GetContainerMetricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/bots/{bot_id}/container/skills": {
@@ -14156,6 +14200,65 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ContainerResourceLimitCapabilitiesResponse": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitCapabilityResponse"
+                },
+                "memory": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitCapabilityResponse"
+                },
+                "storage": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitCapabilityResponse"
+                }
+            }
+        },
+        "handlers.ContainerResourceLimitCapabilityResponse": {
+            "type": "object",
+            "properties": {
+                "hard_limit_supported": {
+                    "type": "boolean"
+                },
+                "soft_limit_supported": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.ContainerResourceLimitObservedResponse": {
+            "type": "object",
+            "properties": {
+                "cpu_usage_percent": {
+                    "type": "number"
+                },
+                "memory_limit_bytes": {
+                    "type": "integer"
+                },
+                "memory_usage_bytes": {
+                    "type": "integer"
+                },
+                "storage_over_soft_limit": {
+                    "type": "boolean"
+                },
+                "storage_used_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.ContainerResourceLimitValuesResponse": {
+            "type": "object",
+            "properties": {
+                "cpu_millicores": {
+                    "type": "integer"
+                },
+                "memory_bytes": {
+                    "type": "integer"
+                },
+                "storage_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.ContainerStorageMetricsResponse": {
             "type": "object",
             "properties": {
@@ -14443,6 +14546,9 @@ const docTemplate = `{
                 "metrics": {
                     "$ref": "#/definitions/handlers.ContainerMetricsPayloadResponse"
                 },
+                "resource_limits": {
+                    "$ref": "#/definitions/handlers.GetContainerResourceLimitsResponse"
+                },
                 "sampled_at": {
                     "type": "string"
                 },
@@ -14453,6 +14559,38 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "unsupported_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.GetContainerResourceLimitsResponse": {
+            "type": "object",
+            "properties": {
+                "applied": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitValuesResponse"
+                },
+                "backend": {
+                    "type": "string"
+                },
+                "capabilities": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitCapabilitiesResponse"
+                },
+                "desired": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitValuesResponse"
+                },
+                "observed": {
+                    "$ref": "#/definitions/handlers.ContainerResourceLimitObservedResponse"
+                },
+                "requires_recreate": {
+                    "type": "boolean"
+                },
+                "runtime_backend": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "workspace_backend": {
                     "type": "string"
                 }
             }
@@ -15077,6 +15215,28 @@ const docTemplate = `{
                 },
                 "summary": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.UpdateContainerMetricsRequest": {
+            "type": "object",
+            "properties": {
+                "resource_limits": {
+                    "$ref": "#/definitions/handlers.UpdateContainerResourceLimitsRequest"
+                }
+            }
+        },
+        "handlers.UpdateContainerResourceLimitsRequest": {
+            "type": "object",
+            "properties": {
+                "cpu_millicores": {
+                    "type": "integer"
+                },
+                "memory_bytes": {
+                    "type": "integer"
+                },
+                "storage_bytes": {
+                    "type": "integer"
                 }
             }
         },

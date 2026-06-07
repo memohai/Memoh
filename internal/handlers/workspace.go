@@ -30,6 +30,8 @@ type containerWorkspace interface {
 	RecordContainerRunning(ctx context.Context, botID, containerID, image string)
 	GetContainerInfo(ctx context.Context, botID string) (*workspace.ContainerStatus, error)
 	GetContainerMetrics(ctx context.Context, botID string) (*workspace.ContainerMetricsResult, error)
+	GetResourceLimits(ctx context.Context, botID string) (*workspace.ResourceLimitsResult, error)
+	SetResourceLimits(ctx context.Context, botID string, limits ctr.ResourceLimits) (*workspace.ResourceLimitsResult, error)
 	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
 	StopBot(ctx context.Context, botID string) error
 	ResolveWorkspaceSkillDiscoveryRoots(ctx context.Context, botID string) ([]string, error)

@@ -150,6 +150,14 @@ type SnapshotInfo struct {
 	Labels  map[string]string
 }
 
+// ResourceLimits contains desired hard/soft workspace resource limits.
+// A zero value for a field means unlimited.
+type ResourceLimits struct {
+	CPUMillicores int64
+	MemoryBytes   int64
+	StorageBytes  int64
+}
+
 type MountInfo struct {
 	Type    string
 	Source  string

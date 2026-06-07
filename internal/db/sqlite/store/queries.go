@@ -1803,6 +1803,25 @@ func (q *Queries) GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (p
 	return result, nil
 }
 
+func (q *Queries) GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (pgsqlc.BotWorkspaceResourceLimit, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, err
+	}
+	out, err := q.store.queries.GetBotWorkspaceResourceLimits(ctx, sqliteBotID)
+	if err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotWorkspaceResourceLimit
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (pgsqlc.MemoryProvider, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.MemoryProvider{}, errSQLiteQueriesNotConfigured
@@ -4975,6 +4994,25 @@ func (q *Queries) UpsertContainer(ctx context.Context, arg pgsqlc.UpsertContaine
 	}
 	err := q.store.queries.UpsertContainer(ctx, sqliteArg)
 	return mapQueryErr(err)
+}
+
+func (q *Queries) UpsertBotWorkspaceResourceLimits(ctx context.Context, arg pgsqlc.UpsertBotWorkspaceResourceLimitsParams) (pgsqlc.BotWorkspaceResourceLimit, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.UpsertBotWorkspaceResourceLimitsParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, err
+	}
+	out, err := q.store.queries.UpsertBotWorkspaceResourceLimits(ctx, sqliteArg)
+	if err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, mapQueryErr(err)
+	}
+	var result pgsqlc.BotWorkspaceResourceLimit
+	if err := convertValue(out, &result); err != nil {
+		return pgsqlc.BotWorkspaceResourceLimit{}, err
+	}
+	return result, nil
 }
 
 func (q *Queries) UpsertEmailOAuthToken(ctx context.Context, arg pgsqlc.UpsertEmailOAuthTokenParams) (pgsqlc.EmailOauthToken, error) {

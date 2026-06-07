@@ -201,6 +201,21 @@ func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
 	return opts
 }
 
+func specOptsFromResourceLimits(limits ResourceLimits) []oci.SpecOpts {
+	var opts []oci.SpecOpts
+	if limits.MemoryBytes > 0 {
+		opts = append(opts, oci.WithMemoryLimit(uint64(limits.MemoryBytes))) //nolint:gosec // validated as non-negative before container creation.
+	}
+	if limits.CPUMillicores > 0 {
+		const cpuCFSPeriod = uint64(100_000)
+		quota := limits.CPUMillicores * int64(cpuCFSPeriod) / 1000
+		if quota > 0 {
+			opts = append(opts, oci.WithCPUCFS(quota, cpuCFSPeriod))
+		}
+	}
+	return opts
+}
+
 func networkJoinTargetValue(spec ContainerSpec) string {
 	return spec.NetworkJoinTarget.Value
 }
@@ -305,6 +320,7 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 		oci.WithImageConfig(image),
 	}
 	specOpts = append(specOpts, specOptsFromSpec(req.Spec)...)
+	specOpts = append(specOpts, specOptsFromResourceLimits(req.ResourceLimits)...)
 
 	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),

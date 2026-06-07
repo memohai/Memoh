@@ -4,7 +4,7 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
-import { RefreshCw, Play, Square, Box, Database, Settings, History } from 'lucide-vue-next'
+import { RefreshCw, Play, Square, Box, Database, Settings, History, Gauge } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
@@ -16,9 +16,11 @@ import {
   postBotsByBotIdContainerSnapshotsRollback,
   postBotsByBotIdContainerStart,
   postBotsByBotIdContainerStop,
+  putBotsByBotIdContainerMetrics,
   type HandlersCreateContainerRequest,
   type HandlersGetContainerMetricsResponse,
   type HandlersGetContainerResponse,
+  type HandlersUpdateContainerMetricsRequest,
   type HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import {
@@ -29,7 +31,6 @@ import {
 import { Button, Input, Label, Separator, Spinner, Switch, Textarea } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ContainerCreateProgress from './container-create-progress.vue'
-import ContainerMetricsPanel from './container-metrics-panel.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -93,14 +94,24 @@ const containerBusy = computed(() => containerLoading.value || containerAction.v
 
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerMetrics = HandlersGetContainerMetricsResponse
+type BotContainerResourceLimits = NonNullable<HandlersGetContainerMetricsResponse['resource_limits']>
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
+
+const bytesPerGiB = 1024 * 1024 * 1024
 
 const containerInfo = ref<BotContainerInfo | null>(null)
 const containerMetrics = ref<BotContainerMetrics | null>(null)
+const resourceLimits = computed(() => containerMetrics.value?.resource_limits ?? null)
 const containerMissing = ref(false)
 const snapshots = ref<BotContainerSnapshot[]>([])
 const metricsLoading = ref(false)
+const resourceLimitsLoading = computed(() => metricsLoading.value)
+const resourceLimitsSaving = ref(false)
+const resourceLimitApplyPromptVisible = ref(false)
 const snapshotsLoading = ref(false)
+const cpuLimitCores = ref('')
+const memoryLimitGiB = ref('')
+const storageLimitGiB = ref('')
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   return resolveApiErrorMessage(error, fallback)
@@ -140,6 +151,7 @@ async function loadContainerData(showLoadingToast: boolean) {
         containerMetrics.value = null
         containerMissing.value = true
         snapshots.value = []
+        await loadContainerMetrics(showLoadingToast)
         return
       }
       throw result.error
@@ -166,6 +178,8 @@ async function loadContainerData(showLoadingToast: boolean) {
 }
 
 async function loadContainerMetrics(showLoadingToast: boolean) {
+  if (!botId.value) return
+
   metricsLoading.value = true
   try {
     const { data } = await getBotsByBotIdContainerMetrics({
@@ -173,8 +187,11 @@ async function loadContainerMetrics(showLoadingToast: boolean) {
       throwOnError: true,
     })
     containerMetrics.value = data
+    applyResourceLimitForm(data.resource_limits ?? null)
+    resourceLimitApplyPromptVisible.value = !!data.resource_limits?.requires_recreate && !!containerInfo.value
   } catch (error) {
     containerMetrics.value = null
+    resourceLimitApplyPromptVisible.value = false
     if (showLoadingToast) {
       toast.error(resolveErrorMessage(error, t('bots.container.metricsLoadFailed')))
     }
@@ -379,8 +396,8 @@ const isContainerTaskRunning = computed(() => {
 const hasPreservedData = computed(() => !!containerInfo.value?.has_preserved_data)
 const isLegacy = computed(() => !!containerInfo.value?.legacy)
 
-async function handleRecreateContainer() {
-  if (botLifecyclePending.value || !containerInfo.value) return
+async function handleRecreateContainer(): Promise<boolean> {
+  if (botLifecyclePending.value || !containerInfo.value) return false
 
   containerAction.value = 'recreate'
   try {
@@ -395,14 +412,205 @@ async function handleRecreateContainer() {
     await createContainerSSE({ restore_data: true })
     await loadContainerData(false)
     toast.success(t('bots.container.legacyRecreateSuccess'))
+    return true
   }
   catch (error) {
     toast.error(resolveErrorMessage(error, t('bots.container.actionFailed')))
+    return false
   }
   finally {
     containerAction.value = ''
     createProgress.value = null
   }
+}
+
+function trimTrailingZeros(value: string): string {
+  return value.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+}
+
+function limitInputFromMillicores(value?: number): string {
+  if (!value || value <= 0) return ''
+  return trimTrailingZeros((value / 1000).toFixed(3))
+}
+
+function limitInputFromBytes(value?: number): string {
+  if (!value || value <= 0) return ''
+  return trimTrailingZeros((value / bytesPerGiB).toFixed(2))
+}
+
+function applyResourceLimitForm(value: BotContainerResourceLimits | null) {
+  const desired = value?.desired
+  cpuLimitCores.value = limitInputFromMillicores(desired?.cpu_millicores)
+  memoryLimitGiB.value = limitInputFromBytes(desired?.memory_bytes)
+  storageLimitGiB.value = limitInputFromBytes(desired?.storage_bytes)
+}
+
+function parseLimitInput(value: string, fieldLabel: string): number {
+  const trimmed = value.trim()
+  if (!trimmed) return 0
+
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(t('bots.container.resourceLimits.invalidNumber', { field: fieldLabel }))
+  }
+  return parsed
+}
+
+function buildResourceLimitsPayload(): NonNullable<HandlersUpdateContainerMetricsRequest['resource_limits']> {
+  const cpuCores = parseLimitInput(cpuLimitCores.value, t('bots.container.resourceLimits.cpuLabel'))
+  const memoryGiB = parseLimitInput(memoryLimitGiB.value, t('bots.container.resourceLimits.memoryLabel'))
+  const storageGiB = parseLimitInput(storageLimitGiB.value, t('bots.container.resourceLimits.storageLabel'))
+
+  return {
+    cpu_millicores: Math.round(cpuCores * 1000),
+    memory_bytes: Math.round(memoryGiB * bytesPerGiB),
+    storage_bytes: Math.round(storageGiB * bytesPerGiB),
+  }
+}
+
+async function handleSaveResourceLimits() {
+  if (!botId.value || resourceLimitsSaving.value) return
+
+  let resourceLimitBody: NonNullable<HandlersUpdateContainerMetricsRequest['resource_limits']>
+  try {
+    resourceLimitBody = buildResourceLimitsPayload()
+  } catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.resourceLimits.saveFailed')))
+    return
+  }
+
+  resourceLimitsSaving.value = true
+  try {
+    const { data } = await putBotsByBotIdContainerMetrics({
+      path: { bot_id: botId.value },
+      body: { resource_limits: resourceLimitBody },
+      throwOnError: true,
+    })
+    containerMetrics.value = data
+    applyResourceLimitForm(data.resource_limits ?? null)
+    resourceLimitApplyPromptVisible.value = !!data.resource_limits?.requires_recreate && !!containerInfo.value
+    toast.success(resourceLimitApplyPromptVisible.value
+      ? t('bots.container.resourceLimits.saveRequiresRecreate')
+      : t('bots.container.resourceLimits.saveSuccess'))
+  } catch (error) {
+    toast.error(resolveErrorMessage(error, t('bots.container.resourceLimits.saveFailed')))
+  } finally {
+    resourceLimitsSaving.value = false
+  }
+}
+
+async function handleApplyResourceLimitsNow() {
+  const applied = await handleRecreateContainer()
+  if (applied) {
+    resourceLimitApplyPromptVisible.value = false
+    await loadContainerMetrics(false)
+  }
+}
+
+const resourceLimitStatusClass = computed(() => {
+  const status = resourceLimits.value?.status
+  if (status === 'applied') return 'border-success/30 bg-success/10 text-success'
+  if (status === 'pending_recreate') return 'border-warning-border bg-warning-soft text-warning-foreground'
+  if (status === 'not_created') return 'border-border bg-muted/30 text-muted-foreground'
+  if (status === 'unsupported') return 'border-destructive/30 bg-destructive/10 text-destructive'
+  return 'border-border bg-muted/30 text-muted-foreground'
+})
+
+const resourceLimitStatusText = computed(() => {
+  const status = resourceLimits.value?.status
+  if (status === 'applied') return t('bots.container.resourceLimits.statusApplied')
+  if (status === 'pending_recreate') return t('bots.container.resourceLimits.statusPendingRecreate')
+  if (status === 'not_created') return t('bots.container.resourceLimits.statusNotCreated')
+  if (status === 'unsupported') return t('bots.container.resourceLimits.statusUnsupported')
+  return t('bots.container.resourceLimits.statusUnknown')
+})
+
+function formatLimitBytes(value?: number): string {
+  if (!value || value <= 0) return t('bots.container.resourceLimits.unlimited')
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  const fractionDigits = size >= 100 || unitIndex === 0 ? 0 : 1
+  return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+function formatLimitCPU(value?: number): string {
+  if (!value || value <= 0) return t('bots.container.resourceLimits.unlimited')
+  return t('bots.container.resourceLimits.cpuCoresValue', {
+    value: trimTrailingZeros((value / 1000).toFixed(3)),
+  })
+}
+
+function formatResourceLimitValues(value: BotContainerResourceLimits['desired']): string {
+  return [
+    t('bots.container.resourceLimits.cpuSummary', { value: formatLimitCPU(value?.cpu_millicores) }),
+    t('bots.container.resourceLimits.memorySummary', { value: formatLimitBytes(value?.memory_bytes) }),
+    t('bots.container.resourceLimits.storageSummary', { value: formatLimitBytes(value?.storage_bytes) }),
+  ].join(' | ')
+}
+
+const desiredResourceLimitText = computed(() => formatResourceLimitValues(resourceLimits.value?.desired))
+const appliedResourceLimitText = computed(() => formatResourceLimitValues(resourceLimits.value?.applied))
+const storageHardLimitSupported = computed(() =>
+  resourceLimits.value?.capabilities?.storage?.hard_limit_supported === true,
+)
+const storageSoftLimitExceeded = computed(() =>
+  resourceLimits.value?.observed?.storage_over_soft_limit === true,
+)
+
+const containerMetricsStatus = computed(() => containerMetrics.value?.status)
+const cpuMetrics = computed(() => containerMetrics.value?.metrics?.cpu)
+const memoryMetrics = computed(() => containerMetrics.value?.metrics?.memory)
+const storageMetrics = computed(() => containerMetrics.value?.metrics?.storage)
+const metricsBackendUnsupported = computed(() => containerMetrics.value?.supported === false)
+const metricsTaskRunning = computed(() => containerMetricsStatus.value?.task_running)
+const hasAnyMetric = computed(() =>
+  !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
+)
+const cpuMetricValueText = computed(() => formatMetricPercent(cpuMetrics.value?.usage_percent))
+const memoryMetricValueText = computed(() => formatMetricBytes(memoryMetrics.value?.usage_bytes))
+const storageMetricValueText = computed(() => formatMetricBytes(storageMetrics.value?.used_bytes))
+const storageMetricPathText = computed(() => storageMetrics.value?.path || '-')
+const sampledAtText = computed(() =>
+  formatDateTime(containerMetrics.value?.sampled_at, { fallback: '-' }),
+)
+const memoryMetricHintText = computed(() => {
+  const limit = memoryMetrics.value?.limit_bytes
+  if (limit && limit > 0) {
+    const usagePercent = formatMetricPercent(memoryMetrics.value?.usage_percent)
+    return `${formatMetricBytes(memoryMetrics.value?.usage_bytes)} / ${formatMetricBytes(limit)}${usagePercent === '--' ? '' : ` (${usagePercent})`}`
+  }
+  if (memoryMetrics.value) {
+    return t('bots.container.metricsUnlimited')
+  }
+  return t('bots.container.metricsUnavailable')
+})
+
+function formatMetricBytes(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '--'
+  if (value === 0) return '0 B'
+
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let size = value
+  let unitIndex = 0
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+
+  const fractionDigits = size >= 100 || unitIndex === 0 ? 0 : 1
+  return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
+}
+
+function formatMetricPercent(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '--'
+  const fractionDigits = value >= 100 ? 0 : 1
+  return `${value.toFixed(fractionDigits)}%`
 }
 
 async function handleStopContainer() {
@@ -455,6 +663,7 @@ async function handleDeleteContainer(preserveData: boolean) {
       createRestoreData.value = preserveData
       createImage.value = lastImage
       createImagePrefilled.value = !!lastImage
+      await loadContainerMetrics(false)
     },
     successMessage,
   )
@@ -796,6 +1005,117 @@ watch([activeTab, botId], ([tab]) => {
           </p>
         </div>
 
+        <!-- Resource Limits -->
+        <div class="rounded-md border border-border/60 bg-background p-4 shadow-none">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="space-y-1">
+              <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+                <Gauge class="size-3.5 text-muted-foreground" />
+                {{ $t('bots.container.resourceLimits.title') }}
+              </h4>
+              <p class="text-[11px] text-muted-foreground leading-snug">
+                {{ $t('bots.container.resourceLimits.subtitle') }}
+              </p>
+            </div>
+            <span
+              class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-[10px] font-medium"
+              :class="resourceLimitStatusClass"
+            >
+              {{ resourceLimitStatusText }}
+            </span>
+          </div>
+
+          <div
+            v-if="resourceLimitsLoading && !resourceLimits"
+            class="mt-4 flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <Spinner />
+            <span>{{ $t('common.loading') }}</span>
+          </div>
+
+          <div
+            v-else
+            class="mt-4 space-y-4"
+          >
+            <div class="grid gap-3 md:grid-cols-3">
+              <div class="space-y-1.5">
+                <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.cpuLabel') }}</Label>
+                <Input
+                  v-model="cpuLimitCores"
+                  inputmode="decimal"
+                  :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                  :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                  class="h-8 text-xs shadow-none bg-background border-border/60"
+                />
+                <p class="text-[11px] text-muted-foreground">
+                  {{ $t('bots.container.resourceLimits.cpuHint') }}
+                </p>
+              </div>
+
+              <div class="space-y-1.5">
+                <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.memoryLabel') }}</Label>
+                <Input
+                  v-model="memoryLimitGiB"
+                  inputmode="decimal"
+                  :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                  :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                  class="h-8 text-xs shadow-none bg-background border-border/60"
+                />
+                <p class="text-[11px] text-muted-foreground">
+                  {{ $t('bots.container.resourceLimits.memoryHint') }}
+                </p>
+              </div>
+
+              <div class="space-y-1.5">
+                <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.storageLabel') }}</Label>
+                <Input
+                  v-model="storageLimitGiB"
+                  inputmode="decimal"
+                  :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                  :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                  class="h-8 text-xs shadow-none bg-background border-border/60"
+                />
+                <p class="text-[11px] text-muted-foreground">
+                  {{ $t('bots.container.resourceLimits.storageHint') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="space-y-1.5 text-[11px] text-muted-foreground">
+              <p>
+                <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.desiredLabel') }}:</span>
+                {{ desiredResourceLimitText }}
+              </p>
+              <p>
+                <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.appliedLabel') }}:</span>
+                {{ appliedResourceLimitText }}
+              </p>
+            </div>
+
+            <div
+              v-if="resourceLimits && !storageHardLimitSupported"
+              class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
+            >
+              {{ $t('bots.container.resourceLimits.storageSoftOnly') }}
+            </div>
+
+            <div class="flex justify-end">
+              <Button
+                size="sm"
+                :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                class="h-8 text-xs font-medium shadow-none"
+                @click="handleSaveResourceLimits"
+              >
+                <Spinner
+                  v-if="resourceLimitsSaving"
+                  class="mr-1.5 size-3.5"
+                />
+                {{ $t('bots.container.resourceLimits.save') }}
+              </Button>
+            </div>
+          </div>
+        </div>
+
         <div class="flex justify-end pt-2">
           <Button
             :disabled="containerBusy || botLifecyclePending"
@@ -928,11 +1248,245 @@ watch([activeTab, botId], ([tab]) => {
         </div>
       </div>
 
-      <ContainerMetricsPanel
-        :backend="capabilitiesStore.containerBackend"
-        :loading="metricsLoading"
-        :metrics="containerMetrics"
-      />
+      <!-- Resources -->
+      <div class="rounded-md border border-border/60 bg-background p-4 shadow-none">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div class="space-y-1">
+            <h4 class="text-xs font-medium text-foreground flex items-center gap-2">
+              <Gauge class="size-3.5 text-muted-foreground" />
+              {{ $t('bots.container.metricsTitle') }}
+            </h4>
+            <p class="text-[11px] text-muted-foreground leading-snug">
+              {{ $t('bots.container.metricsSubtitle') }}
+            </p>
+          </div>
+          <span
+            class="inline-flex w-fit items-center rounded border px-2 py-0.5 text-[10px] font-medium"
+            :class="resourceLimitStatusClass"
+          >
+            {{ resourceLimitStatusText }}
+          </span>
+        </div>
+
+        <div
+          v-if="resourceLimitsLoading && !resourceLimits"
+          class="mt-4 flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <Spinner />
+          <span>{{ $t('common.loading') }}</span>
+        </div>
+
+        <div
+          v-else
+          class="mt-4 space-y-4"
+        >
+          <div
+            v-if="metricsBackendUnsupported"
+            class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+          >
+            {{ $t('bots.container.metricsUnsupported') }}
+          </div>
+
+          <div
+            v-else-if="!hasAnyMetric"
+            class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+          >
+            {{ metricsTaskRunning === false ? $t('bots.container.metricsStopped') : $t('bots.container.metricsUnavailable') }}
+          </div>
+
+          <template v-else>
+            <div
+              v-if="metricsTaskRunning === false"
+              class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs"
+            >
+              {{ $t('bots.container.metricsStopped') }}
+            </div>
+
+            <div class="grid gap-3 md:grid-cols-3">
+              <div class="rounded-md border bg-background/70 p-3">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.metricsLabels.cpu') }}
+                </p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{ cpuMetricValueText }}
+                </p>
+                <p class="mt-2 text-[11px] text-muted-foreground">
+                  {{ $t('bots.container.currentSample') }}
+                </p>
+              </div>
+
+              <div class="rounded-md border bg-background/70 p-3">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.metricsLabels.memory') }}
+                </p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{ memoryMetricValueText }}
+                </p>
+                <p class="mt-2 text-[11px] text-muted-foreground">
+                  {{ memoryMetricHintText }}
+                </p>
+              </div>
+
+              <div class="rounded-md border bg-background/70 p-3">
+                <p class="text-xs text-muted-foreground">
+                  {{ $t('bots.container.metricsLabels.storage') }}
+                </p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{ storageMetricValueText }}
+                </p>
+                <p class="mt-2 text-[11px] text-muted-foreground break-all">
+                  {{ $t('bots.container.metricsPath') }}: {{ storageMetricPathText }}
+                </p>
+              </div>
+            </div>
+
+            <p
+              v-if="sampledAtText !== '-'"
+              class="text-[11px] text-muted-foreground"
+            >
+              {{ $t('bots.container.sampledAt') }}: {{ sampledAtText }}
+            </p>
+          </template>
+
+          <Separator class="bg-border/40" />
+
+          <div class="space-y-1">
+            <h5 class="text-xs font-medium text-foreground">
+              {{ $t('bots.container.resourceLimits.title') }}
+            </h5>
+            <p class="text-[11px] text-muted-foreground leading-snug">
+              {{ $t('bots.container.resourceLimits.subtitle') }}
+            </p>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-3">
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.cpuLabel') }}</Label>
+              <Input
+                v-model="cpuLimitCores"
+                inputmode="decimal"
+                :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                class="h-8 text-xs shadow-none bg-background border-border/60"
+              />
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.resourceLimits.cpuHint') }}
+              </p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.memoryLabel') }}</Label>
+              <Input
+                v-model="memoryLimitGiB"
+                inputmode="decimal"
+                :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                class="h-8 text-xs shadow-none bg-background border-border/60"
+              />
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.resourceLimits.memoryHint') }}
+              </p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label class="text-xs font-medium">{{ $t('bots.container.resourceLimits.storageLabel') }}</Label>
+              <Input
+                v-model="storageLimitGiB"
+                inputmode="decimal"
+                :placeholder="$t('bots.container.resourceLimits.unlimitedPlaceholder')"
+                :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+                class="h-8 text-xs shadow-none bg-background border-border/60"
+              />
+              <p class="text-[11px] text-muted-foreground">
+                {{ $t('bots.container.resourceLimits.storageHint') }}
+              </p>
+            </div>
+          </div>
+
+          <div class="space-y-1.5 text-[11px] text-muted-foreground">
+            <p>
+              <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.desiredLabel') }}:</span>
+              {{ desiredResourceLimitText }}
+            </p>
+            <p>
+              <span class="font-medium text-foreground">{{ $t('bots.container.resourceLimits.appliedLabel') }}:</span>
+              {{ appliedResourceLimitText }}
+            </p>
+          </div>
+
+          <div
+            v-if="resourceLimits && !storageHardLimitSupported"
+            class="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
+          >
+            {{ $t('bots.container.resourceLimits.storageSoftOnly') }}
+          </div>
+
+          <div
+            v-if="storageSoftLimitExceeded"
+            class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-[11px] text-warning-foreground"
+          >
+            {{ $t('bots.container.resourceLimits.storageSoftExceeded') }}
+          </div>
+
+          <div
+            v-if="resourceLimitApplyPromptVisible"
+            class="flex flex-col gap-3 rounded-md border border-warning-border bg-warning-soft px-3 py-3 text-[11px] text-warning-foreground sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p class="leading-snug">
+              {{ $t('bots.container.resourceLimits.recreatePrompt') }}
+            </p>
+            <div class="flex shrink-0 items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 text-[11px]"
+                :disabled="containerBusy || botLifecyclePending"
+                @click="resourceLimitApplyPromptVisible = false"
+              >
+                {{ $t('bots.container.resourceLimits.saveForLater') }}
+              </Button>
+              <ConfirmPopover
+                :title="$t('bots.container.resourceLimits.recreateConfirmTitle')"
+                :message="$t('bots.container.resourceLimits.recreateConfirm')"
+                :confirm-text="$t('bots.container.resourceLimits.recreateNow')"
+                :loading="containerAction === 'recreate'"
+                @confirm="handleApplyResourceLimitsNow"
+              >
+                <template #trigger>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-8 text-[11px] shadow-none"
+                    :disabled="containerBusy || botLifecyclePending"
+                  >
+                    <Spinner
+                      v-if="containerAction === 'recreate'"
+                      class="mr-1.5 size-3.5"
+                    />
+                    {{ $t('bots.container.resourceLimits.recreateNow') }}
+                  </Button>
+                </template>
+              </ConfirmPopover>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <Button
+              size="sm"
+              :disabled="containerBusy || botLifecyclePending || resourceLimitsSaving"
+              class="h-8 text-xs font-medium shadow-none"
+              @click="handleSaveResourceLimits"
+            >
+              <Spinner
+                v-if="resourceLimitsSaving"
+                class="mr-1.5 size-3.5"
+              />
+              {{ $t('bots.container.resourceLimits.save') }}
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div class="rounded-md border border-border/50 bg-background px-3 py-2 text-[11px] text-muted-foreground shadow-none">
         {{ $t('bots.container.gpuRecreateHint') }}
       </div>

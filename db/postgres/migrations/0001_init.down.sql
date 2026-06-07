@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS schedule;
 DROP TABLE IF EXISTS lifecycle_events;
 DROP TABLE IF EXISTS container_versions;
 DROP TABLE IF EXISTS snapshots;
+DROP TABLE IF EXISTS bot_workspace_resource_limits;
 DROP TABLE IF EXISTS containers;
 DROP TABLE IF EXISTS user_input_requests;
 DROP TABLE IF EXISTS bot_history_messages;

@@ -243,6 +243,15 @@ type BotUserGrant struct {
 	UpdatedAt       string         `json:"updated_at"`
 }
 
+type BotWorkspaceResourceLimit struct {
+	BotID         string `json:"bot_id"`
+	CpuMillicores int64  `json:"cpu_millicores"`
+	MemoryBytes   int64  `json:"memory_bytes"`
+	StorageBytes  int64  `json:"storage_bytes"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
 type ChannelIdentity struct {
 	ID               string         `json:"id"`
 	ChannelType      string         `json:"channel_type"`
