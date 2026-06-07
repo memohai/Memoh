@@ -1,5 +1,5 @@
 <template>
-  <MainLayout>
+  <AppShell>
     <template #sidebar>
       <SettingsSidebar />
     </template>
@@ -57,7 +57,7 @@
         </section>
       </SidebarInset>
     </template>
-  </MainLayout>
+  </AppShell>
 </template>
 
 <script setup lang="ts">
@@ -74,7 +74,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@memohai/ui'
-import MainLayout from '@/layout/main-layout/index.vue'
+import AppShell from '@/layout/app-shell/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 
 const route = useRoute()

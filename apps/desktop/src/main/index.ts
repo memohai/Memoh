@@ -155,8 +155,7 @@ if (DESKTOP_RUNTIME_MODE === 'remote') {
 }
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
-const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
-type WindowKind = 'chat' | 'settings'
+type WindowKind = 'chat'
 type WindowDefaults = {
   width: number
   height: number
@@ -179,16 +178,8 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
-let settingsWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 
-// Pending settings-navigate target keyed by webContents id. Set by the
-// `window:open-settings` IPC when the settings window has not finished
-// loading yet (cold start, refresh, etc.) and drained by the per-window
-// `did-finish-load` listener attached at creation time. Storing on a Map
-// rather than a closure variable lets us stay correct if a future change
-// ever introduces multiple settings windows.
-const pendingSettingsNavigate = new Map<number, string>()
 let stoppingLocalProcesses = false
 let windowStatesCache: StoredWindowStates | null = null
 
@@ -395,7 +386,7 @@ function applyExternalLinkHandler(window: BrowserWindow): void {
   })
 }
 
-function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings'): void {
+function loadRendererEntry(window: BrowserWindow, entry: 'index'): void {
   const base = process.env.ELECTRON_RENDERER_URL
   if (is.dev && base) {
     window.loadURL(`${base}/${entry}.html`)
@@ -452,7 +443,7 @@ const SETTINGS_TRAY_ITEMS: TraySettingsItem[] = [
 ]
 
 function openSettingsWindow(target?: string): void {
-  const window = ensureWindow('settings')
+  const window = ensureWindow('chat')
   focusWindow(window)
   if (target?.startsWith('/settings')) {
     dispatchSettingsNavigate(window, target)
@@ -637,61 +628,9 @@ function createChatWindow(): BrowserWindow {
   return window
 }
 
-function createSettingsWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    ...rememberedWindowOptions('settings', SETTINGS_DEFAULTS),
-    ...macWindowChromeOptions('memoh-settings'),
-    show: false,
-    autoHideMenuBar: true,
-    title: `${DESKTOP_PRODUCT_NAME} · Settings`,
-    icon: iconPng,
-    webPreferences: {
-      preload: join(__dirname, PRELOAD_FILE),
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  })
-  attachWindowStatePersistence(window, 'settings', SETTINGS_DEFAULTS)
-  window.setParentWindow(null)
-  const webContentsId = window.webContents.id
-
-  window.on('ready-to-show', () => {
-    if (window.isDestroyed()) return
-    window.setParentWindow(null)
-    restoreWindowMaximized(window, 'settings')
-    window.show()
-  })
-  window.on('closed', () => {
-    pendingSettingsNavigate.delete(webContentsId)
-    settingsWindow = null
-  })
-
-  // Drain any queued navigate target as soon as the renderer is ready to
-  // receive IPC messages. Reusing `did-finish-load` keeps both fresh
-  // cold-starts and in-place refreshes working without extra coordination.
-  window.webContents.on('did-finish-load', () => {
-    const target = pendingSettingsNavigate.get(webContentsId)
-    if (!target) return
-    if (window.isDestroyed()) return
-    pendingSettingsNavigate.delete(webContentsId)
-    window.webContents.send('settings:navigate', target)
-  })
-
-  applyExternalLinkHandler(window)
-  loadRendererEntry(window, 'settings')
-  return window
-}
-
-function ensureWindow(kind: WindowKind): BrowserWindow {
-  if (kind === 'chat') {
-    if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
-    return chatWindow
-  }
-  if (!settingsWindow || settingsWindow.isDestroyed()) {
-    settingsWindow = createSettingsWindow()
-  }
-  return settingsWindow
+function ensureWindow(_kind: WindowKind): BrowserWindow {
+  if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
+  return chatWindow
 }
 
 function focusWindow(window: BrowserWindow): void {
@@ -701,12 +640,11 @@ function focusWindow(window: BrowserWindow): void {
 }
 
 function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
-  // If the renderer hasn't booted yet (cold start) or is mid-reload, we
-  // can't push the navigate event straight away — buffer it for the
-  // `did-finish-load` listener to drain. Otherwise send immediately so
-  // warm clicks feel instant.
   if (window.webContents.isLoading()) {
-    pendingSettingsNavigate.set(window.webContents.id, target)
+    window.webContents.once('did-finish-load', () => {
+      if (window.isDestroyed()) return
+      window.webContents.send('settings:navigate', target)
+    })
     return
   }
   window.webContents.send('settings:navigate', target)
@@ -988,7 +926,7 @@ app.whenReady().then(async () => {
   createAppTray()
 
   ipcMain.handle('window:open-settings', (_event, rawTarget: unknown) => {
-    const window = ensureWindow('settings')
+    const window = ensureWindow('chat')
     focusWindow(window)
     const target = typeof rawTarget === 'string' && rawTarget.startsWith('/settings')
       ? rawTarget
