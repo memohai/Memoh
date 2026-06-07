@@ -30,6 +30,19 @@ curl_json() {
   curl -fsS "$@"
 }
 
+check_server_ready() {
+  if ! curl -fsSI "$BASE_URL/health" >/dev/null; then
+    echo "ERROR: Memoh server is not reachable at $BASE_URL." >&2
+    echo "Set MEMOH_VERIFY_BASE_URL or start the dev server before running this verifier." >&2
+    exit 1
+  fi
+
+  PING_JSON="$TMPDIR/ping.json"
+  curl_json "$BASE_URL/ping" >"$PING_JSON"
+  assert_json "$PING_JSON" ".status == \"ok\"" "server ping status must be ok"
+  assert_json "$PING_JSON" ".container_backend == \"$EXPECTED_BACKEND\"" "server container backend must be $EXPECTED_BACKEND"
+}
+
 assert_json() {
   local file="$1"
   local filter="$2"
@@ -127,6 +140,14 @@ if [[ "$EXPECTED_RUNTIME" == *kata* ]]; then
     echo "WARN: /dev/kvm is not present on this host; Kata verification will fail unless the target server has KVM elsewhere." >&2
   fi
 fi
+
+echo "Verifier target:"
+echo "  base_url=$BASE_URL"
+echo "  expected_backend=$EXPECTED_BACKEND"
+echo "  expected_workspace_backend=$EXPECTED_WORKSPACE_BACKEND"
+echo "  expected_runtime=$EXPECTED_RUNTIME"
+echo "  verify_data_preservation=$VERIFY_DATA_PRESERVATION"
+check_server_ready
 
 echo "Logging in to $BASE_URL as $USERNAME..."
 LOGIN_JSON="$TMPDIR/login.json"
