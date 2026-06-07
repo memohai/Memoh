@@ -679,10 +679,14 @@ async function handleAuthorize() {
     if (!result.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(result.auth_url, 'provider-oauth', 'width=600,height=720')
     if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
-    webOAuthFlow.value?.cancel()
+    // Supersede any in-flight popup silently: dispose() (not cancel()) so the
+    // previous flow's onAborted doesn't clear this attempt's loading state or
+    // close the window we just reused.
+    webOAuthFlow.value?.dispose()
     webOAuthFlow.value = startOAuthPopupFlow<ProvidersOAuthStatus>({
       popup,
       target: window,
+      expectedSource: popup,
       messageType: 'memoh-provider-oauth-success',
       pollIntervalMs: webOAuthPollIntervalMs,
       timeoutMs: webOAuthPollTimeoutMs,

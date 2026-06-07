@@ -1,4 +1,4 @@
-interface OAuthStatusTextStatus {
+interface OAuthStatusSummary {
   configured: boolean
   has_token: boolean
 }
@@ -6,7 +6,7 @@ interface OAuthStatusTextStatus {
 interface OAuthStatusTextOptions {
   loading: boolean
   authorizing?: boolean
-  status: OAuthStatusTextStatus | null
+  status: OAuthStatusSummary | null
   unavailableKey: string
 }
 

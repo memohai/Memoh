@@ -459,7 +459,9 @@ function cancelCodexOAuthAuthorization() {
 async function handleAuthorize(profile: AcpprofilePublicProfile) {
   try {
     if (!props.botId) return
-    codexOAuthFlow.value?.cancel()
+    // Supersede any in-flight popup silently: dispose() (not cancel()) so the
+    // previous flow's onAborted doesn't fight the new attempt's loading state.
+    codexOAuthFlow.value?.dispose()
     agentForm(profile).setup_mode = 'oauth'
     authorizingCodexOAuth.value = true
     const { data } = await client.get<{ 200: ACPCodexOAuthAuthorizeResponse }, unknown, true>({
@@ -473,6 +475,7 @@ async function handleAuthorize(profile: AcpprofilePublicProfile) {
     codexOAuthFlow.value = startOAuthPopupFlow<ACPCodexOAuthStatus>({
       popup,
       target: window,
+      expectedSource: popup,
       messageType: 'memoh-acp-codex-oauth-success',
       messageMatches: event => event.data?.botId === props.botId,
       pollIntervalMs: codexOAuthPollIntervalMs,

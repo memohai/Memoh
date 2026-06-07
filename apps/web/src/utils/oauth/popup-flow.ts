@@ -15,6 +15,12 @@ interface OAuthPopupFlowOptions<TStatus> {
   target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
   messageType: string
   messageMatches?: (event: MessageEvent) => boolean
+  // When set, success messages must originate from this window (the popup we
+  // opened). Guards against unrelated tabs/scripts spoofing the success message.
+  expectedSource?: MessageEventSource | null
+  // Optional origin allow-check. Left unset by default because the OAuth callback
+  // page may be served from a different origin than the SPA (e.g. in dev).
+  originMatches?: (event: MessageEvent) => boolean
   pollIntervalMs: number
   timeoutMs: number
   pollStatus: () => Promise<TStatus | null>
@@ -75,10 +81,11 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
     pollTimer = globalThis.setTimeout(() => {
       pollTimer = null
       if (completed) return
-      if (options.popup.closed) {
-        finishAborted('cancelled')
-        return
-      }
+      // The callback page posts its success message and immediately calls
+      // window.close(), so a closed popup does NOT necessarily mean the user
+      // cancelled — the token may already be stored. Poll one final time before
+      // concluding, and only abort as cancelled if it is still unauthorized.
+      const popupClosed = options.popup.closed === true
       void options.pollStatus()
         .then((status) => {
           if (completed) return
@@ -86,11 +93,19 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
             finishAuthorized()
             return
           }
+          if (popupClosed) {
+            finishAborted('cancelled')
+            return
+          }
           schedulePoll()
         })
         .catch((error: unknown) => {
           if (completed) return
           options.onError?.(error)
+          if (popupClosed) {
+            finishAborted('cancelled')
+            return
+          }
           schedulePoll()
         })
     }, options.pollIntervalMs)
@@ -99,6 +114,8 @@ export function startOAuthPopupFlow<TStatus>(options: OAuthPopupFlowOptions<TSta
   function onMessage(event: Event) {
     const message = event as MessageEvent
     if (message.data?.type !== options.messageType) return
+    if (options.expectedSource !== undefined && message.source !== options.expectedSource) return
+    if (options.originMatches && !options.originMatches(message)) return
     if (options.messageMatches && !options.messageMatches(message)) return
     finishAuthorized()
   }
