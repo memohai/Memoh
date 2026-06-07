@@ -33,6 +33,30 @@ make a **new** cross-cutting decision, write it back here — this is a living d
 3. **New language only.** The refactored Atoms are the reference. Do **not** copy
    an un-refactored legacy component's styling.
 
+## The one rule — clean vs dirty
+
+Every rule below is one principle: **at rest a control is transparent and
+inherits its surface, defined only by a single hairline edge; on interaction
+that ONE layer changes in place** — the edge swaps color, or one fill tint
+deepens. Nothing stacks.
+
+> **Clean = one layer changing in place. Dirty = many chrome layers stacked on a
+> single control** (a baked fill + a structural border + a colored outer ring + a
+> shadow + hand-written alpha).
+
+The refactored Atoms (Button / Input / Select / Toggle / Checkbox …) pass this
+test; the legacy look (see § Dirty patterns) fails it by adding layers. Two
+corollaries that the whole system leans on:
+
+- **Stroke defines the body; color expresses interaction.** A non-emphasis
+  control is shaped by its edge (transparent fill, inherited surface), and
+  hover/press/focus is read through a color change — never by inventing a border
+  or shadow at rest.
+- **Black / white / gray is the skeleton (~90%). Blue means "selected". Purple is
+  scarce.** The high-emphasis CTA fill is CHARCOAL (`--btn-primary`), NOT brand;
+  brand purple (`--brand`) is reserved for `variant="brand"` and a few accents.
+  Do not paint the UI purple.
+
 ## Unification ≠ homogenization
 
 Unifying the system does **not** mean every control looks the same. A component
@@ -101,9 +125,13 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 - **Reference (refactored — copy these):** Button, Input, Textarea, Select /
   SelectTrigger, NativeSelect, Checkbox, Switch, NumberField, InputGroup, Field,
   SegmentedControl, Toggle.
-- **In progress / upcoming:** Slider, RadioGroup, Select menu surface, Combobox.
-- **Legacy (do NOT use as reference):** Badge — and any component not listed as
-  Reference above. When in doubt, ask; do not pattern-match off legacy.
+- **In progress / upcoming:** Slider, RadioGroup, Select menu surface, Combobox,
+  PinInput, InputOTP, TagsInput (mid-refactor — their pre-refactor code is a
+  textbook § Dirty patterns exhibit; check it in git, do not copy the in-flight
+  state).
+- **Legacy (do NOT use as reference):** Badge, Alert (semantic fills) — and any
+  component not listed as Reference above. When in doubt, ask; do not
+  pattern-match off legacy.
 
 ## Color
 
@@ -120,6 +148,16 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   text, **state-constant**), `-soft` (rest bg), `-soft-hover`, `-soft-active`,
   `-border`, `-deep`. 3-layer model: a colored item's text/icon **never** changes
   on hover/select — only the background deepens `soft → soft-hover → soft-active`.
+- **Charcoal CTA, scarce brand.** The high-emphasis button fill is the charcoal
+  ramp (`--btn-primary` → `-hover` → `-active`); `variant="default"`/`"primary"`
+  use it. Brand purple (`--brand`) is the SCARCE accent — it ships only via
+  `<Button variant="brand">` (rare brand CTAs like chat Send) and a handful of
+  reserved tokens (`--sidebar-primary`, capability/event accents). Never make
+  purple a default surface or a large fill; the skeleton stays black/white/gray.
+- **Selection is one blue, applied as fill.** Checkbox, Switch, Radio (checked
+  edge) and the Slider range all use `--accent-blue-fill` — the chosen value
+  reads as a solid blue fill, not a border. (Hover differs by control: Checkbox
+  deepens, Switch brightens.)
 
 ## Interaction model (hover / press / focus)
 
@@ -140,13 +178,46 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
   (subtle) / `--destructive` (invalid).
 - **Focus ring** is `--ring` via `focus-visible:ring-2 ring-ring/<alpha>` (or the
   segmented's 2px-track + 4px-ring inset). Keyboard focus only — not a resting
-  border.
+  border. Controls that keep DOM focus after a mouse action (Select trigger,
+  native select, Slider thumb) deliberately ship NO focus style — a ring would
+  linger as a "stuck" edge.
+  - `--ring` is a MID-GRAY (~0.575L), deliberately soft — keyboard focus should
+    read as a quiet halo, never a harsh outline. The loud near-black edge
+    (`--field-edge-solid`) is a SEPARATE, rationed treatment that belongs only to
+    the field-commit semantic (see § Borders & field edge); do not reach for it
+    as a general focus/emphasis ring.
+
+## Highlight vs selection (menus, lists, rows)
+
+Two DIFFERENT states with two different expressions — do not conflate them:
+
+- **Highlight** = the transient pointer / keyboard cursor resting on a row. Shown
+  by a background tint (`data-[highlighted]:bg-[color:var(--ui-selected)]`, reka's
+  roving focus). It just follows the pointer. Single source: `lib/menu.ts`
+  `menuItemClass` — Select / Dropdown / Context / Command all reuse it; no
+  per-component highlight rule.
+- **Selection** = the actually-chosen value. Shown by an INDICATOR (check / dot),
+  **never** by a persistent row background.
+- Table rows are the exception that proves it (no indicator slot): they tint
+  `hover:--ui-hover` / `data-[state=selected]:--ui-selected`.
+- `<Item>` interaction is OPT-IN: hover/press fills arm only when the row is a
+  real control (`as="a"` / `as="button"`); selection still goes through an
+  indicator, not a background.
 
 ## Radius
 
 - Use the scale only: `rounded-2xs/xs/sm/md/lg/xl` = `--radius-*`
-  (3 / 4 / 6 / 8 / 10 / 14 px; `--radius` = 10px).
-- Controls (buttons, fields) are `rounded-md` (8px).
+  (3 / 4 / 6 / 8 / 10 / 14 px; `--radius` = 10px), plus the menu pair
+  `--radius-menu` (8) / `--radius-menu-shell` (12).
+- Role map (the values components actually land on):
+  - Badge / tag / Tooltip / Kbd → `rounded-sm` (6).
+  - Controls (button / field / Select / Toggle) and menu rows → `rounded-md` /
+    `rounded-menu` (8).
+  - Chromed Popover & menu shell → `rounded-menu-shell` (12).
+  - Card / Dialog / Sheet → `rounded-xl` (14). (The Scale bench explored
+    card 12 / dialog 16, but shipped components consolidate on 14 — follow the
+    component, not the bench.)
+  - Avatar → `rounded-full`.
 - In-field small controls (InputGroup clear/reveal, NumberField steppers) share
   one tuned radius: `rounded-[calc(var(--radius)-5px)]` (5px) — the only allowed
   arbitrary radius (allowlisted in the guard). Smaller than 8px on purpose so a
@@ -154,17 +225,60 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 
 ## Borders & field edge
 
-- Borders only from `--border` / `--border-hairline` (and `--shadow-hairline` =
-  the inset 1px chrome for secondary/outline buttons & checkbox).
-- Fields use the `--field-edge-*` contract above. Never stack an outer ring on a
-  field — the edge changes color in place.
+Borders come in THREE role families — never cross them (putting a structural
+border on a control body is a top cause of the "dirty" look):
+
+- **Control edge** — an alpha hairline that melts into the inherited fill:
+  `--field-edge-*` (fields / Select trigger) and `--border-hairline`
+  (secondary/outline button, Checkbox, Radio, Slider thumb). 1px, changes in
+  place. `--shadow-hairline` is this edge expressed as an inset shadow so it can
+  animate with hover.
+- **Structural edge** — solid neutral `--border`: containers & dividers (Card,
+  Accordion, Table row, Alert, separators). Do NOT put `--border` / `border-input`
+  on a control body — it reads heavy and dirty.
+- **Floating edge** — `--border-menu` (dropdown / select / chromed popover panels)
+  and `--border-menu-elevated` (modal surfaces).
+
+Fields use the `--field-edge-*` contract: the edge changes color IN PLACE
+(`rest → solid` on focus / `engaged` subtle / `--destructive` invalid). **Never
+stack an outer ring on a field, and never grow the border width on focus** (the
+old `focus:border-2` + `z-10`/`relative` reflow fix is the anti-pattern).
+
+**The near-black edge (`--field-edge-solid`, ~0.78 alpha) is a scarce, deliberate
+accent — not a generic "make it pop" border.** It is loud on purpose and belongs
+to ONE semantic: a FIELD committing to focus (Input / Textarea / Select trigger /
+InputGroup / NumberField, plus the field-family PinInput / InputOTP / TagsInput).
+That input focus look is an intentional design choice, not a default to scatter.
+Everywhere else, reach for the softer rungs first — the subtle
+`--field-edge-engaged`, the gray `--ui-*` interactive ladder, or the keyboard
+focus ring `--ring` (which is a MID-GRAY ~0.575L, **not** black — see Interaction
+model). Using the near-black edge as a hover / selected / emphasis treatment
+outside the field-commit semantic needs an explicit, case-by-case reason; when in
+doubt, default to gray. (Like purple-scarcity, this is a judgment rule — loud
+high-contrast chrome is rationed, not guard-enforced.)
+
+Whether a surface even HAS a border is a CONTRAST decision: a Card / dropdown over
+the page gets one; a modal over the dark scrim uses `--border-menu-elevated` =
+NO border in light (a white panel + scrim + shadow already separate; a dark
+hairline the same darkness as the scrim only muddies it) and a white hairline in
+dark. Tooltip carries no border at all — its solid fill is its own edge.
 
 ## Elevation / shadow
 
-- Shadows are tokenized so elevation never fragments: `--shadow-hairline`
-  (1px inset edge), `--shadow-thumb` (subtle lift for the segmented sliding
-  thumb). Use a token; do not write `box-shadow: 0 1px 2px rgb(...)` inline.
-- Most controls are flat. Do not add shadow for decoration.
+- **Flat by default.** `@layer utilities { .shadow-sm { box-shadow: none } }`
+  zeroes Tailwind's `shadow-sm` on purpose — shadow is a scarce, tokenized
+  elevation ladder, not decoration.
+- The tokenized ladder (use a token; never write `box-shadow: 0 …` inline or a
+  raw `shadow-xs/md/lg` utility):
+  - `--shadow-hairline` — the 1px inset edge for secondary/outline buttons (a
+    shadow only so it can animate with hover; not a drop shadow).
+  - `--shadow-thumb` — the faint lift on the SegmentedControl sliding thumb.
+  - `--shadow-dropdown` — floating menus (Dropdown / Select / chromed Popover);
+    strong negative spread so the cast sits below the panel and barely bleeds out
+    the sides.
+  - `--shadow-modal` — the modal layer (Dialog / Sheet / CommandDialog).
+- Flat controls and Cards carry NO shadow. Tooltip carries none. A `shadow-none`
+  fighting an inherited shadow, or an invented `shadow-xs`, is the dirty tell.
 
 ## Typography
 
@@ -208,6 +322,39 @@ prose use `variant="link"`; for a control-sized action use a normal `<Button>`.
 
 - Every interactive control sets `cursor-pointer` (Button, Switch, segmented
   item, …). Disabled flips to `cursor-not-allowed`.
+
+## Dirty patterns — anti-examples (do NOT copy)
+
+A control reads "dirty" when it STACKS chrome instead of changing one layer in
+place (see § The one rule). These eight are red lines — each roughly means "you
+copied an un-refactored component." The pre-refactor PinInput / InputOTP /
+TagsInput were textbook exhibits; their code is in git history (don't copy the
+in-flight state either — confirm against the rules above).
+
+1. **Baked fill on a control body** — `bg-background` / `bg-input` /
+   `dark:bg-*/30` / `bg-secondary` as a tag fill. Be transparent and inherit the
+   surface; a baked fill renders grayer than its `bg-card` parent → "inside ≠
+   outside."
+2. **Structural border on a control** — `border-input` / `border-border` on a
+   field or slot. Use the control-edge family (`--field-edge-*` /
+   `--border-hairline`).
+3. **Focus that grows or stacks the edge** — `focus:border-2`,
+   `focus-within:ring-2`, a colored `border-ring` growth, plus `z-10`/`relative`
+   to patch the reflow. Swap the field edge to `--field-edge-solid` IN PLACE.
+4. **Invalid via an outer ring** — `aria-invalid:ring-destructive/20`. Swap the
+   edge to `--destructive` in place instead.
+5. **Invented shadow** — a raw `shadow-xs/md/lg` utility, or a `shadow-none`
+   fighting an inherited one. Flat controls carry no shadow; elevation is a token.
+6. **Hand-written alpha** — `/20` `/30` `/40` `/80` on fills/rings (the sanctioned
+   exception is the `ring-ring/<alpha>` focus ring). Everything else is a token.
+7. **Selection / active via `ring-offset-*`** — a background-gap halo (pure
+   shadcn). Use an indicator or the `--ui-selected` fill (see § Highlight vs
+   selection).
+8. **Off-scale / mismatched radius** — a control on `rounded-lg`, a tag not on
+   `rounded-sm`, a bare `rounded`. Use the § Radius role map.
+
+The guard WARNs on red lines 2 / 5 / 7 (string-detectable); the existing HARD
+checks already cover raw color, arbitrary radius, and invented box-shadow.
 
 ## Motion & Tailwind v4 gotchas
 

@@ -17,6 +17,13 @@
 // WARN (exit 0):
 //   3. OFF-SCALE raw text-[Npx] (not on the type scale) → use a type token
 //   4. likely hand-rolled icon-button hover      → reuse <Button variant="ghost">
+//   8. raw shadow utility (shadow-xs/sm/md/lg/xl/2xl) → use an elevation token / shadow-none
+//   9. border-input on a control body            → use the field-edge contract
+//  10. ring-offset-* (selection via offset halo) → use an indicator / --ui-selected
+//
+// Red lines 8/9/10 are the string-detectable § Dirty patterns (AGENTS.md). They
+// are WARN for now (legacy ButtonGroup/Sidebar still ship a flat shadow-sm, and
+// PinInput/InputOTP/TagsInput are mid-refactor); promote to HARD once those land.
 //
 // Rules 5/6/7 are HARD now that the pre-contract debt is fully migrated (the
 // library has zero raw values outside token blocks). Token DEFINITION blocks
@@ -57,11 +64,40 @@ function walk(dir) {
   }
 }
 
+// Strip comments so descriptive prose ("was the old border-input / shadow-md")
+// never trips a smell check. Tracks // line comments and /* */ + <!-- --> blocks
+// across lines (block state lives in the caller, reset per file). Code after //
+// (incl. URLs) is dropped — harmless, we never assert on URLs.
+function makeCodeStripper() {
+  let blockEnd = null
+  return (line) => {
+    let out = ''
+    let i = 0
+    while (i < line.length) {
+      if (blockEnd) {
+        const idx = line.indexOf(blockEnd, i)
+        if (idx === -1) return out
+        i = idx + blockEnd.length
+        blockEnd = null
+        continue
+      }
+      if (line.startsWith('//', i)) return out
+      if (line.startsWith('/*', i)) { blockEnd = '*/'; i += 2; continue }
+      if (line.startsWith('<!--', i)) { blockEnd = '-->'; i += 4; continue }
+      out += line[i]
+      i++
+    }
+    return out
+  }
+}
+
 function scan(file) {
   const rel = relative(ROOT, file)
   const src = readFileSync(file, 'utf8')
   const lines = src.split('\n')
-  lines.forEach((line, i) => {
+  const codeOf = makeCodeStripper()
+  lines.forEach((rawLine, i) => {
+    const line = codeOf(rawLine)
     const ln = i + 1
     for (const tok of line.split(/[\s'"`]+/)) {
       if (!tok) continue
@@ -79,6 +115,16 @@ function scan(file) {
       // 5. raw color in a Tailwind arbitrary class (bg-[#..], text-[oklch(..)], …)
       if (/-\[(?:#|(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\()/.test(tok))
         hard.push(`${rel}:${ln}  raw color in arbitrary class (use a palette token) → ${tok}`)
+      // 8. raw tailwind shadow scale utility — elevation is tokenized
+      //    (shadow-[var(--shadow-*)] and shadow-none are the allowed forms).
+      if (/(?:^|:)shadow-(?:2xs|xs|sm|md|lg|xl|2xl)$/.test(tok))
+        warn.push(`${rel}:${ln}  raw shadow utility (use an elevation token or shadow-none) → ${tok}`)
+      // 9. structural border on a control body — controls use the field-edge family
+      if (/(?:^|:)border-input$/.test(tok))
+        warn.push(`${rel}:${ln}  border-input on a control (use the field-edge contract) → ${tok}`)
+      // 10. selection/active via an offset ring halo — use an indicator / --ui-selected
+      if (/(?:^|:)ring-offset(?:-|$)/.test(tok))
+        warn.push(`${rel}:${ln}  ring-offset (selection via offset halo — use an indicator) → ${tok}`)
     }
     // 4. likely hand-rolled icon-button hover (icon present + ad-hoc hover fill)
     if (/\[&[_>]svg/.test(line) && /hover:bg-(accent|\[)/.test(line) && !/data-slot="button"/.test(line))
