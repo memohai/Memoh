@@ -74,7 +74,10 @@
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    background-color: transparent;
+    /* Use oklch(0 0 0 / 0) instead of `transparent` so the interpolation
+       to the hover overlay (also oklch) stays in the same color space and
+       the browser produces a smooth alpha fade rather than a hard cut. */
+    background-color: oklch(0 0 0 / 0);
     box-shadow: var(--shadow-hairline);
     scale: 1 1;
     transition:
@@ -609,6 +612,30 @@
   }
 }
 
+/* Tooltip (dark mode only): subtle ring using --border-menu (14% white) so it
+   lifts off any dark surface without a heavy outline. Drop shadow adds depth. */
+.dark [data-slot="tooltip-content"] {
+  box-shadow: 0 0 0 1px var(--border-menu), 0 4px 12px oklch(0 0 0 / 0.35);
+}
+
+/* Dark mode: secondary / outline button hover keeps the full-strength border
+   (overrides the component-layer box-shadow: none). The fill sinks dark while
+   the border stays at its resting brightness, creating a clear outline. */
+.dark [data-button]:is([data-variant="outline"], [data-variant="secondary"]):not(:disabled):hover::before {
+  box-shadow: inset 0 0 0 1px var(--border-hairline);
+}
+
+/* Dark mode: slow down the background-color transition on both primary and
+   secondary buttons so the high-contrast color change (near-white ↔ gray,
+   transparent ↔ black) has enough time to read as a smooth fade rather than
+   a hard cut. Only overrides duration; property & easing stay from the layer. */
+.dark [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
+  transition-duration: 0.255s, 0.25s;
+}
+.dark [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
+  transition-duration: 0.255s, 0.25s, 0.25s;
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(0.985 0.001 286);
@@ -698,13 +725,23 @@
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
   --shadow-dropdown: 0 1px 2px 0 oklch(0 0 0 / 0.04), 0 6px 18px -6px oklch(0 0 0 / 0.08);
-  /* Same menu family as --shadow-dropdown, but lifted for a MODAL menu surface
-     (CommandDialog) that floats over a dimmed scrim. The standard dropdown shadow
-     is tuned to read on a plain light page; over the overlay it flattens out, so a
-     palette gets this deeper cast to separate cleanly from the darkened background.
-     The surface promotes to its own GPU layer while the dialog scales open, so this
-     larger blur rasterizes once instead of repainting per animation frame. */
-  --shadow-dropdown-elevated: 0 4px 10px -2px oklch(0 0 0 / 0.13), 0 24px 50px -12px oklch(0 0 0 / 0.30);
+  /* Elevation for any surface floating in the MODAL layer over a scrim — the card
+     Dialog / Sheet panels AND the CommandDialog menu palette all share it so modal
+     depth never fragments (was: per-component shadow-2xl / shadow-lg / a bespoke
+     dropdown-elevated). It is the --shadow-dropdown family deepened: the flat
+     dropdown cast washes out against a dimmed background, so the modal layer gets
+     this stronger drop to separate cleanly from the scrim. Surfaces that scale on
+     open promote to their own GPU layer (will-change-transform), so this larger
+     blur rasterizes once instead of repainting per animation frame. */
+  --shadow-modal: 0 4px 10px -2px oklch(0 0 0 / 0.13), 0 24px 50px -12px oklch(0 0 0 / 0.30);
+  /* Backdrop scrim behind modal surfaces. ONE standard dim for card modals (Dialog,
+     Sheet) so they stop fragmenting (was bg-black/80 on Dialog vs bg-black/30 on
+     Sheet). --scrim-soft is the lighter dim reserved for a floating MENU palette
+     (CommandDialog): a heavy scrim swallowed the palette's hairline + shadow and
+     made it look edgeless, so it dims just enough to focus without erasing the
+     surface chrome. Black-alpha reads in both schemes, so no .dark override. */
+  --scrim: oklch(0 0 0 / 0.5);
+  --scrim-soft: oklch(0 0 0 / 0.4);
   /* Form-field edge — text input / textarea / select. The edge is one inset
      hairline whose color swaps per state (never an outer ring):
        solid  (default) → the hairline turns near-black on focus
@@ -858,15 +895,19 @@
   --capability-tool: var(--info);
   --capability-tool-foreground: var(--info-foreground);
   --capability-tool-soft: var(--info-soft);
+  --capability-tool-border: var(--info-border);
   --capability-vision: var(--brand);
   --capability-vision-foreground: var(--event-subagent-foreground);
   --capability-vision-soft: var(--brand-soft);
+  --capability-vision-border: var(--brand-border);
   --capability-image: oklch(0.60 0.18 340);
   --capability-image-foreground: oklch(0.40 0.15 340);
   --capability-image-soft: oklch(0.96 0.035 340);
+  --capability-image-border: oklch(0.87 0.07 340);
   --capability-reasoning: var(--warning);
   --capability-reasoning-foreground: var(--warning-foreground);
   --capability-reasoning-soft: var(--warning-soft);
+  --capability-reasoning-border: var(--warning-border);
   --context-window-xs: oklch(0.93 0 0);
   --context-window-sm: var(--warning-soft);
   --context-window-md: var(--info-soft);
@@ -889,23 +930,24 @@
 }
 
 .dark {
-  --background: oklch(0.165 0.006 286);
-  --foreground: oklch(0.86 0.005 285);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.90 0.003 285);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.90 0.003 285);
-  --primary: oklch(0.84 0.006 285);
-  --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.86 0.005 285);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.86 0.005 285);
+  --background: oklch(0.152 0 0);
+  --foreground: oklch(0.86 0 0);
+  --card: oklch(0.21 0 0);
+  --card-foreground: oklch(0.90 0 0);
+  --popover: oklch(0.21 0 0);
+  --popover-foreground: oklch(0.90 0 0);
+  --primary: oklch(0.84 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.26 0 0);
+  --secondary-foreground: oklch(0.86 0 0);
+  --muted: oklch(0.26 0 0);
+  --muted-foreground: oklch(0.62 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.86 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0.001 286);
   --border: oklch(1 0 0 / 10%);
+  --border-hairline: oklch(0.422 0 0);
   --border-menu: oklch(1 0 0 / 0.14);
   /* Dark: elevated menu edge is a WHITE hairline (light-on-dark), a touch stronger
      than --border-menu — mirroring the light-mode --border-menu-elevated. Without
@@ -919,12 +961,12 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.18 0.005 286);
-  --sidebar-foreground: oklch(0.90 0.003 285);
+  --sidebar: oklch(0.165 0 0);
+  --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
-  --sidebar-primary-foreground: oklch(0.985 0.001 286);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.86 0.005 285);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.26 0 0);
+  --sidebar-accent-foreground: oklch(0.86 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
@@ -940,12 +982,12 @@
   --sidebar-ring: var(--brand);
   /* Dark mode: the primary CTA inverts to a light fill (text-background gives it
      dark text automatically), still lightening rest → hover → press. */
-  --btn-primary: oklch(0.92 0 0);
-  --btn-primary-hover: oklch(0.84 0 0);
-  --btn-primary-active: oklch(0.76 0 0);
+  --btn-primary: oklch(0.976 0 0);
+  --btn-primary-hover: oklch(0.90 0 0);
+  --btn-primary-active: oklch(0.82 0 0);
   /* Dark: the tooltip inverts to a near-white bubble with dark text. */
-  --tooltip: oklch(0.92 0 0);
-  --tooltip-foreground: oklch(0.21 0.006 285);
+  --tooltip: oklch(0.22 0 0);
+  --tooltip-foreground: oklch(0.92 0 0);
   /* Dark: control tints LIGHTEN on engage. Anchored so pressed = 0.32 to keep
      ghost hover identical to before. hover · selected · pressed · sel+pressed. */
   --ui-hover: oklch(0.26 0 0);
@@ -988,15 +1030,19 @@
   --capability-tool: var(--info);
   --capability-tool-foreground: var(--info-foreground);
   --capability-tool-soft: var(--info-soft);
+  --capability-tool-border: var(--info-border);
   --capability-vision: var(--brand);
   --capability-vision-foreground: var(--brand);
   --capability-vision-soft: var(--brand-soft);
+  --capability-vision-border: var(--brand-border);
   --capability-image: oklch(0.76 0.13 340);
   --capability-image-foreground: oklch(0.84 0.12 340);
   --capability-image-soft: oklch(0.30 0.07 340 / 0.35);
+  --capability-image-border: oklch(0.76 0.13 340 / 0.32);
   --capability-reasoning: var(--warning);
   --capability-reasoning-foreground: var(--warning-foreground);
   --capability-reasoning-soft: var(--warning-soft);
+  --capability-reasoning-border: var(--warning-border);
   --context-window-xs: oklch(0.28 0.006 286);
   --context-window-sm: var(--warning-soft);
   --context-window-md: var(--info-soft);
@@ -1007,11 +1053,89 @@
   --diff-add-border: oklch(0.70 0.12 145 / 0.48);
   --diff-remove: oklch(0.70 0.12 25 / 0.16);
   --diff-remove-border: oklch(0.70 0.12 25 / 0.48);
+  /* Dark: accent palette — icon colors brightened, soft fills become dark translucent
+     tints. Pattern mirrors success/warning/info dark values: low-L + mid-C + alpha. */
+  --accent-gray: oklch(0.65 0.005 0);
+  --accent-gray-soft: oklch(0.28 0.003 0 / 0.38);
+  --accent-gray-soft-hover: oklch(0.32 0.003 0 / 0.48);
+  --accent-gray-soft-active: oklch(0.36 0.003 0 / 0.55);
+  --accent-gray-border: oklch(0.55 0.004 0 / 0.32);
+  --accent-gray-deep: oklch(0.80 0.004 0);
+  --accent-brown: oklch(0.72 0.08 57);
+  --accent-brown-soft: oklch(0.28 0.05 57 / 0.38);
+  --accent-brown-soft-hover: oklch(0.32 0.05 57 / 0.46);
+  --accent-brown-soft-active: oklch(0.36 0.06 57 / 0.54);
+  --accent-brown-border: oklch(0.72 0.08 57 / 0.32);
+  --accent-brown-deep: oklch(0.84 0.06 57);
+  --accent-orange: oklch(0.76 0.16 53);
+  --accent-orange-soft: oklch(0.28 0.07 53 / 0.38);
+  --accent-orange-soft-hover: oklch(0.32 0.08 53 / 0.46);
+  --accent-orange-soft-active: oklch(0.36 0.09 53 / 0.54);
+  --accent-orange-border: oklch(0.76 0.16 53 / 0.32);
+  --accent-orange-deep: oklch(0.86 0.10 53);
+  --accent-yellow: oklch(0.80 0.14 78);
+  --accent-yellow-soft: oklch(0.30 0.07 78 / 0.38);
+  --accent-yellow-soft-hover: oklch(0.34 0.08 78 / 0.46);
+  --accent-yellow-soft-active: oklch(0.38 0.09 78 / 0.54);
+  --accent-yellow-border: oklch(0.80 0.14 78 / 0.32);
+  --accent-yellow-deep: oklch(0.88 0.10 78);
+  --accent-green: oklch(0.72 0.10 153);
+  --accent-green-soft: oklch(0.28 0.06 153 / 0.38);
+  --accent-green-soft-hover: oklch(0.32 0.07 153 / 0.46);
+  --accent-green-soft-active: oklch(0.36 0.08 153 / 0.54);
+  --accent-green-border: oklch(0.72 0.10 153 / 0.32);
+  --accent-green-deep: oklch(0.84 0.08 153);
+  --accent-teal: oklch(0.74 0.10 212);
+  --accent-teal-soft: oklch(0.28 0.06 212 / 0.38);
+  --accent-teal-soft-hover: oklch(0.32 0.07 212 / 0.46);
+  --accent-teal-soft-active: oklch(0.36 0.08 212 / 0.54);
+  --accent-teal-border: oklch(0.74 0.10 212 / 0.32);
+  --accent-teal-deep: oklch(0.84 0.08 212);
+  --accent-blue: oklch(0.72 0.16 260);
+  --accent-blue-soft: oklch(0.28 0.08 260 / 0.38);
+  --accent-blue-soft-hover: oklch(0.32 0.09 260 / 0.46);
+  --accent-blue-soft-active: oklch(0.36 0.10 260 / 0.54);
+  --accent-blue-border: oklch(0.72 0.16 260 / 0.32);
+  --accent-blue-deep: oklch(0.84 0.10 260);
+  --accent-purple: oklch(0.72 0.12 302);
+  --accent-purple-soft: oklch(0.28 0.07 302 / 0.38);
+  --accent-purple-soft-hover: oklch(0.32 0.08 302 / 0.46);
+  --accent-purple-soft-active: oklch(0.36 0.09 302 / 0.54);
+  --accent-purple-border: oklch(0.72 0.12 302 / 0.32);
+  --accent-purple-deep: oklch(0.84 0.09 302);
+  --accent-pink: oklch(0.72 0.16 356);
+  --accent-pink-soft: oklch(0.28 0.08 356 / 0.38);
+  --accent-pink-soft-hover: oklch(0.32 0.09 356 / 0.46);
+  --accent-pink-soft-active: oklch(0.36 0.10 356 / 0.54);
+  --accent-pink-border: oklch(0.72 0.16 356 / 0.32);
+  --accent-pink-deep: oklch(0.84 0.10 356);
+  --accent-red: oklch(0.72 0.17 28);
+  --accent-red-soft: oklch(0.28 0.08 28 / 0.38);
+  --accent-red-soft-hover: oklch(0.32 0.09 28 / 0.46);
+  --accent-red-soft-active: oklch(0.36 0.10 28 / 0.54);
+  --accent-red-border: oklch(0.72 0.17 28 / 0.32);
+  --accent-red-deep: oklch(0.84 0.10 28);
   --chart-1: var(--brand);
   --chart-2: var(--success);
   --chart-3: var(--info);
   --chart-4: var(--warning);
   --chart-5: var(--destructive);
+  /* Dark: field edge uses solid neutral grays (black-alpha is invisible on dark bg).
+       rest ≈ RGB(70) · engaged ≈ RGB(90) · solid ≈ near-white for committed focus */
+  --field-edge-rest: oklch(0.318 0 0);
+  --field-edge-engaged: oklch(0.42 0 0);
+  --field-edge-solid: oklch(0.60 0 0);
+  /* Dark: segmented control labels. The thumb chip is the primary "selected"
+     signal, so idle text can be fully bright. idle ≈ foreground; hover pushes
+     toward white; active also uses --foreground (same as idle, chip distinguishes). */
+  --control-label: oklch(0.86 0 0);
+  --control-label-hover: oklch(0.94 0 0);
+  /* Dark: secondary button hover — pure black fill. Border (--border-hairline)
+     is restored by the .dark override above, so the button shape stays clear. */
+  --btn-secondary-overlay: oklch(0 0 0);
+  /* Dark: destructive ghost hover — warmer translucent red, brighter than before. */
+  --btn-destructive-hover-bg: oklch(0.36 0.12 25 / 0.55);
+  --btn-destructive-hover-text: oklch(0.80 0.18 25);
 }
 
 :root[data-color-scheme="ocean"] {
@@ -1313,15 +1437,19 @@
   --color-capability-tool: var(--capability-tool);
   --color-capability-tool-foreground: var(--capability-tool-foreground);
   --color-capability-tool-soft: var(--capability-tool-soft);
+  --color-capability-tool-border: var(--capability-tool-border);
   --color-capability-vision: var(--capability-vision);
   --color-capability-vision-foreground: var(--capability-vision-foreground);
   --color-capability-vision-soft: var(--capability-vision-soft);
+  --color-capability-vision-border: var(--capability-vision-border);
   --color-capability-image: var(--capability-image);
   --color-capability-image-foreground: var(--capability-image-foreground);
   --color-capability-image-soft: var(--capability-image-soft);
+  --color-capability-image-border: var(--capability-image-border);
   --color-capability-reasoning: var(--capability-reasoning);
   --color-capability-reasoning-foreground: var(--capability-reasoning-foreground);
   --color-capability-reasoning-soft: var(--capability-reasoning-soft);
+  --color-capability-reasoning-border: var(--capability-reasoning-border);
   --color-context-window-xs: var(--context-window-xs);
   --color-context-window-sm: var(--context-window-sm);
   --color-context-window-md: var(--context-window-md);
@@ -1369,5 +1497,23 @@
 
   *::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
+  }
+}
+
+/* Theme-switch crossfade via View Transitions API.
+   The browser captures before/after screenshots and animates between them.
+   Respect prefers-reduced-motion: skip the animation for users who opt out. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 220ms;
+    animation-timing-function: ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms;
   }
 }
