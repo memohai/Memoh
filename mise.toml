@@ -238,6 +238,10 @@ scripts/verify-containerd-kata.sh
 description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
 run = "scripts/test-containerd-kata-e2e.sh"
 
+[tasks."test:kata:compose:e2e"]
+description = "Build, start, verify, and tear down the production Docker Compose Kata deployment"
+run = "scripts/test-containerd-kata-compose-e2e.sh"
+
 [tasks."test:kata:smoke:runc"]
 description = "Run the containerd runtime smoke check against the default runc dev runtime"
 run = """

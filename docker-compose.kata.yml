@@ -10,6 +10,7 @@
 # Example:
 #   MEMOH_CONFIG=./conf/app.kata.docker.toml \
 #     docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build
+#   mise run test:kata:compose:e2e
 
 services:
   migrate:

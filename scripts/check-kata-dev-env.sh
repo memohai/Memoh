@@ -6,7 +6,8 @@ KATA_CONFIG_DIR="${MEMOH_KATA_CONFIG_DIR:-/etc/kata-containers}"
 KATA_CONFIG_FILE="$KATA_CONFIG_DIR/configuration.toml"
 KATA_SHARE_DIR="${MEMOH_KATA_SHARE_DIR:-/usr/share/kata-containers}"
 KATA_OPT_DIR="${MEMOH_KATA_OPT_DIR:-/opt/kata}"
-KATA_DEV_IMAGE="${MEMOH_KATA_DEV_IMAGE:-memoh-dev-server-kata}"
+KATA_CHECK_IMAGE="${MEMOH_KATA_CHECK_IMAGE:-${MEMOH_KATA_DEV_IMAGE:-memoh-dev-server-kata}}"
+KATA_CHECK_BUILD_HINT="${MEMOH_KATA_CHECK_BUILD_HINT:-docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml build migrate server}"
 CHECK_CONTAINER="${MEMOH_KATA_CHECK_CONTAINER:-0}"
 
 fail() {
@@ -26,8 +27,8 @@ require_cmd() {
 
 check_container_shim() {
   require_cmd docker
-  if ! docker image inspect "$KATA_DEV_IMAGE" >/dev/null 2>&1; then
-    fail "Kata dev image $KATA_DEV_IMAGE is not built. Run: docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml build migrate server"
+  if ! docker image inspect "$KATA_CHECK_IMAGE" >/dev/null 2>&1; then
+    fail "Kata server image $KATA_CHECK_IMAGE is not built. Run: $KATA_CHECK_BUILD_HINT"
   fi
 
   docker_args=(
@@ -49,14 +50,14 @@ check_container_shim() {
     docker_args+=(-v "$KATA_OPT_DIR:/opt/kata:ro")
   fi
 
-  "${docker_args[@]}" "$KATA_DEV_IMAGE" -lc '
+  "${docker_args[@]}" "$KATA_CHECK_IMAGE" -lc '
 set -euo pipefail
 config=/etc/kata-containers/configuration.toml
-[ -x /usr/local/bin/containerd-shim-kata-v2 ] || { echo "ERROR: Kata shim is not executable inside the dev server image." >&2; exit 1; }
-[ -f "$config" ] || { echo "ERROR: $config is missing inside the dev server image." >&2; exit 1; }
-[ -e /dev/kvm ] || { echo "ERROR: /dev/kvm is missing inside the dev server image." >&2; exit 1; }
-[ -r /dev/kvm ] || { echo "ERROR: /dev/kvm is not readable inside the dev server image." >&2; exit 1; }
-[ -w /dev/kvm ] || { echo "ERROR: /dev/kvm is not writable inside the dev server image." >&2; exit 1; }
+[ -x /usr/local/bin/containerd-shim-kata-v2 ] || { echo "ERROR: Kata shim is not executable inside the server image." >&2; exit 1; }
+[ -f "$config" ] || { echo "ERROR: $config is missing inside the server image." >&2; exit 1; }
+[ -e /dev/kvm ] || { echo "ERROR: /dev/kvm is missing inside the server image." >&2; exit 1; }
+[ -r /dev/kvm ] || { echo "ERROR: /dev/kvm is not readable inside the server image." >&2; exit 1; }
+[ -w /dev/kvm ] || { echo "ERROR: /dev/kvm is not writable inside the server image." >&2; exit 1; }
 set +e
 output="$(/usr/local/bin/containerd-shim-kata-v2 --version 2>&1)"
 status=$?
@@ -87,7 +88,7 @@ done <<EOF
 $paths
 EOF
 if [ -s "$missing" ]; then
-  echo "ERROR: Kata config references paths that are missing inside the dev server image:" >&2
+  echo "ERROR: Kata config references paths that are missing inside the server image:" >&2
   sed "s/^/  /" "$missing" >&2
   echo "Mount the referenced Kata runtime assets or use an official /opt/kata install." >&2
   exit 1
@@ -95,7 +96,7 @@ fi
 '
 }
 
-[ "$(uname -s)" = "Linux" ] || fail "Kata dev validation requires a Linux host with KVM."
+[ "$(uname -s)" = "Linux" ] || fail "Kata validation requires a Linux host with KVM."
 [ -e /dev/kvm ] || fail "/dev/kvm is missing. Enable KVM or run on a VM/bare-metal host with nested virtualization."
 [ -r /dev/kvm ] || warn "/dev/kvm exists but is not readable by the current user. Docker may still pass it through when privileged."
 if [ ! -f "$KATA_SHIM_PATH" ]; then
@@ -112,15 +113,15 @@ fi
 [ -d "$KATA_OPT_DIR" ] || fail "Kata opt directory not found at $KATA_OPT_DIR. Set MEMOH_KATA_OPT_DIR to an existing Kata directory used by your config."
 [ -d "$KATA_SHARE_DIR" ] || fail "Kata share directory not found at $KATA_SHARE_DIR. Set MEMOH_KATA_SHARE_DIR to an existing Kata directory used by your config."
 
-echo "Kata dev host preflight passed:"
+echo "Kata host preflight passed:"
 echo "  MEMOH_KATA_SHIM_PATH=$KATA_SHIM_PATH"
 echo "  MEMOH_KATA_CONFIG_DIR=$KATA_CONFIG_DIR"
 echo "  MEMOH_KATA_CONFIG_FILE=$KATA_CONFIG_FILE"
 echo "  MEMOH_KATA_SHARE_DIR=$KATA_SHARE_DIR"
 echo "  MEMOH_KATA_OPT_DIR=$KATA_OPT_DIR"
-echo "  MEMOH_KATA_DEV_IMAGE=$KATA_DEV_IMAGE"
+echo "  MEMOH_KATA_CHECK_IMAGE=$KATA_CHECK_IMAGE"
 
 if [ "$CHECK_CONTAINER" = "1" ]; then
   check_container_shim
-  echo "Kata dev container preflight passed."
+  echo "Kata container preflight passed."
 fi
