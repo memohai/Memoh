@@ -19,6 +19,7 @@ bash -n \
   scripts/audit-kata-github-verification.sh \
   scripts/check-kata-dev-env.sh \
   scripts/check-kata-runner-ready.sh \
+  scripts/diagnose-kata-dev-stack.sh \
   scripts/prepare-kata-github-runner.sh \
   scripts/run-kata-github-e2e.sh \
   scripts/smoke-containerd-runtime.sh \
@@ -70,9 +71,11 @@ grep -F 'scripts/run-kata-github-e2e.sh' docs/kata-containerd.md
 grep -F '[tasks."test:kata:github"]' mise.toml
 grep -F '[tasks."test:kata:github:e2e"]' mise.toml
 grep -F '[tasks."test:kata:github:runner"]' mise.toml
+grep -F '[tasks."dev:kata:status"]' mise.toml
 grep -F 'check_runner_capabilities()' scripts/prepare-kata-github-runner.sh
 grep -F 'runner host must be x86_64/amd64' scripts/prepare-kata-github-runner.sh
 grep -F 'do not register this host with the kvm label' scripts/prepare-kata-github-runner.sh
+grep -F 'Kata uses container_backend=containerd' scripts/diagnose-kata-dev-stack.sh
 
 echo "Validating containerd runtime wiring..."
 if ! awk '

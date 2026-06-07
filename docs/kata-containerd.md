@@ -90,8 +90,18 @@ For an already-running dev stack, use:
 
 ```bash
 mise run dev:kata
+mise run dev:kata:status
 mise run test:kata
 ```
+
+`dev:kata:status` is a lightweight diagnostic for the current dev server. Use
+it when `http://127.0.0.1:18082` is already open and you need to check whether
+the backing server is the Kata dev stack or the normal dev stack. It inspects
+`/ping`, the `memoh-dev-server` container `CONFIG_PATH`, `/dev/kvm`, and the
+Kata shim/config mounts. `container_backend = "containerd"` is expected for
+Kata; the value that proves the workspace runtime is Kata is
+`runtime_backend = "io.containerd.kata.v2"` on a bot workspace, or
+`Runtime.Name = "io.containerd.kata.v2"` from `ctr containers info`.
 
 `test:kata` uses the running dev stack instead of rebuilding it, but it still
 generates and validates both the API verifier evidence and the direct

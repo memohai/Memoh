@@ -107,6 +107,10 @@ MEMOH_KATA_CHECK_CONTAINER=1 scripts/check-kata-dev-env.sh
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml up --build
 """
 
+[tasks."dev:kata:status"]
+description = "Inspect whether the running development server is the containerd Kata stack"
+run = "scripts/diagnose-kata-dev-stack.sh"
+
 [tasks."dev:down"]
 description = "Stop development environment"
 run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
