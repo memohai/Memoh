@@ -846,6 +846,17 @@
   --accent-blue-fill: #2383e2;
   --accent-blue-fill-hover: #0077d4;
   --accent-blue-fill-active: #006bc7;
+  /* Red ALSO ships as a saturated solid fill (white text) — but for one job only:
+     count / notification bubbles, where the soft status ramp is too quiet to read
+     as an alert. Derived from --accent-red (#cd3c3a) but tuned to feel ALIVE rather
+     than muddy: lightness and chroma both lifted toward a brighter, more vivid red
+     (still a touch softer than the raw screaming red). White numeral lands ~3.8:1 —
+     under strict AA, but it rides as a small BOLD tabular digit (not body text), and
+     the priority here is an unmistakable alert dot. Pinned theme-constant (like
+     --accent-blue-fill) because the .dark block lightens --accent-red for icon use,
+     which would kill white-on-red. */
+  --accent-red-fill: oklch(0.62 0.18 27);
+  --accent-red-foreground: #fff;
   /* Switch — pure color toggle, no outline. Off = a clear gray that deepens on
      hover; ON reuses --accent-blue-fill (one blue across selection controls) and
      BRIGHTENS on hover (unlike checkbox, which deepens); puck = a white disc. */

@@ -22,7 +22,7 @@ export const variantSpecs = {
   },
   badge: {
     axis: 'variant',
-    variants: ['default', 'secondary', 'destructive', 'success', 'warning', 'outline'],
+    variants: ['default', 'secondary', 'destructive', 'success', 'warning', 'info', 'outline'],
     sizes: ['default', 'sm'],
   },
   toggle: {

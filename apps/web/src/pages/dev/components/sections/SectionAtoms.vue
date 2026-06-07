@@ -17,10 +17,12 @@ import {
 } from '@memohai/ui'
 import {
   ArrowRight,
+  Bell,
   Bold,
   ChevronDown,
   Copy,
   ExternalLink,
+  Inbox,
   Italic,
   Plus,
   RefreshCw,
@@ -477,6 +479,7 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         <VariantMatrix
           :variants="variantSpecs.badge.variants"
           :sizes="variantSpecs.badge.sizes"
+          :exclude-sizes="{ outline: ['sm'] }"
         >
           <template #default="{ variant, size }">
             <Badge
@@ -491,15 +494,73 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
 
       <Specimen
         label="<BadgeCount :count>"
-        note="count overflow caps at max (default 99)"
+        note="a small solid count — destructive = the red alert dot (unread / needs attention), pinned to an icon corner. default = a neutral dot for plain informational counts that ride a tab / filter / segment label. In a flat list row a count is calmer as a plain muted numeral, no bubble (Inbox). Overflow caps at max (default 99)."
       >
-        <BadgeCount :count="3" />
-        <BadgeCount :count="42" />
-        <BadgeCount :count="120" />
-        <BadgeCount
-          :count="120"
-          :max="9"
-        />
+        <div class="flex flex-wrap items-center gap-8">
+          <!-- Canonical ALERT: red dot pinned to the corner of an icon button -->
+          <span class="relative inline-flex">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Notifications"
+            >
+              <Bell />
+            </Button>
+            <BadgeCount
+              :count="3"
+              variant="destructive"
+              class="absolute -right-1.5 -top-1.5"
+            />
+          </span>
+
+          <!-- NEUTRAL home: real (interactive) filter buttons carrying their item
+               count. "All" is a plain informational count (neutral); a filter only
+               goes red when its count is itself an alert (unread mentions). -->
+          <div class="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+            >
+              All
+              <BadgeCount :count="24" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+            >
+              Mentions
+              <BadgeCount
+                :count="5"
+                variant="destructive"
+              />
+            </Button>
+          </div>
+
+          <!-- Flat list row: a count here is calmer as a plain muted numeral, no bubble -->
+          <div class="flex w-40 items-center gap-2 text-body">
+            <Inbox class="size-4 text-muted-foreground" />
+            <span>Inbox</span>
+            <span class="ml-auto text-caption tabular-nums text-muted-foreground">12</span>
+          </div>
+
+          <!-- Overflow caps — neutral (default) + alert (destructive) -->
+          <div class="flex items-center gap-2">
+            <BadgeCount :count="3" />
+            <BadgeCount :count="42" />
+            <BadgeCount
+              :count="120"
+              :max="9"
+            />
+            <BadgeCount
+              :count="8"
+              variant="destructive"
+            />
+            <BadgeCount
+              :count="120"
+              variant="destructive"
+            />
+          </div>
+        </div>
       </Specimen>
 
       <Specimen label="<Avatar> image + fallback">
