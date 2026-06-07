@@ -74,6 +74,7 @@ wait_server_ready() {
 validate_bool MEMOH_KATA_E2E_KEEP "$KEEP"
 require_cmd curl
 require_cmd docker
+require_cmd jq
 docker compose version >/dev/null
 if [ -z "$EVIDENCE_FILE" ]; then
   mkdir -p "$EVIDENCE_DIR"

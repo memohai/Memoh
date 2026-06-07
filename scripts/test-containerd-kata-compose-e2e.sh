@@ -91,6 +91,7 @@ wait_server_ready() {
 validate_bool MEMOH_KATA_COMPOSE_E2E_KEEP "$KEEP"
 require_cmd curl
 require_cmd docker
+require_cmd jq
 docker compose version >/dev/null
 guard_no_existing_compose_containers
 if [ -z "$EVIDENCE_FILE" ]; then

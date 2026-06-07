@@ -10,9 +10,19 @@ COMPOSE_CMD="${MEMOH_KATA_RUNNING_COMPOSE_CMD:-docker compose -f devenv/docker-c
 CTR_COMMAND="${MEMOH_VERIFY_CTR_COMMAND:-$COMPOSE_CMD exec -T server ctr}"
 SMOKE_CTR_COMMAND="${MEMOH_CONTAINERD_SMOKE_CTR_COMMAND:-$CTR_COMMAND}"
 
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: missing required command: $1" >&2
+    exit 1
+  fi
+}
+
 runtime_slug() {
   printf "%s" "$EXPECTED_RUNTIME" | tr -c "[:alnum:]" "-" | sed -e "s/^-*//" -e "s/-*$//"
 }
+
+require_cmd curl
+require_cmd jq
 
 if [ -z "$EVIDENCE_FILE" ]; then
   mkdir -p "$EVIDENCE_DIR"
