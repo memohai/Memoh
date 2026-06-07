@@ -32,8 +32,8 @@ const invoices = [
         label="<Card>"
         note="an inline surface that lives in the page (settings sections, dashboards, detail panes) — not a popup. it shares Dialog's surface: same bg-card, same rounded-xl, same header/content/footer anatomy. a Dialog is essentially this Card lifted onto a backdrop. use Card for persistent content, Dialog for transient decisions."
       >
-        <Card class="w-full max-w-sm gap-4">
-          <CardHeader>
+        <Card class="w-full max-w-sm gap-3.5">
+          <CardHeader class="gap-1">
             <CardTitle>Workspace name</CardTitle>
             <CardDescription>Used across the dashboard and CLI</CardDescription>
           </CardHeader>
