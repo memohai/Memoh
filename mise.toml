@@ -227,9 +227,21 @@ description = "Verify a running containerd/Kata Memoh server with a temporary wo
 run = """
 #!/bin/bash
 set -euo pipefail
+MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml exec -T server ctr' \
+scripts/smoke-containerd-runtime.sh
 MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
 MEMOH_VERIFY_CTR_COMMAND='docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml exec -T server ctr' \
 scripts/verify-containerd-kata.sh
+"""
+
+[tasks."test:kata:smoke:runc"]
+description = "Run the containerd runtime smoke check against the default runc dev runtime"
+run = """
+#!/bin/bash
+set -euo pipefail
+MEMOH_CONTAINERD_SMOKE_RUNTIME=io.containerd.runc.v2 \
+MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f devenv/docker-compose.yml exec -T server ctr' \
+scripts/smoke-containerd-runtime.sh
 """
 
 [tasks."test:kata:runc"]
