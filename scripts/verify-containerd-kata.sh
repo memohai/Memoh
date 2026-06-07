@@ -249,6 +249,7 @@ assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.memory_bytes == $MEM
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.desired.storage_bytes == $STORAGE_BYTES" "storage soft limit was not preserved"
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability changed after recreate"
 assert_json "$FINAL_METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability changed after recreate"
+assert_json "$FINAL_METRICS_JSON" 'if .resource_limits.desired.storage_bytes > 0 and .resource_limits.capabilities.storage.soft_limit_supported == true then .resource_limits.observed.storage_over_soft_limit == (.resource_limits.observed.storage_used_bytes > .resource_limits.desired.storage_bytes) else true end' "storage soft limit overage flag mismatch"
 if [ "$EXPECTED_STORAGE_HARD_LIMIT" = "true" ]; then
   assert_json "$FINAL_METRICS_JSON" ".resource_limits.applied.storage_bytes == $STORAGE_BYTES" "storage limit was not applied"
 fi

@@ -226,6 +226,10 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
 description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
 run = "scripts/verify-containerd-kata.sh"
 
+[tasks."test:kata:runc"]
+description = "Run the Kata verifier workflow against the default containerd/runc dev runtime"
+run = "MEMOH_VERIFY_EXPECTED_RUNTIME=io.containerd.runc.v2 scripts/verify-containerd-kata.sh"
+
 [tasks.db-up]
 description = "Initialize and Migrate Database"
 run = "scripts/db-up.sh"
