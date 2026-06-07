@@ -86,37 +86,39 @@
               v-if="isCodexProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
               class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
             >
-              <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
                 <div
-                  class="min-w-0 text-[10px]"
+                  class="min-w-0 flex-1 text-[10px]"
                   :class="codexOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
                 >
                   {{ codexOAuthStatusText() }}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  class="h-7 shrink-0 text-xs shadow-none"
-                  :disabled="authorizingCodexOAuth"
-                  @click="handleAuthorize(profile)"
-                >
-                  <LoaderCircle
-                    v-if="authorizingCodexOAuth"
-                    class="size-3 animate-spin"
-                  />
-                  {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
-                </Button>
-                <Button
-                  v-if="codexOAuthFlow"
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  class="h-7 shrink-0 text-xs shadow-none"
-                  @click="cancelCodexOAuthAuthorization"
-                >
-                  {{ $t('common.cancel') }}
-                </Button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    v-if="codexOAuthFlow"
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    class="h-7 shrink-0 text-xs shadow-none"
+                    @click="cancelCodexOAuthAuthorization"
+                  >
+                    {{ $t('common.cancel') }}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    class="h-7 shrink-0 text-xs shadow-none"
+                    :disabled="authorizingCodexOAuth"
+                    @click="handleAuthorize(profile)"
+                  >
+                    <LoaderCircle
+                      v-if="authorizingCodexOAuth"
+                      class="size-3 animate-spin"
+                    />
+                    {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -124,27 +126,29 @@
               v-if="isClaudeCodeProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
               class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
             >
-              <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
                 <div
-                  class="min-w-0 text-[10px]"
+                  class="min-w-0 flex-1 text-[10px]"
                   :class="claudeOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
                 >
                   {{ claudeOAuthStatusText() }}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  class="h-7 shrink-0 text-xs shadow-none"
-                  :disabled="authorizingClaudeOAuth"
-                  @click="handleAuthorizeClaude(profile)"
-                >
-                  <LoaderCircle
-                    v-if="authorizingClaudeOAuth"
-                    class="size-3 animate-spin"
-                  />
-                  {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
-                </Button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    class="h-7 shrink-0 text-xs shadow-none"
+                    :disabled="authorizingClaudeOAuth"
+                    @click="handleAuthorizeClaude(profile)"
+                  >
+                    <LoaderCircle
+                      v-if="authorizingClaudeOAuth"
+                      class="size-3 animate-spin"
+                    />
+                    {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
+                  </Button>
+                </div>
               </div>
 
               <div
@@ -232,6 +236,7 @@ import {
 } from '@memohai/sdk'
 import { acpAgentIcon, ensureACPAgentForm, normalizeACPAgentID, type ACPAgentForm, type ACPForm } from '@/utils/acp'
 import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
+import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 
 const props = defineProps<{
   botId: string
@@ -274,6 +279,10 @@ interface ACPClaudeCodeOAuthStatus {
 interface ACPClaudeCodeOAuthAuthorizeResponse {
   auth_url: string
   session_id: string
+}
+
+interface OAuthStatusLoadOptions {
+  silent?: boolean
 }
 
 function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
@@ -365,6 +374,12 @@ const claudeOAuthActive = computed(() => {
   return !!form.enabled && form.setup_mode === 'oauth'
 })
 
+const codexOAuthPending = computed(() => authorizingCodexOAuth.value || Boolean(codexOAuthFlow.value))
+const claudeOAuthPending = computed(() => {
+  if (authorizingClaudeOAuth.value || exchangingClaudeOAuth.value) return true
+  return Boolean(claudeOAuthSessionId.value && !claudeOAuthStatus.value?.has_token)
+})
+
 watch([() => props.botId, codexOAuthActive], () => {
   if (codexOAuthActive.value) void loadOAuthStatus()
 }, { immediate: true })
@@ -378,23 +393,26 @@ onBeforeUnmount(() => {
 })
 
 function codexOAuthStatusText(): string {
-  return oauthStatusText(codexOAuthStatusLoading.value, codexOAuthStatus.value, 'bots.settings.acpOAuthUnavailable')
+  return t(oauthStatusTextKey({
+    loading: codexOAuthStatusLoading.value,
+    authorizing: codexOAuthPending.value,
+    status: codexOAuthStatus.value,
+    unavailableKey: 'bots.settings.acpOAuthUnavailable',
+  }))
 }
 
 function claudeOAuthStatusText(): string {
-  return oauthStatusText(claudeOAuthStatusLoading.value, claudeOAuthStatus.value, 'bots.settings.acpClaudeOAuthUnavailable')
+  return t(oauthStatusTextKey({
+    loading: claudeOAuthStatusLoading.value,
+    authorizing: claudeOAuthPending.value,
+    status: claudeOAuthStatus.value,
+    unavailableKey: 'bots.settings.acpClaudeOAuthUnavailable',
+  }))
 }
 
-function oauthStatusText(loading: boolean, status: { configured: boolean, has_token: boolean } | null, unavailableKey: string): string {
-  if (loading) return t('provider.oauth.status.checking')
-  if (!status?.configured) return t(unavailableKey)
-  if (status.has_token) return t('provider.oauth.status.authorized')
-  return t('provider.oauth.status.missing')
-}
-
-async function loadOAuthStatus(): Promise<ACPCodexOAuthStatus | null> {
+async function loadOAuthStatus(options: OAuthStatusLoadOptions = {}): Promise<ACPCodexOAuthStatus | null> {
   if (!props.botId) return null
-  codexOAuthStatusLoading.value = true
+  if (!options.silent) codexOAuthStatusLoading.value = true
   try {
     const { data } = await client.get<{ 200: ACPCodexOAuthStatus }, unknown, true>({
       url: '/bots/{bot_id}/acp/codex/oauth/status',
@@ -404,10 +422,10 @@ async function loadOAuthStatus(): Promise<ACPCodexOAuthStatus | null> {
     codexOAuthStatus.value = data ?? null
     return codexOAuthStatus.value
   } catch {
-    codexOAuthStatus.value = null
+    if (!options.silent) codexOAuthStatus.value = null
     return null
   } finally {
-    codexOAuthStatusLoading.value = false
+    if (!options.silent) codexOAuthStatusLoading.value = false
   }
 }
 
@@ -441,6 +459,7 @@ function cancelCodexOAuthAuthorization() {
 async function handleAuthorize(profile: AcpprofilePublicProfile) {
   try {
     if (!props.botId) return
+    codexOAuthFlow.value?.cancel()
     agentForm(profile).setup_mode = 'oauth'
     authorizingCodexOAuth.value = true
     const { data } = await client.get<{ 200: ACPCodexOAuthAuthorizeResponse }, unknown, true>({
@@ -451,7 +470,6 @@ async function handleAuthorize(profile: AcpprofilePublicProfile) {
     if (!data?.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(data.auth_url, 'acp-codex-oauth', 'width=600,height=720')
     if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
-    codexOAuthFlow.value?.cancel()
     codexOAuthFlow.value = startOAuthPopupFlow<ACPCodexOAuthStatus>({
       popup,
       target: window,
@@ -459,11 +477,11 @@ async function handleAuthorize(profile: AcpprofilePublicProfile) {
       messageMatches: event => event.data?.botId === props.botId,
       pollIntervalMs: codexOAuthPollIntervalMs,
       timeoutMs: codexOAuthPollTimeoutMs,
-      pollStatus: loadOAuthStatus,
+      pollStatus: () => loadOAuthStatus({ silent: true }),
       isAuthorized: status => Boolean(status?.has_token),
       onAuthorized: async () => {
         codexOAuthFlow.value = null
-        await loadOAuthStatus()
+        await loadOAuthStatus({ silent: true })
         toast.success(t('provider.oauth.authorizeSuccess'))
         authorizingCodexOAuth.value = false
       },
