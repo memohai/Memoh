@@ -38,6 +38,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       sparse: ${{ steps.filter.outputs.sparse }}
       vnc: ${{ steps.filter.outputs.vnc }}
+      kata: ${{ steps.filter.outputs.kata }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -73,6 +74,45 @@ jobs:
             vnc:
               - 'docker/Dockerfile.vnc'
               - 'scripts/desktop-install.sh'
+            kata:
+              - '.github/workflows/docker.yml'
+              - '.github/workflows/kata-runtime.yml'
+              - 'conf/app.kata.docker.toml'
+              - 'devenv/app.kata.dev.toml'
+              - 'devenv/Dockerfile.server.kata'
+              - 'devenv/docker-compose.kata.yml'
+              - 'docker/Dockerfile.server'
+              - 'docker-compose.kata.yml'
+              - 'docs/kata-containerd.md'
+              - 'mise.toml'
+              - 'scripts/check-kata-dev-env.sh'
+              - 'scripts/smoke-containerd-runtime.sh'
+              - 'scripts/test-containerd-kata-compose-e2e.sh'
+              - 'scripts/test-containerd-kata-e2e.sh'
+              - 'scripts/test-containerd-kata-running.sh'
+              - 'scripts/test-kata-static.sh'
+              - 'scripts/test-kata-evidence-validator.sh'
+              - 'scripts/validate-containerd-smoke-evidence.sh'
+              - 'scripts/validate-kata-evidence-dir.sh'
+              - 'scripts/validate-kata-evidence-run-dir.sh'
+              - 'scripts/validate-kata-evidence.sh'
+              - 'scripts/verify-containerd-kata.sh'
+              - 'scripts/write-kata-compose-failure-context.sh'
+              - 'scripts/write-kata-evidence-environment.sh'
+
+  kata-static:
+    name: Kata static validation
+    needs: detect-changes
+    if: github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.kata == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Run Kata static validation
+        run: scripts/test-kata-static.sh
 
   build:
     name: build ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }} ${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}

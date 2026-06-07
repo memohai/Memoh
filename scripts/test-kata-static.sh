@@ -41,6 +41,9 @@ grep -F 'run: scripts/test-containerd-kata-e2e.sh' .github/workflows/kata-runtim
 grep -F 'run: scripts/test-containerd-kata-compose-e2e.sh' .github/workflows/kata-runtime.yml
 grep -F 'scripts/validate-kata-evidence-dir.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
 grep -F 'uses: actions/upload-artifact@v4' .github/workflows/kata-runtime.yml
+grep -F 'kata-static:' .github/workflows/docker.yml
+grep -F 'needs.detect-changes.outputs.kata' .github/workflows/docker.yml
+grep -F 'run: scripts/test-kata-static.sh' .github/workflows/docker.yml
 
 echo "Validating Kata config templates..."
 grep -F 'backend = "containerd"' devenv/app.kata.dev.toml

@@ -53,8 +53,10 @@ mise run test:kata:static
 ```
 
 The GitHub `Kata Runtime` workflow uses the same script for its static job.
-Until that workflow file exists on the default branch, use this task directly
-to reproduce the static checks.
+Because GitHub cannot manually dispatch a newly added workflow until that file
+exists on the default branch, the already-registered `Docker` workflow also has
+a `Kata static validation` job for PR-stage remote validation. Use this task
+directly to reproduce the same static checks locally.
 
 ## Development E2E
 
@@ -129,6 +131,12 @@ The `Kata Runtime` workflow always runs static validation on GitHub-hosted
 Ubuntu. Real Kata verification is opt-in because it needs a self-hosted
 Linux/KVM runner with Docker, Docker Compose v2, Kata Containers, `curl`, and
 `jq` installed.
+
+When the `Kata Runtime` workflow is being introduced in a PR, GitHub will not
+accept manual dispatch for it until the workflow file has landed on the default
+branch. During that phase, rely on the `Docker` workflow's `Kata static
+validation` job for GitHub-hosted Ubuntu coverage, plus the local E2E tasks on
+a Linux/KVM host.
 
 Register the runner with these labels:
 
