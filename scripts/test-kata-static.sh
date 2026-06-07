@@ -70,7 +70,6 @@ grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$prod_compose"
 grep -F 'target: /etc/kata-containers' "$prod_compose"
 grep -F 'target: /usr/share/kata-containers' "$prod_compose"
 grep -F 'target: /opt/kata' "$prod_compose"
-grep -F 'create_host_path: false' "$prod_compose"
 
 grep -F 'image: memoh-dev-server-kata' "$dev_compose"
 grep -F 'source: /dev/kvm' "$dev_compose"
@@ -79,7 +78,16 @@ grep -F 'target: /usr/local/bin/containerd-shim-kata-v2' "$dev_compose"
 grep -F 'target: /etc/kata-containers' "$dev_compose"
 grep -F 'target: /usr/share/kata-containers' "$dev_compose"
 grep -F 'target: /opt/kata' "$dev_compose"
-grep -F 'create_host_path: false' "$dev_compose"
+
+if [ "$(grep -cF 'create_host_path: false' docker-compose.kata.yml)" -lt 4 ]; then
+  echo "ERROR: docker-compose.kata.yml must disable host path creation for Kata host mounts" >&2
+  exit 1
+fi
+
+if [ "$(grep -cF 'create_host_path: false' devenv/docker-compose.kata.yml)" -lt 4 ]; then
+  echo "ERROR: devenv/docker-compose.kata.yml must disable host path creation for Kata host mounts" >&2
+  exit 1
+fi
 
 echo "Checking server-kata Dockerfile target..."
 docker build --check --target server-kata -f docker/Dockerfile.server .
