@@ -234,6 +234,10 @@ MEMOH_VERIFY_CTR_COMMAND='docker compose -f devenv/docker-compose.yml -f devenv/
 scripts/verify-containerd-kata.sh
 """
 
+[tasks."test:kata:e2e"]
+description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
+run = "scripts/test-containerd-kata-e2e.sh"
+
 [tasks."test:kata:smoke:runc"]
 description = "Run the containerd runtime smoke check against the default runc dev runtime"
 run = """
