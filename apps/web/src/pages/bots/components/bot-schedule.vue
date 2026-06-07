@@ -508,7 +508,7 @@
 import { Calendar, Pencil, Plus, Trash2, X, RefreshCw } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button, Badge, Input, Label, Spinner, Switch, Textarea,

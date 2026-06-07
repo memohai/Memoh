@@ -768,7 +768,7 @@ import {
 } from '@memohai/ui'
 import { SquarePen, ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

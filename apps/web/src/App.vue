@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import { Toaster } from '@memohai/ui'
-import 'vue-sonner/style.css'
 import { useSettingsStore } from '@/store/settings'
 
 useSettingsStore()
@@ -10,6 +9,6 @@ useSettingsStore()
 <template>
   <section>
     <RouterView />
-    <Toaster position="top-center" />
+    <Toaster position="top-right" />
   </section>
 </template>

@@ -241,7 +241,7 @@ import {
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {

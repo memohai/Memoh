@@ -66,7 +66,7 @@ import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { putProvidersById, deleteProvidersById, getProvidersByIdModels, deleteModelsById } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{

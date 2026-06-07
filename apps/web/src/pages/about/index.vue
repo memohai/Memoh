@@ -175,7 +175,7 @@
 import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { RefreshCw, ExternalLink, Github, BookOpen, MessageSquare, CircleCheck } from 'lucide-vue-next'
 import { Badge, Button, Spinner } from '@memohai/ui'
 import MarkdownRender from 'markstream-vue'

@@ -154,7 +154,7 @@ import {
   type HandlersSupermarketSkillEntry,
   type PluginsManifest,
 } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import PluginCard from './components/plugin-card.vue'
 import SkillCard from './components/skill-card.vue'

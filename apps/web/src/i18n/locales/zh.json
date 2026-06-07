@@ -95,6 +95,10 @@
     "settings": "系统设置",
     "webSearch": "搜索引擎",
     "memory": "记忆管理",
+    "group": {
+      "integrations": "集成",
+      "account": "账户"
+    },
     "network": "网络配置",
     "speech": "语音合成",
     "transcription": "语音转写",

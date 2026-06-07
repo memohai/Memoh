@@ -107,7 +107,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { CalendarClock, Plus, RefreshCw, ExternalLink } from 'lucide-vue-next'
 import { Button, ScrollArea, Switch } from '@memohai/ui'

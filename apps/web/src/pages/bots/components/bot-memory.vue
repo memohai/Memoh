@@ -617,7 +617,7 @@ import type {
   AdaptersTopKBucket as MemoryTopKBucket,
   MessageMessage,
 } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'

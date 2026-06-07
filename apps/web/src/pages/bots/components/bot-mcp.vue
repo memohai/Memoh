@@ -973,7 +973,7 @@ import {
 } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
   Badge, Button, Dialog, DialogClose, DialogContent, ScrollArea, Select, 

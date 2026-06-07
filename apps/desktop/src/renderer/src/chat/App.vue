@@ -2,7 +2,6 @@
 import { onBeforeUnmount, onMounted, provide } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
 import { Toaster } from '@memohai/ui'
-import 'vue-sonner/style.css'
 import { useSettingsStore } from '@memohai/web/store/settings'
 import { DesktopShellKey } from '@memohai/web/lib/desktop-shell'
 
@@ -29,6 +28,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onDevKey))
 <template>
   <section>
     <RouterView />
-    <Toaster position="top-center" />
+    <Toaster position="top-right" />
   </section>
 </template>

@@ -128,7 +128,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { Button, Skeleton, Avatar, AvatarFallback, AvatarImage } from '@memohai/ui'
 

@@ -94,6 +94,10 @@
     "providers": "Providers",
     "webSearch": "Web Search",
     "memory": "Memory",
+    "group": {
+      "integrations": "Integrations",
+      "account": "Account"
+    },
     "network": "Network",
     "speech": "Speech",
     "transcription": "Transcription",

@@ -221,7 +221,7 @@ import {
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { Plus } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {

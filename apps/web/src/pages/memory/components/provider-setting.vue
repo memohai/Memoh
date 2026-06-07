@@ -238,7 +238,7 @@ import {
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProvidersMeta, getMemoryProvidersByIdStatus, putMemoryProvidersById, deleteMemoryProvidersById } from '@memohai/sdk'
 import type { AdaptersProviderGetResponse, AdaptersProviderMeta, AdaptersProviderStatusResponse } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'

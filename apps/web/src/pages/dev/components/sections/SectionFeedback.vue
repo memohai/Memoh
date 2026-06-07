@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // Feedback: alerts, toasts, empty states. The global <Toaster> already lives
-// in App.vue, so sonner just fires toast() — no extra mount here.
+// in App.vue, so this just fires toast() — no extra mount here.
 import {
   Alert, AlertDescription, AlertTitle,
   Button,
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
   Progress,
 } from '@memohai/ui'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { AlertCircle, Inbox, Terminal } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SectionShell from '../components/SectionShell.vue'
@@ -15,11 +15,16 @@ import Specimen from '../components/Specimen.vue'
 import VariantMatrix from '../components/VariantMatrix.vue'
 import { variantSpecs } from '../lib/variant-specs'
 
-function runPromiseToast() {
-  toast.promise(
-    new Promise((resolve) => setTimeout(resolve, 1500)),
-    { loading: 'Saving...', success: 'Saved!', error: 'Failed' },
-  )
+// Fire a burst so the stack reads as a quiet, fully-readable column — newest on
+// top, every card's content visible (no depth stacking that hides prior messages).
+function runStackDemo() {
+  const fns = [
+    () => toast.success('Bot saved'),
+    () => toast.info('Model synced'),
+    () => toast.warning('Channel reconnecting…'),
+    () => toast('Workspace synced'),
+  ]
+  fns.forEach((fn, i) => setTimeout(fn, i * 220))
 }
 
 // Live bar — mimics the container image pull / create SSE progress the server
@@ -66,57 +71,93 @@ onBeforeUnmount(() => clearInterval(progressTimer))
 
       <div class="lg:col-span-2">
         <Specimen
-          label="toast(...) — vue-sonner"
-          note="global Toaster mounted in App.vue"
+          label="toast(...) — variants"
+          note="real global Toaster (App.vue, top-right) · semantic color on the icon only · skin in style.css"
         >
           <Button
             variant="outline"
             size="sm"
-            @click="toast('Event has been created')"
+            @click="toast('Workspace synced')"
           >
             Default
           </Button>
           <Button
             variant="outline"
             size="sm"
-            @click="toast.success('Saved successfully')"
+            @click="toast.success('Bot saved', { description: 'Your changes are live.' })"
           >
             Success
           </Button>
           <Button
             variant="outline"
             size="sm"
-            @click="toast.error('Something went wrong')"
-          >
-            Error
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            @click="toast.warning('Heads up')"
+            @click="toast.warning('Reconnecting…', { description: 'The channel dropped and is retrying.' })"
           >
             Warning
           </Button>
           <Button
             variant="outline"
             size="sm"
-            @click="toast.info('For your information')"
+            @click="toast.error('Save failed', { description: 'Check your network and try again.' })"
           >
-            Info
+            Error
           </Button>
           <Button
             variant="outline"
             size="sm"
-            @click="toast('With action', { description: 'Description text', action: { label: 'Undo', onClick: () => {} } })"
+            @click="toast.info('New model available', { description: 'gpt-5.5 is ready to use.' })"
+          >
+            Info
+          </Button>
+        </Specimen>
+      </div>
+
+      <div class="lg:col-span-2">
+        <Specimen
+          label="toast(...) — rich behaviors"
+          note="action · single-line (Retry) · long (10s) · Stack fires 4 (full column) · dismiss all"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast('Message archived', { action: { label: 'Undo', onClick: () => {} } })"
           >
             With action
           </Button>
           <Button
             variant="outline"
             size="sm"
-            @click="runPromiseToast"
+            @click="toast('Workspace sync paused', { action: { label: 'Retry', onClick: () => {} } })"
           >
-            Promise
+            Single-line action
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast.warning('MCP pencil: Server disconnected.', { description: 'For troubleshooting guidance, please visit our debugging documentation.', action: { label: 'Open developer settings', onClick: () => {} } })"
+          >
+            Long text + Action
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast('Heads up', { duration: 10000 })"
+          >
+            Long (10s)
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="runStackDemo"
+          >
+            Stack ×4
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="toast.dismiss()"
+          >
+            Dismiss all
           </Button>
         </Specimen>
       </div>

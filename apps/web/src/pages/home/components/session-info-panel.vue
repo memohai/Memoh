@@ -116,7 +116,7 @@
 import { computed, inject, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { Sparkles, ExternalLink, Loader2, Minimize2 } from 'lucide-vue-next'
 import { ScrollArea } from '@memohai/ui'
 import { getBotsByBotIdContainerSkills, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'

@@ -4,7 +4,7 @@ import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
 import { isFileSaveEligible } from './file-save-command'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { File, Download, Save } from 'lucide-vue-next'
 import { Button, Spinner } from '@memohai/ui'
 import {

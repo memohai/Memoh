@@ -19,7 +19,7 @@ In deploy/server mode this package is served as the standalone Web frontend. The
 | Forms | vee-validate + `@vee-validate/zod` + Zod |
 | i18n | vue-i18n (en / zh) |
 | Icons | lucide-vue-next (primary) + `@memohai/icon` (brand/provider icons) |
-| Toast | vue-sonner |
+| Toast | `@memohai/ui` `toast` / `Toaster` (in-house) |
 | Tables | @tanstack/vue-table |
 | Markdown | markstream-vue + Shiki + Mermaid + KaTeX |
 | Charts | ECharts + vue-echarts |
@@ -317,8 +317,9 @@ style.css                    — Tailwind + theme tokens
 animate.css                  — Animation utilities
 markstream-vue/index.css     — Markdown rendering
 katex/dist/katex.min.css     — Math rendering
-vue-sonner/style.css         — Toast notifications (in App.vue)
 ```
+
+Toast styling ships inside `@memohai/ui` `style.css` (the in-house `Toaster`); no separate toast stylesheet import is needed.
 
 `@memohai/ui` provides 43 component groups built on Reka UI primitives + Tailwind + class-variance-authority:
 
@@ -329,7 +330,7 @@ vue-sonner/style.css         — Toast notifications (in App.vue)
 - **Overlays**: `Dialog` (incl. `DialogScrollContent`), `Popover`, `Tooltip`, `DropdownMenu`, `ContextMenu`, `Command` (Dialog, Group, Input, Item, List)
 - **Data**: `Table` (9 sub-components), `Badge`, `BadgeCount`, `Avatar`, `Skeleton`, `Empty` (5 sub-components)
 - **Navigation**: `Breadcrumb`, `Tabs`, `Pagination`, `PinInput` (Group, Slot, Separator)
-- **Feedback**: `Button`, `ButtonGroup` (Separator, Text), `Spinner`, `Alert`, `Toaster` (Sonner), `Kbd`
+- **Feedback**: `Button`, `ButtonGroup` (Separator, Text), `Spinner`, `Alert`, `Toaster` (in-house), `Kbd`
 - **Effects**: `TextGenerateEffect`
 
 ### Form Pattern (vee-validate + Zod)
@@ -365,7 +366,7 @@ const form = useForm({
 ### Notification Pattern
 
 ```typescript
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 toast.success(t('common.saved'))
 toast.error(resolveApiErrorMessage(error, 'Failed'))
 ```

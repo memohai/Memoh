@@ -717,9 +717,9 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.001 286);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.27 0.004 95);
-  --card: oklch(0.995 0.001 286);
+  --card: oklch(1 0 0);
   --card-foreground: oklch(0.27 0.004 95);
   --popover: oklch(0.995 0.001 286);
   --popover-foreground: oklch(0.27 0.004 95);
@@ -727,7 +727,7 @@
   --primary-foreground: oklch(0.985 0.001 286);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.27 0.004 95);
-  --muted: oklch(0.967 0.001 286.375);
+  --muted: oklch(0.967 0 0);
   --muted-foreground: oklch(0.52 0.006 95);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
@@ -747,13 +747,13 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.975 0.001 286);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.27 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
-  --sidebar-primary-foreground: oklch(0.985 0.001 286);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.946 0 0);
   --sidebar-accent-foreground: oklch(0.27 0.004 95);
-  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-border: oklch(0.91 0 0);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
   --scrollbar-thumb-hover: oklch(0 0 0 / 0.32);
@@ -1629,5 +1629,200 @@
   ::view-transition-old(root),
   ::view-transition-new(root) {
     animation-duration: 0ms;
+  }
+}
+
+/* ── Toast (Memoh) ───────────────────────────────────────────────────────────
+   Our own toast surface (components/sonner/Toaster.vue + toast.ts) — replaces
+   vue-sonner. Plain fixed flex column: NO JS height measurement, NO transform-
+   offset depth stack. The close × is a real flex child (ghost icon Button),
+   not an absolute corner chip, so its hit area is stable.
+   Card: pure --background fill, --border-menu hairline, --radius-menu-shell,
+   no shadow. Colour stays neutral; semantic intent is carried ONLY by the
+   leading icon (the Linear / Badge·Alert approach).
+   Two layout variants: single (no description) and rich (has description). */
+.memoh-toaster {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 22rem;
+  max-width: calc(100vw - 2rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* the column is click-through; only the cards capture the pointer, so the empty
+     gaps never block the workspace underneath. */
+  pointer-events: none;
+  /* Teleported to <body>, the toaster sits OUTSIDE the app's no-drag wrappers and
+     overlaps the desktop titlebar drag strip (titleBarStyle:'hidden'). Without this,
+     the OS treats the top of each card as window-drag surface and swallows the
+     pointer, so hover/clicks only land where the card clears the drag region. Opt
+     the whole stack back out (no-op on web). See apps/desktop/AGENTS.md. */
+  -webkit-app-region: no-drag;
+}
+.memoh-toaster > * {
+  pointer-events: auto;
+}
+.memoh-toaster--top-right,
+.memoh-toaster--top-left,
+.memoh-toaster--top-center {
+  top: 1rem;
+}
+.memoh-toaster--bottom-right,
+.memoh-toaster--bottom-left,
+.memoh-toaster--bottom-center {
+  bottom: 1rem;
+}
+.memoh-toaster--top-right,
+.memoh-toaster--bottom-right {
+  right: 1rem;
+}
+.memoh-toaster--top-left,
+.memoh-toaster--bottom-left {
+  left: 1rem;
+}
+.memoh-toaster--top-center,
+.memoh-toaster--bottom-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ── Toast card shell ─────────────────────────────────────────────────────── */
+.memoh-toast {
+  /* Ghost button hover chip recalibrated to the popover surface —
+     see comment in the no-drag block above for full rationale. */
+  --btn-ghost-hover: color-mix(in oklab, var(--foreground) 13%, transparent);
+  display: flex;
+  gap: 0.5rem;
+  border-radius: var(--radius-menu-shell);
+  border: 1px solid var(--border-menu);
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+/* ── SINGLE LINE: no description ─────────────────────────────────────────── *
+ *  icon · title · (action) · ×   — one flat row, all center-aligned.         *
+ * ─────────────────────────────────────────────────────────────────────────── */
+.memoh-toast--single {
+  align-items: center;
+  padding: 0.375rem 0.375rem 0.375rem 0.75rem;
+}
+
+/* ── RICH: has description ───────────────────────────────────────────────── *
+ *  icon · [title-row · (action)]  · ×   — top-aligned outer shell            *
+ *            desc                                                             *
+ * ─────────────────────────────────────────────────────────────────────────── */
+.memoh-toast--rich {
+  align-items: flex-start;
+  padding: 0.625rem 0.375rem 0.625rem 0.75rem;
+}
+
+/* ── Icons ────────────────────────────────────────────────────────────────── */
+.memoh-toast__icon {
+  flex-shrink: 0;
+}
+/* In rich mode (align-items: flex-start) each icon's optical center sits at a
+   slightly different height within the 24×24 Lucide viewBox, so they each need
+   an individual nudge to land on the 13px title cap-line. */
+.memoh-toast__icon--rich {
+  margin-top: 1px; /* info — already close, minimal nudge */
+}
+.memoh-toast--rich[data-variant="warning"] .memoh-toast__icon--rich,
+.memoh-toast--rich[data-variant="success"] .memoh-toast__icon--rich,
+.memoh-toast--rich[data-variant="error"]   .memoh-toast__icon--rich {
+  margin-top: 2px;
+}
+.memoh-toast[data-variant="success"] .memoh-toast__icon { color: var(--success); }
+.memoh-toast[data-variant="warning"] .memoh-toast__icon { color: var(--warning); }
+.memoh-toast[data-variant="error"]   .memoh-toast__icon { color: var(--destructive); }
+.memoh-toast[data-variant="info"]    .memoh-toast__icon { color: var(--info); }
+
+/* Single-line title stretches to fill the row */
+.memoh-toast__title--grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Rich body: column layout, title → desc → (action) ───────────────────── */
+.memoh-toast__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+/* Single-line: one grade larger — the card is compact so the title carries more weight */
+.memoh-toast--single .memoh-toast__title {
+  font-size: var(--text-control);
+  line-height: var(--text-control--line-height);
+  letter-spacing: var(--text-control--letter-spacing);
+  font-weight: 500;
+}
+/* Rich: title at text-label (13px) — desc sits below so title doesn't need to dominate */
+.memoh-toast--rich .memoh-toast__title {
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+  font-weight: 500;
+}
+.memoh-toast__desc {
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  color: var(--muted-foreground);
+}
+
+/* ── Action + Close ───────────────────────────────────────────────────────── */
+.memoh-toast__action {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 0.125rem;
+}
+
+/* Single-line close: no adjustment needed (outer row is already center-aligned) */
+.memoh-toast__close {
+  flex-shrink: 0;
+}
+
+/* Rich close: icon-sm is 32px, title line-box is 18px. With flex-start the
+   button top aligns to the card top edge; pull it up so its visual center
+   tracks the title's cap-line instead of sitting a full button-radius below. */
+.memoh-toast__close--rich {
+  margin-top: -0.25rem;
+}
+
+/* enter: a SHORT slide in from the right + fade. exit: quick fade back to the
+   right. The leaving card drops out of flow so the rest slide up cleanly. No
+   vertical travel, no scale — the "from the right, local fade" spec. */
+.memoh-toast-enter-from,
+.memoh-toast-leave-to {
+  opacity: 0;
+  transform: translateX(1rem);
+}
+.memoh-toast-enter-active {
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 140ms ease;
+}
+.memoh-toast-leave-active {
+  position: absolute;
+  width: 100%;
+  transition:
+    transform 140ms ease,
+    opacity 120ms ease;
+}
+.memoh-toast-move {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .memoh-toast-enter-active,
+  .memoh-toast-leave-active,
+  .memoh-toast-move {
+    transition-duration: 1ms;
   }
 }

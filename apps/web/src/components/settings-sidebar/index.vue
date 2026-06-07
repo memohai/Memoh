@@ -11,42 +11,97 @@
     >
       <SidebarHeader
         v-if="!hideHeader"
-        class="p-0 border-0"
+        class="px-4 pt-2 pb-6 border-0"
       >
-        <button
-          class="h-10 flex items-center gap-2.5 px-4 w-full text-foreground hover:bg-accent/50 transition-colors group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-          @click="router.push(backToChatRoute)"
-        >
-          <ChevronLeft
-            class="size-3 shrink-0"
-          />
-          <span class="text-xs font-semibold inline-flex items-center leading-none group-data-[collapsible=icon]:hidden">
-            {{ t('sidebar.settings') }}
-          </span>
-        </button>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <Button
+              variant="ghost"
+              block
+              class="justify-start font-semibold group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+              @click="router.push(backToChatRoute)"
+            >
+              <ChevronLeft class="size-3.5 shrink-0" />
+              <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
+            </Button>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup class="px-2 py-2.5">
+        <SidebarGroup class="px-4 py-0">
           <SidebarGroupContent>
-            <SidebarMenu class="gap-0.5">
+            <SidebarMenu class="gap-2">
               <SidebarMenuItem
-                v-for="item in navItems"
+                v-for="item in coreNavItems"
                 :key="item.name"
               >
-                <SidebarMenuButton
-                  :tooltip="item.title"
-                  :is-active="isItemActive(item.name)"
+                <Button
+                  variant="ghost"
+                  block
+                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  class="h-9 gap-2 relative before:absolute before:w-0.5 before:top-1.5 before:bottom-1.5 before:left-0 before:rounded-full data-[active=true]:before:bg-sidebar-primary group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
                   @click="router.push({ name: item.name })"
                 >
-                  <component
-                    :is="item.icon"
-                    class="size-3.5 ml-1.5 group-data-[collapsible=icon]:ml-0"
-                  />
-                  <span class="text-xs font-medium group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
-                </SidebarMenuButton>
+                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                </Button>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup
+          v-if="integrationsNavItems.length"
+          class="px-4 pt-4 pb-0"
+        >
+          <SidebarGroupLabel class="group-data-[collapsible=icon]:hidden">
+            {{ t('sidebar.group.integrations') }}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu class="gap-2">
+              <SidebarMenuItem
+                v-for="item in integrationsNavItems"
+                :key="item.name"
+              >
+                <Button
+                  variant="ghost"
+                  block
+                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
+                  :aria-current="isItemActive(item.name) ? 'page' : undefined"
+                  @click="router.push({ name: item.name })"
+                >
+                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                </Button>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup
+          v-if="accountNavItems.length"
+          class="px-4 pt-4 pb-0"
+        >
+          <SidebarGroupLabel class="group-data-[collapsible=icon]:hidden">
+            {{ t('sidebar.group.account') }}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu class="gap-2">
+              <SidebarMenuItem
+                v-for="item in accountNavItems"
+                :key="item.name"
+              >
+                <Button
+                  variant="ghost"
+                  block
+                  class="justify-start group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
+                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
+                  :aria-current="isItemActive(item.name) ? 'page' : undefined"
+                  @click="router.push({ name: item.name })"
+                >
+                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                </Button>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
@@ -59,22 +114,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, type Component } from 'vue'
+import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, Bot, Boxes, Globe, Brain, Volume2, AudioLines, Mail, ChartLine, User, Store, Info, Palette, Users } from 'lucide-vue-next'
+import { ChevronLeft } from 'lucide-vue-next'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useChatStore } from '@/store/chat-list'
 import { useUserStore } from '@/store/user'
 import {
+  Button,
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from '@memohai/ui'
@@ -108,8 +164,6 @@ const { userInfo } = storeToRefs(userStore)
 const backToChatRoute = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
   if (!botId) return { name: 'home' as const }
-  // Prefer the bot's name slug so the URL stays name-oriented. Fall back to the
-  // UUID (the chat page canonicalizes it to the name on load).
   const botName = bots.value.find((b) => b.id === botId)?.name ?? botId
   return {
     name: 'bot' as const,
@@ -127,28 +181,34 @@ function isItemActive(name: string): boolean {
   return route.name === name
 }
 
-type NavItem = { title: string; name: string; icon: Component; adminOnly?: boolean }
+type NavItem = { title: string; name: string; adminOnly?: boolean }
 
-const allNavItems = computed<NavItem[]>(() => [
-  { title: t('sidebar.bots'), name: 'bots', icon: Bot },
-  { title: t('sidebar.providers'), name: 'providers', icon: Boxes },
-  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-  { title: t('sidebar.memory'), name: 'memory', icon: Brain },
-  { title: t('sidebar.speech'), name: 'speech', icon: Volume2 },
-  { title: t('sidebar.transcription'), name: 'transcription', icon: AudioLines },
-  { title: t('sidebar.email'), name: 'email', icon: Mail },
-  { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
-  { title: t('sidebar.usage'), name: 'usage', icon: ChartLine },
-  { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
-  { title: t('sidebar.appearance'), name: 'appearance', icon: Palette },
-  { title: t('sidebar.profile'), name: 'profile', icon: User },
-  { title: t('sidebar.about'), name: 'about', icon: Info },
-])
-
-const navItems = computed(() =>
-  allNavItems.value.filter((item) => {
+function filterItems(items: NavItem[]): NavItem[] {
+  return items.filter((item) => {
     if (item.adminOnly && userInfo.value.role !== 'admin') return false
     return props.excludeItems.length === 0 || !props.excludeItems.includes(item.name)
-  }),
-)
+  })
+}
+
+const coreNavItems = computed<NavItem[]>(() => filterItems([
+  { title: t('sidebar.bots'), name: 'bots' },
+  { title: t('sidebar.providers'), name: 'providers' },
+  { title: t('sidebar.memory'), name: 'memory' },
+  { title: t('sidebar.webSearch'), name: 'web-search' },
+  { title: t('sidebar.speech'), name: 'speech' },
+  { title: t('sidebar.transcription'), name: 'transcription' },
+]))
+
+const integrationsNavItems = computed<NavItem[]>(() => filterItems([
+  { title: t('sidebar.email'), name: 'email' },
+  { title: t('sidebar.supermarket'), name: 'supermarket' },
+  { title: t('sidebar.usage'), name: 'usage' },
+  { title: t('sidebar.people'), name: 'people', adminOnly: true },
+]))
+
+const accountNavItems = computed<NavItem[]>(() => filterItems([
+  { title: t('sidebar.appearance'), name: 'appearance' },
+  { title: t('sidebar.profile'), name: 'profile' },
+  { title: t('sidebar.about'), name: 'about' },
+]))
 </script>

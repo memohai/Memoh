@@ -389,7 +389,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { KeyRound, RefreshCw, Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,

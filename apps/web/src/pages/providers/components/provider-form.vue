@@ -368,7 +368,7 @@ import type {
   ProvidersTestResponse,
 } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
 
 const { t } = useI18n()

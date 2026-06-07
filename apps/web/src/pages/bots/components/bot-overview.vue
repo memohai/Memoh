@@ -249,7 +249,7 @@ import {
   type BotsBotCheck 
 } from '@memohai/sdk'
 import { useRoute } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { 
