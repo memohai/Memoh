@@ -375,7 +375,40 @@
   }
 }
 
+/* Skeleton loading shimmer — a soft two-gray seam drifts left→right. The gradient is
+   one repeating tile (--skeleton-tile wide) marching across a VIEWPORT-anchored sheet
+   (background-attachment:fixed), so every skeleton block — wherever it sits — samples
+   the SAME light by its own position: a cluster (avatar + lines) reads as one surface
+   crossed by a single seam, never independent per-block pulses (the "one paper, many
+   windows" model). The tile is narrower than a typical row, so a fresh seam revisits
+   the group every cycle — a short gap, not a viewport-wide wait. Animating by exactly
+   one tile width loops seamlessly. Two CLOSE grays keep it a gentle seam, not a band. */
+@keyframes skeleton-shimmer {
+  to {
+    background-position-x: var(--skeleton-tile);
+  }
+}
+
 @layer components {
+  [data-slot="skeleton"] {
+    background-image: linear-gradient(
+      100deg,
+      var(--muted) 40%,
+      var(--skeleton-mid) 50%,
+      var(--muted) 60%
+    );
+    background-attachment: fixed;
+    background-repeat: repeat;
+    background-size: var(--skeleton-tile) 100%;
+    animation: skeleton-shimmer 2s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="skeleton"] {
+      background-image: none;
+      animation: none;
+    }
+  }
+
   /* ── Toggle — gray-ladder press model (ported verbatim from the contract bench)
      rest → hover 249 → press 237 (snappy) → on 243 → on+press 231. Press-down is
      quick (40ms) and release eases (160ms) — the modern press feel. Fill is on the
@@ -663,6 +696,12 @@
   --secondary-foreground: oklch(0.27 0.004 95);
   --muted: oklch(0.967 0.001 286.375);
   --muted-foreground: oklch(0.52 0.006 95);
+  /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
+     seam is a calm shadow, not a bright flash, on the light gray block. */
+  --skeleton-mid: oklch(0.93 0.002 286);
+  /* Shimmer tile width — narrower than a typical skeleton row so a fresh seam revisits
+     each cluster every cycle (short gap). Bigger = longer gap; smaller = denser. */
+  --skeleton-tile: 640px;
   --accent: oklch(97.1% 0 0deg);
   --accent-foreground: oklch(0.27 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
@@ -970,6 +1009,9 @@
   --secondary-foreground: oklch(0.86 0 0);
   --muted: oklch(0.26 0 0);
   --muted-foreground: oklch(0.62 0 0);
+  /* On dark, the mid-stop is one hair LIGHTER than --muted (0.26) — a gentle lift,
+     never a glaring white sweep. */
+  --skeleton-mid: oklch(0.315 0 0);
   --accent: oklch(0.26 0 0);
   --accent-foreground: oklch(0.86 0 0);
   --destructive: oklch(0.704 0.191 22.216);

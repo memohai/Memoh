@@ -598,7 +598,10 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         </div>
       </Specimen>
 
-      <Specimen label="<Skeleton>">
+      <Specimen
+        label="<Skeleton>"
+        note="One shimmer seam sweeps across all blocks in sync — every Skeleton samples the same viewport-anchored light, so a cluster reads as a single loading surface, not independent pulses."
+      >
         <div class="flex w-full items-center gap-3">
           <Skeleton class="size-10 rounded-full" />
           <div class="flex flex-1 flex-col gap-2">
