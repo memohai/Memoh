@@ -17,6 +17,7 @@ CPU_MILLICORES="${MEMOH_VERIFY_CPU_MILLICORES:-500}"
 MEMORY_BYTES="${MEMOH_VERIFY_MEMORY_BYTES:-134217728}"
 STORAGE_BYTES="${MEMOH_VERIFY_STORAGE_BYTES:-33554432}"
 BOT_PREFIX="${MEMOH_VERIFY_BOT_PREFIX:-kata-runtime-verify}"
+EVIDENCE_FILE="${MEMOH_VERIFY_EVIDENCE_FILE:-}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -122,6 +123,100 @@ verify_containerd_runtime() {
   assert_json "$out_file" ".Runtime.Name == \"$EXPECTED_RUNTIME\"" "containerd runtime must be $EXPECTED_RUNTIME"
 }
 
+write_evidence() {
+  if [ -z "$EVIDENCE_FILE" ]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$EVIDENCE_FILE")"
+  local generated_at
+  generated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  jq -n \
+    --arg generated_at "$generated_at" \
+    --arg base_url "$BASE_URL" \
+    --arg expected_backend "$EXPECTED_BACKEND" \
+    --arg expected_workspace_backend "$EXPECTED_WORKSPACE_BACKEND" \
+    --arg expected_runtime "$EXPECTED_RUNTIME" \
+    --arg verify_containerd_runtime "$VERIFY_CONTAINERD_RUNTIME" \
+    --arg ctr_command "$VERIFY_CTR_COMMAND" \
+    --arg ctr_namespace "$VERIFY_CTR_NAMESPACE" \
+    --arg bot_id "$BOT_ID" \
+    --arg bot_name "$BOT_NAME" \
+    --arg initial_container_id "$CONTAINER_ID" \
+    --arg final_container_id "$FINAL_CONTAINER_ID" \
+    --argjson verify_data_preservation "$VERIFY_DATA_PRESERVATION" \
+    --argjson data_restored "$DATA_RESTORED" \
+    --argjson cpu_millicores "$CPU_MILLICORES" \
+    --argjson memory_bytes "$MEMORY_BYTES" \
+    --argjson storage_bytes "$STORAGE_BYTES" \
+    --slurpfile ping "$PING_JSON" \
+    --slurpfile initial_container "$CONTAINER_INFO_JSON" \
+    --slurpfile initial_metrics "$METRICS_JSON" \
+    --slurpfile limit_update "$UPDATE_JSON" \
+    --slurpfile final_container "$FINAL_CONTAINER_INFO_JSON" \
+    --slurpfile final_metrics "$FINAL_METRICS_JSON" \
+    --slurpfile initial_ctr "$INITIAL_CTR_JSON" \
+    --slurpfile final_ctr "$FINAL_CTR_JSON" \
+    '{
+      schema_version: 1,
+      generated_at: $generated_at,
+      target: {
+        base_url: $base_url,
+        expected_backend: $expected_backend,
+        expected_workspace_backend: $expected_workspace_backend,
+        expected_runtime: $expected_runtime,
+        verify_containerd_runtime: ($verify_containerd_runtime == "true"),
+        ctr_command: $ctr_command,
+        ctr_namespace: $ctr_namespace
+      },
+      bot: {
+        id: $bot_id,
+        name: $bot_name
+      },
+      containers: {
+        initial: {
+          id: $initial_container_id,
+          workspace_backend: $initial_container[0].workspace_backend,
+          runtime_backend: $initial_container[0].runtime_backend,
+          ctr_runtime: ($initial_ctr[0].Runtime.Name // null)
+        },
+        final: {
+          id: $final_container_id,
+          workspace_backend: $final_container[0].workspace_backend,
+          runtime_backend: $final_container[0].runtime_backend,
+          ctr_runtime: ($final_ctr[0].Runtime.Name // null)
+        }
+      },
+      checks: {
+        ping_status: $ping[0].status,
+        ping_container_backend: $ping[0].container_backend,
+        runtime_backend_reported: ($initial_container[0].runtime_backend == $expected_runtime and $final_container[0].runtime_backend == $expected_runtime),
+        ctr_runtime_verified: (if ($verify_containerd_runtime == "true") then (($initial_ctr[0].Runtime.Name // null) == $expected_runtime and ($final_ctr[0].Runtime.Name // null) == $expected_runtime) else null end),
+        resource_limit_status: $final_metrics[0].resource_limits.status,
+        cpu_limit_applied: ($final_metrics[0].resource_limits.applied.cpu_millicores == $cpu_millicores),
+        memory_limit_applied: ($final_metrics[0].resource_limits.applied.memory_bytes == $memory_bytes),
+        storage_soft_limit_preserved: ($final_metrics[0].resource_limits.desired.storage_bytes == $storage_bytes),
+        storage_hard_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.hard_limit_supported,
+        storage_soft_limit_supported: $final_metrics[0].resource_limits.capabilities.storage.soft_limit_supported,
+        data_preservation_checked: $verify_data_preservation,
+        data_restored: (if $verify_data_preservation then $data_restored else null end)
+      },
+      resource_limits: {
+        requested: {
+          cpu_millicores: $cpu_millicores,
+          memory_bytes: $memory_bytes,
+          storage_bytes: $storage_bytes
+        },
+        initial: $initial_metrics[0].resource_limits,
+        update_response: $limit_update[0].resource_limits,
+        final: $final_metrics[0].resource_limits
+      }
+    }' >"$EVIDENCE_FILE"
+
+  echo "Wrote Kata verifier evidence: $EVIDENCE_FILE"
+}
+
 fetch_container_info() {
   local out_file="$1"
   curl_json "$BASE_URL/bots/$BOT_ID/container" \
@@ -172,6 +267,7 @@ TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/memoh-kata-verify.XXXXXX")"
 TOKEN=""
 BOT_ID=""
 PRESERVED_DATA_CREATED=0
+DATA_RESTORED=false
 trap cleanup EXIT
 
 if [[ "$EXPECTED_RUNTIME" == *kata* ]]; then
@@ -247,7 +343,9 @@ assert_json "$METRICS_JSON" ".resource_limits.capabilities.cpu.hard_limit_suppor
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.memory.hard_limit_supported == true" "memory hard limit must be supported"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.hard_limit_supported == $EXPECTED_STORAGE_HARD_LIMIT" "storage hard limit capability must be $EXPECTED_STORAGE_HARD_LIMIT"
 assert_json "$METRICS_JSON" ".resource_limits.capabilities.storage.soft_limit_supported == $EXPECTED_STORAGE_SOFT_LIMIT" "storage soft limit capability must be $EXPECTED_STORAGE_SOFT_LIMIT"
-verify_containerd_runtime "$CONTAINER_ID" "$TMPDIR/ctr.initial.json"
+INITIAL_CTR_JSON="$TMPDIR/ctr.initial.json"
+printf 'null\n' >"$INITIAL_CTR_JSON"
+verify_containerd_runtime "$CONTAINER_ID" "$INITIAL_CTR_JSON"
 
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   WRITE_JSON="$TMPDIR/fs.write.json"
@@ -307,6 +405,7 @@ if ! read_sse_payloads "$RECREATE_STREAM" | jq -e 'select(.type == "complete")' 
 fi
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   assert_sse_data_restored "$RECREATE_STREAM"
+  DATA_RESTORED=true
   PRESERVED_DATA_CREATED=0
 fi
 
@@ -328,7 +427,9 @@ fi
 FINAL_CONTAINER_INFO_JSON="$TMPDIR/container.final.json"
 fetch_container_info "$FINAL_CONTAINER_INFO_JSON"
 FINAL_CONTAINER_ID="$(json_field '.container_id' "$FINAL_CONTAINER_INFO_JSON")"
-verify_containerd_runtime "$FINAL_CONTAINER_ID" "$TMPDIR/ctr.final.json"
+FINAL_CTR_JSON="$TMPDIR/ctr.final.json"
+printf 'null\n' >"$FINAL_CTR_JSON"
+verify_containerd_runtime "$FINAL_CONTAINER_ID" "$FINAL_CTR_JSON"
 if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
   RESTORED_READ_JSON="$TMPDIR/fs.read.restored.json"
   curl_json --get "$BASE_URL/bots/$BOT_ID/container/fs/read" \
@@ -337,6 +438,8 @@ if [ "$VERIFY_DATA_PRESERVATION" = "true" ]; then
     >"$RESTORED_READ_JSON"
   assert_file_content "$RESTORED_READ_JSON" "$SENTINEL_CONTENT"
 fi
+
+write_evidence
 
 echo "Verified $EXPECTED_RUNTIME workspace runtime for bot $BOT_ID."
 echo "Final resource limit state:"

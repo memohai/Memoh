@@ -4,6 +4,8 @@ set -euo pipefail
 KEEP="${MEMOH_KATA_COMPOSE_E2E_KEEP:-${MEMOH_KATA_E2E_KEEP:-false}}"
 BASE_URL="${MEMOH_VERIFY_BASE_URL:-http://127.0.0.1:${MEMOH_DOCKER_SERVER_PORT:-8080}}"
 SERVER_IMAGE="${MEMOH_KATA_SERVER_IMAGE:-memohai/server:kata}"
+EVIDENCE_DIR="${MEMOH_KATA_EVIDENCE_DIR:-tmp/kata-evidence}"
+EVIDENCE_FILE="${MEMOH_VERIFY_EVIDENCE_FILE:-}"
 COMPOSE_CMD="docker compose -f docker-compose.yml -f docker-compose.kata.yml"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.kata.yml)
 STARTED=0
@@ -81,6 +83,10 @@ require_cmd curl
 require_cmd docker
 docker compose version >/dev/null
 guard_no_existing_compose_containers
+if [ -z "$EVIDENCE_FILE" ]; then
+  mkdir -p "$EVIDENCE_DIR"
+  EVIDENCE_FILE="$EVIDENCE_DIR/kata-compose-$(date -u +%Y%m%dT%H%M%SZ)-$$.json"
+fi
 
 trap on_exit EXIT
 
@@ -100,6 +106,8 @@ MEMOH_CONTAINERD_SMOKE_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
 MEMOH_VERIFY_BASE_URL="$BASE_URL" \
 MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
 MEMOH_VERIFY_CTR_COMMAND="$COMPOSE_CMD exec -T server ctr" \
+MEMOH_VERIFY_EVIDENCE_FILE="$EVIDENCE_FILE" \
   scripts/verify-containerd-kata.sh
 
 echo "Kata production Compose E2E verification passed."
+echo "Kata production Compose E2E evidence: $EVIDENCE_FILE"

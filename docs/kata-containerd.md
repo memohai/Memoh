@@ -87,6 +87,10 @@ It verifies the same direct containerd runtime path and Memoh API workflow as
 the dev E2E. By default it tears the stack down when it exits. Set
 `MEMOH_KATA_COMPOSE_E2E_KEEP=true` to keep the stack for inspection.
 
+Both E2E tasks write machine-readable verification evidence under
+`tmp/kata-evidence/` by default. Set `MEMOH_KATA_EVIDENCE_DIR` or
+`MEMOH_VERIFY_EVIDENCE_FILE` to choose another location.
+
 For manual production deployment, copy and edit the Kata config first:
 
 ```bash
@@ -102,6 +106,7 @@ Then verify the running stack:
 MEMOH_VERIFY_BASE_URL=http://127.0.0.1:8080 \
 MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
 MEMOH_VERIFY_CTR_COMMAND='docker compose -f docker-compose.yml -f docker-compose.kata.yml exec -T server ctr' \
+MEMOH_VERIFY_EVIDENCE_FILE=tmp/kata-evidence/kata-compose-manual.json \
   scripts/verify-containerd-kata.sh
 ```
 
@@ -126,6 +131,9 @@ A valid test run must prove all of the following:
   `preserve_data=true` and `restore_data=true` are used.
 
 The `test:kata:e2e` and `test:kata:compose:e2e` tasks perform these checks.
+Their evidence JSON records the target runtime, container IDs, direct
+`ctr containers info` runtime names, final resource-limit state, and data
+restore result without storing the admin password or access token.
 
 ## Troubleshooting
 
