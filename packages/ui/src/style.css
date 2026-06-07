@@ -716,6 +716,7 @@
 }
 
 :root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.27 0.004 95);
@@ -1581,6 +1582,7 @@
     @apply border-border outline-ring/50;
   }
   body {
+    font-family: var(--font-sans);
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -1752,7 +1754,6 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
 }
 
 /* ── Typography ───────────────────────────────────────────────────────────── */
@@ -1771,6 +1772,7 @@
   font-weight: 500;
 }
 .memoh-toast__desc {
+  margin-top: 0.25rem;
   font-size: var(--text-body);
   line-height: var(--text-body--line-height);
   letter-spacing: var(--text-body--letter-spacing);
@@ -1778,10 +1780,30 @@
 }
 
 /* ── Action + Close ───────────────────────────────────────────────────────── */
+/* Single-line action: direct flex child of the center-aligned li — no margin,
+   no align-self override; the outer align-items:center keeps everything on one
+   baseline. Height is tightened to 28px (vs sm's 32px) so the button doesn't
+   dominate the compact single-line row — a scoped override instead of adding a
+   new xs size to the button component. */
 .memoh-toast__action {
   flex-shrink: 0;
+}
+/* TODO: if other compact contexts (inline list actions, tab bars, etc.) also
+   need this height, extract it as a proper `xs` size in button/index.ts instead
+   of duplicating this override. */
+.memoh-toast--single .memoh-toast__action {
+  height: 1.75rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Rich action: lives inside .memoh-toast__body (flex column). Push it down so
+   the visual gap from desc-text-bottom to button-top ≈ card's padding-bottom
+   (0.625rem / 10px).  desc half-leading ≈ 2px, so margin-top 0.5rem (8px)
+   gives ~10px visual distance — matching the bottom padding symmetrically. */
+.memoh-toast--rich .memoh-toast__action {
   align-self: flex-start;
-  margin-top: 0.125rem;
+  margin-top: 0.5rem;
 }
 
 /* Single-line close: no adjustment needed (outer row is already center-aligned) */
