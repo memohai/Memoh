@@ -322,6 +322,7 @@ func (m *Manager) updateBotWorkspaceImagePreference(ctx context.Context, botID, 
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
 		ID:          botUUID,
+		Name:        row.Name,
 		DisplayName: row.DisplayName,
 		AvatarUrl:   row.AvatarUrl,
 		Timezone:    row.Timezone,
@@ -354,6 +355,7 @@ func (m *Manager) rememberWorkspaceBackend(ctx context.Context, botID, backend, 
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
 		ID:          botUUID,
+		Name:        row.Name,
 		DisplayName: row.DisplayName,
 		AvatarUrl:   row.AvatarUrl,
 		Timezone:    row.Timezone,
@@ -444,6 +446,7 @@ func (m *Manager) updateBotWorkspaceGPUPreference(ctx context.Context, botID str
 	}
 	_, err = m.queries.UpdateBotProfile(ctx, dbsqlc.UpdateBotProfileParams{
 		ID:          botUUID,
+		Name:        row.Name,
 		DisplayName: row.DisplayName,
 		AvatarUrl:   row.AvatarUrl,
 		Timezone:    row.Timezone,
