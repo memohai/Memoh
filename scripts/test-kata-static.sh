@@ -26,6 +26,7 @@ bash -n \
   scripts/validate-kata-evidence-dir.sh \
   scripts/validate-kata-evidence-run-dir.sh \
   scripts/validate-kata-evidence.sh \
+  scripts/validate-kata-runner-readiness.sh \
   scripts/verify-containerd-kata.sh \
   scripts/write-kata-compose-failure-context.sh \
   scripts/write-kata-evidence-environment.sh
@@ -41,7 +42,9 @@ grep -F 'runs-on: [self-hosted, linux, x64, kvm, kata]' .github/workflows/kata-r
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/kata-runtime.yml
 grep -F 'name: Linux/KVM runner readiness' .github/workflows/kata-runtime.yml
 grep -F 'name: kata-runner-readiness' .github/workflows/kata-runtime.yml
+grep -F 'run: scripts/validate-kata-runner-readiness.sh tmp/kata-runner-readiness' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/check-kata-runner-ready.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
+grep -F 'run: scripts/validate-kata-runner-readiness.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-containerd-kata-e2e.sh' .github/workflows/kata-runtime.yml
 grep -F 'run: scripts/test-containerd-kata-compose-e2e.sh' .github/workflows/kata-runtime.yml
 grep -F 'scripts/validate-kata-evidence-dir.sh tmp/kata-evidence' .github/workflows/kata-runtime.yml
@@ -49,6 +52,7 @@ grep -F 'uses: actions/upload-artifact@v4' .github/workflows/kata-runtime.yml
 grep -F 'kata-static:' .github/workflows/docker.yml
 grep -F 'needs.detect-changes.outputs.kata' .github/workflows/docker.yml
 grep -F "'scripts/check-kata-runner-ready.sh'" .github/workflows/docker.yml
+grep -F "'scripts/validate-kata-runner-readiness.sh'" .github/workflows/docker.yml
 grep -F 'run: scripts/test-kata-static.sh' .github/workflows/docker.yml
 
 echo "Validating Kata config templates..."

@@ -97,6 +97,7 @@ jobs:
               - 'scripts/validate-kata-evidence-dir.sh'
               - 'scripts/validate-kata-evidence-run-dir.sh'
               - 'scripts/validate-kata-evidence.sh'
+              - 'scripts/validate-kata-runner-readiness.sh'
               - 'scripts/verify-containerd-kata.sh'
               - 'scripts/write-kata-compose-failure-context.sh'
               - 'scripts/write-kata-evidence-environment.sh'

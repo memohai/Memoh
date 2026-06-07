@@ -156,7 +156,9 @@ self-hosted, linux, x64, kvm, kata
 To check a newly registered runner without starting the Memoh stack, run the
 workflow manually with `run_runner_readiness=true` and `run_kata_e2e=false`.
 This runs only `scripts/check-kata-runner-ready.sh` and uploads a
-`kata-runner-readiness` artifact containing the environment summary.
+`kata-runner-readiness` artifact containing the environment summary. The job
+also runs `scripts/validate-kata-runner-readiness.sh` against that artifact so
+the uploaded evidence can be rechecked independently.
 
 For full verification, run the workflow manually with `run_kata_e2e=true`. The
 E2E job executes `scripts/check-kata-runner-ready.sh` first so runner, Docker,
@@ -204,6 +206,8 @@ A valid test run must prove all of the following:
 
 - `scripts/check-kata-runner-ready.sh` passes on the Linux/KVM runner and writes
   an environment summary proving Linux and `/dev/kvm`.
+- `scripts/validate-kata-runner-readiness.sh` passes against the readiness
+  artifact.
 - `scripts/check-kata-dev-env.sh` passes on the Linux/KVM host.
 - `scripts/check-kata-dev-env.sh` passes with `MEMOH_KATA_CHECK_CONTAINER=1`
   after the target server image is built.

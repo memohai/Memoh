@@ -212,6 +212,10 @@ FAILURE_CONTEXT_DIR="$TMPDIR/failure-context-dir"
 RUNC_EVIDENCE_DIR="$TMPDIR/runc-evidence-dir"
 MISSING_PAIR_EVIDENCE_DIR="$TMPDIR/missing-pair-evidence-dir"
 MISMATCH_EVIDENCE_DIR="$TMPDIR/mismatch-evidence-dir"
+VALID_READINESS_DIR="$TMPDIR/valid-readiness-dir"
+NO_KVM_READINESS_DIR="$TMPDIR/no-kvm-readiness-dir"
+NO_DOCKER_READINESS_DIR="$TMPDIR/no-docker-readiness-dir"
+SENSITIVE_READINESS_DIR="$TMPDIR/sensitive-readiness-dir"
 
 write_evidence "$KATA_EVIDENCE" "io.containerd.kata.v2"
 scripts/validate-kata-evidence.sh "$KATA_EVIDENCE" >/dev/null
@@ -269,6 +273,27 @@ expect_failure "smoke runtime_started must be enforced" \
 jq '.debug.password = "admin123"' "$KATA_SMOKE_EVIDENCE" >"$SENSITIVE_SMOKE_EVIDENCE"
 expect_failure "sensitive smoke evidence must be rejected" \
   scripts/validate-containerd-smoke-evidence.sh "$SENSITIVE_SMOKE_EVIDENCE"
+
+mkdir -p "$VALID_READINESS_DIR"
+write_environment_summary "$VALID_READINESS_DIR/environment.txt"
+scripts/validate-kata-runner-readiness.sh "$VALID_READINESS_DIR" >/dev/null
+
+mkdir -p "$NO_KVM_READINESS_DIR"
+write_environment_summary "$NO_KVM_READINESS_DIR/environment.txt" false
+expect_failure "runner readiness evidence must require KVM" \
+  scripts/validate-kata-runner-readiness.sh "$NO_KVM_READINESS_DIR"
+
+mkdir -p "$NO_DOCKER_READINESS_DIR"
+write_environment_summary "$NO_DOCKER_READINESS_DIR/environment.txt"
+sed -i.bak 's/^docker=.*/docker=missing/' "$NO_DOCKER_READINESS_DIR/environment.txt"
+expect_failure "runner readiness evidence must require Docker" \
+  scripts/validate-kata-runner-readiness.sh "$NO_DOCKER_READINESS_DIR"
+
+mkdir -p "$SENSITIVE_READINESS_DIR"
+write_environment_summary "$SENSITIVE_READINESS_DIR/environment.txt"
+printf 'jwt_secret=devsecret\n' >>"$SENSITIVE_READINESS_DIR/environment.txt"
+expect_failure "runner readiness evidence must reject sensitive text" \
+  scripts/validate-kata-runner-readiness.sh "$SENSITIVE_READINESS_DIR"
 
 mkdir -p "$VALID_EVIDENCE_DIR"
 write_environment_summary "$VALID_EVIDENCE_DIR/environment.txt"
