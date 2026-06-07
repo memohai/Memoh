@@ -146,47 +146,85 @@ const currentPage = ref(2)
         </Pagination>
       </Specimen>
 
-      <div class="lg:col-span-2">
-        <Specimen
-          label="<Tabs>"
-          note="underline section nav (owns tabpanels + a11y) — distinct from SegmentedControl, the enclosed pill value/mode selector"
+      <Specimen
+        label="<Tabs> underline"
+        note="section nav that owns tabpanels + a11y. the active indicator is a sliding underline bar measured off the active trigger — not a static border that jumps."
+      >
+        <Tabs
+          default-value="account"
+          class="w-full max-w-md"
         >
-          <Tabs
-            default-value="account"
-            class="w-full max-w-md"
+          <TabsList>
+            <TabsTrigger value="account">
+              Account
+            </TabsTrigger>
+            <TabsTrigger value="password">
+              Password
+            </TabsTrigger>
+            <TabsTrigger value="team">
+              Team
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent
+            value="account"
+            class="pt-2 text-body text-muted-foreground"
           >
-            <TabsList>
-              <TabsTrigger value="account">
-                Account
-              </TabsTrigger>
-              <TabsTrigger value="password">
-                Password
-              </TabsTrigger>
-              <TabsTrigger value="team">
-                Team
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent
-              value="account"
-              class="text-sm text-muted-foreground"
-            >
-              Account panel content.
-            </TabsContent>
-            <TabsContent
-              value="password"
-              class="text-sm text-muted-foreground"
-            >
-              Password panel content.
-            </TabsContent>
-            <TabsContent
-              value="team"
-              class="text-sm text-muted-foreground"
-            >
-              Team panel content.
-            </TabsContent>
-          </Tabs>
-        </Specimen>
-      </div>
+            Account panel content.
+          </TabsContent>
+          <TabsContent
+            value="password"
+            class="pt-2 text-body text-muted-foreground"
+          >
+            Password panel content.
+          </TabsContent>
+          <TabsContent
+            value="team"
+            class="pt-2 text-body text-muted-foreground"
+          >
+            Team panel content.
+          </TabsContent>
+        </Tabs>
+      </Specimen>
+
+      <Specimen
+        label="<Tabs> pill"
+        note="same Tabs semantics + panels, rendered as the enclosed segmented chrome — a sliding thumb reused from SegmentedControl. for compact in-card switching."
+      >
+        <Tabs
+          default-value="overview"
+          class="w-full max-w-md"
+        >
+          <TabsList variant="pill">
+            <TabsTrigger value="overview">
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="activity">
+              Activity
+            </TabsTrigger>
+            <TabsTrigger value="settings">
+              Settings
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent
+            value="overview"
+            class="pt-2 text-body text-muted-foreground"
+          >
+            Overview panel content.
+          </TabsContent>
+          <TabsContent
+            value="activity"
+            class="pt-2 text-body text-muted-foreground"
+          >
+            Activity panel content.
+          </TabsContent>
+          <TabsContent
+            value="settings"
+            class="pt-2 text-body text-muted-foreground"
+          >
+            Settings panel content.
+          </TabsContent>
+        </Tabs>
+      </Specimen>
 
       <div class="lg:col-span-2">
         <Specimen
