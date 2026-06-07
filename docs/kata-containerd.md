@@ -164,7 +164,10 @@ scripts/prepare-kata-github-runner.sh
 Set `MEMOH_KATA_RUNNER_NAME`, `MEMOH_KATA_RUNNER_DIR`, or
 `MEMOH_KATA_RUNNER_SCRIPT` to override the generated runner name, install
 directory, or output script. The `mise` equivalent is
-`mise run test:kata:github:runner`.
+`mise run test:kata:github:runner`. The generated registration script rechecks
+Linux, x86_64/amd64, `/dev/kvm`, Docker Compose, and the Kata shim/config paths
+before registering the runner, so a copied script cannot silently register the
+wrong host with the `kvm,kata` labels.
 
 To check a newly registered runner without starting the Memoh stack, run the
 workflow manually with `run_runner_readiness=true` and `run_kata_e2e=false`.

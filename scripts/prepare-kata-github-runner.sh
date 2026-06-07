@@ -60,6 +60,10 @@ RUNNER_NAME="$RUNNER_NAME"
 RUNNER_DIR="$RUNNER_DIR"
 RUNNER_WORK_DIR="$RUNNER_WORK_DIR"
 LABELS="$LABELS"
+KATA_SHIM_PATH="\${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}"
+KATA_CONFIG_DIR="\${MEMOH_KATA_CONFIG_DIR:-/etc/kata-containers}"
+KATA_SHARE_DIR="\${MEMOH_KATA_SHARE_DIR:-/usr/share/kata-containers}"
+KATA_OPT_DIR="\${MEMOH_KATA_OPT_DIR:-/opt/kata}"
 
 fail() {
   echo "ERROR: \$*" >&2
@@ -72,6 +76,25 @@ require_cmd() {
   fi
 }
 
+check_runner_capabilities() {
+  [ "\$(uname -s)" = "Linux" ] || fail "runner host must be Linux"
+  case "\$(uname -m)" in
+    x86_64|amd64)
+      ;;
+    *)
+      fail "runner host must be x86_64/amd64 because this helper installs the linux-x64 actions runner"
+      ;;
+  esac
+  [ -e /dev/kvm ] || fail "/dev/kvm is missing; do not register this host with the kvm label"
+  require_cmd docker
+  docker info >/dev/null
+  docker compose version >/dev/null
+  [ -x "\$KATA_SHIM_PATH" ] || fail "Kata shim is missing or not executable at \$KATA_SHIM_PATH"
+  [ -f "\$KATA_CONFIG_DIR/configuration.toml" ] || fail "Kata configuration missing at \$KATA_CONFIG_DIR/configuration.toml"
+  [ -d "\$KATA_SHARE_DIR" ] || fail "Kata share directory missing at \$KATA_SHARE_DIR"
+  [ -d "\$KATA_OPT_DIR" ] || fail "Kata opt directory missing at \$KATA_OPT_DIR"
+}
+
 if [ "\$(id -u)" = "0" ]; then
   fail "do not run the GitHub Actions runner as root; run this script as the dedicated runner user"
 fi
@@ -80,6 +103,7 @@ require_cmd curl
 require_cmd gh
 require_cmd jq
 require_cmd tar
+check_runner_capabilities
 
 repo_url="https://github.com/\$REPO"
 mkdir -p "\$RUNNER_DIR"
