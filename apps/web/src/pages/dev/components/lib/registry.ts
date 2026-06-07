@@ -3,9 +3,6 @@
 // = one entry here + the component import.
 
 import { markRaw, type Component } from 'vue'
-import SectionScene from '../sections/SectionScene.vue'
-import SectionShape from '../sections/SectionShape.vue'
-import SectionContract from '../sections/SectionContract.vue'
 import SectionTokens from '../sections/SectionTokens.vue'
 import SectionType from '../sections/SectionType.vue'
 import SectionAccents from '../sections/SectionAccents.vue'
@@ -24,9 +21,6 @@ export interface WallSection {
 }
 
 export const wallSections: WallSection[] = [
-  { id: 'scene', label: 'Scene (context preview)', component: markRaw(SectionScene) },
-  { id: 'scale', label: 'Scale (radius·elevation)', component: markRaw(SectionShape) },
-  { id: 'controls-contract', label: 'Controls contract', component: markRaw(SectionContract) },
   { id: 'tokens', label: 'Design tokens', component: markRaw(SectionTokens) },
   { id: 'type', label: 'Typography', component: markRaw(SectionType) },
   { id: 'accents', label: 'Accent palette', component: markRaw(SectionAccents) },
