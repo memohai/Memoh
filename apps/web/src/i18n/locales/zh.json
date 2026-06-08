@@ -167,22 +167,6 @@
         "rose": "温暖的玫瑰色，柔和的视觉对比",
         "amber": "明亮的琥珀色，清晰的状态指示"
       },
-      "fontFamily": "字体",
-      "fontFamilyDescription": "切换字体，评估各种字体在界面中的视觉效果，所选字体将全局生效。",
-      "fontCjkUnified": "CJK 统一",
-      "fontCjkSystem": "系统 CJK",
-      "fonts": {
-        "system": "系统默认",
-        "noto-sans-sc": "Noto Sans SC",
-        "misans": "MiSans（小米）",
-        "harmony-sans": "HarmonyOS Sans（华为）",
-        "oppo-sans": "OPPO Sans",
-        "inter": "Inter",
-        "geist": "Geist",
-        "plus-jakarta-sans": "Plus Jakarta Sans",
-        "dm-sans": "DM Sans",
-        "outfit": "Outfit"
-      }
     },
     "langZh": "简体中文",
     "langEn": "English",
