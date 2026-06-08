@@ -31,6 +31,7 @@
     "export": "导出",
     "copy": "复制",
     "copied": "已复制到剪贴板",
+    "copyFailed": "复制失败",
     "tabAddSingle": "添加单个",
     "tabImportJson": "导入 JSON",
     "copyAsJson": "复制为 JSON",
@@ -251,6 +252,15 @@
     "thinking": "思考中…",
     "thinkingInProgress": "思考中…",
     "thinkingDone": "思考完成",
+    "process": {
+      "browse": "浏览 {count} 个文件",
+      "edit": "修改 {count} 个文件",
+      "run": "运行 {count} 条命令",
+      "steps": "{count} 步",
+      "thought": "已思考",
+      "thoughtBriefly": "略作思考",
+      "thoughtSeconds": "已思考 {seconds} 秒"
+    },
     "currentBot": "当前 Bot",
     "inputPlaceholder": "输入你的问题…",
     "readonlyHint": "该聊天为只读",

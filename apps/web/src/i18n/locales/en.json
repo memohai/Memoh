@@ -31,6 +31,7 @@
     "export": "Export",
     "copy": "Copy",
     "copied": "Copied to clipboard",
+    "copyFailed": "Failed to copy",
     "tabAddSingle": "Add single",
     "tabImportJson": "Import JSON",
     "copyAsJson": "Copy as JSON",
@@ -255,6 +256,15 @@
     "thinking": "Thinking…",
     "thinkingInProgress": "Thinking…",
     "thinkingDone": "Thinking complete",
+    "process": {
+      "browse": "Read {count} files",
+      "edit": "Edited {count} files",
+      "run": "Ran {count} commands",
+      "steps": "{count} steps",
+      "thought": "Thought",
+      "thoughtBriefly": "Thought for a moment",
+      "thoughtSeconds": "Thought for {seconds}s"
+    },
     "currentBot": "Current Bot",
     "inputPlaceholder": "Type your question…",
     "readonlyHint": "This chat is read-only",

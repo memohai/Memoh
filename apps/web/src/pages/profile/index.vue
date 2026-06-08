@@ -148,10 +148,14 @@ const profileForm = reactive({
 const passwordDialogOpen = ref(false)
 const copiedId = ref(false)
 
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text)
-  copiedId.value = true
-  setTimeout(() => copiedId.value = false, 2000)
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedId.value = true
+    setTimeout(() => copiedId.value = false, 2000)
+  } catch {
+    toast.error(t('common.copyFailed'))
+  }
 }
 
 const displayUserID = computed(() => account.value?.id || userInfo.id || '')
@@ -209,6 +213,11 @@ function onTimezoneChange(value: string | number | undefined) {
   void autoSaveProfile()
 }
 
+// Monotonic token so out-of-order PUT responses can't clobber newer state: each
+// save claims a token, and only the latest dispatch is allowed to apply its
+// result or roll back on failure.
+let saveToken = 0
+
 // Silent auto-save: triggered on name confirm, timezone change, and avatar apply.
 // Skips the request when nothing actually changed; only surfaces errors.
 async function autoSaveProfile() {
@@ -225,8 +234,11 @@ async function autoSaveProfile() {
     return
   }
 
+  const token = ++saveToken
   try {
     const { data } = await putUsersMe({ body, throwOnError: true })
+    // A newer save has since been dispatched — let it own the final state.
+    if (token !== saveToken) return
     account.value = data
 
     const dName = data.display_name || ''
@@ -247,6 +259,18 @@ async function autoSaveProfile() {
       timezone: tZone,
     })
   } catch (error) {
+    // Roll back the optimistic local edit so the UI re-matches the server —
+    // but only if no newer save superseded this one (which would own state).
+    if (token === saveToken) {
+      profileForm.display_name = originalProfile.display_name
+      profileForm.avatar_url = originalProfile.avatar_url
+      profileForm.timezone = originalProfile.timezone
+      patchUserInfo({
+        displayName: originalProfile.display_name,
+        avatarUrl: originalProfile.avatar_url,
+        timezone: originalProfile.timezone,
+      })
+    }
     toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
   }
 }
