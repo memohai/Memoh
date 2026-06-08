@@ -56,7 +56,7 @@
             </Button>
           </DialogClose>
           <Button @click="applyAvatar">
-            {{ $t('common.save') }}
+            {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -78,7 +78,7 @@
           <Button
             variant="secondary"
             size="icon-sm"
-            :aria-label="$t('common.save')"
+            :aria-label="$t('common.confirm')"
             @click="confirmName"
           >
             <Check class="size-4" />
