@@ -1,5 +1,4 @@
 import { normalizeACPAgentID } from '@/utils/acp'
-import { safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 
 export interface OnboardingACPSelection {
@@ -31,10 +30,14 @@ export function readACPSelection(): OnboardingACPSelection | null {
   }
 }
 
+// ACP selection is functional state that decides which kind of bot gets
+// created, so it deliberately uses storage directly (not the best-effort
+// safe-storage helpers): a failed write must surface rather than silently fall
+// through to creating a plain bot.
 export function writeACPSelection(selection: OnboardingACPSelection): void {
-  safeSessionSet(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
+  sessionStorage.setItem(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
 }
 
 export function clearACPSelection(): void {
-  safeSessionRemove(ONBOARDING_KEYS.acpSelection)
+  sessionStorage.removeItem(ONBOARDING_KEYS.acpSelection)
 }

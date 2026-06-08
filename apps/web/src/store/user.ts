@@ -7,6 +7,7 @@ import { getUsersMe } from '@memohai/sdk'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
+import { safeLocalRemove, safeSessionRemove } from '@/utils/safe-storage'
 
 export interface UserInfo {
   id: string;
@@ -117,13 +118,13 @@ export const useUserStore = defineStore(
       onboardingCompleted.value = false
       _meChecked = false
       _pendingFetch = null
-      localStorage.removeItem(ONBOARDING_KEYS.introSeen)
+      safeLocalRemove(ONBOARDING_KEYS.introSeen)
       // Clear per-session onboarding artifacts too: createdBotId / providerAddedCount
       // live in sessionStorage and survive logout within the same tab, so without
       // this the next user to onboard in this tab would be redirected to the previous
       // user's bot (complete() consumes createdBotId) and see stale provider state.
-      sessionStorage.removeItem(ONBOARDING_KEYS.createdBotId)
-      sessionStorage.removeItem(ONBOARDING_KEYS.providerAddedCount)
+      safeSessionRemove(ONBOARDING_KEYS.createdBotId)
+      safeSessionRemove(ONBOARDING_KEYS.providerAddedCount)
       resetOnboardingState()
     }
 
