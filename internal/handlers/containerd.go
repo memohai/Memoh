@@ -412,6 +412,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		if pullErr != nil {
 			h.logger.Error("image preparation failed",
 				slog.String("image", image), slog.Any("error", pullErr))
+			h.recordContainerSetupFailure(ctx, botID, "image_prepare", pullErr)
 			sendError("image preparation failed: " + pullErr.Error())
 			return nil
 		}
@@ -441,6 +442,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}); err != nil {
 		h.logger.Error("container start failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
+		h.recordContainerSetupFailure(ctx, botID, "start", err)
 		sendError("container start failed: " + err.Error())
 		return nil
 	}
@@ -475,6 +477,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	}
 
 	h.manager.RecordContainerRunning(ctx, botID, containerID, image)
+	h.clearContainerSetupFailure(ctx, botID)
 
 	status, statusErr := h.manager.GetContainerInfo(ctx, botID)
 	if statusErr != nil {
@@ -507,6 +510,30 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	})
 
 	return nil
+}
+
+func (h *ContainerdHandler) recordContainerSetupFailure(ctx context.Context, botID, phase string, err error) {
+	if h.botService == nil {
+		return
+	}
+	if recordErr := h.botService.RecordContainerSetupFailure(ctx, botID, phase, err); recordErr != nil {
+		h.logger.Warn("record bot container setup failure failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", recordErr),
+		)
+	}
+}
+
+func (h *ContainerdHandler) clearContainerSetupFailure(ctx context.Context, botID string) {
+	if h.botService == nil {
+		return
+	}
+	if err := h.botService.ClearContainerSetupFailure(ctx, botID); err != nil {
+		h.logger.Warn("clear bot container setup failure failed",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // GetContainer godoc

@@ -161,14 +161,15 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000104"
 	botID := "00000000-0000-0000-0000-000000000204"
+	streamDB := &createBotStreamDB{
+		ownerID: ownerID,
+		botID:   botID,
+	}
 
 	handler := &UsersHandler{
-		logger:  slog.Default(),
-		service: newTestCreateBotAccountService(ownerID),
-		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
-			ownerID: ownerID,
-			botID:   botID,
-		}))),
+		logger:       slog.Default(),
+		service:      newTestCreateBotAccountService(ownerID),
+		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
 		acpWorkspace: &createBotStreamWorkspace{err: errors.New("image pull failed")},
 	}
 
@@ -204,6 +205,13 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	message, _ := last["message"].(string)
 	if !strings.Contains(message, "container setup failed: image pull failed") {
 		t.Fatalf("error message = %q, want setup failure details", message)
+	}
+	setupError := requireStreamLastSetupError(t, streamDB.persistedMetadata)
+	if setupError["phase"] != "setup" {
+		t.Fatalf("phase = %#v, want setup", setupError["phase"])
+	}
+	if got, _ := setupError["message"].(string); !strings.Contains(got, "image pull failed") {
+		t.Fatalf("persisted message = %q, want setup failure", got)
 	}
 }
 
@@ -352,8 +360,10 @@ func (createBotMissingAccountStore) GetByUserID(context.Context, string) (dbstor
 }
 
 type createBotStreamDB struct {
-	ownerID string
-	botID   string
+	ownerID           string
+	botID             string
+	metadata          []byte
+	persistedMetadata []byte
 }
 
 func (*createBotStreamDB) Exec(_ context.Context, _ string, _ ...interface{}) (pgconn.CommandTag, error) {
@@ -370,6 +380,14 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
 	case strings.Contains(query, "INSERT INTO bots"):
 		return d.botRow(bots.BotStatusCreating)
+	case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+		payload, ok := args[6].([]byte)
+		if !ok {
+			return &createBotStreamRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		}
+		d.metadata = append([]byte(nil), payload...)
+		d.persistedMetadata = append([]byte(nil), payload...)
+		return d.botRow(bots.BotStatusReady)
 	case strings.Contains(query, "FROM bots") && strings.Contains(query, "WHERE id = $1"):
 		return d.botRow(bots.BotStatusReady)
 	case strings.Contains(query, "FROM bots") && strings.Contains(query, "WHERE name = $1"):
@@ -383,6 +401,10 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 func (d *createBotStreamDB) botRow(status string) pgx.Row {
 	botID := testUUID(d.botID)
 	ownerID := testUUID(d.ownerID)
+	metadata := d.metadata
+	if len(metadata) == 0 {
+		metadata = []byte(`{}`)
+	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
 		if len(dest) < 20 {
 			return pgx.ErrNoRows
@@ -405,7 +427,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[15].(*int32) = 30
 		*dest[16].(*string) = ""
 		if len(dest) == 20 {
-			*dest[17].(*[]byte) = []byte(`{}`)
+			*dest[17].(*[]byte) = append([]byte(nil), metadata...)
 			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
@@ -414,11 +436,28 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[18].(*int32) = 200
 		*dest[19].(*int32) = 50
 		*dest[20].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[21].(*[]byte) = []byte(`{}`)
+		*dest[21].(*[]byte) = append([]byte(nil), metadata...)
 		*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		*dest[23].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
+}
+
+func requireStreamLastSetupError(t *testing.T, payload []byte) map[string]any {
+	t.Helper()
+	var metadata map[string]any
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		t.Fatalf("decode metadata: %v", err)
+	}
+	workspace, ok := metadata["workspace"].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace metadata missing: %#v", metadata)
+	}
+	setupError, ok := workspace["last_setup_error"].(map[string]any)
+	if !ok {
+		t.Fatalf("last_setup_error missing: %#v", workspace)
+	}
+	return setupError
 }
 
 type createBotStreamRow struct {
