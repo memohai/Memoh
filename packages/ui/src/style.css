@@ -235,6 +235,16 @@
     box-shadow: inset 0 0 0 1px var(--destructive);
   }
 
+  /* Select opens "pointing at" its current value: the CHECKED row carries the menu
+     highlight the instant the panel opens — but ONLY once. [data-open-hint] is set
+     on the viewport at open and dropped on the first pointer-move / key-press
+     (SelectContent.vue), so after any interaction the highlight follows the pointer/
+     keyboard and never snaps back to the selected row when the cursor leaves. The
+     selection itself still reads via the check icon, never a persistent fill. */
+  [data-slot="select-viewport"][data-open-hint] [data-slot="select-item"][data-state="checked"] {
+    background-color: var(--ui-selected);
+  }
+
   /* Menu panel border lives on the Tailwind utility in lib/menu.ts → menuContentClass
      (border-[color:var(--border-menu)]). It MUST be a utility, not a rule here:
      @layer utilities always wins over @layer components, so any border-color set
@@ -799,11 +809,15 @@
      (≈234) never drags the menu highlight (≈243) with it. Ghost is button-tier
      (own press-scale), so its hover is pinned to its OWN step, not the control
      press. Steps (rgb): hover 239 · on 234 · pressed 224 · on+pressed 218. */
-  --ui-hover: oklch(0.951 0 0); /* ≈239 — control hover */
-  --ui-selected: oklch(0.962 0 0); /* ≈243 — MENU highlight + segmented track (unchanged) */
-  --ui-on: oklch(0.934 0 0); /* ≈234 — control SELECTED (Toggle on) */
-  --ui-pressed: oklch(0.910 0 0); /* ≈224 — control press */
-  --ui-selected-pressed: oklch(0.893 0 0); /* ≈218 — control on+press */
+  /* Warmed to the canvas hue (72) so menu/control fills sit in the SAME family as
+     the warm popover — a neutral gray highlight on a warm surface read as "pale &
+     off". --ui-selected (menu highlight + segmented track) is also deepened a step
+     (243→≈238) so the dropdown hover actually registers instead of looking faint. */
+  --ui-hover: oklch(0.949 0.004 72); /* ≈239 warm — control hover */
+  --ui-selected: oklch(0.945 0.005 72); /* ≈238 warm — MENU highlight + segmented track */
+  --ui-on: oklch(0.932 0.005 72); /* ≈234 warm — control SELECTED (Toggle on) */
+  --ui-pressed: oklch(0.908 0.005 72); /* ≈224 warm — control press */
+  --ui-selected-pressed: oklch(0.891 0.005 72); /* ≈218 warm — control on+press */
   --btn-ghost-hover: oklch(0.94 0.0052 72); /* ≈237 warm — ghost (button-tier), matches sidebar-accent on the warm canvas */
   /* Segmented control surfaces: recessed track + elevated sliding thumb. */
   --segment-track: var(--ui-selected);
@@ -1718,8 +1732,8 @@
   gap: 0.5rem;
   border-radius: var(--radius-menu-shell);
   border: 1px solid var(--border-menu);
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--popover);
+  color: var(--popover-foreground);
   box-shadow: none;
 }
 

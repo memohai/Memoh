@@ -58,10 +58,12 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   const setTheme = (value: ThemePreference) => {
-    withViewTransition(() => {
-      theme.value = value
-      colorMode.value = value === 'system' ? 'auto' : value
-    })
+    // No view transition here: the segmented control already animates its own
+    // thumb, and wrapping each toggle in startViewTransition freezes the page for
+    // the transition's duration — which made rapid segment switching feel laggy
+    // and swallowed hover. Theme flip is applied instantly instead.
+    theme.value = value
+    colorMode.value = value === 'system' ? 'auto' : value
   }
 
   const setColorScheme = (value: ColorSchemeId) => {

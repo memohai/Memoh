@@ -9,7 +9,7 @@
     >
       <SidebarHeader
         v-if="!hideHeader"
-        class="px-[18px] pt-[18px] pb-3 border-0"
+        class="px-[16px] pt-[18px] pb-3 border-0"
       >
         <NavItem @click="router.push(_backToChatRoute).catch(() => {})">
           <ChevronLeft class="size-3.5 shrink-0" />
@@ -19,7 +19,7 @@
 
       <SidebarContent>
         <!-- Core group: no label -->
-        <SidebarGroup class="px-[18px] pt-1 pb-0">
+        <SidebarGroup class="px-[16px] pt-1 pb-0">
           <SidebarGroupContent>
             <SidebarMenu class="gap-1">
               <SidebarMenuItem
@@ -47,7 +47,7 @@
         <!-- Integrations group -->
         <SidebarGroup
           v-if="integrationsNavItems.length"
-          class="px-[18px] pt-4 pb-0"
+          class="px-[16px] pt-4 pb-0"
         >
           <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.integrations') }}
@@ -79,7 +79,7 @@
         <!-- Account group -->
         <SidebarGroup
           v-if="accountNavItems.length"
-          class="px-[18px] pt-4 pb-0"
+          class="px-[16px] pt-4 pb-0"
         >
           <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.account') }}

@@ -14,7 +14,10 @@
             <SelectTrigger size="sm">
               <SelectValue :placeholder="t('settings.languagePlaceholder')" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent
+              align="end"
+              :align-offset="0"
+            >
               <SelectItem value="en">
                 {{ t('settings.langEn') }}
               </SelectItem>

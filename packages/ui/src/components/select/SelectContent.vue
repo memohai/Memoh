@@ -3,11 +3,13 @@ import type { SelectContentEmits, SelectContentProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import {
+  injectSelectRootContext,
   SelectContent,
   SelectPortal,
   SelectViewport,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { menuContentClass, menuSlideClass, menuViewportClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 import { SelectScrollDownButton, SelectScrollUpButton } from '.'
@@ -16,9 +18,49 @@ defineOptions({
   inheritAttrs: false,
 })
 
+// "Highlight the selected row on OPEN — once." reka focuses the selected item on
+// open, but the highlight is cleared a frame later (the classic flash), so we hold it
+// ourselves via [data-open-hint] (style.css) until the user actually interacts. The
+// flag is reset on the REAL open state — NOT onMounted: this wrapper mounts once and
+// reka toggles the panel internally, which is exactly why a second open used to flash.
+// The handoff happens on a GENUINE pointer move (changed coords) or a key press; the
+// open itself fires a spurious pointermove with UNCHANGED coords (popper re-positions /
+// the selected row scrolls into view) which we ignore. After handoff the pointer owns
+// the highlight and it never snaps back to the selected row when the cursor leaves.
+const rootContext = injectSelectRootContext()
+const openHint = ref(false)
+let originX = Number.NaN
+let originY = Number.NaN
+function clearHint(): void {
+  openHint.value = false
+}
+function onMenuPointerMove(e: PointerEvent): void {
+  if (!openHint.value) return
+  if (Number.isNaN(originX)) {
+    originX = e.clientX
+    originY = e.clientY
+    return
+  }
+  if (e.clientX !== originX || e.clientY !== originY) clearHint()
+}
+watch(() => rootContext.open.value, (open) => {
+  if (open) {
+    openHint.value = true
+    originX = Number.NaN
+    originY = Number.NaN
+    document.addEventListener('keydown', clearHint, true)
+  }
+  else {
+    openHint.value = false
+    document.removeEventListener('keydown', clearHint, true)
+  }
+}, { immediate: true })
+onBeforeUnmount(() => document.removeEventListener('keydown', clearHint, true))
+
 const props = withDefaults(
-  defineProps<SelectContentProps & { class?: HTMLAttributes['class'] }>(),
+  defineProps<SelectContentProps & { class?: HTMLAttributes['class'], size?: 'sm' | 'default' }>(),
   {
+    size: 'default',
     position: 'popper',
     // Keep the page SCROLLABLE while the menu is open. The scroll freeze is caused
     // solely by reka's bodyLock (it sets overflow:hidden on <body>), so we turn
@@ -42,7 +84,7 @@ const props = withDefaults(
 )
 const emits = defineEmits<SelectContentEmits>()
 
-const delegatedProps = reactiveOmit(props, 'class')
+const delegatedProps = reactiveOmit(props, 'class', 'size')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
@@ -57,12 +99,24 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         'relative max-h-(--reka-select-content-available-height) min-w-[8rem]',
         position === 'popper'
           && cn(menuSlideClass, 'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1'),
+        // A Select is a value CHOOSER, not an action menu: its rows track the
+        // TRIGGER's type size (default 13px / sm 12px), never the 14px action-menu
+        // size — so the open list reads as the same control, not a heavier menu.
+        // Only the type scales; row padding/height stay comfortable (no cramping).
+        size === 'sm'
+          ? '[&_[data-slot=select-item]]:text-body'
+          : '[&_[data-slot=select-item]]:text-label',
         props.class,
       )
       "
     >
       <SelectScrollUpButton />
-      <SelectViewport :class="cn(menuViewportClass, position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')">
+      <SelectViewport
+        data-slot="select-viewport"
+        :data-open-hint="openHint ? '' : undefined"
+        :class="cn(menuViewportClass, 'p-1!', position === 'popper' && 'w-full min-w-[calc(var(--reka-select-trigger-width)_+_8px)] scroll-my-1')"
+        @pointermove="onMenuPointerMove"
+      >
         <slot />
       </SelectViewport>
       <SelectScrollDownButton />
