@@ -7,7 +7,7 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { assignInPlace, reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -71,6 +71,7 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | Attachmen
 
 export interface ChatUserTurn {
   id: string
+  serverId?: string
   role: 'user'
   text: string
   attachments: AttachmentItem[]
@@ -88,6 +89,7 @@ export interface ChatUserTurn {
 
 export interface ChatAssistantTurn {
   id: string
+  serverId?: string
   role: 'assistant'
   messages: ContentBlock[]
   timestamp: string
@@ -119,6 +121,7 @@ export interface BackgroundTask {
 
 export interface ChatSystemTurn {
   id: string
+  serverId?: string
   role: 'system'
   kind: 'background_task'
   backgroundTask: BackgroundTask
@@ -792,23 +795,51 @@ export const useChatStore = defineStore('chat', () => {
     updateSinceFromMessages(items)
   }
 
+  const PRESERVED_TURN_KEYS = ['id', 'serverId']
+
   function mergeTurnInPlace(current: ChatMessage, incoming: ChatMessage) {
-    if (current.role === 'assistant' && incoming.role === 'assistant') {
+    const mergeBlocks = current.role === 'assistant' && incoming.role === 'assistant'
+    if (mergeBlocks) {
       reconcileById(current.messages, incoming.messages)
-      for (const key of Object.keys(current)) {
-        if (key !== 'messages' && !(key in incoming)) {
-          delete (current as unknown as Record<string, unknown>)[key]
-        }
-      }
-      const { messages: _incomingBlocks, ...rest } = incoming
-      Object.assign(current, rest)
-    } else {
-      assignInPlace(current, incoming)
+    }
+    const target = current as unknown as Record<string, unknown>
+    const source = incoming as unknown as Record<string, unknown>
+    for (const key of Object.keys(target)) {
+      if (PRESERVED_TURN_KEYS.includes(key)) continue
+      if (mergeBlocks && key === 'messages') continue
+      if (!(key in source)) delete target[key]
+    }
+    for (const key of Object.keys(source)) {
+      if (PRESERVED_TURN_KEYS.includes(key)) continue
+      if (mergeBlocks && key === 'messages') continue
+      target[key] = source[key]
+    }
+  }
+
+  function adoptTailOptimisticTurns(incoming: ChatMessage[]) {
+    const incomingIds = new Set(incoming.map(turn => turn.id))
+    const existingKeys = new Set(messages.map(turn => turn.serverId ?? turn.id))
+    let ei = messages.length - 1
+    let ii = incoming.length - 1
+    while (ei >= 0 && ii >= 0) {
+      const existing = messages[ei]
+      const candidate = incoming[ii]
+      if (!existing || !candidate) break
+      if (incomingIds.has(existing.serverId ?? existing.id)) break
+      if (existingKeys.has(candidate.id)) break
+      if (existing.role !== candidate.role) break
+      existing.serverId = candidate.id
+      ei -= 1
+      ii -= 1
     }
   }
 
   function reconcileMessages(items: ChatMessage[]) {
-    reconcileById(messages, items, { merge: mergeTurnInPlace })
+    adoptTailOptimisticTurns(items)
+    reconcileById(messages, items, {
+      keyOfExisting: turn => turn.serverId ?? turn.id,
+      merge: mergeTurnInPlace,
+    })
     updateSinceFromMessages(items)
   }
 

@@ -997,6 +997,43 @@ describe('chat-list store', () => {
     expect(blockAfter?.type === 'text' ? blockAfter.content : '').toBe('hello world')
   })
 
+  it('adopts the server id onto the just-sent optimistic turn in place, keeping its key', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    sendEvents = [
+      { type: 'message', data: { id: 0, type: 'text', content: 'hello' } } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
+      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
+    ])
+    await store.sendMessage('hi')
+    await flushPromises()
+
+    const asstTurn = store.messages.find(message => message.role === 'assistant')
+    expect(asstTurn).toBeTruthy()
+    expect(asstTurn!.id).not.toBe('srv-asst-1')
+    expect((asstTurn as { serverId?: string }).serverId).toBe('srv-asst-1')
+
+    api.fetchMessagesUI.mockResolvedValueOnce([
+      { id: 'srv-user-1', role: 'user', text: 'hi', timestamp: '2026-01-01T00:00:00Z' },
+      { id: 'srv-asst-1', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'hello' }], timestamp: '2026-01-01T00:00:01Z' },
+      { id: 'srv-user-2', role: 'user', text: 'again', timestamp: '2026-01-01T00:00:02Z' },
+      { id: 'srv-asst-2', role: 'assistant', messages: [{ id: 0, type: 'text', content: 'reply 2' }], timestamp: '2026-01-01T00:00:03Z' },
+    ])
+    await store.sendMessage('again')
+    await flushPromises()
+
+    const asstTurnAfter = store.messages.find(message => (message as { serverId?: string }).serverId === 'srv-asst-1')
+    expect(asstTurnAfter).toBe(asstTurn)
+  })
+
   it('refreshes pending user input after response stream failure', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
