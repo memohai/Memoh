@@ -18,6 +18,13 @@
         class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
       />
     </button>
+
+    <LivePeekLine
+      v-if="!open && streaming && peekLine"
+      :text="block.content"
+      class="ml-5"
+    />
+
     <div
       v-if="open"
       class="mt-1 ml-5 border-l border-border pl-3 py-1"
@@ -35,6 +42,8 @@ import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
+import { latestOutputLine } from '@/store/chat-list.utils'
+import LivePeekLine from './live-peek-line.vue'
 
 const props = defineProps<{
   block: ThinkingBlock
@@ -43,7 +52,9 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const open = ref(props.streaming)
+const open = ref(false)
+
+const peekLine = computed(() => latestOutputLine(props.block.content))
 
 const actionLabel = computed(() =>
   props.streaming ? t('chat.thinkingInProgress') : t('chat.thinkingDone'),
