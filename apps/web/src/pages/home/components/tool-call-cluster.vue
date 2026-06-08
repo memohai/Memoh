@@ -1,6 +1,7 @@
 <template>
   <div class="text-sm leading-relaxed">
     <button
+      :aria-expanded="open"
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none text-muted-foreground hover:text-foreground"
       @click="open = !open"
     >

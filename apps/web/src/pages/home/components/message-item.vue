@@ -249,10 +249,7 @@
           :key="segment.key"
         >
           <!-- Process rail: recessed lane for thinking + tool calls -->
-          <ProcessRail
-            v-if="segment.kind === 'rail'"
-            :settled="!message.streaming"
-          >
+          <ProcessRail v-if="segment.kind === 'rail'">
             <template
               v-for="item in segment.items"
               :key="item.key"
@@ -328,7 +325,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
@@ -354,7 +351,8 @@ import type {
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 import type { RailItem, TurnSegment } from '@/store/chat-list.utils'
-import { clusterRailBlocks, segmentTurnBlocks } from '@/store/chat-list.utils'
+import { clusterRailBlocks, latestOutputLine, segmentTurnBlocks } from '@/store/chat-list.utils'
+import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
 import ProcessRail from './process-rail.vue'
 import ToolCallCluster from './tool-call-cluster.vue'
 
@@ -491,20 +489,77 @@ type RenderSegment =
   | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
   | { kind: 'flow'; key: string; block: ContentBlock }
 
-// Fold settled tool runs into clusters, but keep the trailing run of the last
-// rail open while the turn is still streaming into it (see clusterRailBlocks).
+// Fold settled tool runs into clusters, but never while the turn streams — see
+// clusterRailBlocks. Folding mid-stream would reparent a tool row (remount); we
+// only fold once the turn has settled.
 const renderSegments = computed<RenderSegment[]>(() => {
-  const segments = turnSegments.value
-  const lastIndex = segments.length - 1
   const streaming = props.message.role === 'assistant' && props.message.streaming
-  return segments.map((segment, index) => {
+  return turnSegments.value.map((segment) => {
     if (segment.kind === 'flow') return segment
     return {
       kind: 'rail',
       key: segment.key,
-      items: clusterRailBlocks(segment.blocks, streaming && index === lastIndex),
+      items: clusterRailBlocks(segment.blocks, streaming),
     }
   })
+})
+
+// Mirror this turn's background tasks into the pane-level beacon so a floating
+// pill can surface a running task once the turn scrolls off screen — regardless
+// of whether the task's row is expanded or folded into a cluster. Visibility is
+// the turn's, which is robust to that collapse state (the row may not be in the
+// DOM when clustered).
+const beacon = useBgTaskBeacon()
+
+const bgTasks = computed(() => {
+  if (props.message.role !== 'assistant') return []
+  const tasks: { taskId: string, phase: 'active' | 'done', latestLine: string }[] = []
+  for (const block of props.message.messages) {
+    if (block.type !== 'tool') continue
+    const task = (block as ToolCallBlockType).backgroundTask
+    if (!task) continue
+    const status = (task.status || '').trim().toLowerCase()
+    const active = status === 'running' || status === 'stalled'
+    const done = status === 'completed' || status === 'failed' || status === 'killed'
+    if (!active && !done) continue
+    tasks.push({
+      taskId: task.taskId,
+      phase: active ? 'active' : 'done',
+      latestLine: latestOutputLine(task.outputTail) || task.command || '',
+    })
+  }
+  return tasks
+})
+
+const registeredTaskIds = new Set<string>()
+
+watch(
+  [bgTasks, isVisible],
+  ([tasks, visible]) => {
+    if (!beacon) return
+    const current = new Set<string>()
+    for (const task of tasks) {
+      current.add(task.taskId)
+      beacon.upsert({
+        taskId: task.taskId,
+        phase: task.phase,
+        visible,
+        latestLine: task.latestLine,
+        scrollIntoView: () => messageEl.value?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+      })
+    }
+    for (const id of registeredTaskIds) {
+      if (!current.has(id)) beacon.remove(id)
+    }
+    registeredTaskIds.clear()
+    for (const id of current) registeredTaskIds.add(id)
+  },
+  { immediate: true, deep: true },
+)
+
+onBeforeUnmount(() => {
+  if (!beacon) return
+  for (const id of registeredTaskIds) beacon.remove(id)
 })
 
 // Only the final block of a streaming turn is "live" — earlier blocks have

@@ -259,7 +259,9 @@
       "killed": "后台任务已终止",
       "updated": "后台任务已更新",
       "pillRunning": "{count} 个运行中",
-      "pillDone": "{count} 个已完成"
+      "pillDone": "{count} 个已完成",
+      "pillRunningAria": "{count} 个后台任务运行中，滚动查看",
+      "pillDoneAria": "{count} 个后台任务已完成"
     },
     "readonly": "只读",
     "replyTo": "回复 {sender}",

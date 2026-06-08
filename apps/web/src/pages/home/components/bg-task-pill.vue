@@ -1,6 +1,7 @@
 <template>
   <button
     type="button"
+    :aria-label="ariaLabel"
     class="flex items-center gap-2 max-w-full rounded-full border bg-background/95 px-3 py-1.5 text-xs shadow-sm backdrop-blur hover:bg-accent"
     @click="$emit('jump')"
   >
@@ -37,5 +38,11 @@ const label = computed(() =>
   props.pill.tone === 'running'
     ? t('chat.backgroundTask.pillRunning', { count: props.pill.count })
     : t('chat.backgroundTask.pillDone', { count: props.pill.count }),
+)
+
+const ariaLabel = computed(() =>
+  props.pill.tone === 'running'
+    ? t('chat.backgroundTask.pillRunningAria', { count: props.pill.count })
+    : t('chat.backgroundTask.pillDoneAria', { count: props.pill.count }),
 )
 </script>

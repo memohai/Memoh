@@ -314,23 +314,15 @@ describe('clusterRailBlocks', () => {
     ])
   })
 
-  it('keeps the trailing done run unfolded while the turn streams', () => {
-    const t1 = tool(1, true)
-    const t2 = tool(2, true)
-    expect(clusterRailBlocks([t1, t2], true)).toEqual([
-      { kind: 'block', key: 'block:1', block: t1 },
-      { kind: 'block', key: 'block:2', block: t2 },
-    ])
-  })
-
-  it('still folds non-trailing runs even when keeping the trailing run open', () => {
+  it('folds nothing anywhere while the turn streams (keepOpen) so no tool ever reparents mid-stream', () => {
     const t1 = tool(1, true)
     const t2 = tool(2, true)
     const r3 = reasoning(3)
     const t4 = tool(4, true)
     const t5 = tool(5, true)
     expect(clusterRailBlocks([t1, t2, r3, t4, t5], true)).toEqual([
-      { kind: 'cluster', key: 'cluster:1', tools: [t1, t2] },
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: t2 },
       { kind: 'block', key: 'block:3', block: r3 },
       { kind: 'block', key: 'block:4', block: t4 },
       { kind: 'block', key: 'block:5', block: t5 },

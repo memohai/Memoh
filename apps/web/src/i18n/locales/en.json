@@ -263,7 +263,9 @@
       "killed": "Background task killed",
       "updated": "Background task updated",
       "pillRunning": "{count} running",
-      "pillDone": "{count} done"
+      "pillDone": "{count} done",
+      "pillRunningAria": "{count} background tasks running, scroll to view",
+      "pillDoneAria": "{count} background tasks completed"
     },
     "readonly": "Read-only",
     "replyTo": "Reply to {sender}",

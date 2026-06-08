@@ -162,17 +162,17 @@
       >
         <div class="relative w-full max-w-4xl mx-auto">
           <Transition
-            enter-active-class="transition-opacity duration-150 ease-out"
-            enter-from-class="opacity-0"
+            enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
+            enter-from-class="motion-safe:opacity-0"
             enter-to-class="opacity-100"
-            leave-active-class="transition-opacity duration-150 ease-in"
+            leave-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-in"
             leave-from-class="opacity-100"
-            leave-to-class="opacity-0"
+            leave-to-class="motion-safe:opacity-0"
           >
             <BgTaskPill
               v-if="bgTaskPill"
               :pill="bgTaskPill"
-              class="absolute left-0 bottom-full z-20 mb-2 max-w-[70%]"
+              class="absolute left-0 bottom-full z-20 mb-2 max-w-[calc(50%-2rem)]"
               @jump="scrollToOffscreen"
             />
           </Transition>
@@ -729,7 +729,8 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
-const { pill: bgTaskPill, scrollToOffscreen } = provideBgTaskBeacons()
+const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
+onBeforeUnmount(cleanupBgTaskBeacons)
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const composerError = ref('')

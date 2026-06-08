@@ -20,6 +20,7 @@ const DONE_LINGER_MS = 4000
 export function provideBgTaskBeacons(): {
   pill: ComputedRef<BgTaskPill | null>
   scrollToOffscreen: () => void
+  cleanup: () => void
 } {
   const records = reactive(new Map<string, BeaconRecord>())
   const doneTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -34,8 +35,14 @@ export function provideBgTaskBeacons(): {
 
   const api: BgTaskBeaconApi = {
     upsert(record) {
-      records.set(record.taskId, record)
       if (record.phase === 'done') {
+        // Only surface completion for a task we actually saw running. A task
+        // that is already done the first time we see it (e.g. scrolling through
+        // history, or initial load) is history, not a fresh finish — ignore it
+        // so it never flashes a false "done" pill.
+        const prev = records.get(record.taskId)
+        if (!prev || prev.phase !== 'active') return
+        records.set(record.taskId, record)
         if (!doneTimers.has(record.taskId)) {
           doneTimers.set(record.taskId, setTimeout(() => {
             records.delete(record.taskId)
@@ -43,6 +50,7 @@ export function provideBgTaskBeacons(): {
           }, DONE_LINGER_MS))
         }
       } else {
+        records.set(record.taskId, record)
         clearTimer(record.taskId)
       }
     },
@@ -63,7 +71,13 @@ export function provideBgTaskBeacons(): {
     target?.scrollIntoView()
   }
 
-  return { pill, scrollToOffscreen }
+  const cleanup = () => {
+    for (const timer of doneTimers.values()) clearTimeout(timer)
+    doneTimers.clear()
+    records.clear()
+  }
+
+  return { pill, scrollToOffscreen, cleanup }
 }
 
 export function useBgTaskBeacon(): BgTaskBeaconApi | null {

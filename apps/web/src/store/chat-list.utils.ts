@@ -99,20 +99,20 @@ export type RailItem<T> =
 
 // Fold maximal runs of >=2 consecutive *settled* tool calls into a single
 // cluster; reasoning blocks and in-progress tools always render solo (and break
-// a run). When `keepTrailingOpen` is set (the turn is still streaming into this
-// rail), the final trailing run stays unfolded so the tools the agent is working
-// through don't suddenly collapse under the user's eyes — they only fold once
-// the agent has moved past them.
+// a run). When `keepOpen` is set (the turn is still streaming) nothing folds —
+// every tool renders solo — so streaming never reparents a tool into a cluster
+// (which would remount it and reintroduce the stall). Runs fold only once the
+// turn has settled.
 export function clusterRailBlocks<T extends { id: number; type: string; done?: boolean }>(
   blocks: T[],
-  keepTrailingOpen = false,
+  keepOpen = false,
 ): RailItem<T>[] {
   const items: RailItem<T>[] = []
   let run: T[] = []
 
-  const flush = (asSolo: boolean) => {
+  const flush = () => {
     if (run.length === 0) return
-    if (asSolo || run.length < 2) {
+    if (keepOpen || run.length < 2) {
       for (const tool of run) items.push({ kind: 'block', key: `block:${tool.id}`, block: tool })
     } else {
       items.push({ kind: 'cluster', key: `cluster:${run[0]!.id}`, tools: run })
@@ -124,11 +124,11 @@ export function clusterRailBlocks<T extends { id: number; type: string; done?: b
     if (block.type === 'tool' && block.done === true) {
       run.push(block)
     } else {
-      flush(false)
+      flush()
       items.push({ kind: 'block', key: `block:${block.id}`, block })
     }
   }
-  flush(keepTrailingOpen)
+  flush()
   return items
 }
 
