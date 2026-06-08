@@ -32,6 +32,10 @@ export interface ToastRecord {
   title: string
   description?: string
   action?: ToastAction
+  /** True when `title` is a synthesized variant heading (the long-blob auto-shape
+   *  below), NOT caller copy. `<Toaster>` swaps it for a localized label when one
+   *  is supplied via the `headings` prop; the English `title` here is the fallback. */
+  autoHeading?: boolean
 }
 
 interface TimerEntry {
@@ -42,6 +46,31 @@ interface TimerEntry {
 }
 
 const DEFAULT_DURATION = 4000
+
+/** Concise, variant-derived heading used when a caller fires a long,
+ *  headline-unfriendly blob — a raw backend error, a file path, a URL, a
+ *  connection string — as the message with NO description. Rather than render
+ *  that wall of text as a giant bold title (the "ugly overflow" bug), we surface
+ *  it as gray BODY copy under this heading, matching the title→description shape
+ *  of a well-formed rich toast (e.g. "Upload failed" + detail).
+ *
+ *  This is a safety net for the many `toast.error(rawBackendError)` call sites.
+ *  Callers that can do better should pass their own short, localized title plus
+ *  the detail in `description` — that path is always respected verbatim. */
+const VARIANT_HEADLINE: Record<ToastVariant, string> = {
+  message: 'Notice',
+  success: 'Success',
+  error: 'Error',
+  warning: 'Warning',
+  info: 'Info',
+}
+
+/** A message reads as a HEADLINE only when it is short AND free of long
+ *  unbreakable tokens. A long sentence, or any 32+ char unbroken run (path /
+ *  URL / token / hash), is body copy that belongs in the description instead. */
+function isHeadline(message: string): boolean {
+  return message.length <= 56 && !/\S{32,}/.test(message)
+}
 
 // Single source of truth: a module-level reactive list rendered by <Toaster>.
 export const toasts = reactive<ToastRecord[]>([])
@@ -111,12 +140,24 @@ function create(variant: ToastVariant, message: string, options?: ToastOptions):
   const id = options?.id != null ? String(options.id) : uid()
   const duration = options?.duration ?? DEFAULT_DURATION
 
+  // Respect an explicit title+description as-is; only auto-shape a long,
+  // titleless blob into heading + gray description.
+  let title = message
+  let description = options?.description
+  let autoHeading = false
+  if (description == null && !isHeadline(message)) {
+    title = VARIANT_HEADLINE[variant]
+    description = message
+    autoHeading = true
+  }
+
   const record: ToastRecord = {
     id,
     variant,
-    title: message,
-    description: options?.description,
+    title,
+    description,
     action: options?.action,
+    autoHeading,
   }
 
   const existing = toasts.find(t => t.id === id)

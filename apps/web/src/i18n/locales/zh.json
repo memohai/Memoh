@@ -1,5 +1,12 @@
 {
   "common": {
+    "toast": {
+      "notice": "提示",
+      "success": "成功",
+      "error": "错误",
+      "warning": "警告",
+      "info": "提示"
+    },
     "confirm": "确认",
     "cancel": "取消",
     "back": "返回",
@@ -2037,6 +2044,8 @@
       "fromConversation": "从已有对话创建",
       "noConversations": "暂无历史对话",
       "idCopied": "ID 已复制",
+      "copyFailed": "复制失败",
+      "historyLoadFailed": "加载历史消息失败",
       "deleteConfirm": "确定要删除这条记忆吗？此操作无法撤销。"
     },
     "plugins": {

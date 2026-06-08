@@ -4,7 +4,7 @@ import { CircleCheckIcon, CircleXIcon, InfoIcon, TriangleAlertIcon, XIcon } from
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { Button } from '#/components/button'
 import { cn } from '#/lib/utils'
-import { dismiss, pauseAll, resumeAll, toast as toastApi, toasts, type ToastVariant } from './toast'
+import { dismiss, pauseAll, resumeAll, toast as toastApi, toasts, type ToastRecord, type ToastVariant } from './toast'
 
 export type ToasterPosition =
   | 'top-right'
@@ -18,12 +18,24 @@ export interface ToasterProps {
   /** Screen corner the column docks to. We default to top-right: out of the
    *  centre of vision, so a card can carry more text without blocking work. */
   position?: ToasterPosition
+  /** Localized labels for the synthesized variant heading shown when a long,
+   *  titleless blob is auto-shaped into heading + description. The library is
+   *  i18n-agnostic, so the app passes these (e.g. from vue-i18n); when absent we
+   *  fall back to the English `title` baked on the record. */
+  headings?: Partial<Record<ToastVariant, string>>
   class?: string
 }
 
 const props = withDefaults(defineProps<ToasterProps>(), {
   position: 'top-right',
 })
+
+/** Display heading for a toast: a localized variant label for auto-shaped
+ *  toasts, otherwise the caller's own title verbatim. */
+function headingFor(t: ToastRecord): string {
+  if (t.autoHeading && props.headings?.[t.variant]) return props.headings[t.variant]!
+  return t.title
+}
 
 // Re-expose the imperative API on the component instance for the rare template
 // ref consumer; the canonical entry stays the `toast` export from the package.
@@ -91,7 +103,7 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibil
               class="memoh-toast__icon size-4"
               aria-hidden="true"
             />
-            <span class="memoh-toast__title memoh-toast__title--grow">{{ t.title }}</span>
+            <span class="memoh-toast__title memoh-toast__title--grow">{{ headingFor(t) }}</span>
             <Button
               v-if="t.action"
               variant="outline"
@@ -127,7 +139,7 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibil
               aria-hidden="true"
             />
             <div class="memoh-toast__body">
-              <span class="memoh-toast__title">{{ t.title }}</span>
+              <span class="memoh-toast__title">{{ headingFor(t) }}</span>
               <p class="memoh-toast__desc">
                 {{ t.description }}
               </p>

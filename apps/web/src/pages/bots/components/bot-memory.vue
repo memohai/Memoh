@@ -1192,7 +1192,7 @@ async function loadHistory() {
     }))
   } catch (error) {
     console.error('Failed to load history:', error)
-    toast.error('Failed to load history')
+    toast.error(t('bots.memory.historyLoadFailed'))
   } finally {
     historyLoading.value = false
   }
@@ -1341,7 +1341,7 @@ async function copyToClipboard(text: string) {
     toast.success(t('bots.memory.idCopied'))
   } catch (err) {
     console.error('Failed to copy:', err)
-    toast.error('Failed to copy')
+    toast.error(t('bots.memory.copyFailed'))
   }
 }
 

@@ -114,6 +114,42 @@ onBeforeUnmount(() => clearInterval(progressTimer))
 
       <div class="lg:col-span-2">
         <Specimen
+          label="toast(...) — long content auto-shaping"
+          note="a long / unbreakable, titleless blob (raw backend error, path, URL, connection string) is auto-shaped into a variant heading + gray description (like 'Upload failed') instead of a bold wall of title text. Short titles stay single-line."
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast.error('not found: readdir: open /Users/qqqqqf/.memoh/workspaces/1/documents/项目: no such file or directory')"
+          >
+            Raw backend error
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast('https://example.com/api/v1/workspaces/1/documents/very/deeply/nested/path/that/never/breaks/file.tar.gz?token=abcdefghijklmnopqrstuvwxyz0123456789')"
+          >
+            Unbreakable URL
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast.error('Upload failed', { description: 'Could not write /Users/qqqqqf/.memoh/workspaces/1/documents/项目/long-unbreakable-filename-without-spaces-1234567890.bin — the destination directory does not exist.' })"
+          >
+            Long title + desc
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="toast.warning('connection_string=postgresql://memoh_user:supersecretpassword@db.internal.memoh.example.com:5432/memoh_production?sslmode=require', { action: { label: 'Copy', onClick: () => {} } })"
+          >
+            Long blob + action
+          </Button>
+        </Specimen>
+      </div>
+
+      <div class="lg:col-span-2">
+        <Specimen
           label="toast(...) — rich behaviors"
           note="action · single-line (Retry) · long (10s) · Stack fires 4 (full column) · dismiss all"
         >

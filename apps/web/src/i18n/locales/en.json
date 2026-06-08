@@ -1,5 +1,12 @@
 {
   "common": {
+    "toast": {
+      "notice": "Notice",
+      "success": "Success",
+      "error": "Error",
+      "warning": "Warning",
+      "info": "Info"
+    },
     "confirm": "Confirm",
     "cancel": "Cancel",
     "back": "Back",
@@ -2041,6 +2048,8 @@
       "fromConversation": "Create from Conversation",
       "noConversations": "No history conversations found",
       "idCopied": "ID copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "historyLoadFailed": "Failed to load history",
       "deleteConfirm": "Are you sure you want to delete this memory? This cannot be undone."
     },
     "plugins": {

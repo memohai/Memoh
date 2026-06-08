@@ -1789,6 +1789,15 @@
 }
 
 /* ── Typography ───────────────────────────────────────────────────────────── */
+/* Long unbreakable tokens (file paths, URLs, IDs — e.g. a raw backend error like
+   "open /Users/…/workspaces/1/documents/项目: no such file or directory") must
+   wrap INSIDE the card, never spill past the close button. `anywhere` also lets
+   the flex item collapse to its true min-content width, so a wall-of-text title
+   can't push the row wider than the 22rem column. Applies to single + rich. */
+.memoh-toast__title,
+.memoh-toast__desc {
+  overflow-wrap: anywhere;
+}
 /* Single-line: one grade larger — the card is compact so the title carries more weight */
 .memoh-toast--single .memoh-toast__title {
   font-size: var(--text-control);
@@ -1812,22 +1821,25 @@
 }
 
 /* ── Action + Close ───────────────────────────────────────────────────────── */
-/* Single-line action: direct flex child of the center-aligned li — no margin,
-   no align-self override; the outer align-items:center keeps everything on one
-   baseline. Height is tightened to 28px (vs sm's 32px) so the button doesn't
-   dominate the compact single-line row — a scoped override instead of adding a
-   new xs size to the button component. */
+/* Toast action button (Retry / Undo / Copy / Open settings…). The `sm` button is
+   32px tall with the standard 14px control type — too chunky for this compact
+   card, where it visually competes with the title. Tighten BOTH layouts to a
+   secondary affordance: 28px tall, no vertical padding, and the title's 13px
+   `text-label` type (a notch under the button default) so it reads as an action,
+   not a control hogging the toast. Single-line stays center-aligned by the row;
+   rich pins below the description (see the rich rule). */
 .memoh-toast__action {
   flex-shrink: 0;
+  height: 1.75rem;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
 }
 /* TODO: if other compact contexts (inline list actions, tab bars, etc.) also
    need this height, extract it as a proper `xs` size in button/index.ts instead
    of duplicating this override. */
-.memoh-toast--single .memoh-toast__action {
-  height: 1.75rem;
-  padding-top: 0;
-  padding-bottom: 0;
-}
 
 /* Rich action: lives inside .memoh-toast__body (flex column). Push it down so
    the visual gap from desc-text-bottom to button-top ≈ card's padding-bottom
