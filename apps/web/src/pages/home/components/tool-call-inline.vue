@@ -12,10 +12,15 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0"
+        class="size-3.5 shrink-0 opacity-60"
       />
       <span
-        v-if="showActionLabel"
+        v-if="isExec"
+        class="shrink-0 font-mono select-none"
+        :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
+      >$</span>
+      <span
+        v-else-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
@@ -71,10 +76,15 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0"
+        class="size-3.5 shrink-0 opacity-60"
       />
       <span
-        v-if="showActionLabel"
+        v-if="isExec"
+        class="shrink-0 font-mono select-none"
+        :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
+      >$</span>
+      <span
+        v-else-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
@@ -230,16 +240,16 @@ const renderedActionLabel = computed(
   () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
 )
 
+const isExec = computed(() => props.block.toolName === 'exec')
+
+// Tool rows sit a notch below thinking in weight — terminal-flavoured and
+// muted, so the recessed rail reads uniformly quiet (design: 过程内敛). exec
+// shows a dim `$` prompt instead of a verb; running shimmers like thinking.
 const rowClass = computed(() => {
-  if (props.block.toolName === 'exec') {
-    return expandable.value ? 'text-foreground hover:text-foreground' : 'text-foreground'
+  if (display.value.isError) {
+    return expandable.value ? 'text-destructive hover:text-destructive/90' : 'text-destructive'
   }
-  if (!expandable.value) {
-    return display.value.isError ? 'text-destructive' : 'text-muted-foreground'
-  }
-  return display.value.isError
-    ? 'text-destructive hover:text-destructive/90'
-    : 'text-muted-foreground hover:text-foreground'
+  return expandable.value ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground'
 })
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
@@ -275,9 +285,8 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (props.block.toolName === 'exec') return 'text-foreground'
   if (display.value.isError) return 'text-destructive'
-  return 'text-foreground/80'
+  return 'text-foreground/75'
 })
 
 const actionClass = computed(() => {
