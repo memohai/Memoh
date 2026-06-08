@@ -263,6 +263,9 @@
       "pillRunningAria": "{count} 个后台任务运行中，滚动查看",
       "pillDoneAria": "{count} 个后台任务已完成"
     },
+    "rail": {
+      "thinking": "{count} 次思考"
+    },
     "readonly": "只读",
     "replyTo": "回复 {sender}",
     "forwardedFrom": "转发自 {sender}",

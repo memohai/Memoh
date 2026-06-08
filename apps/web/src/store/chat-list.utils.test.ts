@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, summarizeRailSegment, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -377,6 +377,56 @@ describe('clusterRailBlocks', () => {
     expect(clusterRailBlocks([finishedBg, t2])).toEqual([
       { kind: 'cluster', key: 'cluster:1', tools: [finishedBg, t2] },
     ])
+  })
+})
+
+describe('summarizeRailSegment', () => {
+  it('counts thinking and tool blocks and lists distinct tool names in order', () => {
+    const blocks = [
+      { id: 1, type: 'reasoning' },
+      { id: 2, type: 'tool', toolName: 'exec' },
+      { id: 3, type: 'tool', toolName: 'edit' },
+      { id: 4, type: 'tool', toolName: 'exec' },
+      { id: 5, type: 'reasoning' },
+    ]
+    expect(summarizeRailSegment(blocks)).toEqual({
+      thinkingCount: 2,
+      toolCount: 3,
+      toolNames: ['exec', 'edit'],
+    })
+  })
+
+  it('returns zeroed counts for an empty segment', () => {
+    expect(summarizeRailSegment([])).toEqual({ thinkingCount: 0, toolCount: 0, toolNames: [] })
+  })
+})
+
+describe('canSummarizeRailSegment', () => {
+  const doneTool = (id: number) => ({ id, type: 'tool', toolName: 'exec', done: true })
+
+  it('summarizes a settled segment of two or more blocks', () => {
+    expect(canSummarizeRailSegment([{ id: 1, type: 'reasoning' }, doneTool(2)])).toBe(true)
+  })
+
+  it('does not summarize a segment with fewer than two blocks', () => {
+    expect(canSummarizeRailSegment([doneTool(1)])).toBe(false)
+  })
+
+  it('does not summarize while a tool is still running', () => {
+    expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', toolName: 'exec', done: false }])).toBe(false)
+  })
+
+  it('does not summarize while a tool awaits approval or input', () => {
+    expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', done: true, approval: { status: 'pending' } }])).toBe(false)
+    expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', done: true, userInput: { status: 'pending' } }])).toBe(false)
+  })
+
+  it('does not summarize while a background task is still running', () => {
+    expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', done: true, backgroundTask: { status: 'running' } }])).toBe(false)
+  })
+
+  it('summarizes a segment whose background task has completed', () => {
+    expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', done: true, backgroundTask: { status: 'completed' } }])).toBe(true)
   })
 })
 

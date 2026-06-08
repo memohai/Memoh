@@ -267,6 +267,9 @@
       "pillRunningAria": "{count} background tasks running, scroll to view",
       "pillDoneAria": "{count} background tasks completed"
     },
+    "rail": {
+      "thinking": "{count} thinking steps"
+    },
     "readonly": "Read-only",
     "replyTo": "Reply to {sender}",
     "forwardedFrom": "Forwarded from {sender}",

@@ -5,22 +5,11 @@
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none text-muted-foreground hover:text-foreground"
       @click="open = !open"
     >
-      <span class="flex items-center gap-1 shrink-0">
-        <component
-          :is="icon"
-          v-for="(icon, i) in icons"
-          :key="i"
-          class="size-3.5"
-        />
-      </span>
-      <span class="shrink-0">{{ summaryLabel }}</span>
+      <RailIconStack :icons="icons" />
+      <span class="ml-1 shrink-0 font-medium">{{ summaryLabel }}</span>
       <ChevronRight
-        v-if="!open"
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
-      />
-      <ChevronDown
-        v-else
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
+        class="size-3.5 shrink-0 ml-auto opacity-45 transition-transform group-hover:opacity-90"
+        :class="open ? 'rotate-90' : ''"
       />
     </button>
 
@@ -39,11 +28,12 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
 import { distinctToolNames } from '@/store/chat-list.utils'
 import { getToolDisplay } from './tool-call-registry'
+import RailIconStack from './rail-icon-stack.vue'
 import ToolCallBlock from './tool-call-block.vue'
 
 const props = defineProps<{ tools: ToolCallBlockType[] }>()

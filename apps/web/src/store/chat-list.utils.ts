@@ -165,6 +165,49 @@ export function distinctToolNames<T extends { toolName?: string }>(tools: T[]): 
   return names
 }
 
+function isUnsettledRailBlock(block: FoldableToolShape): boolean {
+  if (block.type !== 'tool') return false
+  if (block.done !== true) return true
+  if (block.approval?.status === 'pending' || block.userInput?.status === 'pending') return true
+  const bg = (block.backgroundTask?.status ?? '').trim().toLowerCase()
+  return bg === 'running' || bg === 'stalled'
+}
+
+// Once a turn settles, an interleaved thinking↔tool rail can be collapsed whole
+// into a single summary line (clustering only consecutive tools can't tame an
+// alternating trace). Only collapse a segment of >=2 blocks where nothing still
+// needs attention or is live — those must stay visible.
+export function canSummarizeRailSegment<T extends FoldableToolShape & { id: number }>(blocks: T[]): boolean {
+  if (blocks.length < 2) return false
+  return !blocks.some(isUnsettledRailBlock)
+}
+
+// Tally a settled rail segment for its one-line summary: how many thinking steps,
+// how many tool calls, and the distinct tool names (first-seen order) for icons.
+export function summarizeRailSegment<T extends { type: string; toolName?: string }>(blocks: T[]): {
+  thinkingCount: number
+  toolCount: number
+  toolNames: string[]
+} {
+  let thinkingCount = 0
+  let toolCount = 0
+  const seen = new Set<string>()
+  const toolNames: string[] = []
+  for (const block of blocks) {
+    if (block.type === 'reasoning') {
+      thinkingCount++
+    } else if (block.type === 'tool') {
+      toolCount++
+      const name = block.toolName ?? ''
+      if (name && !seen.has(name)) {
+        seen.add(name)
+        toolNames.push(name)
+      }
+    }
+  }
+  return { thinkingCount, toolCount, toolNames }
+}
+
 export interface BgTaskBeacon {
   taskId: string
   phase: 'active' | 'done'

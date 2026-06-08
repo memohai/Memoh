@@ -248,26 +248,19 @@
           v-for="segment in renderSegments"
           :key="segment.key"
         >
-          <!-- Process rail: recessed lane for thinking + tool calls -->
-          <ProcessRail v-if="segment.kind === 'rail'">
-            <template
-              v-for="item in segment.items"
-              :key="item.key"
-            >
-              <ToolCallCluster
-                v-if="item.kind === 'cluster'"
-                :tools="(item.tools as ToolCallBlockType[])"
-              />
-              <ThinkingBlock
-                v-else-if="item.block.type === 'reasoning'"
-                :block="(item.block as ThinkingBlockType)"
-                :streaming="isBlockStreaming(item.block)"
-              />
-              <ToolCallBlock
-                v-else-if="item.block.type === 'tool'"
-                :block="(item.block as ToolCallBlockType)"
-              />
-            </template>
+          <!-- Process rail: recessed lane for thinking + tool calls. Settled
+               segments collapse to a single summary line; otherwise the rows
+               (with consecutive done tools clustered) render in the lane. -->
+          <ProcessRail v-if="segment.kind === 'summary' || segment.kind === 'rail'">
+            <RailSummary
+              v-if="segment.kind === 'summary'"
+              :blocks="segment.blocks"
+            />
+            <RailItems
+              v-else
+              :items="segment.items"
+              :streaming-block-id="streamingBlockId"
+            />
           </ProcessRail>
 
           <!-- Flow segment: the answer / error / attachments break out full-width -->
@@ -331,8 +324,6 @@ import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
-import ThinkingBlock from './thinking-block.vue'
-import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -346,15 +337,15 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
-  ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 import type { RailItem, TurnSegment } from '@/store/chat-list.utils'
-import { clusterRailBlocks, latestOutputLine, segmentTurnBlocks } from '@/store/chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentTurnBlocks } from '@/store/chat-list.utils'
 import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
 import ProcessRail from './process-rail.vue'
-import ToolCallCluster from './tool-call-cluster.vue'
+import RailItems from './rail-items.vue'
+import RailSummary from './rail-summary.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -486,16 +477,21 @@ const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
 )
 
 type RenderSegment =
+  | { kind: 'summary'; key: string; blocks: ContentBlock[] }
   | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
   | { kind: 'flow'; key: string; block: ContentBlock }
 
-// Fold settled tool runs into clusters, but never while the turn streams — see
-// clusterRailBlocks. Folding mid-stream would reparent a tool row (remount); we
-// only fold once the turn has settled.
+// Once the turn settles, collapse a whole interleaved thinking↔tool rail segment
+// into a single summary line (clustering only consecutive tools can't tame an
+// alternating trace). While streaming, never fold — folding would reparent a
+// tool row (remount); render every row solo. See clusterRailBlocks.
 const renderSegments = computed<RenderSegment[]>(() => {
   const streaming = props.message.role === 'assistant' && props.message.streaming
   return turnSegments.value.map((segment) => {
     if (segment.kind === 'flow') return segment
+    if (!streaming && canSummarizeRailSegment(segment.blocks)) {
+      return { kind: 'summary', key: segment.key, blocks: segment.blocks }
+    }
     return {
       kind: 'rail',
       key: segment.key,
