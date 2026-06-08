@@ -53,6 +53,17 @@ export function sortByRecency<T extends { updated_at?: string; created_at?: stri
   })
 }
 
+export function latestOutputLine(tail?: string): string {
+  if (!tail) return ''
+  for (const line of tail.split('\n').reverse()) {
+    for (const segment of line.split('\r').reverse()) {
+      const candidate = segment.trim()
+      if (candidate) return candidate
+    }
+  }
+  return ''
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,

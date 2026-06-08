@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reconcileById, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
+import { latestOutputLine, reconcileById, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -127,6 +127,25 @@ describe('chat-list.utils', () => {
     sortByRecency(input)
 
     expect(input.map(x => x.id)).toEqual(['a', 'b'])
+  })
+
+  it('latestOutputLine returns the last non-empty line, trimmed', () => {
+    expect(latestOutputLine('alpha\nbeta\ngamma')).toBe('gamma')
+    expect(latestOutputLine('alpha\nbeta\n')).toBe('beta')
+    expect(latestOutputLine('alpha\n\n')).toBe('alpha')
+    expect(latestOutputLine('  hi  ')).toBe('hi')
+  })
+
+  it('latestOutputLine collapses carriage-return progress to the current segment', () => {
+    expect(latestOutputLine('downloading 10%\rdownloading 80%')).toBe('downloading 80%')
+    expect(latestOutputLine('build\nstep 1\r')).toBe('step 1')
+  })
+
+  it('latestOutputLine returns empty for empty, whitespace, or missing input', () => {
+    expect(latestOutputLine('')).toBe('')
+    expect(latestOutputLine(undefined)).toBe('')
+    expect(latestOutputLine('\r\n')).toBe('')
+    expect(latestOutputLine('   \n  ')).toBe('')
   })
 
   it('refreshes only for current session message_created events', () => {

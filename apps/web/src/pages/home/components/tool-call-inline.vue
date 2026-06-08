@@ -115,6 +115,12 @@
       >{{ userInputLabel }}</span>
     </div>
 
+    <BgTaskLiveStatus
+      v-if="backgroundTask && !open"
+      :task="backgroundTask"
+      class="ml-5"
+    />
+
     <div
       v-if="expandable && open && !isPending"
       class="mt-1 ml-5 py-1 space-y-1.5"
@@ -167,6 +173,7 @@ import {
   isFilePathTool,
 } from './tool-call-registry'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import BgTaskLiveStatus from './bg-task-live-status.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
@@ -175,6 +182,8 @@ const chatStore = useChatStore()
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
+
+const backgroundTask = computed(() => props.block.backgroundTask)
 
 const open = ref(getToolDisplay(props.block).defaultOpen === true)
 
