@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clusterRailBlocks, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
+import { clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -358,5 +358,49 @@ describe('distinctToolNames', () => {
 
   it('returns an empty list for no tools', () => {
     expect(distinctToolNames([])).toEqual([])
+  })
+})
+
+describe('computeBgTaskPill', () => {
+  const beacon = (taskId: string, phase: 'active' | 'done', visible: boolean, latestLine = '') =>
+    ({ taskId, phase, visible, latestLine })
+
+  it('shows no pill when there are no beacons', () => {
+    expect(computeBgTaskPill([])).toBeNull()
+  })
+
+  it('shows no pill when the only running task is on screen', () => {
+    expect(computeBgTaskPill([beacon('t1', 'active', true, 'step 1')])).toBeNull()
+  })
+
+  it('shows a running pill for an off-screen running task', () => {
+    expect(computeBgTaskPill([beacon('t1', 'active', false, 'step 7')])).toEqual({
+      tone: 'running',
+      count: 1,
+      latestLine: 'step 7',
+    })
+  })
+
+  it('counts only off-screen running tasks and uses the latest one for the line', () => {
+    expect(computeBgTaskPill([
+      beacon('t1', 'active', false, 'first'),
+      beacon('t2', 'active', true, 'on screen'),
+      beacon('t3', 'active', false, 'latest'),
+    ])).toEqual({ tone: 'running', count: 2, latestLine: 'latest' })
+  })
+
+  it('shows a done pill when an off-screen task has completed and none are running', () => {
+    expect(computeBgTaskPill([beacon('t1', 'done', false)])).toEqual({
+      tone: 'done',
+      count: 1,
+      latestLine: '',
+    })
+  })
+
+  it('prefers the running tone over done when both are off-screen', () => {
+    expect(computeBgTaskPill([
+      beacon('t1', 'done', false),
+      beacon('t2', 'active', false, 'working'),
+    ])).toEqual({ tone: 'running', count: 1, latestLine: 'working' })
   })
 })

@@ -169,6 +169,22 @@
             leave-from-class="opacity-100"
             leave-to-class="opacity-0"
           >
+            <BgTaskPill
+              v-if="bgTaskPill"
+              :pill="bgTaskPill"
+              class="absolute left-0 bottom-full z-20 mb-2 max-w-[70%]"
+              @jump="scrollToOffscreen"
+            />
+          </Transition>
+
+          <Transition
+            enter-active-class="transition-opacity duration-150 ease-out"
+            enter-from-class="opacity-0"
+            enter-to-class="opacity-100"
+            leave-active-class="transition-opacity duration-150 ease-in"
+            leave-from-class="opacity-100"
+            leave-to-class="opacity-0"
+          >
             <Button
               v-if="showJumpToBottom"
               type="button"
@@ -664,6 +680,8 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
+import BgTaskPill from './bg-task-pill.vue'
+import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
@@ -711,6 +729,7 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const { pill: bgTaskPill, scrollToOffscreen } = provideBgTaskBeacons()
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const composerError = ref('')

@@ -145,6 +145,36 @@ export function distinctToolNames<T extends { toolName?: string }>(tools: T[]): 
   return names
 }
 
+export interface BgTaskBeacon {
+  taskId: string
+  phase: 'active' | 'done'
+  visible: boolean
+  latestLine: string
+}
+
+export interface BgTaskPill {
+  tone: 'running' | 'done'
+  count: number
+  latestLine: string
+}
+
+// Decide the floating "tasks running" pill from the set of tracked background
+// tasks: only off-screen tasks justify a pill (an on-screen one is already
+// visible). Running tasks win; a recently-completed off-screen task shows a
+// brief done pill instead.
+export function computeBgTaskPill(beacons: BgTaskBeacon[]): BgTaskPill | null {
+  const offscreen = beacons.filter(beacon => !beacon.visible)
+  const running = offscreen.filter(beacon => beacon.phase === 'active')
+  if (running.length > 0) {
+    return { tone: 'running', count: running.length, latestLine: running[running.length - 1]!.latestLine }
+  }
+  const done = offscreen.filter(beacon => beacon.phase === 'done')
+  if (done.length > 0) {
+    return { tone: 'done', count: done.length, latestLine: '' }
+  }
+  return null
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,
