@@ -603,7 +603,7 @@
                 v-if="savingRuleAction === 'save'"
                 class="mr-1.5 size-3.5"
               />
-              {{ editingRule ? $t('common.save') : $t('bots.access.saveOnly') }}
+              {{ editingRule ? $t('common.confirm') : $t('bots.access.saveOnly') }}
             </Button>
             <Button
               v-if="!editingRule"

@@ -161,7 +161,7 @@
                 v-if="renameSessionLoading"
                 class="mr-1 size-3 animate-spin"
               />
-              {{ t('common.save') }}
+              {{ t('common.confirm') }}
             </Button>
           </DialogFooter>
         </form>

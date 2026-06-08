@@ -312,7 +312,7 @@
               v-if="isSaving"
               class="mr-2 size-3.5"
             />
-            {{ $t('common.save') }}
+            {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -399,7 +399,7 @@
                 v-if="isSavingDiscoveryRoots"
                 class="mr-2 size-3.5"
               />
-              {{ $t('common.save') }}
+              {{ $t('common.confirm') }}
             </Button>
           </div>
         </DialogFooter>

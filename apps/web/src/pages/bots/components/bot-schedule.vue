@@ -277,7 +277,7 @@
                   v-if="isSaving"
                   class="mr-1.5 size-3.5"
                 />
-                {{ formMode === 'create' ? $t('common.create') : $t('common.save') }}
+                {{ formMode === 'create' ? $t('common.create') : $t('common.confirm') }}
               </Button>
             </div>
           </form>

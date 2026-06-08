@@ -746,7 +746,7 @@
               :disabled="!!editorError"
               @click="handleEditorSave"
             >
-              {{ $t('common.save') }}
+              {{ $t('common.confirm') }}
             </Button>
           </div>
         </DialogFooter>
