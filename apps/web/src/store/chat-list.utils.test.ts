@@ -335,6 +335,49 @@ describe('clusterRailBlocks', () => {
     const result = clusterRailBlocks([t1, t2])
     expect((result[0] as { tools: unknown[] }).tools[0]).toBe(t1)
   })
+
+  it('never folds a done tool awaiting approval, so its controls stay visible', () => {
+    const t1 = tool(1, true)
+    const awaitingApproval = { id: 2, type: 'tool', toolName: 'exec', done: true, approval: { status: 'pending' } }
+    expect(clusterRailBlocks([t1, awaitingApproval])).toEqual([
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: awaitingApproval },
+    ])
+  })
+
+  it('never folds a done tool awaiting user input', () => {
+    const t1 = tool(1, true)
+    const awaitingInput = { id: 2, type: 'tool', toolName: 'ask_user', done: true, userInput: { status: 'pending' } }
+    expect(clusterRailBlocks([t1, awaitingInput])).toEqual([
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: awaitingInput },
+    ])
+  })
+
+  it('still folds done tools whose approval has resolved', () => {
+    const resolved = { id: 1, type: 'tool', toolName: 'exec', done: true, approval: { status: 'approved' } }
+    const t2 = tool(2, true)
+    expect(clusterRailBlocks([resolved, t2])).toEqual([
+      { kind: 'cluster', key: 'cluster:1', tools: [resolved, t2] },
+    ])
+  })
+
+  it('never folds a tool whose background task is still running, so its live line stays visible', () => {
+    const t1 = tool(1, true)
+    const liveBg = { id: 2, type: 'tool', toolName: 'exec', done: true, backgroundTask: { status: 'running' } }
+    expect(clusterRailBlocks([t1, liveBg])).toEqual([
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: liveBg },
+    ])
+  })
+
+  it('folds a tool whose background task has completed', () => {
+    const finishedBg = { id: 1, type: 'tool', toolName: 'exec', done: true, backgroundTask: { status: 'completed' } }
+    const t2 = tool(2, true)
+    expect(clusterRailBlocks([finishedBg, t2])).toEqual([
+      { kind: 'cluster', key: 'cluster:1', tools: [finishedBg, t2] },
+    ])
+  })
 })
 
 describe('distinctToolNames', () => {

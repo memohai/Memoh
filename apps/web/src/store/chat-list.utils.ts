@@ -97,13 +97,33 @@ export type RailItem<T> =
   | { kind: 'block'; key: string; block: T }
   | { kind: 'cluster'; key: string; tools: T[] }
 
+interface FoldableToolShape {
+  type: string
+  done?: boolean
+  approval?: { status?: string } | null
+  userInput?: { status?: string } | null
+  backgroundTask?: { status?: string } | null
+}
+
+// A settled tool folds into a cluster only if it needs nothing further and is
+// no longer live. A tool awaiting approval/user input must stay solo so its
+// inline controls aren't buried in a collapsed cluster; a tool with a running
+// background task must stay solo so its live status line stays visible.
+function isFoldableTool(block: FoldableToolShape): boolean {
+  if (block.type !== 'tool' || block.done !== true) return false
+  if (block.approval?.status === 'pending' || block.userInput?.status === 'pending') return false
+  const bgStatus = (block.backgroundTask?.status ?? '').trim().toLowerCase()
+  if (bgStatus === 'running' || bgStatus === 'stalled') return false
+  return true
+}
+
 // Fold maximal runs of >=2 consecutive *settled* tool calls into a single
-// cluster; reasoning blocks and in-progress tools always render solo (and break
-// a run). When `keepOpen` is set (the turn is still streaming) nothing folds —
-// every tool renders solo — so streaming never reparents a tool into a cluster
-// (which would remount it and reintroduce the stall). Runs fold only once the
-// turn has settled.
-export function clusterRailBlocks<T extends { id: number; type: string; done?: boolean }>(
+// cluster; reasoning blocks, in-progress tools, and tools awaiting interaction
+// always render solo (and break a run). When `keepOpen` is set (the turn is
+// still streaming) nothing folds — every tool renders solo — so streaming never
+// reparents a tool into a cluster (which would remount it and reintroduce the
+// stall). Runs fold only once the turn has settled.
+export function clusterRailBlocks<T extends FoldableToolShape & { id: number }>(
   blocks: T[],
   keepOpen = false,
 ): RailItem<T>[] {
@@ -121,7 +141,7 @@ export function clusterRailBlocks<T extends { id: number; type: string; done?: b
   }
 
   for (const block of blocks) {
-    if (block.type === 'tool' && block.done === true) {
+    if (isFoldableTool(block)) {
       run.push(block)
     } else {
       flush()
