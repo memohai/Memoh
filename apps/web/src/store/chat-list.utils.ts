@@ -208,6 +208,17 @@ export function summarizeRailSegment<T extends { type: string; toolName?: string
   return { thinkingCount, toolCount, toolNames }
 }
 
+// A tool whose background task is still running keeps a live status row that
+// must never be hidden — so a rail segment containing one is rendered fully
+// (no rolling / prior-chip collapse) while the turn streams.
+export function segmentHasLiveBg<T extends { type: string; backgroundTask?: { status?: string } | null }>(blocks: T[]): boolean {
+  return blocks.some((block) => {
+    if (block.type !== 'tool') return false
+    const status = (block.backgroundTask?.status ?? '').trim().toLowerCase()
+    return status === 'running' || status === 'stalled'
+  })
+}
+
 export interface RailGroup<T> {
   kind: 'think' | 'tools'
   blocks: T[]

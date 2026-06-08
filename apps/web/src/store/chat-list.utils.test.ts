@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -465,6 +465,19 @@ describe('splitActiveRail', () => {
       prior: [r1, t1, r2],
       current: { kind: 'tools', blocks: [t2, t3] },
     })
+  })
+})
+
+describe('segmentHasLiveBg', () => {
+  it('detects a running or stalled background task in a tool block', () => {
+    expect(segmentHasLiveBg([{ id: 1, type: 'tool', backgroundTask: { status: 'running' } }])).toBe(true)
+    expect(segmentHasLiveBg([{ id: 1, type: 'tool', backgroundTask: { status: 'stalled' } }])).toBe(true)
+  })
+
+  it('ignores completed or absent background tasks', () => {
+    expect(segmentHasLiveBg([{ id: 1, type: 'tool', backgroundTask: { status: 'completed' } }])).toBe(false)
+    expect(segmentHasLiveBg([{ id: 1, type: 'tool' }, { id: 2, type: 'reasoning' }])).toBe(false)
+    expect(segmentHasLiveBg([])).toBe(false)
   })
 })
 

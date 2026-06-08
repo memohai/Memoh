@@ -360,7 +360,7 @@ import type {
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 import type { RailGroup, RailItem, TurnSegment } from '@/store/chat-list.utils'
-import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentTurnBlocks, splitActiveRail } from '@/store/chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentHasLiveBg, segmentTurnBlocks, splitActiveRail } from '@/store/chat-list.utils'
 import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
 import ProcessRail from './process-rail.vue'
 import RailItems from './rail-items.vue'
@@ -516,6 +516,11 @@ const renderSegments = computed<RenderSegment[]>(() => {
   return segments.map((segment, index) => {
     if (segment.kind === 'flow') return segment
     if (streaming && index === lastIndex) {
+      // A live background-task row must stay visible — never roll/collapse it
+      // into the prior chip. Render the whole active rail as solo rows instead.
+      if (segmentHasLiveBg(segment.blocks)) {
+        return { kind: 'rail', key: segment.key, items: clusterRailBlocks(segment.blocks, true) }
+      }
       const { prior, current } = splitActiveRail(segment.blocks)
       return { kind: 'rail-active', key: segment.key, prior, current }
     }
