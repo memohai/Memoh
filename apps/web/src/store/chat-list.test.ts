@@ -957,6 +957,46 @@ describe('chat-list store', () => {
     expect(api.fetchMessagesUI).toHaveBeenCalledTimes(1)
   })
 
+  it('reconciles refreshed turns in place, preserving identity of unchanged turns', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'text', content: 'hello' }],
+      timestamp: '2026-01-01T00:00:01Z',
+    }])
+    streamHandler?.({ type: 'start', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', stream_id: 'stream-a', session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
+
+    const turn = store.messages.find(message => message.id === 'assistant-1')
+    const block = turn?.role === 'assistant' ? turn.messages[0] : null
+    expect(turn?.role).toBe('assistant')
+    expect(block?.type).toBe('text')
+
+    api.fetchMessagesUI.mockResolvedValueOnce([{
+      id: 'assistant-1',
+      role: 'assistant',
+      messages: [{ id: 0, type: 'text', content: 'hello world' }],
+      timestamp: '2026-01-01T00:00:01Z',
+    }])
+    streamHandler?.({ type: 'start', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
+    streamHandler?.({ type: 'end', stream_id: 'stream-b', session_id: 'session-1' } as UIStreamEvent)
+    await flushPromises()
+
+    const turnAfter = store.messages.find(message => message.id === 'assistant-1')
+    const blockAfter = turnAfter?.role === 'assistant' ? turnAfter.messages[0] : null
+    expect(turnAfter).toBe(turn)
+    expect(blockAfter).toBe(block)
+    expect(blockAfter?.type === 'text' ? blockAfter.content : '').toBe('hello world')
+  })
+
   it('refreshes pending user input after response stream failure', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },

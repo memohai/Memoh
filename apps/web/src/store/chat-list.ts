@@ -7,7 +7,7 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 import { useUserStore } from '@/store/user'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { assignInPlace, reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 import {
   createSession,
   deleteSession as requestDeleteSession,
@@ -792,6 +792,26 @@ export const useChatStore = defineStore('chat', () => {
     updateSinceFromMessages(items)
   }
 
+  function mergeTurnInPlace(current: ChatMessage, incoming: ChatMessage) {
+    if (current.role === 'assistant' && incoming.role === 'assistant') {
+      reconcileById(current.messages, incoming.messages)
+      for (const key of Object.keys(current)) {
+        if (key !== 'messages' && !(key in incoming)) {
+          delete (current as unknown as Record<string, unknown>)[key]
+        }
+      }
+      const { messages: _incomingBlocks, ...rest } = incoming
+      Object.assign(current, rest)
+    } else {
+      assignInPlace(current, incoming)
+    }
+  }
+
+  function reconcileMessages(items: ChatMessage[]) {
+    reconcileById(messages, items, { merge: mergeTurnInPlace })
+    updateSinceFromMessages(items)
+  }
+
   function replaceMessages(items: UITurn[], targetSessionId?: string) {
     setMessages(normalizeTurns(items, targetSessionId))
   }
@@ -1244,7 +1264,7 @@ export const useChatStore = defineStore('chat', () => {
       const normalized = normalizeTurns(turns, sid)
       const moreOlder = turns.length > 0
       if (currentBotId.value === bid && sessionId.value === sid) {
-        setMessages(normalized)
+        reconcileMessages(normalized)
         hasMoreOlder.value = moreOlder
         cacheCurrentMessages()
       } else {

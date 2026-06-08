@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -49,6 +49,63 @@ describe('chat-list.utils', () => {
     upsertById(items, { id: 2, content: 'updated' })
 
     expect(original).toEqual({ id: 2, content: 'updated' })
+  })
+
+  it('reconcileById reuses matched items in place and follows incoming order', () => {
+    const a = { id: 1, v: 'a' }
+    const b = { id: 2, v: 'b' }
+    const target = [a, b]
+
+    const result = reconcileById(target, [
+      { id: 2, v: 'b2' },
+      { id: 1, v: 'a2' },
+    ])
+
+    expect(result).toBe(target)
+    expect(result[0]).toBe(b)
+    expect(result[1]).toBe(a)
+    expect(a.v).toBe('a2')
+    expect(b.v).toBe('b2')
+    expect(result.map(x => x.id)).toEqual([2, 1])
+  })
+
+  it('reconcileById drops items absent from incoming and inserts new ones', () => {
+    const a = { id: 1, v: 'a' }
+    const target = [a, { id: 2, v: 'b' }]
+
+    const result = reconcileById(target, [
+      { id: 1, v: 'a' },
+      { id: 3, v: 'c' },
+    ])
+
+    expect(result[0]).toBe(a)
+    expect(result.map(x => x.id)).toEqual([1, 3])
+  })
+
+  it('reconcileById matches existing items via a custom key', () => {
+    const optimistic = { id: 'client-1', serverId: 'server-1', v: 'old' }
+    const target: Array<{ id: string; serverId?: string; v: string }> = [optimistic]
+
+    reconcileById(target, [{ id: 'server-1', v: 'new' }], {
+      keyOfExisting: item => item.serverId ?? item.id,
+    })
+
+    expect(target[0]).toBe(optimistic)
+    expect(optimistic.v).toBe('new')
+  })
+
+  it('reconcileById applies a custom merge to matched items', () => {
+    const a = { id: 1, items: ['x'] }
+    const target = [a]
+
+    reconcileById(target, [{ id: 1, items: ['x', 'y'] }], {
+      merge: (cur, inc) => {
+        cur.items = inc.items
+      },
+    })
+
+    expect(target[0]).toBe(a)
+    expect(a.items).toEqual(['x', 'y'])
   })
 
   it('refreshes only for current session message_created events', () => {
