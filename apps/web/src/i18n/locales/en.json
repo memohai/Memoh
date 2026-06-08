@@ -298,6 +298,7 @@
       "transcribe_audio": "Transcribe",
       "generate_image": "Generate image",
       "spawn": "Spawn {count} subagents",
+      "clustered": "{count} tool calls",
       "use_skill": "Use skill",
       "browser_action": "Browser {action}",
       "browser_observe": "Observe browser {action}",

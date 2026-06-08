@@ -294,6 +294,7 @@
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
       "spawn": "派遣 {count} 个子代理",
+      "clustered": "{count} 次工具调用",
       "use_skill": "使用技能",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",

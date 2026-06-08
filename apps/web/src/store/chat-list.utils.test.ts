@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
+import { clusterRailBlocks, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -265,5 +265,98 @@ describe('segmentTurnBlocks', () => {
     const result = segmentTurnBlocks([tool, text])
     expect((result[0] as { blocks: unknown[] }).blocks[0]).toBe(tool)
     expect((result[1] as { block: unknown }).block).toBe(text)
+  })
+})
+
+describe('clusterRailBlocks', () => {
+  const tool = (id: number, done: boolean, toolName = 'exec') => ({ id, type: 'tool', toolName, done })
+  const reasoning = (id: number) => ({ id, type: 'reasoning' })
+
+  it('returns no items for an empty rail', () => {
+    expect(clusterRailBlocks([])).toEqual([])
+  })
+
+  it('keeps a single done tool solo (a run of one never folds)', () => {
+    const t = tool(1, true)
+    expect(clusterRailBlocks([t])).toEqual([
+      { kind: 'block', key: 'block:1', block: t },
+    ])
+  })
+
+  it('folds a run of two or more consecutive done tools into a cluster', () => {
+    const t1 = tool(1, true)
+    const t2 = tool(2, true)
+    const t3 = tool(3, true)
+    expect(clusterRailBlocks([t1, t2, t3])).toEqual([
+      { kind: 'cluster', key: 'cluster:1', tools: [t1, t2, t3] },
+    ])
+  })
+
+  it('renders an in-progress tool solo and lets it break a done run', () => {
+    const t1 = tool(1, true)
+    const t2 = tool(2, true)
+    const running = tool(3, false)
+    expect(clusterRailBlocks([t1, t2, running])).toEqual([
+      { kind: 'cluster', key: 'cluster:1', tools: [t1, t2] },
+      { kind: 'block', key: 'block:3', block: running },
+    ])
+  })
+
+  it('lets a reasoning block break a run and render solo', () => {
+    const t1 = tool(1, true)
+    const r2 = reasoning(2)
+    const t3 = tool(3, true)
+    const t4 = tool(4, true)
+    expect(clusterRailBlocks([t1, r2, t3, t4])).toEqual([
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: r2 },
+      { kind: 'cluster', key: 'cluster:3', tools: [t3, t4] },
+    ])
+  })
+
+  it('keeps the trailing done run unfolded while the turn streams', () => {
+    const t1 = tool(1, true)
+    const t2 = tool(2, true)
+    expect(clusterRailBlocks([t1, t2], true)).toEqual([
+      { kind: 'block', key: 'block:1', block: t1 },
+      { kind: 'block', key: 'block:2', block: t2 },
+    ])
+  })
+
+  it('still folds non-trailing runs even when keeping the trailing run open', () => {
+    const t1 = tool(1, true)
+    const t2 = tool(2, true)
+    const r3 = reasoning(3)
+    const t4 = tool(4, true)
+    const t5 = tool(5, true)
+    expect(clusterRailBlocks([t1, t2, r3, t4, t5], true)).toEqual([
+      { kind: 'cluster', key: 'cluster:1', tools: [t1, t2] },
+      { kind: 'block', key: 'block:3', block: r3 },
+      { kind: 'block', key: 'block:4', block: t4 },
+      { kind: 'block', key: 'block:5', block: t5 },
+    ])
+  })
+
+  it('preserves tool object identity inside clusters', () => {
+    const t1 = tool(1, true)
+    const t2 = tool(2, true)
+    const result = clusterRailBlocks([t1, t2])
+    expect((result[0] as { tools: unknown[] }).tools[0]).toBe(t1)
+  })
+})
+
+describe('distinctToolNames', () => {
+  it('returns tool names in first-seen order without duplicates', () => {
+    const tools = [
+      { id: 1, toolName: 'exec' },
+      { id: 2, toolName: 'exec' },
+      { id: 3, toolName: 'edit' },
+      { id: 4, toolName: 'exec' },
+    ]
+    expect(distinctToolNames(tools)).toEqual(['exec', 'edit'])
+  })
+
+  it('returns an empty list for no tools', () => {
+    expect(distinctToolNames([])).toEqual([])
   })
 })

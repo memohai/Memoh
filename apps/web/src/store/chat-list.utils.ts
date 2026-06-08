@@ -93,6 +93,58 @@ export function segmentTurnBlocks<T extends { id: number; type: string }>(blocks
   return segments
 }
 
+export type RailItem<T> =
+  | { kind: 'block'; key: string; block: T }
+  | { kind: 'cluster'; key: string; tools: T[] }
+
+// Fold maximal runs of >=2 consecutive *settled* tool calls into a single
+// cluster; reasoning blocks and in-progress tools always render solo (and break
+// a run). When `keepTrailingOpen` is set (the turn is still streaming into this
+// rail), the final trailing run stays unfolded so the tools the agent is working
+// through don't suddenly collapse under the user's eyes — they only fold once
+// the agent has moved past them.
+export function clusterRailBlocks<T extends { id: number; type: string; done?: boolean }>(
+  blocks: T[],
+  keepTrailingOpen = false,
+): RailItem<T>[] {
+  const items: RailItem<T>[] = []
+  let run: T[] = []
+
+  const flush = (asSolo: boolean) => {
+    if (run.length === 0) return
+    if (asSolo || run.length < 2) {
+      for (const tool of run) items.push({ kind: 'block', key: `block:${tool.id}`, block: tool })
+    } else {
+      items.push({ kind: 'cluster', key: `cluster:${run[0]!.id}`, tools: run })
+    }
+    run = []
+  }
+
+  for (const block of blocks) {
+    if (block.type === 'tool' && block.done === true) {
+      run.push(block)
+    } else {
+      flush(false)
+      items.push({ kind: 'block', key: `block:${block.id}`, block })
+    }
+  }
+  flush(keepTrailingOpen)
+  return items
+}
+
+export function distinctToolNames<T extends { toolName?: string }>(tools: T[]): string[] {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const tool of tools) {
+    const name = tool.toolName ?? ''
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,

@@ -245,7 +245,7 @@
         </p> -->
 
         <template
-          v-for="segment in turnSegments"
+          v-for="segment in renderSegments"
           :key="segment.key"
         >
           <!-- Process rail: recessed lane for thinking + tool calls -->
@@ -254,17 +254,21 @@
             :settled="!message.streaming"
           >
             <template
-              v-for="block in segment.blocks"
-              :key="block.id"
+              v-for="item in segment.items"
+              :key="item.key"
             >
+              <ToolCallCluster
+                v-if="item.kind === 'cluster'"
+                :tools="(item.tools as ToolCallBlockType[])"
+              />
               <ThinkingBlock
-                v-if="block.type === 'reasoning'"
-                :block="(block as ThinkingBlockType)"
-                :streaming="isBlockStreaming(block)"
+                v-else-if="item.block.type === 'reasoning'"
+                :block="(item.block as ThinkingBlockType)"
+                :streaming="isBlockStreaming(item.block)"
               />
               <ToolCallBlock
-                v-else-if="block.type === 'tool'"
-                :block="(block as ToolCallBlockType)"
+                v-else-if="item.block.type === 'tool'"
+                :block="(item.block as ToolCallBlockType)"
               />
             </template>
           </ProcessRail>
@@ -349,9 +353,10 @@ import type {
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
-import type { TurnSegment } from '@/store/chat-list.utils'
-import { segmentTurnBlocks } from '@/store/chat-list.utils'
+import type { RailItem, TurnSegment } from '@/store/chat-list.utils'
+import { clusterRailBlocks, segmentTurnBlocks } from '@/store/chat-list.utils'
 import ProcessRail from './process-rail.vue'
+import ToolCallCluster from './tool-call-cluster.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -481,6 +486,26 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
 const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
   props.message.role === 'assistant' ? segmentTurnBlocks(props.message.messages) : [],
 )
+
+type RenderSegment =
+  | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
+  | { kind: 'flow'; key: string; block: ContentBlock }
+
+// Fold settled tool runs into clusters, but keep the trailing run of the last
+// rail open while the turn is still streaming into it (see clusterRailBlocks).
+const renderSegments = computed<RenderSegment[]>(() => {
+  const segments = turnSegments.value
+  const lastIndex = segments.length - 1
+  const streaming = props.message.role === 'assistant' && props.message.streaming
+  return segments.map((segment, index) => {
+    if (segment.kind === 'flow') return segment
+    return {
+      kind: 'rail',
+      key: segment.key,
+      items: clusterRailBlocks(segment.blocks, streaming && index === lastIndex),
+    }
+  })
+})
 
 // Only the final block of a streaming turn is "live" — earlier blocks have
 // settled. We compare by stable block id (never array index) so segmentation
