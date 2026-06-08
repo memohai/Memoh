@@ -1,15 +1,18 @@
 import type { MessageStreamEvent } from '@/composables/api/useChat'
 
 export function upsertById<T extends { id: number }>(items: T[], incoming: T): T[] {
-  const next = [...items]
-  const index = next.findIndex(item => item.id === incoming.id)
-  if (index >= 0) {
-    next[index] = incoming
-  } else {
-    next.push(incoming)
-    next.sort((a, b) => a.id - b.id)
+  const index = items.findIndex(item => item.id === incoming.id)
+  if (index < 0) {
+    items.push(incoming)
+    items.sort((a, b) => a.id - b.id)
+    return items
   }
-  return next
+  const target = items[index]
+  for (const key of Object.keys(target)) {
+    if (!(key in incoming)) delete (target as Record<string, unknown>)[key]
+  }
+  Object.assign(target, incoming)
+  return items
 }
 
 export function shouldRefreshFromMessageCreated(

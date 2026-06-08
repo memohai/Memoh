@@ -27,6 +27,30 @@ describe('chat-list.utils', () => {
     ])
   })
 
+  it('updates an existing item in place, preserving array and item identity', () => {
+    const original = { id: 2, content: 'second' }
+    const items = [original, { id: 4, content: 'fourth' }]
+
+    const result = upsertById(items, { id: 2, content: 'updated' })
+
+    expect(result).toBe(items)
+    expect(result[0]).toBe(original)
+    expect(original.content).toBe('updated')
+  })
+
+  it('drops fields absent from the incoming snapshot when updating in place', () => {
+    const original: { id: number; content: string; stale?: boolean } = {
+      id: 2,
+      content: 'second',
+      stale: true,
+    }
+    const items = [original]
+
+    upsertById(items, { id: 2, content: 'updated' })
+
+    expect(original).toEqual({ id: 2, content: 'updated' })
+  })
+
   it('refreshes only for current session message_created events', () => {
     expect(shouldRefreshFromMessageCreated('bot-1', 'session-1', null, {
       type: 'message_created',
