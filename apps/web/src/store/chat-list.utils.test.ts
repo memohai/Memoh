@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, summarizeRailSegment, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -427,6 +427,44 @@ describe('canSummarizeRailSegment', () => {
 
   it('summarizes a segment whose background task has completed', () => {
     expect(canSummarizeRailSegment([doneTool(1), { id: 2, type: 'tool', done: true, backgroundTask: { status: 'completed' } }])).toBe(true)
+  })
+})
+
+describe('splitActiveRail', () => {
+  const b = (id: number, type: string) => ({ id, type })
+
+  it('returns no current group for an empty segment', () => {
+    expect(splitActiveRail([])).toEqual({ prior: [], current: null })
+  })
+
+  it('makes a lone tool the current tools group with no prior', () => {
+    const t = b(1, 'tool')
+    expect(splitActiveRail([t])).toEqual({ prior: [], current: { kind: 'tools', blocks: [t] } })
+  })
+
+  it('groups a trailing tool run as current and earlier blocks as prior', () => {
+    const r = b(1, 'reasoning')
+    const t1 = b(2, 'tool')
+    const t2 = b(3, 'tool')
+    expect(splitActiveRail([r, t1, t2])).toEqual({ prior: [r], current: { kind: 'tools', blocks: [t1, t2] } })
+  })
+
+  it('makes a trailing thinking block the current think group', () => {
+    const t = b(1, 'tool')
+    const r = b(2, 'reasoning')
+    expect(splitActiveRail([t, r])).toEqual({ prior: [t], current: { kind: 'think', blocks: [r] } })
+  })
+
+  it('flattens every earlier group into prior', () => {
+    const r1 = b(1, 'reasoning')
+    const t1 = b(2, 'tool')
+    const r2 = b(3, 'reasoning')
+    const t2 = b(4, 'tool')
+    const t3 = b(5, 'tool')
+    expect(splitActiveRail([r1, t1, r2, t2, t3])).toEqual({
+      prior: [r1, t1, r2],
+      current: { kind: 'tools', blocks: [t2, t3] },
+    })
   })
 })
 

@@ -248,10 +248,28 @@
           v-for="segment in renderSegments"
           :key="segment.key"
         >
+          <!-- Active rail (streaming): prior steps as a chip + the current
+               phase live — one rolling command, or the thinking peek. -->
+          <ProcessRail v-if="segment.kind === 'rail-active'">
+            <RailSummary
+              v-if="segment.prior.length"
+              :blocks="segment.prior"
+            />
+            <ThinkingBlock
+              v-if="segment.current && segment.current.kind === 'think'"
+              :block="(segment.current.blocks[0] as ThinkingBlockType)"
+              :streaming="true"
+            />
+            <RollingToolSlot
+              v-else-if="segment.current && segment.current.kind === 'tools'"
+              :tools="(segment.current.blocks as ToolCallBlockType[])"
+            />
+          </ProcessRail>
+
           <!-- Process rail: recessed lane for thinking + tool calls. Settled
                segments collapse to a single summary line; otherwise the rows
                (with consecutive done tools clustered) render in the lane. -->
-          <ProcessRail v-if="segment.kind === 'summary' || segment.kind === 'rail'">
+          <ProcessRail v-else-if="segment.kind === 'summary' || segment.kind === 'rail'">
             <RailSummary
               v-if="segment.kind === 'summary'"
               :blocks="segment.blocks"
@@ -337,15 +355,18 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
+  ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
-import type { RailItem, TurnSegment } from '@/store/chat-list.utils'
-import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentTurnBlocks } from '@/store/chat-list.utils'
+import type { RailGroup, RailItem, TurnSegment } from '@/store/chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentTurnBlocks, splitActiveRail } from '@/store/chat-list.utils'
 import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
 import ProcessRail from './process-rail.vue'
 import RailItems from './rail-items.vue'
 import RailSummary from './rail-summary.vue'
+import RollingToolSlot from './rolling-tool-slot.vue'
+import ThinkingBlock from './thinking-block.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -477,25 +498,34 @@ const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
 )
 
 type RenderSegment =
+  | { kind: 'rail-active'; key: string; prior: ContentBlock[]; current: RailGroup<ContentBlock> | null }
   | { kind: 'summary'; key: string; blocks: ContentBlock[] }
   | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
   | { kind: 'flow'; key: string; block: ContentBlock }
 
-// Once the turn settles, collapse a whole interleaved thinking↔tool rail segment
-// into a single summary line (clustering only consecutive tools can't tame an
-// alternating trace). While streaming, never fold — folding would reparent a
-// tool row (remount); render every row solo. See clusterRailBlocks.
+// The active (last) rail of a streaming turn rolls its current phase live: prior
+// steps collapse to a summary chip, the current tool run shows one rolling
+// command, current thinking shows its peek. Settled segments collapse to a
+// summary; remaining settled tool runs cluster. Folding here only touches
+// settled prior rows (a deliberate collapse motion) — the streaming answer
+// markdown never reparents, so the answer itself never stalls.
 const renderSegments = computed<RenderSegment[]>(() => {
   const streaming = props.message.role === 'assistant' && props.message.streaming
-  return turnSegments.value.map((segment) => {
+  const segments = turnSegments.value
+  const lastIndex = segments.length - 1
+  return segments.map((segment, index) => {
     if (segment.kind === 'flow') return segment
-    if (!streaming && canSummarizeRailSegment(segment.blocks)) {
+    if (streaming && index === lastIndex) {
+      const { prior, current } = splitActiveRail(segment.blocks)
+      return { kind: 'rail-active', key: segment.key, prior, current }
+    }
+    if (canSummarizeRailSegment(segment.blocks)) {
       return { kind: 'summary', key: segment.key, blocks: segment.blocks }
     }
     return {
       kind: 'rail',
       key: segment.key,
-      items: clusterRailBlocks(segment.blocks, streaming),
+      items: clusterRailBlocks(segment.blocks, false),
     }
   })
 })

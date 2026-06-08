@@ -208,6 +208,35 @@ export function summarizeRailSegment<T extends { type: string; toolName?: string
   return { thinkingCount, toolCount, toolNames }
 }
 
+export interface RailGroup<T> {
+  kind: 'think' | 'tools'
+  blocks: T[]
+}
+
+// While a turn streams, the active rail shows only its *current* phase live:
+// the trailing thinking block, or the trailing tool run (rolled through one
+// slot). Everything before it ("prior") collapses to a summary chip. Group the
+// segment into consecutive think / tool-run groups and split off the last one.
+export function splitActiveRail<T extends { type: string }>(blocks: T[]): {
+  prior: T[]
+  current: RailGroup<T> | null
+} {
+  const groups: RailGroup<T>[] = []
+  for (const block of blocks) {
+    if (block.type === 'reasoning') {
+      groups.push({ kind: 'think', blocks: [block] })
+    } else {
+      const last = groups[groups.length - 1]
+      if (last && last.kind === 'tools') last.blocks.push(block)
+      else groups.push({ kind: 'tools', blocks: [block] })
+    }
+  }
+  if (groups.length === 0) return { prior: [], current: null }
+  const prior: T[] = []
+  for (let i = 0; i < groups.length - 1; i++) prior.push(...groups[i]!.blocks)
+  return { prior, current: groups[groups.length - 1]! }
+}
+
 export interface BgTaskBeacon {
   taskId: string
   phase: 'active' | 'done'
