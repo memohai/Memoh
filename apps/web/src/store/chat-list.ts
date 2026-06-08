@@ -1301,7 +1301,7 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         cacheFetchedMessages(bid, sid, normalized, moreOlder)
       }
-      touchSession(sid)
+      touchSession(sid, normalized.at(-1)?.timestamp)
     })().finally(() => {
       if (refreshPromise?.promise === promise) {
         refreshPromise = null
@@ -1425,10 +1425,6 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     handleWSStreamEvent(stream, sid || undefined)
-
-    if (stream.type === 'end' || stream.type === 'error') {
-      if (sid) touchSession(sid)
-    }
   }
 
   function handleStreamEvent(targetBotId: string, event: MessageStreamEvent) {
@@ -1453,7 +1449,7 @@ export const useChatStore = defineStore('chat', () => {
       const messageSessionId = String(raw.session_id ?? event.session_id ?? '').trim()
       if (messageSessionId) {
         if (sessions.value.some((session) => session.id === messageSessionId)) {
-          touchSession(messageSessionId)
+          touchSession(messageSessionId, raw.created_at)
         } else {
           void refreshSessionsList(targetBotId)
         }
@@ -1640,13 +1636,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function touchSession(targetSessionId: string) {
-    const index = sessions.value.findIndex(session => session.id === targetSessionId)
-    if (index < 0) return
-    const [target] = sessions.value.splice(index, 1)
+  function touchSession(targetSessionId: string, timestamp?: string) {
+    const target = sessions.value.find(session => session.id === targetSessionId)
     if (!target) return
-    target.updated_at = new Date().toISOString()
-    sessions.value.unshift(target)
+    if (timestamp && (!target.updated_at || timestamp > target.updated_at)) {
+      target.updated_at = timestamp
+    }
   }
 
   function acpSessionMetadata(input: ACPAgentSessionInput): Record<string, unknown> {
@@ -2204,7 +2199,6 @@ export const useChatStore = defineStore('chat', () => {
 
       assistantTurn.streaming = false
       loading.value = false
-      touchSession(sid)
       return { ok: true }
     } catch (error) {
       const err = error instanceof Error ? error : new Error('Unknown error')

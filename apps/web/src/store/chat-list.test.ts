@@ -1034,6 +1034,34 @@ describe('chat-list store', () => {
     expect(asstTurnAfter).toBe(asstTurn)
   })
 
+  it('stamps session updated_at from the server message time, not the client clock or a reorder', async () => {
+    api.fetchSessions.mockResolvedValueOnce([
+      { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat', updated_at: '2026-01-01T00:00:00Z' },
+      { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat', updated_at: '2026-01-02T00:00:00Z' },
+    ])
+    const store = useChatStore()
+    await store.selectBot('bot-1')
+    await flushPromises()
+
+    messageEventsHandler?.({
+      type: 'message_created',
+      bot_id: 'bot-1',
+      message: {
+        id: 'm1',
+        bot_id: 'bot-1',
+        session_id: 'session-2',
+        role: 'assistant',
+        content: 'hi',
+        created_at: '2026-01-03T00:00:00Z',
+      },
+    })
+    await flushPromises()
+
+    const updated = store.sessions.find(session => session.id === 'session-2')
+    expect(updated?.updated_at).toBe('2026-01-03T00:00:00Z')
+    expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-2'])
+  })
+
   it('refreshes pending user input after response stream failure', async () => {
     api.fetchSessions.mockResolvedValueOnce([
       { id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' },

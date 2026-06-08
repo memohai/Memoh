@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reconcileById, shouldRefreshFromMessageCreated, upsertById } from './chat-list.utils'
+import { reconcileById, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -106,6 +106,27 @@ describe('chat-list.utils', () => {
 
     expect(target[0]).toBe(a)
     expect(a.items).toEqual(['x', 'y'])
+  })
+
+  it('sortByRecency orders by updated_at desc, falls back to created_at, stable on ties', () => {
+    const a = { id: 'a', updated_at: '2026-01-01T00:00:00Z' }
+    const b = { id: 'b', updated_at: '2026-01-03T00:00:00Z' }
+    const c = { id: 'c', created_at: '2026-01-02T00:00:00Z' }
+    const d = { id: 'd' }
+    const e = { id: 'e', updated_at: '2026-01-03T00:00:00Z' }
+
+    expect(sortByRecency([a, b, c, d, e]).map(x => x.id)).toEqual(['b', 'e', 'c', 'a', 'd'])
+  })
+
+  it('sortByRecency does not mutate its input', () => {
+    const input = [
+      { id: 'a', updated_at: '2026-01-01T00:00:00Z' },
+      { id: 'b', updated_at: '2026-01-03T00:00:00Z' },
+    ]
+
+    sortByRecency(input)
+
+    expect(input.map(x => x.id)).toEqual(['a', 'b'])
   })
 
   it('refreshes only for current session message_created events', () => {

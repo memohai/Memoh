@@ -177,6 +177,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useChatStore } from '@/store/chat-list'
+import { sortByRecency } from '@/store/chat-list.utils'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -258,7 +259,7 @@ const filteredSessions = computed(() => {
       || (s.id ?? '').toLowerCase().includes(q),
     )
   }
-  return list
+  return sortByRecency(list)
 })
 
 function handleSelect(session: SessionSummary) {

@@ -44,6 +44,15 @@ export function reconcileById<T extends { id: PropertyKey }>(
   return target
 }
 
+export function sortByRecency<T extends { updated_at?: string; created_at?: string }>(items: T[]): T[] {
+  const key = (item: T) => item.updated_at ?? item.created_at ?? ''
+  return [...items].sort((a, b) => {
+    const ka = key(a)
+    const kb = key(b)
+    return ka < kb ? 1 : ka > kb ? -1 : 0
+  })
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,
