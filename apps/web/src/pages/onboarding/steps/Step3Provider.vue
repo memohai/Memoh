@@ -15,11 +15,13 @@ import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
 import { getAcpProfiles, type AcpprofileManagedField, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
 import { acpAgentIcon, defaultSetupMode, findMissingRequiredManagedField, normalizeACPAgentID } from '@/utils/acp'
+import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useStepTransition, nextFrame } from '../useStepTransition'
 import { ONBOARDING_KEYS } from '../constants'
 import { useProviderSetup } from './useProviderSetup'
@@ -29,11 +31,17 @@ const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const { visible, exiting, leave } = useStepTransition()
 const capabilities = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
 
-// Desktop/local deployments default to "self" (run against the host's
-// already-installed, already-logged-in CLI), but BYOK (api_key / oauth) is also
-// available. We use this only to pick the recommended default setup mode.
-const isLocalEnv = computed(() => capabilities.localWorkspaceEnabled)
+// Local workspace creation means "self" can run against host credentials.
+// Remote desktop connects to a server elsewhere, so it should use BYOK defaults.
+const allowLocalWorkspaceCreate = computed(() =>
+  canCreateLocalWorkspace({
+    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+  }),
+)
 
 const listVisible = ref(false)
 const mode = ref<'list' | 'form' | 'acp'>('list')
@@ -119,10 +127,9 @@ function onSkipStep() {
 }
 
 async function openAcpForm(profile: AcpprofilePublicProfile) {
-  // Resolve deployment capabilities before branching: the store defaults to
-  // container (localWorkspaceEnabled=false), so the desktop default (self) is
-  // picked correctly even when the agent card is clicked early.
-  await capabilities.load()
+  // Resolve deployment and desktop runtime policy before branching so remote
+  // desktop does not pick the local "self" default when clicked early.
+  await Promise.all([capabilities.load(), desktopRuntime.load()])
 
   selectedAcpProfile.value = profile
   acpError.value = ''
@@ -136,7 +143,7 @@ async function openAcpForm(profile: AcpprofilePublicProfile) {
   // Desktop/local already has a logged-in CLI, so "use local config" (self) is
   // the recommended default and BYOK (oauth / api_key) is the secondary path.
   // Clean container workspaces have no credentials, so they default to api_key.
-  const preferred = isLocalEnv.value ? 'self' : 'api_key'
+  const preferred = allowLocalWorkspaceCreate.value ? 'self' : 'api_key'
   acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
   listVisible.value = false
   setTimeout(() => {
@@ -225,6 +232,7 @@ onMounted(() => {
   }
 
   void capabilities.load()
+  void desktopRuntime.load()
 
   void (async () => {
     try {

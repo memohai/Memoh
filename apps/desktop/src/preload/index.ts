@@ -46,8 +46,6 @@ const api = {
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
-    saveRemoteBaseUrl: (baseUrl: string): Promise<{ mode: DesktopRuntimeMode, baseUrl: string, ready: boolean, changed: boolean }> =>
-      ipcRenderer.invoke('desktop:save-remote-base-url', baseUrl),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
     getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),

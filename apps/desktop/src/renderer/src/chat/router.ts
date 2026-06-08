@@ -36,8 +36,7 @@ const settingsStubs: RouteRecordRaw[] = SETTINGS_ROUTE_SPECS.map(mapSettingsStub
 const routes: RouteRecordRaw[] = [
   {
     path: '/connect',
-    name: 'ConnectServer',
-    component: () => import('../connect/ConnectServer.vue'),
+    redirect: { name: 'Login' },
   },
   {
     path: '/onboarding',
@@ -102,11 +101,6 @@ router.onError((error: Error) => {
 })
 
 router.beforeEach(async (to: RouteLocationNormalized) => {
-  const status = await window.api.desktop.getServerStatus()
-  const needsRemoteBaseUrl = status.mode === 'remote' && !status.baseUrl
-  if (needsRemoteBaseUrl) {
-    return to.path === '/connect' ? true : { name: 'ConnectServer' }
-  }
   if (to.path === '/connect') {
     return { name: 'Login' }
   }

@@ -29,9 +29,11 @@ import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
@@ -44,6 +46,7 @@ const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const queryCache = useQueryCache()
 const capabilities = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
 const { visible, exiting, leave } = useStepTransition()
 
 const workspaceVisible = ref(false)
@@ -81,6 +84,7 @@ const {
 
 onMounted(() => {
   void capabilities.load()
+  void desktopRuntime.load()
   acpSelection.value = readACPSelection()
   if (acpSelection.value) {
     void (async () => {
@@ -94,7 +98,13 @@ onMounted(() => {
   }
 })
 
-const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
+const allowLocalWorkspaceCreate = computed(() =>
+  canCreateLocalWorkspace({
+    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+  }),
+)
 
 const form = reactive({
   display_name: '',
@@ -104,8 +114,9 @@ const form = reactive({
   workspace_backend: 'container',
 })
 
-watch(localWorkspaceEnabled, (enabled) => {
+watch(allowLocalWorkspaceCreate, (enabled) => {
   if (!enabled) {
+    form.workspace_backend = 'container'
     workspaceVisible.value = false
     return
   }
@@ -160,14 +171,14 @@ const canSubmit = computed(() => {
   return !!form.display_name.trim()
 })
 
-const isContainerSubmitting = computed(() => submitting.value && form.workspace_backend !== 'local')
+const isLocalWorkspace = computed(() => allowLocalWorkspaceCreate.value && form.workspace_backend === 'local')
+
+const isContainerSubmitting = computed(() => submitting.value && !isLocalWorkspace.value)
 
 const ctaLabel = computed(() => {
   if (isContainerSubmitting.value) return t('onboarding.bot.preparingEnvironment')
   return t('onboarding.next')
 })
-
-const isLocalWorkspace = computed(() => localWorkspaceEnabled.value && form.workspace_backend === 'local')
 
 function buildMetadata(): Record<string, unknown> | undefined {
   let metadata: Record<string, unknown> = isLocalWorkspace.value
@@ -199,7 +210,7 @@ async function handleSubmit() {
   // watcher has flushed) before reading isLocalWorkspace / building metadata,
   // so a fast submit on desktop can't create a container bot or enter the
   // OAuth phase the backend would reject.
-  await capabilities.load()
+  await Promise.all([capabilities.load(), desktopRuntime.load()])
   await nextTick()
 
   // The store drives the inline terminal reactively while we await completion.
@@ -427,7 +438,7 @@ function skipOAuth() {
               />
             </div>
 
-            <template v-if="localWorkspaceEnabled">
+            <template v-if="allowLocalWorkspaceCreate">
               <div
                 class="transition-all duration-[350ms] ease-out delay-[140ms] mt-6"
                 :class="workspaceVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
@@ -468,7 +479,7 @@ function skipOAuth() {
                   </div>
 
                   <div
-                    v-if="form.workspace_backend === 'local'"
+                    v-if="isLocalWorkspace"
                     class="rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
                   >
                     {{ $t('bots.localWorkspaceWarning') }}
@@ -478,14 +489,14 @@ function skipOAuth() {
             </template>
 
             <div
-              v-if="form.workspace_backend !== 'local'"
+              v-if="!isLocalWorkspace"
               class="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground mt-6 transition-all duration-[350ms] ease-out delay-[200ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >
               {{ $t('bots.createBotWaitHint') }}
             </div>
             <div
-              v-if="form.workspace_backend !== 'local' && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
+              v-if="!isLocalWorkspace && (createStatus === 'creating' || createStatus === 'error') && terminalLines.length"
               class="mt-3 transition-all duration-[350ms] ease-out delay-[220ms]"
               :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
             >

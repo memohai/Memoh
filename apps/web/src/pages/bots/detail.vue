@@ -279,8 +279,10 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
-import { isLocalWorkspaceBot } from '@/utils/bot-workspace'
+import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
+import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -307,8 +309,8 @@ const botId = computed(() => bot.value?.id ?? '')
 
 const containerInfo = ref<BotContainerInfo | null>(null)
 
-const isLocalWorkspace = computed(() =>
-  isLocalWorkspaceBot(bot.value?.metadata, containerInfo.value?.workspace_backend),
+const botWorkspaceBackend = computed(() =>
+  resolveBotWorkspaceBackend(bot.value?.metadata, containerInfo.value?.workspace_backend),
 )
 
 const canManageBot = computed(() => {
@@ -321,14 +323,17 @@ const canManageBot = computed(() => {
   return perms.includes('manage')
 })
 
+const capabilitiesStore = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
     { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
     { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id } },
-    { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {} },
-    { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id } },
+    { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
+    { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {}, containerWorkspaceOnly: true },
+    { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
@@ -341,12 +346,23 @@ const tabList = computed(() => {
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
-  ]
-  const scoped = canManageBot.value ? tabs : tabs.filter(tab => tab.value === 'overview')
-  if (isLocalWorkspace.value) {
-    return scoped.filter(tab => tab.value !== 'container' && tab.value !== 'network' && tab.value !== 'desktop')
-  }
-  return scoped
+  ] satisfies Array<BotDetailsTabRule & {
+    label: string
+    icon: unknown
+    component: unknown
+    params: Record<string, unknown>
+  }>
+  return filterBotDetailsTabs(tabs, {
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+    canManageBot: canManageBot.value,
+    botWorkspaceBackend: botWorkspaceBackend.value,
+    serverCapabilities: {
+      containerBackend: capabilitiesStore.containerBackend,
+      localWorkspaceEnabled: capabilitiesStore.localWorkspaceEnabled,
+      snapshotSupported: capabilitiesStore.snapshotSupported,
+    },
+  })
 })
 
 const searchQuery = ref('')
@@ -381,8 +397,10 @@ const searchIndex = computed(() => {
 const searchResults = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
   if (!query) return []
+  const visibleTabs = new Set(tabList.value.map(tab => tab.value))
   
   return searchIndex.value.filter(item => {
+    if (!visibleTabs.has(item.tab)) return false
     return item.translatedTitle.toLowerCase().includes(query) || 
            item.keywords.some(k => k.toLowerCase().includes(query)) ||
            t(`bots.tabs.${item.tab}`).toLowerCase().includes(query) ||
@@ -412,9 +430,9 @@ const activeComponent = computed(() => {
   return tabList.value.find(tab => tab.value === activeTab.value)
 })
 
-const capabilitiesStore = useCapabilitiesStore()
 onMounted(() => {
   void capabilitiesStore.load()
+  void desktopRuntime.load()
 })
 
 const queryCache = useQueryCache()

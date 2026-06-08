@@ -119,7 +119,7 @@
       <Separator class="my-6" />
 
       <!-- Workspace (conditional) -->
-      <template v-if="localWorkspaceEnabled">
+      <template v-if="allowLocalWorkspaceCreate">
         <div>
           <h3 class="text-sm font-medium mb-4">
             {{ $t('bots.steps.workspace') }}
@@ -344,7 +344,7 @@ import {
   TooltipTrigger,
 } from '@memohai/ui'
 import { SquarePen, CircleHelp, Check, X, LoaderCircle } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -354,9 +354,11 @@ import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } 
 import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
+import { canCreateLocalWorkspace, desktopApiBridge } from '@/utils/desktop-runtime'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
@@ -369,14 +371,22 @@ const route = useRoute()
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const capabilities = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
 
 const mode = ref<'create' | 'import'>(route.query.mode === 'import' ? 'import' : 'create')
 
 onMounted(() => {
   void capabilities.load()
+  void desktopRuntime.load()
 })
 
-const localWorkspaceEnabled = computed(() => capabilities.localWorkspaceEnabled)
+const allowLocalWorkspaceCreate = computed(() =>
+  canCreateLocalWorkspace({
+    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+  }),
+)
 
 const form = reactive({
   name: '',
@@ -459,21 +469,22 @@ const nameStatusMessage = computed(() => {
   }
 })
 
-watch(localWorkspaceEnabled, (enabled) => {
+const localPathTouched = ref(false)
+
+watch(allowLocalWorkspaceCreate, (enabled) => {
   if (enabled) {
     form.workspace_backend = 'local'
+  } else {
+    form.workspace_backend = 'container'
+    form.local_workspace_path = ''
+    localPathTouched.value = false
   }
 }, { immediate: true })
 
-const localPathTouched = ref(false)
-
 watch([() => form.display_name, () => form.workspace_backend], async ([displayName, backend]) => {
-  if (backend !== 'local' || !displayName?.trim()) return
+  if (!allowLocalWorkspaceCreate.value || backend !== 'local' || !displayName?.trim()) return
   try {
-    const api = (window as Record<string, unknown>).api as
-      | { desktop?: { defaultWorkspacePath?: (name: string) => Promise<string> } }
-      | undefined
-    const path = await api?.desktop?.defaultWorkspacePath?.(displayName.trim())
+    const path = await desktopApiBridge()?.desktop?.defaultWorkspacePath?.(displayName.trim())
     if (path && !localPathTouched.value) {
       form.local_workspace_path = path
     }
@@ -483,6 +494,7 @@ watch([() => form.display_name, () => form.workspace_backend], async ([displayNa
 })
 
 watch(() => form.local_workspace_path, () => {
+  if (!allowLocalWorkspaceCreate.value || form.workspace_backend !== 'local') return
   localPathTouched.value = true
 })
 
@@ -532,12 +544,16 @@ const aclDescription = computed(() => {
   return opt ? t(opt.descriptionKey) : ''
 })
 
+const isLocalWorkspaceCreate = computed(() =>
+  allowLocalWorkspaceCreate.value && form.workspace_backend === 'local',
+)
+
 // Validation
 const canSubmit = computed(() => {
   if (!form.display_name.trim()) return false
   if (!form.name.trim() || nameStatus.value !== 'available') return false
   if (!form.acl_preset) return false
-  if (localWorkspaceEnabled.value && form.workspace_backend === 'local' && !form.local_workspace_path.trim()) return false
+  if (isLocalWorkspaceCreate.value && !form.local_workspace_path.trim()) return false
   return true
 })
 
@@ -555,7 +571,7 @@ function handleImported(botId: string) {
 }
 
 function buildCreatePayload(): BotsCreateBotRequest {
-  const metadata = localWorkspaceEnabled.value && form.workspace_backend === 'local'
+  const metadata = isLocalWorkspaceCreate.value
     ? {
         workspace: {
           backend: 'local',
@@ -595,12 +611,19 @@ async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
   submitLoading.value = true
 
+  await Promise.all([capabilities.load(), desktopRuntime.load()])
+  await nextTick()
+  if (!canSubmit.value) {
+    submitLoading.value = false
+    return
+  }
+
   const payload = buildCreatePayload()
   const options = createStartOptions()
 
   // Local workspaces are near-instant and not sandboxed; skip the dedicated
   // progress route and finish inline.
-  if (form.workspace_backend === 'local') {
+  if (isLocalWorkspaceCreate.value) {
     await store.start(payload, options)
     submitLoading.value = false
     finishLocalCreate()
