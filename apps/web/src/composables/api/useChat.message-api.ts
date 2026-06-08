@@ -6,10 +6,9 @@ import type {
   FetchMessagesOptions,
   Message,
   MessageStreamEvent,
-  StreamEventHandler,
   UITurn,
 } from './useChat.types'
-import { parseStreamPayload, readSSEStream } from './useChat.sse'
+import { readSSEStream } from './useChat.sse'
 
 export async function fetchMessages(
   botId: string,
@@ -112,31 +111,6 @@ export async function sendLocalChannelMessage(
     path: { bot_id: botId },
     body: body as { message: ChannelMessage; model_id?: string; reasoning_effort?: string },
     throwOnError: true,
-  })
-}
-
-export async function streamLocalChannel(
-  botId: string,
-  signal: AbortSignal,
-  onEvent: StreamEventHandler,
-): Promise<void> {
-  const id = botId.trim()
-  if (!id) throw new Error('bot id is required')
-
-  const response = await client.get({
-    url: '/bots/{bot_id}/local/stream',
-    path: { bot_id: id },
-    parseAs: 'stream',
-    signal,
-    throwOnError: true,
-  })
-  const body = response.data as ReadableStream<Uint8Array> | null
-
-  if (!body) throw new Error('No response body')
-
-  await readSSEStream(body, (payload) => {
-    const event = parseStreamPayload(payload)
-    if (event) onEvent(event)
   })
 }
 
