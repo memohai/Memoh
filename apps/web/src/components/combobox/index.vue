@@ -4,13 +4,10 @@
       <button
         data-slot="select-trigger"
         data-size="default"
+        :data-placeholder="selectedLabel ? undefined : ''"
         type="button"
         :aria-expanded="open"
-        :class="[
-          'flex h-9 w-full items-center justify-between gap-2 rounded-md px-3 text-label tracking-[0.01em] whitespace-nowrap outline-none select-none',
-          '[&_svg:not([class*=\'text-\'])]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
-          selectedLabel ? '' : 'text-muted-foreground',
-        ]"
+        :class="[selectTriggerClass, 'w-full']"
       >
         <span class="line-clamp-1">{{ selectedLabel || placeholder }}</span>
         <ChevronsUpDown class="opacity-50" />
@@ -96,7 +93,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
-import { menuItemClass, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
+import { menuItemClass, Popover, PopoverContent, PopoverTrigger, selectTriggerClass } from '@memohai/ui'
 import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
