@@ -108,7 +108,7 @@
     "mcp": "MCP",
     "platform": "Platform",
     "usage": "Usage",
-    "people": "People",
+    "people": "Members",
     "appearance": "Appearance",
     "supermarket": "Supermarket",
     "about": "About"
@@ -150,6 +150,7 @@
     "themePlaceholder": "Select Theme",
     "themeLight": "Light",
     "themeDark": "Dark",
+    "themeSystem": "System",
     "appearance": {
       "title": "Appearance",
       "description": "Customize your interface: language, theme, and color palette.",
@@ -170,7 +171,7 @@
         "forest": "Subtle green tones",
         "rose": "Warm accents and soft contrast",
         "amber": "Golden highlights with clear status indicators"
-      },
+      }
     },
     "langZh": "中文",
     "langEn": "English",

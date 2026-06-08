@@ -5,18 +5,19 @@ import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
 
+export type ThemePreference = 'light' | 'dark' | 'system'
+
 export interface Settings {
   language: Locale;
-  theme: 'light' | 'dark';
+  theme: ThemePreference;
   colorScheme: ColorSchemeId;
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const colorMode = useColorMode()
+  const colorMode = useColorMode({ emitAuto: true })
   const i18n = useI18n()
   const language = useStorage<Locale>('language', 'en')
-  const theme = useStorage<'light' | 'dark'>('theme',
-    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  const theme = useStorage<ThemePreference>('theme', 'system')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
 
   const applyColorScheme = (value: ColorSchemeId) => {
@@ -29,7 +30,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   watch(theme, (value) => {
-    colorMode.value = value
+    colorMode.value = value === 'system' ? 'auto' : value
   }, { immediate: true })
 
   watch(language, (value) => {
@@ -56,10 +57,10 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  const setTheme = (value: 'light' | 'dark') => {
+  const setTheme = (value: ThemePreference) => {
     withViewTransition(() => {
-      document.documentElement.classList.toggle('dark', value === 'dark')
       theme.value = value
+      colorMode.value = value === 'system' ? 'auto' : value
     })
   }
 

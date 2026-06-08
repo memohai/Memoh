@@ -718,17 +718,27 @@
 :root {
   --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.27 0.004 95);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.27 0.004 95);
-  --popover: oklch(0.995 0.001 286);
-  --popover-foreground: oklch(0.27 0.004 95);
+  /* Warm elevation ladder (hue 72 — a warm CREAM ramp, red-led like Perplexity /
+     Cursor canvas, NOT yellow-green: at this hue R leads, so it reads warm not
+     green). Rules:
+       1. depth = LIGHTNESS: canvas 251 < card 253 (forward). Sidebar shares the
+          canvas color (no sidebar-specific tint) — it's just the canvas with a
+          divider + its own borderless hover/active fills.
+       2. chroma RISES as surfaces darken (canvas .0024 → active .0052) so deep
+          fills read as a clean warm, not a muddy near-gray.
+     Pure white is intentionally abandoned — it clashes on a warm canvas and is
+     only viable for web/QC products, not a heavily-customized native app. */
+  --background: oklch(0.984 0.0024 72);
+  --foreground: oklch(0.21 0.004 95);
+  --card: oklch(0.991 0.0018 72);
+  --card-foreground: oklch(0.21 0.004 95);
+  --popover: oklch(0.991 0.0018 72);
+  --popover-foreground: oklch(0.21 0.004 95);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.27 0.004 95);
-  --muted: oklch(0.967 0 0);
+  --secondary: oklch(0.964 0.004 72);
+  --secondary-foreground: oklch(0.21 0.004 95);
+  --muted: oklch(0.964 0.004 72);
   --muted-foreground: oklch(0.52 0.006 95);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
@@ -736,25 +746,25 @@
   /* Shimmer tile width — narrower than a typical skeleton row so a fresh seam revisits
      each cluster every cycle (short gap). Bigger = longer gap; smaller = denser. */
   --skeleton-tile: 640px;
-  --accent: oklch(97.1% 0 0deg);
-  --accent-foreground: oklch(0.27 0.004 95);
+  --accent: oklch(0.964 0.004 72);
+  --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
+  --border: oklch(0.915 0.0045 72);
+  --input: oklch(0.915 0.0045 72);
   --ring: oklch(57.5% 0 0deg / 1);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.27 0.004 95);
+  --sidebar: var(--background);
+  --sidebar-foreground: oklch(0.21 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.946 0 0);
-  --sidebar-accent-foreground: oklch(0.27 0.004 95);
-  --sidebar-border: oklch(0.91 0 0);
+  --sidebar-accent: oklch(0.94 0.0052 72);
+  --sidebar-accent-foreground: oklch(0.21 0.004 95);
+  --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
   --scrollbar-thumb-hover: oklch(0 0 0 / 0.32);
@@ -794,10 +804,10 @@
   --ui-on: oklch(0.934 0 0); /* ≈234 — control SELECTED (Toggle on) */
   --ui-pressed: oklch(0.910 0 0); /* ≈224 — control press */
   --ui-selected-pressed: oklch(0.893 0 0); /* ≈218 — control on+press */
-  --btn-ghost-hover: oklch(0.946 0 0); /* ≈237 — ghost (button-tier), its own step */
+  --btn-ghost-hover: oklch(0.94 0.0052 72); /* ≈237 warm — ghost (button-tier), matches sidebar-accent on the warm canvas */
   /* Segmented control surfaces: recessed track + elevated sliding thumb. */
   --segment-track: var(--ui-selected);
-  --segment-thumb: oklch(1 0 0);
+  --segment-thumb: oklch(0.991 0.0018 72);
   /* Shadows — tokenized so elevation/edge values never fragment. Same in both
      schemes for now; add .dark overrides when dark elevation is tuned.
        --shadow-hairline  1px inset edge (outline / secondary button chrome)

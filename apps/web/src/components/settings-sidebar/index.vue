@@ -1,56 +1,44 @@
 <template>
   <aside
     class="relative h-full"
-    style="--sidebar-width: 17rem"
+    style="--sidebar-width: 15rem"
   >
-    <!-- macTopInset drag overlay only when we own the header (hideHeader=false) -->
-    <header
-      v-if="macTopInset && !hideHeader"
-      class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
-    />
-
     <Sidebar
       :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="(macTopInset && !hideHeader) ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
+      :class="desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
     >
       <SidebarHeader
         v-if="!hideHeader"
-        class="px-2 pt-2 pb-5 border-0"
+        class="px-[18px] pt-[18px] pb-3 border-0"
       >
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <Button
-              variant="ghost"
-              block
-              class="justify-start font-[450] group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
-              @click="router.push(_backToChatRoute)"
-            >
-              <ChevronLeft class="size-3.5 shrink-0" />
-              <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
-            </Button>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <NavItem @click="router.push(_backToChatRoute).catch(() => {})">
+          <ChevronLeft class="size-3.5 shrink-0" />
+          <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
+        </NavItem>
       </SidebarHeader>
 
       <SidebarContent>
         <!-- Core group: no label -->
-        <SidebarGroup class="px-3 pt-3 pb-0">
+        <SidebarGroup class="px-[18px] pt-1 pb-0">
           <SidebarGroupContent>
-            <SidebarMenu class="gap-0.5">
+            <SidebarMenu class="gap-1">
               <SidebarMenuItem
                 v-for="item in coreNavItems"
                 :key="item.name"
               >
-                <Button
-                  variant="ghost"
-                  block
-                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
-                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
+                <NavItem
+                  :active="isItemActive(item.name)"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  @click="router.push({ name: item.name })"
+                  @click="navigate(item.name)"
                 >
+                  <component
+                    :is="item.icon"
+                    :stroke-width="1.75"
+                    class="size-4 shrink-0"
+                    :class="item.flipX && '-scale-x-100'"
+                  />
                   <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
-                </Button>
+                </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
@@ -59,27 +47,30 @@
         <!-- Integrations group -->
         <SidebarGroup
           v-if="integrationsNavItems.length"
-          class="px-3 pt-4 pb-0"
+          class="px-[18px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="px-0! group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.integrations') }}
           </SidebarGroupLabel>
-          <SidebarGroupContent class="pt-1">
-            <SidebarMenu class="gap-0.5">
+          <SidebarGroupContent class="pt-0">
+            <SidebarMenu class="gap-1">
               <SidebarMenuItem
                 v-for="item in integrationsNavItems"
                 :key="item.name"
               >
-                <Button
-                  variant="ghost"
-                  block
-                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
-                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
+                <NavItem
+                  :active="isItemActive(item.name)"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  @click="router.push({ name: item.name })"
+                  @click="navigate(item.name)"
                 >
+                  <component
+                    :is="item.icon"
+                    :stroke-width="1.75"
+                    class="size-4 shrink-0"
+                    :class="item.flipX && '-scale-x-100'"
+                  />
                   <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
-                </Button>
+                </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
@@ -88,27 +79,30 @@
         <!-- Account group -->
         <SidebarGroup
           v-if="accountNavItems.length"
-          class="px-3 pt-4 pb-0"
+          class="px-[18px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="px-0! group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
             {{ t('sidebar.group.account') }}
           </SidebarGroupLabel>
-          <SidebarGroupContent class="pt-1">
-            <SidebarMenu class="gap-0.5">
+          <SidebarGroupContent class="pt-0">
+            <SidebarMenu class="gap-1">
               <SidebarMenuItem
                 v-for="item in accountNavItems"
                 :key="item.name"
               >
-                <Button
-                  variant="ghost"
-                  block
-                  class="justify-start font-[450] px-3! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:px-0!"
-                  :class="isItemActive(item.name) && 'bg-sidebar-accent'"
+                <NavItem
+                  :active="isItemActive(item.name)"
                   :aria-current="isItemActive(item.name) ? 'page' : undefined"
-                  @click="router.push({ name: item.name })"
+                  @click="navigate(item.name)"
                 >
+                  <component
+                    :is="item.icon"
+                    :stroke-width="1.75"
+                    class="size-4 shrink-0"
+                    :class="item.flipX && '-scale-x-100'"
+                  />
                   <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
-                </Button>
+                </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
@@ -121,16 +115,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft } from 'lucide-vue-next'
+import {
+  Box,
+  Captions,
+  ChartNoAxesColumn,
+  ChevronLeft,
+  CircleUserRound,
+  Database,
+  Globe,
+  Info,
+  Mail,
+  MousePointer2,
+  Store,
+  Users,
+  Volume2,
+} from 'lucide-vue-next'
+import AppearanceIcon from './appearance-icon.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useChatStore } from '@/store/chat-list'
 import { useUserStore } from '@/store/user'
 import {
-  Button,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -142,6 +150,7 @@ import {
   SidebarRail,
 } from '@memohai/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
+import NavItem from './nav-item.vue'
 
 const props = withDefaults(defineProps<{
   hideHeader?: boolean
@@ -154,11 +163,6 @@ const props = withDefaults(defineProps<{
 defineEmits<{ back: [] }>()
 
 const desktopShell = inject(DesktopShellKey, false)
-const macTopInset = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
 
 const router = useRouter()
 const route = useRoute()
@@ -170,13 +174,16 @@ const { bots } = storeToRefs(chatStore)
 const userStore = useUserStore()
 const { userInfo } = storeToRefs(userStore)
 
-// kept for when hideHeader=false (sidebar is used standalone)
 const _backToChatRoute = computed(() => {
   const botId = (currentBotId.value ?? '').trim()
   if (!botId) return { name: 'home' as const }
   const botName = bots.value.find((b) => b.id === botId)?.name ?? botId
   return { name: 'bot' as const, params: { botName } }
 })
+
+function navigate(name: string): void {
+  router.push({ name } as Parameters<typeof router.push>[0]).catch(() => {})
+}
 
 function isItemActive(name: string): boolean {
   if (name === 'bots') {
@@ -188,7 +195,7 @@ function isItemActive(name: string): boolean {
   return route.name === name
 }
 
-type NavItem = { title: string; name: string; adminOnly?: boolean }
+type NavItem = { title: string; name: string; icon: Component; flipX?: boolean; adminOnly?: boolean }
 
 function filterItems(items: NavItem[]): NavItem[] {
   return items.filter((item) => {
@@ -198,24 +205,24 @@ function filterItems(items: NavItem[]): NavItem[] {
 }
 
 const coreNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.bots'), name: 'bots' },
-  { title: t('sidebar.providers'), name: 'providers' },
-  { title: t('sidebar.memory'), name: 'memory' },
-  { title: t('sidebar.webSearch'), name: 'web-search' },
-  { title: t('sidebar.speech'), name: 'speech' },
-  { title: t('sidebar.transcription'), name: 'transcription' },
+  { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
+  { title: t('sidebar.providers'), name: 'providers', icon: Box },
+  { title: t('sidebar.memory'), name: 'memory', icon: Database },
+  { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
+  { title: t('sidebar.speech'), name: 'speech', icon: Volume2 },
+  { title: t('sidebar.transcription'), name: 'transcription', icon: Captions },
 ]))
 
 const integrationsNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.email'), name: 'email' },
-  { title: t('sidebar.supermarket'), name: 'supermarket' },
-  { title: t('sidebar.usage'), name: 'usage' },
-  { title: t('sidebar.people'), name: 'people', adminOnly: true },
+  { title: t('sidebar.email'), name: 'email', icon: Mail },
+  { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
+  { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
+  { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
 ]))
 
 const accountNavItems = computed<NavItem[]>(() => filterItems([
-  { title: t('sidebar.appearance'), name: 'appearance' },
-  { title: t('sidebar.profile'), name: 'profile' },
-  { title: t('sidebar.about'), name: 'about' },
+  { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
+  { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
+  { title: t('sidebar.about'), name: 'about', icon: Info },
 ]))
 </script>
