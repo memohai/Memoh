@@ -1,4 +1,5 @@
 import { normalizeACPAgentID } from '@/utils/acp'
+import { safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 
 export interface OnboardingACPSelection {
@@ -31,9 +32,9 @@ export function readACPSelection(): OnboardingACPSelection | null {
 }
 
 export function writeACPSelection(selection: OnboardingACPSelection): void {
-  sessionStorage.setItem(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
+  safeSessionSet(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
 }
 
 export function clearACPSelection(): void {
-  sessionStorage.removeItem(ONBOARDING_KEYS.acpSelection)
+  safeSessionRemove(ONBOARDING_KEYS.acpSelection)
 }

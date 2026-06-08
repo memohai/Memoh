@@ -31,6 +31,7 @@ import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
+import { safeSessionSet } from '@/utils/safe-storage'
 import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, withACPMetadata, type ACPForm } from '@/utils/acp'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
@@ -232,7 +233,7 @@ async function handleSubmit() {
 
   const botId = store.bot?.id
   if (botId) {
-    sessionStorage.setItem(ONBOARDING_KEYS.createdBotId, botId)
+    safeSessionSet(ONBOARDING_KEYS.createdBotId, botId)
   }
   if (store.setupError) {
     toast.error(store.setupError)
