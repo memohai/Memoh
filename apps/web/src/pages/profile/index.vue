@@ -131,7 +131,6 @@ const { userInfo, exitLogin, patchUserInfo } = userStore
 const account = ref<UserAccount | null>(null)
 
 const loadingInitial = ref(true)
-const savingProfile = ref(false)
 const savingPassword = ref(false)
 
 const originalProfile = reactive({
@@ -210,8 +209,8 @@ function onTimezoneChange(value: string | number | undefined) {
   void autoSaveProfile()
 }
 
-// Silent auto-save: triggered on display-name blur, timezone change, and avatar
-// apply. Skips the request when nothing actually changed; only surfaces errors.
+// Silent auto-save: triggered on name confirm, timezone change, and avatar apply.
+// Skips the request when nothing actually changed; only surfaces errors.
 async function autoSaveProfile() {
   const body: AccountsUpdateProfileRequest = {
     display_name: profileForm.display_name.trim(),
@@ -226,7 +225,6 @@ async function autoSaveProfile() {
     return
   }
 
-  savingProfile.value = true
   try {
     const { data } = await putUsersMe({ body, throwOnError: true })
     account.value = data
@@ -250,8 +248,6 @@ async function autoSaveProfile() {
     })
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
-  } finally {
-    savingProfile.value = false
   }
 }
 

@@ -30,6 +30,7 @@
             role="combobox"
             :aria-controls="listboxId"
             :aria-expanded="open"
+            :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined"
             :placeholder="searchPlaceholder"
             :aria-label="searchPlaceholder"
             class="flex h-full w-full bg-transparent text-control outline-hidden placeholder:text-muted-foreground"

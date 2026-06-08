@@ -68,8 +68,8 @@
       <div class="flex h-8 items-center gap-1.5">
         <template v-if="editing">
           <Input
+            ref="nameInput"
             v-model="nameDraft"
-            autofocus
             :aria-label="$t('settings.displayName')"
             class="h-8 max-w-[16rem]"
             @keydown.enter="confirmName"
@@ -99,7 +99,7 @@
           <Button
             variant="ghost"
             size="icon-sm"
-            class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100"
+            class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
             :aria-label="$t('common.edit')"
             @click="startEdit"
           >
@@ -116,7 +116,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
+import { nextTick, ref } from 'vue'
 import {
   Avatar,
   AvatarFallback,
@@ -149,10 +150,18 @@ const emit = defineEmits<{
 // ── Name inline editor ──
 const editing = ref(false)
 const nameDraft = ref('')
+const nameInput = ref<ComponentPublicInstance | null>(null)
 
 function startEdit() {
   nameDraft.value = props.displayName
   editing.value = true
+  // `autofocus` is unreliable for v-if-inserted inputs, so focus explicitly once
+  // the field is in the DOM and pre-select the text for a quick replace.
+  void nextTick(() => {
+    const el = nameInput.value?.$el as HTMLInputElement | undefined
+    el?.focus()
+    el?.select()
+  })
 }
 
 function confirmName() {
