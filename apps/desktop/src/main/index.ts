@@ -35,6 +35,8 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
+import { acceleratorForCommand, appKeyboardCommands } from '../shared/keyboard-commands'
+import { dispatchFocusedWindowCommand } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
@@ -788,6 +790,22 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
   window.webContents.send('settings:navigate', target)
 }
 
+// Derive the native Close accelerator from the shared binding table. The
+// focused window decides whether the command closes an app tab or the window.
+function closeWindowMenuItem(): MenuItemConstructorOptions {
+  return {
+    label: 'Close',
+    accelerator: acceleratorForCommand(appKeyboardCommands.closeCurrentWorkspaceTab),
+    click: () => {
+      dispatchFocusedWindowCommand(
+        chatWindow,
+        BrowserWindow.getFocusedWindow(),
+        appKeyboardCommands.closeCurrentWorkspaceTab,
+      )
+    },
+  }
+}
+
 // CLI install / menu helpers — kept above the whenReady block so the
 // Promise chain can call them without forward-declaration noise.
 
@@ -913,7 +931,7 @@ async function rebuildAppMenu(): Promise<void> {
         label: 'Window',
         submenu: [
           { role: 'minimize' },
-          { role: 'close' },
+          closeWindowMenuItem(),
         ],
       },
     )
@@ -1016,7 +1034,7 @@ async function rebuildAppMenu(): Promise<void> {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
-        { role: 'close' },
+        closeWindowMenuItem(),
       ],
     },
   )
