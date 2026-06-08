@@ -64,6 +64,35 @@ export function latestOutputLine(tail?: string): string {
   return ''
 }
 
+export type TurnSegment<T> =
+  | { kind: 'rail'; key: string; blocks: T[] }
+  | { kind: 'flow'; key: string; block: T }
+
+const PROCESS_BLOCK_TYPES = new Set(['reasoning', 'tool'])
+
+// Group a turn's blocks into segments by their immutable `type`: maximal runs of
+// process blocks (reasoning/tool) become one recessed "rail"; text/error/attachment
+// blocks break out as standalone "flow" segments. Keying by the segment's first
+// block id keeps every segment stable as the turn streams (blocks only append at
+// the tail), so no block ever reparents — which is what prevents remount/stall.
+export function segmentTurnBlocks<T extends { id: number; type: string }>(blocks: T[]): TurnSegment<T>[] {
+  const segments: TurnSegment<T>[] = []
+  let rail: { kind: 'rail'; key: string; blocks: T[] } | null = null
+  for (const block of blocks) {
+    if (PROCESS_BLOCK_TYPES.has(block.type)) {
+      if (rail === null) {
+        rail = { kind: 'rail', key: `rail:${block.id}`, blocks: [] }
+        segments.push(rail)
+      }
+      rail.blocks.push(block)
+    } else {
+      rail = null
+      segments.push({ kind: 'flow', key: `flow:${block.id}`, block })
+    }
+  }
+  return segments
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,

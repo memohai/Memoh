@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { latestOutputLine, reconcileById, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
+import { latestOutputLine, reconcileById, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -196,5 +196,74 @@ describe('chat-list.utils', () => {
         created_at: '2026-04-10T10:00:00Z',
       },
     })).toBe(false)
+  })
+})
+
+describe('segmentTurnBlocks', () => {
+  const b = (id: number, type: string) => ({ id, type })
+
+  it('returns no segments for an empty turn', () => {
+    expect(segmentTurnBlocks([])).toEqual([])
+  })
+
+  it('wraps a lone process block in a rail segment keyed by its id', () => {
+    const tool = b(1, 'tool')
+    expect(segmentTurnBlocks([tool])).toEqual([
+      { kind: 'rail', key: 'rail:1', blocks: [tool] },
+    ])
+  })
+
+  it('emits text / error / attachments as standalone flow segments', () => {
+    const text = b(1, 'text')
+    const error = b(2, 'error')
+    const attachments = b(3, 'attachments')
+    expect(segmentTurnBlocks([text, error, attachments])).toEqual([
+      { kind: 'flow', key: 'flow:1', block: text },
+      { kind: 'flow', key: 'flow:2', block: error },
+      { kind: 'flow', key: 'flow:3', block: attachments },
+    ])
+  })
+
+  it('coalesces a maximal run of consecutive process blocks into one rail', () => {
+    const reasoning = b(1, 'reasoning')
+    const tool1 = b(2, 'tool')
+    const tool2 = b(3, 'tool')
+    expect(segmentTurnBlocks([reasoning, tool1, tool2])).toEqual([
+      { kind: 'rail', key: 'rail:1', blocks: [reasoning, tool1, tool2] },
+    ])
+  })
+
+  it('splits a process run when a flow block interrupts it', () => {
+    const tool1 = b(1, 'tool')
+    const text = b(2, 'text')
+    const tool2 = b(3, 'tool')
+    expect(segmentTurnBlocks([tool1, text, tool2])).toEqual([
+      { kind: 'rail', key: 'rail:1', blocks: [tool1] },
+      { kind: 'flow', key: 'flow:2', block: text },
+      { kind: 'rail', key: 'rail:3', blocks: [tool2] },
+    ])
+  })
+
+  it('keys each segment by its first block so tail growth never reparents earlier segments', () => {
+    const tool1 = b(1, 'tool')
+    const text = b(2, 'text')
+    const tool2 = b(3, 'tool')
+    const reasoning = b(4, 'reasoning')
+
+    const before = segmentTurnBlocks([tool1, text, tool2])
+    const after = segmentTurnBlocks([tool1, text, tool2, reasoning])
+
+    expect(after[0]!.key).toBe(before[0]!.key)
+    expect(after[1]!.key).toBe(before[1]!.key)
+    expect(after[2]!.key).toBe(before[2]!.key)
+    expect(after[2]).toEqual({ kind: 'rail', key: 'rail:3', blocks: [tool2, reasoning] })
+  })
+
+  it('preserves block object identity inside segments', () => {
+    const tool = b(1, 'tool')
+    const text = b(2, 'text')
+    const result = segmentTurnBlocks([tool, text])
+    expect((result[0] as { blocks: unknown[] }).blocks[0]).toBe(tool)
+    expect((result[1] as { block: unknown }).block).toBe(text)
   })
 })

@@ -245,52 +245,63 @@
         </p> -->
 
         <template
-          v-for="(block, i) in message.messages"
-          :key="i"
+          v-for="segment in turnSegments"
+          :key="segment.key"
         >
-          <!-- Thinking block -->
-          <ThinkingBlock
-            v-if="block.type === 'reasoning'"
-            :block="(block as ThinkingBlockType)"
-            :streaming="isAssistantBlockStreaming(i)"
-          />
-
-          <!-- Tool call block -->
-          <ToolCallBlock
-            v-else-if="block.type === 'tool' && isVisibleAssistantBlock(block)"
-            :block="(block as ToolCallBlockType)"
-          />
-
-          <!-- Text block -->
-          <div
-            v-else-if="block.type === 'text' && block.content"
-            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+          <!-- Process rail: recessed lane for thinking + tool calls -->
+          <ProcessRail
+            v-if="segment.kind === 'rail'"
+            :settled="!message.streaming"
           >
-            <MarkdownRender
-              :content="block.content"
-              :is-dark="isDark"
-              :smooth-streaming="isAssistantBlockStreaming(i)"
-              :typewriter="isAssistantBlockStreaming(i)"
-              :fade="isAssistantBlockStreaming(i)"
-              custom-id="chat-msg"
+            <template
+              v-for="block in segment.blocks"
+              :key="block.id"
+            >
+              <ThinkingBlock
+                v-if="block.type === 'reasoning'"
+                :block="(block as ThinkingBlockType)"
+                :streaming="isBlockStreaming(block)"
+              />
+              <ToolCallBlock
+                v-else-if="block.type === 'tool'"
+                :block="(block as ToolCallBlockType)"
+              />
+            </template>
+          </ProcessRail>
+
+          <!-- Flow segment: the answer / error / attachments break out full-width -->
+          <template v-else>
+            <!-- Text block -->
+            <div
+              v-if="segment.block.type === 'text' && segment.block.content"
+              class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+            >
+              <MarkdownRender
+                :content="segment.block.content"
+                :is-dark="isDark"
+                :smooth-streaming="isBlockStreaming(segment.block)"
+                :typewriter="isBlockStreaming(segment.block)"
+                :fade="isBlockStreaming(segment.block)"
+                custom-id="chat-msg"
+              />
+            </div>
+
+            <!-- Error block -->
+            <div
+              v-else-if="segment.block.type === 'error' && segment.block.content"
+              class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+              <span class="min-w-0 whitespace-pre-wrap break-words">{{ segment.block.content }}</span>
+            </div>
+
+            <!-- Attachment block -->
+            <AttachmentBlock
+              v-else-if="segment.block.type === 'attachments'"
+              :block="(segment.block as AttachmentBlockType)"
+              :on-open-media="onOpenMedia"
             />
-          </div>
-
-          <!-- Error block -->
-          <div
-            v-else-if="block.type === 'error' && block.content"
-            class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-            <span class="min-w-0 whitespace-pre-wrap break-words">{{ block.content }}</span>
-          </div>
-
-          <!-- Attachment block -->
-          <AttachmentBlock
-            v-else-if="block.type === 'attachments'"
-            :block="(block as AttachmentBlockType)"
-            :on-open-media="onOpenMedia"
-          />
+          </template>
         </template>
 
         <!-- Streaming indicator -->
@@ -338,6 +349,9 @@ import type {
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
+import type { TurnSegment } from '@/store/chat-list.utils'
+import { segmentTurnBlocks } from '@/store/chat-list.utils'
+import ProcessRail from './process-rail.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -464,12 +478,22 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
   }
 })
 
-function hasLaterAssistantMessage(index: number): boolean {
-  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
-}
+const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
+  props.message.role === 'assistant' ? segmentTurnBlocks(props.message.messages) : [],
+)
 
-function isAssistantBlockStreaming(index: number): boolean {
-  return props.message.role === 'assistant' && props.message.streaming && !hasLaterAssistantMessage(index)
+// Only the final block of a streaming turn is "live" — earlier blocks have
+// settled. We compare by stable block id (never array index) so segmentation
+// and streaming state agree without depending on position.
+const streamingBlockId = computed<number | null>(() => {
+  if (props.message.role !== 'assistant' || !props.message.streaming) return null
+  const blocks = props.message.messages
+  const last = blocks[blocks.length - 1]
+  return last ? last.id : null
+})
+
+function isBlockStreaming(block: ContentBlock): boolean {
+  return streamingBlockId.value !== null && block.id === streamingBlockId.value
 }
 
 const hasVisibleAssistantBlocks = computed(() =>
