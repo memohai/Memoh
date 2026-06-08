@@ -79,7 +79,7 @@
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="grid gap-3 sm:grid-cols-2">
             <button
               v-for="font in fonts"
               :key="font.id"
@@ -90,33 +90,42 @@
             >
               <!-- Preview area -->
               <div class="rounded-md border border-border bg-muted px-3 py-2.5 select-none">
-                <div
-                  class="text-[22px] leading-none font-semibold tracking-tight text-foreground"
-                  :style="{ fontFamily: font.family }"
-                >
-                  Ag
+                <div class="flex items-baseline gap-2">
+                  <span
+                    class="text-[26px] leading-none font-semibold text-foreground"
+                    :style="{ fontFamily: font.family }"
+                  >Ag</span>
+                  <span
+                    class="text-[13px] leading-none text-foreground/80"
+                    :style="{ fontFamily: font.family }"
+                  >智能对话 Interface</span>
                 </div>
                 <div
-                  class="mt-1.5 text-[11px] leading-none text-muted-foreground"
+                  class="mt-2 text-[11px] leading-relaxed text-muted-foreground"
                   :style="{ fontFamily: font.family }"
                 >
-                  智能对话 · Interface
+                  The quick brown fox jumps over the lazy dog. 0123
                 </div>
               </div>
               <!-- Card footer -->
-              <div class="mt-2 flex items-center justify-between gap-2 px-0.5">
-                <div class="min-w-0">
+              <div class="mt-2 px-0.5">
+                <div class="flex items-center justify-between gap-2">
                   <p class="text-xs font-medium truncate">
-                    {{ t(`settings.appearance.fonts.${font.id}`) }}
+                    {{ font.name }}
                   </p>
-                  <p class="mt-0.5 text-[10px] text-muted-foreground">
-                    {{ font.cjk ? t('settings.appearance.fontCjkUnified') : t('settings.appearance.fontCjkSystem') }}
-                  </p>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <span class="text-[10px] text-muted-foreground">
+                      {{ font.cjk ? t('settings.appearance.fontCjkUnified') : t('settings.appearance.fontCjkSystem') }}
+                    </span>
+                    <Check
+                      v-if="fontFamily === font.id"
+                      class="size-3.5 text-foreground"
+                    />
+                  </div>
                 </div>
-                <Check
-                  v-if="fontFamily === font.id"
-                  class="size-3.5 shrink-0 text-foreground"
-                />
+                <p class="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  {{ font.note }}
+                </p>
               </div>
             </button>
           </div>

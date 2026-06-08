@@ -5,8 +5,13 @@ export interface FontOption {
   name: string
   family: string
   href?: string
-  /** Whether this font natively covers CJK glyphs (no system fallback needed for Chinese) */
+  /** Whether this font natively covers CJK glyphs */
   cjk: boolean
+  /**
+   * Brief evaluation note shown on the font card.
+   * Keep to one short line — it's for screenshot evaluation, not documentation.
+   */
+  note: string
 }
 
 export const fontIds = [
@@ -15,8 +20,8 @@ export const fontIds = [
   'misans',
   'harmony-sans',
   'oppo-sans',
-  'geist',
   'inter',
+  'geist',
   'plus-jakarta-sans',
   'dm-sans',
   'outfit',
@@ -30,6 +35,7 @@ export const fonts: FontOption[] = [
     name: 'System',
     family: `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", ${CJK_SYS}`,
     cjk: false,
+    note: 'SF Pro (macOS) · Segoe UI (Windows). The baseline — everything else is judged against this.',
   },
   {
     id: 'noto-sans-sc',
@@ -37,37 +43,39 @@ export const fonts: FontOption[] = [
     family: '"Noto Sans SC", sans-serif',
     href: 'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap',
     cjk: true,
+    note: 'Google\'s universal humanist sans. Balanced weight, zero personality. Best guaranteed CJK cross-platform consistency.',
   },
   {
     id: 'misans',
     name: 'MiSans',
-    family: '"MiSans", "MiSans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif',
-    // Xiaomi HyperOS open-source font — Latin + Simplified Chinese in one family
-    href: 'https://cdn.jsdelivr.net/npm/misans-sc@4.0.1/dist/MiSans.css',
+    family: '"MiSans", "Mi Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif',
+    href: 'https://fonts.cdnfonts.com/css/misans',
     cjk: true,
+    note: 'Xiaomi HyperOS font. Latin weight runs lighter than System — Chinese character is where it earns its keep.',
   },
   {
     id: 'harmony-sans',
     name: 'HarmonyOS Sans',
     family: '"HarmonyOS Sans SC", "HarmonyOS Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif',
-    // Huawei HarmonyOS open-source font — Latin + CJK unified
-    href: 'https://cdn.jsdelivr.net/gh/hurub/HarmonyOS_Sans@main/fonts.css',
+    href: 'https://fonts.cdnfonts.com/css/harmonyos-sans',
     cjk: true,
+    note: 'Huawei\'s system font. Slightly rounder, friendlier. Latin nearly identical to MiSans; CJK is subtly warmer.',
   },
   {
     id: 'oppo-sans',
     name: 'OPPO Sans',
     family: '"OPPO Sans", "OPPOSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", sans-serif',
-    // OPPO open-source font — Latin + Simplified Chinese in one family
-    href: 'https://cdn.jsdelivr.net/gh/OPPO-OpenPlatform/OPPOSans@main/font.css',
+    href: 'https://fonts.cdnfonts.com/css/oppo-sans-4',
     cjk: true,
+    note: 'Elegant proportions. Latin glyphs near-identical to MiSans and HarmonyOS — the three diverge mainly in CJK strokes.',
   },
   {
     id: 'inter',
     name: 'Inter',
     family: `"Inter", ${CJK_SYS}`,
-    href: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
+    // Loaded eagerly in index.html — no runtime href needed
     cjk: false,
+    note: 'The web standard. Default weight runs heavier than System. Neutral to a fault — almost invisible as a design choice.',
   },
   {
     id: 'geist',
@@ -75,6 +83,7 @@ export const fonts: FontOption[] = [
     family: `"Geist", ${CJK_SYS}`,
     href: 'https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist-sans/style.css',
     cjk: false,
+    note: 'Vercel\'s UI font — not a code font (that\'s Geist Mono). Same geometric base as Inter, more personality in numerals and punctuation.',
   },
   {
     id: 'plus-jakarta-sans',
@@ -82,6 +91,7 @@ export const fonts: FontOption[] = [
     family: `"Plus Jakarta Sans", ${CJK_SYS}`,
     href: 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap',
     cjk: false,
+    note: 'Humanist with clear personality. Double-story a, distinct counters. Warm and approachable — product tone alignment matters here.',
   },
   {
     id: 'dm-sans',
@@ -89,6 +99,7 @@ export const fonts: FontOption[] = [
     family: `"DM Sans", ${CJK_SYS}`,
     href: 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap',
     cjk: false,
+    note: 'Inter-adjacent but measurably different. Slightly wider, more relaxed. The g and s carry mild editorial character.',
   },
   {
     id: 'outfit',
@@ -96,6 +107,7 @@ export const fonts: FontOption[] = [
     family: `"Outfit", ${CJK_SYS}`,
     href: 'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap',
     cjk: false,
+    note: 'Near-perfect geometric circles. Strongly designed — excellent for display headings, can overpower dense UI text.',
   },
 ]
 

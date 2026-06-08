@@ -716,7 +716,7 @@
 }
 
 :root {
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.27 0.004 95);
@@ -1479,11 +1479,11 @@
   --animate-accordion-up: accordion-up 0.18s ease-out;
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
-     Anchored to this app's reality — 12px (body) is the workhorse UI size.
-     Weight stays orthogonal but ROLE-MAPPED (single source — do not free-style):
-       · font-semibold → surface / section titles (Card / Dialog / Sheet)
-       · font-medium   → labels, button text, badges, small/inline titles, emphasis
-       · font-normal   → body, descriptions, field values, placeholder, input text */
+     Tuned for Inter Variable.
+     Weight is ROLE-MAPPED via the --font-weight-* overrides below — do not free-style:
+       · font-semibold (560) → surface / section titles (Card / Dialog / Sheet)
+       · font-medium   (470) → labels, button text, badges, small/inline titles, emphasis
+       · font-normal   (380) → body, descriptions, field values, placeholder, input text */
   --text-caption: 0.6875rem; /* 11px — badges, tiny meta */
   --text-caption--line-height: 1rem;
   --text-caption--letter-spacing: -0.04px;
@@ -1505,6 +1505,13 @@
   --text-display: 1.5rem; /* 24px — hero / empty-state */
   --text-display--line-height: 1.85rem;
   --text-display--letter-spacing: -0.4px;
+
+  /* Font-weight overrides: Inter runs ~half-step heavier than SF Pro at the same
+     numeric weight, so the Tailwind role-map values are shifted down accordingly. */
+  --font-weight-normal: 380;
+  --font-weight-medium: 470;
+  --font-weight-semibold: 560;
+  --font-weight-bold: 660;
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -1583,6 +1590,7 @@
   }
   body {
     font-family: var(--font-sans);
+    font-weight: 380;
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
