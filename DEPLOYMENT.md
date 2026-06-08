@@ -30,10 +30,10 @@ nano config.toml   # Change passwords and JWT secret
 
 > **Important**: You must create `config.toml` before starting. `docker-compose.yml` mounts `./config.toml` into the containers — running without it will fail.
 
-### Standard startup (with Qdrant + Browser)
+### Standard startup (with Qdrant + Sparse)
 
 ```bash
-docker compose --profile qdrant --profile browser up -d
+docker compose --profile qdrant --profile sparse up -d
 ```
 
 ### Minimal startup (core only)
@@ -45,33 +45,28 @@ docker compose up -d
 Access:
 - Web UI: http://localhost:8082
 - API: http://localhost:8080
-- Agent: http://localhost:8081
 
 Default credentials: `admin` / `admin123` (change in `config.toml`)
 
 ## Docker Compose Profiles
 
-The base `docker-compose.yml` contains all services. Core services (postgres, server, agent, web) always start. Optional services are gated by profiles and only start when explicitly enabled:
+The base `docker-compose.yml` contains all services. Core services (`postgres`, `migrate`, `server`, and `web`) always start. The AI agent runs in-process inside `server`. Optional services are gated by profiles and only start when explicitly enabled:
 
 | Profile | Service | Description |
 |---------|---------|-------------|
 | `qdrant` | Qdrant | Vector database for memory semantic search |
-| `browser` | Browser | Browser automation gateway (Playwright) |
-| `openviking` | OpenViking | Self-hosted OpenViking memory provider |
+| `sparse` | Sparse | Neural sparse memory retrieval service |
 
 ### Supported combinations
 
 ```bash
-# Core + Qdrant + Browser (recommended default)
-docker compose --profile qdrant --profile browser up -d
-
-# Core + Qdrant + OpenViking (self-hosted)
-docker compose --profile qdrant --profile openviking up -d
+# Core + Qdrant + Sparse (recommended default)
+docker compose --profile qdrant --profile sparse up -d
 ```
 
 ### SaaS / external providers
 
-For Mem0 or OpenViking SaaS, no profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
+For Mem0, OpenViking SaaS, or a separately hosted OpenViking service, no Compose profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
 
 ### China Mainland Mirror
 
@@ -79,7 +74,7 @@ Uncomment `registry = "memoh.cn"` in `config.toml` under `[container]`, then add
 
 ```bash
 docker compose -f docker-compose.yml -f docker/docker-compose.cn.yml \
-  --profile qdrant --profile browser up -d
+  --profile qdrant --profile sparse up -d
 ```
 
 ## Prerequisites
