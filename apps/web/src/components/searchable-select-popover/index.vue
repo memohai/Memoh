@@ -34,6 +34,7 @@
     >
       <div class="flex items-center border-b px-3">
         <Search
+          v-if="searchIcon"
           class="mr-2 size-3.5 shrink-0 text-muted-foreground"
         />
         <input
@@ -201,6 +202,9 @@ const props = withDefaults(defineProps<{
   // Popover width as a fraction of the trigger width. Defaults to full width;
   // consumers with short labels (e.g. timezone) can narrow it.
   widthRatio?: number
+  // Show the magnifier glyph inside the panel search input. Off for a cleaner,
+  // combobox-style panel (the placeholder already says "Search …").
+  searchIcon?: boolean
 }>(), {
   placeholder: '',
   ariaLabel: '',
@@ -209,6 +213,7 @@ const props = withDefaults(defineProps<{
   emptyText: 'No results.',
   showGroupHeaders: true,
   widthRatio: 1,
+  searchIcon: true,
 })
 
 const selected = defineModel<string>({ default: '' })

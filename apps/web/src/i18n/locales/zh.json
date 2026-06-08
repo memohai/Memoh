@@ -137,6 +137,8 @@
     "profileUpdated": "个人资料已更新",
     "profileUpdateFailed": "个人资料更新失败",
     "changePassword": "修改密码",
+    "accountSection": "账户",
+    "sessionSection": "会话",
     "currentPassword": "当前密码",
     "newPassword": "新密码",
     "confirmPassword": "确认新密码",

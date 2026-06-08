@@ -1,5 +1,5 @@
 <template>
-  <div class="mx-4 flex items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+  <div class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
     <div class="min-w-0">
       <div class="text-sm font-medium text-foreground">
         {{ label }}

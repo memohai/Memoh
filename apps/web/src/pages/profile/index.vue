@@ -1,126 +1,100 @@
 <template>
-  <section class="max-w-7xl mx-auto px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12 min-h-[calc(100vh-4rem)] flex flex-col">
-    <!-- Inner Wrapper limits reading width -->
-    <div class="max-w-3xl mx-auto w-full flex-1">
-      <!-- Page Header -->
-      <header class="flex items-start justify-between pb-4 border-b border-border/50 mb-6">
-        <template v-if="loadingInitial">
-          <div class="flex items-center gap-4">
-            <Skeleton class="size-14 rounded-full" />
-            <div class="space-y-2">
-              <Skeleton class="h-5 w-[150px]" />
-              <Skeleton class="h-3 w-[100px]" />
-            </div>
-          </div>
-        </template>
-        <template v-else>
-          <div class="flex items-center gap-4">
-            <Avatar class="size-14 shrink-0">
-              <AvatarImage
-                v-if="profileForm.avatar_url"
-                :src="profileForm.avatar_url"
-                :alt="displayTitle"
-              />
-              <AvatarFallback>
-                {{ avatarFallback }}
-              </AvatarFallback>
-            </Avatar>
-            <div class="min-w-0">
-              <h1 class="text-lg font-semibold truncate">
-                {{ displayTitle }}
-              </h1>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ $t('settings.userProfile') }}
-              </p>
-            </div>
-          </div>
-        </template>
-      </header>
+  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
+    <h1 class="mb-8 px-2 text-lg font-semibold">
+      {{ $t('sidebar.profile') }}
+    </h1>
 
-      <!-- Content Area -->
-      <div class="space-y-6">
-        <!-- Skeleton Loading State -->
-        <template v-if="loadingInitial">
-          <div class="rounded-md border p-6 space-y-6">
-            <div class="grid gap-6 sm:grid-cols-2">
-              <div class="space-y-2">
-                <Skeleton class="h-3 w-16" /><Skeleton class="h-9 w-full" />
-              </div>
-              <div class="space-y-2">
-                <Skeleton class="h-3 w-16" /><Skeleton class="h-9 w-full" />
-              </div>
-              <div class="space-y-2">
-                <Skeleton class="h-3 w-16" /><Skeleton class="h-9 w-full" />
-              </div>
-              <div class="space-y-2">
-                <Skeleton class="h-3 w-16" /><Skeleton class="h-9 w-full" />
-              </div>
-            </div>
+    <div class="space-y-8">
+      <!-- Skeleton loading state -->
+      <template v-if="loadingInitial">
+        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+          <div
+            v-for="i in 5"
+            :key="i"
+            class="mx-4 flex items-center justify-between border-b border-border py-3.5 last:border-b-0"
+          >
+            <Skeleton class="h-4 w-24" />
+            <Skeleton class="h-8 w-64" />
           </div>
-        </template>
+        </div>
+      </template>
 
-        <!-- Main Config Area -->
-        <template v-else>
-          <!-- Profile Card -->
-          <ProfileSection
-            :display-user-id="displayUserID"
-            :display-username="displayUsername"
-            :display-name="profileForm.display_name"
+      <template v-else>
+        <!-- Card 1 · Profile: avatar + display name (hover-to-edit) only -->
+        <SettingsSection>
+          <ProfileIdentity
             :avatar-url="profileForm.avatar_url"
-            :timezone="profileForm.timezone"
-            :saving="savingProfile"
-            :loading="loadingInitial"
-            :is-dirty="isProfileDirty"
-            @update:display-name="profileForm.display_name = $event"
+            :display-name="profileForm.display_name"
+            :username="displayUsername"
+            :fallback="avatarFallback"
             @update:avatar-url="profileForm.avatar_url = $event"
-            @update:timezone="profileForm.timezone = $event"
-            @save="onSaveProfile"
-            @discard="onDiscardProfile"
+            @update:display-name="profileForm.display_name = $event"
+            @save="autoSaveProfile"
           />
+        </SettingsSection>
 
-          <!-- Password Card -->
-          <PasswordSection
-            :current-password="passwordForm.currentPassword"
-            :new-password="passwordForm.newPassword"
-            :confirm-password="passwordForm.confirmPassword"
-            :saving="savingPassword"
-            :loading="loadingInitial"
-            @update:current-password="passwordForm.currentPassword = $event"
-            @update:new-password="passwordForm.newPassword = $event"
-            @update:confirm-password="passwordForm.confirmPassword = $event"
-            @update-password="onUpdatePassword"
-          />
-          
-          <!-- Sign Out Zone -->
-          <div class="pt-6">
-            <div class="rounded-md border bg-background shadow-sm">
-              <div class="flex items-center justify-between p-4 md:p-6">
-                <div>
-                  <h3 class="text-sm font-medium">
-                    {{ $t('auth.logout') }}
-                  </h3>
-                  <p class="text-xs text-muted-foreground mt-1">
-                    End your current session securely.
-                  </p>
-                </div>
-                <ConfirmPopover
-                  :message="$t('auth.logoutConfirm')"
-                  @confirm="onLogout"
-                >
-                  <template #trigger>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                    >
-                      {{ $t('auth.logout') }}
-                    </Button>
-                  </template>
-                </ConfirmPopover>
-              </div>
+        <!-- Card 2 · Account: timezone + password -->
+        <SettingsSection :title="$t('settings.accountSection')">
+          <SettingsRow :label="$t('settings.timezone')">
+            <div class="w-64">
+              <TimezoneSelect
+                :model-value="profileForm.timezone"
+                :placeholder="$t('settings.timezonePlaceholder')"
+                @update:model-value="onTimezoneChange"
+              />
             </div>
-          </div>
-        </template>
-      </div>
+          </SettingsRow>
+
+          <SettingsRow :label="$t('auth.password')">
+            <PasswordSection
+              :open="passwordDialogOpen"
+              :saving="savingPassword"
+              @update:open="passwordDialogOpen = $event"
+              @submit="onSubmitPassword"
+            />
+          </SettingsRow>
+        </SettingsSection>
+
+        <!-- Card 3 · Session: user id + sign out (low-frequency, kept at the bottom) -->
+        <SettingsSection :title="$t('settings.sessionSection')">
+          <SettingsRow :label="$t('settings.userID')">
+            <div class="flex items-center gap-1 text-sm text-muted-foreground">
+              <span class="max-w-[16rem] truncate font-mono text-xs">{{ displayUserID }}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="$t('common.copy')"
+                @click="copyToClipboard(displayUserID)"
+              >
+                <Check
+                  v-if="copiedId"
+                  class="size-3.5"
+                />
+                <Copy
+                  v-else
+                  class="size-3.5"
+                />
+              </Button>
+            </div>
+          </SettingsRow>
+
+          <SettingsRow :label="$t('auth.logout')">
+            <ConfirmPopover
+              :message="$t('auth.logoutConfirm')"
+              @confirm="onLogout"
+            >
+              <template #trigger>
+                <Button
+                  variant="outline"
+                  size="sm"
+                >
+                  {{ $t('auth.logout') }}
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </SettingsRow>
+        </SettingsSection>
+      </template>
     </div>
   </section>
 </template>
@@ -130,10 +104,14 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
-import { Button, Skeleton, Avatar, AvatarFallback, AvatarImage } from '@memohai/ui'
+import { Button, Skeleton } from '@memohai/ui'
+import { Check, Copy } from 'lucide-vue-next'
 
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import ProfileSection from './components/profile-section.vue'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import ProfileIdentity from './components/profile-identity.vue'
 import PasswordSection from './components/password-section.vue'
 
 import { getUsersMe, putUsersMe, putUsersMePassword } from '@memohai/sdk'
@@ -168,11 +146,14 @@ const profileForm = reactive({
   timezone: '',
 })
 
-const passwordForm = reactive({
-  currentPassword: '',
-  newPassword: '',
-  confirmPassword: '',
-})
+const passwordDialogOpen = ref(false)
+const copiedId = ref(false)
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text)
+  copiedId.value = true
+  setTimeout(() => copiedId.value = false, 2000)
+}
 
 const displayUserID = computed(() => account.value?.id || userInfo.id || '')
 const displayUsername = computed(() => account.value?.username || userInfo.username || '')
@@ -180,12 +161,6 @@ const displayTitle = computed(() => {
   return profileForm.display_name.trim() || displayUsername.value || displayUserID.value || t('settings.user')
 })
 const avatarFallback = useAvatarInitials(() => displayTitle.value, 'U')
-
-const isProfileDirty = computed(() => {
-  return profileForm.display_name !== originalProfile.display_name ||
-         profileForm.avatar_url !== originalProfile.avatar_url ||
-         profileForm.timezone !== originalProfile.timezone
-})
 
 onMounted(() => {
   void loadPageData()
@@ -230,23 +205,32 @@ async function loadMyAccount() {
   })
 }
 
-function onDiscardProfile() {
-  profileForm.display_name = originalProfile.display_name
-  profileForm.avatar_url = originalProfile.avatar_url
-  profileForm.timezone = originalProfile.timezone
+function onTimezoneChange(value: string | number | undefined) {
+  profileForm.timezone = String(value || 'UTC')
+  void autoSaveProfile()
 }
 
-async function onSaveProfile() {
+// Silent auto-save: triggered on display-name blur, timezone change, and avatar
+// apply. Skips the request when nothing actually changed; only surfaces errors.
+async function autoSaveProfile() {
+  const body: AccountsUpdateProfileRequest = {
+    display_name: profileForm.display_name.trim(),
+    avatar_url: profileForm.avatar_url.trim(),
+    timezone: profileForm.timezone.trim(),
+  }
+  if (
+    body.display_name === originalProfile.display_name
+    && body.avatar_url === originalProfile.avatar_url
+    && body.timezone === originalProfile.timezone
+  ) {
+    return
+  }
+
   savingProfile.value = true
   try {
-    const body: AccountsUpdateProfileRequest = {
-      display_name: profileForm.display_name.trim(),
-      avatar_url: profileForm.avatar_url.trim(),
-      timezone: profileForm.timezone.trim(),
-    }
     const { data } = await putUsersMe({ body, throwOnError: true })
     account.value = data
-    
+
     const dName = data.display_name || ''
     const aUrl = data.avatar_url || ''
     const tZone = data.timezone || 'UTC'
@@ -264,7 +248,6 @@ async function onSaveProfile() {
       avatarUrl: aUrl,
       timezone: tZone,
     })
-    toast.success(t('settings.profileUpdated'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
   } finally {
@@ -272,16 +255,11 @@ async function onSaveProfile() {
   }
 }
 
-async function onUpdatePassword() {
-  const currentPassword = passwordForm.currentPassword.trim()
-  const newPassword = passwordForm.newPassword.trim()
-  const confirmPassword = passwordForm.confirmPassword.trim()
+async function onSubmitPassword(payload: { currentPassword: string, newPassword: string }) {
+  const currentPassword = payload.currentPassword.trim()
+  const newPassword = payload.newPassword.trim()
   if (!currentPassword || !newPassword) {
     toast.error(t('settings.passwordRequired'))
-    return
-  }
-  if (newPassword !== confirmPassword) {
-    toast.error(t('settings.passwordNotMatch'))
     return
   }
   savingPassword.value = true
@@ -291,9 +269,7 @@ async function onUpdatePassword() {
       new_password: newPassword,
     }
     await putUsersMePassword({ body, throwOnError: true })
-    passwordForm.currentPassword = ''
-    passwordForm.newPassword = ''
-    passwordForm.confirmPassword = ''
+    passwordDialogOpen.value = false
     toast.success(t('settings.passwordUpdated'))
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('settings.passwordUpdateFailed'), { prefixFallback: true }))

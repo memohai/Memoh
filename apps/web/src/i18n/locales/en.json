@@ -137,6 +137,8 @@
     "profileUpdated": "Profile Updated",
     "profileUpdateFailed": "Failed to update profile",
     "changePassword": "Change Password",
+    "accountSection": "Account",
+    "sessionSection": "Session",
     "currentPassword": "Current Password",
     "newPassword": "New Password",
     "confirmPassword": "Confirm New Password",

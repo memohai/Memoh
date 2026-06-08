@@ -1,22 +1,17 @@
 <template>
-  <SearchableSelectPopover
+  <Combobox
     v-model="selected"
     :options="options"
     :placeholder="placeholder || ''"
-    :aria-label="placeholder || 'Select timezone'"
     :search-placeholder="$t('common.searchTimezone')"
-    search-aria-label="Search timezones"
     :empty-text="$t('common.noTimezoneFound')"
-    :show-group-headers="false"
-    :width-ratio="0.55"
   />
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
-import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import Combobox, { type ComboboxOption } from '@/components/combobox/index.vue'
 import { timezones, emptyTimezoneValue, getUtcOffsetLabel } from '@/utils/timezones'
 
 const { t } = useI18n()
@@ -41,8 +36,8 @@ const offsetMap = computed(() => {
   return map
 })
 
-const options = computed<SearchableSelectOption[]>(() => {
-  const items: SearchableSelectOption[] = []
+const options = computed<ComboboxOption[]>(() => {
+  const items: ComboboxOption[] = []
   if (props.allowEmpty) {
     items.push({
       value: emptyTimezoneValue,
@@ -50,13 +45,10 @@ const options = computed<SearchableSelectOption[]>(() => {
     })
   }
   for (const tz of timezones) {
-    const parts = tz.split('/')
-    const offset = offsetMap.value.get(tz) ?? ''
     items.push({
       value: tz,
       label: tz,
-      description: offset,
-      keywords: [...parts, offset],
+      description: offsetMap.value.get(tz) ?? '',
     })
   }
   return items

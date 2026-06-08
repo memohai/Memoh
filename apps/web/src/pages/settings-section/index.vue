@@ -30,7 +30,7 @@
             </template>
             <template #main>
               <SidebarInset class="flex flex-col overflow-hidden">
-                <section class="flex-1 relative min-h-0 overflow-y-auto">
+                <section class="flex-1 relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
                   <router-view v-slot="{ Component }">
                     <KeepAlive>
                       <component :is="Component" />
