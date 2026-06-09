@@ -18,15 +18,17 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { latestOutputLine } from '@/store/chat-list.utils'
 
-const props = defineProps<{ text?: string, mono?: boolean }>()
+const props = defineProps<{ text?: string, mono?: boolean, intervalMs?: number }>()
 
 const latest = computed(() => latestOutputLine(props.text))
 
-// Show the latest line, paced so bursty output can't thrash reactivity. The
-// entrance slide replays only when the line is a *new* line — not when the
-// current line grows token-by-token — so a streaming reasoning line updates its
-// text in place (calm) instead of re-animating on every token (the flicker).
-const THROTTLE_MS = 160
+// A live peek that chases the raw token stream is exhausting to watch, so we
+// sample it at a calm cadence (intervalMs) rather than following every change —
+// the reasoning stream can fire many lines a second, but the peek refreshes at
+// most ~once per interval. The gentle opacity settle replays only when the line
+// is a *new* line, not when the current one grows, so there's no per-token
+// flashing. Callers that want a snappier feel (bg output) pass a smaller value.
+const intervalMs = props.intervalMs ?? 240
 const line = ref(latest.value)
 const animKey = ref(0)
 let throttleTimer: ReturnType<typeof setTimeout> | null = null
@@ -35,7 +37,7 @@ let lastFlushAt = 0
 function apply(next: string) {
   if (next === line.value) return
   // A growing line is a prefix-extension of the current one (or vice versa);
-  // anything else is a genuinely different line worth re-animating.
+  // anything else is a genuinely different line worth re-settling.
   const isGrowth = next.startsWith(line.value) || line.value.startsWith(next)
   if (!isGrowth) animKey.value++
   line.value = next
@@ -43,7 +45,7 @@ function apply(next: string) {
 
 watch(latest, () => {
   const elapsed = Date.now() - lastFlushAt
-  if (elapsed >= THROTTLE_MS) {
+  if (elapsed >= intervalMs) {
     lastFlushAt = Date.now()
     apply(latest.value)
   } else if (throttleTimer === null) {
@@ -51,7 +53,7 @@ watch(latest, () => {
       throttleTimer = null
       lastFlushAt = Date.now()
       apply(latest.value)
-    }, THROTTLE_MS - elapsed)
+    }, intervalMs - elapsed)
   }
 })
 
@@ -61,19 +63,18 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* A gentle brighten, never a flash from zero — calmest at a low cadence. */
 .live-peek-line {
-  animation: live-peek-in 200ms ease-out;
+  animation: live-peek-in 260ms ease-out;
 }
 
 @keyframes live-peek-in {
   from {
-    opacity: 0;
-    transform: translateY(3px);
+    opacity: 0.5;
   }
 
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 

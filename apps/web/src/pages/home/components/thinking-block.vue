@@ -22,6 +22,7 @@
     <LivePeekLine
       v-if="!open && streaming && peekLine"
       :text="block.content"
+      :interval-ms="800"
       class="ml-5"
     />
 
