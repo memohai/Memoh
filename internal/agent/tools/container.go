@@ -812,17 +812,21 @@ func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionConte
 
 	switch action {
 	case "list":
-		tasks := p.bgManager.ListForSession(session.BotID, session.SessionID)
-		entries := make([]map[string]any, 0, len(tasks))
-		for _, t := range tasks {
-			entries = append(entries, map[string]any{
-				"task_id":     t.ID,
-				"command":     truncateStr(t.Command, 120),
-				"description": t.Description,
-				"status":      string(t.Status),
-				"output_file": t.OutputFile,
-				"started_at":  session.FormatTime(t.StartedAt),
-			})
+		snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
+		entries := make([]map[string]any, 0, len(snapshots))
+		for _, s := range snapshots {
+			entry := map[string]any{
+				"task_id":     s.TaskID,
+				"kind":        string(s.Kind),
+				"description": s.Description,
+				"status":      string(s.Status),
+				"started_at":  session.FormatTime(s.StartedAt),
+			}
+			if s.Kind != background.KindSpawn {
+				entry["command"] = truncateStr(s.Command, 120)
+				entry["output_file"] = s.OutputFile
+			}
+			entries = append(entries, entry)
 		}
 		return map[string]any{"tasks": entries, "count": len(entries)}, nil
 
@@ -834,18 +838,42 @@ func (p *ContainerProvider) execBgStatus(_ context.Context, session SessionConte
 		if task == nil {
 			return nil, fmt.Errorf("task %s not found", taskID)
 		}
+		s := task.Snapshot()
 		result := map[string]any{
-			"task_id":     task.ID,
-			"command":     task.Command,
-			"description": task.Description,
-			"status":      string(task.Status),
-			"output_file": task.OutputFile,
-			"started_at":  session.FormatTime(task.StartedAt),
+			"task_id":     s.TaskID,
+			"kind":        string(s.Kind),
+			"description": s.Description,
+			"status":      string(s.Status),
+			"started_at":  session.FormatTime(s.StartedAt),
 		}
-		if task.Status != background.TaskRunning {
-			result["exit_code"] = task.ExitCode
-			result["completed_at"] = session.FormatTime(task.CompletedAt)
-			result["output_tail"] = task.OutputTail()
+		if s.Status != background.TaskRunning {
+			result["completed_at"] = session.FormatTime(s.CompletedAt)
+		}
+		if s.Kind == background.KindSpawn {
+			if len(s.Branches) > 0 {
+				branches := make([]map[string]any, 0, len(s.Branches))
+				for _, br := range s.Branches {
+					b := map[string]any{"task": br.Task, "status": string(br.Status)}
+					if br.ChildSessionID != "" {
+						b["session_id"] = br.ChildSessionID
+					}
+					if br.Report != "" {
+						b["report"] = br.Report
+					}
+					if br.Error != "" {
+						b["error"] = br.Error
+					}
+					branches = append(branches, b)
+				}
+				result["branches"] = branches
+			}
+			return result, nil
+		}
+		result["command"] = s.Command
+		result["output_file"] = s.OutputFile
+		if s.Status != background.TaskRunning {
+			result["exit_code"] = s.ExitCode
+			result["output_tail"] = s.OutputTail
 		}
 		return result, nil
 
