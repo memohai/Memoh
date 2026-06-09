@@ -48,6 +48,25 @@ export function useShikiHighlighter() {
     }
   }
 
+  // Highlight by an explicit language id (markdown code fences carry the
+  // language directly, e.g. ```bash), rather than deriving it from a filename.
+  async function highlightLang(code: string, lang: string) {
+    loading.value = true
+    try {
+      const normalized = (lang || 'plaintext').toLowerCase()
+      const hl = await getHighlighter()
+      await ensureLang(hl, normalized)
+      html.value = hl.codeToHtml(code, {
+        lang: loadedLangs.has(normalized) ? normalized : 'plaintext',
+        themes: { light: 'github-light', dark: 'github-dark' },
+      })
+    } catch {
+      html.value = `<pre>${escapeHtml(code)}</pre>`
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function highlightDiff(oldText: string, newText: string, filename: string) {
     loading.value = true
     try {
@@ -74,7 +93,7 @@ export function useShikiHighlighter() {
     }
   }
 
-  return { html, loading, highlight, highlightDiff }
+  return { html, loading, highlight, highlightLang, highlightDiff }
 }
 
 function escapeHtml(str: string): string {

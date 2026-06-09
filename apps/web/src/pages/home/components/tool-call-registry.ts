@@ -70,6 +70,7 @@ import ToolCallDetailEmailRead from './tool-call-detail-email-read.vue'
 import ToolCallDetailExec from './tool-call-detail-exec.vue'
 import ToolCallDetailImage from './tool-call-detail-image.vue'
 import ToolCallDetailMemory from './tool-call-detail-memory.vue'
+import ToolCallDetailOutput from './tool-call-detail-output.vue'
 import ToolCallDetailRemoteSession from './tool-call-detail-remote-session.vue'
 import ToolCallDetailSchedule from './tool-call-detail-schedule.vue'
 import ToolCallDetailSend from './tool-call-detail-send.vue'
@@ -92,6 +93,9 @@ export interface ToolDisplay {
   diffAdd?: number
   diffRemove?: number
   hideAction?: boolean
+  // 'card' = output/diff/file content in a grayscale card; 'inline' = a
+  // half-embedded key:value list (params), no card. Defaults to 'card'.
+  detailVariant?: 'card' | 'inline'
 }
 
 const FILE_PATH_TOOLS = new Set(['read', 'write', 'edit', 'list'])
@@ -102,6 +106,20 @@ export function isFilePathTool(toolName: string): boolean {
 
 export function isDirPathTool(toolName: string): boolean {
   return toolName === 'list'
+}
+
+// Read-only / no-side-effect tools form an "explore" segment; everything else
+// (write, edit, exec, send, schedule mutations, …) is an "action" segment.
+// Consecutive tools of the same category are grouped together; reasoning rides
+// along with whichever segment it sits next to.
+const READONLY_TOOLS = new Set([
+  'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
+  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+  'list_schedule', 'get_schedule', 'bg_status', 'browser_observe', 'computer_observe',
+])
+
+export function isReadOnlyTool(toolName: string): boolean {
+  return READONLY_TOOLS.has(toolName)
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -134,6 +152,15 @@ function truncate(s: string, max = 60): string {
   if (!s) return ''
   if (s.length <= max) return s
   return `${s.slice(0, max)}…`
+}
+
+// File-path tools show just the filename in the row (the absolute path becomes
+// the tooltip via fullTarget) — same as Arkloop: "Read README_CN.md", not the
+// full /Users/.../README_CN.md.
+function basename(path: string): string {
+  if (!path) return ''
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? path
 }
 
 function firstLine(s: string, max = 80): string {
@@ -269,7 +296,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'read': {
       const path = pickString(input, 'path')
-      return { icon: FileText, actionKey: 'read', target: path }
+      return { icon: FileText, actionKey: 'read', target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
     }
     case 'write': {
       const path = pickString(input, 'path')
@@ -278,7 +305,8 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       return {
         icon: FilePlus2,
         actionKey: 'write',
-        target: path,
+        target: basename(path),
+        fullTarget: path,
         detail: ToolCallDetailWrite,
         defaultOpen: true,
         diffAdd: contentLineCount || lineCount(content),
@@ -292,17 +320,16 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       return {
         icon: FilePen,
         actionKey: 'edit',
-        target: path,
+        target: basename(path),
+        fullTarget: path,
         detail: ToolCallDetailEdit,
-        defaultOpen: true,
         diffAdd: lineCount(newText),
         diffRemove: lineCount(oldText),
-        hideAction: true,
       }
     }
     case 'list': {
       const path = pickString(input, 'path')
-      return { icon: FolderOpen, actionKey: 'list', target: path }
+      return { icon: FolderOpen, actionKey: 'list', target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
     }
     case 'exec': {
       const cmd = pickString(input, 'command')
@@ -358,7 +385,6 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: display,
         fullTarget: text || target,
         detail: ToolCallDetailSend,
-        defaultOpen: true,
       }
     }
     case 'react': {
@@ -547,6 +573,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         actionKey: 'generic',
         target: block.toolName,
         expandable: true,
+        detailVariant: 'inline',
       }
   }
 }

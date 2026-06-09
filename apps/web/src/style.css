@@ -11,8 +11,10 @@
 
 @layer components {
   [data-chat-content] .prose {
-    font-size: 0.875rem;
-    line-height: 1.625;
+    /* Body scale aligned with Arkloop (~16px / 1.65). Tables and code blocks set
+     * their own smaller size so they don't grow with this. */
+    font-size: 1rem;
+    line-height: 1.65;
   }
 }
 
@@ -68,14 +70,17 @@
   --ms-font-sans: inherit;
   --ms-text-body: inherit;
   --ms-leading-body: 1.625;
-  --ms-text-h1: 2.25rem;
-  --ms-text-h2: 1.5rem;
-  --ms-text-h3: 1.25rem;
-  --ms-text-h4: 1.125rem;
-  --ms-text-h5: 1rem;
-  --ms-text-h6: 1rem;
-  --ms-weight-h1: 800;
-  --ms-weight-h2: 700;
+  /* Heading scale is em-relative (tracks the body) and restrained like Arkloop —
+   * headings sit just above the body rather than the old fixed 36/24/20px that
+   * dwarfed the text. Weights are toned down from the previous 800/700. */
+  --ms-text-h1: 1.5em;
+  --ms-text-h2: 1.3em;
+  --ms-text-h3: 1.15em;
+  --ms-text-h4: 1.05em;
+  --ms-text-h5: 1em;
+  --ms-text-h6: 1em;
+  --ms-weight-h1: 700;
+  --ms-weight-h2: 650;
   --ms-weight-h3: 600;
   --ms-weight-h4: 600;
 
@@ -100,12 +105,19 @@
   --list-counter-marker: var(--color-muted-foreground);
   --list-marker: var(--color-muted-foreground);
 
-  /* Tables */
-  --table-border: var(--color-border);
-  --table-header-bg: var(--color-muted);
-  --code-action-hover-bg: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  /* Tables — no row hover (markdown tables are content, not interactive lists).
+   * markstream's `tr:hover` reads --code-action-hover-bg, so transparent here
+   * disables it uniformly for every row (avoids the odd/even specificity tie
+   * with the zebra-stripe override below). */
+  /* Outer frame is the same hairline as the inner grid (a divider, not a hard
+   * edge). Header is one notch grayer than --muted so the two title strips
+   * (table header + code-block header) read as a quiet label band. */
+  --table-border: color-mix(in oklch, var(--color-border) 55%, transparent);
+  --table-header-bg: color-mix(in oklch, var(--color-muted), var(--color-border) 35%);
+  --code-action-hover-bg: transparent;
 
-  /* Inline code — accent pill (1.x uses .inline-code, not bare <code>) */
+  /* Inline code (`internal/` etc.) — a dimmed gray chip, text-button style.
+   * It reads as a quiet token against the pure-white table/code body. */
   --inline-code-bg: var(--color-accent);
   --inline-code-fg: var(--color-foreground);
   --inline-code-border: transparent;
@@ -137,14 +149,33 @@
 
 .markstream-vue .table-node {
   box-shadow: none;
+  /* Body is pure white so it reads brighter than the (slightly gray) chat
+   * surface — never the same as the background. */
+  background-color: #fff;
+  /* Decoupled from the (larger) body font so tables stay compact like Arkloop
+   * — table body 15px, header 14px (see thead rule). */
+  font-size: 0.9375rem;
 }
 
-/* Drop the per-cell vertical grid lines; keep a single horizontal separator */
+.dark .markstream-vue .table-node {
+  background-color: var(--color-card);
+}
+
+/* Full grid (Excel feel): both vertical + horizontal cell lines, but a finer/
+ * lighter hairline than the outer frame so the grid is calm, not heavy. */
 .markstream-vue .table-node th,
 .markstream-vue .table-node td {
+  border-right: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  /* Arkloop-like cell metrics: 8px/12px padding + tight 1.5 line-height keeps
+   * rows compact (the loose 1.625 body leading made our rows read tall). */
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+}
+
+.markstream-vue .table-node th:last-child,
+.markstream-vue .table-node td:last-child {
   border-right: 0;
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0.875rem;
 }
 
 /* Header — tinted, left-aligned, single-weight bottom border */
@@ -152,6 +183,8 @@
   text-align: left;
   font-weight: 600;
   border-bottom-width: 1px;
+  /* One step below the body cells (14px vs 15px), like Arkloop's header. */
+  font-size: 0.875rem;
 }
 
 /* Remove 1.x zebra striping */
@@ -164,9 +197,9 @@
   border-bottom: 0;
 }
 
-/* Row hover tint */
+/* No row hover on markdown tables — they're content, not an interactive list */
 .markstream-vue .table-node tbody tr:hover td {
-  background-color: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  background-color: transparent;
 }
 
 /* Inline code — shape tweaks on top of CSS vars */

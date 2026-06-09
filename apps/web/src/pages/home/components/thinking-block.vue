@@ -1,40 +1,39 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="text-[14.5px] leading-5">
     <button
-      class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 text-muted-foreground hover:text-foreground"
+      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
       @click="toggleOpen"
     >
-      <Lightbulb class="size-3.5 shrink-0" />
       <span
-        class="shrink-0"
-        :class="actionClass"
-      >{{ actionLabel }}</span>
-      <ChevronRight
-        v-if="!open"
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
-      />
+        class="min-w-0 truncate"
+        :class="streaming ? 'tool-shimmer-text' : ''"
+      >{{ label }}</span>
       <ChevronDown
+        v-if="open"
+        class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
+      />
+      <ChevronRight
         v-else
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
+        class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
       />
     </button>
-    <div
-      v-if="open"
-      class="mt-1 ml-5 border-l border-border pl-3 py-1"
-    >
+    <CollapseSection :open="open">
       <div
-        class="whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed"
-        v-text="block.content"
+        class="mt-1 whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed"
+        v-text="bodyText"
       />
-    </div>
+    </CollapseSection>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
+import CollapseSection from './collapse-section.vue'
+import { getReasoningDuration } from './reasoning-timing'
+import { getCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
 
 const props = defineProps<{
   block: ThinkingBlock
@@ -43,15 +42,34 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const open = ref(props.streaming)
+// Persisted, user-driven toggle (survives the post-turn refetch/remount).
+const collapseKey = computed(() => reasoningCollapseKey(props.block.content ?? ''))
+const open = ref(getCollapseOpen(collapseKey.value))
+watch(collapseKey, (key) => {
+  open.value = getCollapseOpen(key)
+})
 
-const actionLabel = computed(() =>
-  props.streaming ? t('chat.thinkingInProgress') : t('chat.thinkingDone'),
-)
+// Trimmed so the expanded body doesn't open with leading blank lines/space.
+const bodyText = computed(() => (props.block.content ?? '').trim())
 
-const actionClass = computed(() => (props.streaming ? 'tool-shimmer-text' : ''))
+// Duration is measured centrally in message-item (every reasoning block, not
+// just the streaming tail) and cached by content, so the re-mounted "done"
+// block recovers it here. Historical blocks (never streamed this session) have
+// no timing and fall back to a plain "Thought".
+const durationMs = computed(() => getReasoningDuration(props.block.content ?? ''))
+
+const label = computed(() => {
+  if (props.streaming) return t('chat.thinkingInProgress')
+  if (durationMs.value > 0) {
+    return t('chat.process.thoughtSeconds', { seconds: Math.max(1, Math.round(durationMs.value / 1000)) })
+  }
+  // No measured duration (historical block, or a sub-second thought) — a worded
+  // phrase reads more naturally than a bare "Thought" or a fake "0s".
+  return t('chat.process.thoughtBriefly')
+})
 
 function toggleOpen() {
   open.value = !open.value
+  setCollapseOpen(collapseKey.value, open.value)
 }
 </script>

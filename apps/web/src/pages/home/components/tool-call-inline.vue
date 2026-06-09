@@ -1,19 +1,15 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="text-[14.5px] leading-5">
     <div
       v-if="expandable"
       role="button"
       tabindex="0"
-      class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none"
+      class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-px select-none"
       :class="rowClass"
       @click="toggleOpen"
       @keydown.enter.prevent="toggleOpen"
       @keydown.space.prevent="toggleOpen"
     >
-      <component
-        :is="display.icon"
-        class="size-3.5 shrink-0"
-      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -21,7 +17,7 @@
       >{{ renderedActionLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click.stop="handleOpenInFiles"
@@ -30,7 +26,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="truncate min-w-0"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -56,23 +52,19 @@
       >{{ userInputLabel }}</span>
       <ChevronRight
         v-if="!open"
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
+        class="size-3.5 shrink-0 ml-0.5 opacity-60 group-hover:opacity-100"
       />
       <ChevronDown
         v-else
-        class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
+        class="size-3.5 shrink-0 ml-0.5 opacity-60 group-hover:opacity-100"
       />
     </div>
 
     <div
       v-else
-      class="flex items-center gap-1.5 w-full py-0.5"
+      class="flex items-center gap-1.5 w-full py-px"
       :class="rowClass"
     >
-      <component
-        :is="display.icon"
-        class="size-3.5 shrink-0"
-      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -80,7 +72,7 @@
       >{{ renderedActionLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click="handleOpenInFiles"
@@ -89,7 +81,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="truncate min-w-0"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -115,20 +107,22 @@
       >{{ userInputLabel }}</span>
     </div>
 
-    <div
-      v-if="expandable && open && !isPending"
-      class="mt-1 ml-5 py-1 space-y-1.5"
+    <CollapseSection
+      v-if="expandable"
+      :open="open && !isPending"
     >
-      <component
-        :is="display.detail"
-        v-if="display.detail"
-        :block="block"
-      />
-      <ToolCallDetailGeneric
-        v-else
-        :block="block"
-      />
-    </div>
+      <div :class="detailClass">
+        <component
+          :is="display.detail"
+          v-if="display.detail"
+          :block="block"
+        />
+        <ToolCallDetailGeneric
+          v-else
+          :block="block"
+        />
+      </div>
+    </CollapseSection>
 
     <div
       v-if="canRespondApproval"
@@ -167,16 +161,34 @@ import {
   isFilePathTool,
 } from './tool-call-registry'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import CollapseSection from './collapse-section.vue'
+import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
 
-const props = defineProps<{ block: ToolCallBlock }>()
+const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
 const { t } = useI18n()
 const chatStore = useChatStore()
+
+// Two detail styles:
+//  - 'inline' = half-embedded key:value list (params), just indented, no card.
+//  - 'card'  = output/diff/file content on a fill surface (card-in-card by color).
+// Detail text is slightly heavier (font-[425]) so it doesn't read too thin.
+const detailClass = computed(() => {
+  if (display.value.detailVariant === 'inline') return 'mt-1 pl-3 font-[425]'
+  return props.inGroup
+    ? 'mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[425]'
+    : 'mt-1.5 rounded-md bg-muted px-3 py-2 font-[425]'
+})
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
 
-const open = ref(getToolDisplay(props.block).defaultOpen === true)
+// Persisted, user-driven toggle (survives the post-turn refetch/remount).
+const collapseKey = computed(() => toolCollapseKey(props.block))
+const open = ref(getCollapseOpen(collapseKey.value) || display.value.defaultOpen === true)
+watch(collapseKey, (key) => {
+  open.value = getCollapseOpen(key) || display.value.defaultOpen === true
+})
 
 const expandable = computed(
   () => Boolean(display.value.detail) || display.value.expandable === true,
@@ -221,16 +233,11 @@ const renderedActionLabel = computed(
   () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
 )
 
+// Every row is gray at rest and animates to near-black (foreground) on hover —
+// one neutral material, color expresses interaction (matches Arkloop's cop-row).
 const rowClass = computed(() => {
-  if (props.block.toolName === 'exec') {
-    return expandable.value ? 'text-foreground hover:text-foreground' : 'text-foreground'
-  }
-  if (!expandable.value) {
-    return display.value.isError ? 'text-destructive' : 'text-muted-foreground'
-  }
-  return display.value.isError
-    ? 'text-destructive hover:text-destructive/90'
-    : 'text-muted-foreground hover:text-foreground'
+  if (display.value.isError) return 'text-destructive transition-colors duration-75'
+  return 'text-muted-foreground hover:text-foreground transition-colors duration-75'
 })
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
@@ -266,9 +273,8 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (props.block.toolName === 'exec') return 'text-foreground'
   if (display.value.isError) return 'text-destructive'
-  return 'text-foreground/80'
+  return '' // inherit the row's gray→black hover color
 })
 
 const actionClass = computed(() => {
@@ -325,6 +331,7 @@ const canOpenInFiles = computed(
 
 function toggleOpen() {
   open.value = !open.value
+  setCollapseOpen(collapseKey.value, open.value)
 }
 
 function handleOpenInFiles() {
