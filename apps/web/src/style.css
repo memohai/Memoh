@@ -2,6 +2,14 @@
 @import "tw-animate-css";
 @import "@memohai/ui/style.css";
 
+/* Bundled MiSans Variable (Apache-2.0) as the CJK fallback so Chinese renders
+ * identically on Web / Windows / macOS instead of each OS's system font.
+ * Inter Variable still wins for Latin (declared first in --font-sans); MiSans
+ * only kicks in for CJK glyphs (per-glyph fallback). Each face is unicode-range
+ * subsetted, so the browser lazy-loads only the CJK ranges actually rendered.
+ * The wrapper declares MiSans' variable wght axis range (150..700). */
+@import "./styles/misans-vf.css";
+
 /* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
  * auto-detection anchors on the Vite project root, so when a consumer
  * (e.g. @memohai/desktop) imports this stylesheet from a different root,
@@ -11,10 +19,12 @@
 
 @layer components {
   [data-chat-content] .prose {
-    /* Body scale aligned with Arkloop (~16px / 1.65). Tables and code blocks set
-     * their own smaller size so they don't grow with this. */
-    font-size: 1rem;
-    line-height: 1.65;
+    /* Compact chat body: 13px text with tight 17.5px line-height. Keep the
+     * body weight close to the global normal rung now that CJK is variable.
+     * Tables / code blocks set their own size so they don't grow with this. */
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    font-weight: 380;
   }
 }
 
@@ -70,8 +80,8 @@
   --ms-font-sans: inherit;
   --ms-text-body: inherit;
   --ms-leading-body: 1.625;
-  /* Heading scale is em-relative (tracks the body) and restrained like Arkloop —
-   * headings sit just above the body rather than the old fixed 36/24/20px that
+  /* Heading scale is em-relative (tracks the body) and restrained: headings sit
+   * just above the body rather than the old fixed 36/24/20px scale that
    * dwarfed the text. Weights are toned down from the previous 800/700. */
   --ms-text-h1: 1.5em;
   --ms-text-h2: 1.3em;
@@ -79,10 +89,10 @@
   --ms-text-h4: 1.05em;
   --ms-text-h5: 1em;
   --ms-text-h6: 1em;
-  --ms-weight-h1: 700;
-  --ms-weight-h2: 650;
-  --ms-weight-h3: 600;
-  --ms-weight-h4: 600;
+  --ms-weight-h1: 600;
+  --ms-weight-h2: 560;
+  --ms-weight-h3: 520;
+  --ms-weight-h4: 500;
 
   /* Flow spacing — calmer rhythm matching the previous defaults */
   --ms-flow-paragraph-y: 1.25em;
@@ -135,6 +145,12 @@
   line-height: 1.625;
 }
 
+.markstream-vue .strong-node,
+.markstream-vue strong,
+.markstream-vue b {
+  font-weight: 520;
+}
+
 /* Tables — restore the previous clean look: rounded outer frame, tinted header,
  * horizontal row separators only. 1.x adds vertical grid lines, zebra striping,
  * and a drop shadow that we remove here. */
@@ -152,8 +168,8 @@
   /* Body is pure white so it reads brighter than the (slightly gray) chat
    * surface — never the same as the background. */
   background-color: #fff;
-  /* Decoupled from the (larger) body font so tables stay compact like Arkloop
-   * — table body 15px, header 14px (see thead rule). */
+  /* Decoupled from the larger body font so tables stay compact: table body
+   * 15px, header 14px (see thead rule). */
   font-size: 0.9375rem;
 }
 
@@ -167,8 +183,8 @@
 .markstream-vue .table-node td {
   border-right: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
   border-bottom: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
-  /* Arkloop-like cell metrics: 8px/12px padding + tight 1.5 line-height keeps
-   * rows compact (the loose 1.625 body leading made our rows read tall). */
+  /* Compact cell metrics: 8px/12px padding + tight 1.5 line-height keeps rows
+   * from reading tall. */
   padding: 0.5rem 0.75rem;
   line-height: 1.5;
 }
@@ -181,9 +197,9 @@
 /* Header — tinted, left-aligned, single-weight bottom border */
 .markstream-vue .table-node thead th {
   text-align: left;
-  font-weight: 600;
+  font-weight: 500;
   border-bottom-width: 1px;
-  /* One step below the body cells (14px vs 15px), like Arkloop's header. */
+  /* One step below the body cells (14px vs 15px). */
   font-size: 0.875rem;
 }
 

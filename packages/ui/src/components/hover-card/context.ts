@@ -1,7 +1,7 @@
 import type { InjectionKey } from 'vue'
 import { inject } from 'vue'
 
-// Arkloop-style hover bridge (no convex "grace area"). The root owns the open
+// Timer-based hover bridge (no convex "grace area"). The root owns the open
 // state + a single close timer; trigger and content share these handlers so the
 // ONLY hit targets are the real trigger element and the real card — there is no
 // invisible polygon spanning the gap. Moving the pointer off both starts a short

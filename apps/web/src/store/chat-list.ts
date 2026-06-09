@@ -1586,7 +1586,7 @@ export const useChatStore = defineStore('chat', () => {
           return acc
         }, null)
         if (!earliest || earliest === cursor) {
-          // Cursor cannot advance — bail out to avoid a request loop.
+          // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }

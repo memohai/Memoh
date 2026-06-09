@@ -19,6 +19,7 @@
     "start": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
     "@lisse/vue": "^0.4.0",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
@@ -43,6 +44,7 @@
     "lucide-vue-next": "^0.562.0",
     "markstream-vue": "1.0.1-beta.1",
     "mermaid": "^11.12.2",
+    "misans-vf": "1.0.0",
     "modern-css-reset": "^1.4.0",
     "moment": "^2.30.1",
     "monaco-editor": "^0.52.2",

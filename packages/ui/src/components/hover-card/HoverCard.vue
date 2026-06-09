@@ -7,7 +7,7 @@ import { HOVER_CARD_INJECTION_KEY } from './context'
 // We do NOT use reka's HoverCardRoot: it bakes in `useGraceArea`, an invisible
 // convex-hull hit-zone that, for a card wider than its trigger, keeps the card
 // open far on whichever side the card overhangs (lopsided "won't close" feel).
-// Instead this is an Arkloop-style hover bridge built on the plain Popover
+// Instead this is a timer-based hover bridge built on the plain Popover
 // primitive (Popover = anchor + portal + Popper positioning, no hover logic):
 // the card opens on trigger enter and closes a short delay after the pointer
 // leaves BOTH the trigger and the card, with re-entry cancelling the timer.

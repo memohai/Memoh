@@ -78,7 +78,7 @@ const props = withDefaults(
     // at px-3=12px. Delta = 5px, so the menu overhangs the trigger by 5px on the
     // start side (and, via the +8px viewport min-width below → +10px on the
     // bordered box, 5px on the end side too — wider than the button on both
-    // sides, per the Scale reference).
+    // sides, per the shared menu geometry).
     alignOffset: -5,
   },
 )

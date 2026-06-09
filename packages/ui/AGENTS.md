@@ -221,7 +221,7 @@ Two DIFFERENT states with two different expressions — do not conflate them:
   - Controls (button / field / Select / Toggle) and menu rows → `rounded-md` /
     `rounded-menu` (8).
   - Chromed Popover & menu shell → `rounded-menu-shell` (12).
-  - Card / Dialog / Sheet → `rounded-xl` (14). (The Scale bench explored
+  - Card / Dialog / Sheet → `rounded-xl` (14). (The sizing bench explored
     card 12 / dialog 16, but shipped components consolidate on 14 — follow the
     component, not the bench.)
   - Avatar → `rounded-full`.
@@ -325,7 +325,7 @@ dark. Tooltip carries no border at all — its solid fill is its own edge.
   swap). Loading buttons are the exception — they hold full color (the spinner is
   the signal).
 
-## Cursor
+## Pointer Cursor
 
 - Every interactive control sets `cursor-pointer` (Button, Switch, segmented
   item, …). Disabled flips to `cursor-not-allowed`.

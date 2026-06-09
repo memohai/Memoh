@@ -18,34 +18,55 @@ const root = ref<HTMLElement>()
 // The sliding thumb is positioned by MEASURING the active item (offset box) — it
 // shares the item's exact footprint so the slide can never mismatch widths.
 const indicator = ref({ left: 0, top: 0, width: 0, height: 0 })
+const motion = ref(false)
 // press-shrink fires ONLY when the already-active item is pressed (non-active
 // items shrink via their own ::before:active in style.css).
 const pressed = ref(false)
+let userMotionPending = false
 
 const active = computed<T | undefined>(() => props.modelValue ?? props.items[0]?.value)
 
-function sync() {
+function sync(animate = false) {
   const el = root.value?.querySelector<HTMLElement>('[data-active="true"]')
   if (!el)
     return
+  motion.value = animate
   indicator.value = {
     left: el.offsetLeft,
     top: el.offsetTop,
     width: el.offsetWidth,
     height: el.offsetHeight,
   }
+  if (!animate) {
+    if (motionFrame)
+      cancelAnimationFrame(motionFrame)
+    motionFrame = requestAnimationFrame(() => {
+      motion.value = true
+    })
+  }
 }
 
-watch(() => [active.value, props.items] as const, () => nextTick(sync), { deep: true })
+watch(() => [active.value, props.items] as const, () => nextTick(() => {
+  const animate = userMotionPending
+  userMotionPending = false
+  sync(animate)
+}), { deep: true })
 
 let ro: ResizeObserver | undefined
+let motionFrame = 0
 onMounted(() => {
-  nextTick(sync)
-  ro = new ResizeObserver(() => sync())
+  nextTick(() => {
+    sync(false)
+  })
+  ro = new ResizeObserver(() => sync(false))
   if (root.value)
     ro.observe(root.value)
 })
-onBeforeUnmount(() => ro?.disconnect())
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  if (motionFrame)
+    cancelAnimationFrame(motionFrame)
+})
 
 const thumbStyle = computed(() => ({
   translate: `${indicator.value.left}px ${indicator.value.top}px`,
@@ -59,6 +80,7 @@ const thumbStyle = computed(() => ({
 function select(item: SegmentedItem<T>) {
   if (item.disabled || item.value === active.value)
     return
+  userMotionPending = true
   emit('update:modelValue', item.value)
 }
 function onDown(item: SegmentedItem<T>) {
@@ -79,6 +101,7 @@ function clearPress() {
   >
     <div
       data-segment-thumb
+      :data-motion="motion ? 'true' : 'false'"
       :style="thumbStyle"
     />
     <button

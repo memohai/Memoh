@@ -525,6 +525,9 @@
       scale 0.16s ease,
       opacity 0.12s ease;
   }
+  [data-slot="segmented"] [data-segment-thumb][data-motion="false"] {
+    transition: none;
+  }
   [data-slot="segmented"] [data-segment-item] {
     position: relative;
     z-index: 1;
@@ -536,7 +539,7 @@
     padding-inline: 0.75rem;
     border-radius: calc(var(--radius) - 0.125rem);
     font-size: 0.875rem;
-    font-weight: 475;
+    font-weight: 450;
     letter-spacing: -0.16px;
     white-space: nowrap;
     /* idle label sits lighter than global muted for a cleaner, airier read;
@@ -726,24 +729,24 @@
 }
 
 :root {
-  --font-sans: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+  --font-sans: "Inter Variable", "Inter", "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
-  /* Warm elevation ladder (hue 72 — a warm CREAM ramp, red-led like Perplexity /
-     Cursor canvas, NOT yellow-green: at this hue R leads, so it reads warm not
-     green). Rules:
-       1. depth = LIGHTNESS: canvas 251 < card 253 (forward). Sidebar shares the
+  --scheme-hue: 72;
+  /* Warm elevation ladder (hue 72): red leads at this hue, so it reads warm
+     rather than yellow-green. Rules:
+       1. depth = LIGHTNESS: canvas 251 < card 255 (forward). Sidebar shares the
           canvas color (no sidebar-specific tint) — it's just the canvas with a
           divider + its own borderless hover/active fills.
        2. chroma RISES as surfaces darken (canvas .0024 → active .0052) so deep
           fills read as a clean warm, not a muddy near-gray.
-     Pure white is intentionally abandoned — it clashes on a warm canvas and is
-     only viable for web/QC products, not a heavily-customized native app. */
+     Settings cards use true white so the primary pane reads one layer forward
+     from the warm canvas. */
   --background: oklch(0.984 0.0024 72);
   --foreground: oklch(0.21 0.004 95);
-  --card: oklch(0.991 0.0018 72);
+  --card: rgb(255 255 255);
   --card-foreground: oklch(0.21 0.004 95);
-  --popover: oklch(0.991 0.0018 72);
-  --popover-foreground: oklch(0.21 0.004 95);
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
   --secondary: oklch(0.964 0.004 72);
@@ -821,12 +824,12 @@
   --btn-ghost-hover: oklch(0.94 0.0052 72); /* ≈237 warm — ghost (button-tier), matches sidebar-accent on the warm canvas */
   /* Segmented control surfaces: recessed track + elevated sliding thumb. */
   --segment-track: var(--ui-selected);
-  --segment-thumb: oklch(0.991 0.0018 72);
+  --segment-thumb: var(--card);
   /* Shadows — tokenized so elevation/edge values never fragment. Same in both
      schemes for now; add .dark overrides when dark elevation is tuned.
        --shadow-hairline  1px inset edge (outline / secondary button chrome)
        --shadow-thumb     subtle lift for the segmented sliding thumb
-       --shadow-dropdown  Scale bench dropdown elevation for menu surfaces */
+       --shadow-dropdown  dropdown elevation for menu surfaces */
   /* Hairline edge color — shared by secondary/outline button chrome and small
      control borders (checkbox). A future Design Token revision target. */
   --border-hairline: oklch(0 0 0 / 0.16);
@@ -842,9 +845,8 @@
      already separate at maximum contrast; a dark semi-transparent hairline here is the
      SAME darkness as the scrim, so instead of drawing a crisp edge it dissolves INTO
      the dimmed background and reads as a muddy smudge. We let the white surface +
-     --shadow-modal carry the separation (Spotlight/Raycast do the same). Dark mode
-     keeps a white hairline (see .dark) because a dark surface on a dark scrim needs
-     one to separate. */
+     --shadow-modal carry the separation. Dark mode keeps a white hairline (see
+     .dark) because a dark surface on a dark scrim needs one to separate. */
   --border-menu-elevated: transparent;
   --shadow-hairline: inset 0 0 0 1px var(--border-hairline);
   --shadow-thumb: 0 1px 2px oklch(0 0 0 / 0.08);
@@ -1278,6 +1280,7 @@
 }
 
 :root[data-color-scheme="ocean"] {
+  --scheme-hue: 230;
   --brand: oklch(0.56 0.15 230);
   --brand-soft: oklch(0.96 0.035 230);
   --brand-border: oklch(0.84 0.08 230);
@@ -1302,6 +1305,7 @@
 }
 
 .dark[data-color-scheme="ocean"] {
+  --scheme-hue: 230;
   --brand: oklch(0.72 0.13 230);
   --brand-soft: oklch(0.30 0.07 230 / 0.35);
   --brand-border: oklch(0.72 0.13 230 / 0.32);
@@ -1325,6 +1329,7 @@
 }
 
 :root[data-color-scheme="forest"] {
+  --scheme-hue: 150;
   --brand: oklch(0.50 0.14 150);
   --brand-soft: oklch(0.96 0.035 150);
   --brand-border: oklch(0.84 0.08 150);
@@ -1348,6 +1353,7 @@
 }
 
 .dark[data-color-scheme="forest"] {
+  --scheme-hue: 150;
   --brand: oklch(0.66 0.12 150);
   --brand-soft: oklch(0.30 0.07 150 / 0.35);
   --brand-border: oklch(0.66 0.12 150 / 0.32);
@@ -1371,6 +1377,7 @@
 }
 
 :root[data-color-scheme="rose"] {
+  --scheme-hue: 355;
   --brand: oklch(0.58 0.18 355);
   --brand-soft: oklch(0.96 0.035 355);
   --brand-border: oklch(0.84 0.09 355);
@@ -1394,6 +1401,7 @@
 }
 
 .dark[data-color-scheme="rose"] {
+  --scheme-hue: 355;
   --brand: oklch(0.74 0.16 355);
   --brand-soft: oklch(0.30 0.07 355 / 0.35);
   --brand-border: oklch(0.74 0.16 355 / 0.32);
@@ -1417,6 +1425,7 @@
 }
 
 :root[data-color-scheme="amber"] {
+  --scheme-hue: 70;
   --brand: oklch(0.62 0.15 70);
   --brand-soft: oklch(0.97 0.045 75);
   --brand-border: oklch(0.86 0.10 75);
@@ -1440,6 +1449,7 @@
 }
 
 .dark[data-color-scheme="amber"] {
+  --scheme-hue: 70;
   --brand: oklch(0.78 0.13 70);
   --brand-soft: oklch(0.30 0.07 70 / 0.35);
   --brand-border: oklch(0.78 0.13 70 / 0.32);
@@ -1460,6 +1470,65 @@
   --event-heartbeat-foreground: oklch(0.82 0.13 350);
   --event-heartbeat-soft: oklch(0.30 0.07 350 / 0.35);
   --event-heartbeat-border: oklch(0.76 0.15 350 / 0.32);
+}
+
+:root[data-color-scheme]:not([data-color-scheme="memoh"]) {
+  --background: oklch(0.984 0.0024 var(--scheme-hue));
+  --foreground: oklch(0.21 0.004 var(--scheme-hue));
+  --secondary: oklch(0.964 0.004 var(--scheme-hue));
+  --secondary-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --muted-foreground: oklch(0.52 0.006 var(--scheme-hue));
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --border: oklch(0.915 0.0045 var(--scheme-hue));
+  --input: var(--border);
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: oklch(0.94 0.0052 var(--scheme-hue));
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
+  --ui-hover: oklch(0.949 0.004 var(--scheme-hue));
+  --ui-selected: oklch(0.945 0.005 var(--scheme-hue));
+  --ui-on: oklch(0.932 0.005 var(--scheme-hue));
+  --ui-pressed: oklch(0.908 0.005 var(--scheme-hue));
+  --ui-selected-pressed: oklch(0.891 0.005 var(--scheme-hue));
+  --btn-ghost-hover: oklch(0.94 0.0052 var(--scheme-hue));
+  --segment-track: var(--ui-selected);
+}
+
+.dark[data-color-scheme]:not([data-color-scheme="memoh"]) {
+  --background: oklch(0.152 0.006 var(--scheme-hue));
+  --foreground: oklch(0.86 0.004 var(--scheme-hue));
+  --card: oklch(0.21 0.006 var(--scheme-hue));
+  --card-foreground: oklch(0.90 0.004 var(--scheme-hue));
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
+  --secondary: oklch(0.26 0.006 var(--scheme-hue));
+  --secondary-foreground: var(--foreground);
+  --muted: var(--secondary);
+  --muted-foreground: oklch(0.62 0.006 var(--scheme-hue));
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --sidebar: oklch(0.165 0.006 var(--scheme-hue));
+  --sidebar-foreground: var(--card-foreground);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --ui-hover: oklch(0.30 0.006 var(--scheme-hue));
+  --ui-selected: oklch(0.30 0.006 var(--scheme-hue));
+  --ui-on: oklch(0.34 0.007 var(--scheme-hue));
+  --ui-pressed: oklch(0.38 0.007 var(--scheme-hue));
+  --ui-selected-pressed: oklch(0.42 0.008 var(--scheme-hue));
+  --btn-ghost-hover: oklch(0.32 0.006 var(--scheme-hue));
+  --segment-track: oklch(0.24 0.006 var(--scheme-hue));
+  --segment-thumb: oklch(0.40 0.006 var(--scheme-hue));
+  --control-label: oklch(0.86 0.004 var(--scheme-hue));
+  --control-label-hover: oklch(0.94 0.004 var(--scheme-hue));
 }
 
 @theme inline {
@@ -1493,7 +1562,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  /* Menu geometry from the Scale bench: row = 8px, shell = row + 4px. */
+  /* Menu geometry: row = 8px, shell = row + 4px. */
   --radius-menu: calc(var(--radius) - 2px);
   --radius-menu-shell: calc(var(--radius) + 2px);
 
@@ -1503,11 +1572,11 @@
   --animate-accordion-up: accordion-up 0.18s ease-out;
 
   /* Type scale: semantic sizes with line-height + tracking baked in.
-     Tuned for Inter Variable.
+     Tuned for variable Latin + CJK fonts.
      Weight is ROLE-MAPPED via the --font-weight-* overrides below — do not free-style:
-       · font-semibold (560) → surface / section titles (Card / Dialog / Sheet)
-       · font-medium   (470) → labels, button text, badges, small/inline titles, emphasis
-       · font-normal   (380) → body, descriptions, field values, placeholder, input text */
+       · font-semibold (520) → surface / section titles (Card / Dialog / Sheet)
+       · font-medium   (450) → labels, button text, badges, small/inline titles, emphasis
+       · font-normal   (360) → body, descriptions, field values, placeholder, input text */
   --text-caption: 0.6875rem; /* 11px — badges, tiny meta */
   --text-caption--line-height: 1rem;
   --text-caption--letter-spacing: -0.04px;
@@ -1532,10 +1601,10 @@
 
   /* Font-weight overrides: Inter runs ~half-step heavier than SF Pro at the same
      numeric weight, so the Tailwind role-map values are shifted down accordingly. */
-  --font-weight-normal: 380;
-  --font-weight-medium: 470;
-  --font-weight-semibold: 560;
-  --font-weight-bold: 660;
+  --font-weight-normal: 360;
+  --font-weight-medium: 450;
+  --font-weight-semibold: 520;
+  --font-weight-bold: 620;
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -1614,7 +1683,7 @@
   }
   body {
     font-family: var(--font-sans);
-    font-weight: 380;
+    font-weight: 360;
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -1673,7 +1742,7 @@
    not an absolute corner chip, so its hit area is stable.
    Card: pure --background fill, --border-menu hairline, --radius-menu-shell,
    no shadow. Colour stays neutral; semantic intent is carried ONLY by the
-   leading icon (the Linear / Badge·Alert approach).
+   leading semantic icon.
    Two layout variants: single (no description) and rich (has description). */
 .memoh-toaster {
   position: fixed;

@@ -29,13 +29,13 @@ export const menuContentClass
 export const menuSlideClass
   = 'data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1'
 
-// Inner padding/gap for a menu panel — matches the Scale "Menu item / row"
-// reference (p-1.5 frame, gap-0.5 rows). Select puts this on its SelectViewport;
+// Inner padding/gap for a menu panel: p-1.5 frame, gap-0.5 rows. Select puts
+// this on its SelectViewport;
 // flatter menus put it straight on the content box.
 export const menuViewportClass = 'flex flex-col gap-0.5 p-1.5'
 
-// One menu row: layout + roving-focus highlight. Geometry is pinned to the Scale
-// "Menu item / row" reference — px-2.5 / py-1.5 / text-control (14px) / rounded-menu
+// One menu row: layout + roving-focus highlight. Geometry is pinned to the
+// shared row contract: px-2.5 / py-1.5 / text-control (14px) / rounded-menu
 // (8px) — so every menu shares the exact same row height, text size and inset.
 // The highlight is reka's [data-highlighted] (the reka/Radix equivalent of shadcn's
 // focus:bg-accent), so it simply follows the pointer/keyboard. The selected value is

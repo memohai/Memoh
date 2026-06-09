@@ -165,7 +165,7 @@
       "colorScheme": "配色方案",
       "colorSchemeDescription": "为品牌、状态和 UI 元素选择一套调色盘。",
       "colorSchemes": {
-        "memoh": "Memoh (默认)",
+        "memoh": "Memoh",
         "ocean": "海洋",
         "forest": "森林",
         "rose": "玫瑰",

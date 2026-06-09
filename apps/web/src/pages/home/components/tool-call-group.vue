@@ -13,14 +13,14 @@
   <!-- Multiple items collapse into one process block. -->
   <div
     v-else
-    class="text-[14.5px] leading-5"
+    class="text-[13px] leading-[18px] font-[400]"
   >
     <button
       class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-muted-foreground hover:text-foreground select-none"
       @click="toggle"
     >
       <span
-        class="min-w-0 truncate font-[450]"
+        class="min-w-0 truncate font-[400]"
         :class="running ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
       <ChevronDown

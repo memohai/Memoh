@@ -1,5 +1,5 @@
 <template>
-  <div class="text-[14.5px] leading-5">
+  <div class="text-[13px] leading-[18px] font-[400]">
     <div
       v-if="expandable"
       role="button"
@@ -171,12 +171,12 @@ const chatStore = useChatStore()
 // Two detail styles:
 //  - 'inline' = half-embedded key:value list (params), just indented, no card.
 //  - 'card'  = output/diff/file content on a fill surface (card-in-card by color).
-// Detail text is slightly heavier (font-[425]) so it doesn't read too thin.
+// Detail text sits one small step above body text so dense output stays readable.
 const detailClass = computed(() => {
-  if (display.value.detailVariant === 'inline') return 'mt-1 pl-3 font-[425]'
+  if (display.value.detailVariant === 'inline') return 'mt-1 pl-3 font-[400]'
   return props.inGroup
-    ? 'mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[425]'
-    : 'mt-1.5 rounded-md bg-muted px-3 py-2 font-[425]'
+    ? 'mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]'
+    : 'mt-1.5 rounded-md bg-muted px-3 py-2 font-[400]'
 })
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
@@ -233,8 +233,8 @@ const renderedActionLabel = computed(
   () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
 )
 
-// Every row is gray at rest and animates to near-black (foreground) on hover —
-// one neutral material, color expresses interaction (matches Arkloop's cop-row).
+// Every row is gray at rest and animates to near-black (foreground) on hover:
+// one neutral material, with color expressing interaction.
 const rowClass = computed(() => {
   if (display.value.isError) return 'text-destructive transition-colors duration-75'
   return 'text-muted-foreground hover:text-foreground transition-colors duration-75'

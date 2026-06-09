@@ -38,7 +38,7 @@ const ctx = injectHoverCardContext()
          (--border-menu), shell radius (rounded-menu-shell) and dropdown shadow as
          Select / DropdownMenu / Combobox, with a fast fade + 1-unit directional
          slide at duration-75 (no zoom). The pointerenter/leave pair is the other
-         half of the Arkloop hover bridge: entering the card cancels the pending
+         half of the hover bridge: entering the card cancels the pending
          close, leaving it arms the close timer. open-auto-focus is prevented so a
          hover preview never steals focus from the page. -->
     <PopoverContent

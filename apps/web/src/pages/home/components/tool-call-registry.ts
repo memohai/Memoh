@@ -154,9 +154,8 @@ function truncate(s: string, max = 60): string {
   return `${s.slice(0, max)}…`
 }
 
-// File-path tools show just the filename in the row (the absolute path becomes
-// the tooltip via fullTarget) — same as Arkloop: "Read README_CN.md", not the
-// full /Users/.../README_CN.md.
+// File-path tools show just the filename in the row; the absolute path becomes
+// the tooltip via fullTarget.
 function basename(path: string): string {
   if (!path) return ''
   const parts = path.split('/').filter(Boolean)

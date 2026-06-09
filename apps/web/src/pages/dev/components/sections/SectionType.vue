@@ -85,7 +85,7 @@ onMounted(measure)
     description="The type scale, weights, and text-color ramp. Every sample renders with its real token-backed utility, so tuning a --text-* / color token in style.css updates this wall and the whole app at once."
   >
     <div class="grid grid-cols-1 gap-4">
-      <!-- Scale ladder -->
+      <!-- Type scale ladder -->
       <Specimen
         label="Type scale — text-{display,heading,title,body,label,caption}"
         note="size · line-height · letter-spacing read back from computed styles"
