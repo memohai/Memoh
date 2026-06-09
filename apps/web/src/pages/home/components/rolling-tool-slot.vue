@@ -2,26 +2,66 @@
   <div class="relative">
     <Transition name="roll">
       <div
-        v-if="current"
-        :key="current.id"
+        v-if="shown"
+        :key="shown.id"
       >
-        <ToolCallBlock :block="current" />
+        <ToolCallBlock :block="shown" />
       </div>
     </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
 import ToolCallBlock from './tool-call-block.vue'
 
-// Codex-style single active command: only the latest tool of a live run is
-// shown; when a new command arrives it slides up into the slot (roll-in) and
-// the previous is absorbed (it has already settled into the prior-steps chip).
+// Codex-style single active command. Two refinements over "just show the last
+// tool": an exec hasn't surfaced its command until its args stream in, so
+// sitting on that bare "$ …" frontier made the slot read as perpetually
+// "Working…". So (1) prefer the most recent *showable* tool — an exec with a
+// command, or any non-exec — falling back to the latest only during genuine
+// startup; and (2) hold each command on screen long enough to read, skipping
+// ones that come and go faster than the dwell rather than flashing past.
 const props = defineProps<{ tools: ToolCallBlockType[] }>()
 
-const current = computed(() => props.tools[props.tools.length - 1])
+function isReady(tool: ToolCallBlockType): boolean {
+  if (tool.toolName !== 'exec') return true
+  const input = tool.input as Record<string, unknown> | undefined
+  return typeof input?.command === 'string' && input.command.length > 0
+}
+
+const candidate = computed<ToolCallBlockType | undefined>(() => {
+  const tools = props.tools
+  for (let i = tools.length - 1; i >= 0; i--) {
+    if (isReady(tools[i]!)) return tools[i]
+  }
+  return tools[tools.length - 1]
+})
+
+const DWELL_MS = 650
+const shown = ref<ToolCallBlockType | undefined>(candidate.value)
+let timer: ReturnType<typeof setTimeout> | null = null
+let lastSwitch = 0
+
+watch(candidate, (next) => {
+  if (!next || next.id === shown.value?.id) return
+  const elapsed = Date.now() - lastSwitch
+  if (elapsed >= DWELL_MS) {
+    lastSwitch = Date.now()
+    shown.value = next
+  } else if (timer === null) {
+    timer = setTimeout(() => {
+      timer = null
+      lastSwitch = Date.now()
+      shown.value = candidate.value
+    }, DWELL_MS - elapsed)
+  }
+})
+
+onUnmounted(() => {
+  if (timer !== null) clearTimeout(timer)
+})
 </script>
 
 <style scoped>
