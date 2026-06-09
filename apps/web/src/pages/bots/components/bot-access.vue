@@ -105,7 +105,7 @@
               @click="openMemberForm"
             >
               <Plus class="mr-1.5 size-3.5" />
-              {{ $t('bots.access.members.add') }}
+              {{ memberAddLabel }}
             </Button>
           </div>
 
@@ -162,7 +162,7 @@
                 :disabled="!memberFormIdentityId"
                 @click="confirmAddMember"
               >
-                {{ $t('common.add') }}
+                {{ memberAddConfirmLabel }}
               </Button>
             </div>
           </div>
@@ -177,7 +177,7 @@
           <Empty
             v-else-if="members.length === 0"
             :title="$t('bots.access.members.title')"
-            :description="$t('bots.access.members.empty')"
+            :description="memberEmptyDescription"
             class="border border-dashed border-border/60 bg-muted/5 rounded-lg py-10"
           />
 
@@ -933,6 +933,22 @@ function isRowBusy(member: MemberRow): boolean {
 const memberFormVisible = ref(false)
 const memberFormIdentityId = ref('')
 
+const memberAddLabel = computed(() =>
+  isBlacklistMode.value ? t('bots.access.members.addBlocked') : t('bots.access.members.add'),
+)
+const memberAddConfirmLabel = computed(() =>
+  isBlacklistMode.value ? t('bots.access.members.blockConfirm') : t('common.add'),
+)
+const memberEmptyDescription = computed(() =>
+  isBlacklistMode.value ? t('bots.access.members.emptyBlacklist') : t('bots.access.members.emptyWhitelist'),
+)
+const memberAddedMessage = computed(() =>
+  isBlacklistMode.value ? t('bots.access.members.blocked') : t('bots.access.members.added'),
+)
+const memberAddFailedMessage = computed(() =>
+  isBlacklistMode.value ? t('bots.access.members.blockFailed') : t('bots.access.members.addFailed'),
+)
+
 const memberCandidateOptions = computed<SearchableSelectOption[]>(() => {
   const present = new Set(members.value.map(m => m.channelIdentityId))
   return (identityCandidates.value?.items ?? [])
@@ -973,10 +989,10 @@ async function confirmAddMember() {
       await createIdentityRule(id, 'allow')
     }
     await Promise.all([invalidateRules(), invalidateManagers()])
-    toast.success(t('bots.access.members.added'))
+    toast.success(memberAddedMessage.value)
   }
   catch (e) {
-    toast.error(resolveApiErrorMessage(e, t('bots.access.members.addFailed')))
+    toast.error(resolveApiErrorMessage(e, memberAddFailedMessage.value))
   }
   finally {
     pendingIds.value.delete(id)
