@@ -2869,13 +2869,20 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	return nil
 }
 
-// isStartCommand returns true when the command text is "/start".
+// isStartCommand returns true when the command text is "/start" (with optional
+// Telegram-style @botname suffix and a deep-link payload). Telegram deep links
+// deliver "/start <payload>" (and "/start@bot <payload>" in groups), which Parse
+// reads as an Action/Args; the payload is ignored — any /start opens the welcome.
 func isStartCommand(cmdText string) bool {
-	parsed, err := command.Parse(command.ExtractCommandText(cmdText))
+	extracted := command.ExtractCommandText(cmdText)
+	if extracted == "" {
+		return false
+	}
+	parsed, err := command.Parse(extracted)
 	if err != nil {
 		return false
 	}
-	return parsed.Resource == "start" && parsed.Action == "" && len(parsed.Args) == 0
+	return parsed.Resource == "start"
 }
 
 // handleStartCommand replies with a lightweight welcome. Unlike /new it does not
