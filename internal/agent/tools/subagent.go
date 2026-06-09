@@ -433,11 +433,12 @@ func (p *SpawnProvider) execSpawnBackground(
 	}()
 
 	return map[string]any{
-		"status":     "background_started",
-		"task_id":    taskID,
-		"kind":       "spawn",
-		"task_count": len(tasks),
-		"message":    fmt.Sprintf("%d subagent task(s) started in background with task ID: %s. You will be notified with each task's report when all complete. Do NOT poll or sleep — the notification arrives automatically.", len(tasks), taskID),
+		"status":      "background_started",
+		"task_id":     taskID,
+		"kind":        "spawn",
+		"task_count":  len(tasks),
+		"description": description,
+		"message":     fmt.Sprintf("%d subagent task(s) started in background with task ID: %s. You will be notified with each task's report when all complete. Do NOT poll or sleep — the notification arrives automatically.", len(tasks), taskID),
 	}, nil
 }
 

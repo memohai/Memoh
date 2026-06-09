@@ -120,6 +120,9 @@ func TestSpawnRunInBackgroundReturnsImmediatelyAndNotifiesJoinRecord(t *testing.
 	if taskID == "" {
 		t.Fatal("expected non-empty task_id")
 	}
+	if desc, _ := m["description"].(string); !strings.Contains(desc, "alpha") {
+		t.Errorf("expected description carrying the task list, got %q", desc)
+	}
 	if task := mgr.GetForSession("bot1", "sess1", taskID); task == nil || task.Status != background.TaskRunning {
 		t.Fatalf("expected running spawn task registered for session, got %+v", task)
 	}
