@@ -24,6 +24,11 @@
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
+      <span
+        v-if="isExec && !display.target"
+        class="shrink-0 font-mono truncate"
+        :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
+      >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
         class="font-mono truncate hover:underline cursor-pointer"
@@ -88,6 +93,11 @@
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
+      <span
+        v-if="isExec && !display.target"
+        class="shrink-0 font-mono truncate"
+        :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
+      >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
         class="font-mono truncate hover:underline cursor-pointer"

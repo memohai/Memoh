@@ -4,7 +4,7 @@
     class="h-4 overflow-hidden"
   >
     <div
-      :key="line"
+      :key="animKey"
       class="live-peek-line truncate text-xs text-muted-foreground/70 leading-4"
       :class="mono ? 'font-mono' : ''"
       :title="text"
@@ -22,23 +22,35 @@ const props = defineProps<{ text?: string, mono?: boolean }>()
 
 const latest = computed(() => latestOutputLine(props.text))
 
-// Pace the displayed line so bursty updates can't re-trigger the fade fast
-// enough to stall; the latest line always wins (leading + trailing).
-const THROTTLE_MS = 140
+// Show the latest line, paced so bursty output can't thrash reactivity. The
+// entrance slide replays only when the line is a *new* line — not when the
+// current line grows token-by-token — so a streaming reasoning line updates its
+// text in place (calm) instead of re-animating on every token (the flicker).
+const THROTTLE_MS = 160
 const line = ref(latest.value)
+const animKey = ref(0)
 let throttleTimer: ReturnType<typeof setTimeout> | null = null
 let lastFlushAt = 0
+
+function apply(next: string) {
+  if (next === line.value) return
+  // A growing line is a prefix-extension of the current one (or vice versa);
+  // anything else is a genuinely different line worth re-animating.
+  const isGrowth = next.startsWith(line.value) || line.value.startsWith(next)
+  if (!isGrowth) animKey.value++
+  line.value = next
+}
 
 watch(latest, () => {
   const elapsed = Date.now() - lastFlushAt
   if (elapsed >= THROTTLE_MS) {
-    line.value = latest.value
     lastFlushAt = Date.now()
+    apply(latest.value)
   } else if (throttleTimer === null) {
     throttleTimer = setTimeout(() => {
       throttleTimer = null
       lastFlushAt = Date.now()
-      line.value = latest.value
+      apply(latest.value)
     }, THROTTLE_MS - elapsed)
   }
 })

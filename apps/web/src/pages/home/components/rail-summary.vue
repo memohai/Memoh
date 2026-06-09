@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="rail-settle">
     <button
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none text-muted-foreground hover:text-foreground"
       :aria-expanded="open"
@@ -65,3 +65,30 @@ const label = computed(() => {
 
 const clusteredItems = computed(() => clusterRailBlocks(props.blocks, false))
 </script>
+
+<style scoped>
+/* When a turn settles, its rail collapses to this one line — settle it in
+   gently (a small downward drop + fade) so the fold reads as a collapse
+   rather than a hard cut. */
+.rail-settle {
+  animation: rail-settle-in 260ms ease-out;
+}
+
+@keyframes rail-settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-settle {
+    animation: none;
+  }
+}
+</style>
