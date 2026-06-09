@@ -28,21 +28,19 @@
             :tab-id="currentTerminal?.id"
             :active="activeTab.id === currentTerminal?.id"  
           />
-
-          <component
-            :is="currentDisplay?.component"
-            v-else-if="activeTab.type==='display'"
-            :key="`display-pane:${currentDisplay?.id}:${currentBotId}`"
-            :bot-id="currentBotId || ''"
-            :tab-id="currentDisplay?.id"
-            :title="currentDisplay?.title"
-            :active="activeTab?.id === currentDisplay?.id"
-            :class="{ 'pointer-events-none': activeTab?.id !== currentDisplay?.id }"
-            @close="store.closeTab(currentDisplay?.id as string)"
-            @snapshot="handleDisplaySnapshot"
-          />
         </KeepAlive>
       </template>
+      <DisplayPane
+        v-for="display in displayTabs"
+        v-show="activeTab?.id === display.id"
+        :key="`display-pane:${display.id}:${currentBotId}`"
+        :bot-id="currentBotId || ''"
+        :tab-id="display.id"
+        :title="display.title"
+        :active="activeTab?.id === display.id"
+        @close="store.closeTab(display.id)"
+        @snapshot="handleDisplaySnapshot"
+      />
       <BrowserPane
         v-for="browser in browserTabs"
         v-show="activeTab?.id === browser.id"
@@ -93,22 +91,21 @@ const { currentBotId } = storeToRefs(chatStore)
 
 
 type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
-type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
 type ChatTab = Extract<WorkspaceTab, { type: 'chat' | 'draft' }>
 type FileTab = Extract<WorkspaceTab, { type: 'file' }>
 type BrowserTab = Extract<WorkspaceTab, { type: 'browser' }>
+type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
 
 const chatTabs = computed<ChatTab[]>(() =>
   tabs.value.filter((tab): tab is ChatTab => tab.type === 'chat' || tab.type === 'draft'),
 )
 
-function TypeTab<T extends (TerminalTab | DisplayTab | ChatTab | FileTab)[]>(tabComp: ComputedRef<T>) {
+function TypeTab<T extends (TerminalTab | ChatTab | FileTab)[]>(tabComp: ComputedRef<T>) {
   const componentMap = {
     chat: ChatPane,
     draft: ChatPane,
     file: FilePane,
     terminal: TerminalPane,
-    display: DisplayPane,
   }
   return computed(() => {
     if (!activeTab.value?.id) return
@@ -141,7 +138,6 @@ const browserTabs = computed<BrowserTab[]>(() =>
 const currentFile = TypeTab(fileTabs)
 const currentChat = TypeTab(chatTabs)
 const currentTerminal=TypeTab(terminalTabs)
-const currentDisplay= TypeTab(displayTabs)
 
 
 
