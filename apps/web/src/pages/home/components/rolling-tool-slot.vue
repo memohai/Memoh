@@ -42,12 +42,18 @@ const candidate = computed<ToolCallBlockType | undefined>(() => {
 const DWELL_MS = 650
 const shown = ref<ToolCallBlockType | undefined>(candidate.value)
 let timer: ReturnType<typeof setTimeout> | null = null
-let lastSwitch = 0
+// Seed at mount so the first shown command gets a full dwell too (not an
+// instant elapsed from epoch that would let it flash away).
+let lastSwitch = Date.now()
 
 watch(candidate, (next) => {
   if (!next || next.id === shown.value?.id) return
+  // Hold a shown command for its dwell — including the first one — so it never
+  // flashes past; but never make a not-yet-resolved placeholder linger: if what
+  // is shown isn't a real command yet, switch to the resolved candidate at once.
+  const shownReady = shown.value ? isReady(shown.value) : false
   const elapsed = Date.now() - lastSwitch
-  if (elapsed >= DWELL_MS) {
+  if (!shownReady || elapsed >= DWELL_MS) {
     lastSwitch = Date.now()
     shown.value = next
   } else if (timer === null) {
