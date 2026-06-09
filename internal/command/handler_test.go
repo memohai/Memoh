@@ -692,6 +692,66 @@ func TestNewCommands_NilServices(t *testing.T) {
 	}
 }
 
+// captureRoleResolver records the arguments passed to GetMemberRole so tests can
+// assert that the correct identity is forwarded (regression guard for the bug
+// where ChannelIdentityID was swapped with UserID).
+type captureRoleResolver struct {
+	botID             string
+	channelIdentityID string
+	role              string
+	err               error
+}
+
+func (f *captureRoleResolver) GetMemberRole(_ context.Context, botID, channelIdentityID string) (string, error) {
+	f.botID = botID
+	f.channelIdentityID = channelIdentityID
+	return f.role, f.err
+}
+
+// TestExecute_CorrectIdentityForwarded guards the critical fix: when input carries
+// both a UserID (bound web user) and a ChannelIdentityID (IM identity), the role
+// resolver MUST receive the ChannelIdentityID so downstream ManageResolver can
+// look it up via bot_channel_admins + user_channel_identity_bindings.
+// Passing UserID instead breaks inherited Manage for every non-owner bound user.
+func TestExecute_CorrectIdentityForwarded(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bound user with manage: channel identity id forwarded", func(t *testing.T) {
+		t.Parallel()
+		captor := &captureRoleResolver{role: "manager"}
+		h := newTestHandler(captor)
+		// BotID should be a valid UUID for completeness.
+		_, _ = h.ExecuteWithInput(context.Background(), ExecuteInput{
+			BotID:             "11111111-1111-1111-1111-111111111111",
+			ChannelIdentityID: "33333333-3333-3333-3333-333333333333",
+			UserID:            "44444444-4444-4444-4444-444444444444",
+			Text:              "/model set",
+			ChannelType:       "telegram",
+		})
+		if captor.channelIdentityID != "33333333-3333-3333-3333-333333333333" {
+			t.Errorf("GetMemberRole received channelIdentityID=%q, want %q",
+				captor.channelIdentityID, "33333333-3333-3333-3333-333333333333")
+		}
+	})
+
+	t.Run("unbound user: channel identity id forwarded", func(t *testing.T) {
+		t.Parallel()
+		captor := &captureRoleResolver{role: ""}
+		h := newTestHandler(captor)
+		_, _ = h.ExecuteWithInput(context.Background(), ExecuteInput{
+			BotID:             "11111111-1111-1111-1111-111111111111",
+			ChannelIdentityID: "33333333-3333-3333-3333-333333333333",
+			UserID:            "", // unbound
+			Text:              "/settings",
+			ChannelType:       "discord",
+		})
+		if captor.channelIdentityID != "33333333-3333-3333-3333-333333333333" {
+			t.Errorf("GetMemberRole received channelIdentityID=%q, want %q",
+				captor.channelIdentityID, "33333333-3333-3333-3333-333333333333")
+		}
+	})
+}
+
 // suppress unused warnings.
 var (
 	_ = fakeScheduleService{items: []schedule.Schedule{{ID: "1", Name: "test"}}}

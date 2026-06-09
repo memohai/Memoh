@@ -367,10 +367,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 
 	// Resolve the user's role in this bot.
 	role := ""
-	roleIdentityID := input.ChannelIdentityID
-	if strings.TrimSpace(input.UserID) != "" {
-		roleIdentityID = strings.TrimSpace(input.UserID)
-	}
+	roleIdentityID := strings.TrimSpace(input.ChannelIdentityID)
 	if h.roleResolver != nil && roleIdentityID != "" {
 		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
 		if err != nil {
@@ -624,9 +621,6 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 	}
 	role := ""
 	roleIdentityID := strings.TrimSpace(input.ChannelIdentityID)
-	if strings.TrimSpace(input.UserID) != "" {
-		roleIdentityID = strings.TrimSpace(input.UserID)
-	}
 	if h.roleResolver != nil && roleIdentityID != "" {
 		if r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID); err == nil {
 			role = r
@@ -651,9 +645,6 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 }
 
 func allowsUnboundWriteCommands(input ExecuteInput) bool {
-	if strings.TrimSpace(input.UserID) != "" {
-		return false
-	}
 	if strings.TrimSpace(input.ChannelIdentityID) == "" {
 		return false
 	}
