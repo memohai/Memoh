@@ -21,8 +21,8 @@
 
     <LivePeekLine
       v-if="!open && streaming && peekLine"
-      :text="block.content"
-      :interval-ms="800"
+      :text="peekLine"
+      :interval-ms="450"
       class="ml-5"
     />
 
@@ -43,7 +43,7 @@ import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
-import { latestOutputLine } from '@/store/chat-list.utils'
+import { thinkingPeek } from '@/store/chat-list.utils'
 import LivePeekLine from './live-peek-line.vue'
 
 const props = defineProps<{
@@ -55,7 +55,10 @@ const { t } = useI18n()
 
 const open = ref(false)
 
-const peekLine = computed(() => latestOutputLine(props.block.content))
+// The peek is the latest complete sentence of the reasoning as plain semantic
+// text (markdown stripped) — see thinkingPeek — so it reads as a calm phrase
+// rather than a hard-truncated, marker-laden raw line.
+const peekLine = computed(() => thinkingPeek(props.block.content))
 
 const actionLabel = computed(() =>
   props.streaming ? t('chat.thinkingInProgress') : t('chat.thinkingDone'),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, upsertById } from './chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, computeBgTaskPill, distinctToolNames, latestOutputLine, reconcileById, segmentHasLiveBg, segmentTurnBlocks, shouldRefreshFromMessageCreated, sortByRecency, splitActiveRail, summarizeRailSegment, thinkingPeek, upsertById } from './chat-list.utils'
 
 describe('chat-list.utils', () => {
   it('replaces existing item with same id and preserves order', () => {
@@ -465,6 +465,37 @@ describe('splitActiveRail', () => {
       prior: [r1, t1, r2],
       current: { kind: 'tools', blocks: [t2, t3] },
     })
+  })
+})
+
+describe('thinkingPeek', () => {
+  it('returns empty for empty content', () => {
+    expect(thinkingPeek('')).toBe('')
+    expect(thinkingPeek(undefined)).toBe('')
+  })
+
+  it('returns the last complete sentence, ignoring an in-progress one', () => {
+    expect(thinkingPeek('First idea here. Now I am starting to')).toBe('First idea here.')
+  })
+
+  it('returns the latest of several complete sentences', () => {
+    expect(thinkingPeek('One. Two. Three.')).toBe('Three.')
+  })
+
+  it('strips heading / emphasis / inline-code markers, keeping the prose', () => {
+    expect(thinkingPeek('## Plan\nI will check **the** `config` value.')).toBe('I will check the config value.')
+  })
+
+  it('skips fenced code blocks and shows the surrounding prose', () => {
+    expect(thinkingPeek('Let me run this:\n```\nnpm test\n```\nThe suite passed.')).toBe('The suite passed.')
+  })
+
+  it('strips list markers, showing clean item text', () => {
+    expect(thinkingPeek('- **First** item\n- second item')).toBe('second item')
+  })
+
+  it('falls back to the in-progress fragment when no sentence has completed', () => {
+    expect(thinkingPeek('Considering the options for')).toBe('Considering the options for')
   })
 })
 

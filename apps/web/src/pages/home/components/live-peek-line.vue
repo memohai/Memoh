@@ -16,11 +16,13 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { latestOutputLine } from '@/store/chat-list.utils'
 
+// `text` is the already-extracted display string — the caller decides what a
+// "line" means (a command's latest output line, the latest reasoning sentence,
+// …). This component only paces and settles it.
 const props = defineProps<{ text?: string, mono?: boolean, intervalMs?: number }>()
 
-const latest = computed(() => latestOutputLine(props.text))
+const latest = computed(() => props.text ?? '')
 
 // A live peek that chases the raw token stream is exhausting to watch, so we
 // sample it at a calm cadence (intervalMs) rather than following every change —

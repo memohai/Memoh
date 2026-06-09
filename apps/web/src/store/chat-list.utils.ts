@@ -278,6 +278,44 @@ export function computeBgTaskPill(beacons: BgTaskBeacon[]): BgTaskPill | null {
   return null
 }
 
+// Lightweight markdown→text for an inline preview: drop fenced code, unwrap
+// inline code / links / images, strip heading / blockquote / list markers and
+// emphasis, flatten table pipes. Not a full parser — just enough to keep a
+// one-line peek free of raw structural markers (single `_` is left alone so
+// snake_case identifiers survive).
+function stripMarkdown(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*>+\s?/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/(\*\*|\*|__|~~)/g, '')
+    .replace(/\|/g, ' ')
+}
+
+// Pick the calm one-line "thinking peek": the latest COMPLETE sentence of the
+// reasoning as plain semantic text. While a new sentence is mid-write we keep
+// showing the last finished one (no hard mid-word cut, no raw markdown); only
+// before any sentence completes do we show the in-progress fragment. This is
+// what makes the peek read as comfortable prose instead of a truncated,
+// marker-laden raw line.
+export function thinkingPeek(content?: string): string {
+  if (!content) return ''
+  const segments = stripMarkdown(content)
+    .split(/(?<=[.!?。！？])\s+|\n+/)
+    .map(segment => segment.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  if (segments.length === 0) return ''
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (/[.!?。！？]$/.test(segments[i]!)) return segments[i]!
+  }
+  return segments[segments.length - 1]!
+}
+
 export function shouldRefreshFromMessageCreated(
   targetBotId: string,
   currentSessionId: string | null,
