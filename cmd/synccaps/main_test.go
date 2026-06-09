@@ -100,3 +100,49 @@ models:
 		t.Fatalf("plain no-reason model should remain untouched:\n%s", got)
 	}
 }
+
+func TestEnrichFilePreservesCompactModelSpacing(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := capabilities.NewResolver([]byte(`{
+		"reasoning-a": {"mode": "chat", "supports_reasoning": true},
+		"reasoning-b": {"mode": "chat", "supports_reasoning": true}
+	}`))
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "provider.yaml")
+	if err := os.WriteFile(path, []byte(`name: Test
+client_type: openai-completions
+models:
+  - model_id: reasoning-a
+    name: A
+    type: chat
+  - model_id: reasoning-b
+    name: B
+    type: chat
+`), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	changed, err := enrichFile(path, resolver, false)
+	if err != nil {
+		t.Fatalf("enrichFile: %v", err)
+	}
+	if changed != 2 {
+		t.Fatalf("changed = %d, want 2", changed)
+	}
+	gotBytes, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	got := string(gotBytes)
+	if strings.Contains(got, "\n\n  - model_id: reasoning-b") {
+		t.Fatalf("compact catalog gained blank model spacing:\n%s", got)
+	}
+	if !strings.Contains(got, "thinking_mode: toggle") {
+		t.Fatalf("output missing enrichment:\n%s", got)
+	}
+}

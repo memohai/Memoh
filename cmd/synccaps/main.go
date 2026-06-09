@@ -157,7 +157,7 @@ func enrichFile(path string, resolver *capabilities.Resolver, check bool) (int, 
 	if changed == 0 || check {
 		return changed, nil
 	}
-	return changed, writeNode(path, &doc)
+	return changed, writeNode(path, &doc, modelEntriesHaveBlankLines(raw))
 }
 
 // applyToModel sets thinking_mode + reasoning_efforts inside a model's config
@@ -317,7 +317,7 @@ func removeSeqValue(node *yaml.Node, value string) bool {
 	return changed
 }
 
-func writeNode(path string, doc *yaml.Node) error {
+func writeNode(path string, doc *yaml.Node, blankBetweenModels bool) error {
 	var buf strings.Builder
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -328,7 +328,7 @@ func writeNode(path string, doc *yaml.Node) error {
 		return err
 	}
 
-	out := restoreBlankLines(buf.String())
+	out := restoreBlankLines(buf.String(), blankBetweenModels)
 
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".synccaps-*.yaml")
 	if err != nil {
@@ -346,11 +346,33 @@ func writeNode(path string, doc *yaml.Node) error {
 	return os.Rename(tmpName, path) //nolint:gosec // temp→target in same dir, safe atomic swap
 }
 
+// modelEntriesHaveBlankLines detects the file's existing model-entry spacing.
+// Smaller catalogs are hand-formatted with a blank line between entries, while
+// large imported catalogs such as OpenRouter are compact. Preserve that style so
+// synccaps changes only capability metadata, not the whole catalog layout.
+func modelEntriesHaveBlankLines(raw []byte) bool {
+	lines := strings.Split(string(raw), "\n")
+	modelEntries := 0
+	blankBefore := 0
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "  - model_id:") {
+			continue
+		}
+		modelEntries++
+		if i > 0 && strings.TrimSpace(lines[i-1]) == "" {
+			blankBefore++
+		}
+	}
+	if modelEntries > 200 {
+		return false
+	}
+	return modelEntries > 1 && blankBefore*2 >= modelEntries
+}
+
 // restoreBlankLines re-inserts the blank-line spacing the YAML encoder strips:
-// one blank line before the top-level `models:` key and one between consecutive
-// model entries. This keeps the diff minimal against the hand-formatted
-// templates (which separate entries with blank lines for readability).
-func restoreBlankLines(s string) string {
+// always one blank line before the top-level `models:` key, and optionally one
+// between model entries when the original file used that style.
+func restoreBlankLines(s string, blankBetweenModels bool) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	out := make([]string, 0, len(lines)+len(lines)/4)
 	prevMeaningful := ""
@@ -358,7 +380,7 @@ func restoreBlankLines(s string) string {
 		switch {
 		case ln == "models:" && prevMeaningful != "":
 			out = append(out, "")
-		case strings.HasPrefix(ln, "  - model_id:") && prevMeaningful != "" && prevMeaningful != "models:":
+		case blankBetweenModels && strings.HasPrefix(ln, "  - model_id:") && prevMeaningful != "" && prevMeaningful != "models:":
 			out = append(out, "")
 		}
 		out = append(out, ln)
