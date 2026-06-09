@@ -137,6 +137,17 @@
       "fieldSessionID": "会话 ID",
       "fieldChatACL": "聊天 ACL"
     },
+    "link": {
+      "usage": "用法：/link <code> — 把此账号关联到你的 Memoh 用户。",
+      "missingCode": "请提供关联码：/link <code>",
+      "success": "已关联。此账号现在已绑定到你的 Memoh 用户，并继承你的 Bot 权限。",
+      "notFound": "关联码无效。",
+      "expired": "关联码已过期。请在 Memoh 设置中重新生成。",
+      "consumed": "该关联码已被使用。",
+      "noIdentity": "无法关联：缺少渠道身份。",
+      "unavailable": "账号关联功能当前不可用。",
+      "failed": "关联失败，请重试。"
+    },
     "help": {
       "availableCommands": "可用命令",
       "top": {
@@ -440,6 +451,8 @@
       "unknownCommandShort": "未知命令 {command}，用 {help} 查看全部命令。",
       "unknownAction": "{command} 不支持 {action} 操作，用 {help} 查看可用操作。",
       "ownerOnly": "⚠️ 仅机器人所有者可执行 {command}，聊天不受影响。",
+      "noAccess": "⚠️ 你没有该 Bot 的访问权限。",
+      "accessDeniedHint": "⚠️ 你暂时无法与该 Bot 对话。如果你是它的拥有者，请到后台复制连接码，并在这里发送 {link} <code> 绑定你的账号。",
       "generic": "⚠️ 暂时无法完成 {command}，请稍后再试。",
       "genericNoResource": "⚠️ 出了点问题，请稍后再试。",
       "runToSeeList": " 用 {command} 查看可用项。"

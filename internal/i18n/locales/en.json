@@ -137,6 +137,17 @@
       "fieldSessionID": "Session ID",
       "fieldChatACL": "Chat ACL"
     },
+    "link": {
+      "usage": "Usage: /link <code> — connect this account to your Memoh user.",
+      "missingCode": "Please provide a link code: /link <code>",
+      "success": "Connected. This account is now linked to your Memoh user and inherits your bot permissions.",
+      "notFound": "That link code is invalid.",
+      "expired": "That link code has expired. Generate a new one in Memoh settings.",
+      "consumed": "That link code was already used.",
+      "noIdentity": "Cannot link: missing channel identity.",
+      "unavailable": "Account linking is unavailable right now.",
+      "failed": "Failed to link this account. Please try again."
+    },
     "help": {
       "availableCommands": "Available commands",
       "top": {
@@ -440,6 +451,8 @@
       "unknownCommandShort": "Unknown command {command}. Run {help} to see all commands.",
       "unknownAction": "Unknown action {action} for {command}. Run {help} to see its actions.",
       "ownerOnly": "⚠️ Only the bot owner can run {command}. You can still chat normally.",
+      "noAccess": "⚠️ You don't have access to this bot.",
+      "accessDeniedHint": "⚠️ You can't chat with this bot yet. If you're its owner, open the dashboard, copy a connection code, and send {link} <code> here to link your account.",
       "generic": "⚠️ Couldn't complete {command} right now. Try again in a moment.",
       "genericNoResource": "⚠️ Something went wrong. Try again in a moment.",
       "runToSeeList": " Run {command} to see what's available."

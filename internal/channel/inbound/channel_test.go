@@ -548,8 +548,13 @@ func TestChannelInboundProcessorACLGuestDeniedDowngradesToNotify(t *testing.T) {
 	if gateway.gotReq.Query != "" {
 		t.Fatal("ACL denied guest should not trigger chat call")
 	}
-	if len(sender.sent) != 0 {
-		t.Fatalf("ACL denied guest should not send reply, got %+v", sender.sent)
+	// A directed (DM) denied message is no longer silently dropped: the sender
+	// gets one access/bind hint so a forgetful owner can /link in.
+	if len(sender.sent) != 1 {
+		t.Fatalf("ACL denied guest (DM) should receive one access hint reply, got %+v", sender.sent)
+	}
+	if !strings.Contains(sender.sent[0].Message.Text, "/link") {
+		t.Fatalf("expected access/bind hint mentioning /link, got %q", sender.sent[0].Message.Text)
 	}
 	if len(chatSvc.persistedIn) != 1 {
 		t.Fatalf("ACL denied guest should persist 1 passive message (replacing inbox), got %d", len(chatSvc.persistedIn))

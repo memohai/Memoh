@@ -369,6 +369,34 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// /new and /stop require route context, so they are handled separately
 	// from the general command handler (which runs before route resolution).
+	// These mode commands run before the chat ACL gate below, so gate them with
+	// the same command-access policy (chat ACL + manage) — otherwise an outsider
+	// who cannot chat could still reset/stop/inspect the bot's session.
+	if isDirectedAtBot(msg) &&
+		(isNewSessionCommand(cmdText) || isStopCommand(cmdText) || isStatusCommand(cmdText)) &&
+		p.commandHandler != nil {
+		ok, accErr := p.commandHandler.CommandAccess(ctx, command.ExecuteInput{
+			BotID:             strings.TrimSpace(identity.BotID),
+			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
+			UserID:            strings.TrimSpace(identity.UserID),
+			Text:              cmdText,
+			ChannelType:       msg.Channel.String(),
+			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
+			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
+			ThreadID:          extractThreadID(msg),
+		})
+		if accErr != nil || !ok {
+			if p.logger != nil {
+				p.logger.Info("mode command denied by acl — ignored",
+					slog.String("channel", msg.Channel.String()),
+					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+					slog.Any("error", accErr),
+				)
+			}
+			return nil
+		}
+	}
 	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
 	}
@@ -533,6 +561,24 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
 				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
 			)
+		}
+		// Don't leave the sender in silence. For a directed message (a DM, or an
+		// @mention/reply in a group) reply with an access/bind hint: a forgetful
+		// owner learns how to link in via /link, and an outsider learns they
+		// aren't permitted. Stay silent for undirected group chatter so we don't
+		// spam the room with denials.
+		if isDirectedAtBot(msg) {
+			loc := p.localizer(ctx, identity.BotID)
+			out := applyMessageFormat(channel.Message{Text: command.AccessDeniedMessage(loc)}, p.channelCaps(msg.Channel))
+			if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+				out.Reply = &channel.ReplyRef{MessageID: mid}
+			}
+			if sendErr := sender.Send(ctx, channel.OutboundMessage{
+				Target:  strings.TrimSpace(msg.ReplyTarget),
+				Message: out,
+			}); sendErr != nil && p.logger != nil {
+				p.logger.Warn("send acl-denied hint failed", slog.Any("error", sendErr))
+			}
 		}
 		return nil
 	}

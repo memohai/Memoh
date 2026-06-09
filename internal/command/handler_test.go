@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/memohai/memoh/internal/acl"
 	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
 	"github.com/memohai/memoh/internal/i18n"
 	"github.com/memohai/memoh/internal/mcp"
@@ -25,6 +26,15 @@ type fakeRoleResolver struct {
 
 func (f *fakeRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string, error) {
 	return f.role, f.err
+}
+
+type fakeAccessEvaluator struct {
+	allow bool
+	err   error
+}
+
+func (f *fakeAccessEvaluator) Evaluate(_ context.Context, _ acl.EvaluateRequest) (bool, error) {
+	return f.allow, f.err
 }
 
 type fakeScheduleService struct {
@@ -83,6 +93,10 @@ func newTestHandler(roleResolver MemberRoleResolver) *Handler {
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
 	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+}
+
+func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
 }
 
 // --- tests ---
@@ -771,6 +785,147 @@ func TestNormalizeLanguageShorthand(t *testing.T) {
 			}
 			if strings.Join(parsed.Args, " ") != strings.Join(tc.wantArgs, " ") {
 				t.Errorf("Args = %v, want %v", parsed.Args, tc.wantArgs)
+			}
+		})
+	}
+}
+
+// outsiderInput builds a read-command invocation from an unbound channel
+// identity (no owner/manager role, non-single-bind platform).
+func outsiderInput(text string) ExecuteInput {
+	return ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "channel-id-1",
+		Text:              text,
+		ChannelType:       "discord",
+		ConversationType:  "direct",
+		ConversationID:    "conv-1",
+	}
+}
+
+// TestExecute_CommandACLGate pins the command-access policy: a caller the chat
+// ACL denies cannot operate the bot via slash commands, except the binding
+// entry point (/link). Owners and chat-allowed callers pass through.
+func TestExecute_CommandACLGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("read command denied for outsider", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{allow: false})
+		result, err := h.ExecuteResult(context.Background(), outsiderInput("/access"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Text, "don't have access") {
+			t.Errorf("expected no-access reply, got: %s", result.Text)
+		}
+		if strings.Contains(result.Text, "Channel Identity") {
+			t.Errorf("denied outsider must not see /access config, got: %s", result.Text)
+		}
+	})
+
+	t.Run("read command allowed when chat ACL allows", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{allow: true})
+		result, err := h.ExecuteResult(context.Background(), outsiderInput("/access"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(result.Text, "don't have access") {
+			t.Errorf("chat-allowed caller should reach the command, got: %s", result.Text)
+		}
+		if !strings.Contains(result.Text, "Channel Identity") {
+			t.Errorf("expected /access output for allowed caller, got: %s", result.Text)
+		}
+	})
+
+	t.Run("owner bypasses chat ACL deny", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHandlerWithACL(&fakeRoleResolver{role: "owner"}, &fakeAccessEvaluator{allow: false})
+		result, err := h.ExecuteResult(context.Background(), outsiderInput("/access"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(result.Text, "don't have access") {
+			t.Errorf("owner must always operate the bot, got: %s", result.Text)
+		}
+		if !strings.Contains(result.Text, "Channel Identity") {
+			t.Errorf("expected /access output for owner, got: %s", result.Text)
+		}
+	})
+
+	t.Run("/link allowed despite chat ACL deny", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{allow: false})
+		result, err := h.ExecuteResult(context.Background(), outsiderInput("/link ABC123"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(result.Text, "don't have access") {
+			t.Errorf("/link is the binding entry point and must never be gated, got: %s", result.Text)
+		}
+	})
+
+	t.Run("eval error fails closed", func(t *testing.T) {
+		t.Parallel()
+		h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{err: errors.New("db down")})
+		result, err := h.ExecuteResult(context.Background(), outsiderInput("/access"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Text, "don't have access") {
+			t.Errorf("ACL eval error must deny (fail closed), got: %s", result.Text)
+		}
+	})
+}
+
+// TestCommandAccess pins the boolean policy used to gate route-aware mode
+// commands (/new, /stop, /status) that do not flow through Execute.
+func TestCommandAccess(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		role      string
+		channel   string
+		allow     bool
+		evalErr   error
+		text      string
+		wantOK    bool
+		wantError bool
+	}{
+		{name: "link always allowed", role: "", allow: false, text: "/link ABC", wantOK: true},
+		{name: "owner allowed despite deny", role: "owner", allow: false, text: "/new", wantOK: true},
+		{name: "manager allowed despite deny", role: "manager", allow: false, text: "/stop", wantOK: true},
+		{name: "outsider denied", role: "", allow: false, text: "/new", wantOK: false},
+		{name: "outsider allowed by chat acl", role: "", allow: true, text: "/status", wantOK: true},
+		{name: "qq unbound allowed", role: "", channel: "qq", allow: false, text: "/new", wantOK: true},
+		{name: "weixin unbound allowed", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: true},
+		{name: "eval error propagates", role: "", allow: false, evalErr: errors.New("boom"), text: "/new", wantOK: false, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newTestHandlerWithACL(&fakeRoleResolver{role: tc.role}, &fakeAccessEvaluator{allow: tc.allow, err: tc.evalErr})
+			ch := tc.channel
+			if ch == "" {
+				ch = "discord"
+			}
+			ok, err := h.CommandAccess(context.Background(), ExecuteInput{
+				BotID:             "bot-1",
+				ChannelIdentityID: "channel-id-1",
+				Text:              tc.text,
+				ChannelType:       ch,
+				ConversationType:  "direct",
+				ConversationID:    "conv-1",
+			})
+			if tc.wantError && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ok != tc.wantOK {
+				t.Errorf("CommandAccess(%q) = %v, want %v", tc.text, ok, tc.wantOK)
 			}
 		})
 	}
