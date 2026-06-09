@@ -34,14 +34,34 @@ export interface TimezoneOption {
   description: string
 }
 
-// Precomputed ONCE at module load (not per component instance). The old
-// per-instance `computed` rebuilt all ~418 offsets on every TimezoneSelect
-// mount — and it mounts behind a v-if on each visit to the profile page — so
-// the ~50ms hitch landed right when the user opened the dropdown. Hoisting it
-// to module scope pays the cost a single time during bundle eval and reuses the
-// result across every instance, mount, and re-open.
+// `description` is a getter, so constructing this list does ZERO Intl work — the
+// offset for a zone is only formatted when something actually reads it, and
+// getUtcOffsetLabel memoises the result. Because the dropdown is virtualized,
+// opening it reads at most the ~23 visible rows' getters (~a few ms), never all
+// ~418. The getter still resolves synchronously, so offsets stay searchable.
 export const timezoneOptions: TimezoneOption[] = timezones.map(tz => ({
   value: tz,
   label: tz,
-  description: getUtcOffsetLabel(tz),
+  get description() {
+    return getUtcOffsetLabel(tz)
+  },
 }))
+
+// Warm the whole cache in the background after load so even the first open (and
+// the first offset search) finds everything already formatted. Runs in small
+// chunks during idle time so it never blocks a frame; falls back to setTimeout
+// where requestIdleCallback is unavailable (older Safari).
+const scheduleIdle: (cb: () => void) => void
+  = typeof window !== 'undefined' && 'requestIdleCallback' in window
+    ? cb => window.requestIdleCallback(() => cb())
+    : cb => setTimeout(cb, 1)
+
+if (typeof window !== 'undefined') {
+  let i = 0
+  const warmChunk = () => {
+    const end = Math.min(i + 40, timezones.length)
+    for (; i < end; i++) getUtcOffsetLabel(timezones[i])
+    if (i < timezones.length) scheduleIdle(warmChunk)
+  }
+  scheduleIdle(warmChunk)
+}
