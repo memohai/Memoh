@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Combobox, { type ComboboxOption } from '@/components/combobox/index.vue'
-import { timezones, emptyTimezoneValue, getUtcOffsetLabel } from '@/utils/timezones'
+import { emptyTimezoneValue, timezoneOptions } from '@/utils/timezones'
 
 const { t } = useI18n()
 
@@ -28,29 +28,13 @@ const props = withDefaults(defineProps<{
 
 const selected = defineModel<string>({ default: '' })
 
-const offsetMap = computed(() => {
-  const map = new Map<string, string>()
-  for (const tz of timezones) {
-    map.set(tz, getUtcOffsetLabel(tz))
-  }
-  return map
-})
-
+// timezoneOptions is precomputed at module scope; only prepend the optional
+// "inherit" row, so mounting/opening this component does no per-zone work.
 const options = computed<ComboboxOption[]>(() => {
-  const items: ComboboxOption[] = []
-  if (props.allowEmpty) {
-    items.push({
-      value: emptyTimezoneValue,
-      label: props.emptyLabel || t('bots.timezoneInherited'),
-    })
-  }
-  for (const tz of timezones) {
-    items.push({
-      value: tz,
-      label: tz,
-      description: offsetMap.value.get(tz) ?? '',
-    })
-  }
-  return items
+  if (!props.allowEmpty) return timezoneOptions
+  return [
+    { value: emptyTimezoneValue, label: props.emptyLabel || t('bots.timezoneInherited') },
+    ...timezoneOptions,
+  ]
 })
 </script>
