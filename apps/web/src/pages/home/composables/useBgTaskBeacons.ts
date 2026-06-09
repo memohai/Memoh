@@ -36,14 +36,17 @@ export function provideBgTaskBeacons(): {
   const api: BgTaskBeaconApi = {
     upsert(record) {
       if (record.phase === 'done') {
-        // Only surface completion for a task we actually saw running. A task
-        // that is already done the first time we see it (e.g. scrolling through
-        // history, or initial load) is history, not a fresh finish — ignore it
-        // so it never flashes a false "done" pill.
         const prev = records.get(record.taskId)
-        if (!prev || prev.phase !== 'active') return
+        // A task that is already done the first time we see it (scrollback /
+        // initial load) is history, not a fresh finish — ignore it so it never
+        // flashes a false "done" pill.
+        if (!prev) return
         records.set(record.taskId, record)
-        if (!doneTimers.has(record.taskId)) {
+        // Start the linger only on the active→done transition; once it's
+        // lingering, keep that timer but still accept later updates (the row
+        // scrolling into view sets visible=true) so the pill dismisses the
+        // moment the user reaches it instead of hanging for the full linger.
+        if (prev.phase === 'active' && !doneTimers.has(record.taskId)) {
           doneTimers.set(record.taskId, setTimeout(() => {
             records.delete(record.taskId)
             doneTimers.delete(record.taskId)

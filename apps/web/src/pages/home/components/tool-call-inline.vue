@@ -4,6 +4,7 @@
       v-if="expandable"
       role="button"
       tabindex="0"
+      :aria-expanded="open"
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none"
       :class="rowClass"
       @click="toggleOpen"
