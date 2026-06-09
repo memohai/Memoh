@@ -179,37 +179,14 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 	if err != nil {
 		return Binding{}, err
 	}
-	code, err := s.queries.GetChannelLinkCodeByToken(ctx, token)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Binding{}, ErrCodeNotFound
-		}
-		return Binding{}, err
-	}
-	if code.ConsumedAt.Valid {
-		return Binding{}, ErrCodeConsumed
-	}
-	if !code.ExpiresAt.Valid || !code.ExpiresAt.Time.After(s.now()) {
-		return Binding{}, ErrCodeExpired
-	}
-	// Atomically claim the code (UPDATE ... WHERE consumed_at IS NULL) BEFORE
-	// creating the binding. This is the one-time guarantee: if two redemptions
-	// race, only the one that flips consumed_at proceeds; the loser gets
-	// ErrCodeConsumed instead of silently establishing a second binding.
-	if _, err := s.queries.MarkChannelLinkCodeConsumed(ctx, sqlc.MarkChannelLinkCodeConsumedParams{
-		Token:                     token,
-		ConsumedChannelIdentityID: pgIdentityID,
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Binding{}, ErrCodeConsumed
-		}
-		return Binding{}, err
-	}
-	bindingRow, err := s.queries.UpsertUserChannelIdentityBinding(ctx, sqlc.UpsertUserChannelIdentityBindingParams{
-		UserID:            code.UserID,
+	bindingRow, err := s.queries.RedeemChannelLinkCode(ctx, sqlc.RedeemChannelLinkCodeParams{
+		Token:             token,
 		ChannelIdentityID: pgIdentityID,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Binding{}, s.classifyRedeemNoRow(ctx, token)
+		}
 		return Binding{}, err
 	}
 	return Binding{
@@ -218,6 +195,23 @@ func (s *Service) ConsumeLinkCode(ctx context.Context, token, channelIdentityID 
 		ChannelIdentityID: uuidString(bindingRow.ChannelIdentityID),
 		CreatedAt:         db.TimeFromPg(bindingRow.CreatedAt),
 	}, nil
+}
+
+func (s *Service) classifyRedeemNoRow(ctx context.Context, token string) error {
+	code, err := s.queries.GetChannelLinkCodeByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCodeNotFound
+		}
+		return err
+	}
+	if code.ConsumedAt.Valid {
+		return ErrCodeConsumed
+	}
+	if !code.ExpiresAt.Valid || !code.ExpiresAt.Time.After(s.now()) {
+		return ErrCodeExpired
+	}
+	return ErrCodeConsumed
 }
 
 // ListUserBindings returns the channel identities bound to a user's account.

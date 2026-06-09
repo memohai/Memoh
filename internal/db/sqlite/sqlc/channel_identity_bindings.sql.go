@@ -174,7 +174,7 @@ const markChannelLinkCodeConsumed = `-- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = CURRENT_TIMESTAMP,
     consumed_channel_identity_id = ?1
-WHERE token = ?2 AND consumed_at IS NULL
+WHERE token = ?2 AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
 RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
 `
 

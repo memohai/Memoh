@@ -955,13 +955,10 @@ function closeMemberForm() {
   memberFormIdentityId.value = ''
 }
 
-// Add persists immediately (no in-memory-only draft): adding a member writes a
-// durable membership anchor so it survives a refresh.
-//  - Whitelist: the member list IS the allow-list, so adding = an allow chat rule
-//    (they can chat now). Removing chat (or Trash) takes them off the list.
-//  - Blacklist: chat is allowed by default (no rule needed), so we anchor the
-//    membership with a Manage placeholder (granted=false) — it lists the member
-//    without changing any permission, and Trash removes it.
+// Add persists immediately (no in-memory-only draft): adding a member writes the
+// list entry for the active mode. Whitelist entries allow chat; blacklist entries
+// deny chat. Manage is only written by the Manage checkbox so list membership
+// cannot accidentally suppress inherited workspace permissions.
 async function confirmAddMember() {
   const id = memberFormIdentityId.value.trim()
   if (!id) return
@@ -970,11 +967,7 @@ async function confirmAddMember() {
   closeMemberForm()
   try {
     if (isBlacklistMode.value) {
-      await postBotsByBotIdChannelManagers({
-        path: { bot_id: props.botId },
-        body: { channel_identity_id: id, granted: false },
-        throwOnError: true,
-      })
+      await createIdentityRule(id, 'deny')
     }
     else {
       await createIdentityRule(id, 'allow')

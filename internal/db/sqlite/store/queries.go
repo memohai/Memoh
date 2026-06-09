@@ -581,6 +581,49 @@ func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg pgsqlc.Ma
 	return result, nil
 }
 
+func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg pgsqlc.RedeemChannelLinkCodeParams) (pgsqlc.UserChannelIdentityBinding, error) {
+	if q == nil || q.store == nil || q.store.db == nil || q.store.queries == nil {
+		return pgsqlc.UserChannelIdentityBinding{}, errSQLiteQueriesNotConfigured
+	}
+	tx, err := q.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	qtx := q.store.queries.WithTx(tx)
+
+	var markArg sqlitesqlc.MarkChannelLinkCodeConsumedParams
+	if err := convertValue(pgsqlc.MarkChannelLinkCodeConsumedParams{
+		Token:                     arg.Token,
+		ConsumedChannelIdentityID: arg.ChannelIdentityID,
+	}, &markArg); err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, err
+	}
+	code, err := qtx.MarkChannelLinkCodeConsumed(ctx, markArg)
+	if err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, mapQueryErr(err)
+	}
+
+	binding, err := qtx.UpsertUserChannelIdentityBinding(ctx, sqlitesqlc.UpsertUserChannelIdentityBindingParams{
+		UserID:            code.UserID,
+		ChannelIdentityID: markArg.ConsumedChannelIdentityID.String,
+	})
+	if err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, mapQueryErr(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, err
+	}
+
+	var result pgsqlc.UserChannelIdentityBinding
+	if err := convertValue(binding, &result); err != nil {
+		return pgsqlc.UserChannelIdentityBinding{}, err
+	}
+	return result, nil
+}
+
 func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg pgsqlc.UpsertUserChannelIdentityBindingParams) (pgsqlc.UserChannelIdentityBinding, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return pgsqlc.UserChannelIdentityBinding{}, errSQLiteQueriesNotConfigured

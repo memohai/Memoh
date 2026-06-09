@@ -286,12 +286,24 @@ func UnknownCommandMessage(t *i18n.Localizer, text string) string {
 
 // AccessDeniedMessage is the reply sent when the chat ACL denies a sender. It
 // doubles as the binding hint so a forgetful owner learns how to link in
-// (/link) while a genuine outsider learns they aren't permitted — used in place
-// of silently dropping a directed message.
-func AccessDeniedMessage(t *i18n.Localizer) string {
+// (/link) while a genuine outsider learns they aren't permitted. A manager gets
+// a narrower message because Manage access does not imply Chat access.
+func AccessDeniedMessage(t *i18n.Localizer, role string) string {
+	if strings.TrimSpace(role) == "manager" {
+		return t.T("cmd.error.accessDeniedManager")
+	}
 	return t.T("cmd.error.accessDeniedHint", map[string]any{
 		"link": CmdRef("link"),
 	})
+}
+
+// MemberRole resolves the sender's bot role for presentation decisions outside
+// command execution. Callers must not use it as an authorization shortcut.
+func (h *Handler) MemberRole(ctx context.Context, botID, channelIdentityID string) (string, error) {
+	if h == nil || h.roleResolver == nil || strings.TrimSpace(channelIdentityID) == "" {
+		return "", nil
+	}
+	return h.roleResolver.GetMemberRole(ctx, strings.TrimSpace(botID), strings.TrimSpace(channelIdentityID))
 }
 
 // ResolveLocale resolves the command-UI locale for a bot from its
@@ -380,7 +392,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 			role = r
 		}
 	}
-	writeAccess := role == "owner" || role == "manager" || allowsUnboundWriteCommands(input)
+	writeAccess := role == "owner" || role == "manager"
 
 	resource := canonicalResource(parsed.Resource)
 	// /language <lang> shorthand → /language set <lang>. Must run BEFORE cc is
@@ -414,9 +426,9 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 
 	// ACL gate for commands: an outsider who cannot chat with the bot must not be
 	// able to operate it via slash commands either. The binding entry point
-	// (/link) is always allowed so a holder of a valid code can bind; owners,
-	// managers, and unbound-write platforms (writeAccess) are always allowed and
-	// can recover even in whitelist mode; everyone else must pass the chat ACL.
+	// (/link) is always allowed so a holder of a valid code can bind; owners and
+	// managers are always allowed and can recover even in whitelist mode; everyone
+	// else must pass the chat ACL.
 	// (Write commands are additionally gated by writeAccess below.)
 	if resource != "link" && !writeAccess {
 		allowed, aclErr := h.chatACLAllows(cc)
@@ -609,10 +621,10 @@ func (h *Handler) chatACLAllows(cc CommandContext) (bool, error) {
 }
 
 // CommandAccess reports whether the caller may operate a command on the bot,
-// applying the same policy as Execute's gate: /link is always allowed; owners,
-// managers, and unbound-write platforms are always allowed; everyone else must
-// pass the chat ACL. The channel processor uses it to gate the route-aware mode
-// commands (/new, /stop, /status) that do not flow through Execute.
+// applying the same policy as Execute's gate: /link is always allowed; owners and
+// managers are always allowed; everyone else must pass the chat ACL. The channel
+// processor uses it to gate the route-aware mode commands (/new, /stop, /status)
+// that do not flow through Execute.
 func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, error) {
 	if parsed, err := Parse(ExtractCommandText(input.Text)); err == nil {
 		if canonicalResource(parsed.Resource) == "link" {
@@ -626,7 +638,7 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 			role = r
 		}
 	}
-	if role == "owner" || role == "manager" || allowsUnboundWriteCommands(input) {
+	if role == "owner" || role == "manager" {
 		return true, nil
 	}
 	if h.aclEvaluator == nil {
@@ -642,20 +654,6 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 			ThreadID:         strings.TrimSpace(input.ThreadID),
 		},
 	})
-}
-
-func allowsUnboundWriteCommands(input ExecuteInput) bool {
-	if strings.TrimSpace(input.ChannelIdentityID) == "" {
-		return false
-	}
-	// QQ and personal WeChat no longer have a channel-identity bind flow, so
-	// channel-scoped slash commands must not depend on a linked Web user.
-	switch strings.ToLower(strings.TrimSpace(input.ChannelType)) {
-	case "qq", "weixin":
-		return true
-	default:
-		return false
-	}
 }
 
 // safeExecute runs a sub-command handler and recovers from panics.

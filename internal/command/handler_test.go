@@ -296,7 +296,7 @@ func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	}
 }
 
-func TestExecute_WritePermissionAllowedForQQAndWeixinWithoutLinkedUser(t *testing.T) {
+func TestExecute_WritePermissionDeniedForQQAndWeixinWithoutLinkedUser(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: ""})
 	for _, channelType := range []string{"qq", "weixin"} {
@@ -311,11 +311,8 @@ func TestExecute_WritePermissionAllowedForQQAndWeixinWithoutLinkedUser(t *testin
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if strings.Contains(result, "Permission denied") {
-				t.Fatalf("%s write command should not require linked owner user, got: %s", channelType, result)
-			}
-			if !strings.Contains(result, "Usage: /model set") {
-				t.Fatalf("expected command to reach handler usage, got: %s", result)
+			if !strings.Contains(result, "Only the bot owner") {
+				t.Fatalf("%s unlinked write command should be denied, got: %s", channelType, result)
 			}
 		})
 	}
@@ -958,8 +955,8 @@ func TestCommandAccess(t *testing.T) {
 		{name: "manager allowed despite deny", role: "manager", allow: false, text: "/stop", wantOK: true},
 		{name: "outsider denied", role: "", allow: false, text: "/new", wantOK: false},
 		{name: "outsider allowed by chat acl", role: "", allow: true, text: "/status", wantOK: true},
-		{name: "qq unbound allowed", role: "", channel: "qq", allow: false, text: "/new", wantOK: true},
-		{name: "weixin unbound allowed", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: true},
+		{name: "qq unbound denied by chat acl", role: "", channel: "qq", allow: false, text: "/new", wantOK: false},
+		{name: "weixin unbound denied by chat acl", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: false},
 		{name: "eval error propagates", role: "", allow: false, evalErr: errors.New("boom"), text: "/new", wantOK: false, wantError: true},
 	}
 	for _, tc := range cases {

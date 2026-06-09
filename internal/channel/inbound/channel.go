@@ -569,7 +569,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		// spam the room with denials.
 		if isDirectedAtBot(msg) {
 			loc := p.localizer(ctx, identity.BotID)
-			out := applyMessageFormat(channel.Message{Text: command.AccessDeniedMessage(loc)}, p.channelCaps(msg.Channel))
+			role := p.accessDeniedRole(ctx, identity)
+			out := applyMessageFormat(channel.Message{Text: command.AccessDeniedMessage(loc, role)}, p.channelCaps(msg.Channel))
 			if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 				out.Reply = &channel.ReplyRef{MessageID: mid}
 			}
@@ -1150,6 +1151,24 @@ func (p *ChannelInboundProcessor) sendModeConfirmation(
 			Emoji:     emoji,
 		})
 	}
+}
+
+func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity InboundIdentity) string {
+	if p == nil || p.commandHandler == nil {
+		return ""
+	}
+	role, err := p.commandHandler.MemberRole(ctx, identity.BotID, identity.ChannelIdentityID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("resolve acl-denied role failed",
+				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
+				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
+				slog.Any("error", err),
+			)
+		}
+		return ""
+	}
+	return role
 }
 
 // drainQueue marks the route as done and processes any queued tasks.

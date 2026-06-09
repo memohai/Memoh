@@ -453,6 +453,7 @@
       "ownerOnly": "⚠️ 仅机器人所有者可执行 {command}，聊天不受影响。",
       "noAccess": "⚠️ 你没有该 Bot 的访问权限。",
       "accessDeniedHint": "⚠️ 你暂时无法与该 Bot 对话。如果你是它的拥有者，请到后台复制连接码，并在这里发送 {link} <code> 绑定你的账号。",
+      "accessDeniedManager": "⚠️ 你可以管理这个 Bot，但这个频道身份没有开启 Chat。Manage 命令仍然可用；如果这个身份也需要发送普通消息，请让 Bot 所有者在 Channel Access 里开启 Chat。",
       "generic": "⚠️ 暂时无法完成 {command}，请稍后再试。",
       "genericNoResource": "⚠️ 出了点问题，请稍后再试。",
       "runToSeeList": " 用 {command} 查看可用项。"

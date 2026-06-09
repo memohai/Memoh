@@ -169,7 +169,7 @@ const markChannelLinkCodeConsumed = `-- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = now(),
     consumed_channel_identity_id = $2
-WHERE token = $1 AND consumed_at IS NULL
+WHERE token = $1 AND consumed_at IS NULL AND expires_at > now()
 RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
 `
 
@@ -189,6 +189,42 @@ func (q *Queries) MarkChannelLinkCodeConsumed(ctx context.Context, arg MarkChann
 		&i.ConsumedAt,
 		&i.ConsumedChannelIdentityID,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const redeemChannelLinkCode = `-- name: RedeemChannelLinkCode :one
+WITH claimed AS (
+  UPDATE channel_link_codes
+  SET consumed_at = now(),
+      consumed_channel_identity_id = $2
+  WHERE token = $1
+    AND consumed_at IS NULL
+    AND expires_at > now()
+  RETURNING user_id
+)
+INSERT INTO user_channel_identity_bindings (user_id, channel_identity_id)
+SELECT user_id, $2
+FROM claimed
+ON CONFLICT (user_id, channel_identity_id) DO UPDATE
+  SET updated_at = now()
+RETURNING id, user_id, channel_identity_id, created_at, updated_at
+`
+
+type RedeemChannelLinkCodeParams struct {
+	Token             string      `json:"token"`
+	ChannelIdentityID pgtype.UUID `json:"channel_identity_id"`
+}
+
+func (q *Queries) RedeemChannelLinkCode(ctx context.Context, arg RedeemChannelLinkCodeParams) (UserChannelIdentityBinding, error) {
+	row := q.db.QueryRow(ctx, redeemChannelLinkCode, arg.Token, arg.ChannelIdentityID)
+	var i UserChannelIdentityBinding
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ChannelIdentityID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

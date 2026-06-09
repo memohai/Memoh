@@ -453,6 +453,7 @@
       "ownerOnly": "⚠️ Only the bot owner can run {command}. You can still chat normally.",
       "noAccess": "⚠️ You don't have access to this bot.",
       "accessDeniedHint": "⚠️ You can't chat with this bot yet. If you're its owner, open the dashboard, copy a connection code, and send {link} <code> here to link your account.",
+      "accessDeniedManager": "⚠️ You can manage this bot, but Chat is disabled for this channel identity. Manage commands still work; ask the bot owner to enable Chat if this identity should send regular messages.",
       "generic": "⚠️ Couldn't complete {command} right now. Try again in a moment.",
       "genericNoResource": "⚠️ Something went wrong. Try again in a moment.",
       "runToSeeList": " Run {command} to see what's available."

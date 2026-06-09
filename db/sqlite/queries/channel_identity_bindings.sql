@@ -12,7 +12,7 @@ WHERE token = sqlc.arg(token);
 UPDATE channel_link_codes
 SET consumed_at = CURRENT_TIMESTAMP,
     consumed_channel_identity_id = sqlc.arg(consumed_channel_identity_id)
-WHERE token = sqlc.arg(token) AND consumed_at IS NULL
+WHERE token = sqlc.arg(token) AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
 RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at;
 
 -- name: UpsertUserChannelIdentityBinding :one
