@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/db"
@@ -244,6 +245,126 @@ func (s *Service) DeleteRule(ctx context.Context, ruleID string) error {
 		return err
 	}
 	return s.queries.DeleteBotACLRuleByID(ctx, pgRuleID)
+}
+
+// GetManageOverride returns the local Manage override for a channel identity on a
+// bot. exists reports whether a row is present; when false, granted is meaningless
+// and callers should fall back to inheritance.
+func (s *Service) GetManageOverride(ctx context.Context, botID, channelIdentityID string) (granted bool, exists bool, err error) {
+	if s == nil || s.queries == nil {
+		return false, false, errors.New("acl service not configured")
+	}
+	pgBotID, err := db.ParseUUID(strings.TrimSpace(botID))
+	if err != nil {
+		return false, false, err
+	}
+	pgIdentityID, err := db.ParseUUID(strings.TrimSpace(channelIdentityID))
+	if err != nil {
+		return false, false, err
+	}
+	row, err := s.queries.GetBotChannelAdmin(ctx, sqlc.GetBotChannelAdminParams{
+		BotID:             pgBotID,
+		ChannelIdentityID: pgIdentityID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return row.Granted, true, nil
+}
+
+// ListManageOverrides returns the local Manage overrides for a bot.
+func (s *Service) ListManageOverrides(ctx context.Context, botID string) ([]ManageOverride, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("acl service not configured")
+	}
+	pgBotID, err := db.ParseUUID(strings.TrimSpace(botID))
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListBotChannelAdmins(ctx, pgBotID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ManageOverride, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, ManageOverride{
+			ID:                         uuid.UUID(row.ID.Bytes).String(),
+			BotID:                      uuid.UUID(row.BotID.Bytes).String(),
+			ChannelIdentityID:          uuid.UUID(row.ChannelIdentityID.Bytes).String(),
+			Granted:                    row.Granted,
+			ChannelType:                strings.TrimSpace(row.ChannelType.String),
+			ChannelSubjectID:           strings.TrimSpace(row.ChannelSubjectID.String),
+			ChannelIdentityDisplayName: strings.TrimSpace(row.ChannelIdentityDisplayName.String),
+			ChannelIdentityAvatarURL:   strings.TrimSpace(row.ChannelIdentityAvatarUrl.String),
+			CreatedAt:                  timeFromPg(row.CreatedAt),
+		})
+	}
+	return items, nil
+}
+
+// SetManageOverride upserts a local Manage override (granted ON/OFF) for a channel
+// identity on a bot.
+func (s *Service) SetManageOverride(ctx context.Context, botID, channelIdentityID string, granted bool, createdByUserID string) (ManageOverride, error) {
+	if s == nil || s.queries == nil {
+		return ManageOverride{}, errors.New("acl service not configured")
+	}
+	channelIdentityID = strings.TrimSpace(channelIdentityID)
+	if channelIdentityID == "" {
+		return ManageOverride{}, ErrInvalidRuleSubject
+	}
+	pgBotID, err := db.ParseUUID(strings.TrimSpace(botID))
+	if err != nil {
+		return ManageOverride{}, err
+	}
+	pgIdentityID, err := db.ParseUUID(channelIdentityID)
+	if err != nil {
+		return ManageOverride{}, err
+	}
+	if _, err := s.queries.GetChannelIdentityByID(ctx, pgIdentityID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ManageOverride{}, ErrInvalidRuleSubject
+		}
+		return ManageOverride{}, err
+	}
+	row, err := s.queries.UpsertBotChannelAdmin(ctx, sqlc.UpsertBotChannelAdminParams{
+		BotID:             pgBotID,
+		ChannelIdentityID: pgIdentityID,
+		Granted:           granted,
+		CreatedByUserID:   optionalUUID(createdByUserID),
+	})
+	if err != nil {
+		return ManageOverride{}, err
+	}
+	return ManageOverride{
+		ID:                uuid.UUID(row.ID.Bytes).String(),
+		BotID:             uuid.UUID(row.BotID.Bytes).String(),
+		ChannelIdentityID: uuid.UUID(row.ChannelIdentityID.Bytes).String(),
+		Granted:           row.Granted,
+		CreatedAt:         timeFromPg(row.CreatedAt),
+	}, nil
+}
+
+// DeleteManageOverride removes a local Manage override, so the channel identity
+// falls back to its inherited grant.
+func (s *Service) DeleteManageOverride(ctx context.Context, botID, channelIdentityID string) error {
+	if s == nil || s.queries == nil {
+		return errors.New("acl service not configured")
+	}
+	pgBotID, err := db.ParseUUID(strings.TrimSpace(botID))
+	if err != nil {
+		return err
+	}
+	pgIdentityID, err := db.ParseUUID(strings.TrimSpace(channelIdentityID))
+	if err != nil {
+		return err
+	}
+	return s.queries.DeleteBotChannelAdmin(ctx, sqlc.DeleteBotChannelAdminParams{
+		BotID:             pgBotID,
+		ChannelIdentityID: pgIdentityID,
+	})
 }
 
 // ListObservedConversationsByChannelIdentity returns conversations observed for a specific
