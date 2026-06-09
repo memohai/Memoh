@@ -1,12 +1,12 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="leading-relaxed">
     <button
       :aria-expanded="open"
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none text-muted-foreground hover:text-foreground"
       @click="open = !open"
     >
       <RailIconStack :icons="icons" />
-      <span class="ml-1 shrink-0 font-medium">{{ summaryLabel }}</span>
+      <span class="ml-1 shrink-0">{{ summaryLabel }}</span>
       <ChevronRight
         class="size-3.5 shrink-0 ml-auto opacity-45 transition-transform group-hover:opacity-90"
         :class="open ? 'rotate-90' : ''"

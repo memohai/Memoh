@@ -6,7 +6,7 @@
       @click="open = !open"
     >
       <RailIconStack :icons="icons" />
-      <span class="ml-1 shrink-0 font-medium">{{ label }}</span>
+      <span class="ml-1 shrink-0">{{ label }}</span>
       <ChevronRight
         class="size-3.5 shrink-0 ml-auto opacity-45 transition-transform group-hover:opacity-90"
         :class="open ? 'rotate-90' : ''"

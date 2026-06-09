@@ -1,5 +1,5 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="leading-relaxed">
     <button
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 text-muted-foreground hover:text-foreground"
       @click="toggleOpen"

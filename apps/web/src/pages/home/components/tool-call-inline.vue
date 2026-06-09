@@ -1,5 +1,5 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="leading-relaxed">
     <div
       v-if="expandable"
       role="button"
@@ -12,11 +12,11 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0 opacity-60"
+        class="size-3.5 shrink-0 opacity-50"
       />
       <span
         v-if="isExec"
-        class="shrink-0 font-mono select-none"
+        class="shrink-0 font-mono text-xs select-none"
         :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
       >$</span>
       <span
@@ -26,12 +26,12 @@
       >{{ renderedActionLabel }}</span>
       <span
         v-if="isExec && !display.target"
-        class="shrink-0 font-mono truncate"
+        class="shrink-0 font-mono text-xs truncate"
         :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
       >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="font-mono text-xs truncate hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click.stop="handleOpenInFiles"
@@ -40,7 +40,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="font-mono text-xs truncate"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -81,11 +81,11 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0 opacity-60"
+        class="size-3.5 shrink-0 opacity-50"
       />
       <span
         v-if="isExec"
-        class="shrink-0 font-mono select-none"
+        class="shrink-0 font-mono text-xs select-none"
         :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
       >$</span>
       <span
@@ -95,12 +95,12 @@
       >{{ renderedActionLabel }}</span>
       <span
         v-if="isExec && !display.target"
-        class="shrink-0 font-mono truncate"
+        class="shrink-0 font-mono text-xs truncate"
         :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
       >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="font-mono text-xs truncate hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click="handleOpenInFiles"
@@ -109,7 +109,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="font-mono text-xs truncate"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -296,7 +296,8 @@ onBeforeUnmount(clearRunningTimer)
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
   if (display.value.isError) return 'text-destructive'
-  return 'text-foreground/75'
+  // Recessed by default (design: tool target ~muted), brightening only on hover.
+  return 'text-muted-foreground group-hover:text-foreground'
 })
 
 const actionClass = computed(() => {
