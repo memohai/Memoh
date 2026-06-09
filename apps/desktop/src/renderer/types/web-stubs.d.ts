@@ -168,6 +168,19 @@ declare module '@memohai/web/store/capabilities' {
   }
 }
 
+declare module '@memohai/web/store/update' {
+  export function useUpdateStore(): {
+    checking: boolean
+    checked: boolean
+    hasUpdate: boolean
+    latestVersion: string
+    releaseBody: string
+    releaseUrl: string
+    check: () => Promise<boolean>
+    checkAtStartup: () => Promise<void>
+  }
+}
+
 declare module '@memohai/web/composables/useDialogMutation' {
   export function useDialogMutation(): {
     run: <T>(action: () => Promise<T>, options?: { fallbackMessage?: string, onSuccess?: () => void }) => Promise<T | undefined>

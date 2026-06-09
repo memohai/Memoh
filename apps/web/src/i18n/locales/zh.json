@@ -232,16 +232,25 @@
     "empty": "暂无成员"
   },
   "about": {
+    "tagline": "开源多智能体平台",
+    "description": "多个 AI Agent，各自拥有独立的电脑与长期记忆。",
+    "updatesSection": "更新",
+    "currentVersion": "当前版本 v{version}",
+    "checkHint": "前往 GitHub 检查最新版本。",
     "checkForUpdates": "检查更新",
-    "checking": "正在检查更新...",
+    "checking": "检查中…",
     "upToDate": "已是最新版本",
     "newVersionAvailable": "发现新版本: v{version}",
+    "newVersionTitle": "新版本 v{version} 已发布",
+    "newVersionDesc": "GitHub 上已有更新版本",
+    "whatsChanged": "更新内容",
     "releaseNotes": "更新日志",
     "viewOnGitHub": "在 GitHub 上查看",
     "checkFailed": "检查更新失败",
     "github": "GitHub",
     "docs": "技术文档",
-    "feedback": "问题反馈"
+    "feedback": "问题反馈",
+    "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
     "greeting": "你好！有什么我可以帮你的吗？",

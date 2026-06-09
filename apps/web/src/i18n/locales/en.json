@@ -236,16 +236,25 @@
     "empty": "No members"
   },
   "about": {
+    "tagline": "Open-source multi-agent platform",
+    "description": "Multiple AI agents, each with its own computer and long-term memory.",
+    "updatesSection": "Updates",
+    "currentVersion": "Version v{version}",
+    "checkHint": "Check GitHub for the latest release.",
     "checkForUpdates": "Check for Updates",
-    "checking": "Checking for Updates...",
-    "upToDate": "You're All Set",
+    "checking": "Checking…",
+    "upToDate": "You're on the latest version",
     "newVersionAvailable": "New Version Available: v{version}",
+    "newVersionTitle": "Version v{version} is available",
+    "newVersionDesc": "A newer release is published on GitHub.",
+    "whatsChanged": "What's changed",
     "releaseNotes": "Release Notes",
     "viewOnGitHub": "View on GitHub",
     "checkFailed": "Check Failed",
     "github": "GitHub",
     "docs": "Documentation",
-    "feedback": "Feedback"
+    "feedback": "Feedback",
+    "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
     "greeting": "Hi! How can I help you today?",
