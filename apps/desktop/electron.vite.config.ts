@@ -9,8 +9,27 @@ const require = createRequire(import.meta.url)
 
 const defaultPort = 8082
 const defaultHost = '127.0.0.1'
-const defaultApiBaseUrl = process.env.VITE_API_URL ?? 'http://localhost:8080'
-const desktopFlavor = process.env.MEMOH_DESKTOP_FLAVOR === 'online' ? 'online' : 'offline'
+const desktopRuntimeMode = resolveDesktopRuntimeMode(
+  process.env.MEMOH_DESKTOP_RUNTIME_MODE ?? process.env.MEMOH_DESKTOP_FLAVOR,
+)
+const defaultApiBaseUrl = process.env.VITE_API_URL ?? (
+  desktopRuntimeMode === 'remote' ? 'http://localhost:18080' : 'http://localhost:8080'
+)
+
+function resolveDesktopRuntimeMode(value: string | undefined): 'local' | 'remote' {
+  switch (value?.trim()) {
+    case 'remote':
+    case 'online':
+      return 'remote'
+    case 'local':
+    case 'offline':
+    case undefined:
+    case '':
+      return 'local'
+    default:
+      throw new Error(`Unsupported desktop runtime mode: ${value}`)
+  }
+}
 
 function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: string; baseUrl: string } {
   const configuredProxyTarget = process.env.MEMOH_WEB_PROXY_TARGET?.trim()
@@ -21,7 +40,13 @@ function resolveProxyTarget(command: 'build' | 'serve'): { port: number; host: s
   let host = defaultHost
   let baseUrl = configuredProxyTarget || defaultApiBaseUrl
 
-  if (command !== 'build') {
+  const shouldReadConfig = command !== 'build' && (
+    desktopRuntimeMode !== 'remote'
+    || Boolean(configuredProxyTarget)
+    || Boolean(configuredPath)
+  )
+
+  if (shouldReadConfig) {
     try {
       const { loadConfig, getBaseUrl } = require('@memohai/config') as {
         loadConfig: (path: string) => { web?: { port?: number; host?: string } }
@@ -60,19 +85,19 @@ export default defineConfig(({ command }) => {
     main: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
     },
     preload: {
       plugins: [externalizeDepsPlugin({ exclude: bundledElectronToolkit })],
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
     },
     renderer: {
       root: resolve(__dirname, 'src/renderer'),
       define: {
-        __MEMOH_DESKTOP_FLAVOR__: JSON.stringify(desktopFlavor),
+        __MEMOH_DESKTOP_RUNTIME_MODE__: JSON.stringify(desktopRuntimeMode),
       },
       // Reuse apps/web/public so absolute-path assets (e.g. /logo.svg) resolve
       // when web modules are imported directly from the desktop renderer.
@@ -98,7 +123,6 @@ export default defineConfig(({ command }) => {
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
             settings: resolve(__dirname, 'src/renderer/settings.html'),
-            connection: resolve(__dirname, 'src/renderer/connection.html'),
           },
         },
       },

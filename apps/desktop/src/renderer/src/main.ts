@@ -9,6 +9,12 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
+import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+import { connectBrowserKeyboardShortcuts } from '@memohai/web/lib/browser-keyboard-shortcuts'
+import { keyboardBindings, selectDesktopKeydownBindings } from '@memohai/web/lib/keyboard-bindings'
+import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
+import { registerWorkspaceTabCommands } from '@memohai/web/pages/home/commands/workspace-tab-commands'
+import { useWorkspaceTabsStore } from '@memohai/web/store/workspace-tabs'
 
 import 'markstream-vue/index.css'
 import '@memohai/web/style.css'
@@ -19,6 +25,16 @@ import 'katex/dist/katex.min.css'
 import App from './chat/App.vue'
 import router from './chat/router'
 import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
+
+// Window-management fallback, intentionally kept separate from the close-tab app
+// command. Cmd/Ctrl+W closes the active workspace tab; when the registry reports
+// no tab claimed the command, the same key closes the window. The
+// tab-close binding lives in the shared table; this window decision is an explicit
+// desktop product rule, not something derived from that binding.
+function closeWindowWhenNoTab(command: AppKeyboardCommand): void {
+  if (command !== appKeyboardCommands.closeCurrentWorkspaceTab) return
+  void window.api.window.closeSelf()
+}
 
 async function bootstrap() {
   const status = await window.api.desktop.getServerStatus()
@@ -36,11 +52,22 @@ async function bootstrap() {
     void router.push(target)
   })
 
+  const pinia = createPinia().use(piniaPluginPersistedstate)
+  const keyboardCommands = createKeyboardCommandRegistry()
+  registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
+  // Menu-delivered commands arrive over IPC; closing the window when no tab
+  // remains is a distinct window-management concern (see closeWindowWhenNoTab).
+  keyboardCommands.connect(window.api.window, closeWindowWhenNoTab)
+  // keydown-delivered commands (e.g. save) share the exact web matcher; menu
+  // commands are excluded here so they never double-fire with the accelerator.
+  connectBrowserKeyboardShortcuts(keyboardCommands, selectDesktopKeydownBindings(keyboardBindings))
+
   const app = createApp(App)
-    .use(createPinia().use(piniaPluginPersistedstate))
+    .use(pinia)
     .use(PiniaColada)
     .use(router)
     .use(i18n)
+    .provide(KEYBOARD_REGISTRY, keyboardCommands)
 
   // Bridge query-cache invalidations between chat and settings windows.
   // Must run after `PiniaColada` is installed so the store is registered.

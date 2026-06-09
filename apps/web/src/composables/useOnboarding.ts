@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import { useUserStore } from '@/store/user'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { readACPSelection, clearACPSelection } from '@/pages/onboarding/steps/useACPSetup'
+import { safeLocalRemove, safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 
 export const LAST_STEP_INDEX = 4
 export const STEP_COUNT = 5
@@ -65,12 +66,12 @@ export function useOnboarding() {
       return false
     }
     await minWait
-    const createdBotId = sessionStorage.getItem(ONBOARDING_KEYS.createdBotId)
+    const createdBotId = safeSessionGet(ONBOARDING_KEYS.createdBotId)
     const acpAgentId = readACPSelection()?.agentId ?? ''
-    sessionStorage.removeItem(ONBOARDING_KEYS.createdBotId)
-    sessionStorage.removeItem(ONBOARDING_KEYS.providerAddedCount)
+    safeSessionRemove(ONBOARDING_KEYS.createdBotId)
+    safeSessionRemove(ONBOARDING_KEYS.providerAddedCount)
     clearACPSelection()
-    localStorage.removeItem(ONBOARDING_KEYS.forceOnboarding)
+    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
     if (createdBotId) {
       // Navigate to the `bot` route directly (not the `/chat/...` redirect,
       // which drops the query) so the chat page can read `?acp=` on landing.

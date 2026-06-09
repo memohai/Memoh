@@ -35,8 +35,8 @@ export function finalizeBotCreateTerminalLines(
   status: 'done' | 'error' = 'done',
 ): BotCreateTerminalLine[] {
   if (lines.length === 0) return lines
-  const last = lines[lines.length - 1]
-  if (last.status !== 'running') return lines
+  const last = lines.at(-1)
+  if (!last || last.status !== 'running') return lines
   return [...lines.slice(0, -1), { ...last, status }]
 }
 
@@ -75,6 +75,8 @@ export function appendBotCreateTerminalLine(
       return pushBotCreateTerminalLine(lines, { kind: 'creating', status: 'running' })
     case 'restoring':
       return pushBotCreateTerminalLine(lines, { kind: 'restoring', status: 'running' })
+    case 'complete':
+      return finalizeBotCreateTerminalLines(lines)
     case 'ready':
       return pushBotCreateTerminalLine(lines, { kind: 'ready', status: 'done' })
     case 'error': {

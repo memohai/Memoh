@@ -96,6 +96,21 @@ set -e
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml up --build
 """
 
+[tasks."dev:kata"]
+description = "Start Linux/KVM development environment with containerd Kata runtime"
+run = """
+#!/bin/bash
+set -euo pipefail
+scripts/check-kata-dev-env.sh
+docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml build migrate server
+MEMOH_KATA_CHECK_CONTAINER=1 scripts/check-kata-dev-env.sh
+docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml up --build
+"""
+
+[tasks."dev:kata:status"]
+description = "Inspect whether the running development server is the containerd Kata stack"
+run = "scripts/diagnose-kata-dev-stack.sh"
+
 [tasks."dev:down"]
 description = "Stop development environment"
 run = "docker compose -f devenv/docker-compose.yml down --remove-orphans"
@@ -111,6 +126,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml down --remove-o
 [tasks."dev:down:selinux"]
 description = "Stop development environment on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml down --remove-orphans"
+
+[tasks."dev:down:kata"]
+description = "Stop Linux/KVM Kata development environment"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml down --remove-orphans"
 
 [tasks."dev:logs"]
 description = "View development logs"
@@ -128,6 +147,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml logs -f"
 description = "View development logs on SELinux systems"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml logs -f"
 
+[tasks."dev:logs:kata"]
+description = "View Linux/KVM Kata development logs"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml logs -f"
+
 [tasks."dev:restart"]
 description = "Restart a service (usage: mise run dev:restart -- server)"
 run = "docker compose -f devenv/docker-compose.yml restart $@"
@@ -143,6 +166,10 @@ run = "docker compose -f devenv/docker-compose.sqlite.minify.yml restart $@"
 [tasks."dev:restart:selinux"]
 description = "Restart a service on SELinux systems (usage: mise run dev:restart:selinux -- server)"
 run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml restart $@"
+
+[tasks."dev:restart:kata"]
+description = "Restart a service in the Linux/KVM Kata dev environment (usage: mise run dev:restart:kata -- server)"
+run = "docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.kata.yml restart $@"
 
 [tasks."local:dev"]
 description = "Start the server locally with Docker and local workspaces enabled"
@@ -197,6 +224,62 @@ run = """
 set -e
 docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml exec server \
   sh -c 'cd /workspace && sh devenv/bridge-build.sh'
+"""
+
+[tasks."test:kata"]
+description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
+run = "scripts/test-containerd-kata-running.sh"
+
+[tasks."test:kata:static"]
+description = "Run static validation for Kata configs, compose overrides, scripts, and evidence checks"
+run = "scripts/test-kata-static.sh"
+
+[tasks."test:kata:runner"]
+description = "Check that the current Linux/KVM host is ready to run Kata E2E"
+run = "scripts/check-kata-runner-ready.sh"
+
+[tasks."test:kata:e2e"]
+description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
+run = "scripts/test-containerd-kata-e2e.sh"
+
+[tasks."test:kata:compose:e2e"]
+description = "Build, start, verify, and tear down the production Docker Compose Kata deployment"
+run = "scripts/test-containerd-kata-compose-e2e.sh"
+
+[tasks."test:kata:evidence"]
+description = "Run local regression tests for Kata evidence validation"
+run = "scripts/test-kata-evidence-validator.sh"
+
+[tasks."test:kata:github"]
+description = "Audit GitHub PR checks for complete Linux/KVM Kata verification"
+run = "scripts/audit-kata-github-verification.sh"
+
+[tasks."test:kata:github:e2e"]
+description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata E2E workflow"
+run = "scripts/run-kata-github-e2e.sh"
+
+[tasks."test:kata:github:runner"]
+description = "Prepare a Linux/KVM host for GitHub Kata E2E runner registration"
+run = "scripts/prepare-kata-github-runner.sh"
+
+[tasks."test:kata:smoke:runc"]
+description = "Run the containerd runtime smoke check against the default runc dev runtime"
+run = """
+#!/bin/bash
+set -euo pipefail
+MEMOH_CONTAINERD_SMOKE_RUNTIME=io.containerd.runc.v2 \
+MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f devenv/docker-compose.yml exec -T server ctr' \
+scripts/smoke-containerd-runtime.sh
+"""
+
+[tasks."test:kata:runc"]
+description = "Run the Kata verifier workflow against the default containerd/runc dev runtime"
+run = """
+#!/bin/bash
+set -euo pipefail
+MEMOH_VERIFY_EXPECTED_RUNTIME=io.containerd.runc.v2 \
+MEMOH_KATA_RUNNING_COMPOSE_CMD='docker compose -f devenv/docker-compose.yml' \
+scripts/test-containerd-kata-running.sh
 """
 
 [tasks.db-up]

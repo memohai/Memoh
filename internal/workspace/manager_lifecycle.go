@@ -135,8 +135,9 @@ func (m *Manager) ensureContainerNetwork(ctx context.Context, containerID, botID
 	if err != nil {
 		return err
 	}
-	// Legacy containers use TCP gRPC — cache their IP for the pool.
-	if m.IsLegacyContainer(ctx, containerID) {
+	// Legacy and VM-backed containers use TCP gRPC because host UDS cannot cross
+	// a VM boundary.
+	if m.usesTCPBridge(ctx, containerID) {
 		m.SetLegacyIP(botID, ip)
 	}
 	return nil
@@ -257,8 +258,10 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 			row, dbErr := m.queries.GetContainerByBotID(ctx, pgBotID)
 			if dbErr == nil {
 				cdiDevices := []string(nil)
+				runtimeBackend := ""
 				if liveInfo, liveErr := m.service.GetContainer(ctx, row.ContainerID); liveErr == nil {
 					cdiDevices = workspaceCDIDevicesFromLabels(liveInfo.Labels)
+					runtimeBackend = liveInfo.Runtime.Name
 				}
 				createdAt := time.Time{}
 				if row.CreatedAt.Valid {
@@ -276,6 +279,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
 					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend, row.ContainerID),
+					RuntimeBackend:   runtimeBackend,
 					Image:            row.Image,
 					Status:           status,
 					Namespace:        row.Namespace,
@@ -310,6 +314,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 	return &ContainerStatus{
 		ContainerID:      info.ID,
 		WorkspaceBackend: workspaceBackendFromRecord("", info.ID),
+		RuntimeBackend:   info.Runtime.Name,
 		Image:            info.Image,
 		Status:           status,
 		Namespace:        m.namespace,
@@ -327,10 +332,18 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 // ---------------------------------------------------------------------------
 
 type ContainerSetupEvent struct {
-	Type    string
-	Image   string
-	Message string
-	Layers  []ctr.LayerStatus
+	Type             string
+	Image            string
+	Message          string
+	Layers           []ctr.LayerStatus
+	ContainerID      string
+	WorkspaceBackend string
+	RuntimeBackend   string
+	ContainerPath    string
+	CDIDevices       []string
+	Started          bool
+	DataRestored     bool
+	HasPreservedData bool
 }
 
 type ContainerSetupProgress func(ContainerSetupEvent)
@@ -400,7 +413,8 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 	}
 
 	emit(ContainerSetupEvent{Type: "creating"})
-	if m.HasPreservedData(botID) {
+	hadPreservedData := m.HasPreservedData(botID)
+	if hadPreservedData {
 		emit(ContainerSetupEvent{Type: "restoring"})
 	}
 
@@ -409,6 +423,14 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 			slog.String("bot_id", botID),
 			slog.Any("error", err))
 		return err
+	}
+	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
+		if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
+			m.logger.Error("setup bot container: bridge not ready",
+				slog.String("bot_id", botID),
+				slog.Any("error", err))
+			return err
+		}
 	}
 	if workspaceCfg.Backend != bridge.WorkspaceBackendLocal {
 		if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
@@ -429,6 +451,24 @@ func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress 
 
 	containerID := m.resolveContainerID(ctx, botID)
 	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
+	event := ContainerSetupEvent{
+		Type:             "complete",
+		Image:            image,
+		ContainerID:      containerID,
+		WorkspaceBackend: workspaceBackendFromRecord(workspaceCfg.Backend, containerID),
+		Started:          true,
+		DataRestored:     hadPreservedData && !m.HasPreservedData(botID),
+		HasPreservedData: m.HasPreservedData(botID),
+	}
+	if status, err := m.GetContainerInfo(ctx, botID); err == nil {
+		event.ContainerID = status.ContainerID
+		event.WorkspaceBackend = status.WorkspaceBackend
+		event.RuntimeBackend = status.RuntimeBackend
+		event.ContainerPath = status.ContainerPath
+		event.CDIDevices = status.CDIDevices
+		event.HasPreservedData = status.HasPreservedData
+	}
+	emit(event)
 	return nil
 }
 

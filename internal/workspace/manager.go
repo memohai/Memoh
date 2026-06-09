@@ -36,7 +36,10 @@ const (
 	DisplayRFBSocketName        = "display.rfb.sock"
 	ACPToolsProxyHTTPURL        = bridge.ACPToolsProxyHTTPURL
 
-	legacyGRPCPort = 9090
+	legacyGRPCPort           = 9090
+	bridgeReadyTimeout       = 45 * time.Second
+	bridgeReadyRPCTimeout    = 3 * time.Second
+	bridgeReadyRetryInterval = 500 * time.Millisecond
 )
 
 // ErrContainerNotFound is returned when no container exists for a bot.
@@ -46,6 +49,7 @@ var ErrContainerNotFound = errors.New("container not found for bot")
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
 	WorkspaceBackend string    `json:"workspace_backend"`
+	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -177,7 +181,7 @@ func (m *Manager) dialTarget(botID string) string {
 	ip, legacy := m.legacyIPs[botID]
 	m.legacyMu.RUnlock()
 	if legacy {
-		return fmt.Sprintf("%s:%d", ip, legacyGRPCPort)
+		return fmt.Sprintf("passthrough:///%s:%d", ip, legacyGRPCPort)
 	}
 	return "unix://" + m.socketPath(botID)
 }
@@ -195,6 +199,18 @@ func (m *Manager) ClearLegacyIP(botID string) {
 	m.legacyMu.Lock()
 	delete(m.legacyIPs, botID)
 	m.legacyMu.Unlock()
+}
+
+func (m *Manager) usesKataRuntime() bool {
+	provider, ok := m.service.(interface{ RuntimeType() string })
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(provider.RuntimeType())), "kata")
+}
+
+func (m *Manager) usesTCPBridge(ctx context.Context, containerID string) bool {
+	return m.IsLegacyContainer(ctx, containerID) || m.usesKataRuntime()
 }
 
 // clearLegacyRoute evicts any stale TCP fallback state for a bot so future
@@ -217,6 +233,32 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 		}
 	}
 	return m.grpcPool.Get(ctx, botID)
+}
+
+func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error {
+	deadline := time.Now().Add(bridgeReadyTimeout)
+	var lastErr error
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, bridgeReadyRPCTimeout)
+		client, err := m.MCPClient(attemptCtx, botID)
+		if err == nil {
+			_, err = client.Stat(attemptCtx, "/")
+		}
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		m.grpcPool.Remove(botID)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("workspace bridge not ready for bot %s after %s: %w", botID, bridgeReadyTimeout, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for workspace bridge: %w", ctx.Err())
+		case <-time.After(bridgeReadyRetryInterval):
+		}
+	}
 }
 
 func (m *Manager) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
@@ -337,7 +379,11 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	skillEnv := skillset.ContainerEnv(skillRoots)
 	env := make([]string, 0, len(tzEnv)+1+len(skillEnv))
 	env = append(env, tzEnv...)
-	env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	if m.usesKataRuntime() {
+		env = append(env, fmt.Sprintf("BRIDGE_TCP_ADDR=:%d", legacyGRPCPort))
+	} else {
+		env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
+	}
 	if m.botDisplayEnabled(ctx, botID) {
 		env = append(env,
 			"MEMOH_DISPLAY_ENABLED=true",
@@ -581,7 +627,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 			return fmt.Errorf("restore preserved data through bridge: %w", err)
 		}
 	}
-	if !m.IsLegacyContainer(ctx, containerID) {
+	if !m.usesTCPBridge(ctx, containerID) {
 		m.clearLegacyRoute(botID)
 	}
 	return nil

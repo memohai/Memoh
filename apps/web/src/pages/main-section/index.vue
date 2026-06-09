@@ -20,10 +20,11 @@ import MainLayout from '@/layout/main-layout/index.vue'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
+import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 
-const shouldAnimateEntry = sessionStorage.getItem(ONBOARDING_KEYS.entryAnimation) === '1'
+const shouldAnimateEntry = safeSessionGet(ONBOARDING_KEYS.entryAnimation) === '1'
 if (shouldAnimateEntry) {
-  sessionStorage.removeItem(ONBOARDING_KEYS.entryAnimation)
+  safeSessionRemove(ONBOARDING_KEYS.entryAnimation)
 }
 
 const entering = ref(shouldAnimateEntry)

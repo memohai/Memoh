@@ -35,16 +35,18 @@ import {
   writeCliPrefs,
   type CliStatus,
 } from './cli-integration'
+import { acceleratorForCommand, appKeyboardCommands } from '../shared/keyboard-commands'
+import { dispatchFocusedWindowCommand } from './window-commands'
 
 type DesktopRuntimeMode = 'local' | 'remote'
 
-const DESKTOP_FLAVOR = __MEMOH_DESKTOP_FLAVOR__ === 'online' ? 'online' : 'offline'
-const DESKTOP_RUNTIME_MODE: DesktopRuntimeMode = DESKTOP_FLAVOR === 'online' ? 'remote' : 'local'
+const DESKTOP_RUNTIME_MODE: DesktopRuntimeMode = __MEMOH_DESKTOP_RUNTIME_MODE__ === 'remote' ? 'remote' : 'local'
 const ONLINE_PRODUCT_NAME = 'Memoh'
 const LOCAL_PRODUCT_NAME = 'Memoh Local'
 const LEGACY_REMOTE_PRODUCT_NAME = 'Memoh Online'
 const LEGACY_LOCAL_PRODUCT_NAME = 'Memoh'
 const DESKTOP_PRODUCT_NAME = DESKTOP_RUNTIME_MODE === 'remote' ? ONLINE_PRODUCT_NAME : LOCAL_PRODUCT_NAME
+const DEFAULT_REMOTE_BASE_URL = is.dev ? 'http://localhost:18080' : 'http://localhost:8080'
 
 interface RemoteProfile {
   baseUrl?: string
@@ -154,8 +156,6 @@ if (DESKTOP_RUNTIME_MODE === 'remote') {
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 const SETTINGS_DEFAULTS = { width: 1080, height: 720, minWidth: 880, minHeight: 560 }
-const CONNECTION_DEFAULTS = { width: 520, height: 360, minWidth: 460, minHeight: 320 }
-
 type WindowKind = 'chat' | 'settings'
 type WindowDefaults = {
   width: number
@@ -180,7 +180,6 @@ type TraySettingsItem = {
 
 let chatWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
-let connectionWindow: BrowserWindow | null = null
 let appTray: Tray | null = null
 
 // Pending settings-navigate target keyed by webContents id. Set by the
@@ -214,11 +213,6 @@ function readRemoteProfile(): RemoteProfile {
     console.error('failed to read remote desktop profile', error)
     return {}
   }
-}
-
-function writeRemoteProfile(profile: RemoteProfile): void {
-  mkdirSync(app.getPath('userData'), { recursive: true })
-  writeFileSync(remoteProfilePath(), `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 })
 }
 
 function windowStatePath(): string {
@@ -307,7 +301,7 @@ function getDesktopApiBaseUrl(): string {
   if (!isRemoteMode()) {
     return getLocalServerStatus().baseUrl
   }
-  return readRemoteProfile().baseUrl ?? ''
+  return configuredRemoteBaseUrl()
 }
 
 function normalizeRemoteBaseUrl(raw: string): string {
@@ -328,21 +322,14 @@ function normalizeRemoteBaseUrl(raw: string): string {
   return url.toString().replace(/\/$/, '')
 }
 
-async function probeRemoteBaseUrl(baseUrl: string): Promise<void> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 5000)
-  try {
-    const response = await fetch(`${baseUrl}/ping`, { signal: controller.signal })
-    if (!response.ok) {
-      throw new Error(`GET /ping failed with HTTP ${response.status}`)
-    }
-    const payload = await response.json().catch(() => null) as { status?: string } | null
-    if (payload?.status !== 'ok') {
-      throw new Error('GET /ping did not return a Memoh server response')
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
+function configuredRemoteBaseUrl(): string {
+  const configured =
+    process.env.MEMOH_DESKTOP_REMOTE_BASE_URL?.trim()
+    || process.env.MEMOH_WEB_PROXY_TARGET?.trim()
+    || process.env.VITE_API_URL?.trim()
+    || readRemoteProfile().baseUrl
+    || DEFAULT_REMOTE_BASE_URL
+  return normalizeRemoteBaseUrl(configured)
 }
 
 function getDesktopServerStatus() {
@@ -358,30 +345,6 @@ function getDesktopServerStatus() {
     baseUrl,
     ready: baseUrl !== '',
     managed: false,
-  }
-}
-
-async function clearRendererAuthState(): Promise<void> {
-  const script = `
-    window.localStorage.removeItem('token');
-    window.localStorage.removeItem('user');
-    window.sessionStorage.clear();
-  `
-  await Promise.all(BrowserWindow.getAllWindows().map(async (window) => {
-    if (window.isDestroyed() || window.webContents.isDestroyed()) return
-    try {
-      await window.webContents.executeJavaScript(script, true)
-    } catch (error) {
-      console.warn('failed to clear renderer auth state after server switch', error)
-    }
-  }))
-}
-
-function reloadRendererWindowsExcept(webContentsId: number): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed() || window.webContents.isDestroyed()) continue
-    if (window.webContents.id === webContentsId) continue
-    window.webContents.reload()
   }
 }
 
@@ -432,7 +395,7 @@ function applyExternalLinkHandler(window: BrowserWindow): void {
   })
 }
 
-function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings' | 'connection'): void {
+function loadRendererEntry(window: BrowserWindow, entry: 'index' | 'settings'): void {
   const base = process.env.ELECTRON_RENDERER_URL
   if (is.dev && base) {
     window.loadURL(`${base}/${entry}.html`)
@@ -497,7 +460,7 @@ function openSettingsWindow(target?: string): void {
 }
 
 function openMemohSettings(): void {
-  focusWindow(ensureConnectionWindow())
+  openSettingsWindow('/settings')
 }
 
 function quitFromTray(): void {
@@ -720,38 +683,6 @@ function createSettingsWindow(): BrowserWindow {
   return window
 }
 
-function createConnectionWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    ...CONNECTION_DEFAULTS,
-    show: false,
-    autoHideMenuBar: true,
-    title: 'Memoh Settings',
-    icon: iconPng,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    parent: chatWindow && !chatWindow.isDestroyed() ? chatWindow : undefined,
-    webPreferences: {
-      preload: join(__dirname, PRELOAD_FILE),
-      sandbox: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  })
-
-  window.on('ready-to-show', () => {
-    if (window.isDestroyed()) return
-    window.show()
-  })
-  window.on('closed', () => {
-    connectionWindow = null
-  })
-
-  applyExternalLinkHandler(window)
-  loadRendererEntry(window, 'connection')
-  return window
-}
-
 function ensureWindow(kind: WindowKind): BrowserWindow {
   if (kind === 'chat') {
     if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
@@ -761,13 +692,6 @@ function ensureWindow(kind: WindowKind): BrowserWindow {
     settingsWindow = createSettingsWindow()
   }
   return settingsWindow
-}
-
-function ensureConnectionWindow(): BrowserWindow {
-  if (!connectionWindow || connectionWindow.isDestroyed()) {
-    connectionWindow = createConnectionWindow()
-  }
-  return connectionWindow
 }
 
 function focusWindow(window: BrowserWindow): void {
@@ -786,6 +710,22 @@ function dispatchSettingsNavigate(window: BrowserWindow, target: string): void {
     return
   }
   window.webContents.send('settings:navigate', target)
+}
+
+// Derive the native Close accelerator from the shared binding table. The
+// focused window decides whether the command closes an app tab or the window.
+function closeWindowMenuItem(): MenuItemConstructorOptions {
+  return {
+    label: 'Close',
+    accelerator: acceleratorForCommand(appKeyboardCommands.closeCurrentWorkspaceTab),
+    click: () => {
+      dispatchFocusedWindowCommand(
+        chatWindow,
+        BrowserWindow.getFocusedWindow(),
+        appKeyboardCommands.closeCurrentWorkspaceTab,
+      )
+    },
+  }
 }
 
 // CLI install / menu helpers — kept above the whenReady block so the
@@ -913,7 +853,7 @@ async function rebuildAppMenu(): Promise<void> {
         label: 'Window',
         submenu: [
           { role: 'minimize' },
-          { role: 'close' },
+          closeWindowMenuItem(),
         ],
       },
     )
@@ -1016,7 +956,7 @@ async function rebuildAppMenu(): Promise<void> {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
-        { role: 'close' },
+        closeWindowMenuItem(),
       ],
     },
   )
@@ -1062,24 +1002,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:server-status', () => getDesktopServerStatus())
   ipcMain.handle('desktop:api-base-url', () => getDesktopApiBaseUrl())
   ipcMain.handle('desktop:auth-token', () => isRemoteMode() ? '' : getDesktopAuthToken())
-  ipcMain.handle('desktop:save-remote-base-url', async (event, rawBaseUrl: unknown) => {
-    if (!isRemoteMode()) {
-      throw new Error('Remote server URL can only be configured in online mode')
-    }
-    const previousBaseUrl = getDesktopApiBaseUrl()
-    const baseUrl = normalizeRemoteBaseUrl(typeof rawBaseUrl === 'string' ? rawBaseUrl : '')
-    await probeRemoteBaseUrl(baseUrl)
-    const changed = baseUrl !== previousBaseUrl
-    writeRemoteProfile({ baseUrl })
-    if (changed) {
-      await clearRendererAuthState()
-      reloadRendererWindowsExcept(event.sender.id)
-    }
-    return {
-      ...getDesktopServerStatus(),
-      changed,
-    }
-  })
   ipcMain.handle('desktop:default-workspace-path', (_event, rawDisplayName: unknown) => {
     if (isRemoteMode()) return ''
     return defaultWorkspacePath(typeof rawDisplayName === 'string' ? rawDisplayName : '')

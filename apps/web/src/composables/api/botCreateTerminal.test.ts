@@ -44,7 +44,7 @@ describe('botCreateTerminal', () => {
       { kind: 'creating', status: 'error' },
       { kind: 'error', status: 'error' },
     ])
-    expect(lines[1].message).toBe('boom')
+    expect(lines.at(1)?.message).toBe('boom')
   })
 
   it('derives the full happy-path log', () => {
@@ -55,6 +55,15 @@ describe('botCreateTerminal', () => {
       { type: 'pull_progress', layers: [{ ref: 'a', offset: 100, total: 100 }] },
       { type: 'creating' },
       { type: 'restoring' },
+      {
+        type: 'complete',
+        container: {
+          container_id: 'workspace-b1',
+          workspace_backend: 'container',
+          runtime_backend: 'io.containerd.kata.v2',
+          started: true,
+        },
+      },
       { type: 'ready', bot: { id: 'b1' } },
     ]
     for (const event of events) {

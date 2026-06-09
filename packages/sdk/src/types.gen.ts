@@ -1173,6 +1173,7 @@ export type HandlersCreateContainerResponse = {
     data_restored?: boolean;
     has_preserved_data?: boolean;
     image?: string;
+    runtime_backend?: string;
     snapshotter?: string;
     started?: boolean;
     workspace_backend?: string;
@@ -1293,6 +1294,7 @@ export type HandlersGetContainerResponse = {
     image?: string;
     legacy?: boolean;
     namespace?: string;
+    runtime_backend?: string;
     status?: string;
     task_running?: boolean;
     updated_at?: string;

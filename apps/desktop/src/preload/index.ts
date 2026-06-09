@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import {
+  DESKTOP_KEYBOARD_COMMAND_CHANNEL,
+  isAppKeyboardCommand,
+  type AppKeyboardCommand,
+} from '../shared/keyboard-commands'
 
 // Cross-window query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -46,8 +51,6 @@ const api = {
       ipcRenderer.invoke('desktop:server-status'),
     apiBaseUrl: (): Promise<string> => ipcRenderer.invoke('desktop:api-base-url'),
     authToken: (): Promise<string> => ipcRenderer.invoke('desktop:auth-token'),
-    saveRemoteBaseUrl: (baseUrl: string): Promise<{ mode: DesktopRuntimeMode, baseUrl: string, ready: boolean, changed: boolean }> =>
-      ipcRenderer.invoke('desktop:save-remote-base-url', baseUrl),
     defaultWorkspacePath: (displayName: string): Promise<string> =>
       ipcRenderer.invoke('desktop:default-workspace-path', displayName),
     getCliStatus: (): Promise<CliStatusPayload> => ipcRenderer.invoke('desktop:cli-status'),
@@ -87,6 +90,15 @@ const api = {
       ipcRenderer.on('chat:navigate', (_event: IpcRendererEvent, target: string) => {
         cb(target)
       })
+    },
+    onKeyboardCommand: (cb: (command: AppKeyboardCommand) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, command: unknown) => {
+        if (isAppKeyboardCommand(command)) cb(command)
+      }
+      ipcRenderer.on(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
+      return () => {
+        ipcRenderer.removeListener(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
+      }
     },
   },
 }

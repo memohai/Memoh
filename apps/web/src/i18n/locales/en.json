@@ -679,6 +679,7 @@
       "authorize": "Authorize",
       "deviceAuthorize": "Start Device Authorization",
       "authorizeFailed": "Failed to start authorization",
+      "authorizeTimedOut": "Authorization timed out. Try again.",
       "authorizeSuccess": "Authorization successful",
       "revoke": "Revoke",
       "revokeFailed": "Failed to revoke authorization",
