@@ -1530,6 +1530,97 @@ definitions:
       verified_at:
         type: string
     type: object
+  channelaccess.Binding:
+    properties:
+      channel_identity_avatar_url:
+        type: string
+      channel_identity_display_name:
+        type: string
+      channel_identity_id:
+        type: string
+      channel_subject_id:
+        type: string
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      user_id:
+        type: string
+    type: object
+  channelaccess.IssueLinkCodeRequest:
+    properties:
+      channel_type:
+        type: string
+    type: object
+  channelaccess.LinkCode:
+    properties:
+      channel_type:
+        type: string
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      token:
+        type: string
+      user_id:
+        type: string
+    type: object
+  channelaccess.ListBindingsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/channelaccess.Binding'
+        type: array
+    type: object
+  channelaccess.ListManagersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/channelaccess.Manager'
+        type: array
+    type: object
+  channelaccess.Manager:
+    properties:
+      bound:
+        description: |-
+          Bound reports whether this identity is linked to a workspace member of this
+          bot (any permission). It marks the identity as a "platform member" in the UI
+          regardless of whether it carries Manage.
+        type: boolean
+      channel_identity_avatar_url:
+        type: string
+      channel_identity_display_name:
+        type: string
+      channel_identity_id:
+        type: string
+      channel_subject_id:
+        type: string
+      channel_type:
+        type: string
+      has_override:
+        description: HasOverride reports whether a local Channel Access override exists
+          for it.
+        type: boolean
+      inherited:
+        description: |-
+          Inherited reports whether this identity is bound to a web member that carries
+          the Manage capability (owner or workspace manage grant).
+        type: boolean
+      manage:
+        description: Manage is the effective Manage capability (local override ??
+          inherited).
+        type: boolean
+    type: object
+  channelaccess.SetManagerRequest:
+    properties:
+      channel_identity_id:
+        type: string
+      granted:
+        description: Granted forces Manage ON (true) or OFF (false) locally.
+        type: boolean
+    type: object
   compaction.ListLogsResponse:
     properties:
       items:
@@ -4626,6 +4717,102 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Summarize what a bot would export
+      tags:
+      - bots
+  /bots/{bot_id}/channel-managers:
+    get:
+      description: List effective Manage state per channel identity on a bot (inherited
+        + local overrides)
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/channelaccess.ListManagersResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List channel managers
+      tags:
+      - bots
+    post:
+      description: Force the Manage capability ON or OFF for a channel identity on
+        a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Override payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/channelaccess.SetManagerRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Set a channel manage override
+      tags:
+      - bots
+  /bots/{bot_id}/channel-managers/{channel_identity_id}:
+    delete:
+      description: Remove the local Manage override so the channel identity falls
+        back to inheritance
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Channel Identity ID
+        in: path
+        name: channel_identity_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Clear a channel manage override
       tags:
       - bots
   /bots/{bot_id}/compaction/logs:
@@ -11352,6 +11539,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -11382,6 +11573,70 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Update current user profile
+      tags:
+      - users
+  /users/me/channel-identities:
+    get:
+      description: List the IM channel identities bound to the current user's account
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/channelaccess.ListBindingsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List connected channel identities
+      tags:
+      - users
+  /users/me/channel-identities/{channel_identity_id}:
+    delete:
+      description: Remove a channel identity binding from the current user's account
+      parameters:
+      - description: Channel Identity ID
+        in: path
+        name: channel_identity_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Disconnect a channel identity
+      tags:
+      - users
+  /users/me/channel-links:
+    post:
+      description: Generate a one-time code to send as /link <code> in IM to bind
+        that channel identity to your account
+      parameters:
+      - description: Link code options
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/channelaccess.IssueLinkCodeRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/channelaccess.LinkCode'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Issue an account link code
       tags:
       - users
   /users/me/channels/{platform}:

@@ -1260,6 +1260,146 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/channel-managers": {
+            "get": {
+                "description": "List effective Manage state per channel identity on a bot (inherited + local overrides)",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "List channel managers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.ListManagersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Force the Manage capability ON or OFF for a channel identity on a bot",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Set a channel manage override",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Override payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.SetManagerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/channel-managers/{channel_identity_id}": {
+            "delete": {
+                "description": "Remove the local Manage override so the channel identity falls back to inheritance",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Clear a channel manage override",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Channel Identity ID",
+                        "name": "channel_identity_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/compaction/logs": {
             "get": {
                 "description": "List compaction logs for a bot",
@@ -10991,6 +11131,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -11021,6 +11167,103 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/accounts.Account"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-identities": {
+            "get": {
+                "description": "List the IM channel identities bound to the current user's account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "List connected channel identities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.ListBindingsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-identities/{channel_identity_id}": {
+            "delete": {
+                "description": "Remove a channel identity binding from the current user's account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "Disconnect a channel identity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Channel Identity ID",
+                        "name": "channel_identity_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/channel-links": {
+            "post": {
+                "description": "Generate a one-time code to send as /link \u003ccode\u003e in IM to bind that channel identity to your account",
+                "tags": [
+                    "users"
+                ],
+                "summary": "Issue an account link code",
+                "parameters": [
+                    {
+                        "description": "Link code options",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.IssueLinkCodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/channelaccess.LinkCode"
                         }
                     },
                     "400": {
@@ -13635,6 +13878,133 @@ const docTemplate = `{
                 },
                 "verified_at": {
                     "type": "string"
+                }
+            }
+        },
+        "channelaccess.Binding": {
+            "type": "object",
+            "properties": {
+                "channel_identity_avatar_url": {
+                    "type": "string"
+                },
+                "channel_identity_display_name": {
+                    "type": "string"
+                },
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_subject_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.IssueLinkCodeRequest": {
+            "type": "object",
+            "properties": {
+                "channel_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.LinkCode": {
+            "type": "object",
+            "properties": {
+                "channel_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "channelaccess.ListBindingsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channelaccess.Binding"
+                    }
+                }
+            }
+        },
+        "channelaccess.ListManagersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/channelaccess.Manager"
+                    }
+                }
+            }
+        },
+        "channelaccess.Manager": {
+            "type": "object",
+            "properties": {
+                "bound": {
+                    "description": "Bound reports whether this identity is linked to a workspace member of this\nbot (any permission). It marks the identity as a \"platform member\" in the UI\nregardless of whether it carries Manage.",
+                    "type": "boolean"
+                },
+                "channel_identity_avatar_url": {
+                    "type": "string"
+                },
+                "channel_identity_display_name": {
+                    "type": "string"
+                },
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "channel_subject_id": {
+                    "type": "string"
+                },
+                "channel_type": {
+                    "type": "string"
+                },
+                "has_override": {
+                    "description": "HasOverride reports whether a local Channel Access override exists for it.",
+                    "type": "boolean"
+                },
+                "inherited": {
+                    "description": "Inherited reports whether this identity is bound to a web member that carries\nthe Manage capability (owner or workspace manage grant).",
+                    "type": "boolean"
+                },
+                "manage": {
+                    "description": "Manage is the effective Manage capability (local override ?? inherited).",
+                    "type": "boolean"
+                }
+            }
+        },
+        "channelaccess.SetManagerRequest": {
+            "type": "object",
+            "properties": {
+                "channel_identity_id": {
+                    "type": "string"
+                },
+                "granted": {
+                    "description": "Granted forces Manage ON (true) or OFF (false) locally.",
+                    "type": "boolean"
                 }
             }
         },

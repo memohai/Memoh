@@ -892,6 +892,72 @@ export type ChannelUpsertConfigRequest = {
     verified_at?: string;
 };
 
+export type ChannelaccessBinding = {
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    created_at?: string;
+    id?: string;
+    user_id?: string;
+};
+
+export type ChannelaccessIssueLinkCodeRequest = {
+    channel_type?: string;
+};
+
+export type ChannelaccessLinkCode = {
+    channel_type?: string;
+    created_at?: string;
+    expires_at?: string;
+    token?: string;
+    user_id?: string;
+};
+
+export type ChannelaccessListBindingsResponse = {
+    items?: Array<ChannelaccessBinding>;
+};
+
+export type ChannelaccessListManagersResponse = {
+    items?: Array<ChannelaccessManager>;
+};
+
+export type ChannelaccessManager = {
+    /**
+     * Bound reports whether this identity is linked to a workspace member of this
+     * bot (any permission). It marks the identity as a "platform member" in the UI
+     * regardless of whether it carries Manage.
+     */
+    bound?: boolean;
+    channel_identity_avatar_url?: string;
+    channel_identity_display_name?: string;
+    channel_identity_id?: string;
+    channel_subject_id?: string;
+    channel_type?: string;
+    /**
+     * HasOverride reports whether a local Channel Access override exists for it.
+     */
+    has_override?: boolean;
+    /**
+     * Inherited reports whether this identity is bound to a web member that carries
+     * the Manage capability (owner or workspace manage grant).
+     */
+    inherited?: boolean;
+    /**
+     * Manage is the effective Manage capability (local override ?? inherited).
+     */
+    manage?: boolean;
+};
+
+export type ChannelaccessSetManagerRequest = {
+    channel_identity_id?: string;
+    /**
+     * Granted forces Manage ON (true) or OFF (false) locally.
+     */
+    granted?: boolean;
+};
+
 export type CompactionListLogsResponse = {
     items?: Array<CompactionLog>;
     total_count?: number;
@@ -3332,6 +3398,123 @@ export type GetBotsByBotIdBackupSummaryResponses = {
 };
 
 export type GetBotsByBotIdBackupSummaryResponse = GetBotsByBotIdBackupSummaryResponses[keyof GetBotsByBotIdBackupSummaryResponses];
+
+export type GetBotsByBotIdChannelManagersData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers';
+};
+
+export type GetBotsByBotIdChannelManagersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdChannelManagersError = GetBotsByBotIdChannelManagersErrors[keyof GetBotsByBotIdChannelManagersErrors];
+
+export type GetBotsByBotIdChannelManagersResponses = {
+    /**
+     * OK
+     */
+    200: ChannelaccessListManagersResponse;
+};
+
+export type GetBotsByBotIdChannelManagersResponse = GetBotsByBotIdChannelManagersResponses[keyof GetBotsByBotIdChannelManagersResponses];
+
+export type PostBotsByBotIdChannelManagersData = {
+    /**
+     * Override payload
+     */
+    body: ChannelaccessSetManagerRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers';
+};
+
+export type PostBotsByBotIdChannelManagersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdChannelManagersError = PostBotsByBotIdChannelManagersErrors[keyof PostBotsByBotIdChannelManagersErrors];
+
+export type PostBotsByBotIdChannelManagersResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/channel-managers/{channel_identity_id}';
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
+
+export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type DeleteBotsByBotIdCompactionLogsData = {
     body?: never;
@@ -11304,6 +11487,10 @@ export type GetUsersMeErrors = {
      */
     400: HandlersErrorResponse;
     /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -11351,6 +11538,95 @@ export type PutUsersMeResponses = {
 };
 
 export type PutUsersMeResponse = PutUsersMeResponses[keyof PutUsersMeResponses];
+
+export type GetUsersMeChannelIdentitiesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/channel-identities';
+};
+
+export type GetUsersMeChannelIdentitiesErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetUsersMeChannelIdentitiesError = GetUsersMeChannelIdentitiesErrors[keyof GetUsersMeChannelIdentitiesErrors];
+
+export type GetUsersMeChannelIdentitiesResponses = {
+    /**
+     * OK
+     */
+    200: ChannelaccessListBindingsResponse;
+};
+
+export type GetUsersMeChannelIdentitiesResponse = GetUsersMeChannelIdentitiesResponses[keyof GetUsersMeChannelIdentitiesResponses];
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdData = {
+    body?: never;
+    path: {
+        /**
+         * Channel Identity ID
+         */
+        channel_identity_id: string;
+    };
+    query?: never;
+    url: '/users/me/channel-identities/{channel_identity_id}';
+};
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdError = DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors[keyof DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors];
+
+export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostUsersMeChannelLinksData = {
+    /**
+     * Link code options
+     */
+    body?: ChannelaccessIssueLinkCodeRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/channel-links';
+};
+
+export type PostUsersMeChannelLinksErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostUsersMeChannelLinksError = PostUsersMeChannelLinksErrors[keyof PostUsersMeChannelLinksErrors];
+
+export type PostUsersMeChannelLinksResponses = {
+    /**
+     * Created
+     */
+    201: ChannelaccessLinkCode;
+};
+
+export type PostUsersMeChannelLinksResponse = PostUsersMeChannelLinksResponses[keyof PostUsersMeChannelLinksResponses];
 
 export type GetUsersMeChannelsByPlatformData = {
     body?: never;
