@@ -41,26 +41,40 @@ const candidate = computed<ToolCallBlockType | undefined>(() => {
 
 const DWELL_MS = 650
 const shown = ref<ToolCallBlockType | undefined>(candidate.value)
+const shownReady = computed(() => (shown.value ? isReady(shown.value) : false))
 let timer: ReturnType<typeof setTimeout> | null = null
-// Seed at mount so the first shown command gets a full dwell too (not an
-// instant elapsed from epoch that would let it flash away).
-let lastSwitch = Date.now()
+// The dwell clock starts when a real command first becomes VISIBLE — not at
+// mount. A placeholder shown at startup has no clock yet (0); it starts the
+// instant the command resolves (in place, see the watcher) or when we switch
+// to an already-ready tool. That way the first command gets a full dwell too.
+let commandShownAt = shownReady.value ? Date.now() : 0
+
+function show(next: ToolCallBlockType | undefined) {
+  shown.value = next
+  commandShownAt = next && isReady(next) ? Date.now() : 0
+}
+
+// A placeholder resolving its command in place is the moment that command
+// becomes visible — begin its dwell here.
+watch(shownReady, (ready) => {
+  if (ready && commandShownAt === 0) commandShownAt = Date.now()
+})
 
 watch(candidate, (next) => {
   if (!next || next.id === shown.value?.id) return
-  // Hold a shown command for its dwell — including the first one — so it never
-  // flashes past; but never make a not-yet-resolved placeholder linger: if what
-  // is shown isn't a real command yet, switch to the resolved candidate at once.
-  const shownReady = shown.value ? isReady(shown.value) : false
-  const elapsed = Date.now() - lastSwitch
-  if (!shownReady || elapsed >= DWELL_MS) {
-    lastSwitch = Date.now()
-    shown.value = next
+  // Never make an unresolved placeholder linger; otherwise hold the shown
+  // command for its full dwell, measured from when it became visible.
+  if (!shownReady.value) {
+    show(next)
+    return
+  }
+  const elapsed = Date.now() - commandShownAt
+  if (elapsed >= DWELL_MS) {
+    show(next)
   } else if (timer === null) {
     timer = setTimeout(() => {
       timer = null
-      lastSwitch = Date.now()
-      shown.value = candidate.value
+      show(candidate.value)
     }, DWELL_MS - elapsed)
   }
 })
