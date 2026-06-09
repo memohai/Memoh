@@ -39,6 +39,17 @@ type Queries interface {
 	CreateBotPluginInstallation(ctx context.Context, arg dbsqlc.CreateBotPluginInstallationParams) (dbsqlc.BotPluginInstallation, error)
 	CreateBotUserGrant(ctx context.Context, arg dbsqlc.CreateBotUserGrantParams) (dbsqlc.BotUserGrant, error)
 	DeleteBotUserGrantByID(ctx context.Context, id pgtype.UUID) error
+	UpsertBotChannelAdmin(ctx context.Context, arg dbsqlc.UpsertBotChannelAdminParams) (dbsqlc.BotChannelAdmin, error)
+	DeleteBotChannelAdmin(ctx context.Context, arg dbsqlc.DeleteBotChannelAdminParams) error
+	GetBotChannelAdmin(ctx context.Context, arg dbsqlc.GetBotChannelAdminParams) (dbsqlc.BotChannelAdmin, error)
+	ListBotChannelAdmins(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotChannelAdminsRow, error)
+	CreateChannelLinkCode(ctx context.Context, arg dbsqlc.CreateChannelLinkCodeParams) (dbsqlc.ChannelLinkCode, error)
+	GetChannelLinkCodeByToken(ctx context.Context, token string) (dbsqlc.ChannelLinkCode, error)
+	MarkChannelLinkCodeConsumed(ctx context.Context, arg dbsqlc.MarkChannelLinkCodeConsumedParams) (dbsqlc.ChannelLinkCode, error)
+	UpsertUserChannelIdentityBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelIdentityBindingParams) (dbsqlc.UserChannelIdentityBinding, error)
+	ListChannelIdentityBindingsForUser(ctx context.Context, userID pgtype.UUID) ([]dbsqlc.ListChannelIdentityBindingsForUserRow, error)
+	DeleteUserChannelIdentityBinding(ctx context.Context, arg dbsqlc.DeleteUserChannelIdentityBindingParams) error
+	ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error)
 	GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotUserGrant, error)
 	ListBotUserGrants(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotUserGrantsRow, error)
 	ListBotUserGrantsForUser(ctx context.Context, arg dbsqlc.ListBotUserGrantsForUserParams) ([]dbsqlc.ListBotUserGrantsForUserRow, error)

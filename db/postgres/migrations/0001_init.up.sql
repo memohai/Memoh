@@ -237,6 +237,49 @@ CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_bot_id ON bot_acl_rules(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_user_id ON bot_acl_rules(user_id);
 CREATE INDEX IF NOT EXISTS idx_bot_acl_rules_channel_identity_id ON bot_acl_rules(channel_identity_id);
 
+-- bot_channel_admins: channel-identity level manage grant (run owner-only slash commands)
+CREATE TABLE IF NOT EXISTS bot_channel_admins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  channel_identity_id UUID NOT NULL REFERENCES channel_identities(id) ON DELETE CASCADE,
+  granted BOOLEAN NOT NULL DEFAULT true,
+  created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_channel_admins_unique UNIQUE (bot_id, channel_identity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_channel_admins_bot_id ON bot_channel_admins(bot_id);
+CREATE INDEX IF NOT EXISTS idx_bot_channel_admins_channel_identity_id ON bot_channel_admins(channel_identity_id);
+
+-- user_channel_identity_bindings: global account-level link between a web user and
+-- an IM channel identity. Lets a member's bot permissions flow to their IM identity.
+CREATE TABLE IF NOT EXISTS user_channel_identity_bindings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_identity_id UUID NOT NULL REFERENCES channel_identities(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT user_channel_identity_bindings_unique UNIQUE (user_id, channel_identity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_channel_identity_bindings_user_id ON user_channel_identity_bindings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_channel_identity_bindings_channel_identity_id ON user_channel_identity_bindings(channel_identity_id);
+
+-- channel_link_codes: one-time codes a user generates in the web app, then sends as
+-- /link <code> to a bot in IM to bind the sending channel identity to their account.
+CREATE TABLE IF NOT EXISTS channel_link_codes (
+  token TEXT PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel_type TEXT NOT NULL DEFAULT '',
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  consumed_channel_identity_id UUID REFERENCES channel_identities(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_link_codes_user_id ON channel_link_codes(user_id);
+
 CREATE TABLE IF NOT EXISTS bot_plugin_installations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,

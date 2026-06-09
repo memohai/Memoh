@@ -68,6 +68,16 @@ type BotAclRule struct {
 	SubjectChannelType     pgtype.Text        `json:"subject_channel_type"`
 }
 
+type BotChannelAdmin struct {
+	ID                pgtype.UUID        `json:"id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	ChannelIdentityID pgtype.UUID        `json:"channel_identity_id"`
+	Granted           bool               `json:"granted"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotChannelConfig struct {
 	ID               pgtype.UUID        `json:"id"`
 	BotID            pgtype.UUID        `json:"bot_id"`
@@ -260,6 +270,16 @@ type ChannelIdentity struct {
 	Metadata         []byte             `json:"metadata"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelLinkCode struct {
+	Token                     string             `json:"token"`
+	UserID                    pgtype.UUID        `json:"user_id"`
+	ChannelType               string             `json:"channel_type"`
+	ExpiresAt                 pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt                pgtype.Timestamptz `json:"consumed_at"`
+	ConsumedChannelIdentityID pgtype.UUID        `json:"consumed_channel_identity_id"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 }
 
 type Container struct {
@@ -590,6 +610,14 @@ type UserChannelBinding struct {
 	Config      []byte             `json:"config"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserChannelIdentityBinding struct {
+	ID                pgtype.UUID        `json:"id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	ChannelIdentityID pgtype.UUID        `json:"channel_identity_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserInputRequest struct {
