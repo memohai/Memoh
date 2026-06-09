@@ -367,8 +367,11 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
 
-	// /new and /stop require route context, so they are handled separately
-	// from the general command handler (which runs before route resolution).
+	// /start, /new, /stop, and /status require channel-layer handling outside
+	// the generic command handler (which runs before route resolution).
+	if isStartCommand(cmdText) && isDirectedAtBot(msg) {
+		return p.handleStartCommand(ctx, msg, sender, identity)
+	}
 	if isNewSessionCommand(cmdText) && isDirectedAtBot(msg) {
 		return p.handleNewSessionCommand(ctx, cfg, msg, sender, identity)
 	}
@@ -2864,6 +2867,37 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		)
 	}
 	return nil
+}
+
+// isStartCommand returns true when the command text is "/start".
+func isStartCommand(cmdText string) bool {
+	parsed, err := command.Parse(command.ExtractCommandText(cmdText))
+	if err != nil {
+		return false
+	}
+	return parsed.Resource == "start" && parsed.Action == "" && len(parsed.Args) == 0
+}
+
+// handleStartCommand replies with a lightweight welcome. Unlike /new it does not
+// reset the active session or show configuration — it only opens the door.
+func (p *ChannelInboundProcessor) handleStartCommand(
+	ctx context.Context,
+	msg channel.InboundMessage,
+	sender channel.StreamReplySender,
+	identity InboundIdentity,
+) error {
+	target := strings.TrimSpace(msg.ReplyTarget)
+	if target == "" {
+		return errors.New("reply target missing for /start command")
+	}
+	loc := p.localizer(ctx, identity.BotID)
+	caps := p.channelCaps(msg.Channel)
+
+	out := applyMessageFormat(channel.Message{Text: formatStartWelcomeMessage(loc)}, caps)
+	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
+		out.Reply = &channel.ReplyRef{MessageID: mid}
+	}
+	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
 // isNewSessionCommand returns true when the command text is "/new" (with
