@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
@@ -857,6 +858,785 @@ func TestRequestPermissionOnlyAutoAllowsOnce(t *testing.T) {
 	}
 }
 
+func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-1",
+			ShortID: 9,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		virtualRoot: true,
+		approval:    approval,
+		baseSession: ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+			CurrentPlatform:   "web",
+			ConversationType:  "private",
+		},
+		events: &toolEventEmitter{},
+	}
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("write-1"),
+			Title:      acp.Ptr("Write /data/review.txt"),
+			Kind:       acp.Ptr(acp.ToolKindEdit),
+			Locations:  []acp.ToolCallLocation{{Path: "/data/review.txt"}},
+			RawInput: map[string]any{
+				"path":    "/data/review.txt",
+				"content": "review me\n",
+			},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if resp.Outcome.Selected == nil || resp.Outcome.Selected.OptionId != acp.PermissionOptionId("allow") {
+		t.Fatalf("permission outcome = %#v, want allow once", resp.Outcome)
+	}
+	if approval.created.ToolCallID != "write-1" || approval.created.ToolName != "write" {
+		t.Fatalf("approval input = %#v", approval.created)
+	}
+	if approval.created.BotID != "bot-1" || approval.created.SessionID != "session-1" || approval.created.ChannelIdentityID != "channel-1" {
+		t.Fatalf("approval context = %#v", approval.created)
+	}
+	events := collector.result().Events
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want pending and approved approval events", events)
+	}
+	for i, status := range []string{toolapproval.StatusPending, toolapproval.StatusApproved} {
+		if events[i].Type != StreamEventToolApprovalRequest ||
+			events[i].ToolCallID != "write-1" ||
+			events[i].ApprovalID != "approval-1" ||
+			events[i].Status != status {
+			t.Fatalf("approval event %d = %#v, want status %q", i, events[i], status)
+		}
+	}
+	approvalPayload, _ := events[1].Metadata["approval"].(map[string]any)
+	if approvalPayload["can_approve"] != false {
+		t.Fatalf("approval event = %#v", events[0])
+	}
+}
+
+func TestRequestPermissionWithApprovalRejectsUnknownTool(t *testing.T) {
+	t.Parallel()
+
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		virtualRoot: true,
+		approval: &fakeACPToolApproval{
+			decision: toolapproval.Request{Status: toolapproval.StatusApproved},
+		},
+		baseSession: ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	}
+	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("unknown-1"),
+			Title:      acp.Ptr("Custom approval"),
+			RawInput:   map[string]any{"description": "approve a custom action"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if resp.Outcome.Cancelled == nil {
+		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
+	}
+}
+
+func TestRequestPermissionRejectedByMemohToolApprovalCancelsACP(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-2",
+			ShortID: 10,
+			Status:  toolapproval.StatusRejected,
+		},
+	}
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		virtualRoot: true,
+		approval:    approval,
+		baseSession: ToolSessionContext{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			StreamID:  "stream-1",
+		},
+		events: &toolEventEmitter{},
+	}
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-1"),
+			Title:      acp.Ptr("Shell"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "rm -rf *"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if resp.Outcome.Cancelled == nil {
+		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
+	}
+	if approval.created.ToolName != "exec" {
+		t.Fatalf("approval input = %#v", approval.created)
+	}
+	var sawRejected bool
+	for _, event := range collector.result().Events {
+		if event.Type == StreamEventToolApprovalRequest &&
+			event.ToolCallID == "exec-1" &&
+			event.ApprovalID == "approval-2" &&
+			event.Status == toolapproval.StatusRejected {
+			sawRejected = true
+		}
+	}
+	if !sawRejected {
+		t.Fatalf("events = %#v, want rejected approval update", collector.result().Events)
+	}
+}
+
+func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-terminal",
+			ShortID: 11,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	term, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "printf",
+		Args:    []string{"terminal-ok"},
+	})
+	if err != nil {
+		t.Fatalf("CreateTerminal error = %v", err)
+	}
+	if approval.created.ToolCallID != "terminal-term-1" || approval.created.ToolName != "exec" {
+		t.Fatalf("approval input = %#v", approval.created)
+	}
+	input, ok := approval.created.ToolInput.(map[string]any)
+	if !ok || input["command"] != "printf terminal-ok" {
+		t.Fatalf("approval command input = %#v", approval.created.ToolInput)
+	}
+
+	if _, err := callbacks.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit error = %v", err)
+	}
+	events := collector.result().Events
+	var sawStart, sawApproval, sawEnd bool
+	for _, event := range events {
+		if event.ToolCallID != "terminal-term-1" {
+			continue
+		}
+		switch event.Type {
+		case StreamEventToolCallStart:
+			sawStart = event.ToolName == "exec"
+		case StreamEventToolApprovalRequest:
+			sawApproval = event.ApprovalID == "approval-terminal"
+		case StreamEventToolCallEnd:
+			sawEnd = event.ToolName == "exec"
+		}
+	}
+	if !sawStart || !sawApproval || !sawEnd {
+		t.Fatalf("terminal events start=%v approval=%v end=%v events=%#v", sawStart, sawApproval, sawEnd, events)
+	}
+}
+
+func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-terminal-reject",
+			ShortID: 12,
+			Status:  toolapproval.StatusRejected,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			StreamID:  "stream-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	_, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "pwd",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("CreateTerminal error = %v, want rejected", err)
+	}
+	events := collector.result().Events
+	var sawErrorEnd bool
+	for _, event := range events {
+		if event.ToolCallID == "terminal-term-1" && event.Type == StreamEventToolCallEnd && strings.Contains(event.Error, "rejected") {
+			sawErrorEnd = true
+		}
+	}
+	if !sawErrorEnd {
+		t.Fatalf("events = %#v, want rejected tool_call_end", events)
+	}
+}
+
+func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-write",
+			ShortID: 13,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	if _, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
+		Path:    "/data/review.txt",
+		Content: "review me\n",
+	}); err != nil {
+		t.Fatalf("WriteTextFile error = %v", err)
+	}
+	if approval.created.ToolName != "write" {
+		t.Fatalf("approval input = %#v", approval.created)
+	}
+	input, ok := approval.created.ToolInput.(map[string]any)
+	if !ok || input["path"] != "/data/review.txt" || input["content"] != "review me\n" {
+		t.Fatalf("approval tool input = %#v", approval.created.ToolInput)
+	}
+	written, err := os.ReadFile(filepath.Join(root, "review.txt")) //nolint:gosec // reads from t.TempDir
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(written) != "review me\n" {
+		t.Fatalf("written content = %q", written)
+	}
+	assertSingleApprovalWithStartEnd(t, collector.result().Events, approval.created.ToolCallID, "write", "approval-write")
+}
+
+func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		&fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}},
+		ToolSessionContext{BotID: "bot-1"},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	_, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
+		Path:    "/data/review.txt",
+		Content: "review me\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("WriteTextFile error = %v, want rejected", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "review.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("written file stat error = %v, want not exist", err)
+	}
+	events := collector.result().Events
+	var sawRejectedEnd bool
+	for _, event := range events {
+		if event.Type == StreamEventToolCallEnd && event.ToolName == "write" && strings.Contains(event.Error, "rejected") {
+			sawRejectedEnd = true
+		}
+	}
+	if !sawRejectedEnd {
+		t.Fatalf("events = %#v, want rejected tool_call_end", events)
+	}
+}
+
+func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-write",
+			ShortID: 14,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	permission, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("write-1"),
+			Title:      acp.Ptr("Write /data/review.txt"),
+			Kind:       acp.Ptr(acp.ToolKindEdit),
+			RawInput: map[string]any{
+				"path":    "/data/review.txt",
+				"content": "review me\n",
+			},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if permission.Outcome.Selected == nil {
+		t.Fatalf("permission outcome = %#v, want selected", permission.Outcome)
+	}
+	if _, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
+		Path:    "/data/review.txt",
+		Content: "review me\n",
+	}); err != nil {
+		t.Fatalf("WriteTextFile error = %v", err)
+	}
+	if got := approval.createdCount(); got != 1 {
+		t.Fatalf("approval create count = %d, want 1", got)
+	}
+	assertSingleApprovalWithStartEnd(t, collector.result().Events, "write-1", "write", "approval-write")
+}
+
+func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-exec",
+			ShortID: 15,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	if _, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-1"),
+			Title:      acp.Ptr("Shell"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "pwd"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	}); err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	term, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "pwd"})
+	if err != nil {
+		t.Fatalf("CreateTerminal error = %v", err)
+	}
+	if _, err := callbacks.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit error = %v", err)
+	}
+	if got := approval.createdCount(); got != 1 {
+		t.Fatalf("approval create count = %d, want 1", got)
+	}
+	assertSingleApprovalWithStartEnd(t, collector.result().Events, "exec-1", "exec", "approval-exec")
+}
+
+func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestBridgeClient(t, root)
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:      "approval-exec-cwd",
+			ShortID: 16,
+			Status:  toolapproval.StatusApproved,
+		},
+	}
+	callbacks := newClientCallbacks(
+		context.Background(),
+		client,
+		"/data",
+		"/data",
+		time.Second,
+		nil,
+		nil,
+		true,
+		approval,
+		ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			StreamID:          "stream-1",
+			ChannelIdentityID: "channel-1",
+		},
+	)
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	// The permission request carries the raw command with loose spacing and no
+	// cwd; the terminal create rebuilds it from Command+Args and adds a cwd.
+	// The one-shot grant must still match.
+	if _, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-cwd-1"),
+			Title:      acp.Ptr("Shell"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "printf  grant-ok"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	}); err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	term, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "printf",
+		Args:    []string{"grant-ok"},
+		Cwd:     acp.Ptr("/data"),
+	})
+	if err != nil {
+		t.Fatalf("CreateTerminal error = %v", err)
+	}
+	if _, err := callbacks.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit error = %v", err)
+	}
+	if got := approval.createdCount(); got != 1 {
+		t.Fatalf("approval create count = %d, want 1 (grant should dedupe despite cwd/spacing)", got)
+	}
+	assertSingleApprovalWithStartEnd(t, collector.result().Events, "exec-cwd-1", "exec", "approval-exec-cwd")
+}
+
+func TestPermissionNativeToolMapsClaudeCodeShapes(t *testing.T) {
+	t.Parallel()
+
+	// Shapes mirror what @agentclientprotocol/claude-agent-acp sends via
+	// toolInfoFromToolUse: Bash -> execute + {command}, Write/Edit -> edit +
+	// {file_path, ...}.
+	cases := []struct {
+		name     string
+		request  acp.RequestPermissionRequest
+		wantTool string
+		wantKey  string
+		wantVal  string
+	}{
+		{
+			name: "bash",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					ToolCallId: acp.ToolCallId("toolu_bash"),
+					Title:      acp.Ptr("npm test"),
+					Kind:       acp.Ptr(acp.ToolKindExecute),
+					RawInput:   map[string]any{"command": "npm test", "description": "Run tests"},
+				},
+			},
+			wantTool: "exec",
+			wantKey:  "command",
+			wantVal:  "npm test",
+		},
+		{
+			name: "write",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					ToolCallId: acp.ToolCallId("toolu_write"),
+					Title:      acp.Ptr("Write foo.txt"),
+					Kind:       acp.Ptr(acp.ToolKindEdit),
+					RawInput:   map[string]any{"file_path": "/data/foo.txt", "content": "hello"},
+					Locations:  []acp.ToolCallLocation{{Path: "/data/foo.txt"}},
+				},
+			},
+			wantTool: "write",
+			wantKey:  "path",
+			wantVal:  "/data/foo.txt",
+		},
+		{
+			name: "edit",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					ToolCallId: acp.ToolCallId("toolu_edit"),
+					Title:      acp.Ptr("Edit foo.txt"),
+					Kind:       acp.Ptr(acp.ToolKindEdit),
+					RawInput: map[string]any{
+						"file_path":  "/data/foo.txt",
+						"old_string": "hello",
+						"new_string": "world",
+					},
+					Locations: []acp.ToolCallLocation{{Path: "/data/foo.txt"}},
+				},
+			},
+			wantTool: "edit",
+			wantKey:  "path",
+			wantVal:  "/data/foo.txt",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			toolCallID, toolName, input, ok := permissionNativeTool(tc.request)
+			if !ok {
+				t.Fatalf("permissionNativeTool() failed to map %s request", tc.name)
+			}
+			if toolCallID != strings.TrimSpace(string(tc.request.ToolCall.ToolCallId)) {
+				t.Fatalf("toolCallID = %q, want %q", toolCallID, tc.request.ToolCall.ToolCallId)
+			}
+			if toolName != tc.wantTool {
+				t.Fatalf("toolName = %q, want %q", toolName, tc.wantTool)
+			}
+			if got := stringFromAny(input[tc.wantKey]); got != tc.wantVal {
+				t.Fatalf("input[%s] = %q, want %q (input=%#v)", tc.wantKey, got, tc.wantVal, input)
+			}
+		})
+	}
+}
+
+func TestPinSessionModeSkipsWhenNotNeeded(t *testing.T) {
+	t.Parallel()
+
+	modes := &acp.SessionModeState{
+		CurrentModeId: acp.SessionModeId("default"),
+		AvailableModes: []acp.SessionMode{
+			{Id: acp.SessionModeId("default"), Name: "Always Ask"},
+			{Id: acp.SessionModeId("acceptEdits"), Name: "Accept Edits"},
+		},
+	}
+	// nil conn proves these paths never issue a set_mode call.
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "", nil, "claude-code"); err != nil {
+		t.Fatalf("empty desired mode: %v", err)
+	}
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), nil, "default", nil, "claude-code"); err != nil {
+		t.Fatalf("nil modes: %v", err)
+	}
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "default", nil, "claude-code"); err != nil {
+		t.Fatalf("already in desired mode: %v", err)
+	}
+	if err := pinSessionMode(context.Background(), nil, acp.SessionId("s1"), modes, "nonexistent", nil, "claude-code"); err != nil {
+		t.Fatalf("unavailable mode should be skipped, got %v", err)
+	}
+}
+
+func TestPinSessionConfigValuesSkipsWhenNotNeeded(t *testing.T) {
+	t.Parallel()
+
+	effort := acp.SessionConfigOption{
+		Select: &acp.SessionConfigOptionSelect{
+			Id:           acp.SessionConfigId("effort"),
+			CurrentValue: acp.SessionConfigValueId("high"),
+			Options: acp.SessionConfigSelectOptions{
+				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+					{Value: acp.SessionConfigValueId("default"), Name: "Default"},
+					{Value: acp.SessionConfigValueId("high"), Name: "High"},
+				},
+			},
+		},
+	}
+	// nil conn proves these paths never issue a set_config_option call:
+	// no desired entry, already at desired value, and unadvertised value.
+	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, nil, nil, "claude-code")
+	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "high"}, nil, "claude-code")
+	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "ultra"}, nil, "claude-code")
+	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), nil, map[string]string{"effort": "high"}, nil, "claude-code")
+}
+
+func TestApprovalGrantsAreClearedBetweenPrompts(t *testing.T) {
+	t.Parallel()
+
+	callbacks := &clientCallbacks{}
+	input := writeToolInput("/data/review.txt", "review me\n")
+	callbacks.rememberApprovalGrant("write-1", "write", input)
+	if got, ok := callbacks.consumeApprovalGrant("write", input); !ok || got != "write-1" {
+		t.Fatalf("consume grant = %q, %v; want write-1, true", got, ok)
+	}
+
+	callbacks.rememberApprovalGrant("write-1", "write", input)
+	callbacks.setPromptState(nil, nil, ToolSessionContext{})
+	if got, ok := callbacks.consumeApprovalGrant("write", input); ok || got != "" {
+		t.Fatalf("stale grant survived prompt reset: %q, %v", got, ok)
+	}
+}
+
+func TestWriteApprovalGrantKeyIncludesFullContentHashWhenPreviewTruncated(t *testing.T) {
+	t.Parallel()
+
+	prefix := strings.Repeat("a", maxWriteToolContentPreview)
+	first := writeToolInput("/data/large.txt", prefix+"b")
+	second := writeToolInput("/data/large.txt", prefix+"c")
+	if first["content"] != second["content"] || first["content_bytes"] != second["content_bytes"] {
+		t.Fatalf("test setup expected same preview and byte count: %#v %#v", first, second)
+	}
+	if first["content_sha256"] == "" || first["content_sha256"] == second["content_sha256"] {
+		t.Fatalf("content hashes should distinguish truncated writes: %#v %#v", first["content_sha256"], second["content_sha256"])
+	}
+	if approvalGrantKey("write", first) == approvalGrantKey("write", second) {
+		t.Fatal("grant keys for distinct truncated writes should differ")
+	}
+}
+
+func assertSingleApprovalWithStartEnd(t *testing.T, events []StreamEvent, toolCallID, toolName, approvalID string) {
+	t.Helper()
+	var pendingApprovals, approvedApprovals, starts, ends int
+	for _, event := range events {
+		if event.ToolCallID != toolCallID {
+			continue
+		}
+		switch event.Type {
+		case StreamEventToolApprovalRequest:
+			if event.ApprovalID != approvalID {
+				t.Fatalf("approval event = %#v, want approval id %q", event, approvalID)
+			}
+			switch event.Status {
+			case toolapproval.StatusPending:
+				pendingApprovals++
+			case toolapproval.StatusApproved:
+				approvedApprovals++
+			default:
+				t.Fatalf("approval event = %#v, want pending or approved", event)
+			}
+		case StreamEventToolCallStart:
+			starts++
+			if event.ToolName != toolName {
+				t.Fatalf("start event = %#v, want tool %q", event, toolName)
+			}
+		case StreamEventToolCallEnd:
+			ends++
+			if event.ToolName != toolName || event.Error != "" {
+				t.Fatalf("end event = %#v, want successful %q", event, toolName)
+			}
+		}
+	}
+	if pendingApprovals != 1 || approvedApprovals != 1 || starts != 1 || ends != 1 {
+		t.Fatalf("events for %s pending/approved/start/end = %d/%d/%d/%d, events=%#v", toolCallID, pendingApprovals, approvedApprovals, starts, ends, events)
+	}
+}
+
 func TestResolvePathUnderRootRejectsEscapeAndSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
@@ -1206,4 +1986,75 @@ func (*fakeACPAgent) SetSessionConfigOption(context.Context, acp.SetSessionConfi
 
 func (*fakeACPAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil
+}
+
+type fakeACPToolApproval struct {
+	mu          sync.Mutex
+	created     toolapproval.CreatePendingInput
+	createCount int
+	decision    toolapproval.Request
+}
+
+func (*fakeACPToolApproval) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
+	return toolapproval.Evaluation{Decision: toolapproval.DecisionNeedsApproval}, nil
+}
+
+func (f *fakeACPToolApproval) CreatePending(_ context.Context, input toolapproval.CreatePendingInput) (toolapproval.Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created = input
+	f.createCount++
+	req := toolapproval.Request{
+		ID:                "approval-1",
+		BotID:             input.BotID,
+		SessionID:         input.SessionID,
+		ChannelIdentityID: input.ChannelIdentityID,
+		ToolCallID:        input.ToolCallID,
+		ToolName:          input.ToolName,
+		ToolInput:         copyInputMap(input.ToolInput),
+		ShortID:           1,
+		Status:            toolapproval.StatusPending,
+		SourcePlatform:    input.SourcePlatform,
+		ConversationType:  input.ConversationType,
+	}
+	if strings.TrimSpace(f.decision.ID) != "" {
+		req.ID = f.decision.ID
+	}
+	if f.decision.ShortID != 0 {
+		req.ShortID = f.decision.ShortID
+	}
+	return req, nil
+}
+
+func (*fakeACPToolApproval) Reject(context.Context, string, string, string) (toolapproval.Request, error) {
+	return toolapproval.Request{Status: toolapproval.StatusRejected}, nil
+}
+
+func (f *fakeACPToolApproval) WaitForDecision(_ context.Context, approvalID string) (toolapproval.Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	decision := f.decision
+	if strings.TrimSpace(decision.ID) == "" {
+		decision.ID = approvalID
+	}
+	if strings.TrimSpace(decision.Status) == "" {
+		decision.Status = toolapproval.StatusApproved
+	}
+	return decision, nil
+}
+
+func (f *fakeACPToolApproval) createdCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.createCount
+}
+
+func copyInputMap(input any) map[string]any {
+	out := map[string]any{}
+	if m, ok := input.(map[string]any); ok {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
 }

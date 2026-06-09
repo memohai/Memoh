@@ -80,6 +80,7 @@ type SessionPool struct {
 	store    sessionGetter
 	tools    *mcp.ToolGatewayService
 	contexts *mcp.ToolSessionContextStore
+	approval acpclient.ToolApprovalService
 	timeout  time.Duration
 
 	mu        sync.RWMutex
@@ -90,6 +91,10 @@ type SessionPool struct {
 type sessionRunner interface {
 	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
 	StartSession(ctx context.Context, req acpclient.StartRequest, sink acpclient.EventSink) (*acpclient.Session, error)
+}
+
+type workspaceClientRunner interface {
+	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
 }
 
 type botGetter interface {
@@ -210,6 +215,12 @@ func (p *SessionPool) SetToolGateway(gateway *mcp.ToolGatewayService) {
 func (p *SessionPool) SetToolSessionContextStore(store *mcp.ToolSessionContextStore) {
 	if p != nil {
 		p.contexts = store
+	}
+}
+
+func (p *SessionPool) SetToolApprovalService(service acpclient.ToolApprovalService) {
+	if p != nil {
+		p.approval = service
 	}
 }
 
@@ -525,7 +536,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
 
-	result, err := sess.PromptWithResources(ctx, input.Prompt, promptResources(input), toolSink)
+	result, err := sess.PromptWithToolContext(ctx, input.Prompt, promptResources(input), toolCtx, toolSink)
 	orderedEvents := toolSink.Events()
 	if len(orderedEvents) > 0 {
 		result.Events = orderedEvents
@@ -712,6 +723,9 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 			return fail(err)
 		}
 	}
+	if err := p.reconcileManagedCodexConfig(startCtx, h.botID, profile, setup, mode); err != nil {
+		return fail(fmt.Errorf("prepare Codex managed config: %w", err))
+	}
 	// Managed env (Claude Code BYOK tokens) is injected for every backend.
 	// Local processes inherit the host env and only get our overrides appended;
 	// managedProcessEnv returns nil for self mode and for Codex (which is
@@ -729,21 +743,24 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 
 	sess, err := p.runner.StartSession(startCtx, acpclient.StartRequest{
-		AgentID:      h.agentID,
-		BotID:        h.botID,
-		ProjectPath:  h.projectPath,
-		Command:      profile.Command,
-		Args:         profile.Args,
-		LocalCommand: profile.LocalCommand,
-		LocalArgs:    profile.LocalArgs,
-		Env:          env,
-		SetupMode:    mode,
-		Timeout:      0,
-		ToolHTTPURL:  toolHTTPURL,
+		AgentID:             h.agentID,
+		BotID:               h.botID,
+		ProjectPath:         h.projectPath,
+		Command:             profile.Command,
+		Args:                profile.Args,
+		LocalCommand:        profile.LocalCommand,
+		LocalArgs:           profile.LocalArgs,
+		Env:                 env,
+		SetupMode:           mode,
+		SessionMode:         profile.SessionModeID,
+		SessionConfigValues: profile.SessionConfigValues,
+		Timeout:             0,
+		ToolHTTPURL:         toolHTTPURL,
 		// The handler resolves identity from the handle per request, so the
 		// process configuration only ever carries stable runtime identity.
 		ToolHTTPHandler: p.toolHTTPHandler(h),
 		ToolSession:     h.stableToolIdentity(),
+		ToolApproval:    p.approval,
 	}, opts.Sink)
 	if err != nil {
 		return fail(err)
@@ -1183,6 +1200,28 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 	})
 }
 
+func (p *SessionPool) reconcileManagedCodexConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode acpclient.SetupMode) error {
+	if profile.ID != acpprofile.AgentCodexID || mode == acpclient.SetupModeSelf {
+		return nil
+	}
+	runner, ok := p.runner.(workspaceClientRunner)
+	if !ok {
+		return nil
+	}
+	client, err := runner.MCPClient(ctx, botID)
+	if err != nil {
+		return err
+	}
+	cfg := acpclient.CodexManagedConfig{
+		Mode:    mode,
+		Managed: setup.Managed,
+	}
+	if mode == acpclient.SetupModeOAuth {
+		return acpclient.WriteCodexManagedConfigFile(ctx, client, cfg)
+	}
+	return acpclient.WriteCodexManagedConfigWithAuth(ctx, client, cfg)
+}
+
 type promptToolEventSink struct {
 	mu     sync.Mutex
 	next   acpclient.EventSink
@@ -1288,6 +1327,10 @@ func managedProcessEnv(profile acpprofile.Profile, values map[string]string, mod
 			"CLAUDE_CODE_USE_BEDROCK=",
 			"CLAUDE_CODE_USE_VERTEX=",
 			"CLAUDE_CODE_USE_FOUNDRY=",
+			// Claude Code does not think unless given a budget; this is the
+			// counterpart of Codex's model_reasoning_effort in config.toml so
+			// managed sessions stream reasoning by default.
+			"MAX_THINKING_TOKENS=16000",
 		}
 		switch mode {
 		case acpclient.SetupModeAPIKey:

@@ -130,6 +130,7 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 		BotID:             "bot-1",
 		SessionID:         "session-1",
 		StreamID:          "stream-1",
+		ToolCallID:        "mcp-http-call-1",
 		ChannelIdentityID: "user-1",
 		CurrentPlatform:   "web",
 		ReplyTarget:       "reply-1",
@@ -144,8 +145,11 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	if approval.created.ToolName != "exec" || approval.created.ToolInput.(map[string]any)["command"] != "make test" || approval.created.ConversationType != "private" {
 		t.Fatalf("approval input = %#v", approval.created)
 	}
-	if len(publisher.events) != 3 {
-		t.Fatalf("published events = %d, want start/message/end", len(publisher.events))
+	if approval.created.ToolCallID != "mcp-http-call-1" {
+		t.Fatalf("approval tool_call_id = %q, want existing MCP tool call id", approval.created.ToolCallID)
+	}
+	if len(publisher.events) != 6 {
+		t.Fatalf("published events = %d, want pending and approved start/message/end pairs", len(publisher.events))
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(publisher.events[1].Data, &payload); err != nil {
@@ -156,9 +160,24 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 		t.Fatalf("stream payload = %#v", stream)
 	}
 	data, _ := stream["data"].(map[string]any)
+	if data["tool_call_id"] != "mcp-http-call-1" {
+		t.Fatalf("approval stream tool_call_id = %#v, want existing MCP tool call id", data["tool_call_id"])
+	}
 	approvalPayload, _ := data["approval"].(map[string]any)
 	if approvalPayload["approval_id"] != "approval-1" || approvalPayload["status"] != toolapproval.StatusPending {
 		t.Fatalf("approval payload = %#v", approvalPayload)
+	}
+	var approvedPayload map[string]any
+	if err := json.Unmarshal(publisher.events[4].Data, &approvedPayload); err != nil {
+		t.Fatalf("decode approved event: %v", err)
+	}
+	approvedStream, _ := approvedPayload["stream"].(map[string]any)
+	approvedData, _ := approvedStream["data"].(map[string]any)
+	approvedApproval, _ := approvedData["approval"].(map[string]any)
+	if approvedApproval["approval_id"] != "approval-1" ||
+		approvedApproval["status"] != toolapproval.StatusApproved ||
+		approvedApproval["can_approve"] != false {
+		t.Fatalf("approved approval payload = %#v", approvedApproval)
 	}
 	structured, ok := result["structuredContent"].(map[string]any)
 	if !ok || structured["command"] != "make test" {
@@ -178,6 +197,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 			},
 		}},
 	}
+	publisher := &nativeSourcePublisher{}
 	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
 		AllowAll: true,
 		Approval: &nativeSourceApproval{
@@ -188,7 +208,7 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 				DecisionReason: "not now",
 			},
 		},
-		ApprovalPublisher: &nativeSourcePublisher{},
+		ApprovalPublisher: publisher,
 	})
 
 	result, err := source.CallTool(context.Background(), mcp.ToolSessionContext{
@@ -204,6 +224,21 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	}
 	if isError, _ := result["isError"].(bool); !isError {
 		t.Fatalf("result = %#v, want MCP error result", result)
+	}
+	if len(publisher.events) != 6 {
+		t.Fatalf("published events = %d, want pending and rejected start/message/end pairs", len(publisher.events))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(publisher.events[4].Data, &payload); err != nil {
+		t.Fatalf("decode rejected event: %v", err)
+	}
+	stream, _ := payload["stream"].(map[string]any)
+	data, _ := stream["data"].(map[string]any)
+	approvalPayload, _ := data["approval"].(map[string]any)
+	if approvalPayload["approval_id"] != "approval-2" ||
+		approvalPayload["status"] != toolapproval.StatusRejected ||
+		approvalPayload["can_approve"] != false {
+		t.Fatalf("rejected approval payload = %#v", approvalPayload)
 	}
 }
 
