@@ -15,13 +15,6 @@ const routes = [
     name: 'onboarding',
     component: () => import('@/pages/onboarding/index.vue'),
   },
-  ...(import.meta.env.DEV
-    ? [{
-        path: '/dev/chat-refactor-demo',
-        name: 'dev-chat-refactor-demo',
-        component: () => import('@/pages/dev/chat-refactor-demo.vue'),
-      }]
-    : []),
   {
     path: '/',
     component: () => import('@/pages/main-section/index.vue'),
@@ -258,7 +251,6 @@ router.onError((error) => {
 })
 
 router.beforeEach(async (to) => {
-  if (import.meta.env.DEV && to.path.startsWith('/dev/')) return true
   const token = localStorage.getItem('token')
 
   if (to.fullPath === '/login') {
