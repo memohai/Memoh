@@ -11302,6 +11302,10 @@ export type GetUsersMeErrors = {
      */
     400: HandlersErrorResponse;
     /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
