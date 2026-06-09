@@ -79,6 +79,67 @@ func (q *Queries) GetChannelLinkCodeByToken(ctx context.Context, token string) (
 	return i, err
 }
 
+const listChannelIdentityBindings = `-- name: ListChannelIdentityBindings :many
+SELECT
+  b.id,
+  b.user_id,
+  b.channel_identity_id,
+  b.created_at,
+  b.updated_at,
+  ci.channel_type,
+  ci.channel_subject_id,
+  ci.display_name AS channel_identity_display_name,
+  ci.avatar_url AS channel_identity_avatar_url
+FROM user_channel_identity_bindings b
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
+ORDER BY b.created_at DESC
+`
+
+type ListChannelIdentityBindingsRow struct {
+	ID                         string         `json:"id"`
+	UserID                     string         `json:"user_id"`
+	ChannelIdentityID          string         `json:"channel_identity_id"`
+	CreatedAt                  string         `json:"created_at"`
+	UpdatedAt                  string         `json:"updated_at"`
+	ChannelType                sql.NullString `json:"channel_type"`
+	ChannelSubjectID           sql.NullString `json:"channel_subject_id"`
+	ChannelIdentityDisplayName sql.NullString `json:"channel_identity_display_name"`
+	ChannelIdentityAvatarUrl   sql.NullString `json:"channel_identity_avatar_url"`
+}
+
+func (q *Queries) ListChannelIdentityBindings(ctx context.Context) ([]ListChannelIdentityBindingsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listChannelIdentityBindings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChannelIdentityBindingsRow
+	for rows.Next() {
+		var i ListChannelIdentityBindingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ChannelIdentityID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ChannelType,
+			&i.ChannelSubjectID,
+			&i.ChannelIdentityDisplayName,
+			&i.ChannelIdentityAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelIdentityBindingsForUser = `-- name: ListChannelIdentityBindingsForUser :many
 SELECT
   b.id,
@@ -174,7 +235,7 @@ const markChannelLinkCodeConsumed = `-- name: MarkChannelLinkCodeConsumed :one
 UPDATE channel_link_codes
 SET consumed_at = CURRENT_TIMESTAMP,
     consumed_channel_identity_id = ?1
-WHERE token = ?2 AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+WHERE token = ?2 AND consumed_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP
 RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at
 `
 

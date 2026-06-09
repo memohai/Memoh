@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/memohai/memoh/internal/accounts"
+	"github.com/memohai/memoh/internal/acl"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/channelaccess"
 	identitypkg "github.com/memohai/memoh/internal/identity"
@@ -91,7 +92,7 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.service.SetManager(c.Request().Context(), botID, channelIdentityID, req.Granted, actorID); err != nil {
-		if errors.Is(err, channelaccess.ErrInvalidInput) {
+		if errors.Is(err, channelaccess.ErrInvalidInput) || errors.Is(err, acl.ErrInvalidRuleSubject) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

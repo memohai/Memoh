@@ -12,7 +12,7 @@ WHERE token = sqlc.arg(token);
 UPDATE channel_link_codes
 SET consumed_at = CURRENT_TIMESTAMP,
     consumed_channel_identity_id = sqlc.arg(consumed_channel_identity_id)
-WHERE token = sqlc.arg(token) AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+WHERE token = sqlc.arg(token) AND consumed_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP
 RETURNING token, user_id, channel_type, expires_at, consumed_at, consumed_channel_identity_id, created_at;
 
 -- name: UpsertUserChannelIdentityBinding :one
@@ -44,6 +44,21 @@ SELECT
 FROM user_channel_identity_bindings b
 LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
 WHERE b.user_id = sqlc.arg(user_id)
+ORDER BY b.created_at DESC;
+
+-- name: ListChannelIdentityBindings :many
+SELECT
+  b.id,
+  b.user_id,
+  b.channel_identity_id,
+  b.created_at,
+  b.updated_at,
+  ci.channel_type,
+  ci.channel_subject_id,
+  ci.display_name AS channel_identity_display_name,
+  ci.avatar_url AS channel_identity_avatar_url
+FROM user_channel_identity_bindings b
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
 ORDER BY b.created_at DESC;
 
 -- name: DeleteUserChannelIdentityBinding :exec

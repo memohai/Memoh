@@ -643,6 +643,21 @@ func (q *Queries) UpsertUserChannelIdentityBinding(ctx context.Context, arg pgsq
 	return result, nil
 }
 
+func (q *Queries) ListChannelIdentityBindings(ctx context.Context) ([]pgsqlc.ListChannelIdentityBindingsRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	out, err := q.store.queries.ListChannelIdentityBindings(ctx)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListChannelIdentityBindingsRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, userID pgtype.UUID) ([]pgsqlc.ListChannelIdentityBindingsForUserRow, error) {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return nil, errSQLiteQueriesNotConfigured

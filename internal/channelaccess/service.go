@@ -37,12 +37,24 @@ var (
 
 type Service struct {
 	queries dbstore.Queries
-	acl     *acl.Service
-	bots    *bots.Service
+	acl     manageOverrideStore
+	bots    botPermissionResolver
 	logger  *slog.Logger
 	now     func() time.Time
 	token   func() (string, error)
 	codeTTL time.Duration
+}
+
+type manageOverrideStore interface {
+	GetManageOverride(ctx context.Context, botID, channelIdentityID string) (granted bool, exists bool, err error)
+	ListManageOverrides(ctx context.Context, botID string) ([]acl.ManageOverride, error)
+	SetManageOverride(ctx context.Context, botID, channelIdentityID string, granted bool, createdByUserID string) (acl.ManageOverride, error)
+	DeleteManageOverride(ctx context.Context, botID, channelIdentityID string) error
+}
+
+type botPermissionResolver interface {
+	ResolveUserPermissions(ctx context.Context, botID, userID string, isAdmin bool) ([]string, error)
+	ListUserGrants(ctx context.Context, botID string) ([]bots.UserGrant, error)
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service, botService *bots.Service) *Service {
@@ -297,8 +309,14 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 		if err != nil {
 			return nil, err
 		}
+		everyoneCarriesManage := false
 		for _, g := range grants {
 			userID := strings.TrimSpace(g.UserID)
+			carriesManage := g.IsOwner || bots.HasPermission(g.Permissions, bots.PermissionManage)
+			if g.SubjectType == bots.GrantSubjectEveryone {
+				everyoneCarriesManage = everyoneCarriesManage || carriesManage
+				continue
+			}
 			if userID == "" || g.SubjectType != bots.GrantSubjectUser {
 				continue
 			}
@@ -306,40 +324,21 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 			if err != nil {
 				continue
 			}
-			carriesManage := g.IsOwner || bots.HasPermission(g.Permissions, bots.PermissionManage)
 			bindings, err := s.queries.ListChannelIdentityBindingsForUser(ctx, pgUserID)
 			if err != nil {
 				return nil, err
 			}
 			for _, b := range bindings {
-				ciID := uuidString(b.ChannelIdentityID)
-				if ciID == "" {
-					continue
-				}
-				m := byIdentity[ciID]
-				if m == nil {
-					m = &Manager{ChannelIdentityID: ciID}
-					byIdentity[ciID] = m
-				}
-				m.Bound = true
-				// An identity bound to several members is inherited-manage if ANY
-				// of those members carries Manage.
-				if carriesManage {
-					m.Inherited = true
-					m.Manage = true
-				}
-				if m.ChannelType == "" {
-					m.ChannelType = db.TextToString(b.ChannelType)
-				}
-				if m.ChannelSubjectID == "" {
-					m.ChannelSubjectID = db.TextToString(b.ChannelSubjectID)
-				}
-				if m.ChannelIdentityDisplayName == "" {
-					m.ChannelIdentityDisplayName = db.TextToString(b.ChannelIdentityDisplayName)
-				}
-				if m.ChannelIdentityAvatarURL == "" {
-					m.ChannelIdentityAvatarURL = db.TextToString(b.ChannelIdentityAvatarUrl)
-				}
+				mergeManagerBinding(byIdentity, b.ChannelIdentityID, carriesManage, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
+			}
+		}
+		if everyoneCarriesManage {
+			bindings, err := s.queries.ListChannelIdentityBindings(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, b := range bindings {
+				mergeManagerBinding(byIdentity, b.ChannelIdentityID, true, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
 			}
 		}
 	}
@@ -380,6 +379,37 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 		items = append(items, *m)
 	}
 	return items, nil
+}
+
+func mergeManagerBinding(byIdentity map[string]*Manager, channelIdentityID pgtype.UUID, carriesManage bool, channelType, channelSubjectID, displayName, avatarURL pgtype.Text) {
+	ciID := uuidString(channelIdentityID)
+	if ciID == "" {
+		return
+	}
+	m := byIdentity[ciID]
+	if m == nil {
+		m = &Manager{ChannelIdentityID: ciID}
+		byIdentity[ciID] = m
+	}
+	m.Bound = true
+	// An identity bound to several members is inherited-manage if ANY of those
+	// members, including an Everyone grant, carries Manage.
+	if carriesManage {
+		m.Inherited = true
+		m.Manage = true
+	}
+	if m.ChannelType == "" {
+		m.ChannelType = db.TextToString(channelType)
+	}
+	if m.ChannelSubjectID == "" {
+		m.ChannelSubjectID = db.TextToString(channelSubjectID)
+	}
+	if m.ChannelIdentityDisplayName == "" {
+		m.ChannelIdentityDisplayName = db.TextToString(displayName)
+	}
+	if m.ChannelIdentityAvatarURL == "" {
+		m.ChannelIdentityAvatarURL = db.TextToString(avatarURL)
+	}
 }
 
 func uuidString(id pgtype.UUID) string {
