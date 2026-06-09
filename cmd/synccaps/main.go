@@ -139,13 +139,18 @@ func enrichFile(path string, resolver *capabilities.Resolver, check bool) (int, 
 		if !ok {
 			continue
 		}
-		// Only fill positive reasoning models; a "none"/unknown result leaves the
-		// template's own compatibilities + legacy toggle fallback in charge.
-		if caps.ThinkingMode != "toggle" && caps.ThinkingMode != "adaptive" {
-			continue
-		}
-		if applyToModel(model, caps.ThinkingMode, caps.EffortLevels) {
-			changed++
+		// Positive discoveries fill reasoning controls. Explicit negative
+		// discoveries only correct stale reasoning metadata; unknown stays
+		// untouched so LiteLLM silence does not become a false "no reasoning".
+		switch caps.ThinkingMode {
+		case "toggle", "adaptive":
+			if applyToModel(model, caps.ThinkingMode, caps.EffortLevels) {
+				changed++
+			}
+		case "none":
+			if applyNoReasonToModel(model) {
+				changed++
+			}
 		}
 	}
 
@@ -181,6 +186,44 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	return changed
 }
 
+// applyNoReasonToModel records an explicit no-reasoning discovery only when the
+// template already carries stale reasoning metadata. It does not create a config
+// block for ordinary non-reasoning models.
+func applyNoReasonToModel(model *yaml.Node) bool {
+	cfg := mapValue(model, "config")
+	if cfg == nil || !hasReasoningResidue(cfg) {
+		return false
+	}
+
+	changed := false
+	if scalarValue(mapValue(cfg, "thinking_mode")) != "none" {
+		mapSet(cfg, "thinking_mode", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "none"})
+		changed = true
+	}
+	if mapValue(cfg, "reasoning_efforts") != nil {
+		mapDelete(cfg, "reasoning_efforts")
+		changed = true
+	}
+	if removeSeqValue(mapValue(cfg, "compatibilities"), "reasoning") {
+		if seq := mapValue(cfg, "compatibilities"); seq != nil && len(seq.Content) == 0 {
+			mapDelete(cfg, "compatibilities")
+		}
+		changed = true
+	}
+	return changed
+}
+
+func hasReasoningResidue(cfg *yaml.Node) bool {
+	mode := scalarValue(mapValue(cfg, "thinking_mode"))
+	if mode != "" && mode != "none" {
+		return true
+	}
+	if mapValue(cfg, "reasoning_efforts") != nil {
+		return true
+	}
+	return seqContains(mapValue(cfg, "compatibilities"), "reasoning")
+}
+
 func flowSeq(items []string) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
 	for _, it := range items {
@@ -214,6 +257,18 @@ func mapValue(m *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+func mapDelete(m *yaml.Node, key string) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return
+		}
+	}
+}
+
 // mapSet replaces or appends key->value in a mapping node.
 func mapSet(m *yaml.Node, key string, value *yaml.Node) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
@@ -231,6 +286,35 @@ func scalarValue(n *yaml.Node) string {
 		return ""
 	}
 	return n.Value
+}
+
+func seqContains(node *yaml.Node, value string) bool {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, c := range node.Content {
+		if c.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func removeSeqValue(node *yaml.Node, value string) bool {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return false
+	}
+	out := node.Content[:0]
+	changed := false
+	for _, c := range node.Content {
+		if c.Value == value {
+			changed = true
+			continue
+		}
+		out = append(out, c)
+	}
+	node.Content = out
+	return changed
 }
 
 func writeNode(path string, doc *yaml.Node) error {

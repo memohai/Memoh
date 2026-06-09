@@ -11,11 +11,66 @@ func TestCanonical(t *testing.T) {
 		"us.anthropic.claude-opus-4-6":    "claude-opus-4-6",
 		"claude-opus-4-6-20251101":        "claude-opus-4-6",
 		"gpt-5.4":                         "gpt-5-4",
+		"deepseek-coder":                  "deepseek-coder",
+		"deepseek/deepseek-coder":         "deepseek-coder",
+		"dashscope.qwen-coder":            "qwen-coder",
+		"mistral-large":                   "mistral-large",
 		"":                                "",
 	}
 	for in, want := range cases {
 		if got := canonical(in); got != want {
 			t.Errorf("canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestResolverDoesNotCollapseModelFamilies(t *testing.T) {
+	body := []byte(`{
+		"deepseek-coder": {"mode": "chat", "supports_reasoning": false},
+		"dashscope/qwen-coder": {"mode": "chat", "supports_reasoning": true, "supports_max_reasoning_effort": true},
+		"mistral-large": {"mode": "chat", "supports_reasoning": true}
+	}`)
+	r, err := NewResolver(body)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	deepseek, ok := r.Resolve("deepseek/deepseek-coder")
+	if !ok {
+		t.Fatal("deepseek-coder should resolve")
+	}
+	if deepseek.ThinkingMode != "none" {
+		t.Fatalf("deepseek-coder thinking = %q, want none; likely folded into qwen-coder", deepseek.ThinkingMode)
+	}
+
+	qwen, ok := r.Resolve("dashscope/qwen-coder")
+	if !ok || qwen.ThinkingMode != "toggle" {
+		t.Fatalf("qwen-coder = %+v ok=%v, want toggle", qwen, ok)
+	}
+}
+
+func TestResolverDoesNotBorrowMissingVariants(t *testing.T) {
+	body := []byte(`{
+		"deepseek-v4": {"mode": "chat", "supports_reasoning": true},
+		"gpt-5": {"mode": "chat", "supports_reasoning": true},
+		"qwen3-coder": {"mode": "chat", "supports_reasoning": true},
+		"kimi-k2-thinking": {"mode": "chat", "supports_reasoning": true}
+	}`)
+	r, err := NewResolver(body)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	for _, modelID := range []string{
+		"deepseek/deepseek-v4-pro",
+		"deepseek/deepseek-v4-flash",
+		"openai/gpt-5-pro",
+		"openai/gpt-5-mini",
+		"qwen/qwen3-coder-plus",
+		"kimi-k2",
+	} {
+		if caps, ok := r.Resolve(modelID); ok {
+			t.Fatalf("%q unexpectedly borrowed capabilities: %+v", modelID, caps)
 		}
 	}
 }

@@ -31,6 +31,8 @@ models:
     config:
       compatibilities: [vision, reasoning]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: magistral-small-2509
     name: Magistral Small 1.2
@@ -38,6 +40,8 @@ models:
     config:
       compatibilities: [vision, reasoning]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: open-mistral-nemo
     name: Mistral Nemo

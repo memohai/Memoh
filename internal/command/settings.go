@@ -247,19 +247,6 @@ func commandLanguageDisplay(cc CommandContext, value string) string {
 	}
 }
 
-func settingsUpdateUsage() string {
-	return "Usage: /settings update [options]\n\n" +
-		"Options:\n" +
-		"- --language <value>\n" +
-		"- --acl_default_effect <allow|deny>\n" +
-		"- --reasoning_enabled <true|false>\n" +
-		"- --reasoning_effort <minimal|low|medium|high|xhigh|max> (model-dependent)\n" +
-		"- --heartbeat_enabled <true|false>\n" +
-		"- --heartbeat_interval <minutes>\n" +
-		"- --chat_model_id <id>\n" +
-		"- --heartbeat_model_id <id>"
-}
-
 func (h *Handler) getBotSettings(cc CommandContext) (settings.Settings, error) {
 	if h.settingsService == nil {
 		return settings.Settings{}, errors.New("settings service is not available")

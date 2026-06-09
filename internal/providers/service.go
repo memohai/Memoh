@@ -14,7 +14,6 @@ import (
 	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/capabilities"
 	memohcopilot "github.com/memohai/memoh/internal/copilot"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
@@ -24,18 +23,10 @@ import (
 
 // Service handles provider operations.
 type Service struct {
-	queries            dbstore.Queries
-	logger             *slog.Logger
-	httpClient         *http.Client
-	callbackURL        string
-	capabilityRegistry *capabilities.Registry
-}
-
-// SetCapabilityRegistry wires the LiteLLM-backed capability registry used to
-// enrich fetched models. Setter injection keeps the many lightweight
-// NewService(nil, ...) call sites unaffected; when unset, enrichment is skipped.
-func (s *Service) SetCapabilityRegistry(r *capabilities.Registry) {
-	s.capabilityRegistry = r
+	queries     dbstore.Queries
+	logger      *slog.Logger
+	httpClient  *http.Client
+	callbackURL string
 }
 
 // NewService creates a new provider service.
@@ -314,10 +305,6 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, fmt.Errorf("get provider: %w", err)
 	}
 
-	// Kick off the capability-registry refresh in the background. Best-effort and
-	// fail-open: a slow or failed registry never blocks or fails the fetch.
-	s.warmCapabilities(ctx)
-
 	var remoteModels []RemoteModel
 	switch {
 	case models.ClientType(provider.ClientType) == models.ClientTypeGitHubCopilot:
@@ -331,7 +318,6 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return nil, err
 	}
 
-	s.enrichWithCapabilities(ctx, remoteModels)
 	return remoteModels, nil
 }
 
@@ -386,81 +372,6 @@ func fetchCodexCatalogModels() []RemoteModel {
 		})
 	}
 	return remoteModels
-}
-
-// warmCapabilities triggers a background registry refresh detached from the
-// request context (bounded inside the registry). It is intentionally fire and
-// forget so model listing never waits for LiteLLM registry I/O.
-func (s *Service) warmCapabilities(ctx context.Context) {
-	if s.capabilityRegistry == nil {
-		return
-	}
-	s.capabilityRegistry.Warm(ctx)
-}
-
-// enrichWithCapabilities fills in reasoning capabilities (thinking mode, effort
-// levels, context window, and vision/tool-call/reasoning compatibility) for chat
-// models from the LiteLLM registry. It is strictly trust + fill: it only supplies
-// information the upstream did not, and never strips an upstream-claimed value.
-func (s *Service) enrichWithCapabilities(ctx context.Context, remoteModels []RemoteModel) {
-	if s.capabilityRegistry == nil {
-		return
-	}
-	for i := range remoteModels {
-		m := &remoteModels[i]
-		if t := strings.TrimSpace(m.Type); t != "" && t != string(models.ModelTypeChat) {
-			continue
-		}
-		caps, ok := s.capabilityRegistry.Lookup(ctx, m.ID)
-		if !ok {
-			continue
-		}
-		applyCapabilities(m, caps)
-	}
-}
-
-// applyCapabilities merges discovered capabilities into a RemoteModel without
-// overriding explicit upstream values.
-func applyCapabilities(m *RemoteModel, caps capabilities.Capabilities) {
-	if m.ThinkingMode == "" && caps.ThinkingMode != "" {
-		// Don't let a registry "none" override an explicit upstream reasoning claim.
-		if caps.ThinkingMode != models.ThinkingModeNone || !hasCompat(m.Compatibilities, models.CompatReasoning) {
-			m.ThinkingMode = caps.ThinkingMode
-		}
-	}
-	if len(m.ReasoningEfforts) == 0 && len(caps.EffortLevels) > 0 {
-		m.ReasoningEfforts = append([]string(nil), caps.EffortLevels...)
-	}
-	if m.ContextWindow == nil && caps.ContextWindow != nil {
-		m.ContextWindow = caps.ContextWindow
-	}
-
-	switch caps.ThinkingMode {
-	case models.ThinkingModeToggle, models.ThinkingModeAdaptive, models.ThinkingModeOnlyAdaptive:
-		m.Compatibilities = addCompat(m.Compatibilities, models.CompatReasoning)
-	}
-	if caps.Vision != nil && *caps.Vision {
-		m.Compatibilities = addCompat(m.Compatibilities, models.CompatVision)
-	}
-	if caps.ToolCall != nil && *caps.ToolCall {
-		m.Compatibilities = addCompat(m.Compatibilities, models.CompatToolCall)
-	}
-}
-
-func hasCompat(list []string, c string) bool {
-	for _, v := range list {
-		if v == c {
-			return true
-		}
-	}
-	return false
-}
-
-func addCompat(list []string, c string) []string {
-	if hasCompat(list, c) {
-		return list
-	}
-	return append(list, c)
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
