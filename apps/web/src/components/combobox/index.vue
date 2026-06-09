@@ -56,7 +56,6 @@
             <div
               v-for="vRow in virtualRows"
               :key="vRow.key"
-              :ref="measureRow"
               :data-index="vRow.index"
               class="py-0.5"
               :style="{ position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${vRow.start}px)` }"
@@ -67,7 +66,7 @@
                 role="option"
                 :aria-selected="modelValue === vRow.option.value"
                 :data-highlighted="activeIndex === vRow.index ? '' : undefined"
-                :class="menuItemClass"
+                :class="[menuItemClass, 'h-8']"
                 @click="select(vRow.option.value)"
                 @pointermove="activeIndex = vRow.index"
               >
@@ -143,10 +142,11 @@ const virtualizer = useVirtualizer<HTMLElement, HTMLElement>(
   computed(() => ({
     count: filtered.value.length,
     getScrollElement: () => scrollEl.value,
-    // Real row height: menuItemClass (text-control 14px + py-1.5 = 32) + the row
-    // wrapper's py-0.5 = 36. Matching the estimate to the actual height keeps the
-    // translateY offsets exact even before measureElement re-measures, so rows never
-    // drift away from the scrollbar position.
+    // Rows are pinned to an exact height — the option button is h-8 (32px) and the
+    // row wrapper adds py-0.5 (4px) = 36px — so this estimate IS the real height for
+    // every row. That determinism is why we don't measureElement: there is no
+    // variance to measure, the translateY offsets stay pixel-exact, and we skip a
+    // getBoundingClientRect reflow per visible row on open/scroll.
     estimateSize: () => 36,
     overscan: 8,
     getItemKey: (index: number) => filtered.value[index]?.value ?? index,
@@ -161,10 +161,6 @@ const virtualRows = computed(() =>
     return option ? [{ key: String(vi.key), index: vi.index, start: vi.start, option }] : []
   }),
 )
-
-const measureRow = (el: unknown) => {
-  if (el instanceof HTMLElement) virtualizer.value.measureElement(el)
-}
 
 // useListboxKeyboard skips non-'item' rows, so wrap the flat options as item rows.
 // Indexes stay 1:1 with `filtered`, so activeIndex lines up with the virtual rows.
