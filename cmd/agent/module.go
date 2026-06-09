@@ -15,6 +15,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/adapters/local"
 	"github.com/memohai/memoh/internal/channel/adapters/weixin"
 	"github.com/memohai/memoh/internal/channel/identities"
+	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/conversation"
 	emailpkg "github.com/memohai/memoh/internal/email"
@@ -66,6 +67,7 @@ func options() fx.Option {
 			provideACPClaudeCodeOAuthHandler,
 			accounts.NewService,
 			acl.NewService,
+			channelaccess.NewService,
 			settings.NewService,
 			toolapproval.NewService,
 			userinput.NewService,
@@ -136,6 +138,7 @@ func options() fx.Option {
 			provideServerHandler(handlers.NewToolApprovalHandler),
 			provideServerHandler(handlers.NewACLHandler),
 			provideServerHandler(handlers.NewBotUserAccessHandler),
+			provideServerHandler(handlers.NewChannelAccessHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
 			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),

@@ -46,6 +46,7 @@ import (
 	"github.com/memohai/memoh/internal/channel/identities"
 	"github.com/memohai/memoh/internal/channel/inbound"
 	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/memohai/memoh/internal/channelaccess"
 	"github.com/memohai/memoh/internal/command"
 	"github.com/memohai/memoh/internal/compaction"
 	"github.com/memohai/memoh/internal/config"
@@ -481,6 +482,7 @@ func provideChannelRouter(
 	identityService *identities.Service,
 	botService *bots.Service,
 	aclService *acl.Service,
+	channelAccessService *channelaccess.Service,
 	policyService *policy.Service,
 	mediaService *media.Service,
 	audioService *audiopkg.Service,
@@ -528,7 +530,7 @@ func provideChannelRouter(
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	cmdHandler := command.NewHandler(
 		log,
-		&command.BotMemberRoleAdapter{BotService: botService},
+		&command.BotMemberRoleAdapter{BotService: botService, ManageResolver: channelAccessService},
 		scheduleService,
 		settingsService,
 		mcpConnService,
@@ -545,6 +547,7 @@ func provideChannelRouter(
 		&commandContainerFSAdapter{provider: provider},
 	)
 	cmdHandler.SetCompactionService(compactionService, queries)
+	cmdHandler.SetLinkConsumer(channelAccessService)
 	processor.SetCommandHandler(cmdHandler)
 	return processor
 }
