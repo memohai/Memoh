@@ -389,7 +389,13 @@ function isRowBusy(grant: BotsUserGrant): boolean {
 }
 
 function invalidate() {
-  return queryCache.invalidateQueries({ key: ['bot-user-access', props.botId] })
+  // Workspace Manage flows into Channel Members as inherited Manage, so refresh
+  // the channel managers view too — otherwise the sibling tab shows a stale
+  // inherited state after a grant change while runtime permissions already moved.
+  return Promise.all([
+    queryCache.invalidateQueries({ key: ['bot-user-access', props.botId] }),
+    queryCache.invalidateQueries({ key: ['bot-channel-managers', props.botId] }),
+  ])
 }
 
 async function handleCreate() {

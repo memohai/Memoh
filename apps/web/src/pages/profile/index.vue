@@ -90,9 +90,15 @@
             @update:confirm-password="passwordForm.confirmPassword = $event"
             @update-password="onUpdatePassword"
           />
-          
-          <!-- Sign Out Zone -->
-          <div class="pt-6">
+
+          <!-- Connected IM Accounts -->
+          <ConnectedAccountsSection />
+
+          <!-- Sign Out Zone (hidden in the desktop shell: it auto-logs in and has no login screen to return to) -->
+          <div
+            v-if="!desktopShell"
+            class="pt-6"
+          >
             <div class="rounded-md border bg-background shadow-sm">
               <div class="flex items-center justify-between p-4 md:p-6">
                 <div>
@@ -126,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
@@ -135,12 +141,14 @@ import { Button, Skeleton, Avatar, AvatarFallback, AvatarImage } from '@memohai/
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ProfileSection from './components/profile-section.vue'
 import PasswordSection from './components/password-section.vue'
+import ConnectedAccountsSection from './components/connected-accounts-section.vue'
 
 import { getUsersMe, putUsersMe, putUsersMePassword } from '@memohai/sdk'
 import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePasswordRequest } from '@memohai/sdk'
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 
 type UserAccount = AccountsAccount
 
@@ -148,6 +156,10 @@ const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
+
+// In the desktop shell the app auto-logs in and has no login screen, so the
+// sign-out action is hidden there. Connected Accounts stays available.
+const desktopShell = inject(DesktopShellKey, false)
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

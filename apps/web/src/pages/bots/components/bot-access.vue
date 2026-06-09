@@ -1,7 +1,7 @@
 <template>
-  <div class="max-w-2xl mx-auto pb-6 space-y-5">
-    <!-- Sovereign Header -->
-    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4 flex items-center justify-between">
+  <div class="max-w-2xl mx-auto pb-6 space-y-6">
+    <!-- Header -->
+    <header class="pb-4 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-30 pt-4 -mt-4">
       <div class="space-y-1">
         <h2 class="text-sm font-semibold text-foreground">
           {{ $t('bots.access.title') }}
@@ -10,393 +10,123 @@
           {{ $t('bots.access.subtitle') }}
         </p>
       </div>
-
-      <div class="flex items-center gap-2">
-        <Button
-          v-if="!formVisible"
-          size="sm"
-          class="h-8 text-[11px] font-medium px-3 shadow-none"
-          @click="openAddDialog"
-        >
-          <Plus class="mr-1.5 size-3.5" />
-          {{ addListEntryLabel }}
-        </Button>
-      </div>
     </header>
 
-    <!-- Access Mode (Posture Style) -->
-    <section class="space-y-4 rounded-md border p-4 bg-background/50">
-      <div class="space-y-1">
-        <p class="text-xs font-medium text-foreground">
-          {{ $t('bots.access.modeTitle') }}
-        </p>
-        <p class="text-[11px] text-muted-foreground">
-          {{ $t('bots.access.modeDescription') }}
-        </p>
-      </div>
-      <div class="grid gap-3 md:grid-cols-2">
-        <button
-          type="button"
-          class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
-          :class="defaultEffectDraft === 'allow'
-            ? 'border-foreground bg-muted text-foreground'
-            : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
-          :disabled="isSavingDefaultEffect"
-          @click="handleSetDefaultEffect('allow')"
-        >
-          <div
-            class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
-            :class="defaultEffectDraft === 'allow' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
-          >
-            <ShieldAlert class="size-5" />
-          </div>
-          <span class="text-sm font-semibold mb-1">{{ $t('bots.access.blacklistMode') }}</span>
-          <span class="text-[11px] leading-relaxed text-muted-foreground">
-            {{ $t('bots.access.blacklistModeDescription') }}
-          </span>
-        </button>
+    <!-- Audience switch: IM channel members vs workspace members -->
+    <Tabs
+      v-model="activeTab"
+      class="w-full"
+    >
+      <TabsList class="grid w-full grid-cols-2">
+        <TabsTrigger value="channel">
+          {{ $t('bots.access.channelTab') }}
+        </TabsTrigger>
+        <TabsTrigger value="workspace">
+          {{ $t('bots.access.workspaceTab') }}
+        </TabsTrigger>
+      </TabsList>
 
-        <button
-          type="button"
-          class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
-          :class="defaultEffectDraft === 'deny'
-            ? 'border-foreground bg-muted text-foreground'
-            : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
-          :disabled="isSavingDefaultEffect"
-          @click="handleSetDefaultEffect('deny')"
-        >
-          <div
-            class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
-            :class="defaultEffectDraft === 'deny' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
-          >
-            <ShieldCheck class="size-5" />
-          </div>
-          <span class="text-sm font-semibold mb-1">{{ $t('bots.access.whitelistMode') }}</span>
-          <span class="text-[11px] leading-relaxed text-muted-foreground">
-            {{ $t('bots.access.whitelistModeDescription') }}
-          </span>
-        </button>
-      </div>
-    </section>
-
-    <!-- Rules List -->
-    <section class="space-y-4">
-      <div class="flex items-center justify-between">
-        <div class="space-y-1">
-          <h3 class="text-xs font-medium text-foreground">
-            {{ listTitle }}
-          </h3>
-          <p class="text-[11px] text-muted-foreground">
-            {{ listDescription }}
-          </p>
-        </div>
-      </div>
-
-      <div
-        v-if="isLoadingRules"
-        class="flex justify-center py-12"
+      <!-- Channel members (IM) -->
+      <TabsContent
+        value="channel"
+        class="space-y-6 mt-4"
       >
-        <Spinner class="size-6 text-muted-foreground/50" />
-      </div>
-
-      <Empty
-        v-else-if="visibleRules.length === 0"
-        :title="emptyTitle"
-        :description="emptyDescription"
-        class="border border-dashed border-border/60 bg-muted/5 rounded-lg py-10"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          class="mt-4 h-8 text-[11px] border-border/60 shadow-none"
-          @click="openAddDialog"
-        >
-          <Plus class="mr-1.5 size-3.5" />
-          {{ addListEntryLabel }}
-        </Button>
-      </Empty>
-
-      <div
-        v-else
-        class="space-y-2"
-      >
-        <div
-          v-for="rule in visibleRules"
-          :key="rule.id"
-          class="group flex items-center gap-3 rounded-md border border-border/60 bg-background/50 px-3 py-2.5 hover:bg-muted/30 transition-all duration-200"
-        >
-          <!-- Avatar size-8 (32px) -->
-          <Avatar
-            v-if="rule.channel_identity_id"
-            class="size-8 shrink-0 border border-border/40"
-          >
-            <AvatarImage
-              :src="rule.channel_identity_avatar_url"
-              :alt="describeRuleTarget(rule)"
-            />
-            <AvatarFallback class="text-[10px]">
-              {{ ruleTargetFallback(rule) }}
-            </AvatarFallback>
-          </Avatar>
-          <div
-            v-else-if="rule.subject_channel_type"
-            class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
-          >
-            <ChannelIcon
-              :channel="rule.subject_channel_type"
-              size="1em"
-            />
-          </div>
-          <div
-            v-else
-            class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
-          >
-            <Users class="size-4" />
-          </div>
-
-          <div class="min-w-0 flex-1 space-y-0.5">
-            <div class="flex min-w-0 items-center gap-2">
-              <p class="truncate text-[11px] font-semibold text-foreground">
-                {{ describeRuleTarget(rule) }}
-              </p>
-              <Badge
-                variant="outline"
-                class="h-4 px-1.5 text-[9px] font-medium rounded-full shadow-none"
-                :class="rule.enabled ? 'bg-foreground/5 text-foreground border-foreground/20' : 'bg-muted/40 text-muted-foreground border-border/40'"
-              >
-                {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
-              </Badge>
-            </div>
-            <div class="flex min-w-0 items-center text-[10px] text-muted-foreground">
-              <span class="shrink-0">
-                {{ ruleScopePrefix(rule) }}
-              </span>
-              <template v-if="ruleScopeDetail(rule)">
-                <span class="shrink-0 mx-1">: </span>
-                <Avatar
-                  v-if="rule.source_conversation_avatar_url"
-                  class="mr-1 size-3.5 shrink-0"
-                >
-                  <AvatarImage
-                    :src="rule.source_conversation_avatar_url"
-                    :alt="rule.source_conversation_name || rule.source_scope?.conversation_id"
-                  />
-                  <AvatarFallback class="text-[8px]">
-                    {{ ruleScopeFallback(rule) }}
-                  </AvatarFallback>
-                </Avatar>
-                <span class="truncate">
-                  {{ ruleScopeDetail(rule) }}
-                </span>
-              </template>
-            </div>
-            <p
-              v-if="rule.description"
-              class="truncate text-[10px] text-muted-foreground/70 italic leading-relaxed"
-            >
-              {{ rule.description }}
+        <!-- Access Mode -->
+        <section class="space-y-4 rounded-md border p-4 bg-background/50">
+          <div class="space-y-1">
+            <p class="text-xs font-medium text-foreground">
+              {{ $t('bots.access.modeTitle') }}
+            </p>
+            <p class="text-[11px] text-muted-foreground">
+              {{ $t('bots.access.modeDescription') }}
             </p>
           </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <button
+              type="button"
+              class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
+              :class="defaultEffectDraft === 'allow'
+                ? 'border-foreground bg-muted text-foreground'
+                : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
+              :disabled="isSavingDefaultEffect"
+              @click="handleSetDefaultEffect('allow')"
+            >
+              <div
+                class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
+                :class="defaultEffectDraft === 'allow' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
+              >
+                <ShieldAlert class="size-5" />
+              </div>
+              <span class="text-sm font-semibold mb-1">{{ $t('bots.access.blacklistMode') }}</span>
+              <span class="text-[11px] leading-relaxed text-muted-foreground">
+                {{ $t('bots.access.blacklistModeDescription') }}
+              </span>
+            </button>
 
-          <!-- Icon-Only Actions -->
-          <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="size-7 shadow-none"
-              :class="rule.enabled ? 'text-muted-foreground' : 'text-foreground hover:bg-foreground/5'"
-              :aria-label="rule.enabled ? $t('bots.access.disableRule') : $t('bots.access.enableRule')"
-              @click="handleToggleEnabled(rule, !(rule.enabled ?? false))"
+            <button
+              type="button"
+              class="flex flex-col items-start rounded-lg border p-4 text-left transition-all duration-200 group shadow-none"
+              :class="defaultEffectDraft === 'deny'
+                ? 'border-foreground bg-muted text-foreground'
+                : 'border-border/60 bg-background/70 text-foreground hover:bg-accent/50'"
+              :disabled="isSavingDefaultEffect"
+              @click="handleSetDefaultEffect('deny')"
             >
-              <Power class="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="size-7"
-              :aria-label="$t('common.edit')"
-              @click="openEditDialog(rule)"
-            >
-              <SquarePen class="size-3.5 text-muted-foreground" />
-            </Button>
-            <ConfirmPopover
-              :message="$t('bots.access.deleteConfirmDescription')"
-              :confirm-text="$t('common.delete')"
-              @confirm="handleDeleteRule(rule.id!)"
-            >
-              <template #trigger>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-7 text-destructive/70 hover:text-destructive hover:bg-destructive/10"
-                  :aria-label="$t('common.delete')"
-                >
-                  <Trash2 class="size-3.5" />
-                </Button>
-              </template>
-            </ConfirmPopover>
+              <div
+                class="size-8 rounded flex items-center justify-center mb-3 transition-colors shadow-none"
+                :class="defaultEffectDraft === 'deny' ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground group-hover:bg-background'"
+              >
+                <ShieldCheck class="size-5" />
+              </div>
+              <span class="text-sm font-semibold mb-1">{{ $t('bots.access.whitelistMode') }}</span>
+              <span class="text-[11px] leading-relaxed text-muted-foreground">
+                {{ $t('bots.access.whitelistModeDescription') }}
+              </span>
+            </button>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <!-- Inline Add/Edit Rule Form -->
-    <Transition name="fade">
-      <section
-        v-if="formVisible"
-        class="space-y-5 rounded-md border border-border/60 bg-muted/10 p-4 relative"
-      >
-        <div class="flex items-center justify-between">
-          <h3 class="text-xs font-semibold text-foreground">
-            {{ editingRule ? $t('bots.access.editRule') : addListEntryLabel }}
-          </h3>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            class="size-7"
-            @click="formVisible = false"
+        <!-- Members: per-identity Chat + Manage -->
+        <section class="space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="space-y-1">
+              <h3 class="text-xs font-medium text-foreground">
+                {{ $t('bots.access.members.title') }}
+              </h3>
+              <p class="text-[11px] text-muted-foreground max-w-md">
+                {{ $t('bots.access.members.subtitle') }}
+              </p>
+            </div>
+            <Button
+              v-if="!memberFormVisible"
+              size="sm"
+              variant="outline"
+              class="h-8 text-[11px] font-medium px-3 shrink-0 shadow-none"
+              @click="openMemberForm"
+            >
+              <Plus class="mr-1.5 size-3.5" />
+              {{ $t('bots.access.members.add') }}
+            </Button>
+          </div>
+
+          <!-- Add member: identity selector -->
+          <div
+            v-if="memberFormVisible"
+            class="space-y-3 rounded-lg border border-border/60 bg-background/70 p-4"
           >
-            <X class="size-4" />
-          </Button>
-        </div>
-
-        <form
-          class="space-y-4"
-          @submit.prevent="handleSaveRule(false)"
-        >
-          <!-- Rule Preview (Code Block Style) -->
-          <div class="rounded-md bg-background/80 border border-border/40 px-3 py-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
-            <div class="flex items-center gap-2 mb-1">
-              <div class="size-1.5 rounded-full bg-foreground/40" />
-              <span class="text-foreground/60 uppercase tracking-wider font-bold">Preview</span>
-            </div>
-            {{ rulePreviewText }}
-          </div>
-
-          <!-- Platform Scope -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
-              <Button
-                v-if="ruleForm.subjectChannelType"
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
-                @click="setPlatformScope('')"
-              >
-                {{ $t('bots.access.allPlatforms') }}
-              </Button>
-            </div>
             <SearchableSelectPopover
-              v-model="ruleForm.subjectChannelType"
-              :options="platformOptions"
-              :placeholder="$t('bots.access.allPlatforms')"
-              :search-placeholder="$t('bots.access.searchPlatform')"
-              :empty-text="$t('bots.access.noPlatformCandidates')"
+              v-model="memberFormIdentityId"
+              :options="memberCandidateOptions"
+              :placeholder="$t('bots.access.members.selectIdentity')"
+              :search-placeholder="$t('bots.access.members.searchIdentity')"
+              :empty-text="$t('bots.access.members.noIdentityCandidates')"
               :show-group-headers="false"
-              @update:model-value="setPlatformScope"
             >
-              <template #trigger="{ open, displayLabel }">
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  :aria-expanded="open"
-                  class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none focus-visible:ring-ring/30"
-                >
-                  <span class="flex min-w-0 items-center gap-2 truncate">
-                    <span
-                      v-if="ruleForm.subjectChannelType"
-                      class="flex size-5 shrink-0 items-center justify-center rounded bg-muted/40 text-muted-foreground"
-                    >
-                      <ChannelIcon
-                        :channel="ruleForm.subjectChannelType"
-                        size="1em"
-                      />
-                    </span>
-                    <span class="truncate">
-                      {{ displayLabel || $t('bots.access.allPlatforms') }}
-                    </span>
-                  </span>
-                  <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
-                </Button>
-              </template>
-              <template #option-label="{ option }">
-                <div class="flex min-w-0 items-center gap-2 text-left py-0.5">
-                  <span
-                    v-if="option.value"
-                    class="flex size-5 shrink-0 items-center justify-center rounded bg-muted/40 text-muted-foreground"
-                  >
-                    <ChannelIcon
-                      :channel="option.value"
-                      size="1em"
-                    />
-                  </span>
-                  <span
-                    v-else
-                    class="size-5 shrink-0"
-                  />
-                  <span class="truncate text-[11px]">
-                    {{ option.label }}
-                  </span>
-                </div>
-              </template>
-            </SearchableSelectPopover>
-          </div>
-
-          <!-- Channel Identity -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
-              <Button
-                v-if="ruleForm.channelIdentityId"
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
-                @click="setChannelIdentity('')"
-              >
-                {{ $t('bots.access.allUsers') }}
-              </Button>
-            </div>
-            <SearchableSelectPopover
-              v-model="ruleForm.channelIdentityId"
-              :options="filteredIdentityOptions"
-              :placeholder="$t('bots.access.selectIdentity')"
-              :search-placeholder="$t('bots.access.searchIdentity')"
-              :empty-text="$t('bots.access.noIdentityCandidates')"
-              @update:model-value="setChannelIdentity"
-            >
-              <template #trigger="{ open, displayLabel }">
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  :aria-expanded="open"
-                  class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none focus-visible:ring-ring/30"
-                >
-                  <span class="flex min-w-0 items-center gap-2 truncate">
-                    <Avatar
-                      v-if="selectedIdentityOption"
-                      class="size-5 shrink-0 border border-border/40"
-                    >
-                      <AvatarImage
-                        :src="selectedIdentityOption.meta.avatarUrl"
-                        :alt="selectedIdentityOption.label"
-                      />
-                      <AvatarFallback class="text-[8px]">{{ selectedIdentityOption.label.slice(0, 2).toUpperCase() }}</AvatarFallback>
-                    </Avatar>
-                    <span class="truncate">
-                      {{ displayLabel || $t('bots.access.selectIdentity') }}
-                    </span>
-                  </span>
-                  <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
-                </Button>
-              </template>
               <template #option-label="{ option }">
                 <div class="flex min-w-0 items-center gap-2 text-left py-0.5">
                   <Avatar class="size-6 shrink-0 border border-border/40">
                     <AvatarImage
-                      :src="option.meta?.avatarUrl"
+                      :src="optionMeta(option.meta).avatarUrl || ''"
                       :alt="option.label"
                     />
                     <AvatarFallback class="text-[8px]">
@@ -408,224 +138,501 @@
                       {{ option.label }}
                     </div>
                     <div
-                      v-if="option.meta?.channelLabel"
+                      v-if="optionMeta(option.meta).channelLabel"
                       class="truncate text-[10px] text-muted-foreground/60"
                     >
-                      {{ formatIdentityOptionSubtitle(option.meta) }}
+                      {{ optionMeta(option.meta).channelLabel }}
                     </div>
                   </div>
                 </div>
               </template>
             </SearchableSelectPopover>
-          </div>
-
-          <!-- Chat Scope -->
-          <div class="space-y-2">
-            <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
-            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <button
-                v-for="scope in chatScopeOptions"
-                :key="scope.value || 'any'"
-                type="button"
-                class="rounded border px-2 py-1.5 text-[10px] font-semibold transition-all text-center h-8 flex items-center justify-center"
-                :class="ruleForm.sourceConversationType === scope.value
-                  ? 'border-foreground/30 bg-foreground/10 text-foreground'
-                  : 'border-border/50 bg-background/50 text-muted-foreground hover:bg-accent hover:text-foreground'"
-                @click="setChatScope(scope.value)"
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 text-[11px] shadow-none"
+                @click="closeMemberForm"
               >
-                {{ scope.label }}
-              </button>
+                {{ $t('common.cancel') }}
+              </Button>
+              <Button
+                size="sm"
+                class="h-8 text-[11px] shadow-none"
+                :disabled="!memberFormIdentityId"
+                @click="confirmAddMember"
+              >
+                {{ $t('common.add') }}
+              </Button>
             </div>
           </div>
 
-          <!-- Specific Conversation Section -->
-          <section
-            v-if="showSpecificConversationSection"
-            class="space-y-4 border-l-2 border-border/40 pl-4 py-1"
+          <div
+            v-if="isLoadingRules || isLoadingManagers"
+            class="flex justify-center py-10"
           >
-            <div class="space-y-1">
-              <p class="text-[11px] font-semibold text-foreground/80">
-                {{ $t('bots.access.specificConversationTitle') }}
-              </p>
-              <p class="text-[10px] text-muted-foreground leading-relaxed">
-                {{ $t('bots.access.specificConversationDescription') }}
-              </p>
-            </div>
+            <Spinner class="size-6 text-muted-foreground/50" />
+          </div>
 
+          <Empty
+            v-else-if="members.length === 0"
+            :title="$t('bots.access.members.title')"
+            :description="$t('bots.access.members.empty')"
+            class="border border-dashed border-border/60 bg-muted/5 rounded-lg py-10"
+          />
+
+          <div
+            v-else
+            class="space-y-2"
+          >
             <div
-              v-if="showConversationSearch"
-              class="space-y-1.5"
+              v-for="member in members"
+              :key="member.channelIdentityId"
+              class="flex items-center gap-3 rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
             >
-              <Label class="text-[10px] font-medium text-muted-foreground uppercase tracking-tight">{{ $t('bots.access.existingConversation') }}</Label>
-              <SearchableSelectPopover
-                v-model="ruleForm.observedConversationRouteId"
-                :options="observedConversationOptions"
-                :placeholder="$t('bots.access.selectConversationSource')"
-                :empty-text="observedConversationEmptyText"
-                @update:model-value="onConversationSourceChange"
-              >
-                <template #trigger="{ open, displayLabel, selectedOption }">
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    :aria-expanded="open"
-                    class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
-                  >
-                    <span class="flex min-w-0 items-center gap-2 truncate">
-                      <Avatar
-                        v-if="observedConversationAvatar(selectedOption?.meta)"
-                        class="size-5 shrink-0 border border-border/40"
-                      >
-                        <AvatarImage
-                          :src="observedConversationAvatar(selectedOption?.meta)"
-                          :alt="displayLabel"
-                        />
-                        <AvatarFallback class="text-[8px]">{{ displayLabel.slice(0, 2).toUpperCase() }}</AvatarFallback>
-                      </Avatar>
-                      <span class="truncate">
-                        {{ displayLabel || $t('bots.access.selectConversationSource') }}
-                      </span>
-                    </span>
-                    <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
-                  </Button>
-                </template>
-                <template #option-label="{ option }">
-                  <div class="flex min-w-0 flex-1 items-center gap-2 text-left py-1">
-                    <Avatar
-                      v-if="observedConversationAvatar(option.meta)"
-                      class="size-7 shrink-0 border border-border/40"
-                    >
-                      <AvatarImage
-                        :src="observedConversationAvatar(option.meta)"
-                        :alt="option.label"
-                      />
-                      <AvatarFallback class="text-[9px]">
-                        {{ option.label.slice(0, 2).toUpperCase() }}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div class="min-w-0">
-                      <div class="truncate text-[11px] font-medium">
-                        {{ option.label }}
-                      </div>
-                      <div class="truncate text-[9px] text-muted-foreground/60 font-mono">
-                        {{ buildConversationStableId(option.meta as AclObservedConversationCandidate | undefined) }}
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </SearchableSelectPopover>
-            </div>
-
-            <p
-              v-else
-              class="text-[10px] text-muted-foreground/70 italic"
-            >
-              {{ $t('bots.access.pickTargetForConversationSearch') }}
-            </p>
-
-            <div
-              v-if="hasConversationTarget"
-              class="space-y-3"
-            >
-              <p class="text-[11px] font-medium text-muted-foreground">
-                {{ $t('bots.access.manualConversationIds') }}
-              </p>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="space-y-1.5">
-                  <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
-                  <Input
-                    v-model="ruleForm.sourceConversationId"
-                    class="h-8 text-[11px] bg-background/50 border-border/50 focus-visible:ring-ring/30 shadow-none"
-                    :placeholder="$t('bots.access.conversationIdPlaceholder')"
-                  />
+              <Avatar class="size-7 shrink-0 border border-border/40">
+                <AvatarImage
+                  :src="member.avatarUrl || ''"
+                  :alt="member.label"
+                />
+                <AvatarFallback class="text-[10px]">
+                  {{ member.label.slice(0, 2).toUpperCase() }}
+                </AvatarFallback>
+              </Avatar>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate text-xs font-medium text-foreground">
+                    {{ member.label }}
+                  </span>
                 </div>
                 <div
-                  v-if="ruleForm.sourceConversationType === 'thread'"
-                  class="space-y-1.5"
+                  v-if="member.channelType"
+                  class="flex items-center gap-1 truncate text-[10px] text-muted-foreground"
                 >
-                  <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
-                  <Input
-                    v-model="ruleForm.sourceThreadId"
-                    class="h-8 text-[11px] bg-background/50 border-border/50 focus-visible:ring-ring/30 shadow-none"
-                    :placeholder="$t('bots.access.threadIdPlaceholder')"
+                  <ChannelIcon
+                    :channel="member.channelType"
+                    size="1em"
                   />
+                  <span>{{ formatPlatformName(member.channelType) }}</span>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3 shrink-0">
+                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer text-foreground">
+                  <Checkbox
+                    :model-value="member.chat"
+                    :disabled="isRowBusy(member)"
+                    @update:model-value="(v) => toggleChat(member, v === true)"
+                  />
+                  {{ $t('bots.access.members.chat') }}
+                </label>
+                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer text-foreground">
+                  <Checkbox
+                    :model-value="member.manage"
+                    :disabled="isRowBusy(member)"
+                    @update:model-value="(v) => toggleManage(member, v === true)"
+                  />
+                  {{ $t('bots.access.members.manage') }}
+                </label>
+
+                <!-- Info icon next to Manage: its presence marks a platform member
+                 (linked to a workspace account). The popover explains where the
+                 Manage permission comes from and, when locally overridden, offers
+                 a "reset to inherited" action. Reka Popover is click-triggered so
+                 the inner button stays reachable. -->
+                <Popover v-if="member.bound || member.manageInherited">
+                  <PopoverTrigger as-child>
+                    <button
+                      type="button"
+                      class="flex size-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                      :title="$t('bots.access.members.platformMember')"
+                    >
+                      <Info class="size-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    class="w-72 space-y-2 text-left"
+                  >
+                    <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <Info class="size-3.5 text-muted-foreground" />
+                      {{ $t('bots.access.members.platformMember') }}
+                    </div>
+                    <p class="text-[11px] leading-relaxed text-muted-foreground">
+                      {{ member.manageInherited
+                        ? (member.manageHasOverride
+                          ? $t('bots.access.members.overrideActive')
+                          : $t('bots.access.members.inheritedFollowing'))
+                        : $t('bots.access.members.platformMemberHint') }}
+                    </p>
+                    <Button
+                      v-if="member.manageInherited && member.manageHasOverride"
+                      variant="outline"
+                      size="sm"
+                      class="w-full gap-1.5"
+                      :disabled="isRowBusy(member)"
+                      @click="recoverInherit(member)"
+                    >
+                      <RotateCcw class="size-3.5" />
+                      {{ $t('bots.access.members.recoverInherit') }}
+                    </Button>
+                  </PopoverContent>
+                </Popover>
+
+                <!-- Only local-only visitors can be removed here. Platform members (bound)
+                 come from Workspace Members, so they are managed via the checkboxes
+                 (untick Manage to suppress) rather than deleted from this list. -->
+                <ConfirmPopover
+                  v-if="!member.bound && !member.manageInherited"
+                  :message="$t('bots.access.members.removeConfirm')"
+                  :confirm-text="$t('common.delete')"
+                  @confirm="() => removeMember(member)"
+                >
+                  <template #trigger>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-7 text-muted-foreground hover:text-destructive shadow-none"
+                      :disabled="isRowBusy(member)"
+                    >
+                      <Trash2 class="size-3.5" />
+                    </Button>
+                  </template>
+                </ConfirmPopover>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Advanced rules (platform / conversation scoped) -->
+        <Collapsible
+          v-model:open="advancedOpen"
+          class="space-y-3"
+        >
+          <CollapsibleTrigger class="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronRight
+              class="size-3.5 transition-transform"
+              :class="advancedOpen ? 'rotate-90' : ''"
+            />
+            {{ advancedOpen ? $t('bots.access.advanced.hide') : $t('bots.access.advanced.show') }}
+          </CollapsibleTrigger>
+
+          <CollapsibleContent class="space-y-3">
+            <div class="flex justify-end">
+              <Button
+                v-if="!formVisible"
+                size="sm"
+                variant="outline"
+                class="h-8 text-[11px] font-medium px-3 shadow-none"
+                @click="openAddDialog"
+              >
+                <Plus class="mr-1.5 size-3.5" />
+                {{ addListEntryLabel }}
+              </Button>
+            </div>
+
+            <div
+              v-if="advancedRules.length"
+              class="space-y-2"
+            >
+              <div
+                v-for="rule in advancedRules"
+                :key="rule.id"
+                class="group flex items-center gap-3 rounded-md border border-border/60 bg-background/50 px-3 py-2.5 hover:bg-muted/30 transition-all duration-200"
+              >
+                <div
+                  v-if="rule.subject_channel_type"
+                  class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
+                >
+                  <ChannelIcon
+                    :channel="rule.subject_channel_type"
+                    size="1em"
+                  />
+                </div>
+                <Avatar
+                  v-else-if="rule.channel_identity_id"
+                  class="size-8 shrink-0 border border-border/40"
+                >
+                  <AvatarImage
+                    :src="rule.channel_identity_avatar_url || ''"
+                    :alt="describeRuleTarget(rule)"
+                  />
+                  <AvatarFallback class="text-[10px]">
+                    {{ ruleTargetFallback(rule) }}
+                  </AvatarFallback>
+                </Avatar>
+                <div
+                  v-else
+                  class="flex size-8 shrink-0 items-center justify-center rounded bg-background border border-border/50 text-muted-foreground"
+                >
+                  <Users class="size-4" />
+                </div>
+
+                <div class="min-w-0 flex-1 space-y-0.5">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <p class="truncate text-[11px] font-semibold text-foreground">
+                      {{ describeRuleTarget(rule) }}
+                    </p>
+                    <Badge
+                      variant="outline"
+                      class="h-4 px-1.5 text-[9px] font-medium rounded-full shadow-none"
+                      :class="rule.enabled ? 'bg-foreground/5 text-foreground border-foreground/20' : 'bg-muted/40 text-muted-foreground border-border/40'"
+                    >
+                      {{ rule.enabled ? $t('bots.access.ruleEnabled') : $t('bots.access.ruleDisabled') }}
+                    </Badge>
+                  </div>
+                  <div class="flex min-w-0 items-center text-[10px] text-muted-foreground">
+                    <span class="shrink-0">{{ ruleScopePrefix(rule) }}</span>
+                    <template v-if="ruleScopeDetail(rule)">
+                      <span class="shrink-0 mx-1">: </span>
+                      <span class="truncate">{{ ruleScopeDetail(rule) }}</span>
+                    </template>
+                  </div>
+                </div>
+
+                <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="size-7 shadow-none"
+                    :class="rule.enabled ? 'text-muted-foreground' : 'text-foreground hover:bg-foreground/5'"
+                    :aria-label="rule.enabled ? $t('bots.access.disableRule') : $t('bots.access.enableRule')"
+                    @click="handleToggleEnabled(rule, !(rule.enabled ?? false))"
+                  >
+                    <Power class="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="size-7"
+                    :aria-label="$t('common.edit')"
+                    @click="openEditDialog(rule)"
+                  >
+                    <SquarePen class="size-3.5 text-muted-foreground" />
+                  </Button>
+                  <ConfirmPopover
+                    :message="$t('bots.access.deleteConfirmDescription')"
+                    :confirm-text="$t('common.delete')"
+                    @confirm="handleDeleteRule(rule.id!)"
+                  >
+                    <template #trigger>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        class="size-7 text-destructive/70 hover:text-destructive hover:bg-destructive/10"
+                        :aria-label="$t('common.delete')"
+                      >
+                        <Trash2 class="size-3.5" />
+                      </Button>
+                    </template>
+                  </ConfirmPopover>
                 </div>
               </div>
             </div>
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              class="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground border-border/50 bg-transparent shadow-none"
-              @click="clearScopeFields"
-            >
-              <X class="size-3 mr-1" />
-              {{ $t('bots.access.clearSpecificConversation') }}
-            </Button>
-          </section>
+            <!-- Inline Add/Edit Rule Form (advanced) -->
+            <Transition name="fade">
+              <section
+                v-if="formVisible"
+                class="space-y-5 rounded-md border border-border/60 bg-muted/10 p-4 relative"
+              >
+                <div class="flex items-center justify-between">
+                  <h3 class="text-xs font-semibold text-foreground">
+                    {{ editingRule ? $t('bots.access.editRule') : addListEntryLabel }}
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    class="size-7"
+                    @click="formVisible = false"
+                  >
+                    <X class="size-4" />
+                  </Button>
+                </div>
 
-          <!-- Description -->
-          <div class="space-y-1.5">
-            <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
-            <Input
-              v-model="ruleForm.description"
-              class="h-8 text-[11px] bg-background/50 border-border/50 focus-visible:ring-ring/30 shadow-none"
-              :placeholder="$t('bots.access.descriptionPlaceholder')"
-            />
-          </div>
+                <form
+                  class="space-y-4"
+                  @submit.prevent="handleSaveRule(false)"
+                >
+                  <div class="rounded-md bg-background/80 border border-border/40 px-3 py-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                    {{ rulePreviewText }}
+                  </div>
 
-          <p
-            v-if="formError"
-            class="text-[10px] text-destructive bg-destructive/5 px-2 py-1 rounded"
-          >
-            {{ formError }}
-          </p>
+                  <!-- Platform Scope -->
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-2">
+                      <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.platformQuestion') }}</Label>
+                      <Button
+                        v-if="ruleForm.subjectChannelType"
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
+                        @click="setPlatformScope('')"
+                      >
+                        {{ $t('bots.access.allPlatforms') }}
+                      </Button>
+                    </div>
+                    <SearchableSelectPopover
+                      v-model="ruleForm.subjectChannelType"
+                      :options="platformOptions"
+                      :placeholder="$t('bots.access.allPlatforms')"
+                      :search-placeholder="$t('bots.access.searchPlatform')"
+                      :empty-text="$t('bots.access.noPlatformCandidates')"
+                      :show-group-headers="false"
+                      @update:model-value="setPlatformScope"
+                    >
+                      <template #trigger="{ open, displayLabel }">
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          :aria-expanded="open"
+                          class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
+                        >
+                          <span class="truncate">{{ displayLabel || $t('bots.access.allPlatforms') }}</span>
+                          <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
+                        </Button>
+                      </template>
+                    </SearchableSelectPopover>
+                  </div>
 
-          <div class="flex justify-end gap-2 pt-2 border-t border-border/30">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-[11px]"
-              @click="formVisible = false"
-            >
-              {{ $t('common.cancel') }}
-            </Button>
-            <Button
-              type="submit"
-              variant="outline"
-              size="sm"
-              class="h-8 px-4 text-[11px]"
-              :disabled="isSavingRule"
-            >
-              <Spinner
-                v-if="savingRuleAction === 'save'"
-                class="mr-1.5 size-3.5"
-              />
-              {{ editingRule ? $t('common.save') : $t('bots.access.saveOnly') }}
-            </Button>
-            <Button
-              v-if="!editingRule"
-              type="button"
-              size="sm"
-              class="h-8 px-4 text-[11px] shadow-none bg-foreground text-background hover:bg-foreground/90"
-              :disabled="isSavingRule"
-              @click="handleSaveRule(true)"
-            >
-              <Spinner
-                v-if="savingRuleAction === 'enable'"
-                class="mr-1.5 size-3.5"
-              />
-              {{ $t('bots.access.saveAndEnable') }}
-            </Button>
-          </div>
-        </form>
-      </section>
-    </Transition>
+                  <!-- Channel Identity -->
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-2">
+                      <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.userQuestion') }}</Label>
+                      <Button
+                        v-if="ruleForm.channelIdentityId"
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        class="h-5 px-1.5 text-[10px] text-muted-foreground/60"
+                        @click="setChannelIdentity('')"
+                      >
+                        {{ $t('bots.access.allUsers') }}
+                      </Button>
+                    </div>
+                    <SearchableSelectPopover
+                      v-model="ruleForm.channelIdentityId"
+                      :options="filteredIdentityOptions"
+                      :placeholder="$t('bots.access.selectIdentity')"
+                      :search-placeholder="$t('bots.access.searchIdentity')"
+                      :empty-text="$t('bots.access.noIdentityCandidates')"
+                      @update:model-value="setChannelIdentity"
+                    >
+                      <template #trigger="{ open, displayLabel }">
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          :aria-expanded="open"
+                          class="w-full justify-between font-normal h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
+                        >
+                          <span class="truncate">{{ displayLabel || $t('bots.access.selectIdentity') }}</span>
+                          <Search class="ml-2 size-3.5 shrink-0 text-muted-foreground/60" />
+                        </Button>
+                      </template>
+                    </SearchableSelectPopover>
+                  </div>
 
-    <!-- Workspace member access -->
-    <BotUserAccess :bot-id="botId" />
+                  <!-- Chat Scope -->
+                  <div class="space-y-2">
+                    <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.scopeQuestion') }}</Label>
+                    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <button
+                        v-for="scope in chatScopeOptions"
+                        :key="scope.value || 'any'"
+                        type="button"
+                        class="rounded border px-2 py-1.5 text-[10px] font-semibold transition-all text-center h-8 flex items-center justify-center"
+                        :class="ruleForm.sourceConversationType === scope.value
+                          ? 'border-foreground/30 bg-foreground/10 text-foreground'
+                          : 'border-border/50 bg-background/50 text-muted-foreground hover:bg-accent hover:text-foreground'"
+                        @click="setChatScope(scope.value)"
+                      >
+                        {{ scope.label }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="showSpecificConversationSection"
+                    class="space-y-3 border-l-2 border-border/40 pl-4 py-1"
+                  >
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <div class="space-y-1.5">
+                        <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.conversationId') }}</Label>
+                        <Input
+                          v-model="ruleForm.sourceConversationId"
+                          class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
+                          :placeholder="$t('bots.access.conversationIdPlaceholder')"
+                        />
+                      </div>
+                      <div
+                        v-if="ruleForm.sourceConversationType === 'thread'"
+                        class="space-y-1.5"
+                      >
+                        <Label class="text-[10px] font-medium text-muted-foreground">{{ $t('bots.access.threadId') }}</Label>
+                        <Input
+                          v-model="ruleForm.sourceThreadId"
+                          class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
+                          :placeholder="$t('bots.access.threadIdPlaceholder')"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <Label class="text-[11px] font-medium text-muted-foreground">{{ $t('bots.access.description') }}</Label>
+                    <Input
+                      v-model="ruleForm.description"
+                      class="h-8 text-[11px] bg-background/50 border-border/50 shadow-none"
+                      :placeholder="$t('bots.access.descriptionPlaceholder')"
+                    />
+                  </div>
+
+                  <p
+                    v-if="formError"
+                    class="text-[10px] text-destructive bg-destructive/5 px-2 py-1 rounded"
+                  >
+                    {{ formError }}
+                  </p>
+
+                  <div class="flex justify-end gap-2 pt-2 border-t border-border/30">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class="h-8 px-4 text-[11px]"
+                      @click="formVisible = false"
+                    >
+                      {{ $t('common.cancel') }}
+                    </Button>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      class="h-8 px-4 text-[11px] shadow-none bg-foreground text-background hover:bg-foreground/90"
+                      :disabled="isSavingRule"
+                    >
+                      <Spinner
+                        v-if="isSavingRule"
+                        class="mr-1.5 size-3.5"
+                      />
+                      {{ $t('bots.access.saveAndEnable') }}
+                    </Button>
+                  </div>
+                </form>
+              </section>
+            </Transition>
+          </CollapsibleContent>
+        </Collapsible>
+      </TabsContent>
+
+      <!-- Workspace members (web platform) -->
+      <TabsContent
+        value="workspace"
+        class="mt-4"
+      >
+        <BotUserAccess :bot-id="botId" />
+      </TabsContent>
+    </Tabs>
   </div>
 </template>
 
@@ -644,6 +651,9 @@ import {
   Power,
   ShieldCheck,
   ShieldAlert,
+  Info,
+  RotateCcw,
+  ChevronRight,
 } from 'lucide-vue-next'
 import {
   Button,
@@ -655,15 +665,26 @@ import {
   Spinner,
   Empty,
   Badge,
+  Checkbox,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
 } from '@memohai/ui'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import BotUserAccess from './bot-user-access.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
-import type { AclObservedConversationCandidate, AclRule, AclSourceScope, HandlersChannelMeta } from '@memohai/sdk'
-import { formatRelativeTime } from '@/utils/date-time'
+import type { AclRule, AclSourceScope, ChannelaccessManager, HandlersChannelMeta } from '@memohai/sdk'
 import {
   getChannels,
   getBotsByBotIdAclRules,
@@ -673,11 +694,10 @@ import {
   putBotsByBotIdAclRulesByRuleId,
   deleteBotsByBotIdAclRulesByRuleId,
   getBotsByBotIdAclChannelIdentities,
-  getBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversations,
-  getBotsByBotIdAclChannelTypesByChannelTypeConversations,
+  getBotsByBotIdChannelManagers,
+  postBotsByBotIdChannelManagers,
+  deleteBotsByBotIdChannelManagersByChannelIdentityId,
 } from '@memohai/sdk'
-
-// ---- props ----
 
 const props = defineProps<{
   botId: string
@@ -686,26 +706,41 @@ const props = defineProps<{
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
-// ---- constants ----
+const activeTab = ref<'channel' | 'workspace'>('channel')
 
 const chatScopeOptions = computed(() => [
   { value: '', label: t('bots.access.chatScopeAny') },
-  { value: 'private', label: describeConversationEffect(listEntryEffect.value, 'private') },
-  { value: 'group', label: describeConversationEffect(listEntryEffect.value, 'group') },
-  { value: 'thread', label: describeConversationEffect(listEntryEffect.value, 'thread') },
+  { value: 'private', label: t('bots.access.privateConversationGroup') },
+  { value: 'group', label: t('bots.access.groupConversationGroup') },
+  { value: 'thread', label: t('bots.access.threadConversationGroup') },
 ])
 
 const aclExcludedChannelTypes = new Set(['web'])
+
+interface IdentityOptionMeta {
+  avatarUrl?: string
+  channelLabel?: string
+}
+
+function optionMeta(meta: unknown): IdentityOptionMeta {
+  return (meta ?? {}) as IdentityOptionMeta
+}
 
 // ---- queries ----
 
 const { data: rulesData, isLoading: isLoadingRules } = useQuery({
   key: () => ['bot-acl-rules', props.botId],
   query: async () => {
-    const { data } = await getBotsByBotIdAclRules({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
+    const { data } = await getBotsByBotIdAclRules({ path: { bot_id: props.botId }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!props.botId,
+})
+
+const { data: managersData, isLoading: isLoadingManagers } = useQuery({
+  key: () => ['bot-channel-managers', props.botId],
+  query: async () => {
+    const { data } = await getBotsByBotIdChannelManagers({ path: { bot_id: props.botId }, throwOnError: true })
     return data
   },
   enabled: () => !!props.botId,
@@ -722,10 +757,7 @@ const { data: channelMetas } = useQuery({
 const { data: defaultEffectData } = useQuery({
   key: () => ['bot-acl-default-effect', props.botId],
   query: async () => {
-    const { data } = await getBotsByBotIdAclDefaultEffect({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
+    const { data } = await getBotsByBotIdAclDefaultEffect({ path: { bot_id: props.botId }, throwOnError: true })
     return data
   },
   enabled: () => !!props.botId,
@@ -744,95 +776,21 @@ const { data: identityCandidates } = useQuery({
   enabled: () => !!props.botId,
 })
 
-interface RuleForm {
-  enabled: boolean
-  effect: string
-  subjectChannelType: string
-  channelIdentityId: string
-  observedConversationRouteId: string
-  sourceConversationType: string
-  sourceConversationId: string
-  sourceThreadId: string
-  description: string
-}
+// ---- derived: mode ----
 
-function createRuleForm(effect = 'deny'): RuleForm {
-  return {
-    enabled: false,
-    effect,
-    subjectChannelType: '',
-    channelIdentityId: '',
-    observedConversationRouteId: '',
-    sourceConversationType: '',
-    sourceConversationId: '',
-    sourceThreadId: '',
-    description: '',
-  }
-}
+const defaultEffectDraft = ref('allow')
+const isSavingDefaultEffect = ref(false)
 
-const ruleForm = reactive(createRuleForm())
+watch(defaultEffectData, (data) => {
+  if (data?.default_effect) defaultEffectDraft.value = data.default_effect
+}, { immediate: true })
 
-const dialogIdentityId = computed(() =>
-  ruleForm.channelIdentityId.trim(),
-)
-
-const dialogChannelTypeTrimmed = computed(() =>
-  ruleForm.subjectChannelType.trim(),
-)
-
-const { data: observedByIdentityData, isLoading: isLoadingObservedIdentity } = useQuery({
-  key: () => ['bot-acl-observed', props.botId, dialogIdentityId.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversations({
-      path: { bot_id: props.botId, channel_identity_id: dialogIdentityId.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!props.botId && !!dialogIdentityId.value,
-})
-
-const { data: observedByChannelTypeData, isLoading: isLoadingObservedChannelType } = useQuery({
-  key: () => ['bot-acl-observed-channel-type', props.botId, dialogChannelTypeTrimmed.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAclChannelTypesByChannelTypeConversations({
-      path: { bot_id: props.botId, channel_type: dialogChannelTypeTrimmed.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!props.botId && !!dialogChannelTypeTrimmed.value,
-})
-
-/** Active observed-conversation list for the current subject (identity or platform type). */
-const observedConversationsForRule = computed(() => {
-  if (dialogIdentityId.value) {
-    return observedByIdentityData.value
-  }
-  if (dialogChannelTypeTrimmed.value) {
-    return observedByChannelTypeData.value
-  }
-  return undefined
-})
-
-const showConversationSearch = computed(
-  () => !!dialogIdentityId.value || !!dialogChannelTypeTrimmed.value,
-)
-
-const observedConversationEmptyText = computed(() => {
-  if (dialogIdentityId.value && isLoadingObservedIdentity.value) {
-    return t('common.loading')
-  }
-  if (!dialogIdentityId.value && dialogChannelTypeTrimmed.value && isLoadingObservedChannelType.value) {
-    return t('common.loading')
-  }
-  return t('bots.access.noObservedConversations')
-})
-
-// ---- derived ----
+const isBlacklistMode = computed(() => defaultEffectDraft.value === 'allow')
+const listEntryEffect = computed(() => (isBlacklistMode.value ? 'deny' : 'allow'))
 
 const rules = computed(() => rulesData.value?.items ?? [])
-const identities = computed(() => identityCandidates.value?.items ?? [])
+const managers = computed<ChannelaccessManager[]>(() => managersData.value?.items ?? [])
+
 const platformMetaByType = computed(() => {
   const items = new Map<string, HandlersChannelMeta>()
   for (const meta of channelMetas.value ?? []) {
@@ -843,203 +801,315 @@ const platformMetaByType = computed(() => {
 })
 const platformOptions = computed(() =>
   [...platformMetaByType.value.values()]
-    .map(meta => ({
-      value: meta.type?.trim() ?? '',
-      label: formatPlatformName(meta.type, meta.display_name),
-    }))
+    .map(meta => ({ value: meta.type?.trim() ?? '', label: formatPlatformName(meta.type, meta.display_name) }))
     .filter(option => option.value && !aclExcludedChannelTypes.has(option.value))
     .sort((a, b) => a.label.localeCompare(b.label)),
 )
-const isBlacklistMode = computed(() => defaultEffectDraft.value === 'allow')
-const listEntryEffect = computed(() => isBlacklistMode.value ? 'deny' : 'allow')
-const listTitle = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.blacklistTitle')
-    : t('bots.access.whitelistTitle'),
-)
-const listDescription = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.blacklistDescription')
-    : t('bots.access.whitelistDescription'),
-)
-const addListEntryLabel = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.addBlacklistEntry')
-    : t('bots.access.addWhitelistEntry'),
-)
-const emptyTitle = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.blacklistEmpty')
-    : t('bots.access.whitelistEmpty'),
-)
-const emptyDescription = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.blacklistEmptyDescription')
-    : t('bots.access.whitelistEmptyDescription'),
-)
-const selectedIdentityLabel = computed(() =>
-  selectedIdentityOption.value?.label ?? '',
-)
-const selectedIdentityOption = computed(() =>
-  identityOptions.value.find(option => option.value === ruleForm.channelIdentityId),
-)
-const selectedPlatformLabel = computed(() =>
-  ruleForm.subjectChannelType
-    ? formatPlatformName(ruleForm.subjectChannelType)
-    : '',
-)
-const hasConversationTarget = computed(() =>
-  !!dialogIdentityId.value || !!dialogChannelTypeTrimmed.value,
-)
-const showSpecificConversationSection = computed(() =>
-  ruleForm.sourceConversationType === 'group'
-  || ruleForm.sourceConversationType === 'thread'
-  || !!ruleForm.sourceConversationId
-  || !!ruleForm.sourceThreadId,
-)
-const ruleTargetPreview = computed(() => {
-  const platform = selectedPlatformLabel.value
-  const user = selectedIdentityLabel.value
-  if (platform && user) {
-    return t('bots.access.platformUserTargetPreview', { platform, user })
-  }
-  if (platform) {
-    return t('bots.access.platformTargetPreview', { platform })
-  }
-  if (user) {
-    return t('bots.access.userTargetPreview', { user })
-  }
-  return t('bots.access.subjectAllLabel')
-})
-const ruleScopePreview = computed(() => {
-  if (ruleForm.sourceConversationId || ruleForm.sourceThreadId) {
-    return t('bots.access.previewScopeSpecific')
-  }
-  switch (ruleForm.sourceConversationType) {
-    case 'private':
-      return t('bots.access.previewScopePrivate')
-    case 'group':
-      return t('bots.access.previewScopeGroup')
-    case 'thread':
-      return t('bots.access.previewScopeThread')
-    default:
-      return t('bots.access.previewScopeAny')
-  }
-})
-const rulePreviewText = computed(() =>
-  isBlacklistMode.value
-    ? t('bots.access.blacklistPreview', {
-        target: ruleTargetPreview.value,
-        scope: ruleScopePreview.value,
-      })
-    : t('bots.access.whitelistPreview', {
-        target: ruleTargetPreview.value,
-        scope: ruleScopePreview.value,
-      }),
-)
-const visibleRules = computed(() =>
-  rules.value.filter(rule => rule.effect === listEntryEffect.value),
+
+// A pure-identity rule targets a single channel identity with no platform/scope.
+function isPureIdentityRule(rule: AclRule): boolean {
+  return !!rule.channel_identity_id && !rule.subject_channel_type && !rule.source_scope
+}
+
+// Identity-scoped chat rules for the current mode (deny in blacklist, allow in whitelist).
+const identityChatRules = computed(() =>
+  rules.value.filter(r => r.effect === listEntryEffect.value && isPureIdentityRule(r)),
 )
 
-const identityOptions = computed(() =>
-  identities.value
-    .filter(i => !aclExcludedChannelTypes.has(i.channel ?? ''))
+// Advanced rules: platform-wide or conversation-scoped (everything not a pure-identity rule).
+const advancedRules = computed(() =>
+  rules.value.filter(r => r.effect === listEntryEffect.value && !isPureIdentityRule(r)),
+)
+
+// ---- members aggregation ----
+
+interface MemberRow {
+  channelIdentityId: string
+  label: string
+  avatarUrl: string
+  channelType: string
+  chat: boolean
+  chatRuleId?: string
+  manage: boolean
+  manageInherited: boolean
+  manageHasOverride: boolean
+  // bound = linked to a workspace member of this bot (a "platform member"),
+  // regardless of whether it carries Manage. Drives the info (ⓘ) marker.
+  bound: boolean
+}
+
+const pendingIds = ref<Set<string>>(new Set())
+const busyIds = ref<Set<string>>(new Set())
+
+const identityInfoById = computed(() => {
+  const map = new Map<string, { label: string, avatarUrl: string, channelType: string }>()
+  for (const i of identityCandidates.value?.items ?? []) {
+    if (!i.id) continue
+    map.set(i.id, {
+      label: i.display_name || i.channel_subject_id || i.id,
+      avatarUrl: i.avatar_url ?? '',
+      channelType: i.channel ?? '',
+    })
+  }
+  return map
+})
+
+const members = computed<MemberRow[]>(() => {
+  const byId = new Map<string, MemberRow>()
+  const ensure = (id: string): MemberRow => {
+    let row = byId.get(id)
+    if (!row) {
+      row = {
+        channelIdentityId: id,
+        label: id,
+        avatarUrl: '',
+        channelType: '',
+        chat: isBlacklistMode.value, // default: blacklist allows, whitelist blocks
+        manage: false,
+        manageInherited: false,
+        manageHasOverride: false,
+        bound: false,
+      }
+      byId.set(id, row)
+    }
+    return row
+  }
+
+  // Managers (manage / inherited / override + display info).
+  for (const m of managers.value) {
+    const id = m.channel_identity_id
+    if (!id) continue
+    const row = ensure(id)
+    row.manage = m.manage ?? false
+    row.manageInherited = m.inherited ?? false
+    row.manageHasOverride = m.has_override ?? false
+    row.bound = m.bound ?? false
+    if (m.channel_identity_display_name) row.label = m.channel_identity_display_name
+    else if (m.channel_subject_id) row.label = m.channel_subject_id
+    if (m.channel_identity_avatar_url) row.avatarUrl = m.channel_identity_avatar_url
+    if (m.channel_type) row.channelType = m.channel_type
+  }
+
+  // Identity-scoped chat rules for current mode.
+  for (const rule of identityChatRules.value) {
+    const id = rule.channel_identity_id
+    if (!id) continue
+    const row = ensure(id)
+    row.chatRuleId = rule.id
+    // blacklist: a deny rule means chat OFF; whitelist: an allow rule means chat ON.
+    row.chat = !isBlacklistMode.value
+    if (rule.channel_identity_display_name) row.label = rule.channel_identity_display_name
+    else if (rule.channel_subject_id) row.label = rule.channel_subject_id
+    if (rule.channel_identity_avatar_url) row.avatarUrl = rule.channel_identity_avatar_url
+    if (rule.channel_type) row.channelType = rule.channel_type
+  }
+
+  // Optimistic rows for an in-flight add, until the persisted record is refetched.
+  for (const id of pendingIds.value) {
+    ensure(id)
+  }
+
+  // Fill display info from candidate directory where missing.
+  for (const row of byId.values()) {
+    if (!row.label || row.label === row.channelIdentityId || !row.avatarUrl || !row.channelType) {
+      const info = identityInfoById.value.get(row.channelIdentityId)
+      if (info) {
+        if (!row.label || row.label === row.channelIdentityId) row.label = info.label
+        if (!row.avatarUrl) row.avatarUrl = info.avatarUrl
+        if (!row.channelType) row.channelType = info.channelType
+      }
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label))
+})
+
+function isRowBusy(member: MemberRow): boolean {
+  return busyIds.value.has(member.channelIdentityId)
+}
+
+// ---- member add form ----
+
+const memberFormVisible = ref(false)
+const memberFormIdentityId = ref('')
+
+const memberCandidateOptions = computed<SearchableSelectOption[]>(() => {
+  const present = new Set(members.value.map(m => m.channelIdentityId))
+  return (identityCandidates.value?.items ?? [])
+    .filter(i => i.id && !present.has(i.id) && !aclExcludedChannelTypes.has(i.channel ?? ''))
     .map(i => ({
       value: i.id ?? '',
       label: i.display_name || i.channel_subject_id || i.id || '',
-      meta: {
-        avatarUrl: i.avatar_url,
-        channel: i.channel,
-        channelLabel: formatPlatformName(i.channel),
-      },
-    })),
-)
-
-const filteredIdentityOptions = computed(() => {
-  const platform = dialogChannelTypeTrimmed.value
-  if (!platform) return identityOptions.value
-  return identityOptions.value.filter(option => option.meta.channel === platform)
+      keywords: [i.display_name ?? '', i.channel_subject_id ?? '', i.channel ?? ''],
+      meta: { avatarUrl: i.avatar_url, channelLabel: channelTypeDisplayName(t, i.channel ?? '') },
+    }))
 })
 
-function formatIdentityOptionSubtitle(meta?: { channelLabel?: string }): string {
-  return meta?.channelLabel ?? ''
+function openMemberForm() {
+  memberFormVisible.value = true
+  memberFormIdentityId.value = ''
 }
 
-const observedConversationOptions = computed(() =>
-  (observedConversationsForRule.value?.items ?? []).filter(conversationMatchesSelectedScope).map((c) => {
-    const label = buildConversationLabel(c)
-    const keywords = [
-      c.conversation_name,
-      c.conversation_id,
-      c.thread_id,
-      c.channel,
-      c.conversation_type,
-    ].filter((x): x is string => Boolean(x && String(x).trim()))
-    return {
-      value: c.route_id ?? '',
-      label,
-      description: c.last_observed_at ? formatRelativeTime(c.last_observed_at) : undefined,
-      group: c.conversation_type || 'unknown',
-      groupLabel: describeObservedConversationType(c.conversation_type),
-      keywords,
-      meta: c,
+function closeMemberForm() {
+  memberFormVisible.value = false
+  memberFormIdentityId.value = ''
+}
+
+// Add persists immediately (no in-memory-only draft): adding a member writes a
+// durable membership anchor so it survives a refresh.
+//  - Whitelist: the member list IS the allow-list, so adding = an allow chat rule
+//    (they can chat now). Removing chat (or Trash) takes them off the list.
+//  - Blacklist: chat is allowed by default (no rule needed), so we anchor the
+//    membership with a Manage placeholder (granted=false) — it lists the member
+//    without changing any permission, and Trash removes it.
+async function confirmAddMember() {
+  const id = memberFormIdentityId.value.trim()
+  if (!id) return
+  busyIds.value.add(id)
+  pendingIds.value.add(id) // optimistic row while the write lands
+  closeMemberForm()
+  try {
+    if (isBlacklistMode.value) {
+      await postBotsByBotIdChannelManagers({
+        path: { bot_id: props.botId },
+        body: { channel_identity_id: id, granted: false },
+        throwOnError: true,
+      })
     }
-  }),
-)
-
-function conversationMatchesSelectedScope(c: AclObservedConversationCandidate): boolean {
-  const scope = ruleForm.sourceConversationType
-  if (scope !== 'group' && scope !== 'thread') {
-    return true
+    else {
+      await createIdentityRule(id, 'allow')
+    }
+    await Promise.all([invalidateRules(), invalidateManagers()])
+    toast.success(t('bots.access.members.added'))
   }
-  return c.conversation_type === scope
-}
-
-/** Primary display label: name when available, stable ID otherwise. */
-function buildConversationLabel(c: AclObservedConversationCandidate | undefined): string {
-  if (!c) return ''
-  const name = c.conversation_name?.trim()
-  if (name) return name
-  return c.conversation_id || c.route_id || ''
-}
-
-/** Subtitle always shows the stable platform identifiers for verification. */
-function buildConversationStableId(c: AclObservedConversationCandidate | undefined): string {
-  if (!c) return ''
-  const parts: string[] = []
-  if (c.channel) parts.push(c.channel)
-  if (c.conversation_type) parts.push(describeObservedConversationType(c.conversation_type))
-  if (c.conversation_id) parts.push(c.conversation_id)
-  if (c.thread_id) parts.push(`thread:${c.thread_id}`)
-  return parts.join(' · ')
-}
-
-function observedConversationAvatar(meta: unknown): string {
-  const item = meta as AclObservedConversationCandidate | undefined
-  return item?.conversation_avatar_url?.trim() ?? ''
-}
-
-function onConversationSourceChange(routeId: string) {
-  ruleForm.observedConversationRouteId = routeId
-  if (!routeId.trim()) {
-    ruleForm.sourceConversationType = ''
-    ruleForm.sourceConversationId = ''
-    ruleForm.sourceThreadId = ''
-    return
+  catch (e) {
+    toast.error(resolveApiErrorMessage(e, t('bots.access.members.addFailed')))
   }
-  applyObservedConversation(routeId)
+  finally {
+    pendingIds.value.delete(id)
+    busyIds.value.delete(id)
+  }
+}
+
+// ---- chat / manage toggles ----
+
+async function createIdentityRule(channelIdentityId: string, effect: string) {
+  await postBotsByBotIdAclRules({
+    path: { bot_id: props.botId },
+    body: { enabled: true, effect, channel_identity_id: channelIdentityId },
+    throwOnError: true,
+  })
+}
+
+async function deleteRule(ruleId: string) {
+  await deleteBotsByBotIdAclRulesByRuleId({ path: { bot_id: props.botId, rule_id: ruleId }, throwOnError: true })
+}
+
+function invalidateRules() {
+  return queryCache.invalidateQueries({ key: ['bot-acl-rules', props.botId] })
+}
+
+function invalidateManagers() {
+  return queryCache.invalidateQueries({ key: ['bot-channel-managers', props.botId] })
+}
+
+async function toggleChat(member: MemberRow, next: boolean) {
+  busyIds.value.add(member.channelIdentityId)
+  try {
+    if (isBlacklistMode.value) {
+      // blacklist: chat ON = no deny rule; chat OFF = deny rule.
+      if (next) {
+        if (member.chatRuleId) await deleteRule(member.chatRuleId)
+      }
+      else if (!member.chatRuleId) {
+        await createIdentityRule(member.channelIdentityId, 'deny')
+      }
+    }
+    else {
+      // whitelist: chat ON = allow rule; chat OFF = no allow rule.
+      if (next) {
+        if (!member.chatRuleId) await createIdentityRule(member.channelIdentityId, 'allow')
+      }
+      else if (member.chatRuleId) {
+        await deleteRule(member.chatRuleId)
+      }
+    }
+    await invalidateRules()
+    toast.success(t('bots.access.members.updated'))
+  }
+  catch (e) {
+    toast.error(resolveApiErrorMessage(e, t('bots.access.members.updateFailed')))
+  }
+  finally {
+    busyIds.value.delete(member.channelIdentityId)
+  }
+}
+
+async function toggleManage(member: MemberRow, next: boolean) {
+  busyIds.value.add(member.channelIdentityId)
+  try {
+    // Toggling Manage always writes an explicit local override (granted = next);
+    // it never deletes the membership. This keeps the row stable (final state =
+    // local override ?? inherited). To stop overriding an inherited member, use
+    // "Reset to inherited" in the info popover; to remove a local member entirely,
+    // use the Trash action.
+    await postBotsByBotIdChannelManagers({
+      path: { bot_id: props.botId },
+      body: { channel_identity_id: member.channelIdentityId, granted: next },
+      throwOnError: true,
+    })
+    await invalidateManagers()
+    toast.success(t('bots.access.members.updated'))
+  }
+  catch (e) {
+    toast.error(resolveApiErrorMessage(e, t('bots.access.members.updateFailed')))
+  }
+  finally {
+    busyIds.value.delete(member.channelIdentityId)
+  }
+}
+
+async function recoverInherit(member: MemberRow) {
+  busyIds.value.add(member.channelIdentityId)
+  try {
+    await deleteBotsByBotIdChannelManagersByChannelIdentityId({
+      path: { bot_id: props.botId, channel_identity_id: member.channelIdentityId },
+      throwOnError: true,
+    })
+    await invalidateManagers()
+    toast.success(t('bots.access.members.updated'))
+  }
+  catch (e) {
+    toast.error(resolveApiErrorMessage(e, t('bots.access.members.updateFailed')))
+  }
+  finally {
+    busyIds.value.delete(member.channelIdentityId)
+  }
+}
+
+async function removeMember(member: MemberRow) {
+  busyIds.value.add(member.channelIdentityId)
+  try {
+    if (member.chatRuleId) await deleteRule(member.chatRuleId)
+    if (member.manageHasOverride || (member.manage && !member.manageInherited)) {
+      await deleteBotsByBotIdChannelManagersByChannelIdentityId({
+        path: { bot_id: props.botId, channel_identity_id: member.channelIdentityId },
+        throwOnError: true,
+      }).catch(() => undefined)
+    }
+    pendingIds.value.delete(member.channelIdentityId)
+    await Promise.all([invalidateRules(), invalidateManagers()])
+    toast.success(t('bots.access.members.removed'))
+  }
+  catch (e) {
+    toast.error(resolveApiErrorMessage(e, t('bots.access.members.removeFailed')))
+  }
+  finally {
+    busyIds.value.delete(member.channelIdentityId)
+  }
 }
 
 // ---- default effect ----
-
-const defaultEffectDraft = ref('allow')
-const isSavingDefaultEffect = ref(false)
-
-watch(defaultEffectData, (data) => {
-  if (data?.default_effect) {
-    defaultEffectDraft.value = data.default_effect
-  }
-}, { immediate: true })
 
 async function handleSetDefaultEffect(effect: string) {
   const previousEffect = defaultEffectDraft.value
@@ -1047,11 +1117,7 @@ async function handleSetDefaultEffect(effect: string) {
   defaultEffectDraft.value = effect
   isSavingDefaultEffect.value = true
   try {
-    await putBotsByBotIdAclDefaultEffect({
-      path: { bot_id: props.botId },
-      body: { default_effect: effect },
-      throwOnError: true,
-    })
+    await putBotsByBotIdAclDefaultEffect({ path: { bot_id: props.botId }, body: { default_effect: effect }, throwOnError: true })
     queryCache.invalidateQueries({ key: ['bot-acl-default-effect', props.botId] })
     toast.success(t('bots.access.defaultEffectSaved'))
   }
@@ -1064,82 +1130,78 @@ async function handleSetDefaultEffect(effect: string) {
   }
 }
 
-// ---- rule form ----
+// ---- advanced rule form ----
 
+const advancedOpen = ref(false)
+
+interface RuleForm {
+  effect: string
+  subjectChannelType: string
+  channelIdentityId: string
+  sourceConversationType: string
+  sourceConversationId: string
+  sourceThreadId: string
+  description: string
+}
+
+function createRuleForm(effect = 'deny'): RuleForm {
+  return {
+    effect,
+    subjectChannelType: '',
+    channelIdentityId: '',
+    sourceConversationType: '',
+    sourceConversationId: '',
+    sourceThreadId: '',
+    description: '',
+  }
+}
+
+const ruleForm = reactive(createRuleForm())
 const formVisible = ref(false)
 const editingRule = ref<AclRule | null>(null)
 const formError = ref('')
-const savingRuleAction = ref<'save' | 'enable' | ''>('')
-const isSavingRule = computed(() => savingRuleAction.value !== '')
+const savingRuleAction = ref(false)
+const isSavingRule = computed(() => savingRuleAction.value)
 
-watch(
-  () => [
-    formVisible.value,
-    dialogIdentityId.value,
-    dialogChannelTypeTrimmed.value,
-    ruleForm.sourceConversationType,
-    ruleForm.sourceConversationId,
-    ruleForm.sourceThreadId,
-    observedByIdentityData.value,
-    observedByChannelTypeData.value,
-  ] as const,
-  () => {
-    if (!formVisible.value) return
-    const hasIdentity = !!dialogIdentityId.value
-    const hasChannelType = !!dialogChannelTypeTrimmed.value
-    if (!hasIdentity && !hasChannelType) return
-    const items = hasIdentity
-      ? (observedByIdentityData.value?.items ?? [])
-      : (observedByChannelTypeData.value?.items ?? [])
-    const match = items.find(
-      c =>
-        (c.conversation_type ?? '') === (ruleForm.sourceConversationType ?? '')
-        && (c.conversation_id ?? '') === (ruleForm.sourceConversationId ?? '')
-        && (c.thread_id ?? '') === (ruleForm.sourceThreadId ?? ''),
-    )
-    const nextRoute = match?.route_id ?? ''
-    if (nextRoute !== ruleForm.observedConversationRouteId) {
-      ruleForm.observedConversationRouteId = nextRoute
-    }
-  },
+const identityOptions = computed(() =>
+  (identityCandidates.value?.items ?? [])
+    .filter(i => !aclExcludedChannelTypes.has(i.channel ?? ''))
+    .map(i => ({
+      value: i.id ?? '',
+      label: i.display_name || i.channel_subject_id || i.id || '',
+      meta: { avatarUrl: i.avatar_url, channel: i.channel, channelLabel: formatPlatformName(i.channel) },
+    })),
 )
 
-watch(
-  () => ruleForm.channelIdentityId,
-  (id, prev) => {
-    if (!formVisible.value) return
-    if (prev !== undefined && prev !== '' && id !== prev) {
-      ruleForm.observedConversationRouteId = ''
-      ruleForm.sourceConversationType = ''
-      ruleForm.sourceConversationId = ''
-      ruleForm.sourceThreadId = ''
-    }
-  },
-)
+const filteredIdentityOptions = computed(() => {
+  const platform = ruleForm.subjectChannelType.trim()
+  if (!platform) return identityOptions.value
+  return identityOptions.value.filter(option => option.meta.channel === platform)
+})
 
-watch(
-  () => ruleForm.subjectChannelType,
-  (channelType, prev) => {
-    if (!formVisible.value) return
-    if (ruleForm.channelIdentityId) {
-      const selected = identityOptions.value.find(option => option.value === ruleForm.channelIdentityId)
-      if (channelType && selected?.meta.channel !== channelType) {
-        ruleForm.channelIdentityId = ''
-      }
-    }
-    if (prev !== undefined && prev.trim() !== '' && channelType !== prev) {
-      ruleForm.observedConversationRouteId = ''
-      ruleForm.sourceConversationType = ''
-      ruleForm.sourceConversationId = ''
-      ruleForm.sourceThreadId = ''
-    }
-  },
+const addListEntryLabel = computed(() =>
+  isBlacklistMode.value ? t('bots.access.addBlacklistEntry') : t('bots.access.addWhitelistEntry'),
+)
+const showSpecificConversationSection = computed(() =>
+  ruleForm.sourceConversationType === 'group'
+  || ruleForm.sourceConversationType === 'thread'
+  || !!ruleForm.sourceConversationId
+  || !!ruleForm.sourceThreadId,
+)
+const rulePreviewText = computed(() => {
+  const target = ruleForm.subjectChannelType
+    ? formatPlatformName(ruleForm.subjectChannelType)
+    : (ruleForm.channelIdentityId ? t('bots.access.userTargetPreview', { user: selectedIdentityLabel.value || '?' }) : t('bots.access.subjectAllLabel'))
+  return isBlacklistMode.value
+    ? t('bots.access.blacklistPreview', { target })
+    : t('bots.access.whitelistPreview', { target })
+})
+const selectedIdentityLabel = computed(() =>
+  identityOptions.value.find(o => o.value === ruleForm.channelIdentityId)?.label ?? '',
 )
 
 watch(listEntryEffect, (effect) => {
-  if (formVisible.value && !editingRule.value) {
-    ruleForm.effect = effect
-  }
+  if (formVisible.value && !editingRule.value) ruleForm.effect = effect
 })
 
 function openAddDialog() {
@@ -1151,11 +1213,9 @@ function openAddDialog() {
 
 function openEditDialog(rule: AclRule) {
   editingRule.value = rule
-  ruleForm.enabled = rule.enabled ?? true
   ruleForm.effect = rule.effect ?? 'deny'
   ruleForm.subjectChannelType = rule.subject_channel_type ?? ''
   ruleForm.channelIdentityId = rule.channel_identity_id ?? ''
-  ruleForm.observedConversationRouteId = ''
   ruleForm.sourceConversationType = rule.source_scope?.conversation_type ?? ''
   ruleForm.sourceConversationId = rule.source_scope?.conversation_id ?? ''
   ruleForm.sourceThreadId = rule.source_scope?.thread_id ?? ''
@@ -1166,7 +1226,6 @@ function openEditDialog(rule: AclRule) {
 
 function setChatScope(scope: string) {
   if (scope === '' || scope === 'private' || scope !== ruleForm.sourceConversationType) {
-    ruleForm.observedConversationRouteId = ''
     ruleForm.sourceConversationId = ''
     ruleForm.sourceThreadId = ''
   }
@@ -1179,25 +1238,6 @@ function setPlatformScope(channelType: string) {
 
 function setChannelIdentity(identityId: string) {
   ruleForm.channelIdentityId = identityId
-  ruleForm.observedConversationRouteId = ''
-  ruleForm.sourceConversationType = ''
-  ruleForm.sourceConversationId = ''
-  ruleForm.sourceThreadId = ''
-}
-
-function clearScopeFields() {
-  ruleForm.observedConversationRouteId = ''
-  ruleForm.sourceConversationType = ''
-  ruleForm.sourceConversationId = ''
-  ruleForm.sourceThreadId = ''
-}
-
-function applyObservedConversation(routeId: string) {
-  const item = (observedConversationsForRule.value?.items ?? []).find(c => c.route_id === routeId)
-  if (!item) return
-  ruleForm.sourceConversationType = item.conversation_type ?? ''
-  ruleForm.sourceConversationId = item.conversation_id ?? ''
-  ruleForm.sourceThreadId = item.thread_id ?? ''
 }
 
 function buildSourceScope(): AclSourceScope | undefined {
@@ -1205,18 +1245,16 @@ function buildSourceScope(): AclSourceScope | undefined {
   if (ruleForm.sourceConversationType) scope.conversation_type = ruleForm.sourceConversationType
   if (ruleForm.sourceConversationId) scope.conversation_id = ruleForm.sourceConversationId
   if (ruleForm.sourceThreadId) scope.thread_id = ruleForm.sourceThreadId
-  if (!scope.conversation_type && !scope.conversation_id && !scope.thread_id) {
-    return undefined
-  }
+  if (!scope.conversation_type && !scope.conversation_id && !scope.thread_id) return undefined
   return scope
 }
 
-async function handleSaveRule(enable: boolean) {
+async function handleSaveRule(_enable: boolean) {
   formError.value = ''
-  savingRuleAction.value = enable ? 'enable' : 'save'
+  savingRuleAction.value = true
   try {
     const body = {
-      enabled: enable ? true : ruleForm.enabled,
+      enabled: true,
       effect: ruleForm.effect,
       channel_identity_id: ruleForm.channelIdentityId || undefined,
       subject_channel_type: ruleForm.subjectChannelType || undefined,
@@ -1224,20 +1262,12 @@ async function handleSaveRule(enable: boolean) {
       description: ruleForm.description || undefined,
     }
     if (editingRule.value?.id) {
-      await putBotsByBotIdAclRulesByRuleId({
-        path: { bot_id: props.botId, rule_id: editingRule.value.id },
-        body,
-        throwOnError: true,
-      })
+      await putBotsByBotIdAclRulesByRuleId({ path: { bot_id: props.botId, rule_id: editingRule.value.id }, body, throwOnError: true })
     }
     else {
-      await postBotsByBotIdAclRules({
-        path: { bot_id: props.botId },
-        body,
-        throwOnError: true,
-      })
+      await postBotsByBotIdAclRules({ path: { bot_id: props.botId }, body, throwOnError: true })
     }
-    queryCache.invalidateQueries({ key: ['bot-acl-rules', props.botId] })
+    await invalidateRules()
     toast.success(t('bots.access.ruleSaved'))
     formVisible.value = false
   }
@@ -1245,17 +1275,14 @@ async function handleSaveRule(enable: boolean) {
     formError.value = resolveApiErrorMessage(e, t('bots.access.saveFailed'))
   }
   finally {
-    savingRuleAction.value = ''
+    savingRuleAction.value = false
   }
 }
 
 async function handleDeleteRule(ruleId: string) {
   try {
-    await deleteBotsByBotIdAclRulesByRuleId({
-      path: { bot_id: props.botId, rule_id: ruleId },
-      throwOnError: true,
-    })
-    queryCache.invalidateQueries({ key: ['bot-acl-rules', props.botId] })
+    await deleteRule(ruleId)
+    await invalidateRules()
     toast.success(t('bots.access.deleteSuccess'))
   }
   catch (e) {
@@ -1277,7 +1304,7 @@ async function handleToggleEnabled(rule: AclRule, enabled: boolean) {
       },
       throwOnError: true,
     })
-    queryCache.invalidateQueries({ key: ['bot-acl-rules', props.botId] })
+    await invalidateRules()
   }
   catch (e) {
     toast.error(resolveApiErrorMessage(e, t('bots.access.saveFailed')))
@@ -1287,22 +1314,12 @@ async function handleToggleEnabled(rule: AclRule, enabled: boolean) {
 // ---- display helpers ----
 
 function describeRuleTarget(rule: AclRule): string {
-  return describeSubject(rule)
-}
-
-function describeSubject(rule: AclRule): string {
   const platformType = rule.subject_channel_type || rule.channel_type
   const platform = platformType ? formatPlatformName(platformType) : ''
   const user = rule.channel_identity_display_name || rule.channel_subject_id || rule.channel_identity_id || ''
-  if (rule.subject_channel_type && rule.channel_identity_id) {
-    return t('bots.access.platformUserTargetPreview', { platform, user: user || '?' })
-  }
-  if (rule.subject_channel_type) {
-    return t('bots.access.platformTargetPreview', { platform })
-  }
-  if (rule.channel_identity_id) {
-    return t('bots.access.userTargetPreview', { user: user || '?' })
-  }
+  if (rule.subject_channel_type && rule.channel_identity_id) return t('bots.access.platformUserTargetPreview', { platform, user: user || '?' })
+  if (rule.subject_channel_type) return t('bots.access.platformTargetPreview', { platform })
+  if (rule.channel_identity_id) return t('bots.access.userTargetPreview', { user: user || '?' })
   return t('bots.access.subjectAllLabel')
 }
 
@@ -1314,68 +1331,28 @@ function formatPlatformName(type?: string | null, displayName?: string | null): 
 
 function ruleTargetFallback(rule: AclRule): string {
   const label = describeRuleTarget(rule).trim()
-  if (!label) return '?'
-  return label.slice(0, 2).toUpperCase()
-}
-
-function ruleScopeFallback(rule: AclRule): string {
-  const label = rule.source_conversation_name || rule.source_scope?.conversation_id || ''
   return label ? label.slice(0, 2).toUpperCase() : '?'
 }
 
 function ruleScopePrefix(rule: AclRule): string {
   const scope = rule.source_scope
-  if (!scope) return t('bots.access.chatScopeAny')
-
-  return scope.conversation_type
-    ? describeConversationEffect(rule.effect ?? '', scope.conversation_type)
-    : t('bots.access.chatScopeAny')
+  if (!scope?.conversation_type) return t('bots.access.chatScopeAny')
+  switch (scope.conversation_type) {
+    case 'private': return t('bots.access.privateConversationGroup')
+    case 'group': return t('bots.access.groupConversationGroup')
+    case 'thread': return t('bots.access.threadConversationGroup')
+    default: return scope.conversation_type
+  }
 }
 
 function ruleScopeDetail(rule: AclRule): string {
   const scope = rule.source_scope
-  if (!scope) return ''
-
-  const conversationID = scope.conversation_id?.trim()
+  const conversationID = scope?.conversation_id?.trim()
   if (!conversationID) return ''
-
   const name = rule.source_conversation_name?.trim()
   const displayName = name ? `${name} (${conversationID})` : conversationID
-  const thread = scope.thread_id ? ` · thread:${scope.thread_id}` : ''
+  const thread = scope?.thread_id ? ` · thread:${scope.thread_id}` : ''
   return `${displayName}${thread}`
-}
-
-function describeConversationEffect(effect: string, type: string): string {
-  const normalizedEffect = effect === 'allow' ? 'allow' : 'deny'
-  switch (type) {
-    case 'private':
-      return normalizedEffect === 'allow'
-        ? t('bots.access.allowPrivateConversation')
-        : t('bots.access.denyPrivateConversation')
-    case 'group':
-      return normalizedEffect === 'allow'
-        ? t('bots.access.allowGroupConversation')
-        : t('bots.access.denyGroupConversation')
-    case 'thread':
-      return normalizedEffect === 'allow'
-        ? t('bots.access.allowThreadConversation')
-        : t('bots.access.denyThreadConversation')
-    default:
-      return type
-  }
-}
-
-function describeObservedConversationType(type?: string): string {
-  switch (type) {
-    case 'private':
-      return t('bots.access.privateConversationGroup')
-    case 'group':
-      return t('bots.access.groupConversationGroup')
-    case 'thread':
-      return t('bots.access.threadConversationGroup')
-    default:
-      return t('bots.access.unknownConversationGroup')
-  }
 }
 </script>
 
@@ -1384,7 +1361,6 @@ function describeObservedConversationType(type?: string): string {
 .fade-leave-active {
   transition: opacity 0.2s ease;
 }
-
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
