@@ -229,20 +229,37 @@ func TestCompleteSpawnTaskClampsBranchReports(t *testing.T) {
 		t.Fatalf("StartSpawnTask failed: %v", err)
 	}
 
-	long := strings.Repeat("x", spawnReportMaxBytes) + "FINDINGS-TAIL"
+	longReport := strings.Repeat("x", spawnReportMaxBytes) + "FINDINGS-TAIL"
+	longTask := "TASK-HEAD" + strings.Repeat("y", spawnBranchTaskMaxBytes)
+	longError := "ERROR-HEAD" + strings.Repeat("z", spawnBranchErrorMaxBytes)
 	mgr.CompleteSpawnTask(taskID, []SpawnBranch{
-		{Task: "verbose", ChildSessionID: "child-a", Status: TaskCompleted, Report: long},
+		{Task: longTask, ChildSessionID: "child-a", Status: TaskFailed, Report: longReport, Error: longError},
 	})
 
 	n := waitDrain(t, mgr, "bot1", "sess1", 1)[0]
-	if got := len(n.Branches[0].Report); got > spawnReportMaxBytes {
+	br := n.Branches[0]
+	if got := len(br.Report); got > spawnReportMaxBytes {
 		t.Errorf("expected report clamped to %d bytes, got %d", spawnReportMaxBytes, got)
 	}
-	if !strings.HasSuffix(n.Branches[0].Report, "FINDINGS-TAIL") {
+	if !strings.HasSuffix(br.Report, "FINDINGS-TAIL") {
 		t.Error("expected clamping to keep the report tail")
 	}
-	if snap := mgr.Get(taskID).Snapshot(); len(snap.Branches[0].Report) > spawnReportMaxBytes {
-		t.Error("expected recorded branch report to be clamped as well")
+	if got := len(br.Task); got > spawnBranchTaskMaxBytes+len("...") {
+		t.Errorf("expected task clamped to ~%d bytes, got %d", spawnBranchTaskMaxBytes, got)
+	}
+	if !strings.HasPrefix(br.Task, "TASK-HEAD") {
+		t.Error("expected clamping to keep the task head")
+	}
+	if got := len(br.Error); got > spawnBranchErrorMaxBytes+len("...") {
+		t.Errorf("expected error clamped to ~%d bytes, got %d", spawnBranchErrorMaxBytes, got)
+	}
+	if !strings.HasPrefix(br.Error, "ERROR-HEAD") {
+		t.Error("expected clamping to keep the error head")
+	}
+	if snap := mgr.Get(taskID).Snapshot(); len(snap.Branches[0].Report) > spawnReportMaxBytes ||
+		len(snap.Branches[0].Task) > spawnBranchTaskMaxBytes+len("...") ||
+		len(snap.Branches[0].Error) > spawnBranchErrorMaxBytes+len("...") {
+		t.Error("expected recorded branch fields to be clamped as well")
 	}
 }
 

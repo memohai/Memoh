@@ -31,6 +31,14 @@ const MaxRunningSpawnTasks = 3
 // child session.
 const spawnReportMaxBytes = 2048
 
+// spawnBranchTaskMaxBytes caps the per-branch task echo: identification only,
+// the full task text is persisted as the child session's user message.
+const spawnBranchTaskMaxBytes = 200
+
+// spawnBranchErrorMaxBytes caps per-branch error strings, whose summary sits
+// at the head.
+const spawnBranchErrorMaxBytes = 512
+
 // SpawnBranch is the join-record entry for one subagent in a spawn batch.
 // ChildSessionID points at the persisted subagent session so the parent
 // agent can read the full transcript via history tools.
@@ -55,7 +63,7 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	}
 	defer task.Cancel() // release the safety-timeout context
 
-	branches = clampSpawnBranchReports(branches)
+	branches = clampSpawnBranches(branches)
 
 	status := TaskCompleted
 	for _, b := range branches {
@@ -104,15 +112,18 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	})
 }
 
-// clampSpawnBranchReports returns a copy of branches with each report capped
-// to its tail spawnReportMaxBytes, where the findings live per the subagent
-// response contract.
-func clampSpawnBranchReports(branches []SpawnBranch) []SpawnBranch {
+// clampSpawnBranches returns a copy of branches with each text field bounded:
+// reports keep their tail (findings live at the end per the subagent response
+// contract), task echoes and errors keep their head (identification and
+// summary sit at the front).
+func clampSpawnBranches(branches []SpawnBranch) []SpawnBranch {
 	out := append([]SpawnBranch(nil), branches...)
 	for i := range out {
 		if len(out[i].Report) > spawnReportMaxBytes {
 			out[i].Report = out[i].Report[len(out[i].Report)-spawnReportMaxBytes:]
 		}
+		out[i].Task = truncate(out[i].Task, spawnBranchTaskMaxBytes)
+		out[i].Error = truncate(out[i].Error, spawnBranchErrorMaxBytes)
 	}
 	return out
 }
