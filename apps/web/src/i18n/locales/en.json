@@ -119,7 +119,9 @@
     "people": "Members",
     "appearance": "Appearance",
     "supermarket": "Supermarket",
-    "about": "About"
+    "about": "About",
+    "switchBot": "Switch bot",
+    "manageBots": "Manage Bots"
   },
   "breadcrumb": {
     "main": "Home"
@@ -488,7 +490,6 @@
     "noModels": "No models available",
     "acpAttachmentsUnsupported": "Attachments are not supported in ACP sessions yet.",
     "sessionFilterAll": "All",
-    "sessionSourcePrefix": "From:",
     "searchSessionPlaceholder": "Search",
     "heartbeatTrigger": "Heartbeat Trigger",
     "heartbeatTime": "Time",
@@ -513,24 +514,25 @@
     "compactNow": "Compact Now",
     "compactSuccess": "Context compaction completed",
     "compactFailed": "Context compaction failed",
-    "activityTabSessions": "Sessions",
-    "activityTabFiles": "Files",
-    "activityTabTerminal": "Terminal",
-    "activityTabSkills": "Skills",
-    "activityTabMcp": "MCP",
-    "activityTabSchedule": "Schedule",
-    "skillsEmpty": "No skills yet",
-    "untitledSkill": "Untitled skill",
-    "mcpEmpty": "No MCP connections",
-    "untitledMcp": "Untitled connection",
-    "mcpInactive": "Inactive",
-    "mcpOpenInSettings": "Open in settings",
-    "mcpManageInSettings": "Manage MCP",
-    "scheduleEmpty": "No scheduled tasks",
-    "untitledSchedule": "Untitled task",
-    "scheduleManageInSettings": "Manage schedules",
-    "emptyWorkspace": "No open tabs",
-    "emptyWorkspaceHint": "Open a session or file from the left",
+    "sessionStreaming": "Generating",
+    "topBar": {
+      "hideWorkbench": "Hide sidebar",
+      "showWorkbench": "Show sidebar",
+      "goBack": "Back",
+      "goForward": "Forward"
+    },
+    "activityBar": {
+      "sessions": "Sessions",
+      "files": "Files",
+      "search": "Search"
+    },
+    "workspaceEmpty": "No open tabs",
+    "workspaceEmptyHint": "Pick a session from the sidebar, or open a file, terminal or browser",
+    "tabMenu": {
+      "close": "Close",
+      "closeOthers": "Close others",
+      "closeAll": "Close all"
+    },
     "tabClose": "Close tab",
     "sessionInfoRingAria": "Session info",
     "sessionInfoTooltipHint": "Hover to see session info",
@@ -540,8 +542,7 @@
       "openBrowser": "Open browser",
       "openDisplay": "Open desktop window",
       "menu": "Tab actions",
-      "closeAll": "Close all",
-      "closeFinished": "Close saved and finished"
+      "closeAll": "Close all"
     },
     "browser": {
       "title": "Browser",

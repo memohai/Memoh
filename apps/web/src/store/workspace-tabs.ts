@@ -1,6 +1,7 @@
 import { defineStore, storeToRefs } from 'pinia'
-import { computed, nextTick, ref, watch } from 'vue'
-import { useStorage } from '@vueuse/core'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import { useLocalStorage, useStorage } from '@vueuse/core'
+import type { DockviewApi, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -12,45 +13,32 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 
-export type WorkspaceTab =
-  | { id: string; type: 'chat'; sessionId: string; title: string }
-  | { id: string; type: 'file'; filePath: string; title: string }
-  | { id: string; type: 'terminal'; title: string }
-  | { id: string; type: 'display'; title: string }
-  | { id: string; type: 'browser'; address: string; title: string }
-  | { id: string; type: 'draft'; title: string }
+// VS Code-style workspace shell state:
+// - the dockview layout in the center area (chat / file / terminal / browser /
+//   display panels, splits, tab order) persisted per bot
+// - the left activity-bar + side-panel state (active view, collapsed, width)
+//
+// The active chat session itself lives in the chat-selection store. The chat
+// panel is a singleton dockview panel whose content follows the active
+// session; files/terminals/browsers/displays are multi-instance panels.
 
-const DRAFT_TAB_ID = 'draft'
+export type SidebarView = 'sessions' | 'files' | 'search'
 
-interface BotTabState {
-  tabs: WorkspaceTab[]
-  activeId: string | null
+export const CHAT_PANEL_ID = 'chat'
+
+export type WorkspacePanelComponent = 'chat' | 'file' | 'terminal' | 'browser' | 'display'
+
+interface BotLayoutState {
+  layout: SerializedDockview | null
   terminalCounter: number
-  displayCounter: number
   browserCounter: number
-  dirtyFileTabs: Record<string, boolean>
+  displayCounter: number
 }
 
-type WorkspaceTabsStorage = Record<string, BotTabState>
+type WorkspaceLayoutStorage = Record<string, BotLayoutState>
 
-function chatTabId(sessionId: string): string {
-  return `chat:${sessionId}`
-}
-
-function fileTabId(filePath: string): string {
-  return `file:${filePath}`
-}
-
-function terminalTabId(counter: number): string {
-  return `terminal:${counter}`
-}
-
-function displayTabId(counter: number): string {
-  return `display:${counter}`
-}
-
-function browserTabId(counter: number): string {
-  return `browser:${counter}`
+function emptyBotLayout(): BotLayoutState {
+  return { layout: null, terminalCounter: 0, browserCounter: 0, displayCounter: 0 }
 }
 
 function fileBaseName(filePath: string): string {
@@ -58,8 +46,13 @@ function fileBaseName(filePath: string): string {
   return idx >= 0 ? filePath.slice(idx + 1) : filePath
 }
 
-function emptyBotState(): BotTabState {
-  return { tabs: [], activeId: null, terminalCounter: 0, displayCounter: 0, browserCounter: 0, dirtyFileTabs: {} }
+function panelComponentOf(id: string): WorkspacePanelComponent | null {
+  if (id === CHAT_PANEL_ID) return 'chat'
+  if (id.startsWith('file:')) return 'file'
+  if (id.startsWith('terminal:')) return 'terminal'
+  if (id.startsWith('browser:')) return 'browser'
+  if (id.startsWith('display:')) return 'display'
+  return null
 }
 
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
@@ -70,492 +63,394 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     chatStore.bots.find(bot => bot.id === currentBotId.value) ?? null,
   )
 
-  const storage = useStorage<WorkspaceTabsStorage>('workspace-tabs', {})
+  // Earlier iterations persisted browser-style tab state under these keys;
+  // neither model is compatible with the dockview layout, so drop them.
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('workspace-tabs')
+    localStorage.removeItem('workspace-panes')
+  }
+  const storage = useStorage<WorkspaceLayoutStorage>('workspace-layout', {})
 
-  function ensureBot(botId: string | null | undefined): BotTabState | null {
+  // ---- dockview wiring -----------------------------------------------------
+
+  const api = shallowRef<DockviewApi | null>(null)
+  const activePanelId = ref<string | null>(null)
+  // The bot whose layout is currently loaded into dockview. Guards persistence
+  // so that clearing the view during a bot switch can't wipe the old bot's
+  // stored layout.
+  let loadedBotId: string | null = null
+  let suppressPersist = false
+  let apiDisposables: Array<{ dispose(): void }> = []
+
+  function ensureBotLayout(botId: string | null | undefined): BotLayoutState | null {
     const bid = (botId ?? '').trim()
     if (!bid) return null
     if (!storage.value[bid]) {
-      storage.value = { ...storage.value, [bid]: emptyBotState() }
-    } else {
-      // Backfill fields added later so old persisted state stays usable.
-      const cur = storage.value[bid]!
-      const currentTabs = cur.tabs ?? []
-      const tabs = (currentTabs as Array<WorkspaceTab | { id: string; type: string; title: string }>).map((tab) =>
-        tab.type === 'vnc' ? { id: tab.id, type: 'display' as const, title: tab.title } : tab,
-      ) as WorkspaceTab[]
-      const tabsChanged = tabs.some((tab, index) => tab !== currentTabs[index])
-      if (cur.terminalCounter === undefined || cur.displayCounter === undefined || cur.browserCounter === undefined || cur.dirtyFileTabs === undefined || tabsChanged) {
-        storage.value = {
-          ...storage.value,
-          [bid]: {
-            tabs,
-            activeId: cur.activeId ?? null,
-            terminalCounter: cur.terminalCounter ?? 0,
-            displayCounter: cur.displayCounter ?? (tabs.some((tab) => tab.type === 'display') ? 1 : 0),
-            browserCounter: cur.browserCounter ?? tabs.filter((tab) => tab.type === 'browser').length,
-            dirtyFileTabs: cur.dirtyFileTabs ?? {},
-          },
-        }
-      }
+      storage.value = { ...storage.value, [bid]: emptyBotLayout() }
     }
     return storage.value[bid] ?? null
   }
 
-  const currentState = computed<BotTabState>(() => {
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid) return emptyBotState()
-    return storage.value[bid] ?? emptyBotState()
-  })
+  function patchBotLayout(botId: string, patch: Partial<BotLayoutState>) {
+    const state = ensureBotLayout(botId)
+    if (!state) return
+    storage.value = { ...storage.value, [botId]: { ...state, ...patch } }
+  }
 
-  const tabs = computed<WorkspaceTab[]>(() => currentState.value.tabs)
-  const activeId = computed<string | null>(() => currentState.value.activeId)
-  const activeTab = computed<WorkspaceTab | null>(() => {
-    const id = activeId.value
-    if (!id) return null
-    return tabs.value.find((t) => t.id === id) ?? null
-  })
-
-  function commit(state: BotTabState) {
-    const bid = (currentBotId.value ?? '').trim()
-    if (!bid) return
-    storage.value = {
-      ...storage.value,
-      [bid]: {
-        tabs: [...state.tabs],
-        activeId: state.activeId,
-        terminalCounter: state.terminalCounter,
-        displayCounter: state.displayCounter,
-        browserCounter: state.browserCounter,
-        dirtyFileTabs: { ...state.dirtyFileTabs },
-      },
+  function persistLayout() {
+    if (!api.value || suppressPersist || !loadedBotId) return
+    try {
+      patchBotLayout(loadedBotId, { layout: api.value.toJSON() })
+    } catch {
+      // Serialization should never throw, but a failed save must not break UI.
     }
   }
 
-  function discardTerminalSnapshots(botId: string, tabsToDiscard: WorkspaceTab[]) {
-    const terminalTabs = tabsToDiscard.filter((tab) => tab.type === 'terminal')
-    if (!botId || terminalTabs.length === 0) return
-    void nextTick(() => {
-      for (const tab of terminalTabs) {
-        deleteTerminalSnapshot(terminalCacheKey(botId, tab.id))
-      }
-    })
-  }
-
-  function setActive(id: string | null) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    if (state.activeId === id) return
-    commit({ ...state, activeId: id })
-
-    if (!id) return
-    const tab = state.tabs.find((t) => t.id === id)
-    if (tab?.type === 'chat') {
-      void chatStore.selectSession(tab.sessionId)
-    } else if (tab?.type === 'draft') {
-      void chatStore.createNewSession()
-    }
-  }
-
-  function openChat(sessionId: string, title?: string) {
-    const sid = (sessionId ?? '').trim()
-    if (!sid) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const id = chatTabId(sid)
-    const existing = state.tabs.find((t) => t.id === id)
-    if (existing) {
-      if (title && existing.type === 'chat' && existing.title !== title) {
-        const next = state.tabs.map((t) =>
-          t.id === id && t.type === 'chat' ? { ...t, title } : t,
-        )
-        commit({ ...state, tabs: next, activeId: id })
+  function restoreLayout(botId: string) {
+    const dock = api.value
+    if (!dock) return
+    suppressPersist = true
+    try {
+      const stored = storage.value[botId]?.layout ?? null
+      if (stored) {
+        try {
+          dock.fromJSON(stored)
+        } catch {
+          dock.clear()
+          patchBotLayout(botId, { layout: null })
+        }
       } else {
-        commit({ ...state, activeId: id })
+        dock.clear()
       }
-    } else {
-      const tab: WorkspaceTab = {
-        id,
-        type: 'chat',
-        sessionId: sid,
-        title: title ?? '',
-      }
-      commit({ ...state, tabs: [...state.tabs, tab], activeId: id })
+      loadedBotId = botId
+      prunePanels()
+      activePanelId.value = dock.activePanel?.id ?? null
+    } finally {
+      suppressPersist = false
     }
-    void chatStore.selectSession(sid)
+  }
+
+  function registerApi(dock: DockviewApi) {
+    for (const d of apiDisposables) d.dispose()
+    api.value = dock
+    apiDisposables = [
+      dock.onDidActivePanelChange((panel) => {
+        activePanelId.value = panel?.id ?? null
+      }),
+      dock.onDidLayoutChange(() => {
+        persistLayout()
+      }),
+      dock.onDidRemovePanel((panel) => {
+        if (panel.id.startsWith('terminal:') && loadedBotId) {
+          const bid = loadedBotId
+          void nextTick(() => deleteTerminalSnapshot(terminalCacheKey(bid, panel.id)))
+        }
+      }),
+    ]
+    const bid = (currentBotId.value ?? '').trim()
+    if (bid) {
+      restoreLayout(bid)
+    }
+  }
+
+  function releaseApi() {
+    for (const d of apiDisposables) d.dispose()
+    apiDisposables = []
+    api.value = null
+    activePanelId.value = null
+    loadedBotId = null
+  }
+
+  // ---- panel operations ----------------------------------------------------
+
+  const activeId = computed<string | null>(() => activePanelId.value)
+
+  function hasCurrentPermission(permission: BotPermission): boolean {
+    return hasBotPermission(currentBot.value?.current_user_permissions, permission)
+  }
+
+  function focusOrAdd(options: {
+    id: string
+    component: WorkspacePanelComponent
+    title: string
+    params?: Record<string, unknown>
+  }): boolean {
+    const dock = api.value
+    if (!dock) return false
+    const existing = dock.getPanel(options.id)
+    if (existing) {
+      existing.api.setActive()
+      return true
+    }
+    dock.addPanel({
+      id: options.id,
+      component: options.component,
+      title: options.title,
+      params: options.params,
+      // Keep panel DOM mounted while hidden: terminals, WebRTC display and
+      // chat scroll state do not survive detach/reattach cycles.
+      renderer: 'always',
+    })
+    return true
+  }
+
+  /** Open or focus the singleton chat panel. Content follows the active session. */
+  function openChat(title?: string) {
+    focusOrAdd({ id: CHAT_PANEL_ID, component: 'chat', title: title ?? '' })
+  }
+
+  function setChatTitle(title: string) {
+    const panel = api.value?.getPanel(CHAT_PANEL_ID)
+    if (panel && panel.api.title !== title) {
+      panel.api.setTitle(title)
+    }
   }
 
   function openFile(filePath: string) {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const id = fileTabId(path)
-    const existing = state.tabs.find((t) => t.id === id)
-    if (existing) {
-      commit({ ...state, activeId: id })
-      return
-    }
-    const tab: WorkspaceTab = {
-      id,
-      type: 'file',
-      filePath: path,
+    focusOrAdd({
+      id: `file:${path}`,
+      component: 'file',
       title: fileBaseName(path),
-    }
-    commit({ ...state, tabs: [...state.tabs, tab], activeId: id })
-  }
-
-  function openDraft() {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const existing = state.tabs.find((t) => t.id === DRAFT_TAB_ID)
-    if (existing) {
-      commit({ ...state, activeId: DRAFT_TAB_ID })
-    } else {
-      const tab: WorkspaceTab = { id: DRAFT_TAB_ID, type: 'draft', title: '' }
-      commit({ ...state, tabs: [...state.tabs, tab], activeId: DRAFT_TAB_ID })
-    }
-    void chatStore.createNewSession()
-  }
-
-  function promoteDraftToChat(sessionId: string, title?: string) {
-    const sid = (sessionId ?? '').trim()
-    if (!sid) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const draftIdx = state.tabs.findIndex((t) => t.type === 'draft')
-    if (draftIdx < 0) return
-
-    const newId = chatTabId(sid)
-    const existingChatIdx = state.tabs.findIndex((t) => t.id === newId)
-
-    if (existingChatIdx >= 0) {
-      // A chat tab for this session already exists; drop the draft and focus it.
-      const nextTabs = state.tabs.filter((_, i) => i !== draftIdx)
-      const nextActive = state.activeId === DRAFT_TAB_ID ? newId : state.activeId
-      commit({ ...state, tabs: nextTabs, activeId: nextActive })
-      return
-    }
-
-    const promoted: WorkspaceTab = {
-      id: newId,
-      type: 'chat',
-      sessionId: sid,
-      title: title ?? '',
-    }
-    const nextTabs = [...state.tabs]
-    nextTabs[draftIdx] = promoted
-    const nextActive = state.activeId === DRAFT_TAB_ID ? newId : state.activeId
-    commit({ ...state, tabs: nextTabs, activeId: nextActive })
+      params: { filePath: path },
+    })
   }
 
   function openTerminal() {
     if (!hasCurrentPermission('workspace_exec')) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const nextCounter = state.terminalCounter + 1
-    const id = terminalTabId(nextCounter)
-    const tab: WorkspaceTab = {
-      id,
-      type: 'terminal',
-      title: `Terminal ${nextCounter}`,
-    }
-    commit({
-      ...state,
-      tabs: [...state.tabs, tab],
-      activeId: id,
-      terminalCounter: nextCounter,
+    const bid = (currentBotId.value ?? '').trim()
+    const state = ensureBotLayout(bid)
+    if (!state || !api.value) return
+    const next = state.terminalCounter + 1
+    patchBotLayout(bid, { terminalCounter: next })
+    focusOrAdd({
+      id: `terminal:${next}`,
+      component: 'terminal',
+      title: `Terminal ${next}`,
+    })
+  }
+
+  function openBrowser(address = 'localhost:5173/') {
+    if (!hasCurrentPermission('manage')) return
+    const bid = (currentBotId.value ?? '').trim()
+    const state = ensureBotLayout(bid)
+    if (!state || !api.value) return
+    const next = state.browserCounter + 1
+    patchBotLayout(bid, { browserCounter: next })
+    focusOrAdd({
+      id: `browser:${next}`,
+      component: 'browser',
+      title: `Browser ${next}`,
+      params: { address },
     })
   }
 
   function openDisplay() {
     if (!hasCurrentPermission('manage')) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const existing = state.tabs.find((tab) => tab.type === 'display')
+    const dock = api.value
+    if (!dock) return
+    const existing = dock.panels.find((panel) => panel.id.startsWith('display:'))
     if (existing) {
-      commit({ ...state, activeId: existing.id })
+      existing.api.setActive()
       return
     }
-    const nextCounter = state.displayCounter + 1
-    const id = displayTabId(nextCounter)
-    const tab: WorkspaceTab = {
-      id,
-      type: 'display',
-      title: `Desktop ${nextCounter}`,
-    }
-    commit({
-      ...state,
-      tabs: [...state.tabs, tab],
-      activeId: id,
-      displayCounter: nextCounter,
-    })
-  }
-
-  function openBrowser(address = 'localhost:5173/') {
-    const state = ensureBot(currentBotId.value)
+    const bid = (currentBotId.value ?? '').trim()
+    const state = ensureBotLayout(bid)
     if (!state) return
-    const nextCounter = state.browserCounter + 1
-    const id = browserTabId(nextCounter)
-    const tab: WorkspaceTab = {
-      id,
-      type: 'browser',
-      address,
-      title: `Browser ${nextCounter}`,
-    }
-    commit({
-      ...state,
-      tabs: [...state.tabs, tab],
-      activeId: id,
-      browserCounter: nextCounter,
+    const next = state.displayCounter + 1
+    patchBotLayout(bid, { displayCounter: next })
+    focusOrAdd({
+      id: `display:${next}`,
+      component: 'display',
+      title: `Desktop ${next}`,
     })
   }
 
   function closeTab(id: string) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const idx = state.tabs.findIndex((t) => t.id === id)
-    if (idx < 0) return
-    const botId = (currentBotId.value ?? '').trim()
-    const closedTab = state.tabs[idx]!
-    const nextTabs = state.tabs.filter((t) => t.id !== id)
-    let nextActive = state.activeId
-    if (state.activeId === id) {
-      if (nextTabs.length === 0) {
-        nextActive = null
-      } else {
-        const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)]
-        nextActive = fallback?.id ?? null
-      }
-    }
-    const nextDirty = { ...state.dirtyFileTabs }
-    delete nextDirty[id]
+    const panel = api.value?.getPanel(id)
+    panel?.api.close()
+  }
 
-    commit({ ...state, tabs: nextTabs, activeId: nextActive, dirtyFileTabs: nextDirty })
-    discardTerminalSnapshots(botId, [closedTab])
-
-    if (nextActive) {
-      const tab = nextTabs.find((t) => t.id === nextActive)
-      if (tab?.type === 'chat') {
-        void chatStore.selectSession(tab.sessionId)
-      }
+  function setFileDirty(panelId: string, dirty: boolean) {
+    const panel = api.value?.getPanel(panelId)
+    if (!panel) return
+    const base = fileBaseName(panelId.startsWith('file:') ? panelId.slice('file:'.length) : panelId)
+    const next = dirty ? `● ${base}` : base
+    if (panel.api.title !== next) {
+      panel.api.setTitle(next)
     }
   }
 
-  function closeChatBySession(sessionId: string) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    closeTab(chatTabId(sessionId))
+  function updateBrowserAddress(panelId: string, address: string) {
+    const panel = api.value?.getPanel(panelId)
+    if (!panel) return
+    panel.api.updateParameters({ address })
+    if (address) {
+      panel.api.setTitle(address)
+    }
   }
 
-  function closeAll() {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const botId = (currentBotId.value ?? '').trim()
-    const closedTabs = state.tabs
-    commit({ ...state, tabs: [], activeId: null, dirtyFileTabs: {} })
-    discardTerminalSnapshots(botId, closedTabs)
-  }
-
-  function isTabBusy(tab: WorkspaceTab, dirty: Record<string, boolean>): boolean {
-    switch (tab.type) {
+  function isPanelAllowed(id: string): boolean {
+    switch (panelComponentOf(id)) {
       case 'chat':
-        return chatStore.isSessionStreaming(tab.sessionId)
-      case 'file':
-        return dirty[tab.id] === true
-      case 'terminal':
-      case 'display':
-      case 'browser':
-      case 'draft':
-        return false
-    }
-  }
-
-  function updateBrowserAddress(tabId: string, address: string) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const next = state.tabs.map((tab) =>
-      tab.id === tabId && tab.type === 'browser'
-        ? { ...tab, address, title: address || tab.title }
-        : tab,
-    )
-    commit({ ...state, tabs: next })
-  }
-
-  function closeFinished() {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const remaining = state.tabs.filter((tab) => isTabBusy(tab, state.dirtyFileTabs))
-    const removed = state.tabs.filter((tab) => !remaining.some((t) => t.id === tab.id))
-    const botId = (currentBotId.value ?? '').trim()
-    let nextActive = state.activeId
-    if (nextActive && !remaining.some((t) => t.id === nextActive)) {
-      nextActive = remaining[0]?.id ?? null
-    }
-    const nextDirty: Record<string, boolean> = {}
-    for (const tab of remaining) {
-      if (state.dirtyFileTabs[tab.id]) nextDirty[tab.id] = true
-    }
-    commit({ ...state, tabs: remaining, activeId: nextActive, dirtyFileTabs: nextDirty })
-    discardTerminalSnapshots(botId, removed)
-
-    if (nextActive) {
-      const tab = remaining.find((t) => t.id === nextActive)
-      if (tab?.type === 'chat') {
-        void chatStore.selectSession(tab.sessionId)
-      }
-    }
-  }
-
-  function setFileDirty(tabId: string, dirty: boolean) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const current = state.dirtyFileTabs[tabId] === true
-    if (current === dirty) return
-    const nextDirty = { ...state.dirtyFileTabs }
-    if (dirty) nextDirty[tabId] = true
-    else delete nextDirty[tabId]
-    commit({ ...state, dirtyFileTabs: nextDirty })
-  }
-
-  function updateChatTitle(sessionId: string, title: string) {
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const id = chatTabId(sessionId)
-    const next = state.tabs.map((t) =>
-      t.id === id && t.type === 'chat' ? { ...t, title } : t,
-    )
-    commit({ ...state, tabs: next })
-  }
-
-  function hasCurrentPermission(permission: BotPermission): boolean {
-    return hasBotPermission(currentBot.value?.current_user_permissions, permission)
-  }
-
-  function isTabAllowed(tab: WorkspaceTab): boolean {
-    switch (tab.type) {
+        return true
       case 'file':
         return hasCurrentPermission('workspace_read')
       case 'terminal':
         return hasCurrentPermission('workspace_exec')
+      case 'browser':
       case 'display':
         return hasCurrentPermission('manage')
-      case 'chat':
-      case 'draft':
-        return true
+      default:
+        return false
     }
   }
 
-  function pruneUnauthorizedTabs() {
+  function prunePanels() {
+    const dock = api.value
+    if (!dock) return
     const perms = currentBot.value?.current_user_permissions
-    if (!currentBotId.value || !perms || perms.length === 0) return
-    const state = ensureBot(currentBotId.value)
-    if (!state) return
-    const tabs = state.tabs.filter(isTabAllowed)
-    if (tabs.length === state.tabs.length) return
-    const botId = currentBotId.value
-    const removed = state.tabs.filter(tab => !tabs.some(item => item.id === tab.id))
-    let activeId = state.activeId
-    if (activeId && !tabs.some(tab => tab.id === activeId)) {
-      activeId = tabs[0]?.id ?? null
+    if (!perms || perms.length === 0) return
+    for (const panel of [...dock.panels]) {
+      if (!isPanelAllowed(panel.id)) {
+        panel.api.close()
+      }
     }
-    const dirtyFileTabs: Record<string, boolean> = {}
-    for (const tab of tabs) {
-      if (state.dirtyFileTabs[tab.id]) dirtyFileTabs[tab.id] = true
-    }
-    commit({ ...state, tabs, activeId, dirtyFileTabs })
-    discardTerminalSnapshots(botId, removed)
   }
 
-  // Reset all tabs for a specific bot. Used when the user switches bots.
+  // ---- sidebar (activity bar + side panel) ---------------------------------
+
+  const sidebarView = useLocalStorage<SidebarView>('workspace-sidebar-view', 'sessions')
+  const sidebarOpen = useLocalStorage('workspace-sidebar-open', true)
+  const sidebarWidth = useLocalStorage('workspace-sidebar-width', 268)
+  const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
+
+  // VS Code semantics: clicking the active activity icon toggles the panel,
+  // clicking another icon switches to it (and reopens if collapsed).
+  function selectSidebarView(view: SidebarView) {
+    if (!workbenchOpen.value) {
+      sidebarView.value = view
+      sidebarOpen.value = true
+      workbenchOpen.value = true
+      return
+    }
+    if (sidebarOpen.value && sidebarView.value === view) {
+      sidebarOpen.value = false
+      return
+    }
+    sidebarView.value = view
+    sidebarOpen.value = true
+  }
+
+  function toggleWorkbench() {
+    workbenchOpen.value = !workbenchOpen.value
+  }
+
+  function showWorkbench() {
+    workbenchOpen.value = true
+  }
+
+  function hideWorkbench() {
+    workbenchOpen.value = false
+  }
+
+  // One-shot navigation request consumed by the sidebar files panel.
+  const pendingFilesPath = ref<string | null>(null)
+
+  function openFilesAt(path: string) {
+    if (!hasCurrentPermission('workspace_read')) return
+    workbenchOpen.value = true
+    sidebarView.value = 'files'
+    sidebarOpen.value = true
+    pendingFilesPath.value = (path ?? '').trim() || null
+  }
+
+  function consumePendingFilesPath(): string | null {
+    const path = pendingFilesPath.value
+    pendingFilesPath.value = null
+    return path
+  }
+
+  // ---- lifecycle -----------------------------------------------------------
+
   function resetBot(botId: string) {
     const bid = (botId ?? '').trim()
     if (!bid) return
     const next = { ...storage.value }
     delete next[bid]
     storage.value = next
+    if (loadedBotId === bid && api.value) {
+      suppressPersist = true
+      try {
+        api.value.clear()
+      } finally {
+        suppressPersist = false
+      }
+    }
     void nextTick(() => clearTerminalSnapshotsForBot(bid))
   }
 
   function resetAll() {
     storage.value = {}
+    pendingFilesPath.value = null
+    if (api.value) {
+      suppressPersist = true
+      try {
+        api.value.clear()
+      } finally {
+        suppressPersist = false
+      }
+    }
+    loadedBotId = null
     void nextTick(() => clearTerminalSnapshots())
   }
 
   onAuthSessionCleared(() => resetAll())
 
-  // When the active tab is a chat tab, keep chat-store selection in sync.
-  watch(activeTab, (tab) => {
-    if (!tab) return
-    if (tab.type !== 'chat') return
-    if (chatStore.sessionId === tab.sessionId) return
-    void chatStore.selectSession(tab.sessionId)
-  })
-
-  // Pre-create state for newly seen bots so that the storage object always
-  // has a slot for the active bot.
   watch(currentBotId, (bid) => {
-    ensureBot(bid)
+    const next = (bid ?? '').trim()
+    if (!next) {
+      loadedBotId = null
+      return
+    }
+    ensureBotLayout(next)
+    if (api.value && loadedBotId !== next) {
+      restoreLayout(next)
+    }
   }, { immediate: true })
 
   watch(
     () => [currentBotId.value, ...(currentBot.value?.current_user_permissions ?? [])].join('|'),
-    () => pruneUnauthorizedTabs(),
-    { immediate: true },
-  )
-
-  // When the chat-store session is set externally (e.g. URL navigation, or
-  // the first message in a draft tab triggering server-side session creation),
-  // promote the draft tab if active, otherwise open or focus the chat tab.
-  const draftSessionId = ref<string | null>(null)
-  watch(
-    () => chatStore.sessionId,
-    (sid) => {
-      if (!sid) {
-        draftSessionId.value = null
-        return
-      }
-      if (draftSessionId.value === sid) return
-      draftSessionId.value = sid
-      const state = ensureBot(currentBotId.value)
-      if (!state) return
-      const id = chatTabId(sid)
-
-      // Promote the draft tab in place if it's currently active. This is the
-      // path taken when sendMessage in a draft creates the real session.
-      if (state.activeId === DRAFT_TAB_ID) {
-        promoteDraftToChat(sid)
-        return
-      }
-
-      const exists = state.tabs.some((t) => t.id === id)
-      if (!exists) return
-      if (state.activeId !== id) {
-        commit({ ...state, activeId: id })
-      }
-    },
+    () => prunePanels(),
   )
 
   return {
-    tabs,
+    api,
     activeId,
-    activeTab,
+    sidebarView,
+    sidebarOpen,
+    workbenchOpen,
+    sidebarWidth,
+    pendingFilesPath,
+    registerApi,
+    releaseApi,
+    selectSidebarView,
+    toggleWorkbench,
+    showWorkbench,
+    hideWorkbench,
     openChat,
+    setChatTitle,
     openFile,
+    openFilesAt,
+    consumePendingFilesPath,
     openTerminal,
-    openDisplay,
     openBrowser,
-    openDraft,
-    promoteDraftToChat,
+    openDisplay,
     closeTab,
-    closeChatBySession,
-    closeAll,
-    closeFinished,
     setFileDirty,
     updateBrowserAddress,
-    updateChatTitle,
-    setActive,
     resetBot,
     resetAll,
   }

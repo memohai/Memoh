@@ -38,6 +38,7 @@
     "animate.css": "^4.1.1",
     "cron-parser": "^5.5.0",
     "cronstrue": "^3.14.0",
+    "dockview-vue": "^6.6.1",
     "dotenv": "^17.2.3",
     "echarts": "^6.0.0",
     "katex": "^0.16.28",

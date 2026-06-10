@@ -231,10 +231,10 @@ part of the security boundary.
 ### Cross-window navigation
 
 Settings actions invoked from the chat window's reused @memohai/web
-components — the gear footer link, the sidebar `+` button, the bot-item
-"Details" menu, the chat sidebar MCP/Schedule panels' `+` icons, the
-schedule/heartbeat trigger blocks, etc. — all eventually call either
-`router.push('/settings/...')` or `router.push({ name: 'bot-detail', ... })`.
+components — the gear footer link, the bot switcher's "New Bot" /
+"Manage Bots" entries, the schedule/heartbeat trigger blocks, etc. —
+all eventually call either `router.push('/settings/...')` or
+`router.push({ name: 'bot-detail', ... })`.
 
 Both shapes are handled in the chat router. Name-based navigation works
 because the chat router registers no-op stub routes for every settings
@@ -318,15 +318,11 @@ empty grey gap above the page content:
   inside (e.g. the chat sidebar `+` button) opt out with explicit
   `[-webkit-app-region:no-drag]` wrappers.
 
-- **Chat right side** reuses the existing 48px tab bars instead of
-  reserving a separate strip. The two chat-window tab-bar rows —
-  `pages/home/components/chat-sidebar.vue` (activity tabs) and
-  `pages/home/components/workspace-tab-bar.vue` (workspace tabs +
-  toolkit) — both carry `[-webkit-app-region:drag]` on the row root,
-  while every interactive child (tab button, close `×`, terminal
-  button, dropdown trigger) carries `[-webkit-app-region:no-drag]`.
-  Empty space within the bars is therefore draggable; clicks on
-  buttons still work. No extra height is added to the chat window.
+- **Chat window** renders a single 36px full-width drag strip at the
+  top of `pages/main-section/index.vue` (gated on the macOS desktop
+  shell), clearing the traffic lights for the entire window. The
+  VS Code-style shell below it (activity rail + side panel + dockview
+  tabs) needs no per-column drag handling.
 
 - **Settings right side** can't reuse the chat trick — settings
   pages vary too much (master/detail layouts, full-page tables,

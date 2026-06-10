@@ -214,6 +214,9 @@ importers:
       cronstrue:
         specifier: ^3.14.0
         version: 3.14.0
+      dockview-vue:
+        specifier: ^6.6.1
+        version: 6.6.1(vue@3.5.26(typescript@5.9.3))
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
@@ -3432,6 +3435,14 @@ packages:
     engines: {node: '>=8'}
     os: [darwin]
     hasBin: true
+
+  dockview-core@6.6.1:
+    resolution: {integrity: sha512-WuNoO2wl3rGI8MaTuvmfgViek4WafHLD9Kf//Hw69g8TgAHSpAWr6RW15kU6U9vwtQxIi/YBxQNcIA5RzQ46Fw==}
+
+  dockview-vue@6.6.1:
+    resolution: {integrity: sha512-Uv7HCWwQMoNitwuvj89oDnZQ7ZduOiuxbeZtaLCW+hUqoeAWSF2BU7zexv8Jc0TtsfJTJ4giMrX3/PF2IjUhKw==}
+    peerDependencies:
+      vue: ^3.4.0
 
   doctypes@1.1.0:
     resolution: {integrity: sha512-LLBi6pEqS6Do3EKQ3J0NqHWV5hhb78Pi8vvESYwyOy2c31ZEZVdtitdzsQsKb7878PEERhzUk0ftqGhG6Mz+pQ==}
@@ -8841,6 +8852,13 @@ snapshots:
       smart-buffer: 4.2.0
       verror: 1.10.1
     optional: true
+
+  dockview-core@6.6.1: {}
+
+  dockview-vue@6.6.1(vue@3.5.26(typescript@5.9.3)):
+    dependencies:
+      dockview-core: 6.6.1
+      vue: 3.5.26(typescript@5.9.3)
 
   doctypes@1.1.0: {}
 

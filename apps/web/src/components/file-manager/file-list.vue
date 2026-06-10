@@ -147,7 +147,7 @@ function handleCheckboxUpdate(entry: HandlersFsFileInfo, checked: CheckboxState)
       >
         <ContextMenuTrigger as-child>
           <div
-            class="group flex cursor-pointer items-center border-b border-border/50 px-3 py-2 text-xs transition-colors hover:bg-muted/50"
+            class="group flex cursor-pointer items-center border-b border-border px-3 py-2 text-xs transition-colors hover:bg-[color:var(--ui-hover)]"
             @click="handleClick(entry)"
           >
             <div

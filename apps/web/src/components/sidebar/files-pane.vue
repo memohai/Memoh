@@ -38,7 +38,7 @@
         variant="ghost"
         size="sm"
         class="size-7 p-0"
-        :class="selectionMode ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary' : ''"
+        :class="selectionMode ? 'bg-sidebar-accent text-foreground!' : ''"
         :disabled="loading || operationLoading || entries.length === 0"
         :aria-pressed="selectionMode"
         :title="selectionMode ? t('bots.files.doneSelecting') : t('bots.files.selectMode')"
@@ -91,27 +91,26 @@
     </div>
 
     <div class="flex items-center px-2 py-1.5 shrink-0 overflow-x-auto">
-      <nav class="flex min-w-0 items-center gap-0.5 text-[11px]">
+      <nav class="flex min-w-0 items-center gap-0.5 text-caption">
         <template
           v-for="(seg, idx) in pathSegments(currentPath)"
           :key="seg.path"
         >
           <ChevronRight
             v-if="idx > 0"
-            class="size-2.5 shrink-0 text-muted-foreground"
+            class="size-3 shrink-0 text-muted-foreground"
           />
-          <button
-            type="button"
-            class="inline-flex items-center truncate rounded px-1 py-0.5 hover:bg-muted/60 transition-colors"
-            :class="idx === pathSegments(currentPath).length - 1 ? 'font-medium text-foreground' : 'text-muted-foreground'"
+          <TextButton
+            class="min-w-0 truncate text-caption"
+            :class="idx === pathSegments(currentPath).length - 1 && 'text-foreground'"
             @click="navigateTo(seg.path)"
           >
             <Folder
               v-if="idx === 0"
-              class="mr-1 size-3 shrink-0"
+              class="size-3 shrink-0"
             />
             {{ seg.name }}
-          </button>
+          </TextButton>
         </template>
       </nav>
     </div>
@@ -135,7 +134,7 @@
 
     <div
       v-if="uploadStatus"
-      class="flex shrink-0 items-center gap-1 border-y border-border/60 px-2 py-1.5 text-[11px]"
+      class="flex shrink-0 items-center gap-1 border-y border-border px-2 py-1.5 text-caption"
     >
       <span
         class="min-w-0 truncate text-muted-foreground"
@@ -304,6 +303,7 @@ import { toast } from '@memohai/ui'
 import { ChevronRight, CloudUpload, Download, Folder, Upload, FolderPlus, ListChecks, RefreshCw, Trash2 } from 'lucide-vue-next'
 import {
   Button,
+  TextButton,
   Input,
   Dialog,
   DialogContent,

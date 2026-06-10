@@ -1,65 +1,29 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <div class="p-2 shrink-0">
-      <InputGroup class="h-[30px]">
-        <InputGroupAddon class="pl-2.5">
-          <Search
-            class="size-2.75 text-muted-foreground"
-          />
-        </InputGroupAddon>
-        <InputGroupInput
-          v-model="searchQuery"
-          :placeholder="t('chat.searchSessionPlaceholder')"
-          class="text-xs h-7.5"
-        />
-      </InputGroup>
-    </div>
-
-    <div class="px-1.5 shrink-0">
-      <Button
-        variant="ghost"
-        class="w-full h-12 justify-start gap-4.5 text-xs font-medium"
-        :disabled="!currentBotId"
-        @click="handleNewSession"
-      >
-        <Plus
-          class="size-3"
-        />
-        {{ t('chat.newSession') }}
-      </Button>
-    </div>
-
-    <div class="px-3.5 h-9.5 flex items-center shrink-0">
+    <div class="px-2.5 h-9 flex items-center shrink-0">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
-          <button class="flex items-center gap-1">
+          <TextButton class="text-xs">
             <component
               :is="filterIconComponent"
-              class="size-2.5"
+              class="size-3"
               :class="filterIconClass"
             />
-            <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.7px]">
-              {{ t('chat.sessionSourcePrefix') }}{{ filterLabel }}
-            </span>
-            <ChevronDown
-              class="size-2.5 text-muted-foreground"
-            />
-          </button>
+            {{ filterLabel }}
+            <ChevronDown class="size-3 opacity-60" />
+          </TextButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuItem
             v-for="opt in filterOptions"
             :key="opt.value ?? 'all'"
-            class="relative"
             @click="filterType = opt.value"
           >
+            {{ opt.label }}
             <Check
               v-if="filterType === opt.value"
-              class="size-3 mr-2 absolute"
+              class="size-3.5 ml-auto text-muted-foreground"
             />
-            <span class="ml-5">
-              {{ opt.label }}
-            </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -74,6 +38,7 @@
               :key="session.id"
               :session="session"
               :is-active="sessionId === session.id"
+              :streaming="chatStore.isSessionStreaming(session.id)"
               @select="handleSelect"
               @rename="openRenameSessionDialog"
               @delete="confirmDeleteSession"
@@ -172,22 +137,20 @@
 
 <script setup lang="ts">
 import { ref, computed, type Component } from 'vue'
-import { Search, Plus, ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch, Bot } from 'lucide-vue-next'
+import { ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch, Bot } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
-import { sortByRecency } from '@/store/chat-list.utils'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { sortByRecency } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
+  TextButton,
   Input,
   ScrollArea,
-  InputGroup,
-  InputGroupInput,
-  InputGroupAddon,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -201,12 +164,15 @@ import {
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
 
+const props = defineProps<{
+  searchQuery?: string
+}>()
+
 const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
 
-const searchQuery = ref('')
 const filterType = ref<string>('chat')
 
 const filterOptions = computed(() => [
@@ -252,7 +218,7 @@ const filteredSessions = computed(() => {
   } else {
     list = list.filter(s => s.type === filterType.value)
   }
-  const q = searchQuery.value.trim().toLowerCase()
+  const q = (props.searchQuery ?? '').trim().toLowerCase()
   if (q) {
     list = list.filter(s =>
       (s.title ?? '').toLowerCase().includes(q)
@@ -263,11 +229,8 @@ const filteredSessions = computed(() => {
 })
 
 function handleSelect(session: SessionSummary) {
-  workspaceTabs.openChat(session.id, session.title ?? '')
-}
-
-function handleNewSession() {
-  workspaceTabs.openDraft()
+  void chatStore.selectSession(session.id)
+  workspaceTabs.openChat((session.title ?? '').trim() || t('chat.untitledSession'))
 }
 
 const deleteSessionDialogOpen = ref(false)
@@ -295,8 +258,7 @@ async function handleRenameSession() {
   if (!target || !title || renameSessionLoading.value) return
   renameSessionLoading.value = true
   try {
-    const updated = await chatStore.renameSession(target.id, title)
-    workspaceTabs.updateChatTitle(target.id, updated.title ?? title)
+    await chatStore.renameSession(target.id, title)
     renameSessionDialogOpen.value = false
     sessionPendingRename.value = null
   } catch (error) {
@@ -312,7 +274,6 @@ async function handleDeleteSession() {
   deleteSessionLoading.value = true
   try {
     await chatStore.removeSession(target.id)
-    workspaceTabs.closeChatBySession(target.id)
     deleteSessionDialogOpen.value = false
     sessionPendingDelete.value = null
   } finally {

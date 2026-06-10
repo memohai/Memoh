@@ -1,150 +1,190 @@
 <template>
-  <aside class="relative h-full">
+  <aside class="flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
     <header
-      v-if="macTopInset"
-      class="fixed top-0 left-0 z-20 h-9 w-(--sidebar-width) flex items-center pl-[78px] pr-2 gap-1 bg-sidebar border-r border-sidebar-border [-webkit-app-region:drag]"
+      class="flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border bg-sidebar pr-1 [-webkit-app-region:drag]"
+      :class="macTrafficReserve ? 'pl-[76px]' : 'pl-2'"
+      :style="{ width: `${headerWidth}px` }"
     >
-      <div class="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-6 text-muted-foreground hover:text-foreground shrink-0"
-          :aria-label="t('bots.createBot')"
-          @click="router.push('/settings/bots')"
-        >
-          <Plus class="size-3.5" />
-        </Button>
+      <div class="min-w-0 flex-1 [-webkit-app-region:no-drag]">
+        <BotSwitcher variant="row" />
       </div>
     </header>
 
-    <Sidebar
-      :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="macTopInset ? 'pt-9 h-dvh border-r border-sidebar-border' : desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
-    >
-      <SidebarHeader
-        v-if="!desktopShell"
-        class="p-0 border-0"
+    <div class="flex min-h-0 flex-1">
+      <div class="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar py-2">
+        <Button
+          v-for="view in availableViews"
+          :key="view.id"
+          variant="ghost"
+          size="icon-sm"
+          class="shrink-0 text-muted-foreground hover:text-foreground"
+          :class="sidebarOpen && sidebarView === view.id && 'bg-sidebar-accent text-foreground!'"
+          :title="view.label"
+          :aria-label="view.label"
+          :aria-pressed="sidebarOpen && sidebarView === view.id"
+          @click="store.selectSidebarView(view.id)"
+        >
+          <component
+            :is="view.icon"
+            :stroke-width="1.75"
+            class="size-4"
+          />
+        </Button>
+
+        <div class="flex-1" />
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class="shrink-0 text-muted-foreground hover:text-foreground"
+          :class="isSettingsActive && 'bg-sidebar-accent text-foreground!'"
+          :title="t('sidebar.settings')"
+          :aria-label="t('sidebar.settings')"
+          @click="router.push('/settings')"
+        >
+          <Settings
+            :stroke-width="1.75"
+            class="size-4"
+          />
+        </Button>
+      </div>
+
+      <div
+        v-if="sidebarOpen"
+        class="relative flex h-full shrink-0 flex-col bg-sidebar"
+        :style="{ width: `${sidebarWidth}px` }"
       >
-        <div class="h-10 flex items-center pl-2 group-data-[collapsible=icon]:pl-3 transition-[padding] duration-200 ease-linear">
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-6 text-muted-foreground hover:text-foreground shrink-0"
-            aria-label="Toggle Sidebar"
-            @click="toggleSidebar"
-          >
-            <PanelLeftClose class="size-3.5 group-data-[collapsible=icon]:hidden" />
-            <PanelLeftOpen class="size-3.5 hidden group-data-[collapsible=icon]:block" />
-          </Button>
-          
-          <div class="ml-auto mr-1.5 group-data-[collapsible=icon]:hidden">
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-6 text-muted-foreground hover:text-foreground shrink-0"
-              :aria-label="t('bots.createBot')"
-              @click="router.push({ name: 'bots' })"
-            >
-              <Plus class="size-3.5" />
-            </Button>
-          </div>
+        <div class="min-h-0 flex-1">
+          <PanelSessions
+            v-show="sidebarView === 'sessions'"
+            class="h-full"
+          />
+          <PanelFiles
+            v-if="canWorkspaceRead"
+            v-show="sidebarView === 'files'"
+            class="h-full"
+          />
+          <PanelSearch
+            v-if="sidebarView === 'search'"
+            class="h-full"
+          />
         </div>
-      </SidebarHeader>
 
-      <SidebarContent class="@container/bots">
-        <SidebarGroup class="px-2 py-0">
-          <SidebarGroupContent>
-            <SidebarMenu class="gap-1">
-              <SidebarMenuItem
-                v-for="bot in bots"
-                :key="bot.id"
-              >
-                <BotItem :bot="bot" />
-              </SidebarMenuItem>
-            </SidebarMenu>
-
-            <div
-              v-if="isLoading"
-              class="flex justify-center py-4"
-            >
-              <LoaderCircle
-                class="size-4 animate-spin text-muted-foreground"
-              />
-            </div>
-            <div
-              v-if="!isLoading && bots.length === 0"
-              class="px-3 py-6 text-center text-xs text-muted-foreground @max-[50px]/bots:hidden"
-            >
-              {{ t('bots.emptyTitle') }}
-            </div>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-
-      <SidebarFooter class="relative border-0 px-2 pb-3.5 pt-2.5">
-        <div class="pointer-events-none absolute -top-30 left-0 h-38.25 w-full bg-linear-to-t from-(--sidebar-background) from-18% to-transparent z-10 group-data-[collapsible=icon]:hidden" />
-        <SidebarMenu class="gap-2.5">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              :tooltip="t('sidebar.settings')"
-              class="h-9 px-2.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
-              :is-active="isSettingsActive"
-              @click="router.push('/settings')"
-            >
-              <Settings
-                class="size-3.5"
-              />
-              <span class="text-xs font-medium group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
-
-      <SidebarRail v-if="!desktopShell" />
-    </Sidebar>
+        <div
+          class="group absolute right-0 top-0 z-10 h-full w-1 cursor-col-resize"
+          @mousedown="onResizeStart"
+        >
+          <div
+            class="h-full w-full transition-colors group-hover:bg-border"
+            :class="{ 'bg-ring': isResizing }"
+          />
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useQuery } from '@pinia/colada'
-import { getBotsQuery } from '@memohai/sdk/colada'
-import type { BotsBot } from '@memohai/sdk'
-import {
-  Button,
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarRail,
-  useSidebar,
-} from '@memohai/ui'
-import { Plus, LoaderCircle, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
-import BotItem from './bot-item.vue'
-import { usePinnedBots } from '@/composables/usePinnedBots'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { storeToRefs } from 'pinia'
+import { Folder, MessageSquare, Search, Settings } from 'lucide-vue-next'
+import { Button } from '@memohai/ui'
+import { useChatStore } from '@/store/chat-list'
+import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
+import { hasBotPermission } from '@/utils/bot-permissions'
+import BotSwitcher from './bot-switcher.vue'
+import PanelSessions from './panel-sessions.vue'
+import PanelFiles from './panel-files.vue'
+import PanelSearch from './panel-search.vue'
+
+const props = defineProps<{
+  macTrafficReserve?: boolean
+}>()
+
+interface ActivityView {
+  id: SidebarView
+  label: string
+  icon: Component
+}
 
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const { toggleSidebar } = useSidebar()
-const desktopShell = inject(DesktopShellKey, false)
-const macTopInset = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
-const { sortBots } = usePinnedBots()
+const store = useWorkspaceTabsStore()
+const { sidebarView, sidebarOpen, sidebarWidth } = storeToRefs(store)
+const chatStore = useChatStore()
+const { currentBotId, bots } = storeToRefs(chatStore)
 
-const { data: botData, isLoading } = useQuery(getBotsQuery())
-const bots = computed<BotsBot[]>(() => sortBots(botData.value?.items ?? []))
+const currentBot = computed(() =>
+  bots.value.find(bot => bot.id === currentBotId.value) ?? null,
+)
+const canWorkspaceRead = computed(() =>
+  hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_read'),
+)
+
+const availableViews = computed<ActivityView[]>(() => {
+  const views: ActivityView[] = [
+    { id: 'sessions', label: t('chat.activityBar.sessions'), icon: MessageSquare },
+  ]
+  if (canWorkspaceRead.value) {
+    views.push({ id: 'files', label: t('chat.activityBar.files'), icon: Folder })
+  }
+  views.push({ id: 'search', label: t('chat.activityBar.search'), icon: Search })
+  return views
+})
+
+// If the persisted view becomes unavailable (e.g. permission lost), fall back.
+watch(availableViews, (views) => {
+  if (!views.some((view) => view.id === sidebarView.value)) {
+    sidebarView.value = 'sessions'
+  }
+}, { immediate: true })
 
 const isSettingsActive = computed(() => route.path.startsWith('/settings'))
+
+const MIN_WIDTH = 200
+const MAX_WIDTH = 480
+const RAIL_WIDTH = 44
+const MAC_TRAFFIC_HEADER_MIN_WIDTH = 176
+
+const headerWidth = computed(() => {
+  const sidebarContentWidth = RAIL_WIDTH + (sidebarOpen.value ? sidebarWidth.value : 0)
+  return props.macTrafficReserve
+    ? Math.max(MAC_TRAFFIC_HEADER_MIN_WIDTH, sidebarContentWidth)
+    : sidebarContentWidth
+})
+
+const isResizing = ref(false)
+
+function onResizeStart(e: MouseEvent) {
+  e.preventDefault()
+  isResizing.value = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+
+  function onMouseMove(ev: MouseEvent) {
+    const delta = ev.clientX - startX
+    sidebarWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta))
+  }
+
+  function onMouseUp() {
+    isResizing.value = false
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
+
+onBeforeUnmount(() => {
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+})
 </script>

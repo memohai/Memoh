@@ -1,5 +1,5 @@
 <template>
-  <SidebarInset class="flex flex-col overflow-hidden">
+  <main class="flex flex-col flex-1 min-w-0 overflow-hidden bg-card">
     <section class="flex-1 min-h-0 overflow-hidden">
       <router-view v-slot="{ Component }">
         <KeepAlive>
@@ -7,9 +7,5 @@
         </KeepAlive>
       </router-view>
     </section>
-  </SidebarInset>
+  </main>
 </template>
-
-<script setup lang="ts">
-import { SidebarInset } from '@memohai/ui'
-</script>

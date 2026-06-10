@@ -1,0 +1,116 @@
+/* Memoh dockview theme: maps dockview's --dv-* variables onto the design
+ * tokens from @memohai/ui style.css so the dock chrome follows light/dark
+ * and any future palette swap automatically. */
+.dockview-theme-memoh {
+  --dv-group-view-background-color: var(--card);
+
+  --dv-tabs-and-actions-container-background-color: var(--background);
+  --dv-tabs-and-actions-container-height: 36px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+
+  --dv-activegroup-visiblepanel-tab-background-color: var(--card);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--card);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  --dv-tab-divider-color: transparent;
+  --dv-tab-font-size: 12px;
+
+  --dv-separator-border: var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--ring);
+
+  --dv-drag-over-background-color: var(--sidebar-accent);
+  --dv-drag-over-border-color: var(--ring);
+
+  --dv-icon-hover-background-color: var(--ui-hover);
+  --dv-scrollbar-background-color: var(--border);
+
+  --dv-context-menu-background-color: var(--popover);
+  --dv-context-menu-color: var(--foreground);
+
+  --dv-border-radius: 0px;
+  --dv-tab-border-radius: 0px;
+  --dv-tab-margin: 4px 0 0 4px;
+
+  --dv-floating-border: 1px solid var(--border);
+}
+
+/* Hover step for background tabs (the custom tab content itself is
+ * transparent; the .dv-tab container owns the chip background). */
+.dockview-theme-memoh .dv-tab {
+  box-sizing: border-box;
+  transition: background-color 0.15s ease;
+}
+.dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
+  background-color: var(--ui-hover);
+}
+
+.dockview-theme-memoh .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--border);
+}
+
+.dockview-theme-memoh .dv-tab.dv-active-tab {
+  position: relative;
+  z-index: 1;
+  height: calc(var(--dv-tabs-and-actions-container-height) + 1px);
+  margin-top: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-top: 0;
+  border-bottom: 0;
+  background-color: var(--card);
+}
+
+.dockview-theme-memoh .dv-tab.dv-active-tab::after {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  left: -1px;
+  z-index: 2;
+  height: 1px;
+  background-color: var(--card);
+  content: "";
+}
+
+.dockview-theme-memoh .dv-tabs-overflow-dropdown-default {
+  height: 28px;
+  margin: 4px 2px 4px 0;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+}
+
+.dockview-theme-memoh .dv-tabs-overflow-dropdown-default:hover {
+  background-color: var(--ui-hover);
+  color: var(--foreground);
+}
+
+.dockview-theme-memoh .dv-tabs-overflow-dropdown-default > span {
+  padding-left: 2px;
+}
+
+.dockview-theme-memoh .dv-tabs-overflow-dropdown-default > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dockview-theme-memoh .dv-right-actions-container {
+  align-items: center;
+}
+
+.workspace-workbench-open .dockview-theme-memoh .dv-tabs-and-actions-container {
+  padding-left: 116px;
+}
+
+.workspace-workbench-collapsed .dockview-theme-memoh .dv-tabs-and-actions-container {
+  padding-left: 116px;
+}
+
+.workspace-workbench-collapsed-mac .dockview-theme-memoh .dv-tabs-and-actions-container {
+  padding-left: 192px;
+}

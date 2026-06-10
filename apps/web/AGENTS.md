@@ -40,9 +40,15 @@ src/
 ├── i18n.ts                    # vue-i18n configuration
 ├── assets/                    # Static assets (logo.svg)
 ├── components/                # Shared components
-│   ├── sidebar/               #   Bot list sidebar (collapsible, bot items, settings link)
-│   │   ├── index.vue          #     Sidebar with bot list + settings gear footer
-│   │   └── bot-item.vue       #     Individual bot entry in sidebar
+│   ├── sidebar/               #   VS Code-style left shell: activity bar + collapsible side panel
+│   │   ├── index.vue          #     Activity rail (bot avatar, Sessions/Files/Search icons, Settings) + resizable panel host
+│   │   ├── bot-switcher.vue   #     Bot switcher dropdown (rail avatar variant + row variant)
+│   │   ├── panel-sessions.vue #     Sessions panel: New Session button + Recents
+│   │   ├── panel-files.vue    #     Files panel wrapper (permissions + openFilesAt navigation)
+│   │   ├── panel-search.vue   #     Search panel (sessions search, autofocused input)
+│   │   ├── files-pane.vue     #     Workspace file browser (upload, mkdir, batch ops)
+│   │   ├── recents.vue        #     Session list (type filter, rename/delete dialogs, streaming indicator)
+│   │   └── session-item.vue   #     Session list row (avatar, title, timestamp, streaming spinner)
 │   ├── settings-sidebar/      #   Settings section sidebar (back-to-chat + nav items)
 │   ├── main-container/        #   Main content area (KeepAlive RouterView)
 │   ├── master-detail-sidebar-layout/  # Master-detail layout pattern
@@ -108,22 +114,28 @@ src/
 │   ├── main-section/          #   Chat section layout (bot sidebar + main container)
 │   ├── settings-section/      #   Settings section layout (settings sidebar + KeepAlive)
 │   ├── home/                  #   Chat interface (used by both `/` and `/chat/:botId?`)
-│   │   ├── index.vue          #     Route ↔ store sync, chat sidebar + workspace area
+│   │   ├── index.vue          #     Route ↔ store sync + workspace host (left shell lives in components/sidebar)
 │   │   ├── composables/       #     Page-specific composables
 │   │   │   ├── useFileManagerProvider.ts  # File manager context
 │   │   │   └── useMediaGallery.ts         # Media gallery state
 │   │   └── components/        #     Chat UI components
-│   │       ├── chat-area.vue          # Main chat area (messages, input, attachments)
-│   │       ├── chat-sidebar.vue       # Left workspace sidebar (sessions, files, tools)
-│   │       ├── chat-workspace.vue     # Main workspace host (chat, files, terminal, display)
-│   │       ├── workspace-tab-bar.vue  # Workspace tabs and terminal/display actions
+│   │       ├── chat-workspace.vue     # Dockview host: panel registry, theme, tab context menu, chat panel sync
+│   │       ├── dockview/              # Dockview panel wrappers
+│   │       │   ├── panel-chat.vue     #   Singleton chat panel (content follows active session)
+│   │       │   ├── panel-file.vue     #   Opened-file panel (Monaco file viewer)
+│   │       │   ├── panel-terminal.vue #   Terminal panel
+│   │       │   ├── panel-browser.vue  #   Workspace browser panel (iframe, renderer 'always')
+│   │       │   ├── panel-display.vue  #   Workspace desktop panel (WebRTC, renderer 'always')
+│   │       │   ├── workspace-watermark.vue # Empty-dock watermark
+│   │       │   ├── group-actions.vue  #   Group header "+" menu (new terminal/browser/desktop)
+│   │       │   └── use-panel-visible.ts #  Panel visibility tracking composable
+│   │       ├── chat-pane.vue          # Main chat area (messages, input, attachments)
+│   │       ├── file-pane.vue          # Opened-file viewer pane
 │   │       ├── terminal-pane.vue      # Interactive workspace terminal
 │   │       ├── display-pane.vue       # Workspace desktop/browser display over WebRTC
-│   │       ├── session-sidebar.vue    # Session list sidebar (search, filter, CRUD)
+│   │       ├── browser-pane.vue       # Embedded workspace browser pane
 │   │       ├── session-info-panel.vue # Session info panel
-│   │       ├── chat-header.vue        # Chat top bar (status, step indicator)
 │   │       ├── message-item.vue       # Single message (user/assistant, markdown, blocks)
-│   │       ├── session-item.vue       # Session list row (avatar, title, timestamp)
 │   │       ├── thinking-block.vue     # Collapsible thinking/reasoning block
 │   │       ├── attachment-block.vue   # Attachment grid (images, audio, files)
 │   │       ├── media-gallery-lightbox.vue  # Fullscreen media lightbox
@@ -262,8 +274,9 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
 
 1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memohai/ui`. Provides `#sidebar` and `#main` slots.
 
-2. **Chat Section** (`pages/main-section/`) — Uses `MainLayout` with:
-   - **Sidebar** (`components/sidebar/`) — Bot list sidebar (collapsible). Header shows "Bots" label + create button. Body lists all bots as `BotItem` entries. Footer has a settings gear link to `/settings`.
+2. **Chat Section** (`pages/main-section/`) — VS Code-style shell (hand-rolled flex layout, no `MainLayout`):
+   - On macOS desktop a 36px full-width drag strip clears the traffic lights; web has no strip.
+   - **Sidebar** (`components/sidebar/`) — Activity rail (44px icon column: bot switcher avatar on top, Sessions/Files/Search views, Settings gear at bottom) + a resizable, collapsible side panel. Clicking the active rail icon toggles the panel (VS Code semantics). Files view is hidden without `workspace_read`.
    - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
 
 3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:
@@ -271,10 +284,9 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
    - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
 
 4. **Home/Chat Page** (`pages/home/`) — Internal layout:
-   - **ChatSidebar** — Left panel: session search/filter/CRUD plus file/tool affordances.
-   - **ChatWorkspace** — Main panel: tabbed chat, file viewer/editor, terminal panes, and display panes.
-   - **ChatArea** — Message list with scroll and input area with attachments.
-   - **SessionInfoPanel** — Right panel: session info display.
+   - **ChatWorkspace** — [dockview-vue](https://dockview.dev) host for the center area: tabs, drag-and-drop splits (right/down), per-bot layout serialization. Panel types: `chat` (singleton, content follows the active session), `file`, `terminal`, `browser`, `display`. Floating groups are disabled; all panels use `renderer: 'always'` so terminals / iframes / WebRTC survive tab switches.
+   - **ChatPane** — Message list with scroll and input area with attachments (KeepAlive-cached per session inside the chat panel).
+   - **SessionInfoPanel** — Session info display (via the composer info ring).
 
 Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, speech, transcription).
 
@@ -429,7 +441,7 @@ SDK also generates colada helpers: `getBotsQuery()`, `postBotsMutation()`, query
 | `capabilities` | `capabilities` | Server feature flags (container backend, snapshot support), loaded once from `getPing()` |
 | `chat-selection` | `chat-selection` | Current bot ID and session ID, persisted via `useStorage` to localStorage |
 | `chat-list` | `chat` | Chat messages, sessions, bots, streaming state, SSE/WS event processing. Depends on `chat-selection` store for current bot/session. Utility functions in `chat-list.utils.ts` |
-| `workspace-tabs` | `workspace-tabs` | Chat/file/terminal/display tabs for the active workspace area |
+| `workspace-tabs` | `workspace-tabs` | Dockview layout manager: holds the `DockviewApi` handle, opens/closes panels (chat/file/terminal/browser/display), serializes layout per bot under `workspace-layout`, and owns activity-bar/side-panel state (`sidebarView`, `sidebarOpen`, `sidebarWidth`). The active chat session lives in `chat-selection` |
 | `display-snapshots` | `display-snapshots` | Last display screenshots for previews in chat and bot desktop settings |
 
 Additional stores in `stores/`:
@@ -457,7 +469,7 @@ Chat supports two transport modes: **Server-Sent Events (SSE)** and **WebSocket*
 
 ## Workspace, Display, Browser Use, and Computer Use
 
-- Workspace tabs are managed by `store/workspace-tabs.ts`: chat, draft, file, terminal, and display tabs share the same main workspace region.
+- The center workspace is a dockview layout managed by `store/workspace-tabs.ts`: chat / file / terminal / browser / display are dockview panels that can be tabbed together or split. The chat panel is a singleton that follows the active session; the workspace file browser lives in the left side panel (`components/sidebar/files-pane.vue`), not in the dock.
 - Terminal and file panes are normal workspace features. Display panes are container-workspace features and are hidden for trusted local bots via `utils/bot-workspace.ts` (`metadata.workspace.backend === 'local'` or API `workspace_backend === 'local'`).
 - `pages/home/components/display-pane.vue` connects to the workspace display service, prepares the display runtime, opens a WebRTC session, forwards keyboard/pointer input, and captures snapshots for previews. It represents a headed container desktop with a browser, not a headless automation runner.
 - `pages/bots/components/bot-desktop.vue` is the settings/runtime surface for enabling display, checking Xvnc/browser/toolkit availability, viewing live sessions, and closing display sessions.

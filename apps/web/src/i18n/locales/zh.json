@@ -119,7 +119,9 @@
     "people": "成员",
     "appearance": "外观定制",
     "supermarket": "应用市场",
-    "about": "关于"
+    "about": "关于",
+    "switchBot": "切换智能体",
+    "manageBots": "管理智能体"
   },
   "breadcrumb": {
     "main": "首页"
@@ -484,7 +486,6 @@
     "noModels": "暂无可用模型",
     "acpAttachmentsUnsupported": "ACP 会话暂不支持附件。",
     "sessionFilterAll": "全部",
-    "sessionSourcePrefix": "来自：",
     "searchSessionPlaceholder": "搜索",
     "heartbeatTrigger": "心跳触发",
     "heartbeatTime": "触发时间",
@@ -509,24 +510,25 @@
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
     "compactFailed": "上下文压缩失败",
-    "activityTabSessions": "会话",
-    "activityTabFiles": "文件",
-    "activityTabTerminal": "终端",
-    "activityTabSkills": "技能",
-    "activityTabMcp": "MCP",
-    "activityTabSchedule": "定时任务",
-    "skillsEmpty": "暂无技能",
-    "untitledSkill": "未命名技能",
-    "mcpEmpty": "暂无 MCP 连接",
-    "untitledMcp": "未命名连接",
-    "mcpInactive": "未激活",
-    "mcpOpenInSettings": "在设置中查看",
-    "mcpManageInSettings": "管理 MCP",
-    "scheduleEmpty": "暂无定时任务",
-    "untitledSchedule": "未命名任务",
-    "scheduleManageInSettings": "管理定时任务",
-    "emptyWorkspace": "暂无打开的标签页",
-    "emptyWorkspaceHint": "从左侧打开会话或文件",
+    "sessionStreaming": "生成中",
+    "topBar": {
+      "hideWorkbench": "隐藏侧边栏",
+      "showWorkbench": "显示侧边栏",
+      "goBack": "后退",
+      "goForward": "前进"
+    },
+    "activityBar": {
+      "sessions": "会话",
+      "files": "文件",
+      "search": "搜索"
+    },
+    "workspaceEmpty": "暂无打开的标签页",
+    "workspaceEmptyHint": "从侧栏选择会话，或打开文件、终端、浏览器",
+    "tabMenu": {
+      "close": "关闭",
+      "closeOthers": "关闭其他",
+      "closeAll": "关闭全部"
+    },
     "tabClose": "关闭标签页",
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
@@ -536,8 +538,7 @@
       "openBrowser": "打开浏览器",
       "openDisplay": "打开桌面窗口",
       "menu": "标签页操作",
-      "closeAll": "关闭全部",
-      "closeFinished": "关闭已保存和结束的"
+      "closeAll": "关闭全部"
     },
     "browser": {
       "title": "浏览器",
