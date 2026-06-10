@@ -337,18 +337,6 @@ func TestIntFromConfig(t *testing.T) {
 	}
 }
 
-func TestBuiltinProviderBadServiceTypeDoesNotPanic(t *testing.T) {
-	t.Parallel()
-	p := NewBuiltinProvider(slog.Default(), "not a runtime", nil, nil)
-	if p.service != nil {
-		t.Fatal("expected nil service for non-memoryRuntime value")
-	}
-	_, err := p.Search(context.Background(), adapters.SearchRequest{BotID: "b", Query: "q"})
-	if err == nil {
-		t.Fatal("expected error from nil service")
-	}
-}
-
 func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	t.Parallel()
 	p := NewBuiltinProvider(slog.Default(), nil, nil, nil)
@@ -386,20 +374,19 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 
 func TestNewBuiltinRuntimeFromConfig_DefaultReturnsFileRuntime(t *testing.T) {
 	t.Parallel()
-	sentinel := "file-runtime-sentinel"
-	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, sentinel, nil, nil, defaultTestConfig())
+	rt, err := NewBuiltinRuntimeFromConfig(nil, nil, nil, nil, defaultTestConfig())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if rt != sentinel {
-		t.Fatalf("expected file runtime sentinel, got %v", rt)
+	if rt.Mode() != string(ModeOff) {
+		t.Fatalf("expected file runtime in mode off, got %q", rt.Mode())
 	}
 }
 
 func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "dense"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig())
+	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig())
 	if err == nil {
 		t.Fatal("expected error for dense mode without embedding_model_id")
 	}
@@ -408,7 +395,7 @@ func TestNewBuiltinRuntimeFromConfig_DenseErrorPropagates(t *testing.T) {
 func TestNewBuiltinRuntimeFromConfig_SparseErrorPropagates(t *testing.T) {
 	t.Parallel()
 	cfg := map[string]any{"memory_mode": "sparse"}
-	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, "fallback", nil, nil, defaultTestConfig())
+	_, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, defaultTestConfig())
 	if err == nil {
 		t.Fatal("expected error for sparse mode without encoder base URL")
 	}

@@ -24,7 +24,7 @@ const (
 
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
-	service      memoryRuntime
+	service      Runtime
 	llm          adapters.LLM
 	chatAccessor conversation.Accessor
 	adminChecker AdminChecker
@@ -32,10 +32,10 @@ type BuiltinProvider struct {
 	packer       contextPackerConfig
 }
 
-// memoryRuntime is the runtime memory backend required by the builtin provider.
+// Runtime is the runtime memory backend required by the builtin provider.
 // It is intentionally defined as an interface to decouple provider wiring from
 // concrete service structs in the memory package.
-type memoryRuntime interface {
+type Runtime interface {
 	Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error)
 	Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error)
 	GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error)
@@ -59,17 +59,13 @@ type AdminChecker interface {
 	IsAdmin(ctx context.Context, channelIdentityID string) (bool, error)
 }
 
-func NewBuiltinProvider(log *slog.Logger, service any, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
+func NewBuiltinProvider(log *slog.Logger, service Runtime, chatAccessor conversation.Accessor, adminChecker AdminChecker) *BuiltinProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	logger := log.With(slog.String("provider", BuiltinType))
-	runtimeService, ok := service.(memoryRuntime)
-	if service != nil && !ok {
-		logger.Warn("service does not implement memoryRuntime; provider will operate without a backend")
-	}
 	return &BuiltinProvider{
-		service:      runtimeService,
+		service:      service,
 		chatAccessor: chatAccessor,
 		adminChecker: adminChecker,
 		logger:       logger,

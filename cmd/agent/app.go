@@ -265,12 +265,8 @@ func provideMemoryLLM(modelsService *models.Service, settingsService *settings.S
 func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatService *conversation.Service, accountService *accounts.Service, provider bridge.Provider, queries dbstore.Queries, cfg config.Config) *memprovider.Registry {
 	registry := memprovider.NewRegistry(log)
 	fileStore := storefs.New(log, provider)
-	var fileRuntime any
-	if provider != nil {
-		fileRuntime = membuiltin.NewFileRuntime(fileStore)
-	}
 	registry.RegisterFactory(string(memprovider.ProviderBuiltin), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileRuntime, fileStore, queries, cfg)
+		runtime, err := membuiltin.NewBuiltinRuntimeFromConfig(log, providerConfig, fileStore, queries, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +281,7 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, chatSe
 	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ string, providerConfig map[string]any) (memprovider.Provider, error) {
 		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
-	defaultProvider := membuiltin.NewBuiltinProvider(log, fileRuntime, chatService, accountService)
+	defaultProvider := membuiltin.NewBuiltinProvider(log, membuiltin.NewFileRuntime(fileStore), chatService, accountService)
 	defaultProvider.SetLLM(llm)
 	registry.Register("__builtin_default__", defaultProvider)
 	return registry

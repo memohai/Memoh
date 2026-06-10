@@ -13,28 +13,20 @@ import (
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
 
-type fileMemoryStore interface {
-	PersistMemories(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ReadAllMemoryFiles(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
-	RemoveMemories(ctx context.Context, botID string, ids []string) error
-	RemoveAllMemories(ctx context.Context, botID string) error
-	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
-	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
-	SyncOverview(ctx context.Context, botID string) error
-	CountMemoryFiles(ctx context.Context, botID string) (int, error)
-}
-
 // fileRuntime implements the built-in file-backed memory runtime. Markdown files
 // remain the source of truth, with no derived vector index.
 type fileRuntime struct {
-	store fileMemoryStore
+	store memoryStore
 }
 
-func NewFileRuntime(store *storefs.Service) *fileRuntime {
+// NewFileRuntime returns the file-only Runtime used when the builtin provider
+// runs with memory_mode "off": markdown files are served directly without any
+// derived vector index.
+func NewFileRuntime(store *storefs.Service) Runtime {
 	return newFileRuntime(store)
 }
 
-func newFileRuntime(store fileMemoryStore) *fileRuntime {
+func newFileRuntime(store memoryStore) *fileRuntime {
 	if store == nil {
 		return nil
 	}

@@ -130,7 +130,7 @@ func float64sToFloat32s(in []float64) []float32 {
 	return out
 }
 
-// --- memoryRuntime interface ---
+// --- Runtime interface ---
 
 func (r *denseRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapters.SearchResponse, error) {
 	botID, err := runtimeBotID(req.BotID, req.Filters)

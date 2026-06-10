@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -13,6 +14,18 @@ import (
 	qdrantclient "github.com/memohai/memoh/internal/memory/qdrant"
 	storefs "github.com/memohai/memoh/internal/memory/storefs"
 )
+
+// memoryStore is the markdown file store consumed by the builtin runtimes.
+type memoryStore interface {
+	PersistMemories(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
+	ReadAllMemoryFiles(ctx context.Context, botID string) ([]storefs.MemoryItem, error)
+	RemoveMemories(ctx context.Context, botID string, ids []string) error
+	RemoveAllMemories(ctx context.Context, botID string) error
+	RebuildFiles(ctx context.Context, botID string, items []storefs.MemoryItem, filters map[string]any) error
+	ArchiveAndRebuildFiles(ctx context.Context, botID string, active []storefs.MemoryItem, archived []storefs.MemoryItem, filters map[string]any) error
+	SyncOverview(ctx context.Context, botID string) error
+	CountMemoryFiles(ctx context.Context, botID string) (int, error)
+}
 
 func canonicalStoreItem(item storefs.MemoryItem) storefs.MemoryItem {
 	item.ID = strings.TrimSpace(item.ID)
