@@ -2,11 +2,21 @@
   <section class="absolute inset-0 flex flex-col bg-background">
     <div class="flex-1 relative">
       <MasterDetailSidebarLayout
+        flush
         class="[&_td:last-child]:w-45"
       >
         <template #sidebar-header>
+          <!-- Back to the bot grid — same NavItem, position and style as the
+               settings sidebar's back affordance; only the label differs. -->
+          <div class="px-[16px] pt-[18px] pb-3">
+            <NavItem @click="router.push({ name: 'bots' }).catch(() => {})">
+              <ChevronLeft class="size-3.5 shrink-0" />
+              <span>{{ $t('sidebar.bots') }}</span>
+            </NavItem>
+          </div>
+
           <!-- Bot Identity Header -->
-          <div class="p-4 pb-3 flex flex-col">
+          <div class="px-4 pb-3 flex flex-col">
             <div class="flex items-center gap-3">
               <!-- Avatar -->
               <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
@@ -104,7 +114,7 @@
                 autocapitalize="off"
                 autocorrect="off"
                 spellcheck="false"
-                class="pl-8 h-8 text-xs bg-transparent shadow-none focus-visible:ring-0"
+                class="pl-8 pr-8 h-8 text-xs"
                 :placeholder="$t('common.search')"
               />
               <button
@@ -120,87 +130,44 @@
         </template>
 
         <template #sidebar-content>
-          <!-- Search Results View -->
-          <div
-            v-if="searchQuery"
-            class="flex flex-col gap-1"
-          >
-            <div
-              v-if="searchResults.length === 0"
-              class="px-3 py-4 text-xs text-muted-foreground text-center"
-            >
-              {{ $t('common.noData') }}
-            </div>
-            <SidebarMenu
-              v-else
-              class="m-0 p-0 gap-1"
-            >
-              <SidebarMenuItem
-                v-for="(result, idx) in searchResults"
-                :key="idx"
+          <!-- Same NavItem rows as the settings sidebar; search narrows the
+               groups in place instead of swapping to a separate result list. -->
+          <div class="px-2 pb-2">
+            <template v-if="displayGroups.length">
+              <div
+                v-for="(group, idx) in displayGroups"
+                :key="group.key"
+                :class="idx > 0 ? 'mt-4' : ''"
               >
-                <SidebarMenuButton
-                  as-child
-                  class="justify-start py-0! px-0 h-11 before:hidden"
-                >
-                  <button
-                    class="w-full flex flex-col items-start justify-center py-2 px-3 text-left border border-transparent transition-colors hover:bg-accent hover:text-accent-foreground rounded-md group/result"
-                    @click="() => { activeTab = result.tab; searchQuery = '' }"
+                <SidebarMenu class="m-0 gap-1 p-0">
+                  <SidebarMenuItem
+                    v-for="tab in group.items"
+                    :key="tab.value"
                   >
-                    <span class="text-xs font-medium text-foreground group-hover/result:text-accent-foreground">{{ result.translatedTitle }}</span>
-                    <span class="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 group-hover/result:text-accent-foreground/70">
-                      <component
-                        :is="tabList.find(t => t.value === result.tab)?.icon"
-                        class="size-3 opacity-70"
-                      />
-                      {{ $t(`bots.tabs.${result.tab}`) }}
-                    </span>
-                  </button>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </div>
-
-          <!-- Normal Grouped View -->
-          <template v-else>
-            <div
-              v-for="(group, idx) in groupedTabs"
-              :key="group.key"
-              :class="idx > 0 ? 'mt-4' : ''"
-              class="flex flex-col gap-0.5"
-            >
-              <SidebarMenu
-                v-for="tab in group.items"
-                :key="tab.value"
-                class="m-0 p-0"
-              >
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    as-child
-                    :is-active="activeTab === tab.value"
-                    class="justify-start py-0! px-0 h-10 before:hidden"
-                  >
-                    <Toggle
-                      class="w-full justify-start h-10 px-3 text-xs font-medium border-0 bg-transparent! transition-colors gap-3"
-                      :model-value="isActive(tab.value).value"
-                      @update:model-value="(isSelect: boolean) => {
-                        if (isSelect) {
-                          activeTab = tab.value
-                        }
-                      }"
+                    <NavItem
+                      :active="activeTab === tab.value"
+                      :aria-current="activeTab === tab.value ? 'page' : undefined"
+                      @click="selectTab(tab.value)"
                     >
                       <component
                         :is="tab.icon"
                         v-if="tab.icon"
+                        :stroke-width="1.75"
                         class="size-4 shrink-0"
                       />
                       <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
-                    </Toggle>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
+                    </NavItem>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </div>
+            </template>
+            <div
+              v-else
+              class="px-3 py-6 text-center text-xs text-muted-foreground"
+            >
+              {{ $t('common.noData') }}
             </div>
-          </template>
+          </div>
         </template>
 
         <template #sidebar-footer />
@@ -232,15 +199,15 @@
 <script setup lang="ts">
 import {
   Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, Toggle
+  SidebarMenu, SidebarMenuItem,
 } from '@memohai/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen
+  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
@@ -281,6 +248,7 @@ import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
+import NavItem from '@/components/settings-sidebar/nav-item.vue'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 type BotCheck = BotsBotCheck
@@ -288,6 +256,7 @@ type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 // The route param may be a name slug or a UUID; resolve it to the canonical
 // bot UUID so child tabs keep operating on UUIDs.
@@ -394,19 +363,28 @@ const searchIndex = computed(() => {
   }))
 })
 
-const searchResults = computed(() => {
-  const query = searchQuery.value.toLowerCase().trim()
-  if (!query) return []
-  const visibleTabs = new Set(tabList.value.map(tab => tab.value))
-  
-  return searchIndex.value.filter(item => {
-    if (!visibleTabs.has(item.tab)) return false
-    return item.translatedTitle.toLowerCase().includes(query) || 
-           item.keywords.some(k => k.toLowerCase().includes(query)) ||
-           t(`bots.tabs.${item.tab}`).toLowerCase().includes(query) ||
-           item.tab.toLowerCase().includes(query)
-  })
-})
+const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
+
+// Match a tab against the search box: its title, its tab key, and the keyword
+// index so deep settings (e.g. "telegram", "qdrant") still surface the tab.
+function tabMatches(tab: { value: string, label: string }): boolean {
+  const q = normalizedQuery.value
+  if (!q) return true
+  if (t(tab.label).toLowerCase().includes(q)) return true
+  if (t(`bots.tabs.${tab.value}`).toLowerCase().includes(q)) return true
+  if (tab.value.toLowerCase().includes(q)) return true
+  return searchIndex.value.some(item =>
+    item.tab === tab.value && (
+      item.translatedTitle.toLowerCase().includes(q)
+      || item.keywords.some(k => k.toLowerCase().includes(q))
+    ),
+  )
+}
+
+function selectTab(value: string): void {
+  activeTab.value = value
+  searchQuery.value = ''
+}
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
@@ -422,9 +400,12 @@ const groupedTabs = computed(() => {
   ].filter(g => g.items.length > 0)
 })
 
-const isActive = (name: string) => computed(() => {
-  return activeTab.value === name
-})
+// Narrow the grouped nav in place while searching; drop emptied groups.
+const displayGroups = computed(() =>
+  groupedTabs.value
+    .map(group => ({ ...group, items: group.items.filter(tabMatches) }))
+    .filter(group => group.items.length > 0),
+)
 
 const activeComponent = computed(() => {
   return tabList.value.find(tab => tab.value === activeTab.value)

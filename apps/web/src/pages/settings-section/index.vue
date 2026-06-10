@@ -26,7 +26,10 @@
         >
           <MainLayout>
             <template #sidebar>
-              <SettingsSidebar />
+              <!-- De-nest: inside a single bot, its own nav (rendered by
+                   bots/detail.vue) takes over this column, so the settings nav
+                   steps aside instead of stacking a second sidebar beside it. -->
+              <SettingsSidebar v-if="!isBotDetail" />
             </template>
             <template #main>
               <SidebarInset class="flex flex-col overflow-hidden">
@@ -47,14 +50,20 @@
 </template>
 
 <script setup lang="ts">
-import { inject, ref } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { computed, inject, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { SidebarInset } from '@memohai/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 
 const desktopShell = inject(DesktopShellKey, false)
+
+const route = useRoute()
+// On a single bot's detail page the bot's own nav owns the left column, so we
+// drop the settings nav here to avoid two stacked sidebars (the "three-column"
+// nesting). Every other settings route keeps the settings nav.
+const isBotDetail = computed(() => route.name === 'bot-detail')
 
 // Page transition: slide-in from the right on open, faster slide-out on leave.
 // We hold the navigation until the leave animation has played.
