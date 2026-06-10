@@ -634,7 +634,16 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 	role := ""
 	roleIdentityID := strings.TrimSpace(input.ChannelIdentityID)
 	if h.roleResolver != nil && roleIdentityID != "" {
-		if r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID); err == nil {
+		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn("failed to resolve member role in CommandAccess",
+					slog.String("bot_id", input.BotID),
+					slog.String("channel_identity_id", roleIdentityID),
+					slog.Any("error", err),
+				)
+			}
+		} else {
 			role = r
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -223,6 +224,12 @@ func (s *Service) classifyRedeemNoRow(ctx context.Context, token string) error {
 	if !code.ExpiresAt.Valid || !code.ExpiresAt.Time.After(s.now()) {
 		return ErrCodeExpired
 	}
+	// The code exists, is unconsumed, and is not expired, yet the redeem CTE
+	// returned no rows. This is a narrow race: between the CTE's UPDATE check
+	// and this diagnostic SELECT, another concurrent request consumed the code,
+	// or a clock-skew edge made the CTE's now() disagree with ours. Returning
+	// ErrCodeConsumed is approximately correct for the user ("code already used")
+	// and safe — the binding was not created.
 	return ErrCodeConsumed
 }
 
@@ -332,15 +339,11 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 				mergeManagerBinding(byIdentity, b.ChannelIdentityID, carriesManage, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
 			}
 		}
-		if everyoneCarriesManage {
-			bindings, err := s.queries.ListChannelIdentityBindings(ctx)
-			if err != nil {
-				return nil, err
-			}
-			for _, b := range bindings {
-				mergeManagerBinding(byIdentity, b.ChannelIdentityID, true, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
-			}
-		}
+		// When "everyone" carries Manage, every registered user has manage on this
+		// bot. Enumerating ALL global bindings here would leak channel identities
+		// from unrelated bots (user_channel_identity_bindings is a global table).
+		// The per-user grant loop above already populated known members. The UI
+		// derives the "everyone has Manage" state from the workspace grants list.
 	}
 
 	// Local overrides win over inheritance.
@@ -378,6 +381,14 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 	for _, m := range byIdentity {
 		items = append(items, *m)
 	}
+	sort.Slice(items, func(i, j int) bool {
+		ni := items[i].ChannelIdentityDisplayName
+		nj := items[j].ChannelIdentityDisplayName
+		if ni != nj {
+			return ni < nj
+		}
+		return items[i].ChannelIdentityID < items[j].ChannelIdentityID
+	})
 	return items, nil
 }
 

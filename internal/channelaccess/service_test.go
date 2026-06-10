@@ -13,20 +13,21 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-func TestListManagersIncludesEveryoneManageBindings(t *testing.T) {
+// TestListManagersEveryoneDoesNotEnumerateGlobalBindings guards the fix for the
+// cross-tenant data leak: when "everyone" carries Manage, ListManagers must NOT
+// call ListChannelIdentityBindings (which returns ALL bindings across the entire
+// database). The UI derives the "everyone has Manage" state from the grants list.
+func TestListManagersEveryoneDoesNotEnumerateGlobalBindings(t *testing.T) {
 	ctx := context.Background()
 	botID := "00000000-0000-0000-0000-000000000010"
-	channelIdentityID := "00000000-0000-0000-0000-000000000020"
 
 	svc := &Service{
 		queries: &fakeChannelAccessQueries{
 			allBindings: []sqlc.ListChannelIdentityBindingsRow{{
-				ID:                         mustUUID(t, "00000000-0000-0000-0000-000000000021"),
-				UserID:                     mustUUID(t, "00000000-0000-0000-0000-000000000022"),
-				ChannelIdentityID:          mustUUID(t, channelIdentityID),
-				ChannelType:                text("telegram"),
-				ChannelSubjectID:           text("tg-1"),
-				ChannelIdentityDisplayName: text("Alice"),
+				ID:                mustUUID(t, "00000000-0000-0000-0000-000000000021"),
+				UserID:            mustUUID(t, "00000000-0000-0000-0000-000000000022"),
+				ChannelIdentityID: mustUUID(t, "00000000-0000-0000-0000-000000000020"),
+				ChannelType:       text("telegram"),
 			}},
 		},
 		acl: &fakeManageOverrides{},
@@ -43,35 +44,21 @@ func TestListManagersIncludesEveryoneManageBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list managers: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 manager, got %d: %#v", len(items), items)
-	}
-	item := items[0]
-	if item.ChannelIdentityID != channelIdentityID {
-		t.Fatalf("unexpected channel identity: %q", item.ChannelIdentityID)
-	}
-	if !item.Bound || !item.Inherited || !item.Manage {
-		t.Fatalf("expected everyone Manage to be inherited and effective, got %#v", item)
-	}
-	if item.ChannelType != "telegram" || item.ChannelIdentityDisplayName != "Alice" {
-		t.Fatalf("identity metadata was not preserved: %#v", item)
+	if len(items) != 0 {
+		t.Fatalf("everyone-manage must not enumerate global bindings, got %d: %#v", len(items), items)
 	}
 }
 
-func TestListManagersLocalOverrideSuppressesEveryoneManage(t *testing.T) {
+// TestListManagersLocalOverrideAppliedWithoutBinding verifies that a local deny
+// override appears in the manager list even when the identity has no per-user
+// grant binding (the everyone-manage path no longer enumerates global bindings).
+func TestListManagersLocalOverrideAppliedWithoutBinding(t *testing.T) {
 	ctx := context.Background()
 	botID := "00000000-0000-0000-0000-000000000010"
 	channelIdentityID := "00000000-0000-0000-0000-000000000020"
 
 	svc := &Service{
-		queries: &fakeChannelAccessQueries{
-			allBindings: []sqlc.ListChannelIdentityBindingsRow{{
-				ID:                mustUUID(t, "00000000-0000-0000-0000-000000000021"),
-				UserID:            mustUUID(t, "00000000-0000-0000-0000-000000000022"),
-				ChannelIdentityID: mustUUID(t, channelIdentityID),
-				ChannelType:       text("telegram"),
-			}},
-		},
+		queries: &fakeChannelAccessQueries{},
 		acl: &fakeManageOverrides{
 			overrides: []acl.ManageOverride{{
 				BotID:             botID,
@@ -93,14 +80,14 @@ func TestListManagersLocalOverrideSuppressesEveryoneManage(t *testing.T) {
 		t.Fatalf("list managers: %v", err)
 	}
 	if len(items) != 1 {
-		t.Fatalf("expected 1 manager, got %d: %#v", len(items), items)
+		t.Fatalf("expected 1 override entry, got %d: %#v", len(items), items)
 	}
 	item := items[0]
-	if !item.Bound || !item.Inherited || !item.HasOverride {
-		t.Fatalf("expected bound inherited identity with override, got %#v", item)
+	if !item.HasOverride {
+		t.Fatalf("expected HasOverride, got %#v", item)
 	}
 	if item.Manage {
-		t.Fatalf("expected local deny override to suppress everyone Manage, got %#v", item)
+		t.Fatalf("expected local deny override (Manage=false), got %#v", item)
 	}
 }
 
