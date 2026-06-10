@@ -103,7 +103,7 @@ func TestListManagersLocalOverrideAppliedWithoutBinding(t *testing.T) {
 
 type fakeChannelAccessQueries struct {
 	dbstore.Queries
-	allBindings     []sqlc.ListChannelIdentityBindingsRow
+	allBindings       []sqlc.ListChannelIdentityBindingsRow
 	botScopedBindings []sqlc.ListChannelIdentityBindingsForBotRow
 }
 
