@@ -170,10 +170,6 @@ func (c *Client) Compact(ctx context.Context, req adapters.CompactRequest) (adap
 	return adapters.CompactResponse{Facts: facts}, nil
 }
 
-func (*Client) DetectLanguage(_ context.Context, _ string) (string, error) {
-	return "", nil
-}
-
 // buildUpdateUserMessage formats the Decide user message following Mem0's
 // update prompt convention: current memory + retrieved facts in triple backticks.
 func buildUpdateUserMessage(candidates []adapters.CandidateMemory, facts []string) string {

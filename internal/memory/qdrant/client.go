@@ -221,23 +221,6 @@ func (c *Client) SearchDense(ctx context.Context, vec DenseVector, botID string,
 	return scoredPointsToResults(scored), nil
 }
 
-// GetByID fetches a single point by UUID.
-func (c *Client) GetByID(ctx context.Context, id string) (*SearchResult, error) {
-	points, err := c.inner.Get(ctx, &pb.GetPoints{
-		CollectionName: c.collection,
-		Ids:            []*pb.PointId{pb.NewID(id)},
-		WithPayload:    pb.NewWithPayload(true),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("qdrant: get: %w", err)
-	}
-	if len(points) == 0 {
-		return nil, nil
-	}
-	r := retrievedPointToResult(points[0])
-	return &r, nil
-}
-
 // Scroll returns all points matching bot_id, up to limit.
 func (c *Client) Scroll(ctx context.Context, botID string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {

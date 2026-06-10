@@ -43,10 +43,6 @@ func (f *fakeLLM) Compact(_ context.Context, req adapters.CompactRequest) (adapt
 	return adapters.CompactResponse{Facts: f.compactFacts}, f.compactErr
 }
 
-func (*fakeLLM) DetectLanguage(context.Context, string) (string, error) {
-	return "", nil
-}
-
 func TestFormationExtractAndAdd(t *testing.T) {
 	t.Parallel()
 	encoder := &fakeSparseEncoder{}

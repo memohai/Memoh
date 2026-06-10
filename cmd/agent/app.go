@@ -1209,14 +1209,6 @@ func (c *lazyLLMClient) Compact(ctx context.Context, req memprovider.CompactRequ
 	return client.Compact(ctx, req)
 }
 
-func (c *lazyLLMClient) DetectLanguage(ctx context.Context, text string) (string, error) {
-	client, err := c.resolve(ctx, "")
-	if err != nil {
-		return "", err
-	}
-	return client.DetectLanguage(ctx, text)
-}
-
 func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.LLM, error) {
 	if c.modelsService == nil || c.queries == nil {
 		return nil, errors.New("models service not configured")
