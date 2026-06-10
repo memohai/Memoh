@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -216,6 +217,134 @@ func TestGStreamerScreenshotArgsCapturesComputerUseJPEG(t *testing.T) {
 	}
 }
 
+func TestRFBInputKeyJittersLastPointerToWakeDisplayRefresh(t *testing.T) {
+	conn := &recordingConn{}
+	input := &rfbInputClient{conn: conn}
+
+	if err := input.Pointer(320, 240, 1); err != nil {
+		t.Fatalf("Pointer returned error: %v", err)
+	}
+	if err := input.Key(0x61, true); err != nil {
+		t.Fatalf("Key returned error: %v", err)
+	}
+
+	got := conn.Bytes()
+	want := []byte{
+		5, 1, 0x01, 0x40, 0x00, 0xf0,
+		4, 1, 0, 0, 0, 0, 0, 0x61,
+		5, 1, 0x01, 0x3f, 0x00, 0xf0,
+		5, 1, 0x01, 0x40, 0x00, 0xf0,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("input bytes = %v, want %v", got, want)
+	}
+}
+
+func TestRFBInputKeyWithoutPointerDoesNotMoveCursor(t *testing.T) {
+	conn := &recordingConn{}
+	input := &rfbInputClient{conn: conn}
+
+	if err := input.Key(0xff0d, true); err != nil {
+		t.Fatalf("Key returned error: %v", err)
+	}
+
+	got := conn.Bytes()
+	want := []byte{4, 1, 0, 0, 0, 0, 0xff, 0x0d}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("input bytes = %v, want %v", got, want)
+	}
+}
+
+func TestRFBSetEncodingsRequestsCursorPseudoEncoding(t *testing.T) {
+	var conn recordingConn
+
+	if err := writeRFBSetEncodings(&conn, []int32{rfbEncodingCursor, rfbEncodingXCursor, rfbEncodingRaw}); err != nil {
+		t.Fatalf("writeRFBSetEncodings returned error: %v", err)
+	}
+
+	got := conn.Bytes()
+	want := []byte{
+		2, 0, 0, 3,
+		0xff, 0xff, 0xff, 0x11,
+		0xff, 0xff, 0xff, 0x10,
+		0, 0, 0, 0,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("set encodings bytes = %v, want %v", got, want)
+	}
+}
+
+func TestProxyRFBSetEncodingsInjectsCursorAndRestrictsUnsupportedEncodings(t *testing.T) {
+	client := bytes.NewBuffer([]byte{
+		0, 0, 3,
+		0, 0, 0, 5,
+		0, 0, 0, 1,
+		0, 0, 0, 0,
+	})
+	var server recordingConn
+
+	if err := proxyRFBSetEncodingsWithCursor(client, &server); err != nil {
+		t.Fatalf("proxyRFBSetEncodingsWithCursor returned error: %v", err)
+	}
+
+	got := server.Bytes()
+	want := []byte{
+		2, 0, 0, 4,
+		0xff, 0xff, 0xff, 0x11,
+		0xff, 0xff, 0xff, 0x10,
+		0, 0, 0, 1,
+		0, 0, 0, 0,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("proxied encodings = %v, want %v", got, want)
+	}
+}
+
+func TestProxyRFBFramebufferUpdateFiltersCursorRectangles(t *testing.T) {
+	server := bytes.NewBuffer([]byte{
+		0, 0, 2,
+		0, 1, 0, 1, 0, 1, 0, 1, 0xff, 0xff, 0xff, 0x11,
+		0x00, 0x00, 0xff, 0x00, 0x80,
+		0, 2, 0, 2, 0, 2, 0, 1, 0, 0, 0, 0,
+		1, 2, 3, 4, 5, 6, 7, 8,
+	})
+	var client recordingConn
+
+	if err := proxyRFBFramebufferUpdateWithoutCursor(&client, server, cursorPixelFormat); err != nil {
+		t.Fatalf("proxyRFBFramebufferUpdateWithoutCursor returned error: %v", err)
+	}
+
+	got := client.Bytes()
+	want := []byte{
+		0, 0, 0, 1,
+		0, 2, 0, 2, 0, 2, 0, 1, 0, 0, 0, 0,
+		1, 2, 3, 4, 5, 6, 7, 8,
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("filtered framebuffer update = %v, want %v", got, want)
+	}
+}
+
+func TestRichCursorMetadataUsesNativeCursorType(t *testing.T) {
+	rect := rfbRectHeader{x: 6, y: 11, width: 13, height: 23, encoding: rfbEncodingCursor}
+	pixels := bytes.Repeat([]byte{0x00, 0x00, 0xff, 0x00}, int(rect.width*rect.height))
+	mask := bytes.Repeat([]byte{0xff, 0xf8}, int(rect.height))
+
+	cursor, err := richCursorMetadata(rect, pixels, mask, cursorPixelFormat)
+	if err != nil {
+		t.Fatalf("richCursorMetadata returned error: %v", err)
+	}
+	if cursor.Type != "cursor" || cursor.Source != "rfb" {
+		t.Fatalf("unexpected cursor metadata type/source: %#v", cursor)
+	}
+	if cursor.Width != 13 || cursor.Height != 23 || cursor.HotX != 6 || cursor.HotY != 11 {
+		t.Fatalf("unexpected cursor geometry: %#v", cursor)
+	}
+	if cursor.Cursor != "text" {
+		t.Fatalf("cursor type = %q, want text", cursor.Cursor)
+	}
+}
+
 func TestLimitJPEGSizeRecompressesOversizedImage(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1280, 800))
 	for y := 0; y < img.Bounds().Dy(); y++ {
@@ -360,4 +489,36 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type recordingConn struct {
+	bytes.Buffer
+}
+
+func (*recordingConn) Read(_ []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (*recordingConn) Close() error {
+	return nil
+}
+
+func (*recordingConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (*recordingConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (*recordingConn) SetDeadline(_ time.Time) error {
+	return nil
+}
+
+func (*recordingConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (*recordingConn) SetWriteDeadline(_ time.Time) error {
+	return nil
 }
