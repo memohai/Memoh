@@ -9,7 +9,6 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/agent"
 	adapters "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/models"
 )
@@ -84,7 +83,7 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 	if req.TimezoneLocation != nil {
 		now = now.In(req.TimezoneLocation)
 	}
-	systemPrompt := strings.ReplaceAll(agent.MemoryExtractPrompt, "{{today}}", now.Format("2006-01-02"))
+	systemPrompt := strings.ReplaceAll(memoryExtractPrompt, "{{today}}", now.Format("2006-01-02"))
 
 	model := c.model()
 	system, messages, _ := models.ApplyPromptCache(
@@ -120,7 +119,7 @@ func (c *Client) Decide(ctx context.Context, req adapters.DecideRequest) (adapte
 	model := c.model()
 	system, messages, _ := models.ApplyPromptCache(
 		model, c.cfg.PromptCacheTTL,
-		agent.MemoryUpdatePrompt, []sdk.Message{sdk.UserMessage(userMessage)}, nil,
+		memoryUpdatePrompt, []sdk.Message{sdk.UserMessage(userMessage)}, nil,
 	)
 	result, err := sdk.GenerateTextResult(ctx,
 		sdk.WithModel(model),
