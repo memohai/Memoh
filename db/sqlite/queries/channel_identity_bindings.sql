@@ -46,6 +46,22 @@ LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
 WHERE b.user_id = sqlc.arg(user_id)
 ORDER BY b.created_at DESC;
 
+-- name: ListChannelIdentityBindingsForBot :many
+SELECT DISTINCT
+  b.id,
+  b.user_id,
+  b.channel_identity_id,
+  b.created_at,
+  b.updated_at,
+  ci.channel_type,
+  ci.channel_subject_id,
+  ci.display_name AS channel_identity_display_name,
+  ci.avatar_url AS channel_identity_avatar_url
+FROM user_channel_identity_bindings b
+INNER JOIN bot_user_grants g ON g.user_id = b.user_id AND g.bot_id = sqlc.arg(bot_id) AND g.subject_type = 'user'
+LEFT JOIN channel_identities ci ON ci.id = b.channel_identity_id
+ORDER BY b.created_at DESC;
+
 -- name: ListChannelIdentityBindings :many
 SELECT
   b.id,

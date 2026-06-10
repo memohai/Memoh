@@ -339,11 +339,19 @@ func (s *Service) ListManagers(ctx context.Context, botID string) ([]Manager, er
 				mergeManagerBinding(byIdentity, b.ChannelIdentityID, carriesManage, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
 			}
 		}
-		// When "everyone" carries Manage, every registered user has manage on this
-		// bot. Enumerating ALL global bindings here would leak channel identities
-		// from unrelated bots (user_channel_identity_bindings is a global table).
-		// The per-user grant loop above already populated known members. The UI
-		// derives the "everyone has Manage" state from the workspace grants list.
+		if everyoneCarriesManage {
+			// Scoped query: only return bindings for users who have a grant on
+			// this specific bot (via bot_user_grants JOIN). This prevents leaking
+			// channel identities from unrelated bots while still showing all
+			// workspace members' bound identities as inherited-manage.
+			bindings, err := s.queries.ListChannelIdentityBindingsForBot(ctx, db.ParseUUIDOrEmpty(botID))
+			if err != nil {
+				return nil, err
+			}
+			for _, b := range bindings {
+				mergeManagerBinding(byIdentity, b.ChannelIdentityID, true, b.ChannelType, b.ChannelSubjectID, b.ChannelIdentityDisplayName, b.ChannelIdentityAvatarUrl)
+			}
+		}
 	}
 
 	// Local overrides win over inheritance.

@@ -49,6 +49,7 @@ type Queries interface {
 	UpsertUserChannelIdentityBinding(ctx context.Context, arg dbsqlc.UpsertUserChannelIdentityBindingParams) (dbsqlc.UserChannelIdentityBinding, error)
 	ListChannelIdentityBindings(ctx context.Context) ([]dbsqlc.ListChannelIdentityBindingsRow, error)
 	ListChannelIdentityBindingsForUser(ctx context.Context, userID pgtype.UUID) ([]dbsqlc.ListChannelIdentityBindingsForUserRow, error)
+	ListChannelIdentityBindingsForBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListChannelIdentityBindingsForBotRow, error)
 	DeleteUserChannelIdentityBinding(ctx context.Context, arg dbsqlc.DeleteUserChannelIdentityBindingParams) error
 	ListUserIDsByChannelIdentity(ctx context.Context, channelIdentityID pgtype.UUID) ([]pgtype.UUID, error)
 	GetBotUserGrantByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotUserGrant, error)

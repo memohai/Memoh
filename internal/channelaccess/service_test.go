@@ -13,21 +13,24 @@ import (
 	dbstore "github.com/memohai/memoh/internal/db/store"
 )
 
-// TestListManagersEveryoneDoesNotEnumerateGlobalBindings guards the fix for the
-// cross-tenant data leak: when "everyone" carries Manage, ListManagers must NOT
-// call ListChannelIdentityBindings (which returns ALL bindings across the entire
-// database). The UI derives the "everyone has Manage" state from the grants list.
-func TestListManagersEveryoneDoesNotEnumerateGlobalBindings(t *testing.T) {
+// TestListManagersEveryoneUsesScopedBindings verifies that when "everyone" carries
+// Manage, ListManagers uses the bot-scoped query (ListChannelIdentityBindingsForBot)
+// instead of the global ListChannelIdentityBindings. This prevents cross-tenant
+// data leaks while still showing workspace members' bound identities.
+func TestListManagersEveryoneUsesScopedBindings(t *testing.T) {
 	ctx := context.Background()
 	botID := "00000000-0000-0000-0000-000000000010"
+	channelIdentityID := "00000000-0000-0000-0000-000000000020"
 
 	svc := &Service{
 		queries: &fakeChannelAccessQueries{
-			allBindings: []sqlc.ListChannelIdentityBindingsRow{{
-				ID:                mustUUID(t, "00000000-0000-0000-0000-000000000021"),
-				UserID:            mustUUID(t, "00000000-0000-0000-0000-000000000022"),
-				ChannelIdentityID: mustUUID(t, "00000000-0000-0000-0000-000000000020"),
-				ChannelType:       text("telegram"),
+			botScopedBindings: []sqlc.ListChannelIdentityBindingsForBotRow{{
+				ID:                         mustUUID(t, "00000000-0000-0000-0000-000000000021"),
+				UserID:                     mustUUID(t, "00000000-0000-0000-0000-000000000022"),
+				ChannelIdentityID:          mustUUID(t, channelIdentityID),
+				ChannelType:                text("telegram"),
+				ChannelSubjectID:           text("tg-1"),
+				ChannelIdentityDisplayName: text("Alice"),
 			}},
 		},
 		acl: &fakeManageOverrides{},
@@ -44,8 +47,15 @@ func TestListManagersEveryoneDoesNotEnumerateGlobalBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list managers: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("everyone-manage must not enumerate global bindings, got %d: %#v", len(items), items)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 manager from scoped bindings, got %d: %#v", len(items), items)
+	}
+	item := items[0]
+	if !item.Bound || !item.Inherited || !item.Manage {
+		t.Fatalf("expected bound inherited manage, got %#v", item)
+	}
+	if item.ChannelIdentityDisplayName != "Alice" {
+		t.Fatalf("expected display name Alice, got %q", item.ChannelIdentityDisplayName)
 	}
 }
 
@@ -93,11 +103,16 @@ func TestListManagersLocalOverrideAppliedWithoutBinding(t *testing.T) {
 
 type fakeChannelAccessQueries struct {
 	dbstore.Queries
-	allBindings []sqlc.ListChannelIdentityBindingsRow
+	allBindings     []sqlc.ListChannelIdentityBindingsRow
+	botScopedBindings []sqlc.ListChannelIdentityBindingsForBotRow
 }
 
 func (f *fakeChannelAccessQueries) ListChannelIdentityBindings(context.Context) ([]sqlc.ListChannelIdentityBindingsRow, error) {
 	return f.allBindings, nil
+}
+
+func (f *fakeChannelAccessQueries) ListChannelIdentityBindingsForBot(context.Context, pgtype.UUID) ([]sqlc.ListChannelIdentityBindingsForBotRow, error) {
+	return f.botScopedBindings, nil
 }
 
 type fakeManageOverrides struct {

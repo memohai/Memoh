@@ -677,6 +677,25 @@ func (q *Queries) ListChannelIdentityBindingsForUser(ctx context.Context, userID
 	return result, nil
 }
 
+func (q *Queries) ListChannelIdentityBindingsForBot(ctx context.Context, botID pgtype.UUID) ([]pgsqlc.ListChannelIdentityBindingsForBotRow, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteBotID string
+	if err := convertValue(botID, &sqliteBotID); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.ListChannelIdentityBindingsForBot(ctx, sqliteBotID)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ListChannelIdentityBindingsForBotRow
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) DeleteUserChannelIdentityBinding(ctx context.Context, arg pgsqlc.DeleteUserChannelIdentityBindingParams) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured
