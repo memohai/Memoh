@@ -34,13 +34,13 @@
                   {{ $t('settings.versionTag', { version: normalizedServerVersion }) }}
                 </Badge>
               </div>
-              <p class="mt-0.5 text-sm text-muted-foreground">
+              <p class="mt-0.5 text-[13px] leading-[18px] tracking-[-0.08px] font-[360] text-muted-foreground">
                 {{ $t('about.tagline') }}
               </p>
             </div>
           </div>
 
-          <p class="mt-4 text-sm leading-relaxed text-muted-foreground">
+          <p class="mt-4 text-[13px] leading-[19px] tracking-[-0.06px] font-[380] text-muted-foreground">
             {{ $t('about.description') }}
           </p>
 
@@ -54,6 +54,7 @@
               rel="noopener noreferrer"
               variant="outline"
               size="sm"
+              class="text-[13px] leading-[18px] tracking-[-0.08px] font-[420] text-foreground/82"
             >
               <component
                 :is="link.icon"
@@ -79,6 +80,7 @@
                 v-if="update.releaseBody"
                 variant="ghost"
                 size="sm"
+                class="font-[430] text-foreground/88"
                 @click="notesOpen = true"
               >
                 {{ $t('about.whatsChanged') }}
@@ -89,6 +91,7 @@
                 target="_blank"
                 rel="noopener noreferrer"
                 size="sm"
+                class="font-[430]"
               >
                 {{ $t('about.viewOnGitHub') }}
               </Button>
