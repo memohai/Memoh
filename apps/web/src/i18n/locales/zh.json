@@ -1324,8 +1324,6 @@
       "importFailed": "导入 Bot 备份失败"
     },
     "checks": {
-      "lastSync": "上次同步",
-      "statusTitle": "健康检查",
       "status": {
         "issue": "需要关注",
         "stable": "运行正常",
@@ -1334,20 +1332,14 @@
         "error": "错误",
         "unknown": "未知"
       },
-      "vitalityTitle": "活跃度",
-      "vitalityUnit": "次事件",
       "diagnosticTitle": "诊断信息",
       "diagnosticSubtitle": "实时系统诊断指标。",
       "expandAll": "全部展开",
       "collapse": "收起",
-      "title": "运行时检查",
-      "subtitle": "查看当前健康状态与异常详情。",
-      "ok": "无异常",
       "hasIssue": "存在异常",
       "issueCount": "{count} 个异常",
       "empty": "暂无检查项",
       "loadFailed": "加载运行时检查失败",
-      "actions": {},
       "titles": {
         "containerInit": "容器初始化",
         "containerRecord": "容器记录",
@@ -1365,8 +1357,36 @@
         "botDelete": "Bot 删除"
       }
     },
+    "overview": {
+      "issueHint": "查看诊断",
+      "platformsTitle": "平台",
+      "platformsEmpty": "还没连接任何平台",
+      "platformsEmptyHint": "连接一个平台，开始和这个 bot 对话",
+      "connectAction": "去连接",
+      "configTitle": "配置",
+      "modelLabel": "模型",
+      "modelNone": "未选择模型",
+      "reasoningBadge": "推理",
+      "memoryLabel": "记忆",
+      "memoryCount": "已索引 {count} 条记忆",
+      "memoryNone": "关闭",
+      "usageTitle": "用量 · 近 30 天",
+      "usageTotal": "总计",
+      "usageInput": "输入",
+      "usageOutput": "输出",
+      "usageCacheHit": "缓存命中",
+      "usageNone": "暂无用量",
+      "runtimeTitle": "运行状态",
+      "runtimeSampledAt": "更新于 {time}",
+      "runtimeStopped": "容器未运行 — 启动后即可查看实时资源占用。",
+      "runtimeNoMetrics": "暂时无法获取资源占用。",
+      "remindersTitle": "待处理",
+      "reminderModelTitle": "选择一个模型",
+      "reminderModelHint": "这个 bot 需要先设置模型才能回复。",
+      "reminderAction": "去设置"
+    },
     "tabs": {
-      "overviewSubtitle": "系统健康概览与核心指标。",
+      "overviewSubtitle": "这个 bot 此刻活在哪、怎么配的",
       "overview": "概览",
       "general": "通用",
       "desktop": "桌面",

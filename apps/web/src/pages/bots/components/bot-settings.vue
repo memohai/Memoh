@@ -149,9 +149,9 @@ import {
   Spinner,
 } from '@memohai/ui'
 import { Check, X, LoaderCircle } from 'lucide-vue-next'
-import { reactive, ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch, onMounted, onActivated, nextTick } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import SettingsGlobalCard from './settings-global-card.vue'
@@ -172,6 +172,32 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
+
+// Deep-link scroll: another surface (e.g. the Overview "choose a model"
+// reminder) can navigate here with ?section=<anchor-id> to land on a specific
+// block. We scroll after paint, then strip the param so a later manual visit or
+// a back/forward doesn't yank the user back down. KeepAlive caches this tab, so
+// onMounted covers the first open and onActivated covers cached re-entry.
+function scrollToSectionParam() {
+  const raw = route.query.section
+  const section = Array.isArray(raw) ? raw[0] : raw
+  if (!section) return
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      document.getElementById(`settings-section-${section}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+      // Clear only the section param, preserving tab and everything else.
+      const { section: _drop, ...rest } = route.query
+      void router.replace({ query: rest })
+    })
+  })
+}
+
+onMounted(scrollToSectionParam)
+onActivated(scrollToSectionParam)
 
 const botIdRef = computed(() => props.botId) as Ref<string>
 

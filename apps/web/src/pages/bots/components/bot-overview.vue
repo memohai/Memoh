@@ -32,10 +32,61 @@
         <ChevronRight class="size-4 shrink-0 text-muted-foreground" />
       </button>
 
-      <!-- Platforms: where the bot is reachable (this product's "source control"
-           block). Every state holds the same min-height so a cold load doesn't
-           make the block jump. -->
-      <SettingsSection :title="$t('bots.overview.platformsTitle')">
+      <!-- Reminders: setup steps the user still needs to do, that no other
+           surface already nags about (Platforms owns "connect", the banner owns
+           diagnostics). One list, grows as features land; the whole block is
+           absent once there's nothing left to do. This is the early-life
+           "what's next" that keeps a fresh bot's Overview from feeling empty.
+           Row mirrors the Platforms "Connect" layout exactly — a real outline
+           Button on the right, not a text affordance — so the two setup nudges
+           read as the same kind of action. -->
+      <section
+        v-if="reminders.length > 0"
+        class="space-y-2.5"
+      >
+        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
+          {{ $t('bots.overview.remindersTitle') }}
+        </h2>
+        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+          <div
+            v-for="r in reminders"
+            :key="r.key"
+            class="mx-4 flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border py-3 last:border-b-0"
+          >
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ r.title }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ r.hint }}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="go(r.tab, r.section)"
+            >
+              {{ r.action }}
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Platforms is deliberately low-weight: a healthy, connected bot does
+           NOT need to be told "you connected Telegram" — the user did that.
+           So the block only earns its place when it's actionable: nothing
+           connected yet (show the Connect nudge) OR the bot has a check issue
+           (surface it so a broken connection is visible). When connected and
+           healthy, it's hidden entirely. `check_state` is the aggregate signal
+           (channel/model/mcp/container combined), so an issue elsewhere also
+           reveals platforms — harmless, since it points at the same diagnostics
+           as the banner. Every state holds the same min-height so a cold load
+           doesn't make the block jump. -->
+      <SettingsSection
+        v-if="showPlatforms"
+        :title="$t('bots.overview.platformsTitle')"
+      >
         <div
           v-if="channelsLoading && configuredChannels.length === 0"
           class="mx-4 flex min-h-[3.75rem] items-center gap-3 py-3"
@@ -94,6 +145,79 @@
           </div>
         </template>
       </SettingsSection>
+
+      <!-- Runtime: the live operational state of the bot's container — the one
+           thing this page can tell the user that they can't already see. Only
+           rendered for container-backed bots; a local/desktop bot has no
+           container to monitor, so the block is absent rather than padded with
+           "not applicable" rows. Metrics auto-refresh while the container is
+           running (see the poll in script).
+
+           NO outer card: wrapping three metric tiles in a SettingsSection frame
+           was card-in-card — a big bordered box moated around a single row of
+           small boxes, which read as mostly-empty. The tiles ARE the content,
+           so they sit directly under the title row. This also reads as "live
+           telemetry" rather than a settings group, which is what it is. -->
+      <section
+        v-if="isContainerBot"
+        class="space-y-2.5"
+      >
+        <!-- Title row: section label + status Badge (sharing a baseline, so the
+             status has an edge to align to), with the sampled-at freshness note
+             pushed to the far right as a quiet footnote. -->
+        <div class="flex items-center gap-2 px-2">
+          <h2 class="text-[13px] font-medium text-muted-foreground">
+            {{ $t('bots.overview.runtimeTitle') }}
+          </h2>
+          <Badge
+            :variant="runtimeStatusVariant"
+            size="sm"
+          >
+            {{ runtimeStatusLabel }}
+          </Badge>
+          <span
+            v-if="runtimeSampledAt"
+            class="ml-auto text-[11px] tabular-nums text-muted-foreground"
+          >
+            {{ $t('bots.overview.runtimeSampledAt', { time: runtimeSampledAt }) }}
+          </span>
+        </div>
+
+        <!-- Metric tiles: CPU / memory / storage. '--' shows for any metric the
+             backend hasn't sampled, so a value is never faked as 0. -->
+        <div
+          v-if="runtimeHasMetrics"
+          class="grid grid-cols-3 gap-3"
+        >
+          <div
+            v-for="m in runtimeMetricCards"
+            :key="m.key"
+            class="rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5"
+          >
+            <p class="text-[11px] text-muted-foreground">
+              {{ m.label }}
+            </p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
+              {{ m.value }}
+            </p>
+            <p
+              v-if="m.sub"
+              class="text-[11px] tabular-nums text-muted-foreground"
+            >
+              {{ m.sub }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Why there's no metric grid: backend can't sample, or the container
+             is stopped. Honest one-liner instead of empty tiles. -->
+        <p
+          v-else
+          class="px-2 text-xs text-muted-foreground"
+        >
+          {{ runtimeMetricsNote }}
+        </p>
+      </section>
 
       <!-- Core setup: only the two settings worth surfacing here — the model it
            thinks with, and whether memory is on. Everything else lives in its
@@ -168,8 +292,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, onActivated, onDeactivated, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { use } from 'echarts/core'
@@ -178,13 +302,15 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
-import { Button, Skeleton } from '@memohai/ui'
+import { Badge, Button, Skeleton } from '@memohai/ui'
 import { AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   getBotsById,
   getBotsByBotIdSettings,
   getBotsByBotIdMemoryStatus,
   getBotsByBotIdTokenUsage,
+  getBotsByBotIdContainer,
+  getBotsByBotIdContainerMetrics,
   getModels,
   getChannels,
   getBotsByIdChannelByPlatform,
@@ -198,7 +324,9 @@ import SettingsRow from '@/components/settings/row.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
-import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
+import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
+import { formatDateTime } from '@/utils/date-time'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
 
@@ -209,10 +337,10 @@ interface BotChannelItem {
 }
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 
 const routeIdentifier = computed(() => route.params.botName as string)
-const activeTab = useSyncedQueryParam('tab', 'overview')
 const checksOpen = ref(false)
 
 const { data: bot } = useQuery({
@@ -277,6 +405,11 @@ const { data: channels, isLoading: channelsLoading } = useQuery({
 
 const configuredChannels = computed(() => (channels.value ?? []).filter((c) => c.configured))
 
+// Platforms is low-weight: only shown when nothing is connected yet (Connect
+// nudge) or the bot has a check issue (so a broken connection stays visible).
+// Connected + healthy hides it — the user knows what they connected.
+const showPlatforms = computed(() => configuredChannels.value.length === 0 || hasIssue.value)
+
 function channelTitle(meta: HandlersChannelMeta) {
   return channelTypeDisplayName(t, meta.type, meta.display_name)
 }
@@ -286,6 +419,38 @@ const modelName = computed(() => {
   if (!id) return t('bots.overview.modelNone')
   const model = (models.value ?? []).find((m) => (m.id || m.model_id) === id)
   return model?.name || model?.model_id || id
+})
+
+// Reminders: a single, extensible "do this next" list for setup steps that the
+// dedicated surfaces don't already nag about. Platforms (connect) and the issue
+// banner (diagnostics) own their own signals, so reminders deliberately covers
+// only what's left — today that's "no model". Push a new entry here as features
+// land (desktop setup, etc.); each is hidden once its condition clears, and the
+// whole block disappears when there's nothing to do. `settings` is undefined
+// until loaded, so we only nag once we actually know the model is unset.
+interface BotReminder {
+  key: string
+  title: string
+  hint: string
+  action: string
+  tab: string
+  // Optional anchor id within the target tab to scroll to (see go()).
+  section?: string
+}
+
+const reminders = computed<BotReminder[]>(() => {
+  const list: BotReminder[] = []
+  if (settings.value && !settings.value.chat_model_id) {
+    list.push({
+      key: 'model',
+      title: t('bots.overview.reminderModelTitle'),
+      hint: t('bots.overview.reminderModelHint'),
+      action: t('bots.overview.reminderAction'),
+      tab: 'general',
+      section: 'interaction',
+    })
+  }
+  return list
 })
 
 const reasoningOn = computed(() => !!settings.value?.reasoning_enabled)
@@ -300,6 +465,170 @@ const memoryDesc = computed(() => {
   const n = memoryStatus.value?.indexed_count
   if (n == null) return t('bots.overview.memoryNone')
   return t('bots.overview.memoryCount', { count: n })
+})
+
+// --- Runtime: live container state + resource metrics. Only meaningful for
+// container-backed bots; a local/desktop bot has no container. We mirror the
+// detail page's resolution exactly: fetch the container record unconditionally
+// (a local bot just 404s → null) and resolve the backend from BOTH the bot
+// metadata AND the container record's workspace_backend, since older bots don't
+// carry the backend in metadata. The metrics query (and the whole Runtime
+// block) then gate on that resolved backend. ---
+
+const { data: container, refetch: refetchContainer } = useQuery({
+  key: () => ['bot-container-overview', botId.value],
+  query: async () => {
+    // No throwOnError: a local/desktop bot returns 404 here, which is a normal
+    // "no container" signal, not an error to surface.
+    const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
+    if (result.error !== undefined) return null
+    return result.data ?? null
+  },
+  enabled: () => !!botId.value,
+})
+
+const isContainerBot = computed(
+  () => resolveBotWorkspaceBackend(bot.value?.metadata, container.value?.workspace_backend) === 'container',
+)
+
+const { data: containerMetrics, refetch: refetchMetrics } = useQuery({
+  key: () => ['bot-container-metrics-overview', botId.value],
+  query: async () => {
+    const result = await getBotsByBotIdContainerMetrics({ path: { bot_id: botId.value } })
+    if (result.error !== undefined) return null
+    return result.data ?? null
+  },
+  enabled: () => !!botId.value && isContainerBot.value,
+})
+
+// Is the container's task actually running? Drives both the status dot and
+// whether we keep polling — a stopped container produces no live metrics.
+const containerRunning = computed(() => {
+  if (containerMetrics.value?.status?.task_running != null) {
+    return containerMetrics.value.status.task_running
+  }
+  if (container.value?.task_running != null) return container.value.task_running
+  const status = (container.value?.status ?? '').trim().toLowerCase()
+  return status === 'running' || status === 'created'
+})
+
+// Poll metrics (and container state) every 10s while running, mirroring the
+// detail-page pattern. KeepAlive wraps this tab, so onUnmounted never fires on
+// tab switch — gate on onActivated/onDeactivated instead, and stop polling once
+// the container isn't running so we don't hammer a backend with nothing to say.
+const POLL_MS = 10_000
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let isActive = true
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function syncPolling() {
+  const shouldPoll = isActive && isContainerBot.value && containerRunning.value
+  if (shouldPoll && !pollTimer) {
+    pollTimer = setInterval(() => {
+      void refetchMetrics()
+      void refetchContainer()
+    }, POLL_MS)
+  } else if (!shouldPoll) {
+    stopPolling()
+  }
+}
+
+watch([isContainerBot, containerRunning], syncPolling, { immediate: true })
+
+onActivated(() => {
+  isActive = true
+  syncPolling()
+})
+
+onDeactivated(() => {
+  isActive = false
+  stopPolling()
+})
+
+onBeforeUnmount(stopPolling)
+
+// Status dot + label reuse the Container tab's status vocabulary so the two
+// pages never disagree on "is it running".
+const runtimeStatusKey = computed(() => {
+  const status = (container.value?.status ?? '').trim().toLowerCase()
+  if (status === 'running') return 'running'
+  if (status === 'created') return 'created'
+  if (status === 'stopped' || status === 'exited') return 'stopped'
+  return containerRunning.value ? 'running' : 'unknown'
+})
+
+// Status as a Badge variant (not a loose dot+text): a badge gives the status a
+// real box to align against the section title, instead of floating with no edge
+// to line up with — which is what made the old dot+label read as misaligned.
+const runtimeStatusVariant = computed<'success' | 'secondary' | 'default'>(() => {
+  switch (runtimeStatusKey.value) {
+    case 'running': return 'success'
+    case 'created': return 'default'
+    case 'stopped': return 'secondary'
+    default: return 'secondary'
+  }
+})
+
+const runtimeStatusLabel = computed(() => {
+  switch (runtimeStatusKey.value) {
+    case 'running': return t('bots.container.statusRunning')
+    case 'created': return t('bots.container.statusCreated')
+    case 'stopped': return t('bots.container.statusStopped')
+    default: return t('bots.container.statusUnknown')
+  }
+})
+
+const runtimeSampledAt = computed(() => {
+  const ts = containerMetrics.value?.sampled_at
+  return ts ? formatDateTime(ts) : ''
+})
+
+const cpuMetrics = computed(() => containerMetrics.value?.metrics?.cpu)
+const memoryMetrics = computed(() => containerMetrics.value?.metrics?.memory)
+const storageMetrics = computed(() => containerMetrics.value?.metrics?.storage)
+
+const runtimeHasMetrics = computed(
+  () => !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
+)
+
+const runtimeMetricCards = computed(() => {
+  const mem = memoryMetrics.value
+  const memLimit = mem?.limit_bytes
+  return [
+    {
+      key: 'cpu',
+      label: t('bots.container.metricsLabels.cpu'),
+      value: formatMetricPercent(cpuMetrics.value?.usage_percent),
+      sub: '',
+    },
+    {
+      key: 'memory',
+      label: t('bots.container.metricsLabels.memory'),
+      value: formatMetricBytes(mem?.usage_bytes),
+      sub: memLimit && memLimit > 0 ? `/ ${formatMetricBytes(memLimit)}` : '',
+    },
+    {
+      key: 'storage',
+      label: t('bots.container.metricsLabels.storage'),
+      value: formatMetricBytes(storageMetrics.value?.used_bytes),
+      sub: '',
+    },
+  ]
+})
+
+// When there's no metric grid, say why instead of showing empty cards.
+const runtimeMetricsNote = computed(() => {
+  if (containerMetrics.value?.supported === false) {
+    return t('bots.container.metricsUnsupported')
+  }
+  if (!containerRunning.value) return t('bots.overview.runtimeStopped')
+  return t('bots.overview.runtimeNoMetrics')
 })
 
 // --- Usage: last 30 days of token usage, drawn as a stat row + a daily bar
@@ -551,7 +880,15 @@ const dailyOption = computed(() => {
   }
 })
 
-function go(tab: string) {
-  activeTab.value = tab
+function go(tab: string, section?: string) {
+  // One atomic navigation writing both tab and (optional) section: doing two
+  // separate query writes races, because each spreads a possibly-stale
+  // route.query and the second can clobber the first. The target tab reads
+  // `section` on mount and scrolls to it. activeTab's own param watcher syncs
+  // this back into its model, so the tab still switches.
+  const query = { ...route.query, tab }
+  if (section) query.section = section
+  else delete query.section
+  void router.replace({ query })
 }
 </script>

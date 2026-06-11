@@ -1328,8 +1328,6 @@
       "importFailed": "Failed to import bot backup"
     },
     "checks": {
-      "lastSync": "Last synced",
-      "statusTitle": "Health Checks",
       "status": {
         "issue": "Needs attention",
         "stable": "Healthy",
@@ -1338,20 +1336,14 @@
         "error": "ERROR",
         "unknown": "UNKNOWN"
       },
-      "vitalityTitle": "Vitality",
-      "vitalityUnit": "events",
       "diagnosticTitle": "Diagnostics",
       "diagnosticSubtitle": "Real-time system diagnostics.",
       "expandAll": "Expand all",
       "collapse": "Collapse",
-      "title": "Runtime Checks",
-      "subtitle": "View current health status and issue details.",
-      "ok": "No issues",
       "hasIssue": "Has issues",
       "issueCount": "{count} issues",
       "empty": "No check items",
       "loadFailed": "Failed to load runtime checks",
-      "actions": {},
       "titles": {
         "containerInit": "Container initialization",
         "containerRecord": "Container record",
@@ -1369,8 +1361,36 @@
         "botDelete": "Bot deletion"
       }
     },
+    "overview": {
+      "issueHint": "View diagnostics",
+      "platformsTitle": "Platforms",
+      "platformsEmpty": "Not connected anywhere yet",
+      "platformsEmptyHint": "Connect a platform to start talking to this bot",
+      "connectAction": "Connect",
+      "configTitle": "Configuration",
+      "modelLabel": "Model",
+      "modelNone": "No model selected",
+      "reasoningBadge": "Reasoning",
+      "memoryLabel": "Memory",
+      "memoryCount": "{count} memories indexed",
+      "memoryNone": "Off",
+      "usageTitle": "Usage · last 30 days",
+      "usageTotal": "Total",
+      "usageInput": "Input",
+      "usageOutput": "Output",
+      "usageCacheHit": "Cache hit",
+      "usageNone": "No usage yet",
+      "runtimeTitle": "Runtime",
+      "runtimeSampledAt": "Updated {time}",
+      "runtimeStopped": "Container isn't running — start it to see live resource usage.",
+      "runtimeNoMetrics": "Resource usage isn't available right now.",
+      "remindersTitle": "Action needed",
+      "reminderModelTitle": "Choose a model",
+      "reminderModelHint": "This bot needs a model before it can reply.",
+      "reminderAction": "Set up"
+    },
     "tabs": {
-      "overviewSubtitle": "System vitality and quick insights.",
+      "overviewSubtitle": "Where this bot lives and how it's set up.",
       "overview": "Overview",
       "general": "General",
       "desktop": "Desktop",
