@@ -1,5 +1,9 @@
 <template>
-  <div class="flex h-dvh flex-col overflow-hidden">
+  <!-- Opaque bg-background: this view is rendered into App.vue's transparent
+       fixed overlay, so it must paint its own backdrop to cover the persistent
+       chat behind it. (The overlay wrapper is intentionally transparent so the
+       chat — not a black layer — shows through during this view's slide/fade.) -->
+  <div class="flex h-dvh flex-col overflow-hidden bg-background">
     <div class="min-h-0 flex-1">
       <!-- Whole settings view (sidebar + content) slides in from the right on open,
            faster slide-out on leave; navigation is held until the leave plays. -->

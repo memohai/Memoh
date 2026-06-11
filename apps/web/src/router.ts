@@ -8,6 +8,7 @@ import { RouterView } from 'vue-router'
 import { i18nRef } from './i18n'
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding } from '@/router-guards/onboarding'
+import { installBackHistory } from '@/composables/useBackOr'
 
 const routes = [
   {
@@ -16,13 +17,19 @@ const routes = [
     component: () => import('@/pages/onboarding/index.vue'),
   },
   {
+    // Chat area. The chat UI (main-section: sidebar + dockview) is mounted
+    // persistently in App.vue, NOT here — these routes exist only so the URL
+    // (/, /bot/:name) matches and the breadcrumb/active-bot sync works. Their
+    // components render nothing; App.vue shows the persistent MainSection on
+    // these route names. This is what lets chat survive a trip into settings
+    // (fixed overlay) without unmounting/relayout/re-scroll.
     path: '/',
-    component: () => import('@/pages/main-section/index.vue'),
+    component: { render: () => null },
     children: [
       {
         name: 'home',
         path: '',
-        component: () => import('@/pages/home/index.vue'),
+        component: { render: () => null },
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
         },
@@ -30,7 +37,7 @@ const routes = [
       {
         name: 'bot',
         path: '/bot/:botName?',
-        component: () => import('@/pages/home/index.vue'),
+        component: { render: () => null },
         meta: {
           breadcrumb: i18nRef('sidebar.chat'),
         },
@@ -247,6 +254,10 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+// Track the previous route so history-following back affordances work the same
+// on web and on the desktop shell's memory-history router. See useBackOr.
+installBackHistory(router)
 
 // Handle chunk load errors (e.g. user aborted refresh, network failure, new deployment)
 router.onError((error) => {

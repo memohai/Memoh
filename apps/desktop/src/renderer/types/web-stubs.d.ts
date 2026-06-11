@@ -201,6 +201,17 @@ declare module '@memohai/web/lib/desktop-shell' {
   export const DesktopShellKey: InjectionKey<boolean>
 }
 
+declare module '@memohai/web/composables/useBackOr' {
+  import type { ComputedRef } from 'vue'
+  import type { RouteLocationRaw, Router } from 'vue-router'
+  export function installBackHistory(router: Router): void
+  export function useBackOr(fallback: RouteLocationRaw): () => void
+  export function useBackAffordance(fallback: RouteLocationRaw): {
+    onBack: () => void
+    label: ComputedRef<string>
+  }
+}
+
 declare module '@memohai/web/style.css'
 
 // Fallback for every Vue SFC reachable through the @memohai/web/* wildcard

@@ -25,10 +25,16 @@
                  the affordance in the exact same spot. Identity sits just below as
                  a floating card, which anchors the header and keeps back from
                  reading as a stray nav row — no hairline needed. -->
-            <div class="px-4 pt-[18px] pb-3 flex flex-col">
-              <NavItem @click="router.push({ name: 'bots' }).catch(() => {})">
+            <div
+              class="px-4 pb-3 flex flex-col"
+              :class="macTrafficReserve ? 'pt-[48px] [-webkit-app-region:drag]' : 'pt-[18px]'"
+            >
+              <NavItem
+                class="[-webkit-app-region:no-drag]"
+                @click="goBack()"
+              >
                 <ChevronLeft class="size-3.5 shrink-0" />
-                <span>{{ $t('sidebar.bots') }}</span>
+                <span>{{ backLabel }}</span>
               </NavItem>
 
               <!-- Identity floats as a card — same recipe as the bots-list persona
@@ -204,6 +210,14 @@
 
           <template #detail>
             <div class="absolute inset-0 overflow-y-auto bg-background">
+              <!-- Top drag strip over the detail pane only (mac desktop), so the
+                   window stays draggable beside the sidebar. No fill/border — it
+                   shares --background with the content, so the sidebar's vertical
+                   edge stays the only divider, unbroken to the top. -->
+              <div
+                v-if="macTrafficReserve"
+                class="h-8 shrink-0 [-webkit-app-region:drag]"
+              />
               <!-- Ensure consistent padding matching Box-in-Box bento architecture -->
               <div class="px-6 pt-4 pb-4">
                 <KeepAlive>
@@ -237,8 +251,8 @@ import {
   BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
   Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft
 } from 'lucide-vue-next'
-import { computed, ref, watch, onMounted, toValue, nextTick } from 'vue'
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
@@ -276,10 +290,12 @@ import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { useBackAffordance } from '@/composables/useBackOr'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
 import NavItem from '@/components/settings-sidebar/nav-item.vue'
+import { DesktopShellKey } from '@/lib/desktop-shell'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 type BotCheck = BotsBotCheck
@@ -287,8 +303,23 @@ type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
 
 const route = useRoute()
-const router = useRouter()
 const { t } = useI18n()
+
+// macOS desktop: this page renders its own full-height sidebar (no full-width
+// topbar above it), so the sidebar header clears the traffic lights and the
+// detail pane gets its own top drag strip. Same computation as settings-section.
+const desktopShell = inject(DesktopShellKey, false)
+const macTrafficReserve = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
+
+// Back follows real navigation history (router.back) and only falls back to the
+// bots list on a cold load — so entering a bot from Scheduled Jobs, a chat, or
+// any future surface returns where the user came from rather than a fixed page.
+// The label mirrors that destination instead of always reading "Bots".
+const { onBack: goBack, label: backLabel } = useBackAffordance({ name: 'bots' })
 
 // Reuse the settings view's open/close motion (see settings-section): this bot
 // view slides in on enter and slides out on leave, holding navigation until the
@@ -304,6 +335,7 @@ function onAfterLeave(): void {
   pendingRouteLeave?.()
   pendingRouteLeave = null
 }
+
 // The route param may be a name slug or a UUID; resolve it to the canonical
 // bot UUID so child tabs keep operating on UUIDs.
 const routeIdentifier = computed(() => {

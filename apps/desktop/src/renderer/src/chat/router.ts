@@ -9,6 +9,7 @@ import {
 import { SETTINGS_DEFAULT_PATH, SETTINGS_ROUTE_SPECS } from '../shared/settings-routes'
 import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
 import { useUserStore } from '@memohai/web/store/user'
+import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
 import type { SettingsRouteSpec } from '../shared/settings-routes'
 
@@ -38,18 +39,22 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@memohai/web/pages/onboarding/index.vue'),
   },
   {
+    // Chat area: UI is mounted persistently in chat/App.vue (MainSection), not
+    // here. These routes exist only for URL matching / active-bot sync; their
+    // components render nothing. Mirrors apps/web router.ts. This lets chat
+    // survive a trip into settings (fixed overlay) without unmount/relayout.
     path: '/',
-    component: () => import('@memohai/web/pages/main-section/index.vue'),
+    component: { render: () => null },
     children: [
       {
         name: 'home',
         path: '',
-        component: () => import('@memohai/web/pages/home/index.vue'),
+        component: { render: () => null },
       },
       {
         name: 'bot',
         path: '/bot/:botName?/:sessionId?',
-        component: () => import('@memohai/web/pages/home/index.vue'),
+        component: { render: () => null },
       },
       {
         // Backwards-compatible redirect for legacy UUID-based chat links.
@@ -97,6 +102,10 @@ const router = createRouter({
   history: createMemoryHistory(),
   routes,
 })
+
+// Memory history keeps no readable back-stack, so back affordances rely on this
+// afterEach-based tracker instead of history state. See useBackOr.
+installBackHistory(router)
 
 router.onError((error: Error) => {
   const isChunkLoadError =

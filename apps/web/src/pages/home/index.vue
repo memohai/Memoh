@@ -64,6 +64,17 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
 
 let suppressUrlSync = false
 
+// home is now mounted persistently (via main-container, which App.vue keeps
+// alive across chat↔settings) rather than torn down when leaving chat. So these
+// route watchers keep running while the user is in settings. The settings route
+// shares the :botName param, so without this guard the route.params.botName
+// watcher would "canonicalize" that UUID and router.replace back to /bot/<name>,
+// yanking the user out of settings. URL sync must only run while a chat route
+// (home/bot) is current. route.name is the reliable signal (no mount/unmount
+// timing to race).
+const CHAT_ROUTE_NAMES = new Set(['home', 'bot'])
+const isChatRoute = () => CHAT_ROUTE_NAMES.has(route.name as string)
+
 // One-shot guard so concurrent syncStoreFromUrl() calls can't both start a
 // session for the same redirect. Set synchronously before the first await.
 let acpStartConsumed = false
@@ -127,6 +138,9 @@ void syncStoreFromUrl((route.params.botName as string) ?? '')
 
 watch(currentBotId, async (newBotId) => {
   if (suppressUrlSync) return
+  // Don't touch the URL while a non-chat route (e.g. settings) is current — home
+  // stays mounted behind the settings overlay and must not redirect away from it.
+  if (!isChatRoute()) return
   const storeBot = (newBotId ?? '').trim()
   if (!storeBot) {
     if (route.name !== 'home') {
@@ -146,6 +160,9 @@ watch(currentBotId, async (newBotId) => {
 watch(
   () => route.params.botName,
   (paramBotName) => {
+    // Only sync on a chat route. The settings route shares the :botName param;
+    // reacting to its changes would bounce the user back to chat (see above).
+    if (!isChatRoute()) return
     void syncStoreFromUrl((paramBotName as string) ?? '')
   },
 )
