@@ -1,19 +1,28 @@
 <template>
   <DropdownMenu v-model:open="menuOpen">
     <DropdownMenuTrigger as-child>
-      <!-- Workspace switcher: the chip hugs avatar + name (never full-width).
-           Hover uses --sidebar-hover. The hover was darkened for contrast and now
-           sits right under the avatar's gray, so THIS avatar (and only this one —
-           not the menu rows, not the shared Avatar component) carries a hairline
-           ring to keep its disc crisp on top of the hover. No color transition:
-           the fill snaps on hover/open (per request) instead of fading, which
-           read as sluggish on this low-contrast chip. -->
+      <!-- Workspace switcher. Two shapes by platform:
+           · mac desktop (chip): hugs avatar + name, never full-width — leaves the
+             traffic-light gutter to its left uncluttered; chevron always shown.
+           · web / Windows (full-width): a stadium hover bar whose right edge lines
+             up with the search button's hover below. Avatar + name stay LEFT; the
+             chevron is pinned far-right and only fades in on hover/open (it's an
+             affordance, not chrome at rest). Web/Win have no traffic lights, so the
+             switcher reads as a normal full-width nav control.
+           The avatar carries a hairline ring (only this one) to stay crisp on the
+           hover fill. No color transition: the fill snaps on hover/open. -->
       <button
         type="button"
-        class="inline-flex h-8 max-w-full items-center gap-2 rounded-md px-1.5 text-xs text-foreground outline-none hover:bg-[color:var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color:var(--sidebar-hover)]"
+        class="group flex h-8 items-center text-xs text-foreground outline-none hover:bg-[color:var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color:var(--sidebar-hover)]"
+        :class="fullWidth
+          ? 'w-[calc(100%+3px)] -ml-[3px] gap-1.5 rounded-full pl-2 pr-2.5'
+          : 'max-w-full gap-2 rounded-md px-1.5'"
         :aria-label="t('sidebar.switchBot')"
       >
-        <Avatar class="size-5 shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]">
+        <Avatar
+          class="shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]"
+          :class="fullWidth ? 'size-[22px]' : 'size-5'"
+        >
           <AvatarImage
             v-if="currentBot?.avatar_url"
             :src="currentBot.avatar_url"
@@ -23,19 +32,27 @@
             {{ avatarFallback }}
           </AvatarFallback>
         </Avatar>
-        <span class="min-w-0 truncate text-[13px] font-semibold tracking-[0.015em]">
+        <span
+          class="min-w-0 truncate text-[13px] font-bold tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
+          :class="fullWidth && 'flex-1 text-left'"
+        >
           {{ currentLabel }}
         </span>
-        <ChevronsUpDown class="size-3 shrink-0 text-muted-foreground" />
+        <ChevronsUpDown
+          class="size-3 shrink-0 text-muted-foreground"
+          :class="fullWidth && 'ml-auto opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-data-[state=open]:opacity-100'"
+        />
       </button>
     </DropdownMenuTrigger>
-    <!-- align-offset pulls the panel left so the dropdown bot avatars line up
-         under the trigger avatar (trigger px-1.5 = 6px vs menu p-1.5 + item
-         px-2.5 = 16px → -10px). -->
+    <!-- chip mode pulls the panel left (align-offset) so the dropdown bot avatars
+         line up under the trigger avatar (trigger px-1.5 = 6px vs menu p-1.5 + item
+         px-2.5 = 16px → -10px). Full-width mode is a plain dropdown: left-aligned,
+         growing rightward — no left pull, which would shove it against the window
+         edge with too little left margin. -->
     <DropdownMenuContent
       align="start"
       side="bottom"
-      :align-offset="-10"
+      :align-offset="fullWidth ? 0 : -10"
       class="w-60"
     >
       <DropdownMenuLabel class="text-xs font-medium text-muted-foreground">
@@ -154,6 +171,10 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const { sortBots } = usePinnedBots()
+
+// Full-width shape for web / Windows (no traffic lights); mac desktop passes
+// false to keep the compact floating chip beside the traffic-light gutter.
+withDefaults(defineProps<{ fullWidth?: boolean }>(), { fullWidth: false })
 
 const menuOpen = ref(false)
 

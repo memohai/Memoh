@@ -11,13 +11,17 @@
     :inert="!workbenchOpen || undefined"
   >
     <!-- Workspace / bot switcher (no bottom divider — header blends into the
-         panel below). -->
+         panel below). Taller than the nav row and with its own vertical padding so
+         the switcher chip/bar floats clear of the window's top edge instead of its
+         hover fill kissing it. mac reserves the traffic-light gutter (pl-[76px]);
+         web/Windows start at the normal pl-3 indent and the switcher goes
+         full-width (right edge aligns with the search row below). -->
     <header
-      class="flex h-9 shrink-0 items-center bg-sidebar pr-1.5 [-webkit-app-region:drag]"
+      class="flex h-11 shrink-0 items-center bg-sidebar pr-2 py-1.5 [-webkit-app-region:drag]"
       :class="macTrafficReserve ? 'pl-[76px]' : 'pl-3'"
     >
       <div class="min-w-0 flex-1 [-webkit-app-region:no-drag]">
-        <BotSwitcher />
+        <BotSwitcher :full-width="!macTrafficReserve" />
       </div>
     </header>
 
@@ -53,7 +57,7 @@
         v-for="view in availableViews"
         :key="view.id"
         type="button"
-        class="inline-flex h-8 shrink-0 cursor-pointer items-center justify-start rounded-full px-[7px] text-muted-foreground outline-none transition-[margin,padding,color,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-[color:var(--sidebar-hover)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:-ml-[3px] data-[active=true]:bg-sidebar-accent data-[active=true]:px-2.5 data-[active=true]:text-foreground"
+        class="inline-flex h-8 shrink-0 cursor-pointer items-center justify-start rounded-full px-[7px] text-muted-foreground outline-none transition-[margin,padding,color,background-color] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-[color:var(--sidebar-hover)] hover:text-foreground dark:hover:text-[color:oklch(0.96_0_0)] focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:-ml-[3px] data-[active=true]:bg-sidebar-accent data-[active=true]:pl-2.5 data-[active=true]:pr-3.5 data-[active=true]:text-foreground dark:data-[active=true]:text-[color:oklch(0.96_0_0)]"
         :data-active="sidebarView === view.id"
         :title="view.label"
         :aria-pressed="sidebarView === view.id"
@@ -69,7 +73,7 @@
           :class="sidebarView === view.id ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'"
         >
           <span class="min-w-0 overflow-hidden">
-            <span class="whitespace-nowrap pl-2 text-control font-medium">{{ view.label }}</span>
+            <span class="whitespace-nowrap pl-2 text-control font-bold">{{ view.label }}</span>
           </span>
         </span>
       </button>
