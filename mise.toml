@@ -362,9 +362,9 @@ description = "Install workspace toolkit"
 depends = ["//:a11y-cli:build"]
 run = "./docker/toolkit/install.sh .toolkit"
 
-[tasks."docker:vnc:build"]
-description = "Build the Debian VNC workspace image used by desktop"
-run = "docker build -f docker/Dockerfile.vnc -t memohai/vnc:debian ."
+[tasks."docker:workspace:build"]
+description = "Build the Debian workspace image used by desktop"
+run = "docker build -f docker/Dockerfile.workspace -t memohai/workspace:debian ."
 
 [tasks.lint]
 description = "Run all linters"

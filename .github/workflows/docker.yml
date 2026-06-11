@@ -37,7 +37,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       sparse: ${{ steps.filter.outputs.sparse }}
-      vnc: ${{ steps.filter.outputs.vnc }}
+      workspace: ${{ steps.filter.outputs.workspace }}
       kata: ${{ steps.filter.outputs.kata }}
     steps:
       - uses: actions/checkout@v4
@@ -71,8 +71,8 @@ jobs:
             sparse:
               - 'internal/memory/sparse/service/**'
               - 'docker/Dockerfile.sparse'
-            vnc:
-              - 'docker/Dockerfile.vnc'
+            workspace:
+              - 'docker/Dockerfile.workspace'
               - 'scripts/desktop-install.sh'
             kata:
               - '.github/workflows/docker.yml'
@@ -125,7 +125,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [server, web, sparse, vnc]
+        image: [server, web, sparse, workspace]
         platform: [linux/amd64, linux/arm64]
         variant: ["", debian]
         exclude:
@@ -135,7 +135,7 @@ jobs:
             variant: debian
           - image: sparse
             variant: debian
-          - image: vnc
+          - image: workspace
             variant: ""
         include:
           - image: server
@@ -144,8 +144,8 @@ jobs:
             dockerfile: docker/Dockerfile.web
           - image: sparse
             dockerfile: docker/Dockerfile.sparse
-          - image: vnc
-            dockerfile: docker/Dockerfile.vnc
+          - image: workspace
+            dockerfile: docker/Dockerfile.workspace
           - platform: linux/amd64
             runner: ubuntu-latest
           - platform: linux/arm64
@@ -167,7 +167,7 @@ jobs:
             server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
             web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
             sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
-            vnc)     CHANGED="${{ needs.detect-changes.outputs.vnc }}" ;;
+            workspace) CHANGED="${{ needs.detect-changes.outputs.workspace }}" ;;
           esac
           if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -279,8 +279,8 @@ jobs:
           - image: sparse
             artifact_key: sparse
             variant: ""
-          - image: vnc
-            artifact_key: vnc-debian
+          - image: workspace
+            artifact_key: workspace-debian
             variant: debian
     steps:
       - name: Check if publish is needed
@@ -298,7 +298,7 @@ jobs:
             server)  CHANGED="${{ needs.detect-changes.outputs.server }}" ;;
             web)     CHANGED="${{ needs.detect-changes.outputs.web }}" ;;
             sparse)  CHANGED="${{ needs.detect-changes.outputs.sparse }}" ;;
-            vnc)     CHANGED="${{ needs.detect-changes.outputs.vnc }}" ;;
+            workspace) CHANGED="${{ needs.detect-changes.outputs.workspace }}" ;;
           esac
           if [[ "$FORCE" == "true" || "$CHANGED" == "true" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -367,7 +367,7 @@ jobs:
 
           if [ "$GITHUB_REF" = "refs/heads/main" ]; then
             add_tag "$DEV_TAG"
-            if [ "${{ matrix.image }}" = "vnc" ] && [ -n "$VARIANT" ]; then
+            if [ "${{ matrix.image }}" = "workspace" ] && [ -n "$VARIANT" ]; then
               add_tag "$VARIANT"
             fi
           fi
@@ -383,7 +383,7 @@ jobs:
               add_tag "$LATEST_TAG"
               add_tag "${MAJOR_MINOR}${VERSION_TAG_SUFFIX}"
               add_tag "${MAJOR}${VERSION_TAG_SUFFIX}"
-              if [ "${{ matrix.image }}" = "vnc" ] && [ -n "$VARIANT" ]; then
+              if [ "${{ matrix.image }}" = "workspace" ] && [ -n "$VARIANT" ]; then
                 add_tag "$VARIANT"
               fi
             fi
