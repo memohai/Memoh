@@ -257,7 +257,14 @@
       "failed": "后台任务失败",
       "stalled": "后台任务需要处理",
       "killed": "后台任务已终止",
-      "updated": "后台任务已更新"
+      "updated": "后台任务已更新",
+      "pillRunning": "{count} 个运行中",
+      "pillDone": "{count} 个已完成",
+      "pillRunningAria": "{count} 个后台任务运行中，滚动查看",
+      "pillDoneAria": "{count} 个后台任务已完成"
+    },
+    "rail": {
+      "thinking": "{count} 次思考"
     },
     "readonly": "只读",
     "replyTo": "回复 {sender}",
@@ -294,6 +301,7 @@
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
       "spawn": "派遣 {count} 个子代理",
+      "clustered": "{count} 次工具调用",
       "use_skill": "使用技能",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",

@@ -1,5 +1,5 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="leading-relaxed">
     <button
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 text-muted-foreground hover:text-foreground"
       @click="toggleOpen"
@@ -18,6 +18,14 @@
         class="size-3.5 shrink-0 ml-auto opacity-60 group-hover:opacity-100"
       />
     </button>
+
+    <LivePeekLine
+      v-if="!open && streaming && peekLine"
+      :text="peekLine"
+      :interval-ms="450"
+      class="ml-5"
+    />
+
     <div
       v-if="open"
       class="mt-1 ml-5 border-l border-border pl-3 py-1"
@@ -35,6 +43,8 @@ import { computed, ref } from 'vue'
 import { ChevronDown, ChevronRight, Lightbulb } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
+import { thinkingPeek } from '@/store/chat-list.utils'
+import LivePeekLine from './live-peek-line.vue'
 
 const props = defineProps<{
   block: ThinkingBlock
@@ -43,7 +53,12 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const open = ref(props.streaming)
+const open = ref(false)
+
+// The peek is the latest complete sentence of the reasoning as plain semantic
+// text (markdown stripped) — see thinkingPeek — so it reads as a calm phrase
+// rather than a hard-truncated, marker-laden raw line.
+const peekLine = computed(() => thinkingPeek(props.block.content))
 
 const actionLabel = computed(() =>
   props.streaming ? t('chat.thinkingInProgress') : t('chat.thinkingDone'),

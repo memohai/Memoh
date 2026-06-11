@@ -246,53 +246,76 @@
         </p> -->
 
         <template
-          v-for="(block, i) in message.messages"
-          :key="i"
+          v-for="segment in renderSegments"
+          :key="segment.key"
         >
-          <!-- Thinking block -->
-          <ThinkingBlock
-            v-if="block.type === 'reasoning'"
-            :block="(block as ThinkingBlockType)"
-            :streaming="isAssistantBlockStreaming(i)"
-          />
-
-          <!-- Tool call block -->
-          <ToolCallBlock
-            v-else-if="block.type === 'tool' && isVisibleAssistantBlock(block)"
-            :block="(block as ToolCallBlockType)"
-          />
-
-          <!-- Text block -->
-          <div
-            v-else-if="block.type === 'text' && block.content"
-            class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
-          >
-            <MarkdownRender
-              :content="block.content"
-              :is-dark="isDark"
-              :smooth-streaming="isAssistantBlockStreaming(i)"
-              :typewriter="isAssistantBlockStreaming(i)"
-              :fade="isAssistantBlockStreaming(i)"
-              code-renderer="shiki"
-              custom-id="chat-msg"
+          <!-- Active rail (streaming): prior steps as a chip + the current
+               phase live — one rolling command, or the thinking peek. -->
+          <ProcessRail v-if="segment.kind === 'rail-active'">
+            <RailSummary
+              v-if="segment.prior.length"
+              :blocks="segment.prior"
             />
-          </div>
+            <ThinkingBlock
+              v-if="segment.current && segment.current.kind === 'think'"
+              :block="(segment.current.blocks[0] as ThinkingBlockType)"
+              :streaming="true"
+            />
+            <RollingToolSlot
+              v-else-if="segment.current && segment.current.kind === 'tools'"
+              :tools="(segment.current.blocks as ToolCallBlockType[])"
+            />
+          </ProcessRail>
 
-          <!-- Error block -->
-          <div
-            v-else-if="block.type === 'error' && block.content"
-            class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-            <span class="min-w-0 whitespace-pre-wrap break-words">{{ block.content }}</span>
-          </div>
+          <!-- Process rail: recessed lane for thinking + tool calls. Settled
+               segments collapse to a single summary line; otherwise the rows
+               (with consecutive done tools clustered) render in the lane. -->
+          <ProcessRail v-else-if="segment.kind === 'summary' || segment.kind === 'rail'">
+            <RailSummary
+              v-if="segment.kind === 'summary'"
+              :blocks="segment.blocks"
+            />
+            <RailItems
+              v-else
+              :items="segment.items"
+              :streaming-block-id="streamingBlockId"
+            />
+          </ProcessRail>
 
-          <!-- Attachment block -->
-          <AttachmentBlock
-            v-else-if="block.type === 'attachments'"
-            :block="(block as AttachmentBlockType)"
-            :on-open-media="onOpenMedia"
-          />
+          <!-- Flow segment: the answer / error / attachments break out full-width -->
+          <template v-else>
+            <!-- Text block -->
+            <div
+              v-if="segment.block.type === 'text' && segment.block.content"
+              class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+            >
+              <MarkdownRender
+                :content="segment.block.content"
+                :is-dark="isDark"
+                :smooth-streaming="isBlockStreaming(segment.block)"
+                :typewriter="isBlockStreaming(segment.block)"
+                :fade="isBlockStreaming(segment.block)"
+                code-renderer="shiki"
+                custom-id="chat-msg"
+              />
+            </div>
+
+            <!-- Error block -->
+            <div
+              v-else-if="segment.block.type === 'error' && segment.block.content"
+              class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
+              <span class="min-w-0 whitespace-pre-wrap break-words">{{ segment.block.content }}</span>
+            </div>
+
+            <!-- Attachment block -->
+            <AttachmentBlock
+              v-else-if="segment.block.type === 'attachments'"
+              :block="(segment.block as AttachmentBlockType)"
+              :on-open-media="onOpenMedia"
+            />
+          </template>
         </template>
 
         <!-- Streaming indicator -->
@@ -315,15 +338,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { warmCodeHighlightOnIdle } from '@/utils/warm-code-highlight'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
-import ThinkingBlock from './thinking-block.vue'
-import ToolCallBlock from './tool-call-block.vue'
 import AttachmentBlock from './attachment-block.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -341,6 +362,14 @@ import type {
   ToolCallBlock as ToolCallBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
+import type { RailGroup, RailItem, TurnSegment } from '@/store/chat-list.utils'
+import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentHasLiveBg, segmentTurnBlocks, splitActiveRail } from '@/store/chat-list.utils'
+import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
+import ProcessRail from './process-rail.vue'
+import RailItems from './rail-items.vue'
+import RailSummary from './rail-summary.vue'
+import RollingToolSlot from './rolling-tool-slot.vue'
+import ThinkingBlock from './thinking-block.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -468,12 +497,118 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
   }
 })
 
-function hasLaterAssistantMessage(index: number): boolean {
-  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
-}
+const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
+  props.message.role === 'assistant' ? segmentTurnBlocks(props.message.messages) : [],
+)
 
-function isAssistantBlockStreaming(index: number): boolean {
-  return props.message.role === 'assistant' && props.message.streaming && !hasLaterAssistantMessage(index)
+type RenderSegment =
+  | { kind: 'rail-active'; key: string; prior: ContentBlock[]; current: RailGroup<ContentBlock> | null }
+  | { kind: 'summary'; key: string; blocks: ContentBlock[] }
+  | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
+  | { kind: 'flow'; key: string; block: ContentBlock }
+
+// The active (last) rail of a streaming turn rolls its current phase live: prior
+// steps collapse to a summary chip, the current tool run shows one rolling
+// command, current thinking shows its peek. Settled segments collapse to a
+// summary; remaining settled tool runs cluster. Folding here only touches
+// settled prior rows (a deliberate collapse motion) — the streaming answer
+// markdown never reparents, so the answer itself never stalls.
+const renderSegments = computed<RenderSegment[]>(() => {
+  const streaming = props.message.role === 'assistant' && props.message.streaming
+  const segments = turnSegments.value
+  const lastIndex = segments.length - 1
+  return segments.map((segment, index) => {
+    if (segment.kind === 'flow') return segment
+    if (streaming && index === lastIndex) {
+      // A live background-task row must stay visible — never roll/collapse it
+      // into the prior chip. Render the whole active rail as solo rows instead.
+      if (segmentHasLiveBg(segment.blocks)) {
+        return { kind: 'rail', key: segment.key, items: clusterRailBlocks(segment.blocks, true) }
+      }
+      const { prior, current } = splitActiveRail(segment.blocks)
+      return { kind: 'rail-active', key: segment.key, prior, current }
+    }
+    if (canSummarizeRailSegment(segment.blocks)) {
+      return { kind: 'summary', key: segment.key, blocks: segment.blocks }
+    }
+    return {
+      kind: 'rail',
+      key: segment.key,
+      items: clusterRailBlocks(segment.blocks, false),
+    }
+  })
+})
+
+// Mirror this turn's background tasks into the pane-level beacon so a floating
+// pill can surface a running task once the turn scrolls off screen — regardless
+// of whether the task's row is expanded or folded into a cluster. Visibility is
+// the turn's, which is robust to that collapse state (the row may not be in the
+// DOM when clustered).
+const beacon = useBgTaskBeacon()
+
+const bgTasks = computed(() => {
+  if (props.message.role !== 'assistant') return []
+  const tasks: { taskId: string, phase: 'active' | 'done', latestLine: string }[] = []
+  for (const block of props.message.messages) {
+    if (block.type !== 'tool') continue
+    const task = (block as ToolCallBlockType).backgroundTask
+    if (!task) continue
+    const status = (task.status || '').trim().toLowerCase()
+    const active = status === 'running' || status === 'stalled'
+    const done = status === 'completed' || status === 'failed' || status === 'killed'
+    if (!active && !done) continue
+    tasks.push({
+      taskId: task.taskId,
+      phase: active ? 'active' : 'done',
+      latestLine: latestOutputLine(task.outputTail) || task.command || '',
+    })
+  }
+  return tasks
+})
+
+const registeredTaskIds = new Set<string>()
+
+watch(
+  [bgTasks, isVisible],
+  ([tasks, visible]) => {
+    if (!beacon) return
+    const current = new Set<string>()
+    for (const task of tasks) {
+      current.add(task.taskId)
+      beacon.upsert({
+        taskId: task.taskId,
+        phase: task.phase,
+        visible,
+        latestLine: task.latestLine,
+        scrollIntoView: () => messageEl.value?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+      })
+    }
+    for (const id of registeredTaskIds) {
+      if (!current.has(id)) beacon.remove(id)
+    }
+    registeredTaskIds.clear()
+    for (const id of current) registeredTaskIds.add(id)
+  },
+  { immediate: true, deep: true },
+)
+
+onBeforeUnmount(() => {
+  if (!beacon) return
+  for (const id of registeredTaskIds) beacon.remove(id)
+})
+
+// Only the final block of a streaming turn is "live" — earlier blocks have
+// settled. We compare by stable block id (never array index) so segmentation
+// and streaming state agree without depending on position.
+const streamingBlockId = computed<number | null>(() => {
+  if (props.message.role !== 'assistant' || !props.message.streaming) return null
+  const blocks = props.message.messages
+  const last = blocks[blocks.length - 1]
+  return last ? last.id : null
+})
+
+function isBlockStreaming(block: ContentBlock): boolean {
+  return streamingBlockId.value !== null && block.id === streamingBlockId.value
 }
 
 const hasVisibleAssistantBlocks = computed(() =>

@@ -153,7 +153,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			ApprovalID: strings.TrimSpace(event.ApprovalID),
 			ShortID:    event.ShortID,
 			Status:     status,
-			CanApprove: true,
+			CanApprove: strings.EqualFold(status, "pending"),
 		}
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 

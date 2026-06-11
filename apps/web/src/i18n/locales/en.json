@@ -261,7 +261,14 @@
       "failed": "Background task failed",
       "stalled": "Background task needs attention",
       "killed": "Background task killed",
-      "updated": "Background task updated"
+      "updated": "Background task updated",
+      "pillRunning": "{count} running",
+      "pillDone": "{count} done",
+      "pillRunningAria": "{count} background tasks running, scroll to view",
+      "pillDoneAria": "{count} background tasks completed"
+    },
+    "rail": {
+      "thinking": "{count} thinking steps"
     },
     "readonly": "Read-only",
     "replyTo": "Reply to {sender}",
@@ -298,6 +305,7 @@
       "transcribe_audio": "Transcribe",
       "generate_image": "Generate image",
       "spawn": "Spawn {count} subagents",
+      "clustered": "{count} tool calls",
       "use_skill": "Use skill",
       "browser_action": "Browser {action}",
       "browser_observe": "Observe browser {action}",
