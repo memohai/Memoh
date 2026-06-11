@@ -1119,10 +1119,17 @@
   --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.26 0 0);
+  /* Sidebar interaction ladder (dark) — a layered gradient on the lifted 19 canvas:
+   * bg 19 → hover 32 → active 44. After --sidebar rose 14→19 the old hover (24,
+   * Δ5) and active (36, Δ17) were squeezed flat against the brighter canvas; this
+   * reopens them to Δ13 / Δ25 so hover registers and active sits clearly above it
+   * (classic build-up model: hover < active). --sidebar-accent is shared with the
+   * settings nav, whose hover is a separate ghost step (--btn-ghost-hover ≈51), so
+   * settings keeps its hover-brighter-than-active look — only its active deepens a
+   * touch. Light mode is untouched. */
+  --sidebar-accent: oklch(0.30 0 0);
   --sidebar-accent-foreground: oklch(0.86 0 0);
-  /* Subtle sidebar hover: above the canvas (0.165), below the active fill (0.26). */
-  --sidebar-hover: oklch(0.21 0 0);
+  --sidebar-hover: oklch(0.245 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
@@ -1536,9 +1543,9 @@
   --input: oklch(1 0 0 / 14%);
   --sidebar: oklch(0.185 0.006 var(--scheme-hue));
   --sidebar-foreground: var(--card-foreground);
-  --sidebar-accent: var(--secondary);
+  --sidebar-accent: oklch(0.30 0.006 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-hover: oklch(0.21 0.006 var(--scheme-hue));
+  --sidebar-hover: oklch(0.245 0.006 var(--scheme-hue));
   --sidebar-border: oklch(1 0 0 / 8%);
   --ui-hover: oklch(0.30 0.006 var(--scheme-hue));
   --ui-selected: oklch(0.30 0.006 var(--scheme-hue));
