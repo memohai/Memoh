@@ -2,34 +2,18 @@
   <div
     role="button"
     tabindex="0"
-    class="group relative flex items-center h-9 w-full rounded-md px-2.5 text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    class="group relative flex items-center h-9 w-full rounded-md px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     :class="isActive ? 'bg-sidebar-accent' : 'hover:bg-[color:var(--sidebar-hover)]'"
     :title="hoverTitle"
     @click="$emit('select', session)"
     @keydown.enter.prevent="$emit('select', session)"
     @keydown.space.prevent="$emit('select', session)"
   >
-    <Avatar
-      v-if="isIMSession"
-      class="size-6 shrink-0 mr-2"
-    >
-      <AvatarImage
-        v-if="avatarUrl"
-        :src="avatarUrl"
-        :alt="displayLabel"
-      />
-      <AvatarFallback class="text-[9px]">
-        {{ avatarFallback }}
-      </AvatarFallback>
-    </Avatar>
-    <component
-      :is="typeIcon"
-      v-else-if="typeIcon"
-      class="size-4 shrink-0 mr-2"
-      :class="typeIconClass"
-    />
-
-    <span class="flex-1 min-w-0 truncate text-control text-foreground">
+    <!-- Session rows are text-only: the title carries the row, the timestamp/
+         actions sit at the trailing edge. No leading type glyph — the list is a
+         single human-conversation stream (chat/discuss/agent), so per-row type
+         icons added noise without adding information. -->
+    <span class="flex-1 min-w-0 truncate text-control font-medium text-foreground/95">
       {{ session.title || t('chat.untitledSession') }}
     </span>
 
@@ -95,20 +79,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
-import { HeartPulse, Clock, GitBranch, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@memohai/ui'
-import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentDisplayName, normalizeACPAgentID } from '@/utils/acp'
 
 const props = defineProps<{
   session: SessionSummary
@@ -133,47 +114,11 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
-// Plain chat/discuss rows are text-only; typed sessions get a small inline
-// glyph in their event accent color. No circular icon containers.
-const typeIcon = computed<Component | null>(() => {
-  switch (props.session.type) {
-    case 'heartbeat': return HeartPulse
-    case 'schedule': return Clock
-    case 'subagent': return GitBranch
-    case 'acp_agent': return acpAgentIcon(acpAgentId.value, true)
-    default: return null
-  }
-})
-
-const typeIconClass = computed(() => {
-  switch (props.session.type) {
-    case 'heartbeat': return 'text-event-heartbeat'
-    case 'schedule': return 'text-event-schedule'
-    case 'subagent': return 'text-event-subagent'
-    default: return 'text-muted-foreground'
-  }
-})
-
 const acpAgentId = computed(() => normalizeACPAgentID(props.session.metadata?.acp_agent_id))
 
 function routeMeta(): Record<string, unknown> {
   return props.session.route_metadata ?? {}
 }
-
-function isGroupConversation(): boolean {
-  const ct = (props.session.route_conversation_type ?? '').trim().toLowerCase()
-  return ct === 'group' || ct === 'supergroup' || ct === 'channel'
-}
-
-const avatarUrl = computed<string | null>(() => {
-  const meta = routeMeta()
-  if (isGroupConversation()) {
-    const convAvatar = (meta.conversation_avatar_url as string ?? '').trim()
-    if (convAvatar) return convAvatar
-  }
-  const url = (meta.sender_avatar_url as string ?? '').trim()
-  return url || null
-})
 
 const displayLabel = computed(() => {
   const meta = routeMeta()
@@ -181,10 +126,6 @@ const displayLabel = computed(() => {
     || (meta.sender_display_name as string ?? '').trim()
     || (meta.sender_username as string ?? '').trim()
     || ''
-})
-
-const avatarFallback = computed(() => {
-  return displayLabel.value ? displayLabel.value.charAt(0).toUpperCase() : '?'
 })
 
 // The old two-line subLabel is folded into the native tooltip: channel handle

@@ -1,32 +1,13 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <div class="flex items-center px-2 py-1.5 shrink-0">
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <TextButton class="text-label">
-            <component
-              :is="filterIconComponent"
-              class="size-3.5"
-              :class="filterIconClass"
-            />
-            {{ filterLabel }}
-            <ChevronDown class="size-3.5 opacity-60" />
-          </TextButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem
-            v-for="opt in filterOptions"
-            :key="opt.value ?? 'all'"
-            @click="filterType = opt.value"
-          >
-            {{ opt.label }}
-            <Check
-              v-if="filterType === opt.value"
-              class="size-3.5 ml-auto text-muted-foreground"
-            />
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+    <!-- Section label where the type filter used to be. The list below is a
+         single recency-ordered stream of the user's real conversations
+         (chat / discuss / agent); system-generated runs (heartbeat / schedule /
+         subagent) are not surfaced here. -->
+    <div class="shrink-0 px-2 pb-0.5 pt-1">
+      <span class="pl-[11px] text-xs font-[550] tracking-[-0.02em] text-muted-foreground/80">
+        {{ t('chat.recents') }}
+      </span>
     </div>
 
     <div class="flex-1 relative min-h-0">
@@ -34,7 +15,7 @@
         <ScrollArea class="h-full">
           <div class="flex flex-col gap-1 px-2">
             <SessionItem
-              v-for="session in filteredSessions"
+              v-for="session in visibleSessions"
               :key="session.id"
               :session="session"
               :is-active="sessionId === session.id"
@@ -46,7 +27,7 @@
           </div>
 
           <div
-            v-if="currentBotId && !loadingChats && filteredSessions.length === 0"
+            v-if="currentBotId && !loadingChats && visibleSessions.length === 0"
             class="px-3 py-6 text-center text-xs text-muted-foreground"
           >
             {{ t('chat.noSessions') }}
@@ -136,8 +117,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, type Component } from 'vue'
-import { ChevronDown, Check, LoaderCircle, MessageSquare, MessageCircle, HeartPulse, Clock, GitBranch, Bot } from 'lucide-vue-next'
+import { ref, computed } from 'vue'
+import { LoaderCircle } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
@@ -148,13 +129,8 @@ import type { SessionSummary } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   Button,
-  TextButton,
   Input,
   ScrollArea,
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -169,53 +145,14 @@ const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { sessions, sessionId, currentBotId, loadingChats } = storeToRefs(chatStore)
 
-const filterType = ref<string>('chat')
-
-const filterOptions = computed(() => [
-  { value: 'chat', label: t('chat.sessionTypeChat') },
-  { value: 'discuss', label: t('chat.sessionTypeDiscuss') },
-  { value: 'heartbeat', label: t('chat.sessionTypeHeartbeat') },
-  { value: 'schedule', label: t('chat.sessionTypeSchedule') },
-  { value: 'subagent', label: t('chat.sessionTypeSubagent') },
-  { value: 'acp_agent', label: t('chat.sessionTypeACPAgent') },
-])
-
-const filterLabel = computed(() => {
-  const opt = filterOptions.value.find(o => o.value === filterType.value)
-  return opt?.label ?? t('chat.sessionTypeChat')
-})
-
-const filterIconComponent = computed<Component>(() => {
-  switch (filterType.value) {
-    case 'discuss': return MessageCircle
-    case 'heartbeat': return HeartPulse
-    case 'schedule': return Clock
-    case 'subagent': return GitBranch
-    case 'acp_agent': return Bot
-    default: return MessageSquare
-  }
-})
-
-const filterIconClass = computed(() => {
-  switch (filterType.value) {
-    case 'discuss': return 'text-event-discuss'
-    case 'heartbeat': return 'text-event-heartbeat'
-    case 'schedule': return 'text-event-schedule'
-    case 'subagent': return 'text-event-subagent'
-    case 'acp_agent': return 'text-muted-foreground'
-    default: return 'text-muted-foreground'
-  }
-})
-
-const filteredSessions = computed(() => {
-  let list = sessions.value
-  if (filterType.value === 'chat') {
-    list = list.filter(s => s.type === 'chat' || s.type === 'discuss' || s.type === 'acp_agent')
-  } else {
-    list = list.filter(s => s.type === filterType.value)
-  }
-  return sortByRecency(list)
-})
+// One recency-ordered stream of the user's real conversations. The old type
+// FILTER is gone: chat, discuss and acp_agent are the human-facing types and
+// read as a single timeline, while heartbeat/schedule/subagent are
+// system-generated runs that live in their own surfaces, not this list.
+const USER_SESSION_TYPES = new Set(['chat', 'discuss', 'acp_agent'])
+const visibleSessions = computed(() =>
+  sortByRecency(sessions.value.filter(s => USER_SESSION_TYPES.has(s.type ?? 'chat'))),
+)
 
 function handleSelect(session: SessionSummary) {
   void chatStore.selectSession(session.id)
