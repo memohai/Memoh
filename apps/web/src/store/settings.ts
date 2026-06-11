@@ -35,6 +35,13 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(language, (value) => {
     i18n.locale.value = value
+    // Reflect the active locale onto <html lang> so locale-scoped CSS can target
+    // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
+    // Inter/MiSans render visually heavier for CJK at the same numeric weight, so
+    // Chinese UI needs a lighter rung than English to read at the same density.
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = value
+    }
   }, { immediate: true })
 
   watch(colorScheme, (value) => {

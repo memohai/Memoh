@@ -17,6 +17,47 @@
 @source "./";
 @source "../../../packages/ui/src";
 
+/* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same
+ * size+weight MiSans reads heavier/darker than Inter — a screen of zh titles at
+ * medium/semibold/bold looks overbearingly bold beside the same English UI.
+ * Scoped to <html lang="zh"> (set by the settings store on locale change), so
+ * this only ever fires when the UI language is Chinese; English is untouched.
+ *
+ * Tailwind v4 emits weight utilities as LITERALS (.font-medium → 500, not
+ * var(--font-weight-*)), AND this codebase uses many arbitrary-value weights
+ * (font-[450] is the Button base; font-[550]/[475]/[430] are tuned heading and
+ * label rungs). Neither resolves through a single token, so each class is
+ * remapped here. It is admittedly a lookup table, not an elegant abstraction —
+ * the elegant fix is a real weight-token layer the whole app references, which
+ * is a design-system change deferred for now. The mapping is a single MONOTONIC
+ * compress-the-top curve: heavier source weights drop more, and the order is
+ * preserved (no rung overtakes a heavier one). Keep it sorted by source weight
+ * when editing so monotonicity stays obvious. */
+@layer utilities {
+  /* semantic utilities (literal source weights in parens) */
+  :lang(zh) .font-light { font-weight: 280; }     /* 300 */
+  :lang(zh) .font-normal { font-weight: 315; }    /* 400 */
+  :lang(zh) .font-medium { font-weight: 370; }    /* 500 */
+  :lang(zh) .font-semibold { font-weight: 410; }  /* 600 */
+  :lang(zh) .font-bold { font-weight: 450; }      /* 700 */
+  /* arbitrary-value weights, sorted ascending so the curve stays monotonic */
+  :lang(zh) .font-\[360\] { font-weight: 315; }
+  :lang(zh) .font-\[380\] { font-weight: 330; }
+  :lang(zh) .font-\[400\] { font-weight: 345; }
+  :lang(zh) .font-\[420\] { font-weight: 360; }
+  :lang(zh) .font-\[430\] { font-weight: 368; }
+  :lang(zh) .font-\[450\] { font-weight: 380; }
+  :lang(zh) .font-\[475\] { font-weight: 398; }
+  :lang(zh) .font-\[550\] { font-weight: 432; }
+}
+:lang(zh) body {
+  font-weight: 335;
+}
+/* Chat markdown body also relaxes in Chinese (it pins its own 380 weight). */
+:lang(zh) [data-chat-content] .prose {
+  font-weight: 335;
+}
+
 @layer components {
   [data-chat-content] .prose {
     /* Compact chat body: 13px text with tight 17.5px line-height. Keep the
