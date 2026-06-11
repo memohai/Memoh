@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -163,6 +164,8 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 		}
 		return echo.NewHTTPError(status, err.Error())
 	}
+
+	h.applyDisplayStyleAsync(c.Request().Context(), botID)
 
 	return c.JSON(http.StatusOK, displayWebRTCOfferResponse{
 		Type:      answer.Type,
@@ -412,6 +415,10 @@ func displayPrepareCommand() string {
 ` + strings.TrimRight(displayPrepareInstallScript(), "\n") + `
 MEMOH_DESKTOP_INSTALL
 chmod 0755 /tmp/memoh-desktop-install.sh
+cat >/tmp/memoh-desktop-style.sh <<'MEMOH_DESKTOP_STYLE'
+` + strings.TrimRight(displayPrepareStyleScript(), "\n") + `
+MEMOH_DESKTOP_STYLE
+chmod 0755 /tmp/memoh-desktop-style.sh
 ` + displayPrepareMainCommand
 }
 
@@ -420,6 +427,96 @@ func displayPrepareInstallScript() string {
 		return string(data)
 	}
 	return scriptassets.DesktopInstall
+}
+
+func displayPrepareStyleScript() string {
+	if data, err := os.ReadFile("scripts/desktop-style.sh"); err == nil {
+		return string(data)
+	}
+	return scriptassets.DesktopStyle
+}
+
+func displayApplyStyleCommand() string {
+	return `cat >/tmp/memoh-desktop-install.sh <<'MEMOH_DESKTOP_INSTALL'
+` + strings.TrimRight(displayPrepareInstallScript(), "\n") + `
+MEMOH_DESKTOP_INSTALL
+chmod 0755 /tmp/memoh-desktop-install.sh
+cat >/tmp/memoh-desktop-style.sh <<'MEMOH_DESKTOP_STYLE'
+` + strings.TrimRight(displayPrepareStyleScript(), "\n") + `
+MEMOH_DESKTOP_STYLE
+chmod 0755 /tmp/memoh-desktop-style.sh
+cat >/tmp/memoh-desktop-apply-style.sh <<'MEMOH_DESKTOP_APPLY_STYLE'
+#!/bin/sh
+
+progress() { :; }
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+os_like() {
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    printf '%s %s\n' "${ID:-}" "${ID_LIKE:-}"
+    return
+  fi
+  printf unknown
+}
+is_debian_like() {
+  case " $(os_like) " in
+    *" debian "*|*" ubuntu "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+is_alpine() {
+  case " $(os_like) " in
+    *" alpine "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+. /tmp/memoh-desktop-install.sh
+
+style_lock=/tmp/memoh-desktop-style.lock
+if mkdir "$style_lock" 2>/dev/null; then
+  trap 'rmdir "$style_lock" 2>/dev/null || true' EXIT INT TERM
+else
+  exit 0
+fi
+
+install_style_extras_for_current_os
+/bin/sh /tmp/memoh-desktop-style.sh
+MEMOH_DESKTOP_APPLY_STYLE
+chmod 0755 /tmp/memoh-desktop-apply-style.sh
+/bin/sh /tmp/memoh-desktop-apply-style.sh`
+}
+
+func (h *ContainerdHandler) applyDisplayStyleAsync(ctx context.Context, botID string) {
+	if h == nil || h.manager == nil {
+		return
+	}
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+		defer cancel()
+		client, err := h.manager.MCPClient(runCtx, botID)
+		if err != nil || client == nil {
+			if err != nil && h.logger != nil {
+				h.logger.Warn("display desktop style skipped", slog.String("bot_id", botID), slog.Any("error", err))
+			}
+			return
+		}
+		result, err := client.Exec(runCtx, displayApplyStyleCommand(), "/", 540)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn("display desktop style failed", slog.String("bot_id", botID), slog.Any("error", err))
+			}
+			return
+		}
+		if result != nil && result.ExitCode != 0 && h.logger != nil {
+			h.logger.Warn(
+				"display desktop style exited non-zero",
+				slog.String("bot_id", botID),
+				slog.Int("exit_code", int(result.ExitCode)),
+				slog.String("stderr", strings.TrimSpace(result.Stderr)),
+			)
+		}
+	}()
 }
 
 const displayPrepareMainCommand = `cat >/tmp/memoh-display-prepare.sh <<'MEMOH_DISPLAY_PREPARE'
@@ -565,6 +662,77 @@ stop_browsers() {
     kill -9 "$pid" 2>/dev/null || true
   done
 }
+process_pids_by_name() {
+  for proc_dir in /proc/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    pid="${proc_dir#/proc/}"
+    cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
+    found=0
+    old_ifs="$IFS"
+    IFS='
+'
+    for arg in $cmdline; do
+      base="${arg##*/}"
+      for target in "$@"; do
+        [ "$base" = "$target" ] && found=1
+      done
+    done
+    IFS="$old_ifs"
+    [ "$found" = 1 ] && printf '%s\n' "$pid"
+  done
+  return 0
+}
+xfce_session_pids() {
+  process_pids_by_name startxfce4 xfce4-session xfdesktop
+}
+xfwm4_pids() {
+  process_pids_by_name xfwm4
+}
+fallback_wm_pids() {
+  process_pids_by_name twm
+}
+stop_fallback_wm() {
+  pids="$(fallback_wm_pids)"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+  pids="$(fallback_wm_pids)"
+  for pid in $pids; do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
+start_xfwm4() {
+  has_cmd xfwm4 || return 1
+  [ -n "$(xfwm4_pids)" ] && return 0
+  stop_fallback_wm
+  nohup xfwm4 --replace >/tmp/memoh-xfwm4.log 2>&1 &
+  return 0
+}
+start_desktop_session() {
+  if has_cmd startxfce4; then
+    if [ -n "$(xfce_session_pids)" ]; then
+      start_xfwm4
+      return 0
+    fi
+    stop_fallback_wm
+    nohup startxfce4 >/tmp/memoh-xfce.log 2>&1 &
+  elif has_cmd xfce4-session; then
+    if [ -n "$(xfce_session_pids)" ]; then
+      start_xfwm4
+      return 0
+    fi
+    stop_fallback_wm
+    nohup xfce4-session >/tmp/memoh-xfce.log 2>&1 &
+  elif has_cmd xfwm4; then
+    start_xfwm4
+  elif [ -n "$(fallback_wm_pids)" ]; then
+    return 0
+  elif [ -x /opt/memoh/toolkit/display/bin/twm ]; then
+    nohup /opt/memoh/toolkit/display/bin/twm >/tmp/memoh-twm.log 2>&1 &
+  fi
+}
 display_socket_ready() {
   xvnc_running && [ -S "$X_SOCKET" ] && awk -v port="$(printf '%04X' "$RFB_PORT")" 'toupper($2) ~ ":" port "$" && $4 == "0A" { found = 1 } END { exit found ? 0 : 1 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
@@ -613,6 +781,7 @@ else
     exit 1
   fi
 fi
+install_style_extras_for_current_os
 
 XVNC="$(find_xvnc || true)"
 BROWSER="$(find_browser || true)"
@@ -672,22 +841,15 @@ if command -v fc-cache >/dev/null 2>&1; then
 fi
 if [ -S "$X_SOCKET" ]; then
   if command -v xsetroot >/dev/null 2>&1; then
-    run_quick xsetroot -solid '#315f7d'
+    run_quick xsetroot -solid "${MEMOH_DISPLAY_DESKTOP_COLOR:-#1f2329}"
+    run_quick xsetroot -cursor_name left_ptr
   elif [ -x /opt/memoh/toolkit/display/bin/xsetroot ]; then
-    run_quick /opt/memoh/toolkit/display/bin/xsetroot -solid '#315f7d'
+    run_quick /opt/memoh/toolkit/display/bin/xsetroot -solid "${MEMOH_DISPLAY_DESKTOP_COLOR:-#1f2329}"
+    run_quick /opt/memoh/toolkit/display/bin/xsetroot -cursor_name left_ptr
   fi
 fi
-if ! ps -ef 2>/dev/null | grep -E 'xfce4-session|xfwm4|twm' | grep -v grep >/dev/null 2>&1; then
-  if has_cmd startxfce4; then
-    nohup startxfce4 >/tmp/memoh-xfce.log 2>&1 &
-  elif has_cmd xfce4-session; then
-    nohup xfce4-session >/tmp/memoh-xfce.log 2>&1 &
-  elif has_cmd xfwm4; then
-    nohup xfwm4 >/tmp/memoh-xfwm4.log 2>&1 &
-  elif [ -x /opt/memoh/toolkit/display/bin/twm ]; then
-    nohup /opt/memoh/toolkit/display/bin/twm >/tmp/memoh-twm.log 2>&1 &
-  fi
-fi
+start_desktop_session
+nohup /bin/sh /tmp/memoh-desktop-style.sh >/tmp/memoh-desktop-style.log 2>&1 &
 
 progress 94 browser "Launching browser"
 if ! browser_cdp_running; then
