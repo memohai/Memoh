@@ -33,6 +33,7 @@ const (
 	systemXkbcompPath     = "/usr/bin/xkbcomp"
 	x11SocketDir          = "/tmp/.X11-unix"
 	xvncDisplay           = ":99"
+	xvncNoCursorArg       = "-nocursor"
 	defaultXvncGeometry   = "1280x960"
 	xvncSocketPath        = x11SocketDir + "/X99"
 	xvncLockPath          = "/tmp/.X99-lock"
@@ -80,6 +81,12 @@ func superviseXvnc(ctx context.Context) {
 		geometry := displayGeometry()
 		prepareX11SocketDir(ctx)
 		if displayTCPReady(ctx, rfbTCPAddr) {
+			if xvncProcessMissingArg(xvncNoCursorArg) {
+				logger.FromContext(ctx).Info("restarting Xvnc to hide remote cursor", slog.String("display", xvncDisplay), slog.String("arg", xvncNoCursorArg))
+				stopXvncProcesses(ctx)
+				backoff = time.Second
+				continue
+			}
 			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
 			go startDisplaySession(ctx)
 			if waitExistingDisplay(ctx, rfbTCPAddr) {
@@ -97,6 +104,7 @@ func superviseXvnc(ctx context.Context) {
 			"-geometry", geometry,
 			"-depth", "24",
 			"-SecurityTypes", "None",
+			xvncNoCursorArg,
 			"-localhost",
 			"-rfbport", displayRFBTCPPort(rfbTCPAddr),
 		)
@@ -575,6 +583,46 @@ func xvncProcessIDs() []int {
 		}
 	}
 	return pids
+}
+
+func xvncProcessMissingArg(requiredArg string) bool {
+	requiredArg = strings.TrimSpace(requiredArg)
+	if requiredArg == "" {
+		return false
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", name, "cmdline")) //nolint:gosec // /proc entries are kernel-provided.
+		if err != nil || len(cmdline) == 0 {
+			continue
+		}
+		parts := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		hasXvnc := false
+		hasDisplay := false
+		hasRequiredArg := false
+		for _, arg := range parts {
+			if filepath.Base(arg) == "Xvnc" {
+				hasXvnc = true
+			}
+			if arg == xvncDisplay {
+				hasDisplay = true
+			}
+			if arg == requiredArg {
+				hasRequiredArg = true
+			}
+		}
+		if hasXvnc && hasDisplay && !hasRequiredArg {
+			return true
+		}
+	}
+	return false
 }
 
 func stopXvncProcesses(ctx context.Context) {

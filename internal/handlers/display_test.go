@@ -69,13 +69,18 @@ func TestDisplayPrepareCommandInjectsInstallScript(t *testing.T) {
 	if !strings.Contains(displayPrepareMainCommand, "grep -Eq '^--type=' && continue") {
 		t.Fatal("CDP readiness detection must ignore Chromium child processes")
 	}
+	if !strings.Contains(displayPrepareMainCommand, "XVNC_CURSOR_ARG=-nocursor") ||
+		!strings.Contains(displayPrepareMainCommand, "xvnc_missing_arg()") ||
+		!strings.Contains(displayPrepareMainCommand, `xvnc_missing_arg "$XVNC_CURSOR_ARG"`) {
+		t.Fatal("display prepare must restart old Xvnc processes without remote cursor hiding")
+	}
 	if !strings.Contains(displayPrepareMainCommand, "SingletonLock") {
 		t.Fatal("display prepare must clean stale Chromium profile locks before starting the browser")
 	}
 	if strings.Contains(displayPrepareMainCommand, "rfbunixpath") || strings.Contains(displayPrepareMainCommand, "RFB_SOCKET") {
 		t.Fatal("display prepare should use loopback TCP VNC instead of a bind-mounted Unix RFB socket")
 	}
-	if !strings.Contains(displayPrepareMainCommand, "-localhost -rfbport \"$RFB_PORT\"") {
+	if !strings.Contains(displayPrepareMainCommand, "\"$XVNC_CURSOR_ARG\" -localhost -rfbport \"$RFB_PORT\"") {
 		t.Fatal("display prepare must keep VNC on container loopback")
 	}
 	if !strings.Contains(displayPrepareMainCommand, `XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"`) {

@@ -13,6 +13,7 @@
     <video
       ref="videoRef"
       class="size-full min-h-0 flex-1 bg-foreground object-contain"
+      :style="{ cursor: displayCursor }"
       autoplay
       playsinline
       muted
@@ -339,9 +340,21 @@ interface BitrateSample {
 }
 
 type StatsRecord = Record<string, unknown>
+type DisplayCursor = string
 type VideoWithFrameCallback = HTMLVideoElement & {
   requestVideoFrameCallback?: (callback: (now: number, metadata: unknown) => void) => number
   cancelVideoFrameCallback?: (handle: number) => void
+}
+
+interface DisplayCursorMetadata {
+  type?: string
+  source?: string
+  cursor?: string
+  width?: number
+  height?: number
+  hot_x?: number
+  hot_y?: number
+  hidden?: boolean
 }
 
 const ACTIVE_SNAPSHOT_INTERVAL_MS = 10000
@@ -357,6 +370,25 @@ const FALLBACK_DISPLAY_WIDTH = 1280
 const FALLBACK_DISPLAY_HEIGHT = 960
 const CONNECT_TIMEOUT_MS = 15000
 const INACTIVE_RECONNECT_MS = 10000
+const DISPLAY_INPUT_CHANNEL = 'display-input'
+const DISPLAY_CURSOR_CHANNEL = 'display-cursor'
+const NATIVE_CURSOR_TYPES = new Set([
+  'default',
+  'text',
+  'pointer',
+  'move',
+  'grab',
+  'grabbing',
+  'ew-resize',
+  'ns-resize',
+  'nesw-resize',
+  'nwse-resize',
+  'col-resize',
+  'row-resize',
+  'not-allowed',
+  'wait',
+  'progress',
+])
 
 const { t } = useI18n()
 const rootRef = ref<HTMLElement | null>(null)
@@ -374,6 +406,9 @@ const statsMenu = reactive({
   x: 0,
   y: 0,
 })
+const fallbackCursor = ref<DisplayCursor>('default')
+const remoteCursor = ref<DisplayCursor | null>(null)
+const displayCursor = computed<DisplayCursor>(() => remoteCursor.value ?? fallbackCursor.value)
 let peer: RTCPeerConnection | null = null
 let inputChannel: RTCDataChannel | null = null
 let pointerMask = 0
@@ -508,6 +543,8 @@ function cleanupLocal() {
   closeStatsMenu()
   pointerMask = 0
   lastPointerPoint = null
+  fallbackCursor.value = 'default'
+  remoteCursor.value = null
   if (inputChannel) {
     inputChannel.close()
     inputChannel = null
@@ -807,6 +844,61 @@ function inputReady() {
   return inputChannel?.readyState === 'open'
 }
 
+function handleDisplayDataChannel(event: RTCDataChannelEvent) {
+  const channel = event.channel
+  if (channel.label !== DISPLAY_CURSOR_CHANNEL) return
+  channel.addEventListener('message', (message) => {
+    handleCursorMetadata(message.data)
+  })
+  channel.addEventListener('close', () => {
+    remoteCursor.value = null
+  })
+}
+
+function handleCursorMetadata(data: unknown) {
+  if (typeof data !== 'string') return
+  let metadata: DisplayCursorMetadata
+  try {
+    metadata = JSON.parse(data) as DisplayCursorMetadata
+  } catch {
+    return
+  }
+  if (metadata.type !== 'cursor') return
+  remoteCursor.value = cursorMetadataToCSS(metadata)
+}
+
+function cursorMetadataToCSS(metadata: DisplayCursorMetadata): DisplayCursor | null {
+  if (metadata.hidden) return null
+  if (typeof metadata.cursor === 'string' && NATIVE_CURSOR_TYPES.has(metadata.cursor)) {
+    return metadata.cursor
+  }
+  return nativeCursorTypeFromGeometry(metadata)
+}
+
+function nativeCursorTypeFromGeometry(metadata: DisplayCursorMetadata): DisplayCursor | null {
+  const width = finiteNumber(metadata.width)
+  const height = finiteNumber(metadata.height)
+  const hotX = finiteNumber(metadata.hot_x)
+  const hotY = finiteNumber(metadata.hot_y)
+  if (!width || !height || hotX === null || hotY === null) return null
+  const centerX = Math.floor(width / 2)
+  const centerY = Math.floor(height / 2)
+  if (width <= 18 && height >= 18 && Math.abs(hotX - centerX) <= 3 && Math.abs(hotY - centerY) <= 4) {
+    return 'text'
+  }
+  if (width >= height * 2 && Math.abs(hotY - centerY) <= 4) return 'ew-resize'
+  if (height >= width * 2 && Math.abs(hotX - centerX) <= 4) return 'ns-resize'
+  if (width >= 18 && height >= 18 && Math.abs(hotX - centerX) <= 4 && Math.abs(hotY - centerY) <= 4) {
+    return 'move'
+  }
+  if (width >= 16 && height >= 16 && hotX > 3 && hotY <= 5) return 'pointer'
+  return 'default'
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null
+}
+
 function buttonBit(button: number): number {
   switch (button) {
     case 0: return 1
@@ -854,9 +946,26 @@ function sendPointer(event: MouseEvent | WheelEvent, mask = pointerMask) {
   })
 }
 
+function sendPointerAt(point: { x: number; y: number }, mask = pointerMask) {
+  sendInput({
+    type: 'pointer',
+    x: point.x,
+    y: point.y,
+    button_mask: mask,
+  })
+}
+
+function nudgeLastPointer(mask = pointerMask) {
+  if (!lastPointerPoint) return
+  const nudgeX = lastPointerPoint.x > 0 ? lastPointerPoint.x - 1 : lastPointerPoint.x + 1
+  sendPointerAt({ x: nudgeX, y: lastPointerPoint.y }, mask)
+  sendPointerAt(lastPointerPoint, mask)
+}
+
 function onPointerDown(event: MouseEvent) {
   videoRef.value?.focus()
   pointerMask |= buttonBit(event.button)
+  fallbackCursor.value = 'grabbing'
   sendPointer(event)
 }
 
@@ -866,11 +975,17 @@ function onPointerMove(event: MouseEvent) {
 
 function onPointerUp(event: MouseEvent) {
   pointerMask &= ~buttonBit(event.button)
+  if (pointerMask === 0 && fallbackCursor.value === 'grabbing') {
+    fallbackCursor.value = 'default'
+  }
   sendPointer(event)
 }
 
 function onPointerLeave(event: MouseEvent) {
   pointerMask = 0
+  if (fallbackCursor.value === 'grabbing') {
+    fallbackCursor.value = 'default'
+  }
   const point = resolveVideoPoint(event) ?? lastPointerPoint
   if (!point) return
   sendInput({
@@ -882,6 +997,9 @@ function onPointerLeave(event: MouseEvent) {
 }
 
 function onWheel(event: WheelEvent) {
+  if (fallbackCursor.value === 'grabbing') {
+    fallbackCursor.value = 'default'
+  }
   const bit = event.deltaY < 0 ? 8 : 16
   sendPointer(event, pointerMask | bit)
   sendPointer(event, pointerMask)
@@ -920,11 +1038,31 @@ function keysymForEvent(event: KeyboardEvent): number | null {
 function sendKey(event: KeyboardEvent, down: boolean) {
   const keysym = keysymForEvent(event)
   if (!keysym) return
+  if (down && isTextCursorKey(event)) {
+    fallbackCursor.value = 'text'
+  }
   sendInput({
     type: 'key',
     keysym,
     down,
   })
+  nudgeLastPointer()
+}
+
+function isTextCursorKey(event: KeyboardEvent): boolean {
+  if (event.key.length === 1) return true
+  return [
+    'Backspace',
+    'Delete',
+    'Enter',
+    'Tab',
+    'Home',
+    'End',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+  ].includes(event.key)
 }
 
 function onKeyDown(event: KeyboardEvent) {
@@ -1179,8 +1317,9 @@ async function connect() {
 
   const next = new RTCPeerConnection()
   peer = next
-  inputChannel = next.createDataChannel('display-input', { ordered: true })
+  inputChannel = next.createDataChannel(DISPLAY_INPUT_CHANNEL, { ordered: true })
   next.addTransceiver('video', { direction: 'recvonly' })
+  next.addEventListener('datachannel', handleDisplayDataChannel)
   next.addEventListener('connectionstatechange', () => setPeerStatus(next.connectionState))
   next.addEventListener('track', (event) => {
     const video = videoRef.value
