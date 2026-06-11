@@ -21,6 +21,7 @@ type CreateContainerRequest struct {
 	ImageRef        string
 	ImagePullPolicy string
 	StorageRef      StorageRef
+	ResourceLimits  ResourceLimits
 	Labels          map[string]string
 	Spec            ContainerSpec
 }

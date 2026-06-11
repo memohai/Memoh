@@ -37,6 +37,12 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
         meta: { breadcrumb: i18nRef('bots.createBot') }
       },
       {
+        name: 'bot-create-progress',
+        path: 'new/progress',
+        loader: () => import('@memohai/web/pages/bots/new-progress.vue'),
+        meta: { breadcrumb: i18nRef('bots.createBot') }
+      },
+      {
         name: 'bot-detail',
         path: ':botName',
         loader: () => import('@memohai/web/pages/bots/detail.vue'),

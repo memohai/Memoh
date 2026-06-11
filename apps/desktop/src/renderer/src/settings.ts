@@ -22,10 +22,6 @@ import { setupCrossWindowCacheSync } from './cross-window-cache-sync'
 
 async function bootstrap() {
   const status = await window.api.desktop.getServerStatus()
-  if (status.mode === 'remote' && !status.baseUrl) {
-    await window.api.window.closeSelf()
-    return
-  }
   const token = await window.api.desktop.authToken()
   if (token) {
     localStorage.setItem('token', token)

@@ -4,7 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { nextFrame } from '../useStepTransition'
+import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
+import { readACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { complete, completing } = useOnboarding()
@@ -20,8 +22,8 @@ const cards = [
 ] as const
 
 onMounted(() => {
-  const count = Number.parseInt(sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount) ?? '0', 10)
-  hasProvider.value = Number.isFinite(count) && count > 0
+  const count = Number.parseInt(safeSessionGet(ONBOARDING_KEYS.providerAddedCount) ?? '0', 10)
+  hasProvider.value = (Number.isFinite(count) && count > 0) || !!readACPSelection()
   nextFrame(() => {
     visible.value = true
   })
@@ -30,11 +32,11 @@ onMounted(() => {
 async function handleComplete() {
   if (completing.value) return
   exiting.value = true
-  sessionStorage.setItem(ONBOARDING_KEYS.entryAnimation, '1')
+  safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
   const ok = await complete(175)
   if (!ok) {
     exiting.value = false
-    sessionStorage.removeItem(ONBOARDING_KEYS.entryAnimation)
+    safeSessionRemove(ONBOARDING_KEYS.entryAnimation)
   }
 }
 </script>

@@ -149,7 +149,10 @@ describe('acp-metadata', () => {
     }
 
     expect(findMissingRequiredACPField(value, [codexProfile])?.field.id).toBe('api_key')
-    expect(findMissingRequiredACPField(value, [codexProfile], true)).toBeNull()
+    // `self` mode needs no managed credentials and is skipped per-agent.
+    expect(findMissingRequiredACPField({
+      agents: { codex: { enabled: true, setup_mode: 'self', managed: {} } },
+    }, [codexProfile])).toBeNull()
     expect(findMissingRequiredManagedField(codexProfile, {}, 'self')).toBeNull()
   })
 

@@ -274,6 +274,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 						ToolCallID: call.ID,
 						Running:    uiBoolPtr(true),
 						Approval:   call.Approval,
+						UserInput:  call.UserInput,
 					}
 					appendPendingAssistantMessage(pending, block)
 					if call.ID != "" {
@@ -921,16 +922,24 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 		return
 	}
 	message.Output = output
-	if strings.EqualFold(strings.TrimSpace(message.Name), "exec") {
-		if task, ok := backgroundTaskFromExecToolResult(output); ok {
-			if task.Command == "" {
-				task.Command = stringFromMap(message.Input, "command")
-			}
-			mergeBackgroundTaskIntoTool(message, task)
-			return
+	// Finalize before any early return below: a background handoff result is
+	// still a tool result, and replaying a pending user input would re-offer
+	// an already answered form.
+	finalizeInteractiveRequests(message, output)
+	if task, ok := backgroundTaskFromToolResult(output); ok {
+		if task.Command == "" {
+			task.Command = stringFromMap(message.Input, "command")
 		}
+		mergeBackgroundTaskIntoTool(message, task)
+		return
 	}
 	message.Running = uiBoolPtr(false)
+}
+
+// finalizeInteractiveRequests closes any pending ask_user state on a tool
+// block once its result exists. Every exit path of result application must go
+// through this, or stale pending requests resurface in the UI.
+func finalizeInteractiveRequests(message *UIMessage, output any) {
 	if message.UserInput != nil {
 		if payload, ok := toolResultMap(output); ok {
 			if status := stringFromMap(payload, "status"); status != "" {
@@ -941,7 +950,11 @@ func applyToolResultToUIMessage(message *UIMessage, output any) {
 	}
 }
 
-func backgroundTaskFromExecToolResult(output any) (UIBackgroundTask, bool) {
+// backgroundTaskFromToolResult detects a background handoff in a tool result
+// by payload shape — a task_id plus a background-start status marker —
+// regardless of which tool produced it. Terminal statuses (e.g. bg_status
+// inspection results) intentionally do not match.
+func backgroundTaskFromToolResult(output any) (UIBackgroundTask, bool) {
 	payload, ok := toolResultMap(output)
 	if !ok {
 		return UIBackgroundTask{}, false
@@ -952,25 +965,18 @@ func backgroundTaskFromExecToolResult(output any) (UIBackgroundTask, bool) {
 		return UIBackgroundTask{}, false
 	}
 
-	statusToken := strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status")))
-	status := normalizeBackgroundTaskStatus(statusToken)
-	switch statusToken {
+	switch strings.ToLower(strings.TrimSpace(stringFromMap(payload, "status"))) {
 	case "background_started", "auto_backgrounded", "started":
-		status = "running"
-	}
-	if status == "" {
+	default:
 		return UIBackgroundTask{}, false
 	}
 
 	task := UIBackgroundTask{
 		TaskID:     taskID,
-		Status:     status,
-		Command:    stringFromMap(payload, "command"),
+		Status:     "running",
+		Command:    firstNonEmptyString(stringFromMap(payload, "command"), stringFromMap(payload, "description")),
 		OutputFile: stringFromMap(payload, "output_file"),
-		ExitCode:   int32FromAny(payload["exit_code"]),
-		Duration:   stringFromMap(payload, "duration"),
 		OutputTail: firstNonEmptyString(stringFromMap(payload, "output_tail"), stringFromMap(payload, "tail")),
-		Stalled:    status == "stalled" || boolFromAny(payload["stalled"], false),
 	}
 	return task, true
 }
@@ -1047,9 +1053,12 @@ func parseBackgroundTaskNotification(text string) (UIBackgroundTask, bool) {
 		status = "completed"
 	}
 	task := UIBackgroundTask{
-		TaskID:     taskID,
-		Status:     status,
-		Command:    strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
+		TaskID: taskID,
+		Status: status,
+		Command: firstNonEmptyString(
+			strings.TrimSpace(extractUITaskNotificationTag(body, "command")),
+			strings.TrimSpace(extractUITaskNotificationTag(body, "description")),
+		),
 		OutputFile: strings.TrimSpace(extractUITaskNotificationTag(body, "output-file")),
 		Duration:   strings.TrimSpace(extractUITaskNotificationTag(body, "duration")),
 		OutputTail: strings.TrimSpace(extractUITaskNotificationTag(body, "output-tail")),
@@ -1110,10 +1119,6 @@ func stringFromMap(value any, key string) string {
 		return ""
 	}
 	return stringFromAny(typed[key])
-}
-
-func int32FromAny(value any) int32 {
-	return int32(intFromAny(value)) //nolint:gosec // exit codes are small process statuses.
 }
 
 func firstNonEmptyString(values ...string) string {

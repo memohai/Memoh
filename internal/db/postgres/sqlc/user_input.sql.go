@@ -21,6 +21,7 @@ SET status = 'canceled',
     updated_at = now()
 WHERE id = $3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -66,6 +67,17 @@ func (q *Queries) CancelUserInputRequest(ctx context.Context, arg CancelUserInpu
 }
 
 const createUserInputRequest = `-- name: CreateUserInputRequest :one
+WITH locked_session AS (
+  SELECT id
+  FROM bot_sessions
+  WHERE id = $2
+  FOR UPDATE
+),
+next_short_id AS (
+  SELECT COALESCE(MAX(user_input_requests.short_id), 0) + 1 AS short_id
+  FROM locked_session
+  LEFT JOIN user_input_requests ON user_input_requests.session_id = locked_session.id
+)
 INSERT INTO user_input_requests (
   bot_id,
   session_id,
@@ -82,18 +94,14 @@ INSERT INTO user_input_requests (
   reply_target,
   conversation_type,
   expires_at
-) VALUES (
+) SELECT
   $1,
   $2,
   $3,
   $4,
   $5,
   $6,
-  (
-    SELECT COALESCE(MAX(short_id), 0) + 1
-    FROM user_input_requests
-    WHERE session_id = $2
-  ),
+  next_short_id.short_id,
   $7,
   $8,
   $9,
@@ -102,7 +110,20 @@ INSERT INTO user_input_requests (
   $12,
   $13,
   $14
-)
+FROM locked_session
+CROSS JOIN next_short_id
+ON CONFLICT (session_id, tool_call_id) DO UPDATE
+SET input_json = EXCLUDED.input_json,
+    ui_payload_json = EXCLUDED.ui_payload_json,
+    provider_metadata = EXCLUDED.provider_metadata,
+    requested_by_channel_identity_id = EXCLUDED.requested_by_channel_identity_id,
+    source_platform = EXCLUDED.source_platform,
+    reply_target = EXCLUDED.reply_target,
+    conversation_type = EXCLUDED.conversation_type,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = now()
+WHERE user_input_requests.status = 'pending'
+  AND (user_input_requests.expires_at IS NULL OR user_input_requests.expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -180,6 +201,7 @@ SET status = 'failed',
     updated_at = now()
 WHERE id = $2
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 
@@ -229,6 +251,7 @@ FROM user_input_requests
 WHERE bot_id = $1
   AND session_id = $2
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at DESC, short_id DESC
 LIMIT 1
 `
@@ -280,6 +303,7 @@ WHERE bot_id = $1
   AND session_id = $2
   AND prompt_external_message_id = $3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -332,6 +356,7 @@ WHERE bot_id = $1
   AND session_id = $2
   AND short_id = $3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 `
 
 type GetPendingUserInputBySessionShortIDParams struct {
@@ -416,12 +441,60 @@ func (q *Queries) GetUserInputRequest(ctx context.Context, id pgtype.UUID) (User
 	return i, err
 }
 
+const getUserInputRequestBySessionToolCall = `-- name: GetUserInputRequestBySessionToolCall :one
+SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
+FROM user_input_requests
+WHERE session_id = $1
+  AND tool_call_id = $2
+`
+
+type GetUserInputRequestBySessionToolCallParams struct {
+	SessionID  pgtype.UUID `json:"session_id"`
+	ToolCallID string      `json:"tool_call_id"`
+}
+
+func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg GetUserInputRequestBySessionToolCallParams) (UserInputRequest, error) {
+	row := q.db.QueryRow(ctx, getUserInputRequestBySessionToolCall, arg.SessionID, arg.ToolCallID)
+	var i UserInputRequest
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.RouteID,
+		&i.ChannelIdentityID,
+		&i.ToolCallID,
+		&i.ToolName,
+		&i.ShortID,
+		&i.Status,
+		&i.InputJson,
+		&i.UiPayloadJson,
+		&i.ResultJson,
+		&i.ProviderMetadata,
+		&i.RequestedByChannelIdentityID,
+		&i.RespondedByChannelIdentityID,
+		&i.AssistantMessageID,
+		&i.ToolResultMessageID,
+		&i.PromptMessageID,
+		&i.PromptExternalMessageID,
+		&i.SourcePlatform,
+		&i.ReplyTarget,
+		&i.ConversationType,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.RespondedAt,
+		&i.CanceledAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listPendingUserInputsBySession = `-- name: ListPendingUserInputsBySession :many
 SELECT id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 FROM user_input_requests
 WHERE bot_id = $1
   AND session_id = $2
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at ASC, short_id ASC
 `
 
@@ -548,6 +621,7 @@ SET status = 'submitted',
     updated_at = now()
 WHERE id = $3
   AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, tool_call_id, tool_name, short_id, status, input_json, ui_payload_json, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at
 `
 

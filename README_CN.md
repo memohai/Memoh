@@ -25,6 +25,9 @@
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
+> [!TIP]
+> Memoh 的 SaaS 服务即将上线，欢迎在 [memoh.ai/waitlist](https://memoh.ai/waitlist) 加入 waitlist。
+
 ## Memoh 是什么？
 
 Memoh 让你在一台机器上运行多个 AI Agent。每个 Agent 都拥有独立的容器环境、文件系统、桌面、浏览器、网络和长期记忆，像一台真正属于它的电脑。

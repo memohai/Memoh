@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,12 +27,117 @@ const (
 
 type Service struct {
 	queries dbstore.Queries
+
+	mu          sync.Mutex
+	waiters     map[string][]chan Request
+	waiterCount map[string]int
 }
 
 func NewService(_ *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
 		queries: queries,
+		waiters: map[string][]chan Request{},
 	}
+}
+
+// subscribe registers a waiter for the request before any status check so a
+// concurrent Submit/Cancel cannot slip between check and wait.
+func (s *Service) subscribe(requestID string) (<-chan Request, func()) {
+	ch := make(chan Request, 1)
+	s.mu.Lock()
+	if s.waiters == nil {
+		s.waiters = map[string][]chan Request{}
+	}
+	s.waiters[requestID] = append(s.waiters[requestID], ch)
+	s.mu.Unlock()
+	unsubscribe := func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		chans := s.waiters[requestID]
+		for i, c := range chans {
+			if c == ch {
+				s.waiters[requestID] = append(chans[:i], chans[i+1:]...)
+				break
+			}
+		}
+		if len(s.waiters[requestID]) == 0 {
+			delete(s.waiters, requestID)
+		}
+	}
+	return ch, unsubscribe
+}
+
+// RegisterWaiter records that a caller in this process owns the request's
+// resolution. Callers that announce a pending request to users must register
+// BEFORE announcing, or an instant response can be misjudged as orphaned.
+// The returned release must run when the wait ends.
+func (s *Service) RegisterWaiter(requestID string) func() {
+	if s == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	if s.waiterCount == nil {
+		s.waiterCount = map[string]int{}
+	}
+	s.waiterCount[requestID]++
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.waiterCount[requestID] > 1 {
+			s.waiterCount[requestID]--
+			return
+		}
+		delete(s.waiterCount, requestID)
+	}
+}
+
+// HasWaiter reports whether anyone in this process is currently registered
+// for the request. A pending row without a live waiter (timeout fired, or
+// the process restarted) must not accept answers — recording one would look
+// successful while nothing consumes it.
+func (s *Service) HasWaiter(requestID string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waiterCount[requestID] > 0
+}
+
+func (s *Service) notifyResolved(req Request) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	chans := s.waiters[req.ID]
+	delete(s.waiters, req.ID)
+	s.mu.Unlock()
+	for _, ch := range chans {
+		select {
+		case ch <- req:
+		default:
+		}
+	}
+}
+
+// resolveAndNotify converts a terminal-transition row, then wakes any waiters.
+// Shared by Submit, Cancel, and Fail so notification can never drift between
+// resolution paths. A guarded update that matched no row is disambiguated:
+// an existing non-pending request means the transition lost a race to another
+// decision (or to expiry), not that the request is unknown.
+func (s *Service) resolveAndNotify(ctx context.Context, requestID string, row sqlc.UserInputRequest, err error) (Request, error) {
+	resolved, err := requestFromRowOrErr(row, err)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			if req, getErr := s.Get(ctx, requestID); getErr == nil && req.Status != StatusPending {
+				return Request{}, ErrAlreadyDecided
+			}
+		}
+		return Request{}, err
+	}
+	s.notifyResolved(resolved)
+	return resolved, nil
 }
 
 func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (Request, error) {
@@ -57,14 +163,14 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if toolName != ToolNameAskUser {
 		return Request{}, fmt.Errorf("unsupported user input tool %q", toolName)
 	}
-	if err := ValidateAskUserInput(input.Input); err != nil {
+	uiPayload, err := ParseAskUserPayload(input.Input)
+	if err != nil {
 		return Request{}, err
 	}
 	rawInput, err := marshalObject(input.Input)
 	if err != nil {
 		return Request{}, err
 	}
-	uiPayload := normalizeUIPayload(input.Input)
 	uiPayloadJSON, err := json.Marshal(uiPayload)
 	if err != nil {
 		return Request{}, err
@@ -81,7 +187,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
-	row, err := s.queries.CreateUserInputRequest(ctx, sqlc.CreateUserInputRequestParams{
+	params := sqlc.CreateUserInputRequestParams{
 		BotID:                        botID,
 		SessionID:                    sessionID,
 		RouteID:                      optionalUUID(input.RouteID),
@@ -96,8 +202,21 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
 		ExpiresAt:                    optionalTime(input.ExpiresAt),
-	})
-	return requestFromRowOrErr(row, err)
+	}
+	row, err := s.queries.CreateUserInputRequest(ctx, params)
+	if err != nil {
+		if errors.Is(mapLookupErr(err), ErrNotFound) {
+			existing, getErr := s.queries.GetUserInputRequestBySessionToolCall(ctx, sqlc.GetUserInputRequestBySessionToolCallParams{
+				SessionID:  sessionID,
+				ToolCallID: toolCallID,
+			})
+			if getErr == nil {
+				return requestFromRow(existing), nil
+			}
+		}
+		return Request{}, mapLookupErr(err)
+	}
+	return requestFromRow(row), nil
 }
 
 func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Request, error) {
@@ -181,6 +300,74 @@ func (s *Service) Get(ctx context.Context, requestID string) (Request, error) {
 	return requestFromRowOrErr(row, err)
 }
 
+// WaitForResponse blocks until the request leaves pending. Resolution inside
+// this process arrives via the Submit/Cancel/Fail broadcast; the slow ticker
+// is only a safety net for transitions this process cannot observe (another
+// node, manual DB changes, time-based expiry).
+func (s *Service) WaitForResponse(ctx context.Context, requestID string) (Request, error) {
+	release := s.RegisterWaiter(requestID)
+	defer release()
+	return s.waitForResponse(ctx, requestID)
+}
+
+// WaitForRegisteredResponse waits like WaitForResponse but assumes the caller
+// already registered with RegisterWaiter before announcing the request.
+func (s *Service) WaitForRegisteredResponse(ctx context.Context, requestID string) (Request, error) {
+	return s.waitForResponse(ctx, requestID)
+}
+
+func (s *Service) waitForResponse(ctx context.Context, requestID string) (Request, error) {
+	resolved, unsubscribe := s.subscribe(requestID)
+	defer unsubscribe()
+
+	req, err := s.Get(ctx, requestID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return s.resolvedAfterContextDone(ctx, requestID, resolved)
+		}
+		return Request{}, err
+	}
+	if req.Status != StatusPending {
+		return req, nil
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return s.resolvedAfterContextDone(ctx, requestID, resolved)
+		case req := <-resolved:
+			return req, nil
+		case <-ticker.C:
+			req, err := s.Get(ctx, requestID)
+			if err != nil {
+				return Request{}, err
+			}
+			if req.Status != StatusPending {
+				return req, nil
+			}
+		}
+	}
+}
+
+func (s *Service) resolvedAfterContextDone(ctx context.Context, requestID string, resolved <-chan Request) (Request, error) {
+	// A resolution may have landed at the same instant (select picks randomly
+	// among ready cases) or committed before its notification was delivered.
+	// Prefer the answer over the caller's cancellation.
+	select {
+	case req := <-resolved:
+		return req, nil
+	default:
+	}
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if req, err := s.Get(finalCtx, requestID); err == nil && req.Status != StatusPending {
+		return req, nil
+	}
+	return Request{}, ctx.Err()
+}
+
 func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error) {
 	if s == nil || s.queries == nil {
 		return Request{}, errors.New("user input queries not configured")
@@ -193,7 +380,14 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 	if err != nil {
 		return Request{}, err
 	}
-	result, err := submittedResult(input)
+	req, err := s.Get(ctx, input.RequestID)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.Status != StatusPending {
+		return Request{}, ErrAlreadyDecided
+	}
+	result, err := submittedResult(req.UIPayload, input.Answers)
 	if err != nil {
 		return Request{}, err
 	}
@@ -206,7 +400,7 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 		ResultJson:                   resultJSON,
 		RespondedByChannelIdentityID: actorID,
 	})
-	return requestFromRowOrErr(row, err)
+	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }
 
 func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error) {
@@ -231,7 +425,7 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 		ResultJson:                   resultJSON,
 		RespondedByChannelIdentityID: actorID,
 	})
-	return requestFromRowOrErr(row, err)
+	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }
 
 func (s *Service) Fail(ctx context.Context, requestID string, result map[string]any) (Request, error) {
@@ -253,7 +447,7 @@ func (s *Service) Fail(ctx context.Context, requestID string, result map[string]
 		ID:         id,
 		ResultJson: resultJSON,
 	})
-	return requestFromRowOrErr(row, err)
+	return s.resolveAndNotify(ctx, requestID, row, err)
 }
 
 func (s *Service) UpdatePromptMessage(ctx context.Context, requestID, promptMessageID, externalID string) (Request, error) {
@@ -344,28 +538,104 @@ func DeferredMetadata(req Request) map[string]any {
 	}
 }
 
-func submittedResult(input SubmitInput) (map[string]any, error) {
-	userResponse := make(map[string]any)
-	for key, value := range input.RawUserResponse {
-		userResponse[key] = value
+// submittedResult validates the user's answers against the stored payload and
+// builds the tool result returned to the model. Every question must be answered.
+func submittedResult(payload UIPayload, answers []QuestionAnswer) (map[string]any, error) {
+	if len(payload.Questions) == 0 {
+		return nil, errors.New("user input request has no questions")
 	}
-	if strings.TrimSpace(input.OptionID) != "" {
-		userResponse["option_id"] = strings.TrimSpace(input.OptionID)
+	byQuestion := make(map[string]QuestionAnswer, len(answers))
+	for _, answer := range answers {
+		id := strings.TrimSpace(answer.QuestionID)
+		if id == "" {
+			return nil, errors.New("answers[].question_id is required")
+		}
+		if _, ok := payload.Question(id); !ok {
+			return nil, fmt.Errorf("unknown question %q", id)
+		}
+		if _, dup := byQuestion[id]; dup {
+			return nil, fmt.Errorf("duplicate answer for question %q", id)
+		}
+		byQuestion[id] = answer
 	}
-	if input.OptionValue != nil {
-		userResponse["value"] = input.OptionValue
-	}
-	if input.Answer != nil {
-		userResponse["answer"] = input.Answer
-	}
-	if len(userResponse) == 0 {
-		return nil, errors.New("answer, option_id, value, or user_response is required")
+
+	resultAnswers := make([]map[string]any, 0, len(payload.Questions))
+	for _, question := range payload.Questions {
+		answer, ok := byQuestion[question.ID]
+		if !ok {
+			return nil, fmt.Errorf("missing answer for question %q", question.ID)
+		}
+		entry, err := answerEntry(question, answer)
+		if err != nil {
+			return nil, err
+		}
+		resultAnswers = append(resultAnswers, entry)
 	}
 	return map[string]any{
-		"status":        StatusSubmitted,
-		"user_response": userResponse,
-		"instruction":   submitInstruction,
+		"status":      StatusSubmitted,
+		"answers":     resultAnswers,
+		"instruction": submitInstruction,
 	}, nil
+}
+
+func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, error) {
+	entry := map[string]any{
+		"question_id": question.ID,
+		"question":    question.Text,
+	}
+	optionIDs := cleanIDs(answer.OptionIDs)
+	customText := strings.TrimSpace(answer.CustomText)
+	text := strings.TrimSpace(answer.Text)
+
+	if question.Kind == QuestionKindText {
+		if len(optionIDs) > 0 || customText != "" {
+			return nil, fmt.Errorf("question %q is free text and does not accept option selections", question.ID)
+		}
+		if text == "" {
+			return nil, fmt.Errorf("question %q requires a text answer", question.ID)
+		}
+		entry["text"] = text
+		return entry, nil
+	}
+
+	if text != "" {
+		return nil, fmt.Errorf("question %q is a select question; use option_ids or custom_text", question.ID)
+	}
+	if customText != "" && !question.AllowCustom {
+		return nil, fmt.Errorf("question %q does not allow a custom answer", question.ID)
+	}
+	if question.Kind == QuestionKindSingleSelect {
+		if len(optionIDs) > 1 {
+			return nil, fmt.Errorf("question %q accepts exactly one option", question.ID)
+		}
+		if len(optionIDs) == 1 && customText != "" {
+			return nil, fmt.Errorf("question %q accepts either one option or a custom answer, not both", question.ID)
+		}
+	}
+	if len(optionIDs) == 0 && customText == "" {
+		return nil, fmt.Errorf("question %q requires a selection", question.ID)
+	}
+
+	selected := make([]map[string]any, 0, len(optionIDs))
+	seen := make(map[string]struct{}, len(optionIDs))
+	for _, id := range optionIDs {
+		if _, dup := seen[id]; dup {
+			return nil, fmt.Errorf("question %q selects option %q more than once", question.ID, id)
+		}
+		seen[id] = struct{}{}
+		option, ok := question.Option(id)
+		if !ok {
+			return nil, fmt.Errorf("question %q has no option %q", question.ID, id)
+		}
+		selected = append(selected, map[string]any{"id": option.ID, "label": option.Label})
+	}
+	if len(selected) > 0 {
+		entry["selected"] = selected
+	}
+	if customText != "" {
+		entry["custom_text"] = customText
+	}
+	return entry, nil
 }
 
 func canceledResult(reason string) map[string]any {
@@ -374,13 +644,30 @@ func canceledResult(reason string) map[string]any {
 		reason = "user_canceled"
 	}
 	return map[string]any{
-		"status": StatusCanceled,
-		"user_response": map[string]any{
-			"canceled": true,
-			"reason":   reason,
-		},
+		"status":      StatusCanceled,
+		"reason":      reason,
 		"instruction": cancelInstruction,
 	}
+}
+
+func IsACPMCPRequest(req Request) bool {
+	if req.ProviderMetadata == nil {
+		return false
+	}
+	return strings.TrimSpace(stringValue(req.ProviderMetadata["source"])) == ProviderSourceACPMCP
+}
+
+func cleanIDs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func requestFromRowOrErr(row sqlc.UserInputRequest, err error) (Request, error) {
@@ -426,8 +713,17 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 		canceled := row.CanceledAt.Time
 		req.CanceledAt = &canceled
 	}
+	if row.ExpiresAt.Valid {
+		expires := row.ExpiresAt.Time
+		req.ExpiresAt = &expires
+	}
+	// Present overdue pending rows as expired even before any sweeper runs;
+	// the SQL pending/submit guards enforce the same boundary transactionally.
+	if req.Status == StatusPending && req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
+		req.Status = StatusExpired
+	}
 	_ = json.Unmarshal(row.InputJson, &req.Input)
-	_ = json.Unmarshal(row.UiPayloadJson, &req.UIPayload)
+	req.UIPayload = PayloadFromStored(row.UiPayloadJson)
 	_ = json.Unmarshal(row.ResultJson, &req.Result)
 	_ = json.Unmarshal(row.ProviderMetadata, &req.ProviderMetadata)
 	return req

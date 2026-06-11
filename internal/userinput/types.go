@@ -9,6 +9,8 @@ import (
 const (
 	ToolNameAskUser = "ask_user"
 
+	ProviderSourceACPMCP = "acp_mcp"
+
 	StatusPending   = "pending"
 	StatusSubmitted = "submitted"
 	StatusCanceled  = "canceled"
@@ -17,9 +19,17 @@ const (
 
 	DeferredKind = "user_input"
 
-	ActionTypeUserInput = "user_input"
-	ActionSubmit        = "submit"
-	ActionCancel        = "cancel"
+	// PayloadVersion is the canonical ask_user payload version written to
+	// storage. Older rows are upgraded on read by PayloadFromStored.
+	PayloadVersion = 2
+
+	QuestionKindSingleSelect = "single_select"
+	QuestionKindMultiSelect  = "multi_select"
+	QuestionKindText         = "text"
+
+	MaxQuestionsPerRequest = 4
+	MinOptionsPerQuestion  = 2
+	MaxOptionsPerQuestion  = 20
 )
 
 var (
@@ -50,13 +60,19 @@ type ResolveInput struct {
 	ReplyExternalMessageID string
 }
 
+// QuestionAnswer is the user's answer to a single question of an ask_user
+// request. Selections are always arrays; single_select is an array of one.
+type QuestionAnswer struct {
+	QuestionID string   `json:"question_id"`
+	OptionIDs  []string `json:"option_ids,omitempty"`
+	CustomText string   `json:"custom_text,omitempty"`
+	Text       string   `json:"text,omitempty"`
+}
+
 type SubmitInput struct {
 	RequestID              string
 	ActorChannelIdentityID string
-	Answer                 any
-	OptionID               string
-	OptionValue            any
-	RawUserResponse        map[string]any
+	Answers                []QuestionAnswer
 }
 
 type CancelInput struct {
@@ -83,16 +99,26 @@ type Request struct {
 	SourcePlatform          string         `json:"source_platform,omitempty"`
 	ReplyTarget             string         `json:"reply_target,omitempty"`
 	ConversationType        string         `json:"conversation_type,omitempty"`
+	ExpiresAt               *time.Time     `json:"expires_at,omitempty"`
 	CreatedAt               time.Time      `json:"created_at"`
 	RespondedAt             *time.Time     `json:"responded_at,omitempty"`
 	CanceledAt              *time.Time     `json:"canceled_at,omitempty"`
 }
 
+// UIPayload is the canonical, normalized ask_user payload (v2). It is the
+// single shape stored, streamed, and rendered; ParseAskUserPayload is the
+// only writer and PayloadFromStored the only reader.
 type UIPayload struct {
-	Question    string     `json:"question"`
+	Version   int          `json:"version"`
+	Questions []UIQuestion `json:"questions"`
+}
+
+type UIQuestion struct {
+	ID          string     `json:"id"`
+	Text        string     `json:"text"`
+	Kind        string     `json:"kind"`
 	Options     []UIOption `json:"options,omitempty"`
 	AllowCustom bool       `json:"allow_custom,omitempty"`
-	InputType   string     `json:"input_type,omitempty"`
 	Placeholder string     `json:"placeholder,omitempty"`
 }
 
@@ -100,9 +126,24 @@ type UIOption struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
-	Value       any    `json:"value,omitempty"`
-	InputType   string `json:"input_type,omitempty"`
-	Placeholder string `json:"placeholder,omitempty"`
+}
+
+func (p UIPayload) Question(id string) (UIQuestion, bool) {
+	for _, question := range p.Questions {
+		if question.ID == id {
+			return question, true
+		}
+	}
+	return UIQuestion{}, false
+}
+
+func (q UIQuestion) Option(id string) (UIOption, bool) {
+	for _, option := range q.Options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return UIOption{}, false
 }
 
 func ResultBytes(req Request) []byte {

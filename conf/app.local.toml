@@ -47,6 +47,7 @@ allow_absolute_paths = true
 [containerd]
 socket_path = "/run/containerd/containerd.sock"
 namespace = "default"
+runtime_type = "io.containerd.runc.v2"
 
 [apple]
 socket_path = ""

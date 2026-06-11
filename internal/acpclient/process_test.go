@@ -3,6 +3,7 @@ package acpclient
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -34,14 +35,123 @@ func TestPrepareProcessEnvLocalPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareProcessEnv() error = %v", err)
 	}
-	if env != nil {
-		t.Fatalf("local env = %v, want nil pass-through", env)
+	// Local processes inherit the host env and get our managed overrides
+	// appended; HOME/PATH are never touched so the host toolchain keeps working.
+	assertEnvHas(t, env, "CUSTOM_FLAG=enabled")
+	if envHasKey(env, "HOME") || envHasKey(env, "PATH") {
+		t.Fatalf("local env must not override HOME/PATH: %v", env)
 	}
 	if cleanup != nil {
 		t.Fatalf("local cleanup should be nil")
 	}
 	if got := len(server.records()); got != 0 {
 		t.Fatalf("local backend executed %d bridge commands, want 0", got)
+	}
+}
+
+func TestPrepareProcessEnvContainerClaudeWritesManagedSettings(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:   WorkspaceBackendContainer,
+		AgentID:   "claude-code",
+		SetupMode: SetupModeOAuth,
+		Env:       []string{"CLAUDE_CODE_OAUTH_TOKEN=token"},
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	home := envValue(env, "HOME")
+	if home == "" {
+		t.Fatalf("container Claude env missing HOME: %v", env)
+	}
+	settings, ok := findWrite(server.writes(), home+"/.claude/settings.json")
+	if !ok {
+		t.Fatalf("managed Claude settings were not written: %#v", server.writes())
+	}
+	// The explicit ask rule is what forces "safe" read-only Bash commands
+	// (pwd, ls, ...) through Memoh tool approval instead of the CLI's
+	// built-in auto-allow.
+	if !strings.Contains(string(settings.Content), `"ask"`) || !strings.Contains(string(settings.Content), `"Bash"`) {
+		t.Fatalf("managed Claude settings missing Bash ask rule:\n%s", settings.Content)
+	}
+}
+
+func TestPrepareProcessEnvContainerCodexWritesNoClaudeSettings(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	_, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:   WorkspaceBackendContainer,
+		AgentID:   "codex",
+		SetupMode: SetupModeAPIKey,
+		Env:       []string{"OPENAI_API_KEY=sk-test"},
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	for _, write := range server.writes() {
+		if strings.HasSuffix(write.Path, "/.claude/settings.json") {
+			t.Fatalf("Codex setup unexpectedly wrote Claude settings: %#v", server.writes())
+		}
+	}
+}
+
+func TestPrepareProcessEnvLocalSelfHasNoOverrides(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/data", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "codex",
+		SetupMode:     SetupModeSelf,
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if env != nil {
+		t.Fatalf("local self env = %v, want nil (host login is used as-is)", env)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+}
+
+func TestPrepareProcessEnvLocalCodexSetsScopedCodexHome(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "codex",
+		SetupMode:     SetupModeOAuth,
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+	if got := envValue(env, "CODEX_HOME"); got != "/home/user/ws/.codex" {
+		t.Fatalf("local Codex CODEX_HOME = %q, want %q", got, "/home/user/ws/.codex")
+	}
+	if envHasKey(env, "HOME") {
+		t.Fatalf("local Codex must not override HOME: %v", env)
+	}
+}
+
+func TestPrepareProcessEnvLocalCodexRequiresWorkspaceRoot(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	// Without a workspace root we cannot isolate CODEX_HOME, so BYOK Codex must
+	// fail loudly rather than silently fall back to the user's real ~/.codex.
+	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:   WorkspaceBackendLocal,
+		AgentID:   "codex",
+		SetupMode: SetupModeOAuth,
+	})
+	if err == nil {
+		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
 	}
 }
 
@@ -265,6 +375,102 @@ func TestWriteCodexManagedConfigWritesOAuthAuth(t *testing.T) { //nolint:gosec /
 	if auth["last_refresh"] != lastRefresh.Format(time.RFC3339Nano) {
 		t.Fatalf("last_refresh = %#v, want %q", auth["last_refresh"], lastRefresh.Format(time.RFC3339Nano))
 	}
+}
+
+func TestWriteCodexManagedConfigFileWritesOnlyConfig(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	if err := WriteCodexManagedConfigFile(context.Background(), client, CodexManagedConfig{Mode: SetupModeOAuth}); err != nil {
+		t.Fatalf("WriteCodexManagedConfigFile() error = %v", err)
+	}
+	writes := server.writes()
+	if len(writes) != 1 {
+		t.Fatalf("writes len = %d, want only config.toml: %#v", len(writes), writes)
+	}
+	configWrite, ok := findWrite(writes, CodexManagedConfigDir+"/config.toml")
+	if !ok {
+		t.Fatalf("missing Codex config.toml write: %#v", writes)
+	}
+	config := string(configWrite.Content)
+	for _, want := range []string{
+		`model_provider = "chatgpt-http"`,
+		`model_reasoning_summary = "detailed"`,
+		`hide_agent_reasoning = false`,
+		`show_raw_agent_reasoning = false`,
+		`requires_openai_auth = true`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("Codex config missing %q:\n%s", want, config)
+		}
+	}
+	if _, ok := findWrite(writes, CodexManagedConfigDir+"/auth.json"); ok {
+		t.Fatalf("config-only write unexpectedly touched auth.json: %#v", writes)
+	}
+}
+
+func TestWriteCodexManagedConfigFilePreservesOAuthBaseURL(t *testing.T) {
+	t.Parallel()
+
+	client := newTestBridgeClient(t, t.TempDir())
+	if err := WriteCodexManagedConfigWithAuth(context.Background(), client, CodexManagedConfig{
+		Mode: SetupModeOAuth,
+		OAuth: &CodexOAuthCredentials{ //nolint:gosec // test fixture token-shaped values
+			AccessToken: "access.jwt.token",
+			IDToken:     "id.jwt.token",
+			AccountID:   "account-123",
+			BaseURL:     "https://enterprise.example/backend-api/codex",
+		},
+	}); err != nil {
+		t.Fatalf("WriteCodexManagedConfigWithAuth() error = %v", err)
+	}
+
+	// A config-only refresh without credentials in hand must keep the custom
+	// endpoint instead of resetting it to the default ChatGPT URL.
+	if err := WriteCodexManagedConfigFile(context.Background(), client, CodexManagedConfig{Mode: SetupModeOAuth}); err != nil {
+		t.Fatalf("WriteCodexManagedConfigFile() error = %v", err)
+	}
+	config := readBridgeFile(t, client, CodexManagedConfigDir+"/config.toml")
+	if !strings.Contains(config, `base_url = "https://enterprise.example/backend-api/codex"`) {
+		t.Fatalf("custom OAuth base_url was not preserved:\n%s", config)
+	}
+}
+
+func TestWriteCodexManagedConfigFileIgnoresAPIKeyLeftoverBaseURL(t *testing.T) {
+	t.Parallel()
+
+	client := newTestBridgeClient(t, t.TempDir())
+	if err := WriteCodexManagedConfigWithAuth(context.Background(), client, CodexManagedConfig{
+		Mode: SetupModeAPIKey,
+		Managed: map[string]string{
+			"api_key":  "sk-test",
+			"base_url": "https://proxy.example/v1",
+		},
+	}); err != nil {
+		t.Fatalf("WriteCodexManagedConfigWithAuth() error = %v", err)
+	}
+
+	// An api_key-mode leftover config must not leak its OpenAI-style URL into
+	// an OAuth refresh; the OAuth default applies instead.
+	if err := WriteCodexManagedConfigFile(context.Background(), client, CodexManagedConfig{Mode: SetupModeOAuth}); err != nil {
+		t.Fatalf("WriteCodexManagedConfigFile() error = %v", err)
+	}
+	config := readBridgeFile(t, client, CodexManagedConfigDir+"/config.toml")
+	if !strings.Contains(config, `base_url = "https://chatgpt.com/backend-api/codex"`) {
+		t.Fatalf("OAuth refresh over api_key config should use the default URL:\n%s", config)
+	}
+}
+
+func readBridgeFile(t *testing.T, client *bridge.Client, path string) string {
+	t.Helper()
+	rc, err := client.ReadRaw(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadRaw(%s) error = %v", path, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }
 
 func TestStartBridgeProcessCanRunWithoutBridgeHardTimeout(t *testing.T) {

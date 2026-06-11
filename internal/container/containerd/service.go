@@ -32,11 +32,12 @@ import (
 var ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
 
 type DefaultService struct {
-	client     *containerd.Client
-	namespace  string
-	logger     *slog.Logger
-	cniBinDir  string
-	cniConfDir string
+	client      *containerd.Client
+	namespace   string
+	runtimeType string
+	logger      *slog.Logger
+	cniBinDir   string
+	cniConfDir  string
 }
 
 func NewService(log *slog.Logger, client *containerd.Client, cfg config.Config) *DefaultService {
@@ -57,12 +58,25 @@ func NewDefaultService(log *slog.Logger, client *containerd.Client, cfg config.C
 		cniConfDir = config.DefaultCNIConfigDir
 	}
 	return &DefaultService{
-		client:     client,
-		namespace:  namespace,
-		logger:     log.With(slog.String("service", "containerd")),
-		cniBinDir:  cniBinDir,
-		cniConfDir: cniConfDir,
+		client:      client,
+		namespace:   namespace,
+		runtimeType: cfg.Containerd.RuntimeTypeOrDefault(),
+		logger:      log.With(slog.String("service", "containerd")),
+		cniBinDir:   cniBinDir,
+		cniConfDir:  cniConfDir,
 	}
+}
+
+func (s *DefaultService) runtimeTypeOrDefault() string {
+	runtimeType := strings.TrimSpace(s.runtimeType)
+	if runtimeType == "" {
+		return config.DefaultContainerdRuntimeType
+	}
+	return runtimeType
+}
+
+func (s *DefaultService) RuntimeType() string {
+	return s.runtimeTypeOrDefault()
 }
 
 func (s *DefaultService) PullImage(ctx context.Context, ref string, opts *PullImageOptions) (ImageInfo, error) {
@@ -201,6 +215,21 @@ func specOptsFromSpec(spec ContainerSpec) []oci.SpecOpts {
 	return opts
 }
 
+func specOptsFromResourceLimits(limits ResourceLimits) []oci.SpecOpts {
+	var opts []oci.SpecOpts
+	if limits.MemoryBytes > 0 {
+		opts = append(opts, oci.WithMemoryLimit(uint64(limits.MemoryBytes))) //nolint:gosec // validated as non-negative before container creation.
+	}
+	if limits.CPUMillicores > 0 {
+		const cpuCFSPeriod = uint64(100_000)
+		quota := limits.CPUMillicores * int64(cpuCFSPeriod) / 1000
+		if quota > 0 {
+			opts = append(opts, oci.WithCPUCFS(quota, cpuCFSPeriod))
+		}
+	}
+	return opts
+}
+
 func networkJoinTargetValue(spec ContainerSpec) string {
 	return spec.NetworkJoinTarget.Value
 }
@@ -305,6 +334,7 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 		oci.WithImageConfig(image),
 	}
 	specOpts = append(specOpts, specOptsFromSpec(req.Spec)...)
+	specOpts = append(specOpts, specOptsFromResourceLimits(req.ResourceLimits)...)
 
 	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
@@ -332,8 +362,7 @@ func (s *DefaultService) CreateContainer(ctx context.Context, req CreateContaine
 		containerOpts = append(containerOpts, containerd.WithNewSnapshot(snapshotID, image))
 	}
 	containerOpts = append(containerOpts, containerd.WithNewSpec(specOpts...))
-	runtimeName := "io.containerd.runc.v2"
-	containerOpts = append(containerOpts, containerd.WithRuntime(runtimeName, nil))
+	containerOpts = append(containerOpts, containerd.WithRuntime(s.runtimeTypeOrDefault(), nil))
 	if len(req.Labels) > 0 {
 		containerOpts = append(containerOpts, containerd.WithContainerLabels(req.Labels))
 	}
@@ -738,6 +767,7 @@ func (s *DefaultService) RestoreContainer(ctx context.Context, req CreateContain
 		oci.WithImageConfig(image),
 	}
 	specOpts = append(specOpts, specOptsFromSpec(req.Spec)...)
+	specOpts = append(specOpts, specOptsFromResourceLimits(req.ResourceLimits)...)
 
 	containerOpts := []containerd.NewContainerOpts{
 		containerd.WithImage(image),
@@ -753,8 +783,7 @@ func (s *DefaultService) RestoreContainer(ctx context.Context, req CreateContain
 		containerOpts = append(containerOpts, containerd.WithContainerLabels(req.Labels))
 	}
 
-	runtimeName := "io.containerd.runc.v2"
-	containerOpts = append(containerOpts, containerd.WithRuntime(runtimeName, nil))
+	containerOpts = append(containerOpts, containerd.WithRuntime(s.runtimeTypeOrDefault(), nil))
 
 	ctrObj, err := s.client.NewContainer(ctx, req.ID, containerOpts...)
 	if err != nil {

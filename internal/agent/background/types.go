@@ -18,9 +18,11 @@ const (
 	TaskKilled    TaskStatus = "killed"
 )
 
-// Task represents a single background command execution.
+// Task represents a single background task (a container command execution
+// or a spawn subagent batch, per Kind).
 type Task struct {
 	ID          string
+	Kind        TaskKind
 	BotID       string
 	SessionID   string
 	Command     string
@@ -37,11 +39,13 @@ type Task struct {
 	notified        bool            // true once a terminal notification has been enqueued; prevents duplicates
 	stalledNotified bool            // true once a stalled notification has been enqueued
 	output          strings.Builder // buffered output tail
+	branches        []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
 
 // TaskSnapshot is a lock-safe, immutable view of a task for handler/UI code.
 type TaskSnapshot struct {
 	TaskID      string
+	Kind        TaskKind
 	BotID       string
 	SessionID   string
 	Command     string
@@ -51,6 +55,7 @@ type TaskSnapshot struct {
 	ExitCode    int32
 	OutputFile  string
 	OutputTail  string
+	Branches    []SpawnBranch
 	StartedAt   time.Time
 	CompletedAt time.Time
 	Duration    time.Duration
@@ -71,6 +76,7 @@ func (t *Task) Snapshot() TaskSnapshot {
 	}
 	return TaskSnapshot{
 		TaskID:      t.ID,
+		Kind:        t.Kind,
 		BotID:       t.BotID,
 		SessionID:   t.SessionID,
 		Command:     t.Command,
@@ -80,6 +86,7 @@ func (t *Task) Snapshot() TaskSnapshot {
 		ExitCode:    t.ExitCode,
 		OutputFile:  t.OutputFile,
 		OutputTail:  t.outputTailLocked(),
+		Branches:    append([]SpawnBranch(nil), t.branches...),
 		StartedAt:   t.StartedAt,
 		CompletedAt: t.CompletedAt,
 		Duration:    duration,
@@ -176,6 +183,7 @@ type AdoptResult struct {
 // task reaches a terminal state or requires attention (e.g. stalled).
 type Notification struct {
 	TaskID      string
+	Kind        TaskKind
 	BotID       string
 	SessionID   string
 	Status      TaskStatus
@@ -184,6 +192,7 @@ type Notification struct {
 	ExitCode    int32
 	OutputFile  string
 	OutputTail  string // last N bytes of output for quick summary
+	Branches    []SpawnBranch
 	Duration    time.Duration
 	Stalled     bool // true when task appears stuck on interactive input
 }
@@ -205,6 +214,7 @@ const (
 type TaskEvent struct {
 	Event      TaskEventType `json:"event"`
 	TaskID     string        `json:"task_id"`
+	Kind       TaskKind      `json:"kind,omitempty"`
 	BotID      string        `json:"bot_id,omitempty"`
 	SessionID  string        `json:"session_id,omitempty"`
 	Command    string        `json:"command,omitempty"`
@@ -232,6 +242,9 @@ func (n Notification) MessageText() string {
 // FormatForAgent returns a human-readable task-notification block that can be
 // injected into the agent's message stream.
 func (n Notification) FormatForAgent() string {
+	if n.Kind == KindSpawn {
+		return n.formatSpawnForAgent()
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "<task-notification>\n")
 	fmt.Fprintf(&b, "  <task-id>%s</task-id>\n", n.TaskID)

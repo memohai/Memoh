@@ -234,7 +234,7 @@ func TestStartWithImageClearsLegacyRouteForBridgeContainer(t *testing.T) {
 	botID := "00000000-0000-0000-0000-000000000001"
 	m.SetLegacyIP(botID, "10.0.0.9")
 
-	if got := m.dialTarget(botID); got != "10.0.0.9:9090" {
+	if got := m.dialTarget(botID); got != "passthrough:///10.0.0.9:9090" {
 		t.Fatalf("expected legacy dial target before start, got %q", got)
 	}
 
@@ -302,7 +302,7 @@ func TestDeleteClearsLegacyRoute(t *testing.T) {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	if got := m.dialTarget(botID); got == "10.0.0.9:9090" {
+	if got := m.dialTarget(botID); got == "passthrough:///10.0.0.9:9090" {
 		t.Fatalf("expected legacy TCP target to be cleared, got %q", got)
 	}
 	if svc.removeNet != 1 || svc.deleteTask != 1 || svc.deleteCalls != 1 {

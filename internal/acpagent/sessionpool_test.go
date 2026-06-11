@@ -40,6 +40,11 @@ func injectRuntime(p *SessionPool, h *runtimeHandle) {
 }
 
 func newFakeScriptPool(t *testing.T) *SessionPool {
+	pool, _ := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"}))
+	return pool
+}
+
+func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) {
 	t.Helper()
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
@@ -59,9 +64,9 @@ func newFakeScriptPool(t *testing.T) *SessionPool {
 			DefaultWorkDir: root,
 		},
 	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: bot})
 	t.Cleanup(pool.CloseAll)
-	return pool
+	return pool, root
 }
 
 func TestSessionPoolPromptColdStartsBindsAndReuses(t *testing.T) {
@@ -164,6 +169,76 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 	}
 	if status.DefaultModelID != "gpt-5.1-codex" {
 		t.Fatalf("Ensure() default model = %q, want startup model", status.DefaultModelID)
+	}
+}
+
+func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T) {
+	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{
+		"api_key":  "sk-local-byok",
+		"base_url": "https://proxy.example.com/v1",
+	}))
+
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	}); err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+
+	config := readSessionPoolFile(t, root, ".codex", "config.toml")
+	for _, want := range []string{
+		`model_provider = "OpenAI"`,
+		`model_reasoning_summary = "detailed"`,
+		`hide_agent_reasoning = false`,
+		`show_raw_agent_reasoning = false`,
+		`base_url = "https://proxy.example.com/v1"`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("Codex config missing %q:\n%s", want, config)
+		}
+	}
+	auth := readSessionPoolFile(t, root, ".codex", "auth.json")
+	if !strings.Contains(auth, `"OPENAI_API_KEY": "sk-local-byok"`) {
+		t.Fatalf("Codex auth missing managed key:\n%s", auth)
+	}
+}
+
+func TestSessionPoolStartRuntimeReconcilesCodexOAuthConfigWithoutOverwritingAuth(t *testing.T) {
+	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "oauth", nil))
+	authPath := filepath.Join(root, ".codex", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	const existingAuth = `{"auth_mode":"chatgpt","tokens":{"access_token":"existing"}}`
+	if err := os.WriteFile(authPath, []byte(existingAuth), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Ensure(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     acpprofile.AgentCodexID,
+		ProjectPath: "/data/project",
+	}); err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+
+	config := readSessionPoolFile(t, root, ".codex", "config.toml")
+	for _, want := range []string{
+		`model_provider = "chatgpt-http"`,
+		`model_reasoning_summary = "detailed"`,
+		`hide_agent_reasoning = false`,
+		`show_raw_agent_reasoning = false`,
+		`requires_openai_auth = true`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("Codex OAuth config missing %q:\n%s", want, config)
+		}
+	}
+	if got := readSessionPoolFile(t, root, ".codex", "auth.json"); got != existingAuth {
+		t.Fatalf("OAuth auth.json was overwritten:\n%s", got)
 	}
 }
 
@@ -783,7 +858,7 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 			DefaultWorkDir: root,
 		},
 	})
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
 	t.Cleanup(pool.CloseAll)
 
 	var wg sync.WaitGroup
@@ -900,11 +975,14 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", got)
 	}
 
+	// Desktop BYOK: local api_key now validates managed fields just like
+	// container. Codex carries no env (it is configured via CODEX_HOME files at
+	// the process layer), so req.Env stays empty even with a key set.
 	localRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
 		startErr: errors.New("started"),
 	}
-	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	localPool := newSessionPool(nil, localRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-local-byok"})})
 	_, err = localPool.Prompt(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
@@ -913,13 +991,29 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:      "run",
 	})
 	if err == nil || err.Error() != "started" {
-		t.Fatalf("local missing key error = %v, want runner start error", err)
+		t.Fatalf("local api_key error = %v, want runner start error", err)
 	}
 	if len(localRunner.req.Env) != 0 {
 		t.Fatalf("local backend injected env: %v", localRunner.req.Env)
 	}
 	if localRunner.req.LocalCommand != "npx" || len(localRunner.req.LocalArgs) == 0 {
 		t.Fatalf("local command not passed through: %#v", localRunner.req)
+	}
+
+	// Local api_key without a key must now be rejected (BYOK requires credentials).
+	localMissingPool := newSessionPool(nil, &recordingRunner{
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendLocal, DefaultWorkDir: t.TempDir()},
+		startErr: errors.New("started"),
+	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
+	_, err = localMissingPool.Prompt(context.Background(), PromptInput{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		AgentID:     "codex",
+		ProjectPath: "",
+		Prompt:      "run",
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_key required") {
+		t.Fatalf("local missing key error = %v, want api_key required validation", err)
 	}
 
 	claudeRunner := &recordingRunner{
@@ -1446,6 +1540,16 @@ func newSessionPoolBridgeClient(t *testing.T, root string) *bridge.Client {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return bridge.NewClientFromConn(conn)
+}
+
+func readSessionPoolFile(t *testing.T, root string, parts ...string) string {
+	t.Helper()
+	pathParts := append([]string{root}, parts...)
+	content, err := os.ReadFile(filepath.Join(pathParts...)) //nolint:gosec // reads from t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
 
 func writeSessionPoolFakeAgentScript(t *testing.T, dir, name string) string {

@@ -47,6 +47,7 @@ func NewClientFromConn(conn *grpc.ClientConn) *Client {
 func Dial(_ context.Context, target string) (*Client, error) {
 	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithNoProxy(),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                30 * time.Second, // ping every 30s if idle
 			Timeout:             10 * time.Second, // wait 10s for ping ack

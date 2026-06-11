@@ -29,8 +29,8 @@
   background-image: linear-gradient(
     90deg,
     var(--color-muted-foreground) 0%,
-    var(--color-foreground) 45%,
-    var(--color-foreground) 55%,
+    color-mix(in oklch, var(--color-foreground) 82%, transparent) 45%,
+    color-mix(in oklch, var(--color-foreground) 82%, transparent) 55%,
     var(--color-muted-foreground) 100%
   );
   background-size: 200% 100%;
@@ -46,7 +46,7 @@
     -webkit-background-clip: border-box;
     background-clip: border-box;
     color: var(--color-muted-foreground);
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    animation: none;
   }
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Input,
@@ -12,29 +12,55 @@ import {
   Spinner,
 } from '@memohai/ui'
 import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
+import { getAcpProfiles, type AcpprofileManagedField, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { useOnboarding } from '@/composables/useOnboarding'
+import { useCapabilitiesStore } from '@/store/capabilities'
+import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
-import { providerPresets, type ProviderPreset } from '@/constants/provider-presets'
+import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
+import { acpAgentIcon, defaultSetupMode, findMissingRequiredManagedField, normalizeACPAgentID } from '@/utils/acp'
+import { canCreateLocalWorkspace } from '@/utils/desktop-runtime'
 import { useStepTransition, nextFrame } from '../useStepTransition'
+import { safeSessionGet, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 import { useProviderSetup } from './useProviderSetup'
+import { writeACPSelection, clearACPSelection } from './useACPSetup'
 
 const { t } = useI18n()
 const { nextStep, prevStep } = useOnboarding()
 const { visible, exiting, leave } = useStepTransition()
+const capabilities = useCapabilitiesStore()
+const desktopRuntime = useDesktopRuntime()
+
+// Local workspace creation means "self" can run against host credentials.
+// Remote desktop connects to a server elsewhere, so it should use BYOK defaults.
+const allowLocalWorkspaceCreate = computed(() =>
+  canCreateLocalWorkspace({
+    serverLocalWorkspaceEnabled: capabilities.localWorkspaceEnabled,
+    host: desktopRuntime.host.value,
+    desktopRuntimeMode: desktopRuntime.desktopRuntimeMode.value,
+  }),
+)
 
 const listVisible = ref(false)
-const mode = ref<'list' | 'form'>('list')
+const mode = ref<'list' | 'form' | 'acp'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
 const selectedPreset = ref<ProviderPreset | null>(null)
 const addedCount = ref(0)
 
+const acpProfiles = ref<AcpprofilePublicProfile[]>([])
+const selectedAcpProfile = ref<AcpprofilePublicProfile | null>(null)
+const acpSetupMode = ref('api_key')
+const acpManaged = reactive<Record<string, string>>({})
+const acpError = ref('')
+const acpSubmitting = ref(false)
+
 function advanceWithCount() {
   addedCount.value++
-  sessionStorage.setItem(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
+  safeSessionSet(ONBOARDING_KEYS.providerAddedCount, String(addedCount.value))
   leave(nextStep)
 }
 
@@ -56,6 +82,8 @@ const {
 const ctaLabel = computed(() => addedCount.value > 0 ? t('onboarding.next') : t('onboarding.skip'))
 
 function openForm(preset: ProviderPreset | null) {
+  // Choosing a regular provider supersedes any earlier ACP pick.
+  clearACPSelection()
   selectedPreset.value = preset
   initFormValues(preset)
   listVisible.value = false
@@ -77,6 +105,7 @@ function backToList() {
   setTimeout(() => {
     mode.value = 'list'
     selectedPreset.value = null
+    selectedAcpProfile.value = null
     resetFormState()
     listVisible.value = false
     visible.value = false
@@ -88,6 +117,9 @@ function backToList() {
 }
 
 function onSkipStep() {
+  // Skipping (or finishing with a regular provider) means this is not an ACP
+  // bot, so drop any stale ACP selection from an earlier visit to this step.
+  clearACPSelection()
   if (createdProviderId.value) {
     advanceWithCount()
   } else {
@@ -95,12 +127,123 @@ function onSkipStep() {
   }
 }
 
+async function openAcpForm(profile: AcpprofilePublicProfile) {
+  // Resolve deployment and desktop runtime policy before branching so remote
+  // desktop does not pick the local "self" default when clicked early.
+  await Promise.all([capabilities.load(), desktopRuntime.load()])
+
+  selectedAcpProfile.value = profile
+  acpError.value = ''
+  acpSubmitting.value = false
+  for (const key of Object.keys(acpManaged)) delete acpManaged[key]
+  for (const field of profile.managed_fields ?? []) {
+    const id = normalizeACPAgentID(field.id)
+    if (id) acpManaged[id] = ''
+  }
+  const modes = acpSetupModes(profile)
+  // Desktop/local already has a logged-in CLI, so "use local config" (self) is
+  // the recommended default and BYOK (oauth / api_key) is the secondary path.
+  // Clean container workspaces have no credentials, so they default to api_key.
+  const preferred = allowLocalWorkspaceCreate.value ? 'self' : 'api_key'
+  acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
+  listVisible.value = false
+  setTimeout(() => {
+    mode.value = 'acp'
+    formVisible.value = false
+    formContentVisible.value = false
+    nextFrame(() => {
+      formVisible.value = true
+      formContentVisible.value = true
+    })
+  }, 175)
+}
+
+function acpSetupModes(profile: AcpprofilePublicProfile): string[] {
+  const modes = (profile.setup_modes ?? []).filter(Boolean)
+  return modes.length > 0 ? modes : ['api_key']
+}
+
+function acpSetupModeLabel(modeValue: string, profile: AcpprofilePublicProfile): string {
+  if (modeValue === 'api_key') return t('onboarding.provider.acp.modeApiKey')
+  if (modeValue === 'oauth') {
+    if (normalizeACPAgentID(profile.id) === 'codex') return t('onboarding.provider.acp.modeChatGPT')
+    if (normalizeACPAgentID(profile.id) === 'claude-code') return t('onboarding.provider.acp.modeClaude')
+    return t('onboarding.provider.acp.modeOAuth')
+  }
+  if (modeValue === 'self') return t('onboarding.provider.acp.modeSelf')
+  return modeValue
+}
+
+function acpVisibleFields(profile: AcpprofilePublicProfile): AcpprofileManagedField[] {
+  if (acpSetupMode.value !== 'api_key') return []
+  return (profile.managed_fields ?? []).filter((field) => {
+    const id = normalizeACPAgentID(field.id)
+    if (!id || id === 'provider_id' || id === 'oauth_token') return false
+    return true
+  })
+}
+
+function acpInputType(type: string | undefined): string {
+  if (type === 'password') return 'password'
+  if (type === 'url') return 'url'
+  return 'text'
+}
+
+function setAcpManaged(fieldID: string | undefined, value: string) {
+  const id = normalizeACPAgentID(fieldID)
+  if (!id) return
+  acpManaged[id] = value
+}
+
+function saveAcpAndNext() {
+  const profile = selectedAcpProfile.value
+  if (!profile || acpSubmitting.value) return
+  acpError.value = ''
+  if (acpSetupMode.value === 'api_key') {
+    const missing = findMissingRequiredManagedField(profile, acpManaged, acpSetupMode.value)
+    if (missing) {
+      acpError.value = t('onboarding.provider.acp.requiredError', { field: missing.label || missing.id || '' })
+      return
+    }
+  }
+  const agentId = normalizeACPAgentID(profile.id)
+  if (!agentId) return
+  const managed: Record<string, string> = {}
+  if (acpSetupMode.value === 'api_key') {
+    for (const field of acpVisibleFields(profile)) {
+      const id = normalizeACPAgentID(field.id)
+      const value = (acpManaged[id] ?? '').trim()
+      if (value) managed[id] = value
+    }
+  }
+  writeACPSelection({ agentId, setupMode: acpSetupMode.value, managed })
+  acpSubmitting.value = true
+  leave(nextStep)
+}
+
 onMounted(() => {
-  const stored = sessionStorage.getItem(ONBOARDING_KEYS.providerAddedCount)
+  // Drop any ACP selection left over from an abandoned run; it is (re)written
+  // only when the user actually picks an agent on this step.
+  clearACPSelection()
+
+  const stored = safeSessionGet(ONBOARDING_KEYS.providerAddedCount)
   if (stored !== null) {
     const parsed = Number.parseInt(stored, 10)
     if (Number.isFinite(parsed) && parsed >= 0) addedCount.value = parsed
   }
+
+  void capabilities.load()
+  void desktopRuntime.load()
+
+  void (async () => {
+    try {
+      const { data } = await getAcpProfiles({ throwOnError: true })
+      acpProfiles.value = data?.items ?? []
+    } catch {
+      acpProfiles.value = []
+    }
+  })()
+
   nextFrame(() => {
     listVisible.value = true
   })
@@ -191,6 +334,21 @@ onMounted(() => {
               {{ preset.name }}
             </span>
           </button>
+          <button
+            v-for="profile in acpProfiles"
+            :key="`acp-${profile.id}`"
+            type="button"
+            class="h-16 rounded-lg border border-border bg-background px-3 flex items-center gap-2.5 transition-colors hover:border-muted-foreground/50 hover:bg-accent/40"
+            @click="openAcpForm(profile)"
+          >
+            <component
+              :is="acpAgentIcon(profile.id, true)"
+              class="size-[22px] shrink-0"
+            />
+            <span class="text-sm font-medium truncate">
+              {{ profile.display_name || profile.id }}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -206,7 +364,7 @@ onMounted(() => {
         </button>
         <button
           class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          @click="leave(nextStep)"
+          @click="onSkipStep"
         >
           {{ ctaLabel }}
         </button>
@@ -214,7 +372,7 @@ onMounted(() => {
     </div>
 
     <div
-      v-else
+      v-else-if="mode === 'form'"
       class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
       :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
     >
@@ -226,6 +384,7 @@ onMounted(() => {
           type="button"
           class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           :disabled="submitting"
+          :aria-label="t('onboarding.prev')"
           @click="backToList"
         >
           <ArrowLeft class="size-4" />
@@ -466,6 +625,124 @@ onMounted(() => {
               {{ formCtaLabel }}
             </span>
           </Transition>
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-else-if="mode === 'acp' && selectedAcpProfile"
+      class="text-left pt-24 h-[560px] max-h-[calc(100vh-7rem)] flex flex-col transition-all duration-[175ms] ease-out"
+      :class="formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0'"
+    >
+      <div
+        class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
+        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      >
+        <button
+          type="button"
+          class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          :disabled="acpSubmitting"
+          :aria-label="t('onboarding.prev')"
+          @click="backToList"
+        >
+          <ArrowLeft class="size-4" />
+        </button>
+        <component
+          :is="acpAgentIcon(selectedAcpProfile.id, true)"
+          class="size-7 shrink-0"
+        />
+        <h2 class="text-2xl font-semibold">
+          {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
+        </h2>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
+        <div class="space-y-4">
+          <div
+            class="transition-all duration-[200ms] ease-out delay-[20ms]"
+            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <Label class="mb-2 block text-sm font-medium">
+              {{ t('onboarding.provider.acp.setupMode') }}
+            </Label>
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                v-for="m in acpSetupModes(selectedAcpProfile)"
+                :key="m"
+                type="button"
+                class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
+                :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
+                @click="acpSetupMode = m"
+              >
+                {{ acpSetupModeLabel(m, selectedAcpProfile) }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-for="(field, index) in acpVisibleFields(selectedAcpProfile)"
+            :key="field.id || index"
+            class="transition-all duration-[200ms] ease-out"
+            :style="{ transitionDelay: `${40 + index * 20}ms` }"
+            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            <Label class="mb-2 block text-sm font-medium">
+              {{ field.label || field.id }}
+            </Label>
+            <Input
+              :model-value="acpManaged[field.id || ''] || ''"
+              :type="acpInputType(field.type)"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="field.placeholder"
+              @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
+            />
+          </div>
+
+          <div
+            v-if="acpSetupMode === 'oauth'"
+            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            {{ t('onboarding.provider.acp.oauthDeferredHint') }}
+          </div>
+
+          <div
+            v-else-if="acpSetupMode === 'self'"
+            class="rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed transition-all duration-[200ms] ease-out delay-[40ms]"
+            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+          >
+            {{ t('onboarding.provider.acp.selfHint') }}
+          </div>
+        </div>
+
+        <p
+          v-if="acpError"
+          class="mt-3 text-xs text-destructive"
+        >
+          {{ acpError }}
+        </p>
+      </div>
+
+      <div
+        class="mt-auto pt-12 flex items-center justify-end gap-3 transition-all duration-[200ms] ease-out delay-[80ms]"
+        :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+      >
+        <button
+          class="inline-flex h-[42px] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="acpSubmitting"
+          @click="backToList"
+        >
+          {{ t('onboarding.provider.form.cancel') }}
+        </button>
+        <button
+          class="inline-flex h-[42px] w-[180px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          :disabled="acpSubmitting"
+          @click="saveAcpAndNext"
+        >
+          {{ t('onboarding.next') }}
         </button>
       </div>
     </div>

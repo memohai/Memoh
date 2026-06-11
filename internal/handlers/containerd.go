@@ -60,6 +60,7 @@ type CreateContainerRequest struct {
 type CreateContainerResponse struct {
 	ContainerID      string   `json:"container_id"`
 	WorkspaceBackend string   `json:"workspace_backend"`
+	RuntimeBackend   string   `json:"runtime_backend,omitempty"`
 	ContainerPath    string   `json:"container_path"`
 	Image            string   `json:"image"`
 	Snapshotter      string   `json:"snapshotter"`
@@ -108,6 +109,7 @@ type createContainerErrorEvent struct {
 type GetContainerResponse struct {
 	ContainerID      string    `json:"container_id"`
 	WorkspaceBackend string    `json:"workspace_backend"`
+	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
 	Image            string    `json:"image"`
 	Status           string    `json:"status"`
 	Namespace        string    `json:"namespace"`
@@ -151,12 +153,60 @@ type ContainerMetricsPayloadResponse struct {
 }
 
 type GetContainerMetricsResponse struct {
-	Supported         bool                            `json:"supported"`
-	Backend           string                          `json:"backend"`
-	UnsupportedReason string                          `json:"unsupported_reason,omitempty"`
-	Status            ContainerMetricsStatusResponse  `json:"status"`
-	Metrics           ContainerMetricsPayloadResponse `json:"metrics"`
-	SampledAt         *time.Time                      `json:"sampled_at,omitempty"`
+	Supported         bool                               `json:"supported"`
+	Backend           string                             `json:"backend"`
+	UnsupportedReason string                             `json:"unsupported_reason,omitempty"`
+	Status            ContainerMetricsStatusResponse     `json:"status"`
+	Metrics           ContainerMetricsPayloadResponse    `json:"metrics"`
+	ResourceLimits    GetContainerResourceLimitsResponse `json:"resource_limits"`
+	SampledAt         *time.Time                         `json:"sampled_at,omitempty"`
+}
+
+type ContainerResourceLimitValuesResponse struct {
+	CPUMillicores int64 `json:"cpu_millicores"`
+	MemoryBytes   int64 `json:"memory_bytes"`
+	StorageBytes  int64 `json:"storage_bytes"`
+}
+
+type ContainerResourceLimitCapabilityResponse struct {
+	HardLimitSupported bool `json:"hard_limit_supported"`
+	SoftLimitSupported bool `json:"soft_limit_supported"`
+}
+
+type ContainerResourceLimitCapabilitiesResponse struct {
+	CPU     ContainerResourceLimitCapabilityResponse `json:"cpu"`
+	Memory  ContainerResourceLimitCapabilityResponse `json:"memory"`
+	Storage ContainerResourceLimitCapabilityResponse `json:"storage"`
+}
+
+type ContainerResourceLimitObservedResponse struct {
+	CPUUsagePercent      float64 `json:"cpu_usage_percent"`
+	MemoryUsageBytes     uint64  `json:"memory_usage_bytes"`
+	MemoryLimitBytes     uint64  `json:"memory_limit_bytes"`
+	StorageUsedBytes     uint64  `json:"storage_used_bytes"`
+	StorageOverSoftLimit bool    `json:"storage_over_soft_limit"`
+}
+
+type GetContainerResourceLimitsResponse struct {
+	Desired          ContainerResourceLimitValuesResponse       `json:"desired"`
+	Applied          ContainerResourceLimitValuesResponse       `json:"applied"`
+	Capabilities     ContainerResourceLimitCapabilitiesResponse `json:"capabilities"`
+	Observed         ContainerResourceLimitObservedResponse     `json:"observed"`
+	Status           string                                     `json:"status"`
+	RequiresRecreate bool                                       `json:"requires_recreate"`
+	Backend          string                                     `json:"backend"`
+	WorkspaceBackend string                                     `json:"workspace_backend"`
+	RuntimeBackend   string                                     `json:"runtime_backend,omitempty"`
+}
+
+type UpdateContainerResourceLimitsRequest struct {
+	CPUMillicores int64 `json:"cpu_millicores"`
+	MemoryBytes   int64 `json:"memory_bytes"`
+	StorageBytes  int64 `json:"storage_bytes"`
+}
+
+type UpdateContainerMetricsRequest struct {
+	ResourceLimits *UpdateContainerResourceLimitsRequest `json:"resource_limits"`
 }
 
 type RollbackRequest struct {
@@ -221,6 +271,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.POST("", h.CreateContainer)
 	group.GET("", h.GetContainer)
 	group.GET("/metrics", h.GetContainerMetrics)
+	group.PUT("/metrics", h.UpdateContainerMetrics)
 	group.DELETE("", h.DeleteContainer)
 	group.POST("/start", h.StartContainer)
 	group.POST("/stop", h.StopContainer)
@@ -382,7 +433,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 
 	// Notify the client before starting if data migration will happen,
 	// since restoring a large /data volume can take a while.
-	if h.manager.HasPreservedData(botID) {
+	willRestoreData := h.manager.HasPreservedData(botID)
+	if willRestoreData {
 		send(createContainerRestoringEvent{Type: "restoring"})
 	}
 
@@ -394,6 +446,14 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 			slog.String("bot_id", botID), slog.Any("error", err))
 		sendError("container start failed: " + err.Error())
 		return nil
+	}
+	if workspaceBackend != "local" {
+		if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
+			h.logger.Error("container bridge not ready",
+				slog.String("bot_id", botID), slog.Any("error", err))
+			sendError("container bridge not ready: " + err.Error())
+			return nil
+		}
 	}
 	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
 		h.logger.Warn("remember workspace image failed",
@@ -414,7 +474,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		return nil
 	}
 
-	dataRestored := false
+	dataRestored := willRestoreData && !h.manager.HasPreservedData(botID)
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
 			h.logger.Error("restore preserved data failed",
@@ -435,10 +495,12 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	cdiDevices := gpu.Devices
 	containerPath := ""
 	responseBackend := workspaceBackend
+	runtimeBackend := ""
 	if status != nil {
 		cdiDevices = status.CDIDevices
 		containerPath = status.ContainerPath
 		responseBackend = status.WorkspaceBackend
+		runtimeBackend = status.RuntimeBackend
 	}
 
 	// Phase 3: Complete
@@ -447,6 +509,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		Container: CreateContainerResponse{
 			ContainerID:      containerID,
 			WorkspaceBackend: responseBackend,
+			RuntimeBackend:   runtimeBackend,
 			ContainerPath:    containerPath,
 			Image:            image,
 			Snapshotter:      snapshotter,
@@ -483,6 +546,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	return c.JSON(http.StatusOK, GetContainerResponse{
 		ContainerID:      status.ContainerID,
 		WorkspaceBackend: status.WorkspaceBackend,
+		RuntimeBackend:   status.RuntimeBackend,
 		Image:            status.Image,
 		Status:           status.Status,
 		Namespace:        status.Namespace,
@@ -509,9 +573,68 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 		return err
 	}
 
-	metrics, err := h.manager.GetContainerMetrics(c.Request().Context(), botID)
+	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, nil)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+// UpdateContainerMetrics godoc
+// @Summary Update container metrics settings for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
+// @Success 200 {object} GetContainerMetricsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/container/metrics [put].
+func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+
+	var req UpdateContainerMetricsRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if req.ResourceLimits == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "resource_limits is required")
+	}
+	limitsReq := req.ResourceLimits
+	if limitsReq.CPUMillicores < 0 || limitsReq.MemoryBytes < 0 || limitsReq.StorageBytes < 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "resource limits must be non-negative")
+	}
+	limits, err := h.manager.SetResourceLimits(c.Request().Context(), botID, ctr.ResourceLimits{
+		CPUMillicores: limitsReq.CPUMillicores,
+		MemoryBytes:   limitsReq.MemoryBytes,
+		StorageBytes:  limitsReq.StorageBytes,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, limits)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *ContainerdHandler) buildContainerMetricsResponse(
+	ctx context.Context,
+	botID string,
+	resourceLimits *workspace.ResourceLimitsResult,
+) (GetContainerMetricsResponse, error) {
+	metrics, err := h.manager.GetContainerMetrics(ctx, botID)
+	if err != nil {
+		return GetContainerMetricsResponse{}, err
+	}
+	if resourceLimits == nil {
+		resourceLimits, err = h.manager.GetResourceLimits(ctx, botID)
+		if err != nil {
+			return GetContainerMetricsResponse{}, err
+		}
 	}
 
 	response := GetContainerMetricsResponse{
@@ -527,13 +650,13 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 			Memory:  toContainerMemoryMetricsResponse(metrics.Memory),
 			Storage: toContainerStorageMetricsResponse(metrics.Storage),
 		},
+		ResourceLimits: h.toContainerResourceLimitsResponse(resourceLimits),
 	}
 	if !metrics.SampledAt.IsZero() {
 		sampledAt := metrics.SampledAt
 		response.SampledAt = &sampledAt
 	}
-
-	return c.JSON(http.StatusOK, response)
+	return response, nil
 }
 
 // DeleteContainer godoc
@@ -780,6 +903,56 @@ func toContainerStorageMetricsResponse(metrics *workspace.ContainerStorageMetric
 	return &ContainerStorageMetricsResponse{
 		Path:      metrics.Path,
 		UsedBytes: metrics.UsedBytes,
+	}
+}
+
+func (h *ContainerdHandler) toContainerResourceLimitsResponse(result *workspace.ResourceLimitsResult) GetContainerResourceLimitsResponse {
+	if result == nil {
+		return GetContainerResourceLimitsResponse{Backend: h.containerBackend}
+	}
+	return GetContainerResourceLimitsResponse{
+		Desired:          toContainerResourceLimitValuesResponse(result.Desired),
+		Applied:          toContainerResourceLimitValuesResponse(result.Applied),
+		Capabilities:     toContainerResourceLimitCapabilitiesResponse(result.Capabilities),
+		Observed:         toContainerResourceLimitObservedResponse(result.Observed),
+		Status:           result.Status,
+		RequiresRecreate: result.RequiresRecreate,
+		Backend:          h.containerBackend,
+		WorkspaceBackend: result.WorkspaceBackend,
+		RuntimeBackend:   result.RuntimeBackend,
+	}
+}
+
+func toContainerResourceLimitValuesResponse(limits ctr.ResourceLimits) ContainerResourceLimitValuesResponse {
+	return ContainerResourceLimitValuesResponse{
+		CPUMillicores: limits.CPUMillicores,
+		MemoryBytes:   limits.MemoryBytes,
+		StorageBytes:  limits.StorageBytes,
+	}
+}
+
+func toContainerResourceLimitCapabilityResponse(capability workspace.ResourceLimitCapability) ContainerResourceLimitCapabilityResponse {
+	return ContainerResourceLimitCapabilityResponse{
+		HardLimitSupported: capability.HardLimitSupported,
+		SoftLimitSupported: capability.SoftLimitSupported,
+	}
+}
+
+func toContainerResourceLimitCapabilitiesResponse(caps workspace.ResourceLimitCapabilities) ContainerResourceLimitCapabilitiesResponse {
+	return ContainerResourceLimitCapabilitiesResponse{
+		CPU:     toContainerResourceLimitCapabilityResponse(caps.CPU),
+		Memory:  toContainerResourceLimitCapabilityResponse(caps.Memory),
+		Storage: toContainerResourceLimitCapabilityResponse(caps.Storage),
+	}
+}
+
+func toContainerResourceLimitObservedResponse(observed workspace.ResourceLimitObserved) ContainerResourceLimitObservedResponse {
+	return ContainerResourceLimitObservedResponse{
+		CPUUsagePercent:      observed.CPUUsagePercent,
+		MemoryUsageBytes:     observed.MemoryUsageBytes,
+		MemoryLimitBytes:     observed.MemoryLimitBytes,
+		StorageUsedBytes:     observed.StorageUsedBytes,
+		StorageOverSoftLimit: observed.StorageOverSoftLimit,
 	}
 }
 

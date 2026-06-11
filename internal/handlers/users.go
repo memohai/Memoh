@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -20,12 +23,23 @@ import (
 	"github.com/memohai/memoh/internal/channel/route"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/identity"
+	"github.com/memohai/memoh/internal/workspace"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 type acpWorkspaceConfigProvider interface {
 	bridge.Provider
 	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
+}
+
+type botCreateWorkspace interface {
+	acpWorkspaceConfigProvider
+	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
+}
+
+type createBotStreamBotEvent struct {
+	Type string   `json:"type"`
+	Bot  bots.Bot `json:"bot"`
 }
 
 // UsersHandler manages user/account CRUD and bot operations via REST API.
@@ -37,12 +51,12 @@ type UsersHandler struct {
 	channelLifecycle *channel.Lifecycle
 	channelManager   *channel.Manager
 	registry         *channel.Registry
-	acpWorkspace     acpWorkspaceConfigProvider
+	acpWorkspace     botCreateWorkspace
 	logger           *slog.Logger
 }
 
 // NewUsersHandler creates a UsersHandler with channel identity support.
-func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, acpWorkspace acpWorkspaceConfigProvider) *UsersHandler {
+func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bots.Service, routeService route.Service, channelStore *channel.Store, channelLifecycle *channel.Lifecycle, channelManager *channel.Manager, registry *channel.Registry, acpWorkspace botCreateWorkspace) *UsersHandler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -94,6 +108,7 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 // @Tags users
 // @Success 200 {object} accounts.Account
 // @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /users/me [get].
 func (h *UsersHandler) GetMe(c echo.Context) error {
@@ -103,6 +118,9 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 	}
 	resp, err := h.service.Get(c.Request().Context(), channelIdentityID)
 	if err != nil {
+		if accountNotFound(err) {
+			return echo.NewHTTPError(http.StatusUnauthorized, "current user not found, please login again")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -436,33 +454,179 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	if ownerFromToken {
 		if _, err := h.service.Get(c.Request().Context(), ownerID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if accountNotFound(err) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			} else {
 				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 			}
 		}
 	}
+	if acceptsEventStream(c) {
+		return h.createBotStream(c, ownerID, ownerFromToken, req)
+	}
 	resp, err := h.botService.Create(c.Request().Context(), ownerID, req)
 	if err != nil {
-		if errors.Is(err, bots.ErrOwnerUserNotFound) {
-			if ownerFromToken {
-				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
-			}
-			return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+		return createBotHTTPError(err, ownerFromToken)
+	}
+	// Mirror UpdateBot: when a bot is created with ACP metadata (e.g. the
+	// onboarding flow creates the bot directly with an api_key agent), write the
+	// managed workspace config now so the first session has its credentials.
+	// This requires a ready workspace (the bridge must be reachable), which is
+	// only guaranteed when WaitForReady ran the lifecycle synchronously. For
+	// async creation the workspace isn't ready yet, so skip here and let the
+	// config be written on a later settings update.
+	//
+	// The bot row already exists at this point, so a failure here must NOT fail
+	// the request: returning 500 would orphan the created bot and a client retry
+	// would create a duplicate. Log and continue — the managed ACP config can be
+	// (re)written from the bot settings page.
+	if req.Metadata != nil && req.WaitForReady {
+		if err := h.prepareACPWorkspaceConfig(c.Request().Context(), resp); err != nil {
+			h.logger.Warn("write ACP workspace config after bot create failed",
+				slog.String("bot_id", resp.ID), slog.Any("error", err))
 		}
-		if errors.Is(err, acl.ErrUnknownPreset) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, bots.ErrBotNameTaken) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-		if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
+}
+
+func acceptsEventStream(c echo.Context) bool {
+	return strings.Contains(strings.ToLower(c.Request().Header.Get(echo.HeaderAccept)), "text/event-stream")
+}
+
+func accountNotFound(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound)
+}
+
+func createBotHTTPError(err error, ownerFromToken bool) error {
+	if errors.Is(err, bots.ErrOwnerUserNotFound) {
+		if ownerFromToken {
+			return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+	}
+	if errors.Is(err, acl.ErrUnknownPreset) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, bots.ErrBotNameTaken) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+}
+
+func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest) error {
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	}
+	if h.acpWorkspace == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+
+	req.WaitForReady = false
+	req.SkipLifecycle = true
+	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	if err != nil {
+		return createBotHTTPError(err, ownerFromToken)
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set(echo.HeaderCacheControl, "no-cache")
+	c.Response().Header().Set(echo.HeaderConnection, "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+	writer := bufio.NewWriter(c.Response().Writer)
+
+	var mu sync.Mutex
+	var writeErr error
+	send := func(payload any) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if writeErr != nil {
+			return false
+		}
+		if err := writeSSEJSON(writer, flusher, payload); err != nil {
+			writeErr = err
+			return false
+		}
+		return true
+	}
+	sendError := func(message string) {
+		_ = send(createContainerErrorEvent{Type: "error", Message: message})
+	}
+
+	send(createBotStreamBotEvent{Type: "bot_created", Bot: scrubBotForResponse(bot)})
+
+	lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Minute)
+	defer cancel()
+
+	if err := h.acpWorkspace.SetupBotContainerWithProgress(lifecycleCtx, bot.ID, func(event workspace.ContainerSetupEvent) {
+		switch event.Type {
+		case "pulling":
+			send(createContainerPullingEvent{Type: "pulling", Image: event.Image})
+		case "pull_progress":
+			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: event.Layers})
+		case "pull_skipped", "pull_delegated":
+			send(createContainerPullStatusEvent{Type: event.Type, Image: event.Image, Message: event.Message})
+		case "creating":
+			send(createContainerCreatingEvent{Type: "creating"})
+		case "restoring":
+			send(createContainerRestoringEvent{Type: "restoring"})
+		case "complete":
+			send(createContainerCompleteEvent{
+				Type: "complete",
+				Container: CreateContainerResponse{
+					ContainerID:      event.ContainerID,
+					WorkspaceBackend: event.WorkspaceBackend,
+					RuntimeBackend:   event.RuntimeBackend,
+					ContainerPath:    event.ContainerPath,
+					Image:            event.Image,
+					CDIDevices:       event.CDIDevices,
+					Started:          event.Started,
+					DataRestored:     event.DataRestored,
+					HasPreservedData: event.HasPreservedData,
+				},
+			})
+		}
+	}); err != nil {
+		h.logger.Error("bot container setup failed",
+			slog.String("bot_id", bot.ID),
+			slog.Any("error", err),
+		)
+		if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
+			h.logger.Error("failed to update bot status to ready after stream create failure",
+				slog.String("bot_id", bot.ID),
+				slog.Any("error", readyErr),
+			)
+			sendError("container setup failed: " + err.Error() + "; ready status update failed: " + readyErr.Error())
+			return nil
+		}
+		sendError("container setup failed: " + err.Error())
+		return nil
+	}
+
+	readyBot, err := h.botService.MarkReady(lifecycleCtx, bot.ID)
+	if err != nil {
+		h.logger.Error("failed to update bot status to ready after stream create",
+			slog.String("bot_id", bot.ID),
+			slog.Any("error", err),
+		)
+		sendError("ready status update failed: " + err.Error())
+		return nil
+	}
+	// Mirror the non-streaming path: write ACP workspace config (e.g.
+	// /data/.codex/auth.json) now that the workspace is ready. A failure here
+	// must NOT abort the stream — the bot exists and the config can be
+	// (re)written from the bot settings page.
+	if req.Metadata != nil {
+		if err := h.prepareACPWorkspaceConfig(lifecycleCtx, readyBot); err != nil {
+			h.logger.Warn("write ACP workspace config after stream bot create failed",
+				slog.String("bot_id", readyBot.ID), slog.Any("error", err))
+		}
+	}
+	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
+	return nil
 }
 
 // CheckBotName godoc
@@ -649,23 +813,33 @@ func (h *UsersHandler) prepareACPWorkspaceConfig(ctx context.Context, bot bots.B
 		return nil
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, acpprofile.AgentCodexID)
-	mode := acpclient.SetupMode(setup.Mode)
-	if mode == "" {
-		mode = acpclient.SetupModeAPIKey
-	}
-	if !setup.Enabled || mode == acpclient.SetupModeSelf {
+	if !setup.Enabled {
 		return nil
 	}
-	info, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
+	workspaceInfo, err := h.acpWorkspace.WorkspaceInfo(ctx, bot.ID)
 	if err != nil {
 		return err
 	}
-	if info.Backend == bridge.WorkspaceBackendLocal {
+	mode := acpclient.SetupMode(setup.Mode)
+	if !setup.ModeSet {
+		// Legacy bots predate explicit setup_mode. Local workspaces use the
+		// host's configured credentials (self); container workspaces have no
+		// credentials to write, so skip in both cases.
+		if workspaceInfo.Backend == bridge.WorkspaceBackendLocal {
+			mode = acpclient.SetupModeSelf
+		}
+		// container legacy bots: nothing to write either
+		if mode != acpclient.SetupModeSelf {
+			return nil
+		}
+	}
+	// self and oauth modes: credentials are not managed here.
+	if mode == acpclient.SetupModeSelf || mode == acpclient.SetupModeOAuth {
 		return nil
 	}
-	if mode == acpclient.SetupModeOAuth {
-		return nil
-	}
+	// OAuth credentials are written by the dedicated OAuth callback handler, not
+	// here. For api_key mode we write the managed config now; on local (desktop
+	// BYOK) the bridge maps /data/.codex onto the bot's workspace .codex dir.
 	client, err := h.acpWorkspace.MCPClient(ctx, bot.ID)
 	if err != nil {
 		return err

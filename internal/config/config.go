@@ -10,30 +10,31 @@ import (
 )
 
 const (
-	DefaultConfigPath       = "config.toml"
-	DefaultHTTPAddr         = ":8080"
-	DefaultNamespace        = "default"
-	DefaultSocketPath       = "/run/containerd/containerd.sock"
-	DefaultDataRoot         = "data"
-	DefaultDataMount        = "/data"
-	DefaultCNIBinaryDir     = "/opt/cni/bin"
-	DefaultCNIConfigDir     = "/etc/cni/net.d"
-	DefaultJWTExpiresIn     = "24h"
-	DefaultDatabaseDriver   = "postgres"
-	DefaultPGHost           = "127.0.0.1"
-	DefaultPGPort           = 5432
-	DefaultPGUser           = "postgres"
-	DefaultPGDatabase       = "memoh"
-	DefaultPGSSLMode        = "disable"
-	DefaultSQLitePath       = "data/memoh.db"
-	DefaultSQLiteBusyMS     = 5000
-	DefaultQdrantURL        = "http://127.0.0.1:6334"
-	DefaultQdrantCollection = "memory"
-	DefaultRuntimeDir       = "/opt/memoh/runtime"
-	DefaultBaseImage        = "debian:bookworm-slim"
-	DefaultVNCImage         = "memohai/vnc:debian"
-	DefaultVNCMirrorImage   = "memoh.cn/memohai/vnc:debian"
-	DefaultTimezone         = "UTC"
+	DefaultConfigPath            = "config.toml"
+	DefaultHTTPAddr              = ":8080"
+	DefaultNamespace             = "default"
+	DefaultSocketPath            = "/run/containerd/containerd.sock"
+	DefaultDataRoot              = "data"
+	DefaultDataMount             = "/data"
+	DefaultCNIBinaryDir          = "/opt/cni/bin"
+	DefaultCNIConfigDir          = "/etc/cni/net.d"
+	DefaultJWTExpiresIn          = "24h"
+	DefaultDatabaseDriver        = "postgres"
+	DefaultPGHost                = "127.0.0.1"
+	DefaultPGPort                = 5432
+	DefaultPGUser                = "postgres"
+	DefaultPGDatabase            = "memoh"
+	DefaultPGSSLMode             = "disable"
+	DefaultSQLitePath            = "data/memoh.db"
+	DefaultSQLiteBusyMS          = 5000
+	DefaultQdrantURL             = "http://127.0.0.1:6334"
+	DefaultQdrantCollection      = "memory"
+	DefaultRuntimeDir            = "/opt/memoh/runtime"
+	DefaultBaseImage             = "debian:bookworm-slim"
+	DefaultVNCImage              = "memohai/vnc:debian"
+	DefaultVNCMirrorImage        = "memoh.cn/memohai/vnc:debian"
+	DefaultTimezone              = "UTC"
+	DefaultContainerdRuntimeType = "io.containerd.runc.v2"
 
 	ImagePullPolicyIfNotPresent = "if_not_present"
 	ImagePullPolicyAlways       = "always"
@@ -100,8 +101,17 @@ type ContainerConfig struct {
 }
 
 type ContainerdConfig struct {
-	SocketPath string `toml:"socket_path"`
-	Namespace  string `toml:"namespace"`
+	SocketPath  string `toml:"socket_path"`
+	Namespace   string `toml:"namespace"`
+	RuntimeType string `toml:"runtime_type"`
+}
+
+func (c ContainerdConfig) RuntimeTypeOrDefault() string {
+	runtimeType := strings.TrimSpace(c.RuntimeType)
+	if runtimeType == "" {
+		return DefaultContainerdRuntimeType
+	}
+	return runtimeType
 }
 
 type DockerConfig struct {
@@ -354,8 +364,9 @@ func Load(path string) (Config, error) {
 			WorkspaceConfig: defaultWorkspace,
 		},
 		Containerd: ContainerdConfig{
-			SocketPath: DefaultSocketPath,
-			Namespace:  DefaultNamespace,
+			SocketPath:  DefaultSocketPath,
+			Namespace:   DefaultNamespace,
+			RuntimeType: DefaultContainerdRuntimeType,
 		},
 		Workspace: defaultWorkspace,
 		Postgres: PostgresConfig{

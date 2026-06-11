@@ -1,9 +1,10 @@
 <template>
-  <div class="text-sm leading-relaxed">
+  <div class="leading-relaxed">
     <div
       v-if="expandable"
       role="button"
       tabindex="0"
+      :aria-expanded="open"
       class="group flex items-center gap-1.5 w-full text-left transition-colors cursor-pointer py-0.5 select-none"
       :class="rowClass"
       @click="toggleOpen"
@@ -12,16 +13,26 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0"
+        class="size-3.5 shrink-0 opacity-50"
       />
       <span
-        v-if="showActionLabel"
+        v-if="isExec"
+        class="shrink-0 font-mono text-xs select-none"
+        :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
+      >$</span>
+      <span
+        v-else-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
+      <span
+        v-if="isExec && !display.target"
+        class="shrink-0 font-mono text-xs truncate"
+        :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
+      >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="font-mono text-xs truncate hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click.stop="handleOpenInFiles"
@@ -30,7 +41,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="font-mono text-xs truncate"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -71,16 +82,26 @@
     >
       <component
         :is="display.icon"
-        class="size-3.5 shrink-0"
+        class="size-3.5 shrink-0 opacity-50"
       />
       <span
-        v-if="showActionLabel"
+        v-if="isExec"
+        class="shrink-0 font-mono text-xs select-none"
+        :class="showRunning ? 'tool-shimmer-text' : 'text-muted-foreground/60'"
+      >$</span>
+      <span
+        v-else-if="showActionLabel"
         class="shrink-0"
         :class="actionClass"
       >{{ renderedActionLabel }}</span>
+      <span
+        v-if="isExec && !display.target"
+        class="shrink-0 font-mono text-xs truncate"
+        :class="(showRunning || isPending) ? 'tool-shimmer-text' : 'text-muted-foreground/70'"
+      >{{ pendingLabel }}</span>
       <button
         v-if="display.target && canOpenInFiles"
-        class="font-mono truncate hover:underline cursor-pointer"
+        class="font-mono text-xs truncate hover:underline cursor-pointer"
         :class="targetClass"
         :title="display.fullTarget || display.target"
         @click="handleOpenInFiles"
@@ -89,7 +110,7 @@
       </button>
       <span
         v-else-if="display.target"
-        class="font-mono truncate"
+        class="font-mono text-xs truncate"
         :class="targetClass"
         :title="display.fullTarget || display.target"
       >{{ display.target }}</span>
@@ -114,6 +135,12 @@
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ userInputLabel }}</span>
     </div>
+
+    <BgTaskLiveStatus
+      v-if="backgroundTask && !open"
+      :task="backgroundTask"
+      class="ml-5"
+    />
 
     <div
       v-if="expandable && open && !isPending"
@@ -167,6 +194,7 @@ import {
   isFilePathTool,
 } from './tool-call-registry'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import BgTaskLiveStatus from './bg-task-live-status.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
@@ -175,6 +203,8 @@ const chatStore = useChatStore()
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
+
+const backgroundTask = computed(() => props.block.backgroundTask)
 
 const open = ref(getToolDisplay(props.block).defaultOpen === true)
 
@@ -221,16 +251,16 @@ const renderedActionLabel = computed(
   () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
 )
 
+const isExec = computed(() => props.block.toolName === 'exec')
+
+// Tool rows sit a notch below thinking in weight — terminal-flavoured and
+// muted, so the recessed rail reads uniformly quiet (design: 过程内敛). exec
+// shows a dim `$` prompt instead of a verb; running shimmers like thinking.
 const rowClass = computed(() => {
-  if (props.block.toolName === 'exec') {
-    return expandable.value ? 'text-foreground hover:text-foreground' : 'text-foreground'
+  if (display.value.isError) {
+    return expandable.value ? 'text-destructive hover:text-destructive/90' : 'text-destructive'
   }
-  if (!expandable.value) {
-    return display.value.isError ? 'text-destructive' : 'text-muted-foreground'
-  }
-  return display.value.isError
-    ? 'text-destructive hover:text-destructive/90'
-    : 'text-muted-foreground hover:text-foreground'
+  return expandable.value ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground'
 })
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
@@ -266,9 +296,9 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (props.block.toolName === 'exec') return 'text-foreground'
   if (display.value.isError) return 'text-destructive'
-  return 'text-foreground/80'
+  // Recessed by default (design: tool target ~muted), brightening only on hover.
+  return 'text-muted-foreground group-hover:text-foreground'
 })
 
 const actionClass = computed(() => {

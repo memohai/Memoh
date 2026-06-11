@@ -24,12 +24,15 @@ type containerWorkspace interface {
 	HasPreservedData(botID string) bool
 	StartWithResolvedConfig(ctx context.Context, botID, image string, gpu workspace.WorkspaceGPUConfig) error
 	StartWithWorkspaceConfig(ctx context.Context, botID, image string, gpu workspace.WorkspaceGPUConfig, workspaceCfg workspace.WorkspaceStartConfig) error
+	WaitForWorkspaceReady(ctx context.Context, botID string) error
 	RememberWorkspaceImage(ctx context.Context, botID, image string) error
 	RememberWorkspaceGPU(ctx context.Context, botID string, gpu workspace.WorkspaceGPUConfig) error
 	RestorePreservedData(ctx context.Context, botID string) error
 	RecordContainerRunning(ctx context.Context, botID, containerID, image string)
 	GetContainerInfo(ctx context.Context, botID string) (*workspace.ContainerStatus, error)
 	GetContainerMetrics(ctx context.Context, botID string) (*workspace.ContainerMetricsResult, error)
+	GetResourceLimits(ctx context.Context, botID string) (*workspace.ResourceLimitsResult, error)
+	SetResourceLimits(ctx context.Context, botID string, limits ctr.ResourceLimits) (*workspace.ResourceLimitsResult, error)
 	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
 	StopBot(ctx context.Context, botID string) error
 	ResolveWorkspaceSkillDiscoveryRoots(ctx context.Context, botID string) ([]string, error)

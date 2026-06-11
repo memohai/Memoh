@@ -22,19 +22,27 @@ import (
 type ToolSessionContext = mcp.ToolSessionContext
 
 type StartRequest struct {
-	AgentID         string
-	BotID           string
-	ProjectPath     string
-	Command         string
-	Args            []string
-	LocalCommand    string
-	LocalArgs       []string
-	Env             []string
-	SetupMode       SetupMode
-	Timeout         time.Duration
-	ToolSession     ToolSessionContext
-	ToolHTTPURL     string
-	ToolHTTPHandler http.Handler
+	AgentID      string
+	BotID        string
+	ProjectPath  string
+	Command      string
+	Args         []string
+	LocalCommand string
+	LocalArgs    []string
+	Env          []string
+	SetupMode    SetupMode
+	// SessionMode, when set, is pinned via session/set_mode right after the
+	// session is created (see acpprofile.Profile.SessionModeID).
+	SessionMode string
+	// SessionConfigValues are pinned via session/set_config_option after the
+	// session is created, for options the agent advertises (see
+	// acpprofile.Profile.SessionConfigValues).
+	SessionConfigValues map[string]string
+	Timeout             time.Duration
+	ToolSession         ToolSessionContext
+	ToolApproval        ToolApprovalService
+	ToolHTTPURL         string
+	ToolHTTPHandler     http.Handler
 }
 
 type PromptResult struct {
@@ -167,11 +175,12 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:   backend,
-		AgentID:   req.AgentID,
-		SetupMode: req.SetupMode,
-		Env:       req.Env,
-		NoTimeout: true,
+		Backend:       backend,
+		AgentID:       req.AgentID,
+		SetupMode:     req.SetupMode,
+		Env:           req.Env,
+		WorkspaceRoot: root,
+		NoTimeout:     true,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {
@@ -188,7 +197,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if strings.TrimSpace(toolSession.ChatID) == "" {
 		toolSession.ChatID = toolSession.BotID
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, backend == WorkspaceBackendContainer)
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, backend == WorkspaceBackendContainer, req.ToolApproval, toolSession)
+	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
@@ -254,6 +264,16 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		cancel()
 		return nil, fmt.Errorf("create ACP session: %w", err)
 	}
+	if err := pinSessionMode(ctx, conn, sess.SessionId, sess.Modes, req.SessionMode, r.logger, req.AgentID); err != nil {
+		callbacks.close()
+		_ = proc.Close()
+		if toolHTTPStop != nil {
+			toolHTTPStop()
+		}
+		cancel()
+		return nil, err
+	}
+	pinSessionConfigValues(ctx, conn, sess.SessionId, sess.ConfigOptions, req.SessionConfigValues, r.logger, req.AgentID)
 
 	finishStartup()
 	return &Session{
@@ -269,6 +289,126 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		cancel:          cancel,
 		reverseHTTPStop: toolHTTPStop,
 	}, nil
+}
+
+// pinSessionMode forces the agent session into the requested permission mode
+// so tool approvals flow through ACP regardless of ambient agent-side
+// configuration (e.g. a host ~/.claude/settings.json defaultMode). A desired
+// mode the agent does not advertise is logged and skipped; a failed set_mode
+// call aborts startup because the session would otherwise run with unknown
+// permission behavior.
+func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, modes *acp.SessionModeState, desired string, logger *slog.Logger, agentID string) error {
+	desired = strings.TrimSpace(desired)
+	if desired == "" || modes == nil {
+		return nil
+	}
+	if string(modes.CurrentModeId) == desired {
+		return nil
+	}
+	available := false
+	for _, mode := range modes.AvailableModes {
+		if string(mode.Id) == desired {
+			available = true
+			break
+		}
+	}
+	if !available {
+		if logger != nil {
+			logger.Warn("ACP agent does not advertise the pinned session mode; leaving agent default",
+				slog.String("agent_id", agentID),
+				slog.String("desired_mode", desired),
+				slog.String("current_mode", string(modes.CurrentModeId)))
+		}
+		return nil
+	}
+	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
+		SessionId: sessionID,
+		ModeId:    acp.SessionModeId(desired),
+	}); err != nil {
+		return fmt.Errorf("pin ACP session mode %q: %w", desired, err)
+	}
+	if logger != nil {
+		logger.Info("pinned ACP session mode",
+			slog.String("agent_id", agentID),
+			slog.String("mode", desired),
+			slog.String("previous_mode", string(modes.CurrentModeId)))
+	}
+	return nil
+}
+
+// pinSessionConfigValues applies the profile's desired config option values
+// (e.g. Claude Code's "effort" select, which gates extended thinking on newer
+// models) to options the agent actually advertises. Unlike the session mode
+// this is a quality setting, not a security boundary, so failures are logged
+// and startup continues.
+func pinSessionConfigValues(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, options []acp.SessionConfigOption, desired map[string]string, logger *slog.Logger, agentID string) {
+	for _, option := range options {
+		if option.Select == nil {
+			continue
+		}
+		value, ok := desired[string(option.Select.Id)]
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || string(option.Select.CurrentValue) == value {
+			continue
+		}
+		if !selectOptionHasValue(option.Select.Options, value) {
+			if logger != nil {
+				logger.Warn("ACP agent does not offer the pinned config value; leaving agent default",
+					slog.String("agent_id", agentID),
+					slog.String("config_id", string(option.Select.Id)),
+					slog.String("desired_value", value),
+					slog.String("current_value", string(option.Select.CurrentValue)))
+			}
+			continue
+		}
+		_, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+			ValueId: &acp.SetSessionConfigOptionValueId{
+				SessionId: sessionID,
+				ConfigId:  option.Select.Id,
+				Value:     acp.SessionConfigValueId(value),
+			},
+		})
+		if err != nil {
+			if logger != nil {
+				logger.Warn("failed to pin ACP session config option",
+					slog.String("agent_id", agentID),
+					slog.String("config_id", string(option.Select.Id)),
+					slog.String("desired_value", value),
+					slog.Any("error", err))
+			}
+			continue
+		}
+		if logger != nil {
+			logger.Info("pinned ACP session config option",
+				slog.String("agent_id", agentID),
+				slog.String("config_id", string(option.Select.Id)),
+				slog.String("value", value),
+				slog.String("previous_value", string(option.Select.CurrentValue)))
+		}
+	}
+}
+
+func selectOptionHasValue(options acp.SessionConfigSelectOptions, value string) bool {
+	if options.Ungrouped != nil {
+		for _, option := range *options.Ungrouped {
+			if string(option.Value) == value {
+				return true
+			}
+		}
+	}
+	if options.Grouped != nil {
+		for _, group := range *options.Grouped {
+			for _, option := range group.Options {
+				if string(option.Value) == value {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
@@ -441,6 +581,12 @@ func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink)
 
 // PromptWithResources sends a user prompt plus optional embedded resources.
 func (s *Session) PromptWithResources(ctx context.Context, prompt string, resources []PromptResource, sinks ...EventSink) (PromptResult, error) {
+	return s.PromptWithToolContext(ctx, prompt, resources, ToolSessionContext{}, sinks...)
+}
+
+// PromptWithToolContext sends a user prompt and binds request-scoped tool
+// identity to ACP callbacks while that prompt is active.
+func (s *Session) PromptWithToolContext(ctx context.Context, prompt string, resources []PromptResource, toolSession ToolSessionContext, sinks ...EventSink) (PromptResult, error) {
 	if s == nil || s.conn == nil {
 		return PromptResult{}, ErrSessionNotInitialized
 	}
@@ -493,11 +639,11 @@ func (s *Session) PromptWithResources(ctx context.Context, prompt string, resour
 		sink = sinks[0]
 	}
 	if callbacks != nil {
-		callbacks.setPromptState(collector, sink)
+		callbacks.setPromptState(collector, sink, toolSession)
 	}
 	defer func() {
 		if callbacks != nil {
-			callbacks.setPromptState(nil, nil)
+			callbacks.setPromptState(nil, nil, ToolSessionContext{})
 		}
 	}()
 

@@ -234,7 +234,7 @@ CREATE TABLE mcp_oauth_tokens (
 	assertScopes(t, legacy.ScopesSupported, []string{"email", "offline_access"})
 }
 
-func TestSQLiteUserInputAllowsRepeatedToolCallID(t *testing.T) {
+func TestSQLiteUserInputReusesRepeatedToolCallID(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.OpenSQLite(ctx, config.SQLiteConfig{DSN: ":memory:"})
 	if err != nil {
@@ -286,11 +286,13 @@ CREATE TABLE user_input_requests (
   responded_at TEXT,
   canceled_at TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
-  CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
-);
-`)
+	  CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
+	  CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
+	  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
+	);
+	CREATE UNIQUE INDEX user_input_tool_call_unique
+	  ON user_input_requests(session_id, tool_call_id);
+	`)
 
 	botID := "00000000-0000-0000-0000-000000001001"
 	sessionID := "00000000-0000-0000-0000-000000001002"
@@ -332,8 +334,16 @@ CREATE TABLE user_input_requests (
 	if first.Status != "pending" || first.ShortID != 1 {
 		t.Fatalf("first request = status %q short_id %d", first.Status, first.ShortID)
 	}
+	updated := create("second")
+	if updated.ID != first.ID {
+		t.Fatalf("pending reused tool_call_id created request %s, want existing %s", updated.ID, first.ID)
+	}
+	if updated.Status != "pending" || updated.ShortID != 1 {
+		t.Fatalf("updated request = status %q short_id %d, want pending #1", updated.Status, updated.ShortID)
+	}
+
 	canceled, err := q.CancelUserInputRequest(ctx, pgsqlc.CancelUserInputRequestParams{
-		ID:                           first.ID,
+		ID:                           updated.ID,
 		ResultJson:                   []byte(`{"status":"canceled"}`),
 		RespondedByChannelIdentityID: mustUUID(t, actorID),
 	})
@@ -344,12 +354,30 @@ CREATE TABLE user_input_requests (
 		t.Fatalf("canceled status = %q", canceled.Status)
 	}
 
-	second := create("second")
-	if second.ID == first.ID {
-		t.Fatalf("expected a new request id when tool_call_id is reused")
+	terminal, err := q.CreateUserInputRequest(ctx, pgsqlc.CreateUserInputRequestParams{
+		BotID:                        mustUUID(t, botID),
+		SessionID:                    mustUUID(t, sessionID),
+		ToolCallID:                   "reused-call-id",
+		ToolName:                     "ask_user",
+		InputJson:                    []byte(`{"question":"third"}`),
+		UiPayloadJson:                []byte(`{"question":"third"}`),
+		ProviderMetadata:             []byte(`{}`),
+		RequestedByChannelIdentityID: mustUUID(t, actorID),
+	})
+	if err == nil {
+		if terminal.ID != first.ID || terminal.Status != "canceled" || terminal.ShortID != 1 || string(terminal.InputJson) == `{"question":"third"}` {
+			t.Fatalf("terminal duplicate returned %#v, want unchanged canceled original", terminal)
+		}
 	}
-	if second.Status != "pending" || second.ShortID != 2 {
-		t.Fatalf("second request = status %q short_id %d, want pending #2", second.Status, second.ShortID)
+	existing, err := q.GetUserInputRequestBySessionToolCall(ctx, pgsqlc.GetUserInputRequestBySessionToolCallParams{
+		SessionID:  mustUUID(t, sessionID),
+		ToolCallID: "reused-call-id",
+	})
+	if err != nil {
+		t.Fatalf("get existing terminal request: %v", err)
+	}
+	if existing.ID != first.ID || existing.Status != "canceled" || existing.ShortID != 1 {
+		t.Fatalf("existing request = %#v, want canceled original", existing)
 	}
 }
 

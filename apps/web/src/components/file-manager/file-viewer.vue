@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onBeforeUnmount, defineAsyncComponent, h } from 'vue'
+import { ref, watch, computed, onBeforeUnmount, defineAsyncComponent, h } from 'vue'
+import { appKeyboardCommands } from '@/lib/keyboard-commands'
+import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { isFileSaveEligible } from './file-save-command'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { File, Download, Save } from 'lucide-vue-next'
@@ -177,21 +180,24 @@ watch(fsChangedAt, () => {
   }
 })
 
-function handleKeydown(e: KeyboardEvent) {
-  const isSave = (e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')
-  if (!isSave) return
-  if (props.readonly) return
-  if (!isText.value || !isDirty.value || saving.value) return
-  e.preventDefault()
+// Save on Cmd/Ctrl+S via the shared keyboard layer. The handler is scoped to this
+// component's lifetime: it returns true only for an editable, dirty text file, so
+// the browser keeps its native save behavior in every other state. The
+// cross-platform mod key is handled by the binding table.
+useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
+  if (!isFileSaveEligible({
+    readonly: props.readonly ?? false,
+    isText: isText.value,
+    isDirty: isDirty.value,
+    saving: saving.value,
+  })) {
+    return false
+  }
   void handleSave()
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
+  return true
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
   cleanupImageUrl()
 })
 </script>

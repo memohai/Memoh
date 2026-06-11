@@ -1914,6 +1914,44 @@ definitions:
       task_running:
         type: boolean
     type: object
+  handlers.ContainerResourceLimitCapabilitiesResponse:
+    properties:
+      cpu:
+        $ref: '#/definitions/handlers.ContainerResourceLimitCapabilityResponse'
+      memory:
+        $ref: '#/definitions/handlers.ContainerResourceLimitCapabilityResponse'
+      storage:
+        $ref: '#/definitions/handlers.ContainerResourceLimitCapabilityResponse'
+    type: object
+  handlers.ContainerResourceLimitCapabilityResponse:
+    properties:
+      hard_limit_supported:
+        type: boolean
+      soft_limit_supported:
+        type: boolean
+    type: object
+  handlers.ContainerResourceLimitObservedResponse:
+    properties:
+      cpu_usage_percent:
+        type: number
+      memory_limit_bytes:
+        type: integer
+      memory_usage_bytes:
+        type: integer
+      storage_over_soft_limit:
+        type: boolean
+      storage_used_bytes:
+        type: integer
+    type: object
+  handlers.ContainerResourceLimitValuesResponse:
+    properties:
+      cpu_millicores:
+        type: integer
+      memory_bytes:
+        type: integer
+      storage_bytes:
+        type: integer
+    type: object
   handlers.ContainerStorageMetricsResponse:
     properties:
       path:
@@ -1958,6 +1996,8 @@ definitions:
       has_preserved_data:
         type: boolean
       image:
+        type: string
+      runtime_backend:
         type: string
       snapshotter:
         type: string
@@ -2099,6 +2139,8 @@ definitions:
         type: string
       metrics:
         $ref: '#/definitions/handlers.ContainerMetricsPayloadResponse'
+      resource_limits:
+        $ref: '#/definitions/handlers.GetContainerResourceLimitsResponse'
       sampled_at:
         type: string
       status:
@@ -2106,6 +2148,27 @@ definitions:
       supported:
         type: boolean
       unsupported_reason:
+        type: string
+    type: object
+  handlers.GetContainerResourceLimitsResponse:
+    properties:
+      applied:
+        $ref: '#/definitions/handlers.ContainerResourceLimitValuesResponse'
+      backend:
+        type: string
+      capabilities:
+        $ref: '#/definitions/handlers.ContainerResourceLimitCapabilitiesResponse'
+      desired:
+        $ref: '#/definitions/handlers.ContainerResourceLimitValuesResponse'
+      observed:
+        $ref: '#/definitions/handlers.ContainerResourceLimitObservedResponse'
+      requires_recreate:
+        type: boolean
+      runtime_backend:
+        type: string
+      status:
+        type: string
+      workspace_backend:
         type: string
     type: object
   handlers.GetContainerResponse:
@@ -2127,6 +2190,8 @@ definitions:
       legacy:
         type: boolean
       namespace:
+        type: string
+      runtime_backend:
         type: string
       status:
         type: string
@@ -2512,6 +2577,20 @@ definitions:
         type: string
       summary:
         type: string
+    type: object
+  handlers.UpdateContainerMetricsRequest:
+    properties:
+      resource_limits:
+        $ref: '#/definitions/handlers.UpdateContainerResourceLimitsRequest'
+    type: object
+  handlers.UpdateContainerResourceLimitsRequest:
+    properties:
+      cpu_millicores:
+        type: integer
+      memory_bytes:
+        type: integer
+      storage_bytes:
+        type: integer
     type: object
   handlers.acpRuntimeCreateRequest:
     properties:
@@ -5374,6 +5453,35 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get current container metrics for bot
+      tags:
+      - containerd
+    put:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Metrics settings payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UpdateContainerMetricsRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.GetContainerMetricsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Update container metrics settings for bot
       tags:
       - containerd
   /bots/{bot_id}/container/skills:

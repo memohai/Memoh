@@ -20,6 +20,7 @@ import (
 	memprovider "github.com/memohai/memoh/internal/memory/adapters"
 	"github.com/memohai/memoh/internal/session"
 	"github.com/memohai/memoh/internal/settings"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 const (
@@ -492,6 +493,236 @@ func TestMapACPStandardToolCallEvent(t *testing.T) {
 	}
 	if events[0].Type != agentpkg.EventToolCallEnd || events[0].ToolName != "read" || events[0].ToolCallID != "read-1" {
 		t.Fatalf("event = %#v, want standard read tool end", events[0])
+	}
+}
+
+func TestMapACPUserInputRequestEvent(t *testing.T) {
+	t.Parallel()
+
+	events := mapACPStreamEvent(acpclient.StreamEvent{
+		Type:        acpclient.StreamEventUserInputRequest,
+		ToolCallID:  "mcp-http-call-1",
+		ToolName:    "ask_user",
+		Input:       map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
+		UserInputID: "input-1",
+		ShortID:     3,
+		Status:      "pending",
+		Metadata: map[string]any{
+			"user_input_id": "input-1",
+			"ui_payload":    map[string]any{"version": 2},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Type != agentpkg.EventUserInputRequest || event.ToolCallID != "mcp-http-call-1" {
+		t.Fatalf("event = %#v, want user input request on same tool call", event)
+	}
+	if event.UserInputID != "input-1" || event.ShortID != 3 || event.Status != "pending" {
+		t.Fatalf("event user input fields = %#v", event)
+	}
+	if event.Metadata["user_input_id"] != "input-1" {
+		t.Fatalf("event metadata = %#v", event.Metadata)
+	}
+}
+
+func TestACPResultOutputMessagesPersistsUserInputMetadata(t *testing.T) {
+	t.Parallel()
+
+	output := acpResultOutputMessages(acpclient.PromptResult{
+		Events: []acpclient.StreamEvent{
+			{
+				Type:       acpclient.StreamEventToolCallStart,
+				ToolCallID: "mcp-http-call-1",
+				ToolName:   "ask_user",
+				Input:      map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
+			},
+			{
+				Type:        acpclient.StreamEventUserInputRequest,
+				ToolCallID:  "mcp-http-call-1",
+				ToolName:    "ask_user",
+				UserInputID: "input-1",
+				ShortID:     3,
+				Status:      "pending",
+				Metadata: map[string]any{
+					"ui_payload": map[string]any{
+						"version": 2,
+						"questions": []any{
+							map[string]any{"id": "q1", "text": "Which plan?", "kind": "single_select"},
+						},
+					},
+				},
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "mcp-http-call-1" {
+		t.Fatalf("assistant parts = %#v", parts)
+	}
+	userInput, ok := parts[0].ProviderMetadata["user_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider metadata = %#v, want user_input", parts[0].ProviderMetadata)
+	}
+	if userInput["user_input_id"] != "input-1" || userInput["status"] != "pending" {
+		t.Fatalf("user_input metadata = %#v", userInput)
+	}
+	if _, ok := userInput["ui_payload"].(map[string]any); !ok {
+		t.Fatalf("user_input ui_payload = %#v", userInput["ui_payload"])
+	}
+}
+
+func TestACPResultOutputMessagesPersistsToolApprovalMetadata(t *testing.T) {
+	t.Parallel()
+
+	output := acpResultOutputMessages(acpclient.PromptResult{
+		Events: []acpclient.StreamEvent{
+			{
+				Type:       acpclient.StreamEventToolCallStart,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				Input:      map[string]any{"path": "/data/review.txt"},
+			},
+			{
+				Type:       acpclient.StreamEventToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusPending,
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "write-1" {
+		t.Fatalf("assistant parts = %#v", parts)
+	}
+	approval, ok := parts[0].ProviderMetadata["approval"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
+	}
+	if approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusPending {
+		t.Fatalf("approval metadata = %#v", approval)
+	}
+	if approval["short_id"] != float64(4) {
+		t.Fatalf("approval short_id = %#v, want 4", approval["short_id"])
+	}
+}
+
+func TestACPResultOutputMessagesPersistsResolvedToolApprovalMetadata(t *testing.T) {
+	t.Parallel()
+
+	output := acpResultOutputMessages(acpclient.PromptResult{
+		Events: []acpclient.StreamEvent{
+			{
+				Type:       acpclient.StreamEventToolCallStart,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				Input:      map[string]any{"path": "/data/review.txt"},
+			},
+			{
+				Type:       acpclient.StreamEventToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusPending,
+			},
+			{
+				Type:       acpclient.StreamEventToolApprovalRequest,
+				ToolCallID: "write-1",
+				ToolName:   "write",
+				ApprovalID: "approval-1",
+				ShortID:    4,
+				Status:     toolapproval.StatusApproved,
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "write-1" {
+		t.Fatalf("assistant parts = %#v", parts)
+	}
+	approval, ok := parts[0].ProviderMetadata["approval"].(map[string]any)
+	if !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
+	}
+	if approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusApproved || approval["can_approve"] != false {
+		t.Fatalf("approval metadata = %#v", approval)
+	}
+}
+
+func TestACPResultOutputMessagesMergesApprovalBeforeToolStart(t *testing.T) {
+	t.Parallel()
+
+	output := acpResultOutputMessages(acpclient.PromptResult{
+		Events: []acpclient.StreamEvent{
+			{
+				Type:       acpclient.StreamEventToolApprovalRequest,
+				ToolCallID: "exec-1",
+				ToolName:   "exec",
+				Input:      map[string]any{"command": "pwd"},
+				ApprovalID: "approval-1",
+				ShortID:    1,
+				Status:     toolapproval.StatusPending,
+			},
+			{
+				Type:       acpclient.StreamEventToolCallStart,
+				ToolCallID: "exec-1",
+				ToolName:   "exec",
+				Input:      map[string]any{"command": "pwd"},
+			},
+		},
+	})
+	if len(output) != 1 || output[0].Role != "assistant" {
+		t.Fatalf("output = %#v, want one assistant message", output)
+	}
+	var parts []struct {
+		Type             string         `json:"type"`
+		ToolCallID       string         `json:"toolCallId"`
+		Input            map[string]any `json:"input"`
+		ProviderMetadata map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(output[0].Content, &parts); err != nil {
+		t.Fatalf("unmarshal assistant content: %v", err)
+	}
+	if len(parts) != 1 || parts[0].Type != "tool-call" || parts[0].ToolCallID != "exec-1" {
+		t.Fatalf("assistant parts = %#v, want one merged tool-call", parts)
+	}
+	if parts[0].Input["command"] != "pwd" {
+		t.Fatalf("merged input = %#v, want pwd", parts[0].Input)
+	}
+	if _, ok := parts[0].ProviderMetadata["approval"].(map[string]any); !ok {
+		t.Fatalf("provider metadata = %#v, want approval", parts[0].ProviderMetadata)
 	}
 }
 

@@ -167,6 +167,9 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
+	if req.SkipLifecycle {
+		return bot, nil
+	}
 	if req.WaitForReady {
 		waitCtx := context.WithoutCancel(ctx)
 		if err := s.runCreateLifecycle(waitCtx, bot.ID); err != nil {
@@ -176,6 +179,14 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	}
 	s.enqueueCreateLifecycle(ctx, bot.ID)
 	return bot, nil
+}
+
+// MarkReady marks a bot lifecycle transition as complete and returns the fresh row.
+func (s *Service) MarkReady(ctx context.Context, botID string) (Bot, error) {
+	if err := s.updateStatus(ctx, botID, BotStatusReady); err != nil {
+		return Bot{}, err
+	}
+	return s.Get(ctx, botID)
 }
 
 // Get returns a bot by its identifier, which may be either a UUID or a name slug.
@@ -570,7 +581,7 @@ func (s *Service) ensureUserExists(ctx context.Context, userID pgtype.UUID) erro
 	}
 	_, err := s.queries.GetUserByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return ErrOwnerUserNotFound
 		}
 		return err

@@ -1,0 +1,43 @@
+import { normalizeACPAgentID } from '@/utils/acp'
+import { ONBOARDING_KEYS } from '../constants'
+
+export interface OnboardingACPSelection {
+  agentId: string
+  setupMode: string
+  managed: Record<string, string>
+}
+
+export function readACPSelection(): OnboardingACPSelection | null {
+  try {
+    const raw = sessionStorage.getItem(ONBOARDING_KEYS.acpSelection)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<OnboardingACPSelection>
+    const agentId = normalizeACPAgentID(parsed.agentId)
+    if (!agentId) return null
+    const managed: Record<string, string> = {}
+    if (parsed.managed && typeof parsed.managed === 'object') {
+      for (const [key, value] of Object.entries(parsed.managed)) {
+        managed[key] = String(value ?? '')
+      }
+    }
+    return {
+      agentId,
+      setupMode: typeof parsed.setupMode === 'string' && parsed.setupMode ? parsed.setupMode : 'api_key',
+      managed,
+    }
+  } catch {
+    return null
+  }
+}
+
+// ACP selection is functional state that decides which kind of bot gets
+// created, so it deliberately uses storage directly (not the best-effort
+// safe-storage helpers): a failed write must surface rather than silently fall
+// through to creating a plain bot.
+export function writeACPSelection(selection: OnboardingACPSelection): void {
+  sessionStorage.setItem(ONBOARDING_KEYS.acpSelection, JSON.stringify(selection))
+}
+
+export function clearACPSelection(): void {
+  sessionStorage.removeItem(ONBOARDING_KEYS.acpSelection)
+}

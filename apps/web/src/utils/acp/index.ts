@@ -1,2 +1,2 @@
-export { acpAgentDisplayName, acpAgentIcon } from './agent-icon'
+export { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent } from './agent-icon'
 export * from './metadata'

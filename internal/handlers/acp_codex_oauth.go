@@ -19,7 +19,6 @@ import (
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -219,12 +218,11 @@ func (h *ACPCodexOAuthHandler) requireBotAccess(c echo.Context) (string, string,
 }
 
 func (h *ACPCodexOAuthHandler) ensureManagedWorkspace(ctx context.Context, botID string) error {
-	info, err := h.acpWorkspace.WorkspaceInfo(ctx, botID)
-	if err != nil {
+	// Both container and local (desktop BYOK) workspaces can host managed Codex
+	// auth. For local, the credentials are written under the bot-scoped
+	// CODEX_HOME (workspace .codex dir) rather than the user's real ~/.codex.
+	if _, err := h.acpWorkspace.WorkspaceInfo(ctx, botID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if info.Backend == bridge.WorkspaceBackendLocal {
-		return echo.NewHTTPError(http.StatusBadRequest, "local workspace uses self-managed Codex auth")
 	}
 	return nil
 }

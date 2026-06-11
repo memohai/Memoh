@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const ROOT_DIR = dirname(dirname(fileURLToPath(import.meta.url)))
 
 const CANDIDATE_DIRS = [
   'apps/desktop',
@@ -36,8 +39,8 @@ function prereleaseTag(version) {
   return /^[a-z][a-z0-9._-]*$/i.test(identifier) ? identifier : 'next'
 }
 
-function publishArgs(version) {
-  const args = ['publish', '--access', 'public', '--no-git-checks']
+function publishOptions(version) {
+  const args = ['--access', 'public', '--no-git-checks']
   const tag = prereleaseTag(version)
   if (tag) {
     args.push('--tag', tag)
@@ -58,7 +61,7 @@ function isVersionPublished(name, version) {
 }
 
 function publish(dir, version) {
-  const args = publishArgs(version)
+  const args = ['publish', dir, ...publishOptions(version)]
   if (dryRun) {
     log.info(`[dry-run] ${dir}: pnpm ${args.join(' ')}`)
     return true
@@ -67,7 +70,7 @@ function publish(dir, version) {
   const result = spawnSync(
     'pnpm',
     args,
-    { cwd: dir, stdio: 'inherit' },
+    { cwd: ROOT_DIR, stdio: 'inherit' },
   )
   return result.status === 0
 }
@@ -79,7 +82,7 @@ let failed = 0
 for (const dir of CANDIDATE_DIRS) {
   let pkg
   try {
-    pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    pkg = JSON.parse(readFileSync(join(ROOT_DIR, dir, 'package.json'), 'utf8'))
   } catch {
     log.skip(`${dir} (no package.json)`)
     skipped++

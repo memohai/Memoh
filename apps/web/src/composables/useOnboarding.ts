@@ -5,6 +5,8 @@ import { putUsersMe } from '@memohai/sdk'
 import { toast } from 'vue-sonner'
 import { useUserStore } from '@/store/user'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
+import { readACPSelection, clearACPSelection } from '@/pages/onboarding/steps/useACPSetup'
+import { safeLocalRemove, safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 
 export const LAST_STEP_INDEX = 4
 export const STEP_COUNT = 5
@@ -64,11 +66,23 @@ export function useOnboarding() {
       return false
     }
     await minWait
-    const createdBotId = sessionStorage.getItem(ONBOARDING_KEYS.createdBotId)
-    sessionStorage.removeItem(ONBOARDING_KEYS.createdBotId)
-    sessionStorage.removeItem(ONBOARDING_KEYS.providerAddedCount)
-    localStorage.removeItem(ONBOARDING_KEYS.forceOnboarding)
-    await router.replace(createdBotId ? `/chat/${createdBotId}` : '/')
+    const createdBotId = safeSessionGet(ONBOARDING_KEYS.createdBotId)
+    const acpAgentId = readACPSelection()?.agentId ?? ''
+    safeSessionRemove(ONBOARDING_KEYS.createdBotId)
+    safeSessionRemove(ONBOARDING_KEYS.providerAddedCount)
+    clearACPSelection()
+    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
+    if (createdBotId) {
+      // Navigate to the `bot` route directly (not the `/chat/...` redirect,
+      // which drops the query) so the chat page can read `?acp=` on landing.
+      await router.replace(
+        acpAgentId
+          ? { name: 'bot', params: { botName: createdBotId }, query: { acp: acpAgentId } }
+          : { name: 'bot', params: { botName: createdBotId } },
+      )
+    } else {
+      await router.replace('/')
+    }
     completing.value = false
     return true
   }

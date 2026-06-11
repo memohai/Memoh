@@ -89,7 +89,7 @@ const openStatus = reactive({
     >
       <SidebarMenu
         v-for="providerItem in curFilterProvider"
-        :key="providerItem.name"
+        :key="providerItem.id"
       >
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -136,6 +136,7 @@ const openStatus = reactive({
     <template #sidebar-footer>
       <AddProvider
         v-model:open="openStatus.provideOpen"
+        :providers="curFilterProvider"
       />
     </template>
 

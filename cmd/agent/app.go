@@ -373,10 +373,11 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, sessionService)
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
+	pool.SetToolApprovalService(toolApproval)
 	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -612,11 +613,13 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, eventHub *event.Hub) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, eventHub *event.Hub) *agenttools.NativeToolSource {
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
 		AllowAll:          true,
 		Approval:          toolApproval,
 		ApprovalPublisher: eventHub,
+		UserInput:         userInput,
+		ToolEvents:        toolContexts,
 	})
 }
 
@@ -639,9 +642,6 @@ func acpToolProviders(providers []agenttools.ToolProvider) []agenttools.ToolProv
 	filtered := make([]agenttools.ToolProvider, 0, len(providers))
 	for _, provider := range providers {
 		if provider == nil {
-			continue
-		}
-		if _, ok := provider.(*agenttools.AskUserProvider); ok {
 			continue
 		}
 		if _, ok := provider.(*agenttools.FederationProvider); ok {
@@ -673,7 +673,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewBrowserProvider(log, settingsService, manager, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
 		agenttools.NewWebFetchProvider(log),
-		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService),
+		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log),
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
@@ -959,9 +959,24 @@ func startRegistrySync(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, que
 			if len(defs) == 0 {
 				return nil
 			}
+			defs = providerBootstrapDefinitions(defs)
+			if len(defs) == 0 {
+				return nil
+			}
 			return registry.Sync(ctx, log, queries, defs)
 		},
 	})
+}
+
+func providerBootstrapDefinitions(defs []registry.ProviderDefinition) []registry.ProviderDefinition {
+	filtered := make([]registry.ProviderDefinition, 0, len(defs))
+	for _, def := range defs {
+		if models.IsLLMClientType(models.ClientType(def.ClientType)) {
+			continue
+		}
+		filtered = append(filtered, def)
+	}
+	return filtered
 }
 
 func startAudioProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, queries dbstore.Queries, registry *audiopkg.Registry) {

@@ -162,6 +162,22 @@
       >
         <div class="relative w-full max-w-4xl mx-auto">
           <Transition
+            enter-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-out"
+            enter-from-class="motion-safe:opacity-0"
+            enter-to-class="opacity-100"
+            leave-active-class="motion-safe:transition-opacity motion-safe:duration-150 ease-in"
+            leave-from-class="opacity-100"
+            leave-to-class="motion-safe:opacity-0"
+          >
+            <BgTaskPill
+              v-if="bgTaskPill"
+              :pill="bgTaskPill"
+              class="absolute left-0 bottom-full z-20 mb-2 max-w-[calc(50%-2rem)]"
+              @jump="scrollToOffscreen"
+            />
+          </Transition>
+
+          <Transition
             enter-active-class="transition-opacity duration-150 ease-out"
             enter-from-class="opacity-0"
             enter-to-class="opacity-100"
@@ -225,57 +241,93 @@
             >
               <div
                 v-if="pendingUserInput"
-                class="mb-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
+                class="mb-2 overflow-hidden rounded-lg border border-border bg-card shadow-sm"
               >
-                <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
-                  {{ pendingUserInput.question }}
-                </p>
                 <div
-                  v-if="pendingUserInputChoices.length > 0"
-                  class="mt-2 flex flex-col gap-1"
+                  class="max-h-[45vh] overflow-y-auto overscroll-contain px-3 py-2 pr-2"
+                  style="scrollbar-gutter: stable;"
                 >
-                  <Button
-                    v-for="(option, optionIndex) in pendingUserInputChoices"
-                    :key="option.id"
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
-                    :class="selectedPendingUserInputOptionId === option.id ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
-                    :title="option.description || option.label"
-                    :disabled="streaming"
-                    :aria-pressed="selectedPendingUserInputOptionId === option.id"
-                    @click="selectPendingUserInputOption(option)"
+                  <div
+                    v-for="(question, questionIndex) in pendingUserInputQuestions"
+                    :key="question.id"
+                    :class="questionIndex > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''"
                   >
-                    <span class="mr-2 shrink-0 text-muted-foreground">
-                      {{ optionIndex + 1 }}.
-                    </span>
-                    <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
-                    <Check
-                      v-if="selectedPendingUserInputOptionId === option.id"
-                      class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-                    />
-                  </Button>
+                    <p class="whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+                      {{ question.text }}
+                    </p>
+                    <div>
+                      <div
+                        v-if="question.kind !== 'text' && question.options?.length"
+                        class="mt-2 flex flex-col gap-1"
+                      >
+                        <Button
+                          v-for="option in question.options"
+                          :key="option.id"
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
+                          :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
+                          :title="option.description || option.label"
+                          :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+                          :aria-checked="isPendingUserInputOptionSelected(question.id, option.id)"
+                          @click="togglePendingUserInputOption(question, option.id)"
+                        >
+                          <span
+                            class="mr-2 flex size-4 shrink-0 items-center justify-center"
+                            :class="isPendingUserInputOptionSelected(question.id, option.id) ? 'text-foreground' : 'text-muted-foreground'"
+                          >
+                            <component
+                              :is="pendingUserInputOptionIcon(question, isPendingUserInputOptionSelected(question.id, option.id))"
+                              class="size-4"
+                            />
+                          </span>
+                          <span class="min-w-0 flex-1 break-words">{{ option.label }}</span>
+                        </Button>
+                        <Button
+                          v-if="question.allow_custom"
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="h-auto min-h-8 w-full justify-start whitespace-normal rounded-md px-2.5 py-1.5 text-left text-xs"
+                          :class="isPendingUserInputCustomSelected(question.id) ? 'bg-muted text-foreground' : 'text-foreground hover:bg-accent'"
+                          :role="question.kind === 'multi_select' ? 'checkbox' : 'radio'"
+                          :aria-checked="isPendingUserInputCustomSelected(question.id)"
+                          @click="togglePendingUserInputCustom(question)"
+                        >
+                          <span
+                            class="mr-2 flex size-4 shrink-0 items-center justify-center"
+                            :class="isPendingUserInputCustomSelected(question.id) ? 'text-foreground' : 'text-muted-foreground'"
+                          >
+                            <component
+                              :is="pendingUserInputOptionIcon(question, isPendingUserInputCustomSelected(question.id))"
+                              class="size-4"
+                            />
+                          </span>
+                          <span class="min-w-0 flex-1 break-words">{{ $t('chat.tools.userInputCustomOption') }}</span>
+                        </Button>
+                      </div>
+                      <div
+                        v-if="question.kind === 'text' || isPendingUserInputCustomSelected(question.id)"
+                        class="mt-1 flex items-center gap-2"
+                      >
+                        <input
+                          :value="pendingUserInputDraftText(question)"
+                          class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
+                          @input="setPendingUserInputDraftText(question, ($event.target as HTMLInputElement).value)"
+                          @keydown.enter.prevent="handlePendingUserInputSubmit"
+                        >
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div
-                  v-if="showPendingCustomUserInput"
-                  class="mt-1 flex items-center gap-2"
-                >
-                  <input
-                    v-model="pendingUserInputAnswer"
-                    class="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    :placeholder="pendingUserInputOptionPlaceholder"
-                    :disabled="streaming"
-                    @keydown.enter.prevent="handlePendingUserInputSubmit"
-                  >
-                </div>
-                <div class="mt-2 flex items-center justify-end gap-2">
+                <div class="flex items-center justify-end gap-2 border-t border-border/60 bg-card px-3 py-2">
                   <Button
                     type="button"
                     size="sm"
                     variant="ghost"
                     class="text-xs text-muted-foreground hover:text-foreground"
-                    :disabled="streaming"
                     @click="handlePendingUserInputCancel"
                   >
                     {{ $t('chat.tools.cancelUserInput') }}
@@ -284,7 +336,7 @@
                     type="button"
                     size="sm"
                     class="text-xs"
-                    :disabled="streaming || !canSubmitPendingUserInput"
+                    :disabled="!canSubmitPendingUserInput"
                     @click="handlePendingUserInputSubmit"
                   >
                     {{ $t('chat.tools.submitUserInput') }}
@@ -599,7 +651,26 @@
 
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, useTemplateRef, watchEffect, watch, nextTick, onActivated, onDeactivated } from 'vue'
-import { LoaderCircle, Image as ImageIcon, File as FileIcon, X, Paperclip, Send, ChevronDown, ChevronUp, Lightbulb, CircleAlert, ArrowDown, MessageSquare, Check, FolderOpen } from 'lucide-vue-next'
+import {
+  LoaderCircle,
+  Image as ImageIcon,
+  File as FileIcon,
+  X,
+  Paperclip,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Lightbulb,
+  CircleAlert,
+  ArrowDown,
+  MessageSquare,
+  Check,
+  FolderOpen,
+  Square,
+  SquareCheck,
+  Circle,
+  CircleDot,
+} from 'lucide-vue-next'
 import { ScrollArea, Button, InputGroup, InputGroupAddon, InputGroupTextarea, Popover, PopoverContent, PopoverTrigger } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
@@ -609,13 +680,15 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
+import BgTaskPill from './bg-task-pill.vue'
+import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ReasoningEffortSelect from '@/pages/bots/components/reasoning-effort-select.vue'
 import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
-import type { ChatAttachment, UIUserInput } from '@/composables/api/useChat'
+import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import type { ChatMessage } from '@/store/chat-list'
 import { useACPRuntime } from '@/composables/useACPRuntime'
@@ -639,7 +712,12 @@ interface ScrollSegmentSource {
   messageIndex: number
 }
 
-type PendingUserInputOption = NonNullable<UIUserInput['options']>[number]
+interface PendingUserInputDraft {
+  optionIds: string[]
+  customSelected: boolean
+  customText: string
+  text: string
+}
 
 const props = withDefaults(defineProps<{
   tabId?: string
@@ -651,11 +729,12 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
+onBeforeUnmount(cleanupBgTaskBeacons)
 const fileInput = ref<HTMLInputElement | null>(null)
 const pendingFiles = ref<File[]>([])
 const composerError = ref('')
-const pendingUserInputAnswer = ref('')
-const selectedPendingUserInputOptionId = ref('')
+const pendingUserInputDrafts = ref<Record<string, PendingUserInputDraft>>({})
 const modelPopoverOpen = ref(false)
 const reasoningPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
@@ -703,50 +782,29 @@ const pendingUserInput = computed<UIUserInput | null>(() => {
   return null
 })
 
-const pendingUserInputOptions = computed(() => pendingUserInput.value?.options ?? [])
+const pendingUserInputQuestions = computed(() => pendingUserInput.value?.questions ?? [])
 
-const pendingUserInputChoices = computed(() => pendingUserInputOptions.value)
-
-const selectedPendingUserInputOption = computed(() => (
-  pendingUserInputChoices.value.find(option => option.id === selectedPendingUserInputOptionId.value) ?? null
-))
-
-const selectedPendingUserInputChoiceIsText = computed(() => (
-  selectedPendingUserInputOption.value?.input_type === 'text'
-))
-
-const pendingUserInputOptionPlaceholder = computed(() => (
-  selectedPendingUserInputOption.value?.placeholder
-  || pendingUserInput.value?.placeholder
-  || t('chat.tools.userInputPlaceholder')
-))
-
-const usesFreeTextUserInput = computed(() => {
-  const input = pendingUserInput.value
-  if (!input) return false
-  return pendingUserInputChoices.value.length === 0 || input.input_type === 'text'
+// All questions must be answered per kind before submit; null means incomplete.
+const pendingUserInputAnswers = computed<WSUserInputAnswer[] | null>(() => {
+  const questions = pendingUserInputQuestions.value
+  if (!questions.length) return null
+  const answers: WSUserInputAnswer[] = []
+  for (const question of questions) {
+    const answer = pendingUserInputAnswerFor(question)
+    if (!answer) return null
+    answers.push(answer)
+  }
+  return answers
 })
 
-const showPendingCustomUserInput = computed(() => {
-  const input = pendingUserInput.value
-  if (!input) return false
-  return selectedPendingUserInputChoiceIsText.value || usesFreeTextUserInput.value
-})
-
-const canSubmitPendingUserInput = computed(() => (
-  selectedPendingUserInputChoiceIsText.value || usesFreeTextUserInput.value
-    ? pendingUserInputAnswer.value.trim().length > 0
-    : Boolean(selectedPendingUserInputOption.value)
-))
+const canSubmitPendingUserInput = computed(() => pendingUserInputAnswers.value !== null)
 
 watch(
   () => pendingUserInput.value?.user_input_id,
   () => {
-    pendingUserInputAnswer.value = ''
-    selectedPendingUserInputOptionId.value = ''
+    pendingUserInputDrafts.value = {}
   },
 )
-
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -1630,35 +1688,91 @@ async function fileToAttachment(file: File): Promise<ChatAttachment> {
   })
 }
 
-function selectPendingUserInputOption(option: PendingUserInputOption) {
-  selectedPendingUserInputOptionId.value = option.id
-  if (option.input_type !== 'text') {
-    pendingUserInputAnswer.value = ''
+function ensurePendingUserInputDraft(questionId: string): PendingUserInputDraft {
+  let draft = pendingUserInputDrafts.value[questionId]
+  if (!draft) {
+    draft = { optionIds: [], customSelected: false, customText: '', text: '' }
+    pendingUserInputDrafts.value[questionId] = draft
   }
+  return draft
+}
+
+function isPendingUserInputOptionSelected(questionId: string, optionId: string) {
+  return pendingUserInputDrafts.value[questionId]?.optionIds.includes(optionId) ?? false
+}
+
+function isPendingUserInputCustomSelected(questionId: string) {
+  return pendingUserInputDrafts.value[questionId]?.customSelected ?? false
+}
+
+function pendingUserInputOptionIcon(question: UIUserInputQuestion, selected: boolean) {
+  if (question.kind === 'multi_select') return selected ? SquareCheck : Square
+  return selected ? CircleDot : Circle
+}
+
+function togglePendingUserInputOption(question: UIUserInputQuestion, optionId: string) {
+  const draft = ensurePendingUserInputDraft(question.id)
+  if (question.kind === 'multi_select') {
+    draft.optionIds = draft.optionIds.includes(optionId)
+      ? draft.optionIds.filter(id => id !== optionId)
+      : [...draft.optionIds, optionId]
+    return
+  }
+  draft.optionIds = [optionId]
+  draft.customSelected = false
+  draft.customText = ''
+}
+
+function togglePendingUserInputCustom(question: UIUserInputQuestion) {
+  const draft = ensurePendingUserInputDraft(question.id)
+  if (question.kind === 'multi_select') {
+    draft.customSelected = !draft.customSelected
+  } else {
+    draft.customSelected = true
+    draft.optionIds = []
+  }
+  if (!draft.customSelected) {
+    draft.customText = ''
+  }
+}
+
+function pendingUserInputDraftText(question: UIUserInputQuestion) {
+  const draft = pendingUserInputDrafts.value[question.id]
+  if (!draft) return ''
+  return question.kind === 'text' ? draft.text : draft.customText
+}
+
+function setPendingUserInputDraftText(question: UIUserInputQuestion, value: string) {
+  const draft = ensurePendingUserInputDraft(question.id)
+  if (question.kind === 'text') {
+    draft.text = value
+    return
+  }
+  draft.customText = value
+}
+
+function pendingUserInputAnswerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
+  const draft = pendingUserInputDrafts.value[question.id]
+  const customText = draft?.customSelected ? draft.customText.trim() : ''
+  const text = draft?.text.trim() ?? ''
+  if (!draft) return null
+  if (question.kind === 'text') {
+    return text ? { question_id: question.id, text } : null
+  }
+  if (draft.customSelected && !customText) return null
+  if (question.kind === 'single_select' && draft.optionIds.length + (customText ? 1 : 0) !== 1) return null
+  if (draft.optionIds.length === 0 && !customText) return null
+  const answer: WSUserInputAnswer = { question_id: question.id }
+  if (draft.optionIds.length > 0) answer.option_ids = [...draft.optionIds]
+  if (customText) answer.custom_text = customText
+  return answer
 }
 
 function handlePendingUserInputSubmit() {
   const userInput = pendingUserInput.value
-  if (!userInput) return
-  const option = selectedPendingUserInputOption.value
-  if (option) {
-    if (option.input_type === 'text') {
-      const answer = pendingUserInputAnswer.value.trim()
-      if (!answer) return
-      void chatStore.respondUserInput(userInput, { optionId: option.id, answer })
-      return
-    }
-    void chatStore.respondUserInput(userInput, {
-      optionId: option.id,
-      answer: option.value ?? option.label,
-    })
-    return
-  }
-  if (usesFreeTextUserInput.value) {
-    const answer = pendingUserInputAnswer.value.trim()
-    if (!answer) return
-    void chatStore.respondUserInput(userInput, { answer })
-  }
+  const answers = pendingUserInputAnswers.value
+  if (!userInput || !answers) return
+  void chatStore.respondUserInput(userInput, { answers })
 }
 
 function handlePendingUserInputCancel() {

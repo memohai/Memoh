@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/memohai/memoh/internal/acl"
+	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
 )
@@ -201,6 +202,37 @@ func TestCreateRejectsUnknownACLPreset(t *testing.T) {
 	}
 	if createCalled {
 		t.Fatal("bot row should not be created when acl preset is invalid")
+	}
+}
+
+func TestCreateTreatsStoreNotFoundAsMissingOwner(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	createCalled := false
+
+	dbtx := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "WHERE id = $1"):
+				return &fakeRow{scanFunc: func(_ ...any) error { return db.ErrNotFound }}
+			case strings.Contains(sql, "INSERT INTO bots"):
+				createCalled = true
+				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+			default:
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(dbtx)))
+	_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{
+		DisplayName: "test-bot",
+		AclPreset:   "allow_all",
+	})
+	if !errors.Is(err, ErrOwnerUserNotFound) {
+		t.Fatalf("expected ErrOwnerUserNotFound, got %v", err)
+	}
+	if createCalled {
+		t.Fatal("bot row should not be created when owner is missing")
 	}
 }
 

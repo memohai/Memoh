@@ -25,6 +25,9 @@
   <img src="./assets/hero.png" alt="Memoh" width="1000">
 </div>
 
+> [!TIP]
+> Memoh's SaaS service is coming soon. Join the waitlist at [memoh.ai/waitlist](https://memoh.ai/waitlist).
+
 ## What is Memoh?
 
 Memoh lets you run multiple AI agents on a single machine. Each agent gets its own container, filesystem, desktop, browser, network, and long-term memory — like a real computer that belongs to it.

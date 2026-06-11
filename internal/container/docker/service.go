@@ -140,6 +140,12 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 			nat.Port(bridgeTCPPort + "/tcp"): []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}},
 		},
 	}
+	if req.ResourceLimits.MemoryBytes > 0 {
+		hostCfg.Memory = req.ResourceLimits.MemoryBytes
+	}
+	if req.ResourceLimits.CPUMillicores > 0 {
+		hostCfg.NanoCPUs = req.ResourceLimits.CPUMillicores * 1_000_000
+	}
 	if req.Spec.NetworkJoinTarget.Value != "" {
 		hostCfg.NetworkMode = container.NetworkMode("none")
 	}

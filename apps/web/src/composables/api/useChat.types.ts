@@ -46,30 +46,6 @@ export interface Message {
   created_at?: string
 }
 
-export interface StreamEvent {
-  type?:
-    | 'text_start' | 'text_delta' | 'text_end'
-    | 'reasoning_start' | 'reasoning_delta' | 'reasoning_end'
-    | 'tool_call_start' | 'tool_call_progress' | 'tool_call_end'
-    | 'user_input_request'
-    | 'attachment_delta' | 'reaction_delta'
-    | 'agent_start' | 'agent_end' | 'agent_abort'
-    | 'processing_started' | 'processing_completed' | 'processing_failed'
-    | 'error'
-  delta?: string
-  toolCallId?: string
-  toolName?: string
-  input?: unknown
-  progress?: unknown
-  result?: unknown
-  attachments?: Array<Record<string, unknown>>
-  error?: string
-  message?: string
-  [key: string]: unknown
-}
-
-export type StreamEventHandler = (event: StreamEvent) => void
-
 export interface MessageStreamEvent {
   type: string
   bot_id?: string
@@ -179,21 +155,23 @@ export interface UIUserInput {
   user_input_id: string
   short_id?: number
   status: string
-  question: string
+  questions?: UIUserInputQuestion[]
+  can_respond?: boolean
+}
+
+export interface UIUserInputQuestion {
+  id: string
+  text: string
+  kind: 'single_select' | 'multi_select' | 'text'
   options?: UIUserInputOption[]
   allow_custom?: boolean
-  input_type?: string
   placeholder?: string
-  can_respond?: boolean
 }
 
 export interface UIUserInputOption {
   id: string
   label: string
   description?: string
-  value?: unknown
-  input_type?: string
-  placeholder?: string
 }
 
 export interface UIAttachmentsMessage {

@@ -206,15 +206,22 @@ type ImportResult struct {
 }
 
 type backupData struct {
-	Profile       any                `json:"profile,omitempty"`
-	Settings      any                `json:"settings,omitempty"`
-	ACLRules      any                `json:"acl_rules,omitempty"`
-	Channels      any                `json:"channels,omitempty"`
-	MCP           any                `json:"mcp,omitempty"`
-	Schedules     any                `json:"schedules,omitempty"`
-	EmailBindings any                `json:"email_bindings,omitempty"`
-	Dependencies  backupDependencies `json:"dependencies,omitempty"`
-	History       backupHistory      `json:"history,omitempty"`
+	Profile                 any                            `json:"profile,omitempty"`
+	Settings                any                            `json:"settings,omitempty"`
+	WorkspaceResourceLimits *backupWorkspaceResourceLimits `json:"workspace_resource_limits,omitempty"`
+	ACLRules                any                            `json:"acl_rules,omitempty"`
+	Channels                any                            `json:"channels,omitempty"`
+	MCP                     any                            `json:"mcp,omitempty"`
+	Schedules               any                            `json:"schedules,omitempty"`
+	EmailBindings           any                            `json:"email_bindings,omitempty"`
+	Dependencies            backupDependencies             `json:"dependencies,omitempty"`
+	History                 backupHistory                  `json:"history,omitempty"`
+}
+
+type backupWorkspaceResourceLimits struct {
+	CPUMillicores int64 `json:"cpu_millicores"`
+	MemoryBytes   int64 `json:"memory_bytes"`
+	StorageBytes  int64 `json:"storage_bytes"`
 }
 
 type backupDependencies struct {

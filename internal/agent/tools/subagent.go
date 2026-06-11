@@ -16,6 +16,7 @@ import (
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/agent/background"
 	dbstore "github.com/memohai/memoh/internal/db/store"
 	messagepkg "github.com/memohai/memoh/internal/message"
 	"github.com/memohai/memoh/internal/models"
@@ -210,6 +211,8 @@ type SpawnProvider struct {
 	messageService messagepkg.Writer
 	systemPromptFn func(sessionType string) string
 	modelCreator   ModelCreator
+	bgManager      *background.Manager
+	modelResolver  func(ctx context.Context, botID string) (*sdk.Model, string, string, error)
 	logger         *slog.Logger
 }
 
@@ -221,17 +224,21 @@ func NewSpawnProvider(
 	modelsSvc *models.Service,
 	queries dbstore.Queries,
 	sessionService *sessionpkg.Service,
+	bgManager *background.Manager,
 ) *SpawnProvider {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SpawnProvider{
+	p := &SpawnProvider{
 		settings:       settingsSvc,
 		models:         modelsSvc,
 		queries:        queries,
 		sessionService: sessionService,
+		bgManager:      bgManager,
 		logger:         log.With(slog.String("tool", "spawn")),
 	}
+	p.modelResolver = p.resolveModel
+	return p
 }
 
 // SetAgent injects the agent after construction (breaking the DI cycle).
@@ -268,6 +275,10 @@ func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 						"type":        "array",
 						"description": fmt.Sprintf("List of task instructions. Each string is a self-contained prompt for one subagent. Max %d tasks.", maxTasksPerSpawn),
 						"items":       map[string]any{"type": "string"},
+					},
+					"run_in_background": map[string]any{
+						"type":        "boolean",
+						"description": "If true, run the subagent batch in the background. Returns immediately with a task ID; you will be notified with each task's report when all tasks complete. Use for long research or build batches that should not block the conversation.",
 					},
 				},
 				"required": []string{"tasks"},
@@ -330,7 +341,7 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	// prevent the spawn from completing and returning its results.
 	sessionCtx := context.WithoutCancel(ctx)
 
-	sdkModel, modelID, promptCacheTTL, err := p.resolveModel(sessionCtx, botID)
+	sdkModel, modelID, promptCacheTTL, err := p.modelResolver(sessionCtx, botID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
@@ -338,6 +349,10 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	systemPrompt := ""
 	if p.systemPromptFn != nil {
 		systemPrompt = p.systemPromptFn(sessionpkg.TypeSubagent)
+	}
+
+	if runInBg, _, _ := BoolArg(args, "run_in_background"); runInBg {
+		return p.execSpawnBackground(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, tasks)
 	}
 
 	results := make([]spawnResult, len(tasks))
@@ -354,12 +369,77 @@ func (p *SpawnProvider) execSpawn(ctx context.Context, session SessionContext, a
 	for i, task := range tasks {
 		go func(idx int, query string) {
 			defer wg.Done()
-			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, query)
+			results[idx] = p.runSubagentTask(sessionCtx, session, sdkModel, modelID, promptCacheTTL, systemPrompt, query, true)
 		}(i, task)
 	}
 	wg.Wait()
 
 	return map[string]any{"results": results}, nil
+}
+
+// execSpawnBackground registers the batch as a background spawn task and
+// returns immediately. Branches derive from the task context so bg_status
+// kill can cancel them; the join notification carries each branch's report.
+func (p *SpawnProvider) execSpawnBackground(
+	ctx context.Context,
+	session SessionContext,
+	model *sdk.Model,
+	modelID, promptCacheTTL, systemPrompt string,
+	tasks []string,
+) (any, error) {
+	if p.bgManager == nil {
+		return nil, errors.New("background task manager not available")
+	}
+
+	description := truncateTitle(fmt.Sprintf("spawn %d task(s): %s", len(tasks), strings.Join(tasks, " | ")), 120)
+	taskID, taskCtx, err := p.bgManager.StartSpawnTask(ctx, session.BotID, session.SessionID, description)
+	if err != nil {
+		return map[string]any{
+			"isError": true,
+			"content": []map[string]any{{
+				"type": "text",
+				"text": fmt.Sprintf("%s. Check running tasks with bg_status (and kill stale ones) before starting more.", err),
+			}},
+		}, nil
+	}
+
+	go func() {
+		results := make([]spawnResult, len(tasks))
+		var wg sync.WaitGroup
+		wg.Add(len(tasks))
+		for i, task := range tasks {
+			go func(idx int, query string) {
+				defer wg.Done()
+				results[idx] = p.runSubagentTask(taskCtx, session, model, modelID, promptCacheTTL, systemPrompt, query, false)
+			}(i, task)
+		}
+		wg.Wait()
+
+		branches := make([]background.SpawnBranch, len(results))
+		for i, r := range results {
+			status := background.TaskCompleted
+			if !r.Success {
+				status = background.TaskFailed
+			}
+			branches[i] = background.SpawnBranch{
+				Task:           r.Task,
+				ChildSessionID: r.SessionID,
+				Status:         status,
+				Report:         r.Text,
+				Error:          r.Error,
+			}
+		}
+		p.bgManager.CompleteSpawnTask(taskID, branches)
+	}()
+
+	return map[string]any{
+		"status":      "background_started",
+		"task_id":     taskID,
+		"kind":        "spawn",
+		"task_count":  len(tasks),
+		"description": description,
+		"message":     fmt.Sprintf("%d subagent task(s) started in background with task ID: %s. You will be notified with each task's report when all complete. Do NOT poll or sleep — the notification arrives automatically.", len(tasks), taskID),
+	}, nil
 }
 
 // startSpawnHeartbeat emits periodic progress events into the parent agent
@@ -390,6 +470,9 @@ func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionCo
 	}()
 }
 
+// detachAttempts controls whether each attempt is detached from ctx
+// cancellation: foreground spawns detach so the batch survives parent stream
+// cancellation; background spawns inherit it so Kill stops in-flight work.
 func (p *SpawnProvider) runSubagentTask(
 	ctx context.Context,
 	parentSession SessionContext,
@@ -398,6 +481,7 @@ func (p *SpawnProvider) runSubagentTask(
 	promptCacheTTL string,
 	systemPrompt string,
 	query string,
+	detachAttempts bool,
 ) spawnResult {
 	res := spawnResult{Task: query}
 
@@ -462,9 +546,14 @@ func (p *SpawnProvider) runSubagentTask(
 		// 1. Safety net: wall-clock timeout (subagentTimeout) via context.WithTimeout.
 		// 2. Watchdog: activity-based timeout (subagentWatchdogTimeout) that fires
 		//    when no stream events (tokens, tool output) are received.
-		// Use context.WithoutCancel so retries get a fresh timeout even if
-		// the parent stream was cancelled (e.g. by idle timeout).
-		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), subagentTimeout)
+		// When detachAttempts is set, use context.WithoutCancel so retries get
+		// a fresh timeout even if the parent stream was cancelled (e.g. by
+		// idle timeout).
+		attemptBase := ctx
+		if detachAttempts {
+			attemptBase = context.WithoutCancel(ctx)
+		}
+		safetyCtx, safetyCancel := context.WithTimeout(attemptBase, subagentTimeout)
 		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
 
 		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)

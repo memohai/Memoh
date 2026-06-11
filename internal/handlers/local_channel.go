@@ -29,6 +29,7 @@ import (
 	"github.com/memohai/memoh/internal/conversation/flow"
 	"github.com/memohai/memoh/internal/media"
 	messagepkg "github.com/memohai/memoh/internal/message"
+	"github.com/memohai/memoh/internal/userinput"
 )
 
 // localSpeechSynthesizer synthesizes text to speech audio.
@@ -259,22 +260,21 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 type wsClientMessage struct {
-	Type            string            `json:"type"`
-	StreamID        string            `json:"stream_id,omitempty"`
-	Text            string            `json:"text,omitempty"`
-	SessionID       string            `json:"session_id,omitempty"`
-	Attachments     []json.RawMessage `json:"attachments,omitempty"`
-	ModelID         string            `json:"model_id,omitempty"`
-	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
-	ApprovalID      string            `json:"approval_id,omitempty"`
-	UserInputID     string            `json:"user_input_id,omitempty"`
-	ShortID         int               `json:"short_id,omitempty"`
-	ToolCallID      string            `json:"tool_call_id,omitempty"`
-	Decision        string            `json:"decision,omitempty"`
-	Reason          string            `json:"reason,omitempty"`
-	Answer          json.RawMessage   `json:"answer,omitempty"`
-	OptionID        string            `json:"option_id,omitempty"`
-	Canceled        bool              `json:"canceled,omitempty"`
+	Type            string                     `json:"type"`
+	StreamID        string                     `json:"stream_id,omitempty"`
+	Text            string                     `json:"text,omitempty"`
+	SessionID       string                     `json:"session_id,omitempty"`
+	Attachments     []json.RawMessage          `json:"attachments,omitempty"`
+	ModelID         string                     `json:"model_id,omitempty"`
+	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
+	ApprovalID      string                     `json:"approval_id,omitempty"`
+	UserInputID     string                     `json:"user_input_id,omitempty"`
+	ShortID         int                        `json:"short_id,omitempty"`
+	ToolCallID      string                     `json:"tool_call_id,omitempty"`
+	Decision        string                     `json:"decision,omitempty"`
+	Reason          string                     `json:"reason,omitempty"`
+	Answers         []userinput.QuestionAnswer `json:"answers,omitempty"`
+	Canceled        bool                       `json:"canceled,omitempty"`
 }
 
 type wsOutboundEvent struct {
@@ -656,14 +656,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if explicitID == "" && msg.ShortID > 0 {
 				explicitID = strconv.Itoa(msg.ShortID)
 			}
-			var answer any
-			if len(msg.Answer) > 0 {
-				if err := json.Unmarshal(msg.Answer, &answer); err != nil {
-					answer = string(msg.Answer)
-				}
-			} else if text := strings.TrimSpace(msg.Text); text != "" {
-				answer = text
-			}
 
 			h.startWSStream(streamBaseCtx, connCtx, activeStreams, writer, botID, sessionID, streamID, "ws user input stream error",
 				func(ctx context.Context, eventCh chan<- flow.WSStreamEvent, _ <-chan struct{}) error {
@@ -673,8 +665,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						ActorChannelIdentityID: channelIdentityID,
 						UserInputID:            strings.TrimSpace(msg.UserInputID),
 						ExplicitID:             explicitID,
-						Answer:                 answer,
-						OptionID:               strings.TrimSpace(msg.OptionID),
+						Answers:                msg.Answers,
 						Canceled:               msg.Canceled,
 						Reason:                 strings.TrimSpace(msg.Reason),
 						ChatToken:              bearerToken,

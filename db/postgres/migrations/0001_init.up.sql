@@ -523,7 +523,8 @@ CREATE TABLE IF NOT EXISTS user_input_requests (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT user_input_tool_name_check CHECK (tool_name = 'ask_user'),
   CONSTRAINT user_input_status_check CHECK (status IN ('pending', 'submitted', 'canceled', 'expired', 'failed')),
-  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id)
+  CONSTRAINT user_input_short_id_unique UNIQUE (session_id, short_id),
+  CONSTRAINT user_input_tool_call_unique UNIQUE (session_id, tool_call_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_input_bot_status_created
@@ -554,6 +555,20 @@ CREATE TABLE IF NOT EXISTS containers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_containers_bot_id ON containers(bot_id);
+
+-- bot_workspace_resource_limits: desired per-bot workspace resource limits.
+-- A value of 0 means unlimited for that resource.
+CREATE TABLE IF NOT EXISTS bot_workspace_resource_limits (
+  bot_id UUID PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+  cpu_millicores BIGINT NOT NULL DEFAULT 0,
+  memory_bytes BIGINT NOT NULL DEFAULT 0,
+  storage_bytes BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bot_workspace_resource_limits_cpu_check CHECK (cpu_millicores >= 0),
+  CONSTRAINT bot_workspace_resource_limits_memory_check CHECK (memory_bytes >= 0),
+  CONSTRAINT bot_workspace_resource_limits_storage_check CHECK (storage_bytes >= 0)
+);
 
 CREATE TABLE IF NOT EXISTS snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

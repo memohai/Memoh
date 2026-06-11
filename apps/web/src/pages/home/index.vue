@@ -14,6 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBotsById } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
 import { openInFileManagerKey } from './composables/useFileManagerProvider'
 import ChatSidebar from './components/chat-sidebar.vue'
 import ChatWorkspace from './components/chat-workspace.vue'
@@ -81,6 +82,42 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
 
 let suppressUrlSync = false
 
+// One-shot guard so concurrent syncStoreFromUrl() calls can't both start a
+// session for the same redirect. Set synchronously before the first await.
+let acpStartConsumed = false
+
+function stripAcpQuery() {
+  if (route.query.acp === undefined) return
+  const query = { ...route.query }
+  delete query.acp
+  void router.replace({ query })
+}
+
+// When onboarding redirects here with ?acp=<agent>, open an ACP session for the
+// freshly configured agent so the user lands inside it. Read the query at call
+// time (not captured at setup) so it works regardless of mount timing.
+async function maybeStartACPSession() {
+  if (acpStartConsumed) return
+  const raw = route.query.acp
+  if (typeof raw !== 'string' || raw === '') {
+    stripAcpQuery()
+    return
+  }
+  acpStartConsumed = true
+  const agentId = normalizeACPAgentID(raw)
+  try {
+    if (agentId) {
+      const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE, projectPath: createACPNoProjectPath() })
+      workspaceTabs.openChat(session.id, session.title)
+    }
+  } catch {
+    // Bot may not have the agent enabled; user can still pick it from the composer.
+  } finally {
+    // Always strip the one-shot query param, even for malformed/empty values.
+    stripAcpQuery()
+  }
+}
+
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
   if (!urlName) return
@@ -94,6 +131,7 @@ async function syncStoreFromUrl(rawName: string) {
       suppressUrlSync = false
     }
   }
+  await maybeStartACPSession()
   // Canonicalize the URL to the bot's name slug. This covers entry points that
   // navigate with a UUID (e.g. returning from settings), where currentBotId is
   // unchanged so the watcher below never fires.

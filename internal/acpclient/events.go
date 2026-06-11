@@ -11,10 +11,12 @@ import (
 type StreamEventType string
 
 const (
-	StreamEventTextDelta      StreamEventType = "text_delta"
-	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
-	StreamEventToolCallStart  StreamEventType = "tool_call_start"
-	StreamEventToolCallEnd    StreamEventType = "tool_call_end"
+	StreamEventTextDelta           StreamEventType = "text_delta"
+	StreamEventReasoningDelta      StreamEventType = "reasoning_delta"
+	StreamEventToolCallStart       StreamEventType = "tool_call_start"
+	StreamEventToolCallEnd         StreamEventType = "tool_call_end"
+	StreamEventToolApprovalRequest StreamEventType = "tool_approval_request"
+	StreamEventUserInputRequest    StreamEventType = "user_input_request"
 
 	maxCollectedStreamEvents = 4096
 	maxTrackedACPToolStates  = 1024
@@ -28,6 +30,12 @@ type StreamEvent struct {
 	Input      any             `json:"input,omitempty"`
 	Result     any             `json:"result,omitempty"`
 	Error      string          `json:"error,omitempty"`
+	ApprovalID string          `json:"approval_id,omitempty"`
+	// Interactive request fields (Type StreamEventUserInputRequest).
+	UserInputID string         `json:"user_input_id,omitempty"`
+	ShortID     int            `json:"short_id,omitempty"`
+	Status      string         `json:"status,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type EventSink interface {
@@ -498,7 +506,7 @@ func commandFromACPInput(value any) string {
 func commandFromACPTitle(title string) string {
 	title = strings.TrimSpace(title)
 	switch strings.ToLower(title) {
-	case "", "shell", "command", "run command", "execute", "exec":
+	case "", "shell", "shell command", "command", "run", "run command", "execute", "exec", "bash", "terminal", "terminal command":
 		return ""
 	default:
 		return title

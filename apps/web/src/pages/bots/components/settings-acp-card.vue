@@ -60,47 +60,50 @@
           v-if="agentForm(profile).enabled"
           class="space-y-3 border-t border-border/70 pt-3"
         >
-          <div
-            v-if="isLocalWorkspace"
-            class="rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
-          >
-            {{ $t('bots.settings.acpLocalModeHint') }}
+          <div class="space-y-1.5">
+            <Label class="text-xs font-medium text-foreground">
+              {{ $t('bots.settings.acpSetupMode') }}
+            </Label>
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                v-for="mode in setupModes(profile)"
+                :key="mode"
+                type="button"
+                class="min-h-8 rounded-md border px-2 py-1 text-[11px] font-medium leading-tight transition-colors"
+                :class="agentForm(profile).setup_mode === mode ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-muted'"
+                @click="setSetupMode(profile, mode)"
+              >
+                {{ setupModeLabel(mode, profile) }}
+              </button>
+            </div>
           </div>
 
-          <template v-else>
-            <div class="space-y-1.5">
-              <Label class="text-xs font-medium text-foreground">
-                {{ $t('bots.settings.acpSetupMode') }}
-              </Label>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="mode in setupModes(profile)"
-                  :key="mode"
-                  type="button"
-                  class="min-h-8 rounded-md border px-2 py-1 text-[11px] font-medium leading-tight transition-colors"
-                  :class="agentForm(profile).setup_mode === mode ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-muted'"
-                  @click="setSetupMode(profile, mode)"
-                >
-                  {{ setupModeLabel(mode, profile) }}
-                </button>
-              </div>
-            </div>
-
+          <div
+            v-if="agentForm(profile).setup_mode !== 'self'"
+            class="space-y-3"
+          >
             <div
-              v-if="agentForm(profile).setup_mode !== 'self'"
-              class="space-y-3"
+              v-if="isCodexProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
+              class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
             >
-              <div
-                v-if="isCodexProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
-                class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <div
-                    class="min-w-0 text-[10px]"
-                    :class="codexOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
+              <div class="flex items-center gap-3">
+                <div
+                  class="min-w-0 flex-1 text-[10px]"
+                  :class="codexOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
+                >
+                  {{ codexOAuthStatusText() }}
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    v-if="codexOAuthFlow"
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    class="h-7 shrink-0 text-xs shadow-none"
+                    @click="cancelCodexOAuthAuthorization"
                   >
-                    {{ codexOAuthStatusText() }}
-                  </div>
+                    {{ $t('common.cancel') }}
+                  </Button>
                   <Button
                     type="button"
                     size="sm"
@@ -117,18 +120,20 @@
                   </Button>
                 </div>
               </div>
+            </div>
 
-              <div
-                v-if="isClaudeCodeProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
-                class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <div
-                    class="min-w-0 text-[10px]"
-                    :class="claudeOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
-                  >
-                    {{ claudeOAuthStatusText() }}
-                  </div>
+            <div
+              v-if="isClaudeCodeProfile(profile) && agentForm(profile).setup_mode === 'oauth'"
+              class="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3"
+            >
+              <div class="flex items-center gap-3">
+                <div
+                  class="min-w-0 flex-1 text-[10px]"
+                  :class="claudeOAuthStatus?.has_token ? 'text-muted-foreground' : 'text-destructive'"
+                >
+                  {{ claudeOAuthStatusText() }}
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
                   <Button
                     type="button"
                     size="sm"
@@ -144,73 +149,73 @@
                     {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
                   </Button>
                 </div>
-
-                <div
-                  v-if="claudeOAuthSessionId && !claudeOAuthStatus?.has_token"
-                  class="space-y-2"
-                >
-                  <p class="text-[10px] text-muted-foreground">
-                    {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
-                  </p>
-                  <div class="flex flex-col gap-2 sm:flex-row">
-                    <Input
-                      v-model="claudeOAuthCode"
-                      :placeholder="$t('bots.settings.acpClaudeOAuthCodePlaceholder')"
-                      class="h-8 min-w-0 flex-1 text-xs shadow-none"
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      class="h-8 shrink-0 text-xs shadow-none"
-                      :disabled="exchangingClaudeOAuth"
-                      @click="handleExchangeClaudeOAuth(profile)"
-                    >
-                      <LoaderCircle
-                        v-if="exchangingClaudeOAuth"
-                        class="size-3 animate-spin"
-                      />
-                      {{ $t('bots.settings.acpClaudeOAuthExchange') }}
-                    </Button>
-                  </div>
-                </div>
               </div>
 
               <div
-                v-for="field in visibleManagedFields(profile)"
-                :key="field.id"
-                class="space-y-1.5"
+                v-if="claudeOAuthSessionId && !claudeOAuthStatus?.has_token"
+                class="space-y-2"
               >
-                <Label class="text-xs font-medium text-foreground">
-                  {{ field.label || field.id }}
-                </Label>
-                <Input
-                  :model-value="agentForm(profile).managed[field.id || ''] || ''"
-                  :type="inputType(field.type)"
-                  :name="managedFieldName(profile, field)"
-                  :autocomplete="managedFieldAutocomplete(field)"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                  :placeholder="field.placeholder"
-                  class="h-8 text-xs shadow-none"
-                  @update:model-value="(val) => setManagedField(profile, field.id, String(val ?? ''))"
-                />
-                <p
-                  v-if="field.help"
-                  class="text-[10px] text-muted-foreground"
-                >
-                  {{ field.help }}
+                <p class="text-[10px] text-muted-foreground">
+                  {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
                 </p>
+                <div class="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    v-model="claudeOAuthCode"
+                    :placeholder="$t('bots.settings.acpClaudeOAuthCodePlaceholder')"
+                    class="h-8 min-w-0 flex-1 text-xs shadow-none"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    class="h-8 shrink-0 text-xs shadow-none"
+                    :disabled="exchangingClaudeOAuth"
+                    @click="handleExchangeClaudeOAuth(profile)"
+                  >
+                    <LoaderCircle
+                      v-if="exchangingClaudeOAuth"
+                      class="size-3 animate-spin"
+                    />
+                    {{ $t('bots.settings.acpClaudeOAuthExchange') }}
+                  </Button>
+                </div>
               </div>
             </div>
 
             <div
-              v-else
-              class="break-words rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+              v-for="field in visibleManagedFields(profile)"
+              :key="field.id"
+              class="space-y-1.5"
             >
-              {{ $t('bots.settings.acpSelfModeHint') }}
+              <Label class="text-xs font-medium text-foreground">
+                {{ field.label || field.id }}
+              </Label>
+              <Input
+                :model-value="agentForm(profile).managed[field.id || ''] || ''"
+                :type="inputType(field.type)"
+                :name="managedFieldName(profile, field)"
+                :autocomplete="managedFieldAutocomplete(field)"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                :placeholder="field.placeholder"
+                class="h-8 text-xs shadow-none"
+                @update:model-value="(val) => setManagedField(profile, field.id, String(val ?? ''))"
+              />
+              <p
+                v-if="field.help"
+                class="text-[10px] text-muted-foreground"
+              >
+                {{ field.help }}
+              </p>
             </div>
-          </template>
+          </div>
+
+          <div
+            v-else
+            class="break-words rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+          >
+            {{ $t('bots.settings.acpSelfModeHint') }}
+          </div>
         </div>
       </div>
     </template>
@@ -218,7 +223,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useQueryCache } from '@pinia/colada'
@@ -230,13 +235,14 @@ import {
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
 import { acpAgentIcon, ensureACPAgentForm, normalizeACPAgentID, type ACPAgentForm, type ACPForm } from '@/utils/acp'
+import { startOAuthPopupFlow, type OAuthPopupFlowController } from '@/utils/oauth/popup-flow'
+import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 
 const props = defineProps<{
   botId: string
   profiles: AcpprofilePublicProfile[]
   form: ACPForm
   loading?: boolean
-  isLocalWorkspace?: boolean
 }>()
 
 const { t } = useI18n()
@@ -244,12 +250,15 @@ const queryCache = useQueryCache()
 const codexOAuthStatus = ref<ACPCodexOAuthStatus | null>(null)
 const codexOAuthStatusLoading = ref(false)
 const authorizingCodexOAuth = ref(false)
+const codexOAuthFlow = ref<OAuthPopupFlowController | null>(null)
 const claudeOAuthStatus = ref<ACPClaudeCodeOAuthStatus | null>(null)
 const claudeOAuthStatusLoading = ref(false)
 const authorizingClaudeOAuth = ref(false)
 const exchangingClaudeOAuth = ref(false)
 const claudeOAuthSessionId = ref('')
 const claudeOAuthCode = ref('')
+const codexOAuthPollIntervalMs = 1500
+const codexOAuthPollTimeoutMs = 5 * 60 * 1000
 
 interface ACPCodexOAuthStatus {
   configured: boolean
@@ -270,6 +279,10 @@ interface ACPClaudeCodeOAuthStatus {
 interface ACPClaudeCodeOAuthAuthorizeResponse {
   auth_url: string
   session_id: string
+}
+
+interface OAuthStatusLoadOptions {
+  silent?: boolean
 }
 
 function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
@@ -349,16 +362,22 @@ function visibleManagedFields(profile: AcpprofilePublicProfile): AcpprofileManag
 
 const codexOAuthActive = computed(() => {
   const profile = props.profiles.find(isCodexProfile)
-  if (!profile || props.isLocalWorkspace) return false
+  if (!profile) return false
   const form = agentForm(profile)
   return !!form.enabled && form.setup_mode === 'oauth'
 })
 
 const claudeOAuthActive = computed(() => {
   const profile = props.profiles.find(isClaudeCodeProfile)
-  if (!profile || props.isLocalWorkspace) return false
+  if (!profile) return false
   const form = agentForm(profile)
   return !!form.enabled && form.setup_mode === 'oauth'
+})
+
+const codexOAuthPending = computed(() => authorizingCodexOAuth.value || Boolean(codexOAuthFlow.value))
+const claudeOAuthPending = computed(() => {
+  if (authorizingClaudeOAuth.value || exchangingClaudeOAuth.value) return true
+  return Boolean(claudeOAuthSessionId.value && !claudeOAuthStatus.value?.has_token)
 })
 
 watch([() => props.botId, codexOAuthActive], () => {
@@ -369,24 +388,31 @@ watch([() => props.botId, claudeOAuthActive], () => {
   if (claudeOAuthActive.value) void loadClaudeOAuthStatus()
 }, { immediate: true })
 
+onBeforeUnmount(() => {
+  cancelCodexOAuthAuthorization()
+})
+
 function codexOAuthStatusText(): string {
-  return oauthStatusText(codexOAuthStatusLoading.value, codexOAuthStatus.value, 'bots.settings.acpOAuthUnavailable')
+  return t(oauthStatusTextKey({
+    loading: codexOAuthStatusLoading.value,
+    authorizing: codexOAuthPending.value,
+    status: codexOAuthStatus.value,
+    unavailableKey: 'bots.settings.acpOAuthUnavailable',
+  }))
 }
 
 function claudeOAuthStatusText(): string {
-  return oauthStatusText(claudeOAuthStatusLoading.value, claudeOAuthStatus.value, 'bots.settings.acpClaudeOAuthUnavailable')
+  return t(oauthStatusTextKey({
+    loading: claudeOAuthStatusLoading.value,
+    authorizing: claudeOAuthPending.value,
+    status: claudeOAuthStatus.value,
+    unavailableKey: 'bots.settings.acpClaudeOAuthUnavailable',
+  }))
 }
 
-function oauthStatusText(loading: boolean, status: { configured: boolean, has_token: boolean } | null, unavailableKey: string): string {
-  if (loading) return t('provider.oauth.status.checking')
-  if (!status?.configured) return t(unavailableKey)
-  if (status.has_token) return t('provider.oauth.status.authorized')
-  return t('provider.oauth.status.missing')
-}
-
-async function loadOAuthStatus(): Promise<ACPCodexOAuthStatus | null> {
+async function loadOAuthStatus(options: OAuthStatusLoadOptions = {}): Promise<ACPCodexOAuthStatus | null> {
   if (!props.botId) return null
-  codexOAuthStatusLoading.value = true
+  if (!options.silent) codexOAuthStatusLoading.value = true
   try {
     const { data } = await client.get<{ 200: ACPCodexOAuthStatus }, unknown, true>({
       url: '/bots/{bot_id}/acp/codex/oauth/status',
@@ -396,10 +422,10 @@ async function loadOAuthStatus(): Promise<ACPCodexOAuthStatus | null> {
     codexOAuthStatus.value = data ?? null
     return codexOAuthStatus.value
   } catch {
-    codexOAuthStatus.value = null
+    if (!options.silent) codexOAuthStatus.value = null
     return null
   } finally {
-    codexOAuthStatusLoading.value = false
+    if (!options.silent) codexOAuthStatusLoading.value = false
   }
 }
 
@@ -426,8 +452,16 @@ async function loadClaudeOAuthStatus(): Promise<ACPClaudeCodeOAuthStatus | null>
   }
 }
 
+function cancelCodexOAuthAuthorization() {
+  codexOAuthFlow.value?.cancel()
+}
+
 async function handleAuthorize(profile: AcpprofilePublicProfile) {
   try {
+    if (!props.botId) return
+    // Supersede any in-flight popup silently: dispose() (not cancel()) so the
+    // previous flow's onAborted doesn't fight the new attempt's loading state.
+    codexOAuthFlow.value?.dispose()
     agentForm(profile).setup_mode = 'oauth'
     authorizingCodexOAuth.value = true
     const { data } = await client.get<{ 200: ACPCodexOAuthAuthorizeResponse }, unknown, true>({
@@ -437,38 +471,33 @@ async function handleAuthorize(profile: AcpprofilePublicProfile) {
     })
     if (!data?.auth_url) throw new Error(t('provider.oauth.authorizeFailed'))
     const popup = window.open(data.auth_url, 'acp-codex-oauth', 'width=600,height=720')
-    const startedAt = Date.now()
-    let completed = false
-    const finish = async () => {
-      if (completed) return
-      completed = true
-      window.removeEventListener('message', listener)
-      popup?.close()
-      await loadOAuthStatus()
-      toast.success(t('provider.oauth.authorizeSuccess'))
-      authorizingCodexOAuth.value = false
-    }
-    const poll = () => {
-      window.setTimeout(() => {
-        void (async () => {
-          const status = await loadOAuthStatus()
-          if (status?.has_token) {
-            await finish()
-            return
-          }
-          if (Date.now() - startedAt < 120_000 && !completed) poll()
-          else authorizingCodexOAuth.value = false
-        })()
-      }, 1_500)
-    }
-    const listener = (event: MessageEvent) => {
-      if (event.data?.type === 'memoh-acp-codex-oauth-success' && event.data?.botId === props.botId) {
-        void finish()
-      }
-    }
-    window.addEventListener('message', listener)
-    poll()
+    if (!popup) throw new Error(t('provider.oauth.authorizeFailed'))
+    codexOAuthFlow.value = startOAuthPopupFlow<ACPCodexOAuthStatus>({
+      popup,
+      target: window,
+      expectedSource: popup,
+      messageType: 'memoh-acp-codex-oauth-success',
+      messageMatches: event => event.data?.botId === props.botId,
+      pollIntervalMs: codexOAuthPollIntervalMs,
+      timeoutMs: codexOAuthPollTimeoutMs,
+      pollStatus: () => loadOAuthStatus({ silent: true }),
+      isAuthorized: status => Boolean(status?.has_token),
+      onAuthorized: async () => {
+        codexOAuthFlow.value = null
+        await loadOAuthStatus({ silent: true })
+        toast.success(t('provider.oauth.authorizeSuccess'))
+        authorizingCodexOAuth.value = false
+      },
+      onAborted: (reason) => {
+        codexOAuthFlow.value = null
+        authorizingCodexOAuth.value = false
+        if (reason === 'timeout') {
+          toast.error(t('provider.oauth.authorizeTimedOut'))
+        }
+      },
+    })
   } catch (error) {
+    cancelCodexOAuthAuthorization()
     authorizingCodexOAuth.value = false
     toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
   }

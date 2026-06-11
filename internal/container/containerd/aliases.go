@@ -30,6 +30,7 @@ type (
 	ContainerMetrics       = containerapi.ContainerMetrics
 	CPUMetrics             = containerapi.CPUMetrics
 	MemoryMetrics          = containerapi.MemoryMetrics
+	ResourceLimits         = containerapi.ResourceLimits
 	SnapshotUsage          = containerapi.SnapshotUsage
 	SnapshotInfo           = containerapi.SnapshotInfo
 	MountInfo              = containerapi.MountInfo
