@@ -140,6 +140,7 @@
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
+              code-renderer="shiki"
               custom-id="chat-msg"
             />
           </div>
@@ -272,6 +273,7 @@
               :smooth-streaming="isAssistantBlockStreaming(i)"
               :typewriter="isAssistantBlockStreaming(i)"
               :fade="isAssistantBlockStreaming(i)"
+              code-renderer="shiki"
               custom-id="chat-msg"
             />
           </div>
@@ -316,6 +318,7 @@
 import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
+import { warmCodeHighlightOnIdle } from '@/utils/warm-code-highlight'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
@@ -345,6 +348,7 @@ import { useElementVisibility } from '@vueuse/core'
 
 enableKatex()
 enableMermaid()
+warmCodeHighlightOnIdle()
 
 
 const settingsStore = useSettingsStore()
