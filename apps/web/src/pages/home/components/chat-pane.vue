@@ -61,13 +61,12 @@
               </div>
 
               <div
-                v-for="(msg, msgIndex) in messages"
+                v-for="msg in messages"
                 :key="msg.id"
                 :data-message-id="msg.id"
-                :data-scroll-segment-id="messageSegmentDomId(msg, msgIndex)"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="rounded-2xl transition-[background-color,box-shadow] duration-500"
-                :class="highlightedMessageId === msg.id ? 'bg-muted/45 ring-1 ring-border shadow-sm' : ''"
+                class="rounded-2xl transition-[background-color] duration-500"
+                :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
                 <MessageItem
@@ -84,69 +83,13 @@
             </div>
           </ScrollArea>
 
-          <div
-            v-if="showScrollRail"
-            class="group hidden md:flex absolute right-2 top-1/2 z-10 w-64 -translate-y-1/2 flex-col items-end pointer-events-none"
-            aria-label="Conversation navigation"
-          >
-            <div
-              v-if="hoveredScrollSegment"
-              class="absolute right-12 top-1/2 w-fit max-w-72 -translate-y-1/2 rounded-lg border bg-background/95 px-2.5 py-1.5 text-left font-mono shadow-md backdrop-blur transition-opacity duration-150"
-            >
-              <div
-                v-if="hoveredScrollSegment.role === 'assistant'"
-                class="mb-1 text-[10px] font-medium leading-none text-muted-foreground"
-              >
-                memoh
-              </div>
-              <div class="line-clamp-4 overflow-hidden text-ellipsis break-words text-[11px] leading-snug text-foreground">
-                {{ hoveredScrollSegment.preview }}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              class="absolute bottom-full mb-1 flex size-8 translate-y-1 items-center justify-center rounded-full border border-transparent text-muted-foreground opacity-0 transition-all duration-200 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-0 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover:translate-y-0 group-hover:opacity-100 disabled:group-hover:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pointer-events-auto"
-              aria-label="Navigate to previous message"
-              :disabled="!previousScrollSegment"
-              @click="scrollToAdjacentSegment(-1)"
-            >
-              <ChevronUp class="size-4" />
-            </button>
-
-            <div class="flex flex-col items-end gap-0 pointer-events-auto">
-              <button
-                v-for="segment in scrollSegments"
-                :key="segment.id"
-                type="button"
-                class="group/timeline-tick relative flex h-3 w-8 cursor-pointer items-center justify-center rounded-full border border-transparent text-xs font-medium text-muted-foreground transition-colors duration-100 hover:bg-transparent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                :aria-label="segment.label"
-                @mouseenter="hoveredSegmentId = segment.id"
-                @mouseleave="hoveredSegmentId = ''"
-                @focus="hoveredSegmentId = segment.id"
-                @blur="hoveredSegmentId = ''"
-                @click="scrollToSegment(segment)"
-              >
-                <span
-                  class="h-px rounded-full bg-muted-foreground/70 opacity-50 transition-all duration-150 group-hover:opacity-100 group-hover/timeline-tick:w-4 group-hover/timeline-tick:bg-foreground/70"
-                  :class="[
-                    activeSegmentId === segment.id ? 'w-4 bg-foreground/80 opacity-100' : segment.index % 2 === 0 ? 'w-1.5' : 'w-3',
-                    hoveredSegmentId === segment.id ? '!w-4 !bg-foreground/80 opacity-100' : '',
-                  ]"
-                />
-              </button>
-            </div>
-
-            <button
-              type="button"
-              class="absolute top-full mt-1 flex size-8 -translate-y-1 items-center justify-center rounded-full border border-transparent text-muted-foreground opacity-0 transition-all duration-200 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-0 disabled:hover:bg-transparent disabled:hover:text-muted-foreground group-hover:translate-y-0 group-hover:opacity-100 disabled:group-hover:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pointer-events-auto"
-              aria-label="Navigate to next message"
-              :disabled="!nextScrollSegment"
-              @click="scrollToAdjacentSegment(1)"
-            >
-              <ChevronDown class="size-4" />
-            </button>
-          </div>
+          <ChatMinimap
+            v-if="isActive && !loadingChats"
+            :scroll-el="scrollEl"
+            :content-el="descEl"
+            :messages="messages"
+            @navigate="handleMinimapNavigate"
+          />
         </section>
       </section>
 
@@ -659,7 +602,6 @@ import {
   Paperclip,
   Send,
   ChevronDown,
-  ChevronUp,
   Lightbulb,
   CircleAlert,
   ArrowDown,
@@ -680,6 +622,8 @@ import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings } from 
 import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
+import ChatMinimap from './chat-minimap.vue'
+import { planJump } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
@@ -690,27 +634,9 @@ import { EFFORT_LABELS, EFFORT_OPACITY, REASONING_EFFORT_ADAPTIVE, REASONING_EFF
 import { useMediaGallery } from '../composables/useMediaGallery'
 import type { ChatAttachment, UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import type { ChatMessage } from '@/store/chat-list'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { acpAgentDisplayName, acpAgentIcon, isACPAgentEnabled, isACPNoProject, normalizeACPAgentID } from '@/utils/acp'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-
-interface ScrollSegment {
-  id: string
-  targetSegmentId: string
-  targetMessageId: string
-  role: 'user' | 'assistant'
-  label: string
-  preview: string
-  index: number
-  top: number
-  topPercent: number
-}
-
-interface ScrollSegmentSource {
-  message: ChatMessage
-  messageIndex: number
-}
 
 interface PendingUserInputDraft {
   optionIds: string[]
@@ -1155,24 +1081,12 @@ const isInstant = ref(false)
 const highlightedMessageId = ref('')
 const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
-const scrollSegments = ref<ScrollSegment[]>([])
-const activeSegmentId = ref('')
-const hoveredSegmentId = ref('')
 const scrollAnchorOffset = 8
-const scrollAnimationMaxDuration = 760
-const scrollAnimationMinDuration = 260
-const scrollNavigationLockMs = scrollAnimationMaxDuration + 80
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
-let scrollNavigationLockTimer: ReturnType<typeof setTimeout> | null = null
-let scrollNavigationRaf = 0
-let scrollAnimationRaf = 0
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
-  if (scrollNavigationLockTimer) clearTimeout(scrollNavigationLockTimer)
-  if (scrollNavigationRaf) cancelAnimationFrame(scrollNavigationRaf)
-  if (scrollAnimationRaf) cancelAnimationFrame(scrollAnimationRaf)
 })
 
 const showJumpToBottom = computed(() =>
@@ -1182,216 +1096,21 @@ const showJumpToBottom = computed(() =>
   && !arrivedState.bottom,
 )
 
-const showScrollRail = computed(() =>
-  isActive.value
-  && !loadingChats.value
-  && scrollSegments.value.length > 1,
-)
-
-const hoveredScrollSegment = computed(() => {
-  const id = hoveredSegmentId.value
-  return scrollSegments.value.find(segment => segment.id === id)
-})
-
-const activeSegmentIndex = computed(() => {
-  if (!scrollSegments.value.length) return -1
-  const index = scrollSegments.value.findIndex(segment => segment.id === activeSegmentId.value)
-  return index >= 0 ? index : 0
-})
-
-const previousScrollSegment = computed(() => {
-  const index = activeSegmentIndex.value
-  return index > 0 ? scrollSegments.value[index - 1] : null
-})
-
-const nextScrollSegment = computed(() => {
-  const index = activeSegmentIndex.value
-  return index >= 0 && index < scrollSegments.value.length - 1 ? scrollSegments.value[index + 1] : null
-})
-
-function messageSegmentDomId(message: ChatMessage, index: number) {
-  return `${index}:${message.role}:${message.id}`
+function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement) {
+  return root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top
 }
 
-function findSegmentElement(segmentId: string): HTMLElement | null {
-  const root = scrollEl.value
-  if (!root) return null
-  for (const item of Array.from(root.querySelectorAll<HTMLElement>('[data-scroll-segment-id]'))) {
-    if (item.dataset.scrollSegmentId === segmentId) return item
-  }
-  return null
-}
-
-function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement, rootRect = root.getBoundingClientRect()) {
-  const rect = target.getBoundingClientRect()
-  return root.scrollTop + rect.top - rootRect.top
-}
-
-function getSegmentAbsoluteTop(segment: ScrollSegment) {
-  const target = findSegmentElement(segment.targetSegmentId)
-  if (!target) return segment.top
-  const root = scrollEl.value
-  if (!root) return segment.top
-  return getElementAbsoluteTop(target, root)
-}
-
-function getSegmentText(message: ChatMessage) {
-  if (message.role === 'user') {
-    return message.text?.trim().replace(/\s+/g, ' ') || ''
-  }
-  if (message.role === 'assistant') {
-    const textBlock = message.messages.find(block => block.type === 'text')
-    return textBlock?.content?.trim().replace(/\s+/g, ' ') || ''
-  }
-  return ''
-}
-
-function getSegmentLabel(index: number, message: ChatMessage) {
-  const preview = getSegmentText(message)
-  const roleLabel = message.role === 'assistant'
-    ? t('chat.timelineAnswer')
-    : t('chat.timelineMessage')
-  return preview ? `${roleLabel} ${index + 1}. ${preview.slice(0, 48)}` : `${roleLabel} ${index + 1}`
-}
-
-function buildSegmentSources(): ScrollSegmentSource[] {
-  const sources: ScrollSegmentSource[] = []
-  messages.value.forEach((message, messageIndex) => {
-    if ((message.role === 'user' || message.role === 'assistant') && getSegmentText(message).length > 0) {
-      sources.push({ message, messageIndex })
-    }
-  })
-  return sources
-}
-
-const scrollSegmentStructureKey = computed(() =>
-  messages.value
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    .map(message => `${message.id}:${message.role}:${message.streaming ? '1' : '0'}:${getSegmentText(message).length > 0 ? 'text' : 'empty'}`)
-    .join('|'),
-)
-
-function measureScrollNavigation() {
-  scrollNavigationRaf = 0
-  const root = scrollEl.value
-  if (!root) return
-
-  const scrollHeight = Math.max(root.scrollHeight, 1)
-  const rootRect = root.getBoundingClientRect()
-  const segmentSources = buildSegmentSources()
-  const nextSegments: ScrollSegment[] = []
-
-  segmentSources.forEach(({ message, messageIndex }, index) => {
-    const targetSegmentId = messageSegmentDomId(message, messageIndex)
-    const target = findSegmentElement(targetSegmentId)
-    if (!target) return
-
-    const absoluteTop = getElementAbsoluteTop(target, root, rootRect)
-
-    nextSegments.push({
-      id: targetSegmentId,
-      targetSegmentId,
-      targetMessageId: message.id,
-      role: message.role,
-      label: getSegmentLabel(index, message),
-      preview: getSegmentText(message) || getSegmentLabel(index, message),
-      index,
-      top: absoluteTop,
-      topPercent: Math.min(100, Math.max(0, (absoluteTop / scrollHeight) * 100)),
-    })
-  })
-
-  scrollSegments.value = nextSegments
-
-  if (scrollNavigationLockTimer) return
-
-  const viewportAnchor = root.scrollTop + scrollAnchorOffset
-  let active = nextSegments[0]?.id ?? ''
-  let activeDistance = Number.POSITIVE_INFINITY
-  for (const segment of nextSegments) {
-    const distance = Math.abs(segment.top - viewportAnchor)
-    if (distance < activeDistance) {
-      active = segment.id
-      activeDistance = distance
-    }
-  }
-  activeSegmentId.value = active
-}
-
-function scheduleScrollNavigationMeasure() {
-  if (scrollNavigationRaf) return
-  scrollNavigationRaf = requestAnimationFrame(measureScrollNavigation)
-}
-
-function easeInOutCubic(progress: number) {
-  return progress < 0.5
-    ? 4 * progress * progress * progress
-    : 1 - ((-2 * progress + 2) ** 3) / 2
-}
-
-function scrollViewportTo(top: number, animated = true) {
+function scrollViewportTo(top: number) {
   const root = scrollEl.value
   if (!root) return
   const nextTop = Math.min(Math.max(top, 0), Math.max(root.scrollHeight - root.clientHeight, 0))
-  if (scrollAnimationRaf) cancelAnimationFrame(scrollAnimationRaf)
-
-  if (!animated) {
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scheduleScrollNavigationMeasure()
-    return
-  }
-
-  const startTop = root.scrollTop
-  const distance = nextTop - startTop
-  if (Math.abs(distance) < 1) {
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scheduleScrollNavigationMeasure()
-    return
-  }
-
-  const duration = Math.min(scrollAnimationMaxDuration, Math.max(scrollAnimationMinDuration, Math.abs(distance) * 0.45))
-  const startedAt = performance.now()
-
-  const step = (now: number) => {
-    const progress = Math.min(1, (now - startedAt) / duration)
-    root.scrollTop = startTop + distance * easeInOutCubic(progress)
-    if (progress < 1) {
-      scrollAnimationRaf = requestAnimationFrame(step)
-      return
-    }
-    root.scrollTop = nextTop
-    y.value = nextTop
-    scrollAnimationRaf = 0
-    scheduleScrollNavigationMeasure()
-  }
-
-  scrollAnimationRaf = requestAnimationFrame(step)
+  const { pre } = planJump(root.scrollTop, nextTop, root.clientHeight)
+  if (pre !== null) root.scrollTo({ top: pre, behavior: 'instant' })
+  root.scrollTo({ top: nextTop, behavior: 'smooth' })
 }
 
-async function scrollToSegment(segment: ScrollSegment) {
-  activeSegmentId.value = segment.id
-  if (scrollNavigationLockTimer) clearTimeout(scrollNavigationLockTimer)
-  scrollNavigationLockTimer = setTimeout(() => {
-    scrollNavigationLockTimer = null
-    scheduleScrollNavigationMeasure()
-  }, scrollNavigationLockMs)
-  await scrollToMessage(segment)
-}
-
-async function scrollToAdjacentSegment(direction: -1 | 1) {
-  const target = resolveAdjacentSegment(direction)
-  if (!target) return
-  await scrollToSegment(target)
-}
-
-function resolveAdjacentSegment(direction: -1 | 1) {
-  const segments = scrollSegments.value
-  if (!segments.length) return null
-
-  const targetIndex = activeSegmentIndex.value + direction
-  return targetIndex >= 0 && targetIndex < segments.length ? segments[targetIndex] : null
+function handleMinimapNavigate(messageId: string) {
+  void scrollToMessage(messageId)
 }
 
 function scrollToBottom() {
@@ -1503,14 +1222,6 @@ watch([isAutoScroll, height, isActive], async () => {
   deep: true
 })
 
-watch([scrollSegmentStructureKey, y, height, isActive], async () => {
-  if (!isActive.value) return
-  await nextTick()
-  scheduleScrollNavigationMeasure()
-}, {
-  flush: 'post',
-})
-
 // Sentinel-based infinite scroll for older history. The IntersectionObserver
 // fires reliably even when the user is pinned at scrollTop=0 (where scroll
 // events stop), and we restore the visual position via scrollHeight diff —
@@ -1599,30 +1310,17 @@ useIntersectionObserver(
 function findMessageElement(messageId: string): HTMLElement | null {
   const root = scrollEl.value
   if (!root) return null
-  for (const item of Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]'))) {
-    if (item.dataset.messageId === messageId) return item
-  }
-  return null
+  return root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
 }
 
-async function scrollToMessage(messageOrSegment: string | ScrollSegment): Promise<boolean> {
+async function scrollToMessage(messageId: string): Promise<boolean> {
   await nextTick()
   const root = scrollEl.value
-  const target = typeof messageOrSegment === 'string'
-    ? findMessageElement(messageOrSegment)
-    : findSegmentElement(messageOrSegment.targetSegmentId)
+  const target = findMessageElement(messageId)
   if (!root || !target) return false
   isAutoScroll.value = false
   isInstant.value = false
-  const messageId = typeof messageOrSegment === 'string'
-    ? messageOrSegment
-    : messageOrSegment.targetMessageId
-  const absoluteTop = typeof messageOrSegment === 'string'
-    ? getElementAbsoluteTop(target, root)
-    : getSegmentAbsoluteTop(messageOrSegment)
-  const nextTop = absoluteTop - scrollAnchorOffset
-
-  scrollViewportTo(nextTop)
+  scrollViewportTo(getElementAbsoluteTop(target, root) - scrollAnchorOffset)
   highlightedMessageId.value = messageId
   if (highlightTimer) clearTimeout(highlightTimer)
   highlightTimer = setTimeout(() => {
