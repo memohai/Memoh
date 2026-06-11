@@ -462,7 +462,7 @@
     "reasoningHigh": "高",
     "reasoningXHigh": "极高",
     "sessions": "会话",
-    "newSession": "新建会话",
+    "newSession": "新对话",
     "deleteSession": "删除会话",
     "deleteSessionConfirm": "确定要删除此会话吗？",
     "renameSession": "重命名会话",
@@ -487,6 +487,8 @@
     "acpAttachmentsUnsupported": "ACP 会话暂不支持附件。",
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",
+    "searchSessions": "搜索对话记录",
+    "noSearchResults": "没有匹配的对话",
     "heartbeatTrigger": "心跳触发",
     "heartbeatTime": "触发时间",
     "heartbeatInterval": "间隔",
@@ -518,7 +520,7 @@
       "goForward": "前进"
     },
     "activityBar": {
-      "sessions": "会话",
+      "sessions": "对话",
       "files": "文件",
       "search": "搜索"
     },

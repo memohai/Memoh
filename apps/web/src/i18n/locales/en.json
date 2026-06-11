@@ -466,7 +466,7 @@
     "reasoningHigh": "High",
     "reasoningXHigh": "X-High",
     "sessions": "Sessions",
-    "newSession": "New Session",
+    "newSession": "New Chat",
     "deleteSession": "Delete Session",
     "deleteSessionConfirm": "Are you sure you want to delete this session?",
     "renameSession": "Rename Session",
@@ -491,6 +491,8 @@
     "acpAttachmentsUnsupported": "Attachments are not supported in ACP sessions yet.",
     "sessionFilterAll": "All",
     "searchSessionPlaceholder": "Search",
+    "searchSessions": "Search conversations",
+    "noSearchResults": "No matching conversations",
     "heartbeatTrigger": "Heartbeat Trigger",
     "heartbeatTime": "Time",
     "heartbeatInterval": "Interval",
@@ -522,7 +524,7 @@
       "goForward": "Forward"
     },
     "activityBar": {
-      "sessions": "Sessions",
+      "sessions": "Chat",
       "files": "Files",
       "search": "Search"
     },

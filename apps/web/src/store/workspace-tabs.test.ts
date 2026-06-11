@@ -166,7 +166,7 @@ describe('workspace layout store', () => {
     expect(panel?.title).toBe('todo.md')
   })
 
-  it('toggles the sidebar when re-selecting the active view', () => {
+  it('switches the active view and keeps the sidebar open', () => {
     const store = useWorkspaceTabsStore()
 
     store.sidebarView = 'sessions'
@@ -176,10 +176,9 @@ describe('workspace layout store', () => {
     expect(store.sidebarView).toBe('files')
     expect(store.sidebarOpen).toBe(true)
 
+    // Re-selecting the active view keeps the sidebar open instead of toggling it closed.
     store.selectSidebarView('files')
-    expect(store.sidebarOpen).toBe(false)
-
-    store.selectSidebarView('files')
+    expect(store.sidebarView).toBe('files')
     expect(store.sidebarOpen).toBe(true)
   })
 
@@ -194,10 +193,10 @@ describe('workspace layout store', () => {
     expect(store.workbenchOpen).toBe(false)
     expect(store.sidebarOpen).toBe(true)
 
-    store.selectSidebarView('search')
+    store.selectSidebarView('files')
     expect(store.workbenchOpen).toBe(true)
     expect(store.sidebarOpen).toBe(true)
-    expect(store.sidebarView).toBe('search')
+    expect(store.sidebarView).toBe('files')
 
     store.hideWorkbench()
     expect(store.workbenchOpen).toBe(false)

@@ -1,14 +1,14 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <div class="px-1.5 pt-1.5 shrink-0">
+    <div class="px-2 pt-1.5 shrink-0">
       <Button
         variant="ghost"
         block
-        class="h-8 justify-start gap-2 px-2.5 text-xs"
+        class="h-9 justify-start gap-2.5 px-2.5 text-control"
         :disabled="!currentBotId"
         @click="handleNewSession"
       >
-        <SquarePen class="size-3.5" />
+        <SquarePen class="size-4" />
         {{ t('chat.newSession') }}
       </Button>
     </div>

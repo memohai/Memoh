@@ -1,5 +1,8 @@
 <template>
-  <div class="flex flex-col flex-1 h-full min-w-0 bg-card">
+  <div
+    ref="rootEl"
+    class="flex flex-col flex-1 h-full min-w-0 bg-card"
+  >
     <DockviewVue
       class="h-full w-full"
       :components="panelComponents"
@@ -8,6 +11,8 @@
       :right-header-actions-component="rightHeaderActionsComponent"
       :theme="memohTheme"
       :disable-floating-groups="true"
+      :disable-tabs-overflow-list="true"
+      :disable-auto-resizing="true"
       :get-tab-context-menu-items="getTabContextMenuItems"
       @ready="onReady"
     />
@@ -15,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, provide, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
@@ -45,6 +50,26 @@ const store = useWorkspaceTabsStore()
 const { api } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId, sessionId, activeSession } = storeToRefs(chatStore)
+
+// dockview's own auto-resize is disabled at construction (:disable-auto-resizing);
+// we drive layout from this ResizeObserver instead. The dock is a flex-1 sibling
+// of the sidebar (push/pull model), so when the sidebar slides out/in this root's
+// width animates frame-by-frame; the observer relays out on each of those frames,
+// keeping panels matched to the container the whole way. The right edge is pinned
+// (viewport edge), so the right-side actions ("+") never move while the width
+// changes — no snap.
+// (NOTE: dockview 6.6.1 ignores updateOptions({ disableAutoResizing }) at runtime
+// — a guard checks the wrong key — so toggling the prop reactively does nothing;
+// owning the observer is the reliable route.)
+const rootEl = ref<HTMLElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
+
+function applyLayout() {
+  const dock = api.value
+  const el = rootEl.value
+  if (!dock || !el) return
+  dock.layout(el.clientWidth, el.clientHeight)
+}
 
 // Panel components are looked up by name when panels are added or restored
 // from a serialized layout. dockview-vue types frameworks components as
@@ -102,6 +127,9 @@ const chatPanelTitle = computed(() => {
 
 function onReady(event: DockviewReadyEvent) {
   store.registerApi(event.api)
+  // Size the grid before adding panels (auto-resize is off, so without this the
+  // grid would be 0×0 and the first panel would lay out empty).
+  if (rootEl.value) event.api.layout(rootEl.value.clientWidth, rootEl.value.clientHeight)
   ensureChatPanel()
 }
 
@@ -145,7 +173,14 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
   }
 })
 
+onMounted(() => {
+  resizeObserver = new ResizeObserver(() => applyLayout())
+  if (rootEl.value) resizeObserver.observe(rootEl.value)
+})
+
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
   store.releaseApi()
 })
 </script>

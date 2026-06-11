@@ -40,7 +40,7 @@ src/
 ├── i18n.ts                    # vue-i18n configuration
 ├── assets/                    # Static assets (logo.svg)
 ├── components/                # Shared components
-│   ├── sidebar/               #   VS Code-style left shell: activity bar + collapsible side panel
+│   ├── sidebar/               #   Left shell: activity bar + collapsible side panel
 │   │   ├── index.vue          #     Activity rail (bot avatar, Sessions/Files/Search icons, Settings) + resizable panel host
 │   │   ├── bot-switcher.vue   #     Bot switcher dropdown (rail avatar variant + row variant)
 │   │   ├── panel-sessions.vue #     Sessions panel: New Session button + Recents
@@ -274,9 +274,9 @@ Two-section layout architecture, both sharing the same `MainLayout` wrapper:
 
 1. **MainLayout** (`layout/main-layout/`) — Top-level wrapper using `SidebarProvider` from `@memohai/ui`. Provides `#sidebar` and `#main` slots.
 
-2. **Chat Section** (`pages/main-section/`) — VS Code-style shell (hand-rolled flex layout, no `MainLayout`):
+2. **Chat Section** (`pages/main-section/`) — Hand-rolled flex shell (no `MainLayout`):
    - On macOS desktop a 36px full-width drag strip clears the traffic lights; web has no strip.
-   - **Sidebar** (`components/sidebar/`) — Activity rail (44px icon column: bot switcher avatar on top, Sessions/Files/Search views, Settings gear at bottom) + a resizable, collapsible side panel. Clicking the active rail icon toggles the panel (VS Code semantics). Files view is hidden without `workspace_read`.
+   - **Sidebar** (`components/sidebar/`) — Activity rail (44px icon column: bot switcher avatar on top, Sessions/Files/Search views, Settings gear at bottom) + a resizable, collapsible side panel. Clicking the active rail icon toggles the panel open/closed. Files view is hidden without `workspace_read`.
    - **MainContainer** (`components/main-container/`) — `<KeepAlive>` wrapped `<RouterView>` for chat pages.
 
 3. **Settings Section** (`pages/settings-section/`) — Uses `MainLayout` with:

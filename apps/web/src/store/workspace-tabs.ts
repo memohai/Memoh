@@ -13,7 +13,7 @@ import {
   terminalCacheKey,
 } from '@/composables/useTerminalCache'
 
-// VS Code-style workspace shell state:
+// Workspace shell state (activity bar + side panel + dockview layout):
 // - the dockview layout in the center area (chat / file / terminal / browser /
 //   display panels, splits, tab order) persisted per bot
 // - the left activity-bar + side-panel state (active view, collapsed, width)
@@ -22,7 +22,7 @@ import {
 // panel is a singleton dockview panel whose content follows the active
 // session; files/terminals/browsers/displays are multi-instance panels.
 
-export type SidebarView = 'sessions' | 'files' | 'search'
+export type SidebarView = 'sessions' | 'files'
 
 export const CHAT_PANEL_ID = 'chat'
 
@@ -324,36 +324,38 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   const sidebarView = useLocalStorage<SidebarView>('workspace-sidebar-view', 'sessions')
   const sidebarOpen = useLocalStorage('workspace-sidebar-open', true)
-  const sidebarWidth = useLocalStorage('workspace-sidebar-width', 268)
+  const sidebarWidth = useLocalStorage('workspace-sidebar-width', 256)
   const workbenchOpen = useLocalStorage('workspace-workbench-open', true)
 
-  // VS Code semantics: clicking the active activity icon toggles the panel,
-  // clicking another icon switches to it (and reopens if collapsed).
+  // Push/pull model (see main-section + sidebar): the rail is in flow and slides
+  // out to the left (margin-left) while the dock, a flex sibling, grows to fill
+  // the space — content shifts. Toggling just flips this boolean; the rail
+  // animates its margin on a shared curve and dockview relays out per frame as
+  // the dock width changes, so the right-side actions ("+") stay pinned (right
+  // edge never moves) instead of snapping.
+  function setWorkbench(open: boolean) {
+    workbenchOpen.value = open
+  }
+
+  // Horizontal nav only switches the active view and ensures the sidebar is
+  // shown. Collapsing the whole sidebar lives on the workbench toggle (the
+  // chrome button over the dock), not on the nav items.
   function selectSidebarView(view: SidebarView) {
-    if (!workbenchOpen.value) {
-      sidebarView.value = view
-      sidebarOpen.value = true
-      workbenchOpen.value = true
-      return
-    }
-    if (sidebarOpen.value && sidebarView.value === view) {
-      sidebarOpen.value = false
-      return
-    }
     sidebarView.value = view
     sidebarOpen.value = true
+    setWorkbench(true)
   }
 
   function toggleWorkbench() {
-    workbenchOpen.value = !workbenchOpen.value
+    setWorkbench(!workbenchOpen.value)
   }
 
   function showWorkbench() {
-    workbenchOpen.value = true
+    setWorkbench(true)
   }
 
   function hideWorkbench() {
-    workbenchOpen.value = false
+    setWorkbench(false)
   }
 
   // One-shot navigation request consumed by the sidebar files panel.
@@ -361,7 +363,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function openFilesAt(path: string) {
     if (!hasCurrentPermission('workspace_read')) return
-    workbenchOpen.value = true
+    setWorkbench(true)
     sidebarView.value = 'files'
     sidebarOpen.value = true
     pendingFilesPath.value = (path ?? '').trim() || null

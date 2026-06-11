@@ -775,8 +775,17 @@
   --sidebar-foreground: oklch(0.21 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.94 0.0052 72);
+  --sidebar-accent: oklch(0.93 0.0052 72);
   --sidebar-accent-foreground: oklch(0.21 0.004 95);
+  /* Sidebar hover/active live on the 0.984 canvas, NOT pure white, so the old
+   * very-light pair (hover 0.955 / active 0.94) only cleared the bg by ~0.03 and
+   * read as almost no feedback. Both are pulled one notch darker (hover 0.945 →
+   * Δbg 0.039, active 0.93 → Δbg 0.054) for real contrast, keeping the same
+   * hover < active gap (0.015). The bot-switcher TRIGGER avatar (≈0.932) now sits
+   * right under the hover, so it gets a hairline border locally (bot-switcher.vue)
+   * to stay crisp — we deliberately do NOT touch the shared Avatar or the menu
+   * avatars. */
+  --sidebar-hover: oklch(0.945 0.004 72);
   --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
@@ -894,7 +903,10 @@
   --accent-gray: #5f5e59;
   --accent-gray-soft: #f9f8f7;
   --accent-gray-soft-hover: #f0efed;
-  --accent-gray-soft-active: #e6e5e3;
+  /* Neutral avatar gray (≈#e9e9e5): a touch lighter and more neutral than the
+   * old #e6e5e3 so the avatar disc reads as a clean chip rather than a muddy
+   * warm gray. Also the secondary-badge fill (negligible shift). */
+  --accent-gray-soft-active: #e7e7e4;
   --accent-gray-border: #d4d3cf;
   --accent-gray-deep: #494846;
   --accent-brown: #9f765a;
@@ -1104,6 +1116,8 @@
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.26 0 0);
   --sidebar-accent-foreground: oklch(0.86 0 0);
+  /* Subtle sidebar hover: above the canvas (0.165), below the active fill (0.26). */
+  --sidebar-hover: oklch(0.21 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
@@ -1487,8 +1501,9 @@
   --popover-foreground: var(--card-foreground);
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
-  --sidebar-accent: oklch(0.94 0.0052 var(--scheme-hue));
+  --sidebar-accent: oklch(0.93 0.0052 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
+  --sidebar-hover: oklch(0.945 0.004 var(--scheme-hue));
   --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
   --ui-hover: oklch(0.949 0.004 var(--scheme-hue));
   --ui-selected: oklch(0.945 0.005 var(--scheme-hue));
@@ -1518,6 +1533,7 @@
   --sidebar-foreground: var(--card-foreground);
   --sidebar-accent: var(--secondary);
   --sidebar-accent-foreground: var(--foreground);
+  --sidebar-hover: oklch(0.21 0.006 var(--scheme-hue));
   --sidebar-border: oklch(1 0 0 / 10%);
   --ui-hover: oklch(0.30 0.006 var(--scheme-hue));
   --ui-selected: oklch(0.30 0.006 var(--scheme-hue));

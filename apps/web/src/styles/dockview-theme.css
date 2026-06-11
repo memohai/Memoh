@@ -38,6 +38,15 @@
   --dv-tab-margin: 4px 0 0 4px;
 
   --dv-floating-border: 1px solid var(--border);
+
+  /* Reserve space at the start of the tab strip for the global workspace chrome
+   * (workbench toggle + back/forward) that pages/main-section overlays on top
+   * of the dock. The reserve = inset + controls block; the mac-collapsed case
+   * additionally clears the window traffic lights. Keep these in sync with the
+   * button offsets in pages/main-section/index.vue. */
+  --ws-chrome-inset: 8px; /* matches the controls' `left-2` offset */
+  --ws-chrome-controls: 96px; /* 3 × 28px (size-7) buttons + gaps + buffer */
+  --ws-mac-traffic: 76px; /* macOS traffic-light clearance */
 }
 
 /* Hover step for background tabs (the custom tab content itself is
@@ -45,72 +54,62 @@
 .dockview-theme-memoh .dv-tab {
   box-sizing: border-box;
   transition: background-color 0.15s ease;
+  /* Give short titles (e.g. "New Chat") a fuller tab chip instead of a cramped
+   * sliver; cap the width so a long title truncates rather than ballooning the
+   * strip. The custom tab content (workspace-tab.vue) handles the ellipsis. */
+  min-width: 9rem;
+  max-width: 16rem;
 }
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
   background-color: var(--ui-hover);
 }
 
+/* Bar/content divider: runs the full width but stops under the active tab so
+ * the tab and the view below (both --card) read as one continuous surface.
+ *
+ * It's painted as a pseudo-element pinned BEHIND the tabs (z-index: -1), not as
+ * the container's box border. The classic trick — let the active tab overflow
+ * 1px to cover the border — can't work here because dockview's tab strip is
+ * overflow:auto and clips anything reaching past it. Painting the line behind
+ * everything instead lets the opaque active tab simply hide the slice under
+ * itself, while the transparent rest of the bar lets the line show through. */
 .dockview-theme-memoh .dv-tabs-and-actions-container {
-  border-bottom: 1px solid var(--border);
+  position: relative;
+  /* Establish a stacking context so the z-index:-1 divider below sits ABOVE
+   * the container's own (opaque) background. Without it, position:relative
+   * alone (z-index:auto) doesn't create a context and the divider drops behind
+   * the background — i.e. the whole line disappears. */
+  isolation: isolate;
+}
+
+.dockview-theme-memoh .dv-tabs-and-actions-container::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: -1;
+  height: 1px;
+  background-color: var(--border);
 }
 
 .dockview-theme-memoh .dv-tab.dv-active-tab {
-  position: relative;
-  z-index: 1;
-  height: calc(var(--dv-tabs-and-actions-container-height) + 1px);
+  height: 100%;
   margin-top: 0;
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
-  border-top: 0;
-  border-bottom: 0;
   background-color: var(--card);
-}
-
-.dockview-theme-memoh .dv-tab.dv-active-tab::after {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  left: -1px;
-  z-index: 2;
-  height: 1px;
-  background-color: var(--card);
-  content: "";
-}
-
-.dockview-theme-memoh .dv-tabs-overflow-dropdown-default {
-  height: 28px;
-  margin: 4px 2px 4px 0;
-  padding: 0 6px;
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-}
-
-.dockview-theme-memoh .dv-tabs-overflow-dropdown-default:hover {
-  background-color: var(--ui-hover);
-  color: var(--foreground);
-}
-
-.dockview-theme-memoh .dv-tabs-overflow-dropdown-default > span {
-  padding-left: 2px;
-}
-
-.dockview-theme-memoh .dv-tabs-overflow-dropdown-default > svg {
-  width: 16px;
-  height: 16px;
 }
 
 .dockview-theme-memoh .dv-right-actions-container {
   align-items: center;
 }
 
-.workspace-workbench-open .dockview-theme-memoh .dv-tabs-and-actions-container {
-  padding-left: 116px;
-}
-
-.workspace-workbench-collapsed .dockview-theme-memoh .dv-tabs-and-actions-container {
-  padding-left: 116px;
-}
-
-.workspace-workbench-collapsed-mac .dockview-theme-memoh .dv-tabs-and-actions-container {
-  padding-left: 192px;
+/* Reserve room at the start of the tab strip for the chrome buttons. The value
+ * is driven by main-section as --ws-tabstrip-pad (measured from the chat layer's
+ * own left edge, so it tracks the chrome as it rides the sliding edge). It rides
+ * on the SAME curve as the chat layer's `left` so the first tab stays put under
+ * the chrome the whole transition. Fallback = closed non-mac reserve. */
+.dockview-theme-memoh .dv-tabs-and-actions-container {
+  padding-left: var(--ws-tabstrip-pad, calc(var(--ws-chrome-inset) + var(--ws-chrome-controls)));
+  transition: padding-left 300ms cubic-bezier(0.32, 0.72, 0, 1);
 }

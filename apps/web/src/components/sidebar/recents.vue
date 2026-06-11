@@ -1,16 +1,16 @@
 <template>
   <div class="flex flex-col h-full min-w-0">
-    <div class="px-2.5 h-9 flex items-center shrink-0">
+    <div class="flex items-center px-2 py-1.5 shrink-0">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
-          <TextButton class="text-xs">
+          <TextButton class="text-label">
             <component
               :is="filterIconComponent"
-              class="size-3"
+              class="size-3.5"
               :class="filterIconClass"
             />
             {{ filterLabel }}
-            <ChevronDown class="size-3 opacity-60" />
+            <ChevronDown class="size-3.5 opacity-60" />
           </TextButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
@@ -32,7 +32,7 @@
     <div class="flex-1 relative min-h-0">
       <div class="absolute inset-0">
         <ScrollArea class="h-full">
-          <div class="flex flex-col gap-1 px-1.5">
+          <div class="flex flex-col gap-1 px-2">
             <SessionItem
               v-for="session in filteredSessions"
               :key="session.id"
@@ -164,10 +164,6 @@ import {
 } from '@memohai/ui'
 import SessionItem from './session-item.vue'
 
-const props = defineProps<{
-  searchQuery?: string
-}>()
-
 const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
@@ -217,13 +213,6 @@ const filteredSessions = computed(() => {
     list = list.filter(s => s.type === 'chat' || s.type === 'discuss' || s.type === 'acp_agent')
   } else {
     list = list.filter(s => s.type === filterType.value)
-  }
-  const q = (props.searchQuery ?? '').trim().toLowerCase()
-  if (q) {
-    list = list.filter(s =>
-      (s.title ?? '').toLowerCase().includes(q)
-      || (s.id ?? '').toLowerCase().includes(q),
-    )
   }
   return sortByRecency(list)
 })

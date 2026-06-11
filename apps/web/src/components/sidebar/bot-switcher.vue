@@ -1,80 +1,97 @@
 <template>
-  <DropdownMenu>
+  <DropdownMenu v-model:open="menuOpen">
     <DropdownMenuTrigger as-child>
-      <Button
-        v-if="variant === 'rail'"
-        variant="ghost"
-        size="icon-sm"
-        class="shrink-0"
+      <!-- Workspace switcher: the chip hugs avatar + name (never full-width).
+           Hover uses --sidebar-hover. The hover was darkened for contrast and now
+           sits right under the avatar's gray, so THIS avatar (and only this one —
+           not the menu rows, not the shared Avatar component) carries a hairline
+           ring to keep its disc crisp on top of the hover. No color transition:
+           the fill snaps on hover/open (per request) instead of fading, which
+           read as sluggish on this low-contrast chip. -->
+      <button
+        type="button"
+        class="inline-flex h-8 max-w-full items-center gap-2 rounded-md px-1.5 text-xs text-foreground outline-none hover:bg-[color:var(--sidebar-hover)] focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color:var(--sidebar-hover)]"
         :aria-label="t('sidebar.switchBot')"
-        :title="currentLabel"
       >
-        <Avatar class="size-6 shrink-0 border border-border bg-accent">
+        <Avatar class="size-5 shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]">
           <AvatarImage
             v-if="currentBot?.avatar_url"
             :src="currentBot.avatar_url"
             :alt="currentLabel"
           />
-          <AvatarFallback class="text-[9px] bg-accent text-muted-foreground">
+          <AvatarFallback class="text-[9px]">
             {{ avatarFallback }}
           </AvatarFallback>
         </Avatar>
-      </Button>
-      <Button
-        v-else
-        variant="ghost"
-        class="h-7 w-full min-w-0 max-w-full justify-start gap-2 px-1.5 text-xs"
-        :aria-label="t('sidebar.switchBot')"
-      >
-        <Avatar class="size-5 shrink-0 border border-border bg-accent">
-          <AvatarImage
-            v-if="currentBot?.avatar_url"
-            :src="currentBot.avatar_url"
-            :alt="currentLabel"
-          />
-          <AvatarFallback class="text-[8px] bg-accent text-muted-foreground">
-            {{ avatarFallback }}
-          </AvatarFallback>
-        </Avatar>
-        <span class="truncate">
+        <span class="min-w-0 truncate text-[13px] font-semibold tracking-[0.015em]">
           {{ currentLabel }}
         </span>
         <ChevronsUpDown class="size-3 shrink-0 text-muted-foreground" />
-      </Button>
+      </button>
     </DropdownMenuTrigger>
+    <!-- align-offset pulls the panel left so the dropdown bot avatars line up
+         under the trigger avatar (trigger px-1.5 = 6px vs menu p-1.5 + item
+         px-2.5 = 16px → -10px). -->
     <DropdownMenuContent
       align="start"
-      :side="variant === 'rail' ? 'right' : 'bottom'"
+      side="bottom"
+      :align-offset="-10"
       class="w-60"
     >
-      <DropdownMenuLabel class="text-xs font-[475] text-muted-foreground">
+      <DropdownMenuLabel class="text-xs font-medium text-muted-foreground">
         {{ t('sidebar.bots') }}
       </DropdownMenuLabel>
-      <DropdownMenuItem
-        v-for="bot in bots"
-        :key="bot.id"
-        class="gap-2"
-        :disabled="bot.status === 'error'"
-        @select="handleSelect(bot)"
-      >
-        <Avatar class="size-5 shrink-0 border border-border bg-accent">
-          <AvatarImage
-            v-if="bot.avatar_url"
-            :src="bot.avatar_url"
-            :alt="bot.display_name || bot.id"
+
+      <!-- Bot rows: drag-to-reorder via sortablejs with forceFallback, so there's
+           no native OS drag ghost. Sortable floats its OWN clone, which keeps the
+           hover fill at full content opacity (see .bot-row-drag) and tracks the
+           cursor 1:1 — continuous/finger-following, not snapping slot-by-slot — while
+           the live rows slide to make room (animation) and the source slot shows
+           as an empty gap (.bot-row-ghost). The WHOLE row is the drag target (no
+           `handle`), so you can grab it anywhere the cursor reads as interactive,
+           not just the avatar; a short move starts a drag, a plain click still
+           selects. The grip that swaps in on hover is a pure affordance (no
+           separate cursor, so moving across the row never flickers grab↔pointer).
+           While a drag runs we (a) freeze the rendered list off `displayBots` so
+           an unrelated query refetch can't re-render mid-drag and yank the row,
+           and (b) lock the cursor to grabbing globally (body.bot-dragging). Order
+           persists to localStorage. -->
+      <div ref="listRef">
+        <div
+          v-for="bot in displayBots"
+          :key="bot.id"
+          role="menuitem"
+          class="bot-row group relative flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-control transition-colors"
+          :class="bot.status === 'error'
+            ? 'bot-row-disabled opacity-40'
+            : 'cursor-pointer hover:bg-[color:var(--bot-row-tint)]'"
+          @click="handleSelect(bot)"
+        >
+          <span class="relative size-5 shrink-0">
+            <Avatar class="bot-row-avatar size-5 transition-opacity group-hover:opacity-0">
+              <AvatarImage
+                v-if="bot.avatar_url"
+                :src="bot.avatar_url"
+                :alt="bot.display_name || bot.id"
+              />
+              <AvatarFallback class="text-[9px]">
+                {{ initialsOf(bot) }}
+              </AvatarFallback>
+            </Avatar>
+            <span class="bot-drag-handle absolute inset-0 flex items-center justify-center text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+              <GripVertical class="size-4" />
+            </span>
+          </span>
+          <span class="min-w-0 flex-1 truncate">
+            {{ bot.display_name || bot.id }}
+          </span>
+          <Check
+            v-if="bot.id === currentBotId"
+            class="size-3.5 shrink-0 text-muted-foreground"
           />
-          <AvatarFallback class="text-[8px] bg-accent text-muted-foreground">
-            {{ initialsOf(bot) }}
-          </AvatarFallback>
-        </Avatar>
-        <span class="min-w-0 flex-1 truncate text-xs">
-          {{ bot.display_name || bot.id }}
-        </span>
-        <Check
-          v-if="bot.id === currentBotId"
-          class="size-3 shrink-0 text-muted-foreground"
-        />
-      </DropdownMenuItem>
+        </div>
+      </div>
+
       <div
         v-if="isLoading"
         class="flex justify-center py-3"
@@ -87,30 +104,33 @@
       >
         {{ t('bots.emptyTitle') }}
       </div>
+
       <DropdownMenuSeparator />
       <DropdownMenuItem
         class="gap-2"
         @select="router.push({ name: 'bot-new' })"
       >
-        <Plus class="size-3.5 text-muted-foreground" />
-        <span class="text-xs">{{ t('bots.createBot') }}</span>
+        <Plus class="size-4 text-muted-foreground" />
+        <span class="text-control">{{ t('bots.createBot') }}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         class="gap-2"
         @select="router.push({ name: 'bots' })"
       >
-        <Settings2 class="size-3.5 text-muted-foreground" />
-        <span class="text-xs">{{ t('sidebar.manageBots') }}</span>
+        <Settings2 class="size-4 text-muted-foreground" />
+        <span class="text-control">{{ t('sidebar.manageBots') }}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useLocalStorage } from '@vueuse/core'
+import Sortable from 'sortablejs'
 import { useQuery } from '@pinia/colada'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import type { BotsBot } from '@memohai/sdk'
@@ -118,7 +138,6 @@ import {
   Avatar,
   AvatarImage,
   AvatarFallback,
-  Button,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -126,15 +145,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@memohai/ui'
-import { Check, ChevronsUpDown, LoaderCircle, Plus, Settings2 } from 'lucide-vue-next'
+import { Check, ChevronsUpDown, GripVertical, LoaderCircle, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { usePinnedBots } from '@/composables/usePinnedBots'
-
-withDefaults(defineProps<{
-  variant?: 'row' | 'rail'
-}>(), {
-  variant: 'row',
-})
 
 const router = useRouter()
 const { t } = useI18n()
@@ -142,8 +155,22 @@ const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const { sortBots } = usePinnedBots()
 
+const menuOpen = ref(false)
+
 const { data: botData, isLoading } = useQuery(getBotsQuery())
-const bots = computed<BotsBot[]>(() => sortBots(botData.value?.items ?? []))
+
+// Manual drag order persisted to localStorage; bots not present in the saved
+// order keep their default (pinned) order at the end.
+const botOrder = useLocalStorage<string[]>('bot-order', [])
+const bots = computed<BotsBot[]>(() => {
+  const base = sortBots(botData.value?.items ?? [])
+  if (botOrder.value.length === 0) return base
+  const rank = new Map(botOrder.value.map((id, index) => [id, index]))
+  return [...base].sort((a, b) =>
+    (rank.get(a.id ?? '') ?? Number.MAX_SAFE_INTEGER)
+    - (rank.get(b.id ?? '') ?? Number.MAX_SAFE_INTEGER),
+  )
+})
 
 const currentBot = computed(() =>
   bots.value.find((bot) => bot.id === currentBotId.value) ?? null,
@@ -156,7 +183,14 @@ const currentLabel = computed(() =>
 
 function initialsOf(bot: BotsBot): string {
   const name = (bot.display_name || bot.id || '').trim()
-  return name ? name.charAt(0).toUpperCase() : 'B'
+  const initials = name
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(word => word[0])
+    .join('')
+    .toUpperCase()
+  return initials || 'B'
 }
 
 const avatarFallback = computed(() =>
@@ -166,8 +200,219 @@ const avatarFallback = computed(() =>
 function handleSelect(bot: BotsBot) {
   if (bot.status === 'error') return
   const id = bot.id ?? ''
-  if (!id || id === currentBotId.value) return
+  if (!id) return
+  menuOpen.value = false
+  if (id === currentBotId.value) return
   void chatStore.selectBot(id)
   void router.push({ name: 'bot', params: { botName: bot.name ?? id } })
 }
+
+// ---- drag-to-reorder (sortablejs) ----
+// The teleported menu only mounts while open, so the Sortable instance is created
+// on open and torn down on close.
+//
+// The list renders off `displayBots`, a snapshot of `bots`, instead of `bots`
+// directly. While a drag is in flight we stop syncing it, so a background query
+// refetch (which mints a NEW `bots` array) can't re-render the v-for under
+// Sortable's feet — that mid-drag re-render was the "starts sliding then snaps
+// across" twitch. On drop we revert Sortable's physical DOM move, then write the
+// new order to BOTH `displayBots` (one clean keyed move) and `botOrder`
+// (persistence), so Vue stays the single source of truth and never double-moves.
+const listRef = ref<HTMLElement | null>(null)
+let sortable: Sortable | null = null
+let isDragging = false
+const displayBots = ref<BotsBot[]>([])
+watch(bots, (next) => {
+  if (!isDragging) displayBots.value = next
+}, { immediate: true })
+
+// Lock the drag to the VERTICAL axis. Sortable's fallback clone follows the
+// cursor on both axes (it writes its position as an inline `matrix(a,b,c,d,e,f)`
+// transform, where e = horizontal translate and f = vertical), but a bot list is
+// a single column, so horizontal drift just looks wrong. SortableJS has no
+// built-in axis lock for the visual ghost, so each frame we read that matrix and
+// force e to 0 while keeping f. rAF runs after Sortable's pointer handler and
+// before paint, so the user only ever sees the vertical-only position; Sortable
+// keeps deriving the drop slot from the pointer, so reordering is unaffected.
+let axisLockRaf = 0
+function lockGhostAxis() {
+  axisLockRaf = requestAnimationFrame(lockGhostAxis)
+  const ghost = document.querySelector<HTMLElement>('.bot-row-drag')
+  if (!ghost) return
+  const t = ghost.style.transform
+  if (!t || t === 'none') return
+  let m: DOMMatrixReadOnly
+  try {
+    m = new DOMMatrixReadOnly(t)
+  } catch {
+    return
+  }
+  if (m.e === 0) return
+  ghost.style.transform = `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, 0, ${m.f})`
+}
+function stopAxisLock() {
+  if (axisLockRaf) {
+    cancelAnimationFrame(axisLockRaf)
+    axisLockRaf = 0
+  }
+}
+
+// Post-drop continuity: hover is KEPT, not suppressed. The pointer lands on the
+// dropped row, which must come back ALREADY hovered — the clone was showing the
+// fill + grip, so the row has to snap into that exact look (one continuous
+// object settling in place). bot-drag-settle disables the rows' transitions for
+// a beat so the :hover state applies instantly instead of replaying its fade-in
+// (which read as a flash); normal animated hover resumes once the window ends —
+// re-enabling transitions on an already-applied state animates nothing.
+let settleTimer = 0
+function startSettle() {
+  document.body.classList.add('bot-drag-settle')
+  window.clearTimeout(settleTimer)
+  settleTimer = window.setTimeout(() => {
+    settleTimer = 0
+    document.body.classList.remove('bot-drag-settle')
+  }, 200)
+}
+function clearSettle() {
+  if (settleTimer) {
+    window.clearTimeout(settleTimer)
+    settleTimer = 0
+  }
+  document.body.classList.remove('bot-drag-settle')
+}
+
+watch(menuOpen, async (open) => {
+  if (open) {
+    // Re-sync in case bots changed while the menu was closed (the watcher above
+    // keeps it current, but be explicit so the first paint is never stale).
+    if (!isDragging) displayBots.value = bots.value
+    await nextTick()
+    if (listRef.value && !sortable) {
+      sortable = Sortable.create(listRef.value, {
+        animation: 180,
+        easing: 'cubic-bezier(0.32, 0.72, 0, 1)',
+        // Whole row is draggable (no `handle`); .bot-row-disabled can't be moved.
+        draggable: '.bot-row',
+        filter: '.bot-row-disabled',
+        // No native HTML5 DnD (and its OS drag ghost): Sortable floats its own
+        // clone on <body> and reorders the live rows with the animation above.
+        forceFallback: true,
+        fallbackOnBody: true,
+        fallbackClass: 'bot-row-drag',
+        ghostClass: 'bot-row-ghost',
+        onStart: () => {
+          isDragging = true
+          clearSettle()
+          document.body.classList.add('bot-dragging')
+          lockGhostAxis()
+        },
+        onEnd: (evt) => {
+          isDragging = false
+          stopAxisLock()
+          document.body.classList.remove('bot-dragging')
+          startSettle()
+          const { oldIndex, newIndex, item, from } = evt
+          if (oldIndex == null || newIndex == null || oldIndex === newIndex) {
+            // Re-sync to absorb anything skipped during the drag.
+            displayBots.value = bots.value
+            return
+          }
+          // Undo Sortable's physical move so the live DOM matches `displayBots`
+          // again, then let Vue apply the single keyed move from the data change.
+          item.remove()
+          from.insertBefore(item, from.children[oldIndex] ?? null)
+          const next = [...displayBots.value]
+          const [moved] = next.splice(oldIndex, 1)
+          next.splice(newIndex, 0, moved)
+          displayBots.value = next
+          botOrder.value = next.map(bot => bot.id ?? '').filter(Boolean)
+        },
+      })
+    }
+  }
+  else {
+    sortable?.destroy()
+    sortable = null
+  }
+})
+
+onBeforeUnmount(() => {
+  sortable?.destroy()
+  sortable = null
+  stopAxisLock()
+  clearSettle()
+  document.body.classList.remove('bot-dragging')
+})
 </script>
+
+<style>
+/* sortablejs drag states. The fallback clone (.bot-row-drag) is appended to
+ * <body>, outside this component, so these rules are intentionally global.
+ *
+ * The layering model: the fill is the BOTTOM layer, every row's content (text,
+ * icons, checkmark) is the TOP layer. Hover and drag share ONE fill color so it
+ * never changes from hover → grab → drop. That fill is a translucent ink
+ * (foreground at 8% alpha) instead of the opaque --ui-selected: over the bare
+ * popover it composites to the same ≈ --ui-selected gray in both themes, and
+ * while the clone floats over other rows their content stays readable through
+ * it — fill below, content above. The clone itself is the row DOM, so it
+ * carries .bot-row and resolves the same var. */
+.bot-row {
+  --bot-row-tint: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.bot-row-drag {
+  /* Sortable inlines opacity: 0.8 on the clone; the grabbed row's text and
+   * icons must NOT dim, so out-important it. */
+  opacity: 1 !important;
+  background-color: var(--bot-row-tint) !important;
+  box-shadow: none !important;
+}
+/* The clone is built from the row DOM, but it isn't :hovered (pointer-events are
+ * off), so its group-hover crossfade would default back to the avatar. Force the
+ * grip / hide the avatar so the grabbed row matches the hover state the cursor
+ * was just in — no avatar↔grip flip on pickup. */
+.bot-row-drag .bot-row-avatar {
+  opacity: 0 !important;
+}
+.bot-row-drag .bot-drag-handle {
+  opacity: 1 !important;
+}
+/* The slot the dragged row will land in: an empty gap. Hidden so there's only
+ * ONE visible item (the clone under the finger) — never a second copy. The other
+ * rows sliding to make room (Sortable's `animation`) is what shows the target. */
+.bot-row-ghost {
+  opacity: 0;
+}
+/* Lock the cursor to grabbing for the whole drag so it doesn't flicker as the
+ * pointer passes over rows (pointer). Toggled on <body> by onStart/onEnd. */
+body.bot-dragging,
+body.bot-dragging * {
+  cursor: grabbing !important;
+}
+
+/* During a drag the pointer sweeps across every row, and each row it passes
+ * would otherwise (a) flip its avatar→grip crossfade and (b) flash its hover
+ * fill. Both read as the row "twitching". Freeze the resting rows: avatar stays,
+ * grip hidden, and no hover fill (the empty source gap is excluded since it's
+ * already invisible). */
+body.bot-dragging .bot-row:not(.bot-row-drag) .bot-row-avatar {
+  opacity: 1 !important;
+}
+body.bot-dragging .bot-row:not(.bot-row-drag) .bot-drag-handle {
+  opacity: 0 !important;
+}
+body.bot-dragging .bot-row:not(.bot-row-drag):not(.bot-row-ghost):hover {
+  background-color: transparent !important;
+}
+
+/* Post-drop: hover is KEPT, not suppressed. The pointer lands on the dropped
+ * row, which must come back already hovered — the clone was showing fill +
+ * grip, so the row snapping into that same look reads as one continuous object
+ * settling in place. Transitions are disabled for a beat so the :hover state
+ * applies instantly instead of replaying its fade-ins (the flash); normal
+ * animated hover resumes when the class drops. */
+body.bot-drag-settle .bot-row,
+body.bot-drag-settle .bot-row * {
+  transition: none !important;
+}
+</style>

@@ -321,7 +321,7 @@ empty grey gap above the page content:
 - **Chat window** renders a single 36px full-width drag strip at the
   top of `pages/main-section/index.vue` (gated on the macOS desktop
   shell), clearing the traffic lights for the entire window. The
-  VS Code-style shell below it (activity rail + side panel + dockview
+  workspace shell below it (activity rail + side panel + dockview
   tabs) needs no per-column drag handling.
 
 - **Settings right side** can't reuse the chat trick — settings
