@@ -65,7 +65,7 @@
                 :key="msg.id"
                 :data-message-id="msg.id"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="rounded-2xl transition-[background-color] duration-500"
+                class="rounded-2xl transition-[background-color] duration-500 scroll-mt-2 [content-visibility:auto] [contain-intrinsic-size:auto_200px]"
                 :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
@@ -75,8 +75,6 @@
                   :bot-id="currentBotId"
                   :on-open-media="galleryOpenBySrc"
                   :on-reply-click="handleReplyJump"
-                  :root-el="scrollEl"
-                  :is-scrolling="isScrolling"
                   @active="isActiveEl"
                 />
               </div>
@@ -1081,13 +1079,37 @@ const isInstant = ref(false)
 const highlightedMessageId = ref('')
 const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
-const scrollAnchorOffset = 8
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
+let settleJumpCleanup: (() => void) | null = null
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
+  settleJumpCleanup?.()
 })
+
+// Smooth scrolls animate toward a position computed before content-visibility
+// materializes the rows along the way, so long jumps can land off-target. An
+// instant scrollIntoView after scrollend is spec-guaranteed to be exact.
+function settleJump(root: HTMLElement, messageId: string) {
+  settleJumpCleanup?.()
+  const timer = setTimeout(() => settle(), 900)
+  const cancel = () => {
+    clearTimeout(timer)
+    root.removeEventListener('scrollend', settle)
+    root.removeEventListener('wheel', cancel)
+    root.removeEventListener('touchstart', cancel)
+    settleJumpCleanup = null
+  }
+  const settle = () => {
+    cancel()
+    findMessageElement(messageId)?.scrollIntoView({ behavior: 'instant', block: 'start' })
+  }
+  root.addEventListener('scrollend', settle, { once: true })
+  root.addEventListener('wheel', cancel, { passive: true })
+  root.addEventListener('touchstart', cancel, { passive: true })
+  settleJumpCleanup = cancel
+}
 
 const showJumpToBottom = computed(() =>
   isActive.value
@@ -1141,6 +1163,15 @@ function isActiveEl(isActive: boolean, item: { id: string, top: number }) {
 
 
 const lockScroll = ref(true)
+
+watch(isScrolling, (scrolling) => {
+  if (scrolling || lockScroll.value || !isActive.value) return
+  for (const item of elId) {
+    const el = findMessageElement(item.id)
+    if (el) item.top = el.getBoundingClientRect().top - 48
+  }
+})
+
 let isInit = false
 const transitionScroll=ref(false)
 onActivated(() => {
@@ -1320,7 +1351,10 @@ async function scrollToMessage(messageId: string): Promise<boolean> {
   if (!root || !target) return false
   isAutoScroll.value = false
   isInstant.value = false
-  scrollViewportTo(getElementAbsoluteTop(target, root) - scrollAnchorOffset)
+  const { pre } = planJump(root.scrollTop, getElementAbsoluteTop(target, root), root.clientHeight)
+  if (pre !== null) root.scrollTo({ top: pre, behavior: 'instant' })
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  settleJump(root, messageId)
   highlightedMessageId.value = messageId
   if (highlightTimer) clearTimeout(highlightTimer)
   highlightTimer = setTimeout(() => {

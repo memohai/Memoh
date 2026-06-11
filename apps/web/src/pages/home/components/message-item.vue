@@ -336,7 +336,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
@@ -390,18 +390,16 @@ const props = defineProps<{
   botId?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
-  isScrolling: boolean
 }>()
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-watch([isVisible, toRef(props, 'isScrolling')], () => { 
+watch(isVisible, () => {
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
-  deep:true
 })
 
 const isSelf = computed(() =>
