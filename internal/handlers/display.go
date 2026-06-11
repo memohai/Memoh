@@ -501,6 +501,7 @@ is_alpine() {
 }
 RFB_PORT=5999
 XVNC_GEOMETRY="${MEMOH_DISPLAY_GEOMETRY:-1280x960}"
+XVNC_CURSOR_ARG=-nocursor
 X_SOCKET=/tmp/.X11-unix/X99
 X_LOCK=/tmp/.X99-lock
 xvnc_pids() {
@@ -516,6 +517,18 @@ xvnc_pids() {
 }
 xvnc_running() {
   [ -n "$(xvnc_pids)" ]
+}
+xvnc_missing_arg() {
+  required="$1"
+  [ -n "$required" ] || return 1
+  for proc_dir in /proc/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
+    printf '%s\n' "$cmdline" | grep -Eq '(^|/)Xvnc$' || continue
+    printf '%s\n' "$cmdline" | grep -Fxq ':99' || continue
+    printf '%s\n' "$cmdline" | grep -Fxq -- "$required" || return 0
+  done
+  return 1
 }
 browser_pids() {
   for proc_dir in /proc/[0-9]*; do
@@ -640,6 +653,12 @@ cleanup_stale_display() {
   rm -f "$X_SOCKET" "$X_LOCK"
 }
 
+if xvnc_missing_arg "$XVNC_CURSOR_ARG"; then
+  progress 76 starting "Restarting VNC display without remote cursor"
+  stop_xvnc
+  cleanup_stale_display
+fi
+
 if ! display_socket_ready; then
   progress 78 starting "Starting VNC display"
   if xvnc_running; then
@@ -648,7 +667,7 @@ if ! display_socket_ready; then
   if ! display_socket_ready; then
     stop_xvnc
     cleanup_stale_display
-    nohup "$XVNC" :99 -geometry "$XVNC_GEOMETRY" -depth 24 -SecurityTypes None -localhost -rfbport "$RFB_PORT" >/tmp/memoh-xvnc.log 2>&1 &
+    nohup "$XVNC" :99 -geometry "$XVNC_GEOMETRY" -depth 24 -SecurityTypes None "$XVNC_CURSOR_ARG" -localhost -rfbport "$RFB_PORT" >/tmp/memoh-xvnc.log 2>&1 &
     wait_i=0
     while [ "$wait_i" -lt 25 ]; do
       display_socket_ready && break

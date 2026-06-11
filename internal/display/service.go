@@ -51,6 +51,14 @@ const (
 	screenshotMaxBytes   = 512 * 1024
 	screenshotMIME       = "image/jpeg"
 	rfbTCPAddress        = "127.0.0.1:5999"
+	inputChannelLabel    = "display-input"
+	cursorChannelLabel   = "display-cursor"
+	rfbEncodingRaw       = 0
+	rfbEncodingCopyRect  = 1
+	rfbEncodingCursor    = -239
+	rfbEncodingXCursor   = -240
+	maxCursorDimension   = 512
+	maxRFBDiscardBytes   = 256 * 1024 * 1024
 )
 
 type screenshotJPEGCandidate struct {
@@ -323,7 +331,7 @@ func (s *Service) Screenshot(ctx context.Context, botID string) ([]byte, string,
 	defer cancel()
 	go proxyRFBListener(runCtx, proxy, func(ctx context.Context) (net.Conn, error) {
 		return s.dialRFB(ctx, botID)
-	}, s.logger, botID)
+	}, s.logger, botID, false)
 
 	proxyPort := proxy.Addr().(*net.TCPAddr).Port
 	cmd := exec.CommandContext(runCtx, gstLaunch, gstreamerScreenshotArgs(proxyPort, outputPath)...) //nolint:gosec // executable is resolved from PATH or explicit admin env.
@@ -491,6 +499,10 @@ type session struct {
 	tracks   map[string]*webrtc.TrackLocalStaticRTP
 	input    *rfbInputClient
 
+	cursorMu           sync.RWMutex
+	cursorPayload      []byte
+	cursorDataChannels map[string]*webrtc.DataChannel
+
 	peersMu sync.RWMutex
 	peers   map[string]*peerSession
 
@@ -513,14 +525,15 @@ type peerSession struct {
 func newSession(service *Service, botID, gstLaunch, codec string) *session {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel is stored on the session and called when the display session stops.
 	return &session{
-		service:   service,
-		botID:     botID,
-		gstLaunch: gstLaunch,
-		codec:     codec,
-		ctx:       ctx,
-		cancel:    cancel,
-		tracks:    make(map[string]*webrtc.TrackLocalStaticRTP),
-		peers:     make(map[string]*peerSession),
+		service:            service,
+		botID:              botID,
+		gstLaunch:          gstLaunch,
+		codec:              codec,
+		ctx:                ctx,
+		cancel:             cancel,
+		tracks:             make(map[string]*webrtc.TrackLocalStaticRTP),
+		peers:              make(map[string]*peerSession),
+		cursorDataChannels: make(map[string]*webrtc.DataChannel),
 	}
 }
 
@@ -605,6 +618,7 @@ func (s *session) start(ctx context.Context) error {
 
 	go s.acceptProxy()
 	go s.forwardRTP()
+	go s.watchCursor(runCtx)
 	gstreamerDone := make(chan error, 1)
 	go s.waitGStreamer(gstreamerDone)
 
@@ -673,8 +687,19 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	}
 	go drainRTCP(sender)
 
+	cursorChannel, err := pc.CreateDataChannel(cursorChannelLabel, nil)
+	if err != nil {
+		_ = pc.Close()
+		return OfferResponse{}, fmt.Errorf("create cursor metadata channel: %w", err)
+	}
+	cursorChannelID := uuid.NewString()
+	cursorChannel.OnOpen(func() {
+		s.sendLatestCursor(cursorChannel)
+	})
+	s.addCursorDataChannel(cursorChannelID, cursorChannel)
+
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		if dc.Label() != "display-input" {
+		if dc.Label() != inputChannelLabel {
 			return
 		}
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -699,6 +724,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		cleanupOnce.Do(func() {
 			s.removePeer(peer)
 			s.removeTrack(trackID)
+			s.removeCursorDataChannel(cursorChannelID)
 			if closePeer {
 				_ = pc.Close()
 			}
@@ -777,6 +803,17 @@ type inputEvent struct {
 	Down       bool   `json:"down,omitempty"`
 }
 
+type cursorMetadata struct {
+	Type   string `json:"type"`
+	Source string `json:"source"`
+	Cursor string `json:"cursor,omitempty"`
+	Width  int    `json:"width,omitempty"`
+	Height int    `json:"height,omitempty"`
+	HotX   int    `json:"hot_x,omitempty"`
+	HotY   int    `json:"hot_y,omitempty"`
+	Hidden bool   `json:"hidden,omitempty"`
+}
+
 func (s *session) handleInput(data []byte) error {
 	if s.input == nil {
 		return errors.New("display input is unavailable")
@@ -811,6 +848,119 @@ func (s *session) removeTrack(id string) {
 	s.tracksMu.Unlock()
 	if empty {
 		go s.stop()
+	}
+}
+
+func (s *session) addCursorDataChannel(id string, channel *webrtc.DataChannel) {
+	if channel == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	s.cursorMu.Lock()
+	s.cursorDataChannels[id] = channel
+	s.cursorMu.Unlock()
+}
+
+func (s *session) removeCursorDataChannel(id string) {
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+	s.cursorMu.Lock()
+	delete(s.cursorDataChannels, id)
+	s.cursorMu.Unlock()
+}
+
+func (s *session) sendLatestCursor(channel *webrtc.DataChannel) {
+	if channel == nil {
+		return
+	}
+	s.cursorMu.RLock()
+	payload := append([]byte(nil), s.cursorPayload...)
+	s.cursorMu.RUnlock()
+	if len(payload) == 0 {
+		return
+	}
+	s.sendCursorPayload(channel, payload)
+}
+
+func (s *session) broadcastCursor(cursor cursorMetadata) {
+	payload, err := json.Marshal(cursor)
+	if err != nil {
+		s.service.logger.Debug("display cursor metadata dropped", slog.String("bot_id", s.botID), slog.Any("error", err))
+		return
+	}
+	s.cursorMu.Lock()
+	if bytes.Equal(s.cursorPayload, payload) {
+		s.cursorMu.Unlock()
+		return
+	}
+	s.cursorPayload = append(s.cursorPayload[:0], payload...)
+	channels := make([]*webrtc.DataChannel, 0, len(s.cursorDataChannels))
+	for _, channel := range s.cursorDataChannels {
+		channels = append(channels, channel)
+	}
+	s.cursorMu.Unlock()
+
+	for _, channel := range channels {
+		s.sendCursorPayload(channel, payload)
+	}
+}
+
+func (s *session) sendCursorPayload(channel *webrtc.DataChannel, payload []byte) {
+	if channel == nil || channel.ReadyState() != webrtc.DataChannelStateOpen {
+		return
+	}
+	if err := channel.SendText(string(payload)); err != nil {
+		s.service.logger.Debug("display cursor metadata send failed", slog.String("bot_id", s.botID), slog.Any("error", err))
+	}
+}
+
+func (s *session) watchCursor(ctx context.Context) {
+	backoff := 500 * time.Millisecond
+	for {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		conn, err := s.service.dialRFB(ctx, s.botID)
+		if err != nil {
+			s.service.logger.Debug("display cursor watcher unavailable", slog.String("bot_id", s.botID), slog.Any("error", err))
+			if waitContext(ctx, backoff) {
+				return
+			}
+			if backoff < 5*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+		watcher := &rfbCursorWatcher{
+			conn: conn,
+			onCursor: func(cursor cursorMetadata) {
+				s.broadcastCursor(cursor)
+			},
+		}
+		err = watcher.Run(ctx)
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if err != nil {
+			s.service.logger.Debug("display cursor watcher stopped", slog.String("bot_id", s.botID), slog.Any("error", err))
+		}
+		if waitContext(ctx, backoff) {
+			return
+		}
+		if backoff < 5*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func waitContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -958,10 +1108,10 @@ func (s *session) acceptProxy() {
 func (s *session) proxyRFB(conn net.Conn) {
 	proxyRFBConnection(s.ctx, conn, func(ctx context.Context) (net.Conn, error) {
 		return s.service.dialRFB(ctx, s.botID)
-	}, s.service.logger, s.botID)
+	}, s.service.logger, s.botID, false)
 }
 
-func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string) {
+func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string, filterCursor bool) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -970,11 +1120,11 @@ func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(c
 			}
 			return
 		}
-		go proxyRFBConnection(ctx, conn, dialRFB, logger, botID)
+		go proxyRFBConnection(ctx, conn, dialRFB, logger, botID, filterCursor)
 	}
 }
 
-func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string) {
+func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context.Context) (net.Conn, error), logger *slog.Logger, botID string, filterCursor bool) {
 	defer func() { _ = conn.Close() }()
 
 	rfbConn, err := dialRFB(ctx)
@@ -983,6 +1133,13 @@ func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context
 		return
 	}
 	defer func() { _ = rfbConn.Close() }()
+
+	if filterCursor {
+		if err := proxyRFBWithoutCursor(ctx, conn, rfbConn); err != nil && ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
+			logger.Debug("display RFB cursor-filter proxy stopped", slog.String("bot_id", botID), slog.Any("error", err))
+		}
+		return
+	}
 
 	done := make(chan struct{}, 2)
 	go func() {
@@ -994,6 +1151,374 @@ func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+func proxyRFBWithoutCursor(ctx context.Context, client, server net.Conn) error {
+	format, err := proxyRFBHandshake(client, server)
+	if err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- proxyRFBClientMessages(ctx, client, server, &format)
+	}()
+	go func() {
+		errCh <- proxyRFBServerMessages(ctx, client, server, &format)
+	}()
+	return <-errCh
+}
+
+func proxyRFBHandshake(client, server net.Conn) (rfbPixelFormat, error) {
+	version := make([]byte, 12)
+	if _, err := io.ReadFull(server, version); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB version: %w", err)
+	}
+	if _, err := client.Write(version); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB version: %w", err)
+	}
+	if _, err := io.ReadFull(client, version); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB client version: %w", err)
+	}
+	if _, err := server.Write(version); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB client version: %w", err)
+	}
+
+	securityCount := []byte{0}
+	if _, err := io.ReadFull(server, securityCount); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB security count: %w", err)
+	}
+	if _, err := client.Write(securityCount); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB security count: %w", err)
+	}
+	if securityCount[0] == 0 {
+		if err := proxyRFBLengthPrefixedBytes(server, client); err != nil {
+			return rfbPixelFormat{}, err
+		}
+		return rfbPixelFormat{}, errors.New("RFB security negotiation failed")
+	}
+	securityTypes := make([]byte, int(securityCount[0]))
+	if _, err := io.ReadFull(server, securityTypes); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB security types: %w", err)
+	}
+	if _, err := client.Write(securityTypes); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB security types: %w", err)
+	}
+	securityType := []byte{0}
+	if _, err := io.ReadFull(client, securityType); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB selected security type: %w", err)
+	}
+	if _, err := server.Write(securityType); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB selected security type: %w", err)
+	}
+	securityResult := make([]byte, 4)
+	if _, err := io.ReadFull(server, securityResult); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB security result: %w", err)
+	}
+	if _, err := client.Write(securityResult); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB security result: %w", err)
+	}
+	if binary.BigEndian.Uint32(securityResult) != 0 {
+		if err := proxyRFBLengthPrefixedBytes(server, client); err != nil {
+			return rfbPixelFormat{}, err
+		}
+		return rfbPixelFormat{}, errors.New("RFB security rejected")
+	}
+
+	clientInit := []byte{0}
+	if _, err := io.ReadFull(client, clientInit); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB client init: %w", err)
+	}
+	if _, err := server.Write(clientInit); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB client init: %w", err)
+	}
+	serverInit := make([]byte, 24)
+	if _, err := io.ReadFull(server, serverInit); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy read RFB server init: %w", err)
+	}
+	if _, err := client.Write(serverInit); err != nil {
+		return rfbPixelFormat{}, fmt.Errorf("proxy write RFB server init: %w", err)
+	}
+	nameLen := binary.BigEndian.Uint32(serverInit[20:24])
+	if nameLen > maxRFBDiscardBytes {
+		return rfbPixelFormat{}, fmt.Errorf("RFB desktop name too large: %d", nameLen)
+	}
+	if nameLen > 0 {
+		name := make([]byte, nameLen)
+		if _, err := io.ReadFull(server, name); err != nil {
+			return rfbPixelFormat{}, fmt.Errorf("proxy read RFB desktop name: %w", err)
+		}
+		if _, err := client.Write(name); err != nil {
+			return rfbPixelFormat{}, fmt.Errorf("proxy write RFB desktop name: %w", err)
+		}
+	}
+	return parseRFBPixelFormat(serverInit[4:20]), nil
+}
+
+func proxyRFBLengthPrefixedBytes(src, dst net.Conn) error {
+	lengthBuf := make([]byte, 4)
+	if _, err := io.ReadFull(src, lengthBuf); err != nil {
+		return fmt.Errorf("proxy read RFB length: %w", err)
+	}
+	if _, err := dst.Write(lengthBuf); err != nil {
+		return fmt.Errorf("proxy write RFB length: %w", err)
+	}
+	length := binary.BigEndian.Uint32(lengthBuf)
+	if length > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB length-prefixed payload too large: %d", length)
+	}
+	if _, err := io.CopyN(dst, src, int64(length)); err != nil {
+		return fmt.Errorf("proxy copy RFB length-prefixed payload: %w", err)
+	}
+	return nil
+}
+
+func proxyRFBClientMessages(ctx context.Context, client, server net.Conn, format *rfbPixelFormat) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msgType := []byte{0}
+		if _, err := io.ReadFull(client, msgType); err != nil {
+			return fmt.Errorf("proxy read RFB client message type: %w", err)
+		}
+		switch msgType[0] {
+		case 0:
+			payload := make([]byte, 19)
+			if _, err := io.ReadFull(client, payload); err != nil {
+				return fmt.Errorf("proxy read RFB set pixel format: %w", err)
+			}
+			*format = parseRFBPixelFormat(payload[3:19])
+			if _, err := server.Write(append(msgType, payload...)); err != nil {
+				return fmt.Errorf("proxy write RFB set pixel format: %w", err)
+			}
+		case 2:
+			if err := proxyRFBSetEncodingsWithCursor(client, server); err != nil {
+				return err
+			}
+		case 3:
+			if err := proxyFixedRFBClientMessage(client, server, msgType, 9, "framebuffer update request"); err != nil {
+				return err
+			}
+		case 4:
+			if err := proxyFixedRFBClientMessage(client, server, msgType, 7, "key event"); err != nil {
+				return err
+			}
+		case 5:
+			if err := proxyFixedRFBClientMessage(client, server, msgType, 5, "pointer event"); err != nil {
+				return err
+			}
+		case 6:
+			if err := proxyRFBClientCutText(client, server, msgType); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported RFB client message type %d", msgType[0])
+		}
+	}
+}
+
+func proxyFixedRFBClientMessage(client io.Reader, server io.Writer, msgType []byte, payloadSize int, name string) error {
+	payload := make([]byte, payloadSize)
+	if _, err := io.ReadFull(client, payload); err != nil {
+		return fmt.Errorf("proxy read RFB %s: %w", name, err)
+	}
+	if _, err := server.Write(append(msgType, payload...)); err != nil {
+		return fmt.Errorf("proxy write RFB %s: %w", name, err)
+	}
+	return nil
+}
+
+func proxyRFBClientCutText(client io.Reader, server io.Writer, msgType []byte) error {
+	header := make([]byte, 7)
+	if _, err := io.ReadFull(client, header); err != nil {
+		return fmt.Errorf("proxy read RFB client cut text header: %w", err)
+	}
+	length := binary.BigEndian.Uint32(header[3:7])
+	if length > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB client cut text too large: %d", length)
+	}
+	if _, err := server.Write(append(msgType, header...)); err != nil {
+		return fmt.Errorf("proxy write RFB client cut text header: %w", err)
+	}
+	if _, err := io.CopyN(server, client, int64(length)); err != nil {
+		return fmt.Errorf("proxy copy RFB client cut text: %w", err)
+	}
+	return nil
+}
+
+func proxyRFBSetEncodingsWithCursor(client io.Reader, server io.Writer) error {
+	header := make([]byte, 3)
+	if _, err := io.ReadFull(client, header); err != nil {
+		return fmt.Errorf("proxy read RFB set encodings header: %w", err)
+	}
+	count := int(binary.BigEndian.Uint16(header[1:3]))
+	buf := make([]byte, count*4)
+	if _, err := io.ReadFull(client, buf); err != nil {
+		return fmt.Errorf("proxy read RFB set encodings payload: %w", err)
+	}
+	seen := map[int32]bool{}
+	encodings := []int32{rfbEncodingCursor, rfbEncodingXCursor}
+	seen[rfbEncodingCursor] = true
+	seen[rfbEncodingXCursor] = true
+	for i := 0; i < count; i++ {
+		encoding := int32(binary.BigEndian.Uint32(buf[i*4 : i*4+4])) //nolint:gosec // RFB encodings are signed 32-bit values on the wire.
+		if encoding != rfbEncodingRaw && encoding != rfbEncodingCopyRect {
+			continue
+		}
+		if seen[encoding] {
+			continue
+		}
+		encodings = append(encodings, encoding)
+		seen[encoding] = true
+	}
+	if !seen[rfbEncodingRaw] {
+		encodings = append(encodings, rfbEncodingRaw)
+	}
+	return writeRFBSetEncodings(server, encodings)
+}
+
+func proxyRFBServerMessages(ctx context.Context, client, server net.Conn, format *rfbPixelFormat) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		msgType := []byte{0}
+		if _, err := io.ReadFull(server, msgType); err != nil {
+			return fmt.Errorf("proxy read RFB server message type: %w", err)
+		}
+		switch msgType[0] {
+		case 0:
+			if err := proxyRFBFramebufferUpdateWithoutCursor(client, server, *format); err != nil {
+				return err
+			}
+		case 2:
+			if _, err := client.Write(msgType); err != nil {
+				return fmt.Errorf("proxy write RFB bell: %w", err)
+			}
+		case 3:
+			if err := proxyRFBServerCutText(client, server, msgType); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported RFB server message type %d", msgType[0])
+		}
+	}
+}
+
+func proxyRFBServerCutText(client io.Writer, server io.Reader, msgType []byte) error {
+	header := make([]byte, 7)
+	if _, err := io.ReadFull(server, header); err != nil {
+		return fmt.Errorf("proxy read RFB server cut text header: %w", err)
+	}
+	length := binary.BigEndian.Uint32(header[3:7])
+	if length > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB server cut text too large: %d", length)
+	}
+	if _, err := client.Write(append(msgType, header...)); err != nil {
+		return fmt.Errorf("proxy write RFB server cut text header: %w", err)
+	}
+	if _, err := io.CopyN(client, server, int64(length)); err != nil {
+		return fmt.Errorf("proxy copy RFB server cut text: %w", err)
+	}
+	return nil
+}
+
+func proxyRFBFramebufferUpdateWithoutCursor(client io.Writer, server io.Reader, format rfbPixelFormat) error {
+	header := make([]byte, 3)
+	if _, err := io.ReadFull(server, header); err != nil {
+		return fmt.Errorf("proxy read RFB framebuffer update header: %w", err)
+	}
+	count := int(binary.BigEndian.Uint16(header[1:3]))
+	var payload bytes.Buffer
+	outCount := 0
+	for i := 0; i < count; i++ {
+		rect, rectHeader, err := readRFBRectHeaderBytes(server)
+		if err != nil {
+			return err
+		}
+		switch rect.encoding {
+		case rfbEncodingCursor:
+			if err := discardRFBCursor(server, rect, format); err != nil {
+				return err
+			}
+		case rfbEncodingXCursor:
+			if err := discardRFBXCursor(server, rect); err != nil {
+				return err
+			}
+		case rfbEncodingRaw:
+			payload.Write(rectHeader)
+			if err := copyRFBRectangle(&payload, server, rect, format.bytesPerPixel()); err != nil {
+				return err
+			}
+			outCount++
+		case rfbEncodingCopyRect:
+			payload.Write(rectHeader)
+			if _, err := io.CopyN(&payload, server, 4); err != nil {
+				return fmt.Errorf("proxy copy RFB copyrect payload: %w", err)
+			}
+			outCount++
+		default:
+			return fmt.Errorf("unsupported RFB rectangle encoding %d", rect.encoding)
+		}
+	}
+	outHeader := []byte{0, 0, 0, 0}
+	binary.BigEndian.PutUint16(outHeader[2:4], uint16(outCount))
+	if _, err := client.Write(outHeader); err != nil {
+		return fmt.Errorf("proxy write RFB framebuffer update header: %w", err)
+	}
+	if _, err := client.Write(payload.Bytes()); err != nil {
+		return fmt.Errorf("proxy write RFB framebuffer update payload: %w", err)
+	}
+	return nil
+}
+
+func readRFBRectHeaderBytes(r io.Reader) (rfbRectHeader, []byte, error) {
+	buf := make([]byte, 12)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return rfbRectHeader{}, nil, fmt.Errorf("read RFB rectangle header: %w", err)
+	}
+	return parseRFBRectHeader(buf), buf, nil
+}
+
+func copyRFBRectangle(dst io.Writer, src io.Reader, rect rfbRectHeader, bytesPerPixel int) error {
+	if bytesPerPixel <= 0 {
+		return errors.New("invalid RFB pixel format")
+	}
+	size := int64(rect.width) * int64(rect.height) * int64(bytesPerPixel)
+	if size < 0 || size > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB rectangle payload too large: %d", size)
+	}
+	if _, err := io.CopyN(dst, src, size); err != nil {
+		return fmt.Errorf("proxy copy RFB raw rectangle: %w", err)
+	}
+	return nil
+}
+
+func discardRFBCursor(r io.Reader, rect rfbRectHeader, format rfbPixelFormat) error {
+	bytesPerPixel := format.bytesPerPixel()
+	if bytesPerPixel <= 0 {
+		return errors.New("invalid RFB cursor pixel format")
+	}
+	size := int64(rect.width)*int64(rect.height)*int64(bytesPerPixel) + int64(rfbCursorMaskBytes(rect.width, rect.height))
+	if size < 0 || size > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB cursor payload too large: %d", size)
+	}
+	if _, err := io.CopyN(io.Discard, r, size); err != nil {
+		return fmt.Errorf("discard RFB cursor payload: %w", err)
+	}
+	return nil
+}
+
+func discardRFBXCursor(r io.Reader, rect rfbRectHeader) error {
+	size := int64(6 + rfbCursorMaskBytes(rect.width, rect.height)*2)
+	if size < 0 || size > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB XCursor payload too large: %d", size)
+	}
+	if _, err := io.CopyN(io.Discard, r, size); err != nil {
+		return fmt.Errorf("discard RFB XCursor payload: %w", err)
+	}
+	return nil
 }
 
 func (s *session) forwardRTP() {
@@ -1391,9 +1916,373 @@ func (w processLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+type rfbCursorWatcher struct {
+	conn     net.Conn
+	onCursor func(cursorMetadata)
+}
+
+type rfbServerInit struct {
+	width  uint16
+	height uint16
+	format rfbPixelFormat
+	name   string
+}
+
+type rfbPixelFormat struct {
+	bitsPerPixel uint8
+	depth        uint8
+	bigEndian    bool
+	trueColor    bool
+	redMax       uint16
+	greenMax     uint16
+	blueMax      uint16
+	redShift     uint8
+	greenShift   uint8
+	blueShift    uint8
+}
+
+type rfbRectHeader struct {
+	x        uint16
+	y        uint16
+	width    uint16
+	height   uint16
+	encoding int32
+}
+
+var cursorPixelFormat = rfbPixelFormat{
+	bitsPerPixel: 32,
+	depth:        24,
+	trueColor:    true,
+	redMax:       255,
+	greenMax:     255,
+	blueMax:      255,
+	redShift:     16,
+	greenShift:   8,
+	blueShift:    0,
+}
+
+func (w *rfbCursorWatcher) Run(ctx context.Context) error {
+	if w == nil || w.conn == nil {
+		return errors.New("RFB cursor watcher has no connection")
+	}
+	defer func() { _ = w.conn.Close() }()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = w.conn.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
+
+	init, err := handshakeRFBNoneSecurityServerInit(w.conn, true)
+	if err != nil {
+		return err
+	}
+	if init == nil || init.width == 0 || init.height == 0 {
+		return errors.New("RFB server init is missing display size")
+	}
+	if err := writeRFBSetPixelFormat(w.conn, cursorPixelFormat); err != nil {
+		return fmt.Errorf("write RFB cursor pixel format: %w", err)
+	}
+	if err := writeRFBSetEncodings(w.conn, []int32{rfbEncodingCursor, rfbEncodingXCursor, rfbEncodingRaw, rfbEncodingCopyRect}); err != nil {
+		return fmt.Errorf("write RFB cursor encodings: %w", err)
+	}
+
+	incremental := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := writeRFBFramebufferUpdateRequest(w.conn, incremental, 0, 0, init.width, init.height); err != nil {
+			return fmt.Errorf("request RFB cursor update: %w", err)
+		}
+		incremental = true
+		if err := w.readServerMessage(); err != nil {
+			return err
+		}
+	}
+}
+
+func (w *rfbCursorWatcher) readServerMessage() error {
+	msgType := []byte{0}
+	if _, err := io.ReadFull(w.conn, msgType); err != nil {
+		return fmt.Errorf("read RFB server message type: %w", err)
+	}
+	switch msgType[0] {
+	case 0:
+		return w.readFramebufferUpdate()
+	case 2:
+		return nil
+	case 3:
+		return skipRFBCutText(w.conn)
+	default:
+		return fmt.Errorf("unsupported RFB server message type %d", msgType[0])
+	}
+}
+
+func (w *rfbCursorWatcher) readFramebufferUpdate() error {
+	header := make([]byte, 3)
+	if _, err := io.ReadFull(w.conn, header); err != nil {
+		return fmt.Errorf("read RFB framebuffer update header: %w", err)
+	}
+	count := int(binary.BigEndian.Uint16(header[1:3]))
+	for i := 0; i < count; i++ {
+		rect, err := readRFBRectHeader(w.conn)
+		if err != nil {
+			return err
+		}
+		switch rect.encoding {
+		case rfbEncodingCursor:
+			cursor, err := readRFBRichCursor(w.conn, rect, cursorPixelFormat)
+			if err != nil {
+				return err
+			}
+			if w.onCursor != nil {
+				w.onCursor(cursor)
+			}
+		case rfbEncodingXCursor:
+			cursor, err := readRFBXCursor(w.conn, rect)
+			if err != nil {
+				return err
+			}
+			if w.onCursor != nil {
+				w.onCursor(cursor)
+			}
+		case rfbEncodingRaw:
+			if err := skipRFBRectangle(w.conn, rect, cursorPixelFormat.bytesPerPixel()); err != nil {
+				return err
+			}
+		case rfbEncodingCopyRect:
+			if _, err := io.CopyN(io.Discard, w.conn, 4); err != nil {
+				return fmt.Errorf("skip RFB copyrect payload: %w", err)
+			}
+		default:
+			return fmt.Errorf("unsupported RFB rectangle encoding %d", rect.encoding)
+		}
+	}
+	return nil
+}
+
+func readRFBRectHeader(r io.Reader) (rfbRectHeader, error) {
+	buf := make([]byte, 12)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return rfbRectHeader{}, fmt.Errorf("read RFB rectangle header: %w", err)
+	}
+	return parseRFBRectHeader(buf), nil
+}
+
+func parseRFBRectHeader(buf []byte) rfbRectHeader {
+	if len(buf) < 12 {
+		return rfbRectHeader{}
+	}
+	return rfbRectHeader{
+		x:        binary.BigEndian.Uint16(buf[0:2]),
+		y:        binary.BigEndian.Uint16(buf[2:4]),
+		width:    binary.BigEndian.Uint16(buf[4:6]),
+		height:   binary.BigEndian.Uint16(buf[6:8]),
+		encoding: int32(binary.BigEndian.Uint32(buf[8:12])), //nolint:gosec // RFB encodings are signed 32-bit values on the wire.
+	}
+}
+
+func readRFBRichCursor(r io.Reader, rect rfbRectHeader, format rfbPixelFormat) (cursorMetadata, error) {
+	if rect.width == 0 || rect.height == 0 {
+		return cursorMetadata{Type: "cursor", Source: "rfb", Hidden: true}, nil
+	}
+	if rect.width > maxCursorDimension || rect.height > maxCursorDimension {
+		return cursorMetadata{}, fmt.Errorf("RFB cursor is too large: %dx%d", rect.width, rect.height)
+	}
+	bytesPerPixel := format.bytesPerPixel()
+	pixelBytes := int(rect.width) * int(rect.height) * bytesPerPixel
+	maskBytes := rfbCursorMaskBytes(rect.width, rect.height)
+	pixels := make([]byte, pixelBytes)
+	if _, err := io.ReadFull(r, pixels); err != nil {
+		return cursorMetadata{}, fmt.Errorf("read RFB cursor pixels: %w", err)
+	}
+	mask := make([]byte, maskBytes)
+	if _, err := io.ReadFull(r, mask); err != nil {
+		return cursorMetadata{}, fmt.Errorf("read RFB cursor mask: %w", err)
+	}
+	return richCursorMetadata(rect, pixels, mask, format)
+}
+
+func readRFBXCursor(r io.Reader, rect rfbRectHeader) (cursorMetadata, error) {
+	if rect.width == 0 || rect.height == 0 {
+		return cursorMetadata{Type: "cursor", Source: "rfb", Hidden: true}, nil
+	}
+	if rect.width > maxCursorDimension || rect.height > maxCursorDimension {
+		return cursorMetadata{}, fmt.Errorf("RFB XCursor is too large: %dx%d", rect.width, rect.height)
+	}
+	maskBytes := rfbCursorMaskBytes(rect.width, rect.height)
+	payload := make([]byte, 6+maskBytes*2)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return cursorMetadata{}, fmt.Errorf("read RFB XCursor payload: %w", err)
+	}
+	return cursorMetadataFromGeometry(rect), nil
+}
+
+func richCursorMetadata(rect rfbRectHeader, pixels, mask []byte, format rfbPixelFormat) (cursorMetadata, error) {
+	if rect.width == 0 || rect.height == 0 {
+		return cursorMetadata{Type: "cursor", Source: "rfb", Hidden: true}, nil
+	}
+	bytesPerPixel := format.bytesPerPixel()
+	expectedPixels := int(rect.width) * int(rect.height) * bytesPerPixel
+	expectedMask := rfbCursorMaskBytes(rect.width, rect.height)
+	if len(pixels) != expectedPixels {
+		return cursorMetadata{}, fmt.Errorf("RFB cursor pixel length = %d, want %d", len(pixels), expectedPixels)
+	}
+	if len(mask) != expectedMask {
+		return cursorMetadata{}, fmt.Errorf("RFB cursor mask length = %d, want %d", len(mask), expectedMask)
+	}
+	return cursorMetadataFromGeometry(rect), nil
+}
+
+func cursorMetadataFromGeometry(rect rfbRectHeader) cursorMetadata {
+	return cursorMetadata{
+		Type:   "cursor",
+		Source: "rfb",
+		Cursor: nativeCursorType(rect),
+		Width:  int(rect.width),
+		Height: int(rect.height),
+		HotX:   int(rect.x),
+		HotY:   int(rect.y),
+	}
+}
+
+func nativeCursorType(rect rfbRectHeader) string {
+	width := int(rect.width)
+	height := int(rect.height)
+	hotX := int(rect.x)
+	hotY := int(rect.y)
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	centerX := width / 2
+	centerY := height / 2
+	if width <= 18 && height >= 18 && absInt(hotX-centerX) <= 3 && absInt(hotY-centerY) <= 4 {
+		return "text"
+	}
+	if width >= height*2 && absInt(hotY-centerY) <= 4 {
+		return "ew-resize"
+	}
+	if height >= width*2 && absInt(hotX-centerX) <= 4 {
+		return "ns-resize"
+	}
+	if width >= 18 && height >= 18 && absInt(hotX-centerX) <= 4 && absInt(hotY-centerY) <= 4 {
+		return "move"
+	}
+	if width >= 16 && height >= 16 && hotX > 3 && hotY <= 5 {
+		return "pointer"
+	}
+	return "default"
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func (f rfbPixelFormat) bytesPerPixel() int {
+	if f.bitsPerPixel == 0 {
+		return 0
+	}
+	return int(f.bitsPerPixel+7) / 8
+}
+
+func rfbCursorMaskBytes(width, height uint16) int {
+	return int((width+7)/8) * int(height)
+}
+
+func writeRFBSetPixelFormat(w io.Writer, format rfbPixelFormat) error {
+	msg := make([]byte, 20)
+	msg[0] = 0
+	msg[4] = format.bitsPerPixel
+	msg[5] = format.depth
+	if format.bigEndian {
+		msg[6] = 1
+	}
+	if format.trueColor {
+		msg[7] = 1
+	}
+	binary.BigEndian.PutUint16(msg[8:10], format.redMax)
+	binary.BigEndian.PutUint16(msg[10:12], format.greenMax)
+	binary.BigEndian.PutUint16(msg[12:14], format.blueMax)
+	msg[14] = format.redShift
+	msg[15] = format.greenShift
+	msg[16] = format.blueShift
+	_, err := w.Write(msg)
+	return err
+}
+
+func writeRFBSetEncodings(w io.Writer, encodings []int32) error {
+	if len(encodings) > 0xffff {
+		return fmt.Errorf("too many RFB encodings: %d", len(encodings))
+	}
+	msg := make([]byte, 4+len(encodings)*4)
+	msg[0] = 2
+	binary.BigEndian.PutUint16(msg[2:4], uint16(len(encodings))) //nolint:gosec // Length is range-checked above.
+	offset := 4
+	for _, encoding := range encodings {
+		binary.BigEndian.PutUint32(msg[offset:offset+4], uint32(encoding))
+		offset += 4
+	}
+	_, err := w.Write(msg)
+	return err
+}
+
+func writeRFBFramebufferUpdateRequest(w io.Writer, incremental bool, x, y, width, height uint16) error {
+	msg := make([]byte, 10)
+	msg[0] = 3
+	if incremental {
+		msg[1] = 1
+	}
+	binary.BigEndian.PutUint16(msg[2:4], x)
+	binary.BigEndian.PutUint16(msg[4:6], y)
+	binary.BigEndian.PutUint16(msg[6:8], width)
+	binary.BigEndian.PutUint16(msg[8:10], height)
+	_, err := w.Write(msg)
+	return err
+}
+
+func skipRFBRectangle(r io.Reader, rect rfbRectHeader, bytesPerPixel int) error {
+	if bytesPerPixel <= 0 {
+		return errors.New("invalid RFB pixel format")
+	}
+	size := int64(rect.width) * int64(rect.height) * int64(bytesPerPixel)
+	if size < 0 || size > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB rectangle payload too large: %d", size)
+	}
+	if _, err := io.CopyN(io.Discard, r, size); err != nil {
+		return fmt.Errorf("skip RFB raw rectangle: %w", err)
+	}
+	return nil
+}
+
+func skipRFBCutText(r io.Reader) error {
+	header := make([]byte, 7)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return fmt.Errorf("read RFB cut text header: %w", err)
+	}
+	length := binary.BigEndian.Uint32(header[3:7])
+	if length > maxRFBDiscardBytes {
+		return fmt.Errorf("RFB cut text too large: %d", length)
+	}
+	if _, err := io.CopyN(io.Discard, r, int64(length)); err != nil {
+		return fmt.Errorf("skip RFB cut text: %w", err)
+	}
+	return nil
+}
+
 type rfbInputClient struct {
-	mu   sync.Mutex
-	conn net.Conn
+	mu             sync.Mutex
+	conn           net.Conn
+	lastX          int
+	lastY          int
+	lastButtonMask uint8
+	hasPointer     bool
 }
 
 func newRFBInputClient(conn net.Conn) (*rfbInputClient, error) {
@@ -1422,6 +2311,14 @@ func (c *rfbInputClient) Pointer(x, y int, buttonMask uint8) error {
 	if c.conn == nil {
 		return net.ErrClosed
 	}
+	c.lastX = x
+	c.lastY = y
+	c.lastButtonMask = buttonMask
+	c.hasPointer = true
+	return c.writePointerLocked(x, y, buttonMask)
+}
+
+func (c *rfbInputClient) writePointerLocked(x, y int, buttonMask uint8) error {
 	msg := []byte{5, buttonMask, 0, 0, 0, 0}
 	binary.BigEndian.PutUint16(msg[2:4], clampUint16(x))
 	binary.BigEndian.PutUint16(msg[4:6], clampUint16(y))
@@ -1440,8 +2337,23 @@ func (c *rfbInputClient) Key(keysym uint32, down bool) error {
 		msg[1] = 1
 	}
 	binary.BigEndian.PutUint32(msg[4:8], keysym)
+	if c.hasPointer {
+		jitterX := c.lastX - 1
+		if jitterX < 0 {
+			jitterX = c.lastX + 1
+		}
+		msg = append(msg, pointerEventBytes(jitterX, c.lastY, c.lastButtonMask)...)
+		msg = append(msg, pointerEventBytes(c.lastX, c.lastY, c.lastButtonMask)...)
+	}
 	_, err := c.conn.Write(msg)
 	return err
+}
+
+func pointerEventBytes(x, y int, buttonMask uint8) []byte {
+	msg := []byte{5, buttonMask, 0, 0, 0, 0}
+	binary.BigEndian.PutUint16(msg[2:4], clampUint16(x))
+	binary.BigEndian.PutUint16(msg[4:6], clampUint16(y))
+	return msg
 }
 
 func (c *rfbInputClient) handshake() error {
@@ -1454,69 +2366,102 @@ func probeRFBNoneSecurity(conn net.Conn) error {
 }
 
 func handshakeRFBNoneSecurity(conn net.Conn, clientInit bool) error {
+	_, err := handshakeRFBNoneSecurityServerInit(conn, clientInit)
+	return err
+}
+
+func handshakeRFBNoneSecurityServerInit(conn net.Conn, clientInit bool) (*rfbServerInit, error) {
 	if err := conn.SetDeadline(time.Now().Add(displayProbePeriod)); err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
 	version := make([]byte, 12)
 	if _, err := io.ReadFull(conn, version); err != nil {
-		return fmt.Errorf("read RFB version: %w", err)
+		return nil, fmt.Errorf("read RFB version: %w", err)
 	}
 	if _, err := conn.Write(version); err != nil {
-		return fmt.Errorf("write RFB version: %w", err)
+		return nil, fmt.Errorf("write RFB version: %w", err)
 	}
 
 	count := []byte{0}
 	if _, err := io.ReadFull(conn, count); err != nil {
-		return fmt.Errorf("read RFB security types: %w", err)
+		return nil, fmt.Errorf("read RFB security types: %w", err)
 	}
 	if count[0] == 0 {
 		reason, err := readRFBString(conn)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("RFB security negotiation failed: %s", reason)
+		return nil, fmt.Errorf("RFB security negotiation failed: %s", reason)
 	}
 	types := make([]byte, int(count[0]))
 	if _, err := io.ReadFull(conn, types); err != nil {
-		return fmt.Errorf("read RFB security type list: %w", err)
+		return nil, fmt.Errorf("read RFB security type list: %w", err)
 	}
 	if !containsByte(types, 1) {
-		return errors.New("RFB server does not allow None security")
+		return nil, errors.New("RFB server does not allow None security")
 	}
 	if _, err := conn.Write([]byte{1}); err != nil {
-		return fmt.Errorf("write RFB security type: %w", err)
+		return nil, fmt.Errorf("write RFB security type: %w", err)
 	}
 	result := make([]byte, 4)
 	if _, err := io.ReadFull(conn, result); err != nil {
-		return fmt.Errorf("read RFB security result: %w", err)
+		return nil, fmt.Errorf("read RFB security result: %w", err)
 	}
 	if binary.BigEndian.Uint32(result) != 0 {
 		reason, err := readRFBString(conn)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("RFB security rejected: %s", reason)
+		return nil, fmt.Errorf("RFB security rejected: %s", reason)
 	}
 	if !clientInit {
-		return nil
+		return nil, nil
 	}
 
 	if _, err := conn.Write([]byte{1}); err != nil {
-		return fmt.Errorf("write RFB client init: %w", err)
+		return nil, fmt.Errorf("write RFB client init: %w", err)
 	}
 	header := make([]byte, 24)
 	if _, err := io.ReadFull(conn, header); err != nil {
-		return fmt.Errorf("read RFB server init: %w", err)
+		return nil, fmt.Errorf("read RFB server init: %w", err)
+	}
+	init := &rfbServerInit{
+		width:  binary.BigEndian.Uint16(header[0:2]),
+		height: binary.BigEndian.Uint16(header[2:4]),
+		format: parseRFBPixelFormat(header[4:20]),
 	}
 	nameLen := binary.BigEndian.Uint32(header[20:24])
 	if nameLen > 0 {
-		if _, err := io.CopyN(io.Discard, conn, int64(nameLen)); err != nil {
-			return fmt.Errorf("read RFB server name: %w", err)
+		if nameLen > 4096 {
+			return nil, fmt.Errorf("RFB desktop name too large: %d", nameLen)
 		}
+		name := make([]byte, nameLen)
+		if _, err := io.ReadFull(conn, name); err != nil {
+			return nil, fmt.Errorf("read RFB server name: %w", err)
+		}
+		init.name = string(name)
 	}
-	return nil
+	return init, nil
+}
+
+func parseRFBPixelFormat(data []byte) rfbPixelFormat {
+	if len(data) < 16 {
+		return rfbPixelFormat{}
+	}
+	return rfbPixelFormat{
+		bitsPerPixel: data[0],
+		depth:        data[1],
+		bigEndian:    data[2] != 0,
+		trueColor:    data[3] != 0,
+		redMax:       binary.BigEndian.Uint16(data[4:6]),
+		greenMax:     binary.BigEndian.Uint16(data[6:8]),
+		blueMax:      binary.BigEndian.Uint16(data[8:10]),
+		redShift:     data[10],
+		greenShift:   data[11],
+		blueShift:    data[12],
+	}
 }
 
 func readRFBString(r io.Reader) (string, error) {
