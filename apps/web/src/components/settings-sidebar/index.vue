@@ -7,11 +7,21 @@
       :collapsible="desktopShell ? 'none' : 'icon'"
       :class="desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
     >
+      <!-- Traffic-reserve top padding: clears the macOS traffic lights (bottom edge
+           ≈28px from top) with a comfortable ~20px gap below them — tighter than the
+           old full-width header's 62px (which read as over-reserved) but not cramped
+           against the lights. Web has no traffic lights, so it keeps the bare 18px
+           (which makes the back-row icon sit ~29px from top, matching its ~30px from
+           the left — a balanced corner). -->
       <SidebarHeader
         v-if="!hideHeader"
-        class="px-[16px] pt-[18px] pb-3 border-0"
+        class="px-[16px] pb-3 border-0"
+        :class="macTrafficReserve ? 'pt-[48px] [-webkit-app-region:drag]' : 'pt-[18px]'"
       >
-        <NavItem @click="router.push(_backToChatRoute).catch(() => {})">
+        <NavItem
+          class="[-webkit-app-region:no-drag]"
+          @click="router.push(_backToChatRoute).catch(() => {})"
+        >
           <ChevronLeft class="size-3.5 shrink-0" />
           <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
         </NavItem>
@@ -155,9 +165,14 @@ import NavItem from './nav-item.vue'
 const props = withDefaults(defineProps<{
   hideHeader?: boolean
   excludeItems?: string[]
+  // When true, the sidebar header reserves space for the macOS traffic lights and
+  // becomes a window drag region — used when this sidebar runs to the very top of
+  // the window (no full-width topbar above it), mirroring the chat SideBar.
+  macTrafficReserve?: boolean
 }>(), {
   hideHeader: false,
   excludeItems: () => [],
+  macTrafficReserve: false,
 })
 
 defineEmits<{ back: [] }>()

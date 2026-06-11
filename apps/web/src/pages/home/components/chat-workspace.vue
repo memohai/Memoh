@@ -1,7 +1,7 @@
 <template>
   <div
     ref="rootEl"
-    class="flex flex-col flex-1 h-full min-w-0 bg-card"
+    class="flex flex-col flex-1 h-full min-w-0 bg-background"
   >
     <DockviewVue
       class="h-full w-full"

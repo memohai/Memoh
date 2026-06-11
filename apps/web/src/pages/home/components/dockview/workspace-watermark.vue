@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full w-full items-center justify-center bg-card">
+  <div class="flex h-full w-full items-center justify-center bg-background">
     <div class="text-center px-6">
       <p class="text-xs font-medium text-foreground">
         {{ t('chat.workspaceEmpty') }}

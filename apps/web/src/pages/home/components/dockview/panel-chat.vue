@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full bg-card">
+  <div class="h-full w-full bg-background">
     <KeepAlive>
       <ChatPane
         v-if="visible"

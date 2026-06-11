@@ -1,14 +1,5 @@
 <template>
   <div class="flex h-dvh flex-col overflow-hidden">
-    <!-- Full-width top bar: a drag region that clears the macOS traffic lights and
-         visually separates the chrome from the sidebar/content below, so the sidebar
-         no longer has to align its items to the traffic lights. Stays static while
-         the view below slides on navigation. -->
-    <header
-      v-if="desktopShell"
-      class="h-11 shrink-0 border-b border-border bg-background [-webkit-app-region:drag]"
-    />
-
     <div class="min-h-0 flex-1">
       <!-- Whole settings view (sidebar + content) slides in from the right on open,
            faster slide-out on leave; navigation is held until the leave plays. -->
@@ -28,11 +19,30 @@
             <template #sidebar>
               <!-- De-nest: inside a single bot, its own nav (rendered by
                    bots/detail.vue) takes over this column, so the settings nav
-                   steps aside instead of stacking a second sidebar beside it. -->
-              <SettingsSidebar v-if="!isBotDetail" />
+                   steps aside instead of stacking a second sidebar beside it.
+                   The sidebar is h-dvh, so its right border now runs unbroken from
+                   the very top — there's no full-width topbar cutting across it.
+                   The macOS traffic lights are cleared by the sidebar's own top
+                   drag row (mac-traffic-reserve), mirroring the chat SideBar. -->
+              <SettingsSidebar
+                v-if="!isBotDetail"
+                :mac-traffic-reserve="macTrafficReserve"
+              />
             </template>
             <template #main>
               <SidebarInset class="flex flex-col overflow-hidden">
+                <!-- Top drag strip over the content pane only (not full-width), so
+                     the window stays draggable up here while the sidebar's vertical
+                     edge reads as the single continuous divider. No border/fill —
+                     it shares --background with the content below. Skipped for bot
+                     detail: that route renders its OWN full-height sidebar inside
+                     #main (MasterDetailSidebarLayout), so a strip here would sit
+                     ON TOP of it and push its divider down — bot detail handles its
+                     own top drag/traffic clearance instead. -->
+                <div
+                  v-if="desktopShell && !isBotDetail"
+                  class="h-8 shrink-0 [-webkit-app-region:drag]"
+                />
                 <section class="flex-1 relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
                   <router-view v-slot="{ Component }">
                     <KeepAlive>
@@ -58,6 +68,15 @@ import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 
 const desktopShell = inject(DesktopShellKey, false)
+
+// macOS desktop only: the settings sidebar now runs to the very top of the window
+// (the old full-width topbar is gone), so its header must clear the traffic lights.
+// Mirrors main-section's computation.
+const macTrafficReserve = computed(() =>
+  desktopShell
+  && typeof navigator !== 'undefined'
+  && navigator.platform.toLowerCase().includes('mac'),
+)
 
 const route = useRoute()
 // On a single bot's detail page the bot's own nav owns the left column, so we

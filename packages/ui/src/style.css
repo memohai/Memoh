@@ -1095,7 +1095,12 @@
   --accent-foreground: oklch(0.86 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0.001 286);
-  --border: oklch(1 0 0 / 10%);
+  /* Dark dividers/borders sit at 8% white. Now that the chrome surface was lifted
+   * 14→19 (--sidebar), 6% had dropped the seams to Δ14 against it; 8% restores a
+   * clear Δ19 on BOTH the content (12→31) and chrome (19→38) planes. Width is
+   * unchanged (1px) — only the contrast tracks the brighter surface. Still well
+   * below the old hard 10%. Light mode is unaffected. */
+  --border: oklch(1 0 0 / 8%);
   --border-hairline: oklch(0.422 0 0);
   --border-menu: oklch(1 0 0 / 0.14);
   /* Dark: a dark palette on a dark scrim DOES need an edge, so here the elevated
@@ -1110,7 +1115,7 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.165 0 0);
+  --sidebar: oklch(0.185 0 0);
   --sidebar-foreground: oklch(0.90 0 0);
   --sidebar-primary: oklch(0.62 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -1118,7 +1123,7 @@
   --sidebar-accent-foreground: oklch(0.86 0 0);
   /* Subtle sidebar hover: above the canvas (0.165), below the active fill (0.26). */
   --sidebar-hover: oklch(0.21 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.62 0.22 290);
   --scrollbar-thumb: oklch(1 0 0 / 0.14);
   --scrollbar-thumb-hover: oklch(1 0 0 / 0.26);
@@ -1527,14 +1532,14 @@
   --muted-foreground: oklch(0.62 0.006 var(--scheme-hue));
   --accent: var(--secondary);
   --accent-foreground: var(--foreground);
-  --border: oklch(1 0 0 / 10%);
+  --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 14%);
-  --sidebar: oklch(0.165 0.006 var(--scheme-hue));
+  --sidebar: oklch(0.185 0.006 var(--scheme-hue));
   --sidebar-foreground: var(--card-foreground);
   --sidebar-accent: var(--secondary);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-hover: oklch(0.21 0.006 var(--scheme-hue));
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 8%);
   --ui-hover: oklch(0.30 0.006 var(--scheme-hue));
   --ui-selected: oklch(0.30 0.006 var(--scheme-hue));
   --ui-on: oklch(0.34 0.007 var(--scheme-hue));

@@ -2,17 +2,26 @@
  * tokens from @memohai/ui style.css so the dock chrome follows light/dark
  * and any future palette swap automatically. */
 .dockview-theme-memoh {
-  --dv-group-view-background-color: var(--card);
+  /* Two layers, mirroring the settings page + browser/VS-Code tab logic:
+   *   CONTENT plane = --background (dark 12): the group view AND the active tab,
+   *     so the selected tab sinks down and reads as continuous with the pane it
+   *     owns.
+   *   CHROME plane = --sidebar (dark 14): the tab strip container AND every
+   *     non-active tab, one notch up — the same recessed chrome as the sidebar.
+   * So the active tab (12) drops OUT of the 14 strip onto the 12 content, while
+   * unselected tabs stay at 14. Light mode shifts negligibly. --card/--popover
+   * are untouched, so menus/dialogs still lift on the brighter 24. */
+  --dv-group-view-background-color: var(--background);
 
-  --dv-tabs-and-actions-container-background-color: var(--background);
+  --dv-tabs-and-actions-container-background-color: var(--sidebar);
   --dv-tabs-and-actions-container-height: 36px;
   --dv-tabs-and-actions-container-font-size: 12px;
 
-  --dv-activegroup-visiblepanel-tab-background-color: var(--card);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
   --dv-activegroup-visiblepanel-tab-color: var(--foreground);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--card);
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -65,7 +74,7 @@
 }
 
 /* Bar/content divider: runs the full width but stops under the active tab so
- * the tab and the view below (both --card) read as one continuous surface.
+ * the tab and the view below (both --background) read as one continuous surface.
  *
  * It's painted as a pseudo-element pinned BEHIND the tabs (z-index: -1), not as
  * the container's box border. The classic trick — let the active tab overflow
@@ -97,7 +106,7 @@
   margin-top: 0;
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
-  background-color: var(--card);
+  background-color: var(--background);
 }
 
 .dockview-theme-memoh .dv-right-actions-container {
