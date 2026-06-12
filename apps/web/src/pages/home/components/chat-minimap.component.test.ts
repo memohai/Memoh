@@ -45,9 +45,9 @@ describe('chat minimap active pinning', () => {
 
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', ResizeObserverStub)
-    Element.prototype.scrollTo = function (options?: ScrollToOptions | number) {
+    Element.prototype.scrollTo = function (this: Element, options?: ScrollToOptions | number) {
       if (typeof options === 'object' && options?.top !== undefined) this.scrollTop = options.top
-    } as typeof Element.prototype.scrollTo
+    }
 
     scrollEl = document.createElement('div')
     scrollEl.getBoundingClientRect = () => ({ top: 0 }) as DOMRect
@@ -89,7 +89,7 @@ describe('chat minimap active pinning', () => {
   }
 
   function options() {
-    return [...root.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+    return Array.from(root.querySelectorAll<HTMLButtonElement>('[role="option"]'))
   }
 
   function selectedIndex() {
@@ -132,6 +132,17 @@ describe('chat minimap active pinning', () => {
     await flush()
     await settleScrollAt(2900)
     scrollEl.dispatchEvent(new Event('wheel'))
+    await settleScrollAt(0)
+    expect(selectedIndex()).toBe(0)
+  })
+
+  it('resumes scroll spy when another control scrolls after landing', async () => {
+    await flush()
+    openPanel()
+    await flush()
+    options()[2]!.click()
+    await flush()
+    await settleScrollAt(2900)
     await settleScrollAt(0)
     expect(selectedIndex()).toBe(0)
   })

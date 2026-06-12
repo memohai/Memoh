@@ -68,7 +68,7 @@ function rebuild() {
   const wanted = new Set(anchors.value.map(anchor => anchor.id))
   const rootRect = root.getBoundingClientRect()
   const tops = new Map<string, number>()
-  for (const el of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-message-id]'))) {
     const id = el.dataset.messageId
     if (id && wanted.has(id)) {
       tops.set(id, root.scrollTop + el.getBoundingClientRect().top - rootRect.top)
@@ -87,9 +87,21 @@ function scheduleRebuild() {
   }, 200)
 }
 
-// Set on minimap navigation: the clicked entry stays active until the user
-// scrolls on their own, so probe-based spy can't reassign it on landing.
+// Set on minimap navigation: the clicked entry stays active until something
+// else scrolls, so probe-based spy can't reassign it on landing. The landing
+// window ends at the first scrollend (with a timer fallback); any scroll after
+// that — jump-to-bottom, keyboard, reply jump — resumes the spy.
 let pinned = false
+let landing = false
+let landingTimer: number | null = null
+
+function endLanding() {
+  if (landingTimer !== null) {
+    clearTimeout(landingTimer)
+    landingTimer = null
+  }
+  landing = false
+}
 
 watch(anchorsKey, () => {
   pinned = false
@@ -107,13 +119,16 @@ function syncFromScroll() {
 
 let scrollRaf = 0
 useEventListener(() => props.scrollEl, 'scroll', () => {
+  if (pinned && !landing) pinned = false
   if (scrollRaf) return
   scrollRaf = requestAnimationFrame(() => {
     scrollRaf = 0
     syncFromScroll()
   })
 }, { passive: true })
+useEventListener(() => props.scrollEl, 'scrollend', endLanding, { passive: true })
 useEventListener(() => props.scrollEl, ['wheel', 'touchstart', 'pointerdown'], () => {
+  endLanding()
   pinned = false
 }, { passive: true })
 
@@ -212,6 +227,9 @@ function navigate(index: number) {
   activeIndex.value = index
   highlightedIndex.value = index
   pinned = true
+  landing = true
+  if (landingTimer !== null) clearTimeout(landingTimer)
+  landingTimer = window.setTimeout(endLanding, 1000)
   emit('navigate', anchor.id)
 }
 
@@ -265,6 +283,7 @@ function onListKeydown(event: KeyboardEvent) {
 onBeforeUnmount(() => {
   clearOpenTimers()
   if (rebuildTimer !== null) clearTimeout(rebuildTimer)
+  if (landingTimer !== null) clearTimeout(landingTimer)
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
 })
 </script>
