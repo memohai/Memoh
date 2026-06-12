@@ -130,8 +130,8 @@ import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
+  AudioLines,
   Box,
-  Captions,
   ChartNoAxesColumn,
   ChevronLeft,
   CircleUserRound,
@@ -142,7 +142,6 @@ import {
   MousePointer2,
   Store,
   Users,
-  Volume2,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
@@ -224,8 +223,7 @@ const coreNavItems = computed<NavItem[]>(() => filterItems([
   { title: t('sidebar.providers'), name: 'providers', icon: Box },
   { title: t('sidebar.memory'), name: 'memory', icon: Database },
   { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-  { title: t('sidebar.speech'), name: 'speech', icon: Volume2 },
-  { title: t('sidebar.transcription'), name: 'transcription', icon: Captions },
+  { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
 ]))
 
 const integrationsNavItems = computed<NavItem[]>(() => filterItems([

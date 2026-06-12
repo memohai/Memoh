@@ -109,6 +109,7 @@
     "network": "Network",
     "speech": "Speech",
     "transcription": "Transcription",
+    "voice": "Voice",
     "email": "Email",
     "settings": "Settings",
     "profile": "Profile",
@@ -826,6 +827,14 @@
     "actionSuccess": "Action completed",
     "name": "Name",
     "namePlaceholder": "Configuration name"
+  },
+  "voice": {
+    "title": "Voice",
+    "speakTitle": "Speaking",
+    "speakHint": "Read replies aloud.",
+    "listenTitle": "Listening",
+    "listenHint": "Turn speech into text.",
+    "empty": "No backends yet — add a provider with voice support."
   },
   "speech": {
     "title": "Speech",

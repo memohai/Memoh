@@ -110,6 +110,7 @@
     "network": "网络配置",
     "speech": "语音合成",
     "transcription": "语音转写",
+    "voice": "语音",
     "email": "邮件服务",
     "profile": "个人资料",
     "home": "首页",
@@ -822,6 +823,14 @@
     "actionSuccess": "操作已完成",
     "name": "名称",
     "namePlaceholder": "输入配置名称"
+  },
+  "voice": {
+    "title": "语音",
+    "speakTitle": "朗读",
+    "speakHint": "把回复读成语音。",
+    "listenTitle": "聆听",
+    "listenHint": "把语音转成文字。",
+    "empty": "暂无可用后端，添加具备语音能力的服务商即可。"
   },
   "speech": {
     "title": "语音合成",

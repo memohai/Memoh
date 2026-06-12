@@ -75,16 +75,10 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
     meta: { breadcrumb: i18nRef('sidebar.memory') }
   },
   {
-    name: 'speech',
-    path: '/settings/speech',
-    loader: () => import('@memohai/web/pages/speech/index.vue'),
-    meta: { breadcrumb: i18nRef('sidebar.speech') }
-  },
-  {
-    name: 'transcription',
-    path: '/settings/transcription',
-    loader: () => import('@memohai/web/pages/transcription/index.vue'),
-    meta: { breadcrumb: i18nRef('sidebar.transcription') }
+    name: 'voice',
+    path: '/settings/voice',
+    loader: () => import('@memohai/web/pages/voice/index.vue'),
+    meta: { breadcrumb: i18nRef('sidebar.voice') }
   },
   {
     name: 'email',

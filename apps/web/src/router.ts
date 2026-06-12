@@ -122,20 +122,22 @@ const routes = [
         },
       },
       {
-        name: 'speech',
-        path: 'speech',
-        component: () => import('@/pages/speech/index.vue'),
+        name: 'voice',
+        path: 'voice',
+        component: () => import('@/pages/voice/index.vue'),
         meta: {
-          breadcrumb: i18nRef('sidebar.speech'),
+          breadcrumb: i18nRef('sidebar.voice'),
         },
       },
+      // Speech and transcription merged into the Voice page; keep the old paths
+      // working for existing links/bookmarks.
       {
-        name: 'transcription',
+        path: 'speech',
+        redirect: { name: 'voice' },
+      },
+      {
         path: 'transcription',
-        component: () => import('@/pages/transcription/index.vue'),
-        meta: {
-          breadcrumb: i18nRef('sidebar.transcription'),
-        },
+        redirect: { name: 'voice' },
       },
       {
         name: 'email',
