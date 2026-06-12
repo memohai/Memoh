@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS search_providers (
   CONSTRAINT search_providers_name_unique UNIQUE (name)
 );
 
+CREATE TABLE IF NOT EXISTS fetch_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}',
+  enable INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fetch_providers_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS models (
   id TEXT PRIMARY KEY,
   model_id TEXT NOT NULL,
@@ -153,6 +164,7 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
+  fetch_provider_id TEXT REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
   heartbeat_interval INTEGER NOT NULL DEFAULT 1440,

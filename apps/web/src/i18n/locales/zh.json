@@ -700,12 +700,18 @@
     }
   },
   "webSearch": {
-    "title": "搜索提供方",
-    "add": "添加搜索提供方",
+    "title": "网页搜索",
+    "add": "添加",
+    "addFetch": "添加抓取提供方",
     "empty": "暂无搜索提供方",
-    "provider": "提供方类型",
+    "emptyFetch": "暂无抓取提供方",
+    "provider": "类型",
+    "fetchProvider": "抓取提供方类型",
+    "searchProviders": "搜索",
+    "fetchProviders": "抓取",
     "selectHint": "请选择或新建一个搜索提供方",
     "unsupportedProvider": "该提供方暂未实现配置面板",
+    "nativeManaged": "Native 由 Memoh 管理，并始终保持启用。",
     "saveSuccess": "搜索提供方配置已保存",
     "deleteSuccess": "搜索提供方配置已删除",
     "deleteFailed": "删除搜索提供方配置失败",
@@ -713,7 +719,10 @@
     "emptyTitle": "暂无搜索提供方",
     "emptyDescription": "请先添加搜索提供方，才能配置搜索功能",
     "deleteConfirm": "确定删除该搜索提供方？删除后无法恢复。",
+    "deleteFetchConfirm": "确定删除该抓取提供方？删除后无法恢复。",
     "providerNames": {
+      "native": "Native",
+      "cloudflare_markdown": "Cloudflare Markdown",
       "brave": "Brave",
       "bing": "Bing",
       "google": "Google",
@@ -726,6 +735,10 @@
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
       "yandex": "Yandex"
+    },
+    "fetchProviderNames": {
+      "jina": "Jina Reader",
+      "cloudflare_markdown": "Cloudflare Markdown"
     }
   },
   "memory": {
@@ -1660,6 +1673,8 @@
       "titleModelPlaceholder": "未启用（不自动生成标题）",
       "searchProvider": "搜索提供方",
       "searchProviderPlaceholder": "选择搜索提供方",
+      "fetchProvider": "网页抓取提供方",
+      "fetchProviderPlaceholder": "选择网页抓取提供方",
       "memoryProvider": "记忆提供方",
       "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
       "memoryModePreview": "当前内置模式：{mode}",

@@ -88,6 +88,9 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	if err != nil {
 		return nil, err
 	}
+	if !provider.Enable {
+		return nil, errors.New("search provider is disabled")
+	}
 	registerSearchProviderSecrets(provider)
 
 	query := strings.TrimSpace(StringArg(args, "query"))
