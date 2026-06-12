@@ -67,6 +67,9 @@ Memoh/
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
+│   ├── acpagent/               #   ACP (Agent Control Protocol) runtime session pool
+│   ├── acpclient/              #   ACP client process management
+│   ├── acpprofile/             #   ACP profile definitions
 │   ├── agent/                  #   In-process AI agent (Twilight AI SDK integration)
 │   │   ├── agent.go            #     Core agent: Stream() / Generate() via Twilight SDK
 │   │   ├── stream.go           #     Streaming event assembly
@@ -103,10 +106,12 @@ Memoh/
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
+│   ├── audio/                  #   Audio/TTS processing utilities
 │   ├── auth/                   #   JWT authentication middleware and utilities
 │   ├── bind/                   #   Channel identity-to-user binding code management
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
+│   ├── botbackup/              #   Bot backup/export/import service
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, local
 │   │   └── identities/        #     Channel identity service
@@ -127,6 +132,7 @@ Memoh/
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
 │   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
 │   ├── identity/               #   Identity type utilities (human vs bot)
+│   ├── i18n/                   #   Command and message internationalization
 │   ├── logger/                 #   Structured logging (slog)
 │   ├── mcp/                    #   MCP protocol manager (connections, OAuth, tool gateway)
 │   ├── media/                  #   Content-addressed media asset service
@@ -134,8 +140,10 @@ Memoh/
 │   ├── message/                #   Message persistence and event publishing
 │   ├── messaging/              #   Outbound message executor
 │   ├── models/                 #   LLM model management (CRUD, variants, client types, probe)
+│   ├── network/                #   Workspace container network configuration
 │   ├── oauthctx/               #   OAuth context helpers
 │   ├── pipeline/               #   Discuss/chat pipeline (adapt, projection, rendering, driver)
+│   ├── plugins/                #   Plugin system (manifests, installations, lifecycle)
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
@@ -145,11 +153,14 @@ Memoh/
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
 │   ├── session/                #   Bot session management service
 │   ├── settings/               #   Bot settings management
+│   ├── skills/                 #   Skill registry and activation
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
+│   ├── toolapproval/           #   Tool call approval flow
 │   ├── tts/                    #   Text-to-speech provider management
 │   ├── tui/                    #   Terminal UI (Charm stack for CLI interactive mode)
+│   ├── userinput/              #   In-conversation user input requests (ask_user tool)
 │   ├── version/                #   Build-time version information
 │   └── workspace/              #   Workspace container lifecycle management
 │       ├── manager.go          #     Container reconciliation, gRPC connection pool
@@ -169,7 +180,7 @@ Memoh/
 ├── spec/                       # OpenAPI specifications (swagger.json, swagger.yaml)
 ├── db/                         # Database
 │   ├── postgres/               #   PostgreSQL SQL resources
-│   │   ├── migrations/         #   SQL migration files (0001–0067+)
+│   │   ├── migrations/         #   SQL migration files (PostgreSQL 0001–0092+, SQLite 0001–0017+)
 │   │   └── queries/            #   SQL query files (sqlc input)
 │   └── sqlite/                 #   SQLite SQL resources (parallel backend track)
 │       ├── migrations/         #   SQLite migration files
@@ -198,6 +209,19 @@ Memoh/
 ```
 
 ## Development Guide
+
+### Local Conventions
+
+Before making changes to a directory, check whether that directory (or its nearest parent application/package directory) contains an `AGENTS.md`. If it does, read it first. Local files contain domain-specific conventions that override or extend this root guide.
+
+Key local developer guides:
+- `apps/web/AGENTS.md` — web frontend architecture, routing, page conventions, and i18n rules.
+- `apps/desktop/AGENTS.md` — Electron shell, local server lifecycle, bundled CLI.
+- `packages/ui/AGENTS.md` — design language contract: tokens, radius, shadow, motion, and the UI contract guard.
+
+Bot persona templates (not developer guides):
+- `cmd/bridge/template/AGENTS.md`
+- `internal/workspace/templates/AGENTS.md`
 
 ### Prerequisites
 
@@ -241,6 +265,11 @@ Memoh/
 | `mise run release` | Release new version (bumpp) |
 | `mise run install-socktainer` | Install socktainer (macOS container backend) |
 | `mise run install-workspace-toolkit` | Install workspace toolkit (bridge binary etc.) |
+
+### Dev Component Wall & UI Contract Guard
+
+- The dev component wall at `apps/web/src/pages/dev/components/` is the living reference for `@memohai/ui` components and tokens. Use it to verify visual changes locally.
+- `scripts/check-ui-contract.mjs` is a mechanical guard wired into `mise run lint`. It enforces the design token contract from `packages/ui/AGENTS.md` (no raw colors, no invented shadows, no off-list arbitrary radius). Run lint before committing UI changes.
 
 ### Docker Deployment
 
@@ -335,6 +364,16 @@ PostgreSQL migrations live in `db/postgres/migrations/` and follow a dual-update
 - `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker, local, or archive-backed flows.
 - SSE-based progress feedback is provided during container image pull and creation.
 
+### Recent Major Subsystems
+
+The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
+
+- **ACP (`internal/acpagent/`, `internal/acpclient/`, `internal/acpprofile/`)** — runtime pool and OAuth integration for external ACP agents such as Claude Code and Codex.
+- **Plugin system (`internal/plugins/`)** — plugin manifests, installations, enable/disable lifecycle, and OAuth client bindings. The web Supermarket pages (`apps/web/src/pages/supermarket/`) consume this API to discover and install plugins/skills.
+- **User input / `ask_user` (`internal/userinput/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
+- **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
+- **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
+
 ## Database Tables
 
 The canonical source of truth for the full PostgreSQL schema is `db/postgres/migrations/0001_init.up.sql`. Key tables grouped by domain:
@@ -357,11 +396,14 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `bot_history_message_assets` — Message → content_hash asset links (with name and metadata)
 - `bot_history_message_compacts` — Compacted message summaries
 
+**User Input**
+- `user_input_requests` — In-conversation questions posed by the `ask_user` tool, keyed by session and tool_call_id
+
 **Providers & Models**
 - `providers` — LLM provider configurations (name, base_url, api_key)
 - `provider_oauth_tokens` — Provider-level OAuth tokens
 - `user_provider_oauth_tokens` — Per-user provider OAuth tokens
-- `models` — Model definitions (chat/embedding/speech types, modalities, reasoning)
+- `models` — Model definitions (chat/embedding/speech types, modalities, reasoning, vision, tool calling)
 - `model_variants` — Model variant definitions (weight, metadata)
 - `search_providers` — Search engine provider configurations
 - `memory_providers` — Multi-provider memory adapter configurations
@@ -370,11 +412,16 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `mcp_connections` — MCP connection configurations per bot
 - `mcp_oauth_tokens` — MCP OAuth tokens
 
+**Plugins**
+- `bot_plugin_installations` — Installed plugins per bot and their enabled state
+- `bot_plugin_resources` — Plugin-scoped resources and OAuth client bindings
+
 **Containers**
 - `containers` — Bot container instances
 - `snapshots` — Container snapshots
 - `container_versions` — Container version tracking
 - `lifecycle_events` — Container lifecycle events
+- `bot_workspace_resource_limits` — Per-bot CPU/memory/storage quotas
 
 **Email**
 - `email_providers` — Pluggable email service backends (Mailgun, generic SMTP)
