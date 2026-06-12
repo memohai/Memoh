@@ -65,7 +65,7 @@
                 :key="msg.id"
                 :data-message-id="msg.id"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="rounded-2xl transition-[background-color] duration-500 scroll-mt-2 [content-visibility:auto] [contain-intrinsic-size:auto_200px]"
+                class="rounded-2xl transition-[background-color] duration-500 scroll-mt-2 [content-visibility:auto] [contain-intrinsic-size:auto_600px]"
                 :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
