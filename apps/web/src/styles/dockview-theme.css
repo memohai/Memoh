@@ -1,27 +1,32 @@
 /* Memoh dockview theme: maps dockview's --dv-* variables onto the design
  * tokens from @memohai/ui style.css so the dock chrome follows light/dark
- * and any future palette swap automatically. */
+ * and any future palette swap automatically.
+ *
+ * Two-plane editor model (VS-Code): the active tab and the view it owns both
+ * sit on --surface-editor, so the selected tab reads as continuous with its
+ * pane. The tab strip and every unselected tab sit on --surface-chrome — the
+ * same recessed chrome as the left rail. Because the two planes differ in BOTH
+ * light and dark (see apps/web/src/style.css), the active tab "punches through"
+ * the strip by its FILL alone: no painted divider, no overflow fight, and no
+ * brand top-accent needed (the old inset highlight is gone). */
 .dockview-theme-memoh {
-  /* Two layers, mirroring the settings page + browser/VS-Code tab logic:
-   *   CONTENT plane = --background (dark 12): the group view AND the active tab,
-   *     so the selected tab sinks down and reads as continuous with the pane it
-   *     owns.
-   *   CHROME plane = --sidebar (dark 14): the tab strip container AND every
-   *     non-active tab, one notch up — the same recessed chrome as the sidebar.
-   * So the active tab (12) drops OUT of the 14 strip onto the 12 content, while
-   * unselected tabs stay at 14. Light mode shifts negligibly. --card/--popover
-   * are untouched, so menus/dialogs still lift on the brighter 24. */
-  --dv-group-view-background-color: var(--background);
+  --dv-group-view-background-color: var(--surface-editor);
 
-  --dv-tabs-and-actions-container-background-color: var(--sidebar);
+  --dv-tabs-and-actions-container-background-color: var(--surface-chrome);
   --dv-tabs-and-actions-container-height: 36px;
   --dv-tabs-and-actions-container-font-size: 12px;
 
-  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
+  /* Active group: visible tab drops to the editor surface (continuous with the
+   * pane below); hidden tabs blend into the strip. */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--surface-editor);
   --dv-activegroup-visiblepanel-tab-color: var(--foreground);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
-  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+
+  /* Inactive group: its selected tab must still read as selected (same editor
+   * surface, just a dimmer label — VS Code's unfocused-active tab). Without this
+   * the second pane's current tab looked grey/unselected after a split. */
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface-editor);
   --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -44,81 +49,39 @@
 
   --dv-border-radius: 0px;
   --dv-tab-border-radius: 0px;
-  --dv-tab-margin: 4px 0 0 4px;
+  /* No top margin: a 4px top margin made tabs sit low and a tab visibly "jump
+   * up" the moment it became active (the active tab dropped the margin). Zero
+   * keeps active and inactive tabs vertically identical. */
+  --dv-tab-margin: 0;
 
   --dv-floating-border: 1px solid var(--border);
-
-  /* Reserve space at the start of the tab strip for the global workspace chrome
-   * (workbench toggle + back/forward) that pages/main-section overlays on top
-   * of the dock. The reserve = inset + controls block; the mac-collapsed case
-   * additionally clears the window traffic lights. Keep these in sync with the
-   * button offsets in pages/main-section/index.vue. */
-  --ws-chrome-inset: 8px; /* matches the controls' `left-2` offset */
-  --ws-chrome-controls: 96px; /* 3 × 28px (size-7) buttons + gaps + buffer */
-  --ws-mac-traffic: 76px; /* macOS traffic-light clearance */
 }
 
-/* Hover step for background tabs (the custom tab content itself is
- * transparent; the .dv-tab container owns the chip background). */
+/* The custom tab content (workspace-tab.vue) owns its own padding/ellipsis; the
+ * .dv-tab container only carries the chip background (from the --dv-* vars above)
+ * and the width clamp so a long title truncates rather than ballooning the strip
+ * — short titles ("New Chat") still get a fuller chip than a cramped sliver. */
 .dockview-theme-memoh .dv-tab {
   box-sizing: border-box;
-  transition: background-color 0.15s ease;
-  /* Give short titles (e.g. "New Chat") a fuller tab chip instead of a cramped
-   * sliver; cap the width so a long title truncates rather than ballooning the
-   * strip. The custom tab content (workspace-tab.vue) handles the ellipsis. */
-  min-width: 9rem;
-  max-width: 16rem;
+  padding: 0;
+  transition: background-color 0.12s ease;
+  min-width: 8rem;
+  max-width: 15rem;
 }
+
+/* Hover lifts UNSELECTED tabs only — the active tab never hovers (VS Code). */
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
   background-color: var(--ui-hover);
 }
 
-/* Bar/content divider: runs the full width but stops under the active tab so
- * the tab and the view below (both --background) read as one continuous surface.
- *
- * It's painted as a pseudo-element pinned BEHIND the tabs (z-index: -1), not as
- * the container's box border. The classic trick — let the active tab overflow
- * 1px to cover the border — can't work here because dockview's tab strip is
- * overflow:auto and clips anything reaching past it. Painting the line behind
- * everything instead lets the opaque active tab simply hide the slice under
- * itself, while the transparent rest of the bar lets the line show through. */
-.dockview-theme-memoh .dv-tabs-and-actions-container {
-  position: relative;
-  /* Establish a stacking context so the z-index:-1 divider below sits ABOVE
-   * the container's own (opaque) background. Without it, position:relative
-   * alone (z-index:auto) doesn't create a context and the divider drops behind
-   * the background — i.e. the whole line disappears. */
-  isolation: isolate;
-}
-
-.dockview-theme-memoh .dv-tabs-and-actions-container::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: -1;
-  height: 1px;
-  background-color: var(--border);
-}
-
+/* Active tab = editor surface, continuous with the pane below. The two planes
+ * differ in both light and dark, so the fill step alone marks the active tab —
+ * no top-accent line, no divider. */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
-  height: 100%;
-  margin-top: 0;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  background-color: var(--background);
+  background-color: var(--surface-editor);
 }
 
-.dockview-theme-memoh .dv-right-actions-container {
+.dockview-theme-memoh .dv-right-actions-container,
+.dockview-theme-memoh .dv-left-actions-container {
   align-items: center;
-}
-
-/* Reserve room at the start of the tab strip for the chrome buttons. The value
- * is driven by main-section as --ws-tabstrip-pad (measured from the chat layer's
- * own left edge, so it tracks the chrome as it rides the sliding edge). It rides
- * on the SAME curve as the chat layer's `left` so the first tab stays put under
- * the chrome the whole transition. Fallback = closed non-mac reserve. */
-.dockview-theme-memoh .dv-tabs-and-actions-container {
-  padding-left: var(--ws-tabstrip-pad, calc(var(--ws-chrome-inset) + var(--ws-chrome-controls)));
-  transition: padding-left 300ms cubic-bezier(0.32, 0.72, 0, 1);
 }

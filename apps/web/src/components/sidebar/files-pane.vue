@@ -6,9 +6,9 @@
         variant="ghost"
         size="sm"
         class="size-7 p-0"
-        :disabled="loading || operationLoading"
+        :disabled="operationLoading"
         :title="t('bots.files.upload')"
-        @click="triggerUpload"
+        @click="triggerUpload(rootPath)"
       >
         <Upload class="size-3.5" />
       </Button>
@@ -17,7 +17,7 @@
         variant="ghost"
         size="sm"
         class="size-7 p-0"
-        :disabled="loading || operationLoading"
+        :disabled="operationLoading"
         :title="t('bots.files.uploadFolder')"
         @click="triggerDirectoryUpload"
       >
@@ -28,9 +28,9 @@
         variant="ghost"
         size="sm"
         class="size-7 p-0"
-        :disabled="loading || operationLoading"
+        :disabled="operationLoading"
         :title="t('bots.files.newFolder')"
-        @click="openMkdirDialog"
+        @click="openMkdirDialog(rootPath)"
       >
         <FolderPlus class="size-3.5" />
       </Button>
@@ -39,7 +39,7 @@
         size="sm"
         class="size-7 p-0"
         :class="selectionMode ? 'bg-sidebar-accent text-foreground!' : ''"
-        :disabled="loading || operationLoading || entries.length === 0"
+        :disabled="operationLoading"
         :aria-pressed="selectionMode"
         :title="selectionMode ? t('bots.files.doneSelecting') : t('bots.files.selectMode')"
         @click="toggleSelectionMode"
@@ -79,40 +79,12 @@
         size="sm"
         class="size-7 p-0"
         :class="selectedCount > 0 ? '' : 'ml-auto'"
-        :disabled="loading || operationLoading"
+        :disabled="operationLoading"
         :title="t('common.refresh')"
         @click="reload"
       >
-        <RefreshCw
-          class="size-3.5"
-          :class="{ 'animate-spin': loading }"
-        />
+        <RefreshCw class="size-3.5" />
       </Button>
-    </div>
-
-    <div class="flex items-center px-2 py-1.5 shrink-0 overflow-x-auto">
-      <nav class="flex min-w-0 items-center gap-0.5 text-caption">
-        <template
-          v-for="(seg, idx) in pathSegments(currentPath)"
-          :key="seg.path"
-        >
-          <ChevronRight
-            v-if="idx > 0"
-            class="size-3 shrink-0 text-muted-foreground"
-          />
-          <TextButton
-            class="min-w-0 truncate text-caption"
-            :class="idx === pathSegments(currentPath).length - 1 && 'text-foreground'"
-            @click="navigateTo(seg.path)"
-          >
-            <Folder
-              v-if="idx === 0"
-              class="size-3 shrink-0"
-            />
-            {{ seg.name }}
-          </TextButton>
-        </template>
-      </nav>
     </div>
 
     <input
@@ -134,11 +106,9 @@
 
     <div
       v-if="uploadStatus"
-      class="flex shrink-0 items-center gap-1 border-y border-border px-2 py-1.5 text-caption"
+      class="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 text-caption"
     >
-      <span
-        class="min-w-0 truncate text-muted-foreground"
-      >
+      <span class="min-w-0 truncate text-muted-foreground">
         {{ uploadStatus }}
       </span>
     </div>
@@ -146,22 +116,7 @@
     <div class="flex-1 min-h-0 relative">
       <div class="absolute inset-0">
         <ScrollArea class="h-full">
-          <FileList
-            :entries="entries"
-            :loading="loading"
-            :selected-paths="selectedPaths"
-            :selection-mode="selectionMode"
-            :selection-disabled="operationLoading"
-            :can-write="canWrite"
-            @navigate="navigateTo"
-            @open="handleOpenFile"
-            @download="handleDownload"
-            @extract="handleExtract"
-            @rename="openRenameDialog"
-            @delete="openDeleteDialog"
-            @toggle-select="toggleSelection"
-            @select-all="selectAllVisible"
-          />
+          <FileTree />
         </ScrollArea>
       </div>
     </div>
@@ -297,13 +252,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@memohai/ui'
-import { ChevronRight, CloudUpload, Download, Folder, Upload, FolderPlus, ListChecks, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { CloudUpload, Download, Upload, FolderPlus, ListChecks, RefreshCw, Trash2 } from 'lucide-vue-next'
 import {
   Button,
-  TextButton,
   Input,
   Dialog,
   DialogContent,
@@ -323,8 +277,9 @@ import {
 import type { HandlersFsFileInfo } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
-import { pathSegments, joinPath } from '@/components/file-manager/utils'
-import FileList from '@/components/file-manager/file-list.vue'
+import { joinPath, parentPath } from '@/components/file-manager/utils'
+import FileTree from '@/components/file-manager/file-tree.vue'
+import { FileTreeKey } from '@/components/file-manager/file-tree-context'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { storeToRefs } from 'pinia'
@@ -338,11 +293,19 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const workspaceTabs = useWorkspaceTabsStore()
+const { activeId } = storeToRefs(workspaceTabs)
 const canWrite = computed(() => props.canWrite)
 
-const currentPath = ref('/data')
-const entries = ref<HandlersFsFileInfo[]>([])
-const loading = ref(false)
+const rootPath = '/data'
+
+// Tree state shared with FileTree / FileTreeNode via provide.
+const refreshKey = ref(0)
+const revealPath = ref<string | null>(null)
+const activePath = computed(() => {
+  const id = activeId.value
+  return id && id.startsWith('file:') ? id.slice('file:'.length) : null
+})
+
 const uploadInputRef = ref<HTMLInputElement>()
 const directoryInputRef = ref<HTMLInputElement>()
 const uploadStatus = ref('')
@@ -352,9 +315,8 @@ const extractLoading = ref(false)
 const batchDeleteDialogOpen = ref(false)
 const batchDeleteLoading = ref(false)
 const selectionMode = ref(false)
-const selectedPaths = ref<Set<string>>(new Set())
-const selectedEntries = computed(() => entries.value.filter(entry => entry.path && selectedPaths.value.has(entry.path)))
-const selectedCount = computed(() => selectedEntries.value.length)
+const selectedEntries = ref<Map<string, HandlersFsFileInfo>>(new Map())
+const selectedCount = computed(() => selectedEntries.value.size)
 const operationLoading = computed(() => directoryUploading.value || batchArchiveLoading.value || extractLoading.value || batchDeleteLoading.value)
 
 interface DirectoryUploadFile {
@@ -420,45 +382,55 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-async function loadDirectory(path: string) {
-  if (!props.botId) return
-  loading.value = true
-  try {
-    let lastError: unknown
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const { data } = await getBotsByBotIdContainerFsList({
-          path: { bot_id: props.botId },
-          query: { path },
-          throwOnError: true,
-        })
-        entries.value = data.entries ?? []
-        currentPath.value = data.path ?? path
-        pruneSelection()
-        return
-      } catch (error) {
-        lastError = error
-        if (attempt < 2 && isTransientWorkspaceError(error)) {
-          await wait(500 * (attempt + 1))
-          continue
-        }
-        throw error
+// List a single directory's entries (with a short retry for transient workspace
+// errors). Used by the tree per folder; failures surface as a toast and an empty
+// folder rather than breaking the whole tree.
+async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+  if (!props.botId) return []
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { data } = await getBotsByBotIdContainerFsList({
+        path: { bot_id: props.botId },
+        query: { path },
+        throwOnError: true,
+      })
+      return data.entries ?? []
+    } catch (error) {
+      lastError = error
+      if (attempt < 2 && isTransientWorkspaceError(error)) {
+        await wait(500 * (attempt + 1))
+        continue
       }
+      throw error
     }
-    throw lastError
+  }
+  throw lastError
+}
+
+async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+  try {
+    return await listDirectory(path)
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.loadFailed')))
-  } finally {
-    loading.value = false
+    return []
   }
 }
 
-function navigateTo(path: string) {
-  void loadDirectory(path)
+function reload() {
+  refreshKey.value++
 }
 
-function reload() {
-  void loadDirectory(currentPath.value)
+// Reveal a path in the tree (expand its ancestors + scroll into view). Used by
+// the store's openFilesAt deep-link.
+function navigateTo(path: string) {
+  const target = (path ?? '').trim()
+  if (!target) return
+  // Re-assign even if unchanged so repeated requests still re-trigger reveal.
+  revealPath.value = null
+  void Promise.resolve().then(() => {
+    revealPath.value = target
+  })
 }
 
 function handleOpenFile(entry: HandlersFsFileInfo) {
@@ -466,13 +438,19 @@ function handleOpenFile(entry: HandlersFsFileInfo) {
   workspaceTabs.openFile(entry.path)
 }
 
-function triggerUpload() {
+// ---- upload --------------------------------------------------------------
+
+const uploadTarget = ref(rootPath)
+
+function triggerUpload(target: string) {
   if (!props.canWrite) return
+  uploadTarget.value = target || rootPath
   uploadInputRef.value?.click()
 }
 
 async function triggerDirectoryUpload() {
   if (!props.canWrite) return
+  uploadTarget.value = rootPath
   const picker = (window as unknown as {
     showDirectoryPicker?: () => Promise<FileSystemDirectoryHandleLike>
   }).showDirectoryPicker
@@ -569,7 +547,7 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
   if (!props.canWrite) return
   if (directoryUploading.value) return
   const rootName = payload.rootName.trim() || t('bots.files.uploadedFolderFallbackName')
-  const destinationRoot = joinPath(currentPath.value, rootName)
+  const destinationRoot = joinPath(uploadTarget.value, rootName)
   const directories = [...new Set([
     '',
     ...payload.directories,
@@ -632,7 +610,7 @@ async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
     } else {
       toast.success(t('bots.files.uploadFolderSuccess'))
     }
-    await loadDirectory(currentPath.value)
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
   } finally {
@@ -649,7 +627,7 @@ async function handleUpload(event: Event) {
   const file = input.files?.[0]
   if (!file) return
 
-  const destPath = joinPath(currentPath.value, file.name)
+  const destPath = joinPath(uploadTarget.value, file.name)
   try {
     await postBotsByBotIdContainerFsUpload({
       path: { bot_id: props.botId },
@@ -657,7 +635,8 @@ async function handleUpload(event: Event) {
       throwOnError: true,
     })
     toast.success(t('bots.files.uploadSuccess'))
-    void loadDirectory(currentPath.value)
+    if (uploadTarget.value !== rootPath) navigateTo(uploadTarget.value)
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
   } finally {
@@ -665,12 +644,16 @@ async function handleUpload(event: Event) {
   }
 }
 
+// ---- mkdir ---------------------------------------------------------------
+
 const mkdirDialogOpen = ref(false)
 const mkdirName = ref('')
 const mkdirLoading = ref(false)
+const mkdirTarget = ref(rootPath)
 
-function openMkdirDialog() {
+function openMkdirDialog(target: string) {
   if (!props.canWrite) return
+  mkdirTarget.value = target || rootPath
   mkdirName.value = ''
   mkdirDialogOpen.value = true
 }
@@ -684,18 +667,21 @@ async function handleMkdir() {
   try {
     await postBotsByBotIdContainerFsMkdir({
       path: { bot_id: props.botId },
-      body: { path: joinPath(currentPath.value, name) },
+      body: { path: joinPath(mkdirTarget.value, name) },
       throwOnError: true,
     })
     mkdirDialogOpen.value = false
     toast.success(t('bots.files.mkdirSuccess'))
-    void loadDirectory(currentPath.value)
+    if (mkdirTarget.value !== rootPath) navigateTo(mkdirTarget.value)
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.mkdirFailed')))
   } finally {
     mkdirLoading.value = false
   }
 }
+
+// ---- rename --------------------------------------------------------------
 
 const renameDialogOpen = ref(false)
 const renameTarget = ref<HandlersFsFileInfo | null>(null)
@@ -713,7 +699,7 @@ async function handleRename() {
   if (!props.canWrite) return
   const target = renameTarget.value
   const newName = renameNewName.value.trim()
-  if (!target || !newName || renameLoading.value) return
+  if (!target || !target.path || !newName || renameLoading.value) return
 
   renameLoading.value = true
   try {
@@ -721,19 +707,21 @@ async function handleRename() {
       path: { bot_id: props.botId },
       body: {
         oldPath: target.path,
-        newPath: joinPath(currentPath.value, newName),
+        newPath: joinPath(parentPath(target.path), newName),
       },
       throwOnError: true,
     })
     renameDialogOpen.value = false
     toast.success(t('bots.files.renameSuccess'))
-    void loadDirectory(currentPath.value)
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.renameFailed')))
   } finally {
     renameLoading.value = false
   }
 }
+
+// ---- delete --------------------------------------------------------------
 
 const deleteDialogOpen = ref(false)
 const deleteTarget = ref<HandlersFsFileInfo | null>(null)
@@ -759,7 +747,12 @@ async function handleDelete() {
     })
     deleteDialogOpen.value = false
     toast.success(t('bots.files.deleteSuccess'))
-    void loadDirectory(currentPath.value)
+    if (target.path) {
+      const next = new Map(selectedEntries.value)
+      next.delete(target.path)
+      selectedEntries.value = next
+    }
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.deleteFailed')))
   } finally {
@@ -767,44 +760,30 @@ async function handleDelete() {
   }
 }
 
-function pruneSelection() {
-  const visiblePaths = new Set(entries.value.map(entry => entry.path).filter(Boolean))
-  const next = new Set<string>()
-  for (const selected of selectedPaths.value) {
-    if (visiblePaths.has(selected)) next.add(selected)
-  }
-  selectedPaths.value = next
+// ---- selection + batch ---------------------------------------------------
+
+function isSelected(path: string): boolean {
+  return selectedEntries.value.has(path)
 }
 
 function toggleSelection(entry: HandlersFsFileInfo, selected: boolean) {
   if (!entry.path) return
-  const next = new Set(selectedPaths.value)
-  if (selected) next.add(entry.path)
+  const next = new Map(selectedEntries.value)
+  if (selected) next.set(entry.path, entry)
   else next.delete(entry.path)
-  selectedPaths.value = next
-  if (selected || next.size > 0 || selectionMode.value) {
-    selectionMode.value = true
-  }
+  selectedEntries.value = next
+  if (selected) selectionMode.value = true
 }
 
 function toggleSelectionMode() {
   selectionMode.value = !selectionMode.value
   if (!selectionMode.value) {
-    selectedPaths.value = new Set()
+    selectedEntries.value = new Map()
   }
-}
-
-function selectAllVisible(selected: boolean) {
-  if (!selected) {
-    selectedPaths.value = new Set()
-    return
-  }
-  selectedPaths.value = new Set(entries.value.map(entry => entry.path).filter((value): value is string => !!value))
-  selectionMode.value = selectedPaths.value.size > 0
 }
 
 async function handleBatchDownload() {
-  const paths = selectedEntries.value.map(entry => entry.path).filter((value): value is string => !!value)
+  const paths = [...selectedEntries.value.values()].map(entry => entry.path).filter((value): value is string => !!value)
   if (paths.length === 0 || batchArchiveLoading.value) return
   batchArchiveLoading.value = true
   try {
@@ -838,7 +817,7 @@ function openBatchDeleteDialog() {
 
 async function handleBatchDelete() {
   if (!props.canWrite) return
-  const targets = [...selectedEntries.value]
+  const targets = [...selectedEntries.value.values()]
   if (targets.length === 0 || batchDeleteLoading.value) return
   batchDeleteLoading.value = true
   let failed = 0
@@ -855,13 +834,13 @@ async function handleBatchDelete() {
       }
     }
     batchDeleteDialogOpen.value = false
-    selectedPaths.value = new Set()
+    selectedEntries.value = new Map()
     if (failed > 0) {
       toast.error(t('bots.files.batchDeletePartialFailed', { failed, total: targets.length }))
     } else {
       toast.success(t('bots.files.deleteSuccess'))
     }
-    void loadDirectory(currentPath.value)
+    reload()
   } finally {
     batchDeleteLoading.value = false
   }
@@ -887,7 +866,7 @@ async function handleExtract(entry: HandlersFsFileInfo) {
       throw new Error(await readErrorMessage(response, t('bots.files.extractFailed')))
     }
     toast.success(t('bots.files.extractSuccess'))
-    void loadDirectory(currentPath.value)
+    reload()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('bots.files.extractFailed')))
   } finally {
@@ -907,8 +886,39 @@ function handleDownload(entry: HandlersFsFileInfo) {
   a.click()
 }
 
+function requestNewFolder(entry: HandlersFsFileInfo) {
+  if (entry.isDir && entry.path) openMkdirDialog(entry.path)
+}
+
+function requestUpload(entry: HandlersFsFileInfo) {
+  if (entry.isDir && entry.path) triggerUpload(entry.path)
+}
+
+provide(FileTreeKey, {
+  canWrite,
+  selectionMode,
+  refreshKey,
+  revealPath,
+  activePath,
+  rootPath,
+  listDirectory: safeListDirectory,
+  isSelected,
+  toggleSelect: toggleSelection,
+  openFile: handleOpenFile,
+  requestDownload: handleDownload,
+  requestRename: openRenameDialog,
+  requestDelete: openDeleteDialog,
+  requestExtract: handleExtract,
+  requestNewFolder,
+  requestUpload,
+})
+
+// Reset + reload when the bot changes.
 watch(() => props.botId, () => {
-  void loadDirectory(currentPath.value)
+  selectedEntries.value = new Map()
+  selectionMode.value = false
+  revealPath.value = null
+  reload()
 }, { immediate: true })
 
 // Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/exec).
@@ -916,7 +926,7 @@ const chatStore = useChatStore()
 const { fsChangedAt } = storeToRefs(chatStore)
 watch(fsChangedAt, () => {
   if (!props.botId) return
-  void loadDirectory(currentPath.value)
+  reload()
 })
 
 defineExpose({

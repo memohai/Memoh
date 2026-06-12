@@ -1,36 +1,30 @@
 <template>
   <div
-    class="group/tab relative flex h-full min-w-0 items-center pl-2.5 pr-2"
-    :style="{ '--tab-fade': isActive ? 'var(--background)' : 'var(--ui-hover)' }"
+    class="group/tab relative flex h-full min-w-0 items-center pl-3 pr-7"
     @auxclick.middle.prevent="close"
   >
+    <!-- Active state is signalled by text color (and the CSS top-accent on the
+         tab chip), NOT by weight or size — so selecting a tab never changes the
+         label's metrics or baseline. -->
     <span
       class="min-w-0 flex-1 truncate text-xs leading-none transition-colors"
-      :class="isActive
-        ? 'font-semibold text-foreground dark:text-[color:oklch(0.97_0_0)]'
-        : 'font-normal text-muted-foreground'"
+      :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
     >{{ title }}</span>
-    <!-- Close is a floating overlay pinned to the right, revealed only on hover,
-         so it never reserves layout: the title always uses the full tab width
-         and simply truncates. A short gradient fades the title out beneath the
-         button, keyed to the tab's own background (--background when active,
-         ui-hover when an inactive tab is hovered) so a long title never collides
-         with the X. pointer-events stay off the fade so clicking it still selects
-         the tab; only the button itself is interactive. -->
-    <span
-      class="pointer-events-none absolute inset-y-0 right-0 flex items-center pl-8 pr-1 opacity-0 transition-opacity duration-150 [background:linear-gradient(to_right,transparent,var(--tab-fade)_1.5rem)] group-hover/tab:opacity-100 focus-within:opacity-100"
+    <!-- Close: a fixed slot is always reserved on the right (pr-7 above), so the
+         title simply truncates before it and the button never overlaps text or
+         reflows the chip. Shown on hover (any tab) and always on the active tab,
+         dimmed otherwise — VS Code's behaviour. -->
+    <Button
+      variant="ghost"
+      class="absolute right-1 top-1/2 size-5 -translate-y-1/2 shrink-0 rounded-sm p-0 text-muted-foreground opacity-0 transition-opacity duration-100 hover:bg-[color:var(--ui-hover)] hover:text-foreground group-hover/tab:opacity-100 focus-visible:opacity-100"
+      :class="{ 'opacity-100': isActive }"
+      :aria-label="t('chat.tabMenu.close')"
+      @pointerdown.stop
+      @mousedown.stop
+      @click.stop.prevent="close"
     >
-      <Button
-        variant="ghost"
-        class="pointer-events-auto size-6 shrink-0 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-        :aria-label="t('chat.tabMenu.close')"
-        @pointerdown.stop
-        @mousedown.stop
-        @click.stop.prevent="close"
-      >
-        <X class="size-3.5" />
-      </Button>
-    </span>
+      <X class="size-3.5" />
+    </Button>
   </div>
 </template>
 
@@ -42,8 +36,7 @@ import { Button } from '@memohai/ui'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 
 // Custom default tab: replaces dockview's built-in tab (square icon-hover
-// block) with design-system type and a ghost close button that shows on
-// hover/active — ghost close button on the tab chip.
+// block) with a design-system label + a ghost close button on a fixed slot.
 const props = defineProps<{
   params: {
     api: DockviewPanelApi

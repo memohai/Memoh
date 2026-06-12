@@ -536,6 +536,8 @@
       "closeAll": "关闭全部"
     },
     "tabClose": "关闭标签页",
+    "openPreviewToSide": "在侧边打开预览",
+    "previewTab": "预览：{name}",
     "sessionInfoRingAria": "会话信息",
     "sessionInfoTooltipHint": "悬停查看会话信息",
     "sessionActions": "会话操作",

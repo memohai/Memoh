@@ -26,7 +26,7 @@ export type SidebarView = 'sessions' | 'files'
 
 export const CHAT_PANEL_ID = 'chat'
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'terminal' | 'browser' | 'display'
+export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'terminal' | 'browser' | 'display'
 
 interface BotLayoutState {
   layout: SerializedDockview | null
@@ -49,6 +49,7 @@ function fileBaseName(filePath: string): string {
 function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id === CHAT_PANEL_ID) return 'chat'
   if (id.startsWith('file:')) return 'file'
+  if (id.startsWith('preview:')) return 'preview'
   if (id.startsWith('terminal:')) return 'terminal'
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
@@ -218,6 +219,32 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // VS Code's "Open Preview to the Side": render a markdown/html file's preview
+  // as its own panel in a group beside the source editor, instead of toggling the
+  // source view in place. Focuses an existing preview for the same file.
+  function openPreview(filePath: string, title?: string) {
+    if (!hasCurrentPermission('workspace_read')) return
+    const path = (filePath ?? '').trim()
+    if (!path) return
+    const dock = api.value
+    if (!dock) return
+    const id = `preview:${path}`
+    const existing = dock.getPanel(id)
+    if (existing) {
+      existing.api.setActive()
+      return
+    }
+    const activeGroup = dock.activeGroup
+    dock.addPanel({
+      id,
+      component: 'preview',
+      title: title || fileBaseName(path),
+      params: { filePath: path },
+      renderer: 'always',
+      ...(activeGroup ? { position: { referenceGroup: activeGroup, direction: 'right' as const } } : {}),
+    })
+  }
+
   function openTerminal() {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
@@ -297,6 +324,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'chat':
         return true
       case 'file':
+      case 'preview':
         return hasCurrentPermission('workspace_read')
       case 'terminal':
         return hasCurrentPermission('workspace_exec')
@@ -445,6 +473,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openChat,
     setChatTitle,
     openFile,
+    openPreview,
     openFilesAt,
     consumePendingFilesPath,
     openTerminal,

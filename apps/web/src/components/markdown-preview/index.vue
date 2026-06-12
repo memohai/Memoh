@@ -18,7 +18,7 @@ const isDark = computed(() => settings.theme === 'dark')
 </script>
 
 <template>
-  <div :class="['h-full w-full min-h-0 overflow-auto bg-card', props.class]">
+  <div :class="['h-full w-full min-h-0 overflow-auto bg-surface-editor', props.class]">
     <div class="prose prose-sm dark:prose-invert max-w-none px-6 py-4 *:first:mt-0">
       <MarkdownRender
         :content="props.content"

@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full w-full bg-background">
+  <div class="h-full w-full bg-surface-editor">
     <KeepAlive>
       <FilePane
         v-if="visible && filePath"
