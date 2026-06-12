@@ -1,6 +1,12 @@
 <template>
   <div class="space-y-1.5">
     <div
+      v-if="provider"
+      class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
+    >
+      {{ provider }}
+    </div>
+    <div
       v-if="format"
       class="text-[10px] uppercase tracking-wide text-muted-foreground/70"
     >
@@ -48,6 +54,11 @@ function resolveResult(): Record<string, unknown> | null {
 const format = computed(() => {
   const r = resolveResult()
   return (r?.format as string) ?? ''
+})
+
+const provider = computed(() => {
+  const r = resolveResult()
+  return (r?.providerName as string) ?? (r?.provider as string) ?? ''
 })
 
 const title = computed(() => {

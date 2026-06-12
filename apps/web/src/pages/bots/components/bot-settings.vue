@@ -95,6 +95,7 @@
       <SettingsContextCard
         :form="form"
         :search-providers="searchProviders"
+        :fetch-providers="fetchProviders"
         :memory-providers="memoryProviders"
         :persisted-memory-provider-i-d="persistedMemoryProviderID"
         :memory-status="memoryStatus"
@@ -161,7 +162,7 @@ import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
+import { getBotsById, putBotsById, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getBotsByBotIdMemoryStatus, postBotsByBotIdMemoryRebuild, getBotsNameAvailability } from '@memohai/sdk'
 import type { SettingsSettings } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -216,6 +217,14 @@ const { data: searchProviderData } = useQuery({
   key: ['all-search-providers'],
   query: async () => {
     const { data } = await getSearchProviders({ throwOnError: true })
+    return data
+  },
+})
+
+const { data: fetchProviderData } = useQuery({
+  key: ['all-fetch-providers'],
+  query: async () => {
+    const { data } = await getFetchProviders({ throwOnError: true })
     return data
   },
 })
@@ -361,6 +370,7 @@ const imageCapableModels = computed(() =>
   models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
 )
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
+const fetchProviders = computed(() => (fetchProviderData.value ?? []).filter((p) => p.enable !== false || p.provider === 'native' || p.id === form.fetch_provider_id))
 const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => (ttsProviderData.value ?? []).filter((p) => p.enable !== false))
 const enabledTtsProviderIds = computed(() => new Set(ttsProviders.value.map((p) => p.id)))
@@ -375,6 +385,7 @@ const form = reactive({
   title_model_id: '',
   image_model_id: '',
   search_provider_id: '',
+  fetch_provider_id: '',
   memory_provider_id: '',
   tts_model_id: '',
   transcription_model_id: '',
@@ -420,6 +431,7 @@ watch(settings, (val) => {
     form.title_model_id = val.title_model_id ?? ''
     form.image_model_id = val.image_model_id ?? ''
     form.search_provider_id = val.search_provider_id ?? ''
+    form.fetch_provider_id = val.fetch_provider_id ?? ''
     form.memory_provider_id = val.memory_provider_id ?? ''
     form.tts_model_id = val.tts_model_id ?? ''
     form.transcription_model_id = val.transcription_model_id ?? ''
@@ -442,6 +454,7 @@ const hasSettingsChanges = computed(() => {
     || form.title_model_id !== (s.title_model_id ?? '')
     || form.image_model_id !== (s.image_model_id ?? '')
     || form.search_provider_id !== (s.search_provider_id ?? '')
+    || form.fetch_provider_id !== (s.fetch_provider_id ?? '')
     || form.memory_provider_id !== (s.memory_provider_id ?? '')
     || form.tts_model_id !== (s.tts_model_id ?? '')
     || form.transcription_model_id !== (s.transcription_model_id ?? '')

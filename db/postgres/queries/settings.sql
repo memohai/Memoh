@@ -16,6 +16,7 @@ SELECT
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
+  fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
@@ -35,6 +36,7 @@ LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_
 LEFT JOIN models AS title_models ON title_models.id = bots.title_model_id
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id
+LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = bots.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = bots.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = bots.transcription_model_id
@@ -58,6 +60,10 @@ WITH updated AS (
       compaction_model_id = COALESCE(sqlc.narg(compaction_model_id)::uuid, bots.compaction_model_id),
       title_model_id = COALESCE(sqlc.narg(title_model_id)::uuid, bots.title_model_id),
       search_provider_id = COALESCE(sqlc.narg(search_provider_id)::uuid, bots.search_provider_id),
+      fetch_provider_id = CASE
+        WHEN sqlc.arg(fetch_provider_id_set)::boolean THEN sqlc.narg(fetch_provider_id)::uuid
+        ELSE bots.fetch_provider_id
+      END,
       memory_provider_id = COALESCE(sqlc.narg(memory_provider_id)::uuid, bots.memory_provider_id),
       image_model_id = COALESCE(sqlc.narg(image_model_id)::uuid, bots.image_model_id),
       tts_model_id = COALESCE(sqlc.narg(tts_model_id)::uuid, bots.tts_model_id),
@@ -72,7 +78,7 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_enabled, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_ratio, bots.timezone, bots.chat_model_id, bots.heartbeat_model_id, bots.compaction_model_id, bots.title_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -91,6 +97,7 @@ SELECT
   compaction_models.id AS compaction_model_id,
   title_models.id AS title_model_id,
   search_providers.id AS search_provider_id,
+  fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
   image_models.id AS image_model_id,
   tts_models.id AS tts_model_id,
@@ -110,6 +117,7 @@ LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compacti
 LEFT JOIN models AS title_models ON title_models.id = updated.title_model_id
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id
+LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id
 LEFT JOIN memory_providers ON memory_providers.id = updated.memory_provider_id
 LEFT JOIN models AS tts_models ON tts_models.id = updated.tts_model_id
 LEFT JOIN models AS transcription_models ON transcription_models.id = updated.transcription_model_id;
@@ -132,6 +140,7 @@ SET language = 'auto',
     title_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
+    fetch_provider_id = NULL,
     memory_provider_id = NULL,
     tts_model_id = NULL,
     transcription_model_id = NULL,

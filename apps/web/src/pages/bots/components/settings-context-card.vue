@@ -23,6 +23,15 @@
       </div>
 
       <div class="space-y-1.5">
+        <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.fetchProvider') }}</Label>
+        <FetchProviderSelect
+          v-model="form.fetch_provider_id"
+          :providers="fetchProviders"
+          :placeholder="$t('bots.settings.fetchProviderPlaceholder')"
+        />
+      </div>
+
+      <div class="space-y-1.5">
         <Label class="text-xs font-medium text-foreground">{{ $t('bots.settings.memoryProvider') }}</Label>
         <MemoryProviderSelect
           v-model="form.memory_provider_id"
@@ -199,16 +208,20 @@ import { Label, Button, Spinner } from '@memohai/ui'
 import { ChevronDown } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import SearchProviderSelect from './search-provider-select.vue'
+import FetchProviderSelect from './fetch-provider-select.vue'
 import MemoryProviderSelect from './memory-provider-select.vue'
 import type { 
   SettingsSettings, 
-  AdaptersProviderGetResponse, 
+  AdaptersProviderGetResponse,
+  FetchprovidersGetResponse,
+  SearchprovidersGetResponse,
   AdaptersMemoryStatusResponse 
 } from '@memohai/sdk'
 
 const props = defineProps<{
   form: SettingsSettings
-  searchProviders: AdaptersProviderGetResponse[]
+  searchProviders: SearchprovidersGetResponse[]
+  fetchProviders: FetchprovidersGetResponse[]
   memoryProviders: AdaptersProviderGetResponse[]
   persistedMemoryProviderID: string
   memoryStatus: AdaptersMemoryStatusResponse | null

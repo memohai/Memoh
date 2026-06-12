@@ -51,6 +51,7 @@ type Queries interface {
 	CreateCompactionLog(ctx context.Context, arg dbsqlc.CreateCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
 	CreateEmailOutbox(ctx context.Context, arg dbsqlc.CreateEmailOutboxParams) (dbsqlc.EmailOutbox, error)
 	CreateEmailProvider(ctx context.Context, arg dbsqlc.CreateEmailProviderParams) (dbsqlc.EmailProvider, error)
+	CreateFetchProvider(ctx context.Context, arg dbsqlc.CreateFetchProviderParams) (dbsqlc.FetchProvider, error)
 	CreateHeartbeatLog(ctx context.Context, arg dbsqlc.CreateHeartbeatLogParams) (dbsqlc.CreateHeartbeatLogRow, error)
 	CreateManagedMCPConnection(ctx context.Context, arg dbsqlc.CreateManagedMCPConnectionParams) (dbsqlc.McpConnection, error)
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
@@ -81,6 +82,7 @@ type Queries interface {
 	DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error
 	DeleteEmailOAuthToken(ctx context.Context, emailProviderID pgtype.UUID) error
 	DeleteEmailProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteHeartbeatLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteMCPConnectionsByPlugin(ctx context.Context, arg dbsqlc.DeleteMCPConnectionsByPluginParams) error
@@ -134,6 +136,8 @@ type Queries interface {
 	GetEmailOutboxByID(ctx context.Context, id pgtype.UUID) (dbsqlc.EmailOutbox, error)
 	GetEmailProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.EmailProvider, error)
 	GetEmailProviderByName(ctx context.Context, name string) (dbsqlc.EmailProvider, error)
+	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
+	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	GetLatestPendingToolApprovalBySession(ctx context.Context, arg dbsqlc.GetLatestPendingToolApprovalBySessionParams) (dbsqlc.ToolApprovalRequest, error)
 	GetLatestPendingUserInputBySession(ctx context.Context, arg dbsqlc.GetLatestPendingUserInputBySessionParams) (dbsqlc.UserInputRequest, error)
@@ -196,6 +200,8 @@ type Queries interface {
 	ListEmailOutboxByBot(ctx context.Context, arg dbsqlc.ListEmailOutboxByBotParams) ([]dbsqlc.EmailOutbox, error)
 	ListEmailProviders(ctx context.Context) ([]dbsqlc.EmailProvider, error)
 	ListEmailProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.EmailProvider, error)
+	ListFetchProviders(ctx context.Context) ([]dbsqlc.FetchProvider, error)
+	ListFetchProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.FetchProvider, error)
 	ListEnabledModels(ctx context.Context) ([]dbsqlc.Model, error)
 	ListEnabledModelsByProviderClientType(ctx context.Context, clientType string) ([]dbsqlc.Model, error)
 	ListEnabledModelsByType(ctx context.Context, type_ string) ([]dbsqlc.Model, error)
@@ -294,6 +300,7 @@ type Queries interface {
 	UpdateEmailOutboxFailed(ctx context.Context, arg dbsqlc.UpdateEmailOutboxFailedParams) error
 	UpdateEmailOutboxSent(ctx context.Context, arg dbsqlc.UpdateEmailOutboxSentParams) error
 	UpdateEmailProvider(ctx context.Context, arg dbsqlc.UpdateEmailProviderParams) (dbsqlc.EmailProvider, error)
+	UpdateFetchProvider(ctx context.Context, arg dbsqlc.UpdateFetchProviderParams) (dbsqlc.FetchProvider, error)
 	UpdateBotPluginInstallationStatus(ctx context.Context, arg dbsqlc.UpdateBotPluginInstallationStatusParams) (dbsqlc.BotPluginInstallation, error)
 	UpdateMCPConnection(ctx context.Context, arg dbsqlc.UpdateMCPConnectionParams) (dbsqlc.McpConnection, error)
 	UpdateMCPConnectionActive(ctx context.Context, arg dbsqlc.UpdateMCPConnectionActiveParams) error
