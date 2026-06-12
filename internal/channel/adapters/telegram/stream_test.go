@@ -2,7 +2,11 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +26,21 @@ func mustPreparedTelegramEvent(t *testing.T, event channel.StreamEvent) channel.
 		t.Fatalf("prepare telegram stream event: %v", err)
 	}
 	return prepared
+}
+
+type telegramRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f telegramRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newTestTelegramBot(transport http.RoundTripper) *tgbotapi.BotAPI {
+	bot := &tgbotapi.BotAPI{
+		Token:  "fake",
+		Client: &http.Client{Transport: transport},
+	}
+	bot.SetAPIEndpoint("https://api.telegram.test/bot%s/%s")
+	return bot
 }
 
 func TestTelegramOutboundStream_CloseNil(t *testing.T) {
@@ -741,6 +760,156 @@ func TestToolCallFlow_NoPreTextEditsRunningInPlace(t *testing.T) {
 	if !strings.Contains(editTexts[0], "completed") {
 		t.Fatalf("edit should flip the tool call to completed: %q", editTexts[0])
 	}
+}
+
+func TestTelegramToolCallStartSendsRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+
+	var gotForm url.Values
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendRichMessage") {
+			t.Fatalf("expected sendRichMessage, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		var err error
+		gotForm, err = url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse body: %v", err)
+		}
+		resp := `{"ok":true,"result":{"message_id":10,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	p := channel.ToolCallPresentation{
+		Emoji:    "💻",
+		ToolName: "exec",
+		Status:   channel.ToolCallStatusRunning,
+		Header:   "$ pnpm test <unit>",
+		Body: []channel.ToolCallBlock{
+			{Type: channel.ToolCallBlockText, Text: "stdout: ok & done"},
+			{Type: channel.ToolCallBlockLink, Title: "trace <report>", URL: "https://example.test/run?x=1&y=2", Desc: "open it"},
+			{Type: channel.ToolCallBlockCode, Title: "stderr", Text: "line 1\nline 2"},
+		},
+		Footer: "exit=0",
+	}
+
+	if err := s.sendToolCallMessage(context.Background(), &channel.StreamToolCall{CallID: "call_1"}, p); err != nil {
+		t.Fatalf("sendToolCallMessage: %v", err)
+	}
+
+	if gotForm.Get("chat_id") != "123" {
+		t.Fatalf("expected chat_id=123, got %q", gotForm.Get("chat_id"))
+	}
+	html := telegramRichHTMLFromForm(t, gotForm)
+	for _, want := range []string{
+		"<p><b>💻 exec · running</b></p>",
+		"<p>$ pnpm test &lt;unit&gt;</p>",
+		"<p>stdout: ok &amp; done</p>",
+		`<p><a href="https://example.test/run?x=1&amp;y=2">trace &lt;report&gt;</a><br/>open it</p>`,
+		"<pre>line 1\nline 2</pre>",
+		"<p>exit=0</p>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected rich html to contain %q, got:\n%s", want, html)
+		}
+	}
+
+	if _, ok := s.lookupToolCallMessage("call_1"); !ok {
+		t.Fatal("expected running rich message to be tracked for later edit")
+	}
+}
+
+func TestTelegramToolCallEndEditsWithRichMessage(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	s.storeToolCallMessage("call_1", telegramToolCallMessage{chatID: 123, msgID: 10})
+
+	var gotForm url.Values
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/editMessageText") {
+			t.Fatalf("expected editMessageText, got %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		var err error
+		gotForm, err = url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse body: %v", err)
+		}
+		resp := `{"ok":true,"result":{"message_id":10,"chat":{"id":123}}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(resp)),
+		}, nil
+	}))
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tgbotapi.BotAPI, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	p := channel.ToolCallPresentation{
+		Emoji:    "💻",
+		ToolName: "exec",
+		Status:   channel.ToolCallStatusCompleted,
+		Header:   "$ pnpm test",
+		Footer:   "exit=0",
+	}
+
+	if err := s.sendToolCallMessage(context.Background(), &channel.StreamToolCall{CallID: "call_1"}, p); err != nil {
+		t.Fatalf("sendToolCallMessage: %v", err)
+	}
+	if gotForm.Get("chat_id") != "123" || gotForm.Get("message_id") != "10" {
+		t.Fatalf("unexpected edit target: %v", gotForm)
+	}
+	html := telegramRichHTMLFromForm(t, gotForm)
+	if !strings.Contains(html, "<p><b>💻 exec · completed</b></p>") {
+		t.Fatalf("expected completed rich html, got:\n%s", html)
+	}
+	if gotForm.Get("text") != "" {
+		t.Fatalf("rich edit should not send plain text field, got %q", gotForm.Get("text"))
+	}
+	if _, ok := s.lookupToolCallMessage("call_1"); ok {
+		t.Fatal("expected completed call message to be forgotten after edit")
+	}
+}
+
+func telegramRichHTMLFromForm(t *testing.T, form url.Values) string {
+	t.Helper()
+
+	raw := form.Get("rich_message")
+	if raw == "" {
+		t.Fatalf("expected rich_message in form: %v", form)
+	}
+	var rich map[string]any
+	if err := json.Unmarshal([]byte(raw), &rich); err != nil {
+		t.Fatalf("decode rich_message: %v (raw=%q)", err, raw)
+	}
+	html, _ := rich["html"].(string)
+	if html == "" {
+		t.Fatalf("expected rich_message.html, got %#v", rich)
+	}
+	return html
 }
 
 func TestDraftMode_ToolCallStartSendsPermanentMessage(t *testing.T) {
