@@ -14,7 +14,6 @@ export interface ViewMetrics {
 
 const PREVIEW_MAX_LENGTH = 100
 const PROBE_RATIO = 0.25
-const DIRECT_SCROLL_VIEWPORTS = 2.5
 const TICK_MIN_WIDTH = 5
 const TICK_MAX_WIDTH = 16
 const TICK_FULL_LENGTH = 80
@@ -62,22 +61,59 @@ export function activeAnchorIndex(tops: number[], view: ViewMetrics): number {
   return active
 }
 
-export function planJump(from: number, to: number, viewportHeight: number): { pre: number | null } {
-  if (Math.abs(to - from) <= viewportHeight * DIRECT_SCROLL_VIEWPORTS) return { pre: null }
-  return { pre: to > from ? to - viewportHeight : to + viewportHeight }
-}
-
 export function tickWidth(textLength: number): number {
   const ratio = Math.min(Math.sqrt(textLength / TICK_FULL_LENGTH), 1)
   return Math.round(TICK_MIN_WIDTH + (TICK_MAX_WIDTH - TICK_MIN_WIDTH) * ratio)
 }
 
-export function viewportIndicator(view: ViewMetrics): { topPercent: number, heightPercent: number } {
-  if (view.scrollHeight <= view.clientHeight) return { topPercent: 0, heightPercent: 100 }
-  const clampPercent = (value: number) => Math.min(100, Math.max(0, value))
-  return {
-    topPercent: clampPercent((view.scrollTop / view.scrollHeight) * 100),
-    heightPercent: clampPercent((view.clientHeight / view.scrollHeight) * 100),
+export function sampleRailIndexes(total: number, max: number): number[] {
+  if (total <= 0 || max <= 0) return []
+  if (total <= max) return Array.from({ length: total }, (_, index) => index)
+  return Array.from({ length: max }, (_, position) => Math.round(position * (total - 1) / (max - 1)))
+}
+
+export function railActivePosition(sampled: number[], activeIndex: number): number {
+  if (!sampled.length) return -1
+  let position = 0
+  for (let i = 0; i < sampled.length; i += 1) {
+    if (sampled[i]! > activeIndex) break
+    position = i
+  }
+  return position
+}
+
+export interface ScrollTweenOptions {
+  duration?: number
+  now?: () => number
+  raf?: (cb: FrameRequestCallback) => number
+  caf?: (handle: number) => void
+}
+
+export function animateScrollTo(
+  el: { scrollTop: number },
+  getTarget: () => number,
+  options: ScrollTweenOptions = {},
+): () => void {
+  const duration = options.duration ?? 450
+  const now = options.now ?? (() => performance.now())
+  const raf = options.raf ?? (cb => requestAnimationFrame(cb))
+  const caf = options.caf ?? (handle => cancelAnimationFrame(handle))
+  const start = el.scrollTop
+  const startedAt = now()
+  let cancelled = false
+  let handle = 0
+  const frame = () => {
+    if (cancelled) return
+    const progress = duration > 0 ? Math.min(1, (now() - startedAt) / duration) : 1
+    const eased = 1 - (1 - progress) ** 5
+    el.scrollTop = start + (getTarget() - start) * eased
+    if (progress < 1) handle = raf(frame)
+  }
+  handle = raf(frame)
+  return () => {
+    if (cancelled) return
+    cancelled = true
+    caf(handle)
   }
 }
 

@@ -248,6 +248,7 @@
     "send": "Send",
     "sendFailed": "Message failed to send",
     "minimapLabel": "Conversation outline",
+    "minimapEarlier": "Earlier messages appear as they load",
     "startChat": "Start Chat",
     "noBot": "No bots available, please create a bot first",
     "newChat": "New Chat",

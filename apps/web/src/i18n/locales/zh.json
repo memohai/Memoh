@@ -244,6 +244,7 @@
     "send": "发送",
     "sendFailed": "消息发送失败",
     "minimapLabel": "对话导航",
+    "minimapEarlier": "更早的消息加载后显示",
     "startChat": "开始聊天",
     "noBot": "暂无可用 Bot，请先创建 Bot",
     "newChat": "开启新对话",

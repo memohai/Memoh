@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@/store/chat-list'
 import {
   activeAnchorIndex,
+  animateScrollTo,
   buildMinimapAnchors,
   panelScrollTop,
-  planJump,
+  railActivePosition,
+  sampleRailIndexes,
   tickWidth,
-  viewportIndicator,
 } from './chat-minimap'
 
 function userTurn(id: string, text: string): ChatMessage {
@@ -90,17 +91,43 @@ describe('activeAnchorIndex', () => {
   })
 })
 
-describe('planJump', () => {
-  it('scrolls directly for short distances', () => {
-    expect(planJump(0, 800, 400)).toEqual({ pre: null })
+describe('sampleRailIndexes', () => {
+  it('keeps every index when under the cap', () => {
+    expect(sampleRailIndexes(3, 5)).toEqual([0, 1, 2])
   })
 
-  it('pre-jumps one viewport short when far below', () => {
-    expect(planJump(0, 5000, 400)).toEqual({ pre: 4600 })
+  it('samples evenly and keeps both ends', () => {
+    const sampled = sampleRailIndexes(100, 5)
+    expect(sampled).toEqual([0, 25, 50, 74, 99])
   })
 
-  it('pre-jumps one viewport past when far above', () => {
-    expect(planJump(5000, 0, 400)).toEqual({ pre: 400 })
+  it('never repeats indexes', () => {
+    const sampled = sampleRailIndexes(7, 5)
+    expect(new Set(sampled).size).toBe(sampled.length)
+    expect(sampled[0]).toBe(0)
+    expect(sampled.at(-1)).toBe(6)
+  })
+
+  it('handles empty input', () => {
+    expect(sampleRailIndexes(0, 5)).toEqual([])
+  })
+})
+
+describe('railActivePosition', () => {
+  it('returns the exact position when sampled', () => {
+    expect(railActivePosition([0, 25, 50, 74, 99], 50)).toBe(2)
+  })
+
+  it('falls back to the previous mark between samples', () => {
+    expect(railActivePosition([0, 25, 50, 74, 99], 40)).toBe(1)
+  })
+
+  it('clamps before the first mark', () => {
+    expect(railActivePosition([5, 10], 2)).toBe(0)
+  })
+
+  it('handles empty samples', () => {
+    expect(railActivePosition([], 3)).toBe(-1)
   })
 })
 
@@ -114,15 +141,56 @@ describe('tickWidth', () => {
   })
 })
 
-describe('viewportIndicator', () => {
-  it('maps the visible window to percentages', () => {
-    expect(viewportIndicator({ scrollTop: 1000, clientHeight: 500, scrollHeight: 5000 }))
-      .toEqual({ topPercent: 20, heightPercent: 10 })
+describe('animateScrollTo', () => {
+  function createClock() {
+    let time = 0
+    const queue: FrameRequestCallback[] = []
+    return {
+      now: () => time,
+      raf: (cb: FrameRequestCallback) => queue.push(cb),
+      caf: (handle: number) => {
+        queue.splice(handle - 1, 1)
+      },
+      tick(next: number) {
+        time = next
+        const pending = queue.splice(0, queue.length)
+        for (const cb of pending) cb(next)
+      },
+    }
+  }
+
+  it('eases toward the target and snaps at the end', () => {
+    const clock = createClock()
+    const el = { scrollTop: 0 }
+    animateScrollTo(el, () => 1000, { duration: 100, now: clock.now, raf: clock.raf, caf: clock.caf })
+    clock.tick(50)
+    expect(el.scrollTop).toBeCloseTo(1000 * (1 - 0.5 ** 5))
+    clock.tick(100)
+    expect(el.scrollTop).toBe(1000)
+    clock.tick(150)
+    expect(el.scrollTop).toBe(1000)
   })
 
-  it('clamps degenerate content height', () => {
-    expect(viewportIndicator({ scrollTop: 0, clientHeight: 500, scrollHeight: 0 }))
-      .toEqual({ topPercent: 0, heightPercent: 100 })
+  it('follows a target that moves mid-flight', () => {
+    const clock = createClock()
+    const el = { scrollTop: 0 }
+    let target = 1000
+    animateScrollTo(el, () => target, { duration: 100, now: clock.now, raf: clock.raf, caf: clock.caf })
+    clock.tick(50)
+    target = 2000
+    clock.tick(100)
+    expect(el.scrollTop).toBe(2000)
+  })
+
+  it('stops when cancelled', () => {
+    const clock = createClock()
+    const el = { scrollTop: 0 }
+    const cancel = animateScrollTo(el, () => 1000, { duration: 100, now: clock.now, raf: clock.raf, caf: clock.caf })
+    clock.tick(50)
+    const frozen = el.scrollTop
+    cancel()
+    clock.tick(100)
+    expect(el.scrollTop).toBe(frozen)
   })
 })
 

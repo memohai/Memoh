@@ -86,6 +86,7 @@
             :scroll-el="scrollEl"
             :content-el="descEl"
             :messages="messages"
+            :has-more-older="hasMoreOlder"
             @navigate="handleMinimapNavigate"
           />
         </section>
@@ -621,7 +622,7 @@ import type { AcpclientModelInfo, AcpprofilePublicProfile, ModelsGetResponse, Pr
 import { useI18n } from 'vue-i18n'
 import MessageItem from './message-item.vue'
 import ChatMinimap from './chat-minimap.vue'
-import { planJump } from './chat-minimap'
+import { animateScrollTo } from './chat-minimap'
 import BgTaskPill from './bg-task-pill.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
@@ -1080,35 +1081,31 @@ const highlightedMessageId = ref('')
 const { y, directions, arrivedState, isScrolling } = useScroll(scrollEl, { behavior: computed(() => isAutoScroll.value && isInstant.value ? 'smooth' : 'instant') })
 const { height } = useElementBounding(descEl)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
-let settleJumpCleanup: (() => void) | null = null
+let cancelScrollTween: (() => void) | null = null
 
 onBeforeUnmount(() => {
   stopAuthSessionCleanup()
   if (highlightTimer) clearTimeout(highlightTimer)
-  settleJumpCleanup?.()
+  cancelScrollTween?.()
 })
 
-// Smooth scrolls animate toward a position computed before content-visibility
-// materializes the rows along the way, so long jumps can land off-target. An
-// instant scrollIntoView after scrollend is spec-guaranteed to be exact.
-function settleJump(root: HTMLElement, messageId: string) {
-  settleJumpCleanup?.()
-  const timer = setTimeout(() => settle(), 900)
+// The tween re-reads its target every frame, so positions shifted by
+// content-visibility materializing rows mid-flight still land exactly.
+function startScrollTween(root: HTMLElement, getTarget: () => number) {
+  cancelScrollTween?.()
+  const stop = animateScrollTo(root, () => {
+    const max = Math.max(root.scrollHeight - root.clientHeight, 0)
+    return Math.min(Math.max(getTarget(), 0), max)
+  })
   const cancel = () => {
-    clearTimeout(timer)
-    root.removeEventListener('scrollend', settle)
+    stop()
     root.removeEventListener('wheel', cancel)
     root.removeEventListener('touchstart', cancel)
-    settleJumpCleanup = null
+    cancelScrollTween = null
   }
-  const settle = () => {
-    cancel()
-    findMessageElement(messageId)?.scrollIntoView({ behavior: 'instant', block: 'start' })
-  }
-  root.addEventListener('scrollend', settle, { once: true })
   root.addEventListener('wheel', cancel, { passive: true })
   root.addEventListener('touchstart', cancel, { passive: true })
-  settleJumpCleanup = cancel
+  cancelScrollTween = cancel
 }
 
 const showJumpToBottom = computed(() =>
@@ -1122,13 +1119,10 @@ function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement) {
   return root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top
 }
 
-function scrollViewportTo(top: number) {
+function scrollViewportTo(getTop: () => number) {
   const root = scrollEl.value
   if (!root) return
-  const nextTop = Math.min(Math.max(top, 0), Math.max(root.scrollHeight - root.clientHeight, 0))
-  const { pre } = planJump(root.scrollTop, nextTop, root.clientHeight)
-  if (pre !== null) root.scrollTo({ top: pre, behavior: 'instant' })
-  root.scrollTo({ top: nextTop, behavior: 'smooth' })
+  startScrollTween(root, getTop)
 }
 
 function handleMinimapNavigate(messageId: string) {
@@ -1140,7 +1134,7 @@ function scrollToBottom() {
   if (!root) return
   isAutoScroll.value = true
   isInstant.value = true
-  scrollViewportTo(root.scrollHeight)
+  scrollViewportTo(() => root.scrollHeight)
 }
 
 
@@ -1351,10 +1345,11 @@ async function scrollToMessage(messageId: string): Promise<boolean> {
   if (!root || !target) return false
   isAutoScroll.value = false
   isInstant.value = false
-  const { pre } = planJump(root.scrollTop, getElementAbsoluteTop(target, root), root.clientHeight)
-  if (pre !== null) root.scrollTo({ top: pre, behavior: 'instant' })
-  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  settleJump(root, messageId)
+  const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
+  startScrollTween(root, () => {
+    const el = findMessageElement(messageId)
+    return el ? getElementAbsoluteTop(el, root) - scrollMargin : root.scrollTop
+  })
   highlightedMessageId.value = messageId
   if (highlightTimer) clearTimeout(highlightTimer)
   highlightTimer = setTimeout(() => {

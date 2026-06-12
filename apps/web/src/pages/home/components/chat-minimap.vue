@@ -3,12 +3,13 @@ import { computed, nextTick, onBeforeUnmount, shallowRef, useId, useTemplateRef,
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { ChatMessage } from '@/store/chat-list'
-import { activeAnchorIndex, buildMinimapAnchors, panelScrollTop, tickWidth, viewportIndicator } from './chat-minimap'
+import { activeAnchorIndex, buildMinimapAnchors, panelScrollTop, railActivePosition, sampleRailIndexes, tickWidth } from './chat-minimap'
 
 const props = defineProps<{
   scrollEl: HTMLElement | null
   contentEl: HTMLElement | null
   messages: ChatMessage[]
+  hasMoreOlder?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,19 +21,29 @@ const uid = useId()
 const listId = `chat-minimap-list-${uid}`
 
 const MIN_ANCHORS = 4
-const ROW_HEIGHT = 28
-const LIST_PADDING = 4
+const MAX_RAIL_MARKS = 28
+const ROW_HEIGHT = 32
+const LIST_PADDING = 6
+const HINT_HEIGHT = 24
 
 const anchors = computed(() => buildMinimapAnchors(props.messages))
 const visible = computed(() => anchors.value.length >= MIN_ANCHORS)
 const anchorsKey = computed(() => anchors.value.map(anchor => anchor.id).join('|'))
 
-const geometry = shallowRef<{ tops: Map<string, number>, scrollHeight: number } | null>(null)
+const railIndexes = computed(() => sampleRailIndexes(anchors.value.length, MAX_RAIL_MARKS))
+const railMarks = computed(() => railIndexes.value.map((anchorIndex) => {
+  const anchor = anchors.value[anchorIndex]!
+  return { id: anchor.id, width: tickWidth(anchor.preview.length) }
+}))
+
+const geometry = shallowRef<{ tops: Map<string, number> } | null>(null)
 const activeIndex = shallowRef(0)
 const highlightedIndex = shallowRef(-1)
 const open = shallowRef(false)
 
-const bandEl = useTemplateRef<HTMLElement>('band')
+const railActive = computed(() => railActivePosition(railIndexes.value, activeIndex.value))
+
+const railEl = useTemplateRef<HTMLButtonElement>('rail')
 const listEl = useTemplateRef<HTMLElement>('list')
 
 const anchorTops = computed(() => {
@@ -40,19 +51,10 @@ const anchorTops = computed(() => {
   return anchors.value.map(anchor => tops?.get(anchor.id) ?? Number.MAX_SAFE_INTEGER)
 })
 
-const ticks = computed(() => {
-  const total = geometry.value?.scrollHeight ?? 0
-  if (!total) return []
-  const tops = anchorTops.value
-  return anchors.value.map((anchor, index) => ({
-    id: anchor.id,
-    topPercent: Math.min(100, Math.max(0, (tops[index]! / total) * 100)),
-    width: tickWidth(anchor.preview.length),
-  }))
-})
+const hintOffset = computed(() => props.hasMoreOlder ? HINT_HEIGHT : 0)
 
 const barStyle = computed(() => ({
-  transform: `translateY(${LIST_PADDING + activeIndex.value * ROW_HEIGHT + (ROW_HEIGHT - 20) / 2}px)`,
+  transform: `translateY(${LIST_PADDING + hintOffset.value + activeIndex.value * ROW_HEIGHT + (ROW_HEIGHT - 20) / 2}px)`,
 }))
 
 function rowId(index: number) {
@@ -71,7 +73,7 @@ function rebuild() {
       tops.set(id, root.scrollTop + el.getBoundingClientRect().top - rootRect.top)
     }
   }
-  geometry.value = { tops, scrollHeight: root.scrollHeight }
+  geometry.value = { tops }
   syncFromScroll()
 }
 
@@ -102,15 +104,8 @@ function suppressUntilScrollEnd() {
 
 function syncFromScroll() {
   const root = props.scrollEl
-  if (!root || !visible.value) return
+  if (!root || !visible.value || suppressTimer !== null) return
   const view = { scrollTop: root.scrollTop, clientHeight: root.clientHeight, scrollHeight: root.scrollHeight }
-  const indicator = viewportIndicator(view)
-  const band = bandEl.value
-  if (band) {
-    band.style.top = `${indicator.topPercent}%`
-    band.style.height = `${indicator.heightPercent}%`
-  }
-  if (suppressTimer !== null) return
   const index = activeAnchorIndex(anchorTops.value, view)
   if (index >= 0) activeIndex.value = index
 }
@@ -139,18 +134,36 @@ function clearOpenTimers() {
   }
 }
 
-function openPanel() {
+function openPanel(focusList = false) {
   clearOpenTimers()
-  if (open.value) return
-  open.value = true
-  highlightedIndex.value = activeIndex.value
-  void nextTick(() => positionList(true))
+  if (!open.value) {
+    open.value = true
+    highlightedIndex.value = activeIndex.value
+  }
+  void nextTick(() => {
+    positionList(true)
+    if (focusList) listEl.value?.focus({ preventScroll: true })
+  })
 }
 
-function closePanel() {
+let skipFocusOpen = false
+
+function closePanel(restoreFocus = false) {
   clearOpenTimers()
   open.value = false
   highlightedIndex.value = -1
+  if (restoreFocus) {
+    skipFocusOpen = true
+    railEl.value?.focus({ preventScroll: true })
+  }
+}
+
+function onFocusIn() {
+  if (skipFocusOpen) {
+    skipFocusOpen = false
+    return
+  }
+  openPanel()
 }
 
 function scheduleOpen() {
@@ -159,7 +172,7 @@ function scheduleOpen() {
     closeTimer = null
   }
   if (open.value || openTimer !== null) return
-  openTimer = window.setTimeout(openPanel, 80)
+  openTimer = window.setTimeout(() => openPanel(), 80)
 }
 
 function scheduleClose() {
@@ -168,7 +181,7 @@ function scheduleClose() {
     openTimer = null
   }
   if (!open.value || closeTimer !== null) return
-  closeTimer = window.setTimeout(closePanel, 150)
+  closeTimer = window.setTimeout(() => closePanel(), 150)
 }
 
 function onFocusOut(event: FocusEvent) {
@@ -182,7 +195,7 @@ function positionList(instant = false) {
   if (!list) return
   const index = highlightedIndex.value >= 0 ? highlightedIndex.value : activeIndex.value
   const target = panelScrollTop({
-    itemTop: LIST_PADDING + index * ROW_HEIGHT,
+    itemTop: LIST_PADDING + hintOffset.value + index * ROW_HEIGHT,
     itemHeight: ROW_HEIGHT,
     viewTop: list.scrollTop,
     viewHeight: list.clientHeight,
@@ -213,14 +226,14 @@ function moveHighlight(delta: number) {
   positionList()
 }
 
-function onKeydown(event: KeyboardEvent) {
-  if (!open.value) {
-    if (['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
-      event.preventDefault()
-      openPanel()
-    }
-    return
+function onRailKeydown(event: KeyboardEvent) {
+  if (['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
+    event.preventDefault()
+    openPanel(true)
   }
+}
+
+function onListKeydown(event: KeyboardEvent) {
   switch (event.key) {
     case 'ArrowDown':
       event.preventDefault()
@@ -247,7 +260,7 @@ function onKeydown(event: KeyboardEvent) {
       break
     case 'Escape':
       event.preventDefault()
-      closePanel()
+      closePanel(true)
       break
   }
 }
@@ -266,33 +279,28 @@ onBeforeUnmount(() => {
     class="group/minimap hidden md:flex absolute inset-y-0 right-2 z-10 w-72 flex-col items-end justify-center pointer-events-none"
     @mouseenter="scheduleOpen"
     @mouseleave="scheduleClose"
-    @focusin="openPanel"
+    @focusin="onFocusIn"
     @focusout="onFocusOut"
   >
     <button
+      ref="rail"
       type="button"
-      class="relative w-5 h-[clamp(120px,42vh,320px)] pointer-events-auto cursor-pointer outline-none transition-opacity duration-150 focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
+      class="flex max-h-[60vh] w-5 flex-col items-end justify-center gap-2 overflow-hidden px-0.5 py-2 pointer-events-auto cursor-pointer outline-none rounded-sm transition-opacity duration-150 focus-visible:ring-1 focus-visible:ring-ring"
       :class="open ? 'opacity-0' : 'opacity-100'"
       :aria-label="t('chat.minimapLabel')"
       aria-haspopup="listbox"
       :aria-expanded="open"
       :aria-controls="listId"
-      :aria-activedescendant="open && highlightedIndex >= 0 ? rowId(highlightedIndex) : undefined"
-      @keydown="onKeydown"
-      @click="openPanel"
+      @keydown="onRailKeydown"
+      @click="openPanel(true)"
     >
       <span
-        ref="band"
+        v-for="(mark, position) in railMarks"
+        :key="mark.id"
         aria-hidden="true"
-        class="absolute right-0 w-full rounded-full bg-foreground/[0.07]"
-      />
-      <span
-        v-for="(tick, index) in ticks"
-        :key="tick.id"
-        aria-hidden="true"
-        class="absolute right-0 h-0.5 rounded-full transition-colors duration-150"
-        :class="index === activeIndex ? 'bg-primary' : 'bg-muted-foreground/40 group-hover/minimap:bg-muted-foreground/60'"
-        :style="{ top: `${tick.topPercent}%`, width: `${tick.width}px` }"
+        class="h-0.5 shrink-0 rounded-full transition-colors duration-150"
+        :class="position === railActive ? 'bg-primary' : 'bg-muted-foreground/35 group-hover/minimap:bg-muted-foreground/60'"
+        :style="{ width: `${mark.width}px` }"
       />
     </button>
 
@@ -306,18 +314,27 @@ onBeforeUnmount(() => {
     >
       <div
         v-if="open"
-        class="absolute right-0 top-1/2 w-72 -translate-y-1/2 overflow-hidden rounded-lg border bg-background/95 shadow-md backdrop-blur pointer-events-auto"
+        class="absolute right-0 top-1/2 w-72 -translate-y-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg pointer-events-auto"
       >
         <div
           :id="listId"
           ref="list"
           role="listbox"
+          tabindex="-1"
           :aria-label="t('chat.minimapLabel')"
-          class="relative max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain scrollbar-none px-1 py-1 [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]"
+          :aria-activedescendant="highlightedIndex >= 0 ? rowId(highlightedIndex) : undefined"
+          class="relative max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain scrollbar-none p-1.5 outline-none [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]"
+          @keydown="onListKeydown"
         >
+          <div
+            v-if="hasMoreOlder"
+            class="flex h-6 items-center justify-center text-[11px] text-muted-foreground/70 select-none"
+          >
+            {{ t('chat.minimapEarlier') }}
+          </div>
           <span
             aria-hidden="true"
-            class="absolute left-1.5 h-5 w-0.5 rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-300"
+            class="absolute left-2 h-5 w-0.5 rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
             :style="barStyle"
           />
           <button
@@ -328,8 +345,10 @@ onBeforeUnmount(() => {
             role="option"
             tabindex="-1"
             :aria-selected="index === activeIndex"
-            class="flex h-7 w-full items-center rounded-sm pl-4 pr-3 text-left text-xs"
-            :class="index === highlightedIndex || index === activeIndex ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            class="flex h-8 w-full items-center rounded-md pl-3.5 pr-2.5 text-left text-xs transition-colors duration-100"
+            :class="index === highlightedIndex
+              ? 'bg-accent text-accent-foreground'
+              : index === activeIndex ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
             @click="navigate(index)"
             @mousemove="highlightedIndex = index"
           >
