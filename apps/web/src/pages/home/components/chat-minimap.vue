@@ -23,6 +23,7 @@ const listId = `chat-minimap-list-${uid}`
 const MIN_ANCHORS = 4
 const MAX_RAIL_MARKS = 28
 const ROW_HEIGHT = 32
+const BAR_HEIGHT = 16
 const LIST_PADDING = 6
 const HINT_HEIGHT = 24
 
@@ -54,7 +55,7 @@ const anchorTops = computed(() => {
 const hintOffset = computed(() => props.hasMoreOlder ? HINT_HEIGHT : 0)
 
 const barStyle = computed(() => ({
-  transform: `translateY(${LIST_PADDING + hintOffset.value + activeIndex.value * ROW_HEIGHT + (ROW_HEIGHT - 20) / 2}px)`,
+  transform: `translateY(${LIST_PADDING + hintOffset.value + activeIndex.value * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2}px)`,
 }))
 
 function rowId(index: number) {
@@ -86,25 +87,19 @@ function scheduleRebuild() {
   }, 200)
 }
 
+// Set on minimap navigation: the clicked entry stays active until the user
+// scrolls on their own, so probe-based spy can't reassign it on landing.
+let pinned = false
+
+watch(anchorsKey, () => {
+  pinned = false
+})
 watch([() => props.scrollEl, anchorsKey, visible], () => rebuild(), { flush: 'post' })
 useResizeObserver(computed(() => props.contentEl), scheduleRebuild)
 
-let suppressTimer: number | null = null
-function releaseSuppression() {
-  if (suppressTimer === null) return
-  clearTimeout(suppressTimer)
-  suppressTimer = null
-  syncFromScroll()
-}
-
-function suppressUntilScrollEnd() {
-  if (suppressTimer !== null) clearTimeout(suppressTimer)
-  suppressTimer = window.setTimeout(releaseSuppression, 900)
-}
-
 function syncFromScroll() {
   const root = props.scrollEl
-  if (!root || !visible.value || suppressTimer !== null) return
+  if (!root || !visible.value || pinned) return
   const view = { scrollTop: root.scrollTop, clientHeight: root.clientHeight, scrollHeight: root.scrollHeight }
   const index = activeAnchorIndex(anchorTops.value, view)
   if (index >= 0) activeIndex.value = index
@@ -118,7 +113,9 @@ useEventListener(() => props.scrollEl, 'scroll', () => {
     syncFromScroll()
   })
 }, { passive: true })
-useEventListener(() => props.scrollEl, 'scrollend', releaseSuppression, { passive: true })
+useEventListener(() => props.scrollEl, ['wheel', 'touchstart', 'pointerdown'], () => {
+  pinned = false
+}, { passive: true })
 
 let openTimer: number | null = null
 let closeTimer: number | null = null
@@ -214,7 +211,7 @@ function navigate(index: number) {
   if (!anchor) return
   activeIndex.value = index
   highlightedIndex.value = index
-  suppressUntilScrollEnd()
+  pinned = true
   emit('navigate', anchor.id)
 }
 
@@ -268,7 +265,6 @@ function onListKeydown(event: KeyboardEvent) {
 onBeforeUnmount(() => {
   clearOpenTimers()
   if (rebuildTimer !== null) clearTimeout(rebuildTimer)
-  if (suppressTimer !== null) clearTimeout(suppressTimer)
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
 })
 </script>
@@ -334,7 +330,7 @@ onBeforeUnmount(() => {
           </div>
           <span
             aria-hidden="true"
-            class="absolute left-2 h-5 w-0.5 rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
+            class="absolute top-0 left-[13px] h-4 w-0.5 rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out"
             :style="barStyle"
           />
           <button
@@ -345,7 +341,7 @@ onBeforeUnmount(() => {
             role="option"
             tabindex="-1"
             :aria-selected="index === activeIndex"
-            class="flex h-8 w-full items-center rounded-md pl-3.5 pr-2.5 text-left text-xs transition-colors duration-100"
+            class="flex h-8 w-full items-center rounded-md pl-4 pr-2.5 text-left text-xs transition-colors duration-100"
             :class="index === highlightedIndex
               ? 'bg-accent text-accent-foreground'
               : index === activeIndex ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
