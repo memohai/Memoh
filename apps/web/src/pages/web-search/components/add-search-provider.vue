@@ -10,7 +10,12 @@
       @submit="handleCreate"
     >
       <template #trigger>
+        <span
+          v-if="hideTrigger"
+          class="hidden"
+        />
         <Button
+          v-else
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
@@ -111,6 +116,11 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 const PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
 
 const open = defineModel<boolean>('open')
+withDefaults(defineProps<{
+  hideTrigger?: boolean
+}>(), {
+  hideTrigger: false,
+})
 const { t } = useI18n()
 const { run } = useDialogMutation()
 

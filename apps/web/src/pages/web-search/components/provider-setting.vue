@@ -1,5 +1,5 @@
 <template>
-  <SettingsShell width="standard">
+  <SettingsShell width="narrow">
     <section class="flex items-center gap-3">
       <SearchProviderLogo
         :provider="curProvider?.provider || ''"

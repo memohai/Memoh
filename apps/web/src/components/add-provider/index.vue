@@ -10,7 +10,12 @@
       @submit="createProvider"
     >
       <template #trigger>
+        <span
+          v-if="hideTrigger"
+          class="hidden"
+        />
         <Button
+          v-else
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
@@ -208,8 +213,10 @@ import { suggestProviderName } from './provider-presets'
 const open = defineModel<boolean>('open')
 const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
+  hideTrigger?: boolean
 }>(), {
   providers: () => [],
+  hideTrigger: false,
 })
 const { t } = useI18n()
 const { run } = useDialogMutation()

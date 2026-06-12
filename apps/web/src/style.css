@@ -17,6 +17,36 @@
 @source "./";
 @source "../../../packages/ui/src";
 
+/* ── Workspace surface planes ────────────────────────────────────────────────
+ * The editor workspace (dock group view, tabs, file editor, chat, previews)
+ * collapses to exactly TWO planes so the SELECTED tab reads as continuous with
+ * the content it owns, while the chrome (tab strip + unselected tabs + top
+ * strip) sits clearly apart — in BOTH light and dark. We reuse the existing
+ * elevation tokens, so any palette/scheme swap (and the dark overrides) carry
+ * through automatically (all of :root / .dark / [data-color-scheme] target
+ * <html>, so the var() resolves against that element's final value):
+ *   · editor plane = --background  (light 0.984 canvas · dark 0.152)
+ *     — already what chat/preview sit on, so content is untouched.
+ *   · chrome plane = recessed neutral: light --secondary (0.964, one notch
+ *     under the canvas) · dark --sidebar (0.185, one notch above it).
+ * In light, --background == --sidebar, so the chrome could not separate from
+ * the content before (the bug that forced the old brand top-accent). Stepping
+ * chrome to --secondary in light, and keeping --sidebar in dark, gives a clear
+ * fill step in both schemes — so the active tab separates by its FILL alone,
+ * no accent line. */
+:root {
+  --surface-editor: var(--background);
+  --surface-chrome: var(--secondary);
+}
+.dark {
+  --surface-chrome: var(--sidebar);
+}
+
+@theme inline {
+  --color-surface-editor: var(--surface-editor);
+  --color-surface-chrome: var(--surface-chrome);
+}
+
 /* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same
  * size+weight MiSans reads heavier/darker than Inter — a screen of zh titles at
  * medium/semibold/bold looks overbearingly bold beside the same English UI.
@@ -334,3 +364,72 @@
     background: color-mix(in oklch, var(--color-muted-foreground) 52%, transparent);
   }
 }
+
+/* ── Settings list ↔ detail swap (directional push-pop) ──────────────────────
+ * A page-turn between the list and the detail, driven by <Transition> in
+ * components/settings/swap-transition.vue (no `mode`, so enter+leave run at
+ * once and cross-slide). The leaving pane is taken out of flow so it overlaps
+ * the entering one instead of stacking above it.
+ *
+ * Speed + easing are aligned 1:1 with the settings / bot-detail open motion:
+ * enter 90ms ease-out, leave 40ms ease-in, 10px travel. Only the DIRECTION is
+ * split per forward/back to read as a push-pop:
+ *   forward (open detail): list exits LEFT,  detail enters from RIGHT
+ *   back    (return list):  detail exits RIGHT, list enters from LEFT
+ */
+.swap-forward-enter-active,
+.swap-back-enter-active {
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  transition: transform 40ms ease-in, opacity 40ms ease-in;
+}
+
+/* The pane that is leaving drops out of normal flow and pins to the wrapper, so
+ * the entering pane occupies the layout box uncontested while they cross. */
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  position: absolute;
+  inset: 0;
+}
+
+/* forward: enter from the right, leave to the left */
+.swap-forward-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.swap-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* back: enter from the left, leave to the right */
+.swap-back-enter-from {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.swap-back-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swap-forward-enter-active,
+  .swap-forward-leave-active,
+  .swap-back-enter-active,
+  .swap-back-leave-active {
+    transition: opacity 90ms ease;
+  }
+
+  .swap-forward-enter-from,
+  .swap-forward-leave-to,
+  .swap-back-enter-from,
+  .swap-back-leave-to {
+    transform: none;
+  }
+}
+

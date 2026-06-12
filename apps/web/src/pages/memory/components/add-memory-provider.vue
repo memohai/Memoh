@@ -1,7 +1,12 @@
 <template>
   <Dialog v-model:open="open">
     <DialogTrigger as-child>
+      <span
+        v-if="hideTrigger"
+        class="hidden"
+      />
       <Button
+        v-else
         variant="outline"
         class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
       >
@@ -95,6 +100,11 @@ import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'
 
 const open = defineModel<boolean>('open', { default: false })
+withDefaults(defineProps<{
+  hideTrigger?: boolean
+}>(), {
+  hideTrigger: false,
+})
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const loading = ref(false)

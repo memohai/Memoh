@@ -1,5 +1,5 @@
 <template>
-  <SettingsShell width="wide">
+  <SettingsShell width="standard">
     <section class="flex items-center gap-3">
       <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
         <ProviderIcon

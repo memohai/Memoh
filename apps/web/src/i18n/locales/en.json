@@ -664,6 +664,7 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "searchPlaceholder": "Search providers...",
     "preset": "Preset",
     "presetPlaceholder": "Select preset or custom provider",
     "presetSearchPlaceholder": "Search presets...",
@@ -678,7 +679,7 @@
     "deleteConfirm": "Are you sure you want to delete this provider?",
     "saveChanges": "Save Changes",
     "emptyTitle": "No Providers",
-    "emptyDescription": "Add a model provider first to configure models",
+    "emptyDescription": "Add a provider to connect a model service for your bots.",
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
@@ -780,6 +781,10 @@
     "namePlaceholder": "Enter provider name",
     "builtinMode": "Built-in Memory Mode",
     "builtinModeDescription": "Choose how the built-in memory provider stores and retrieves memory for bots.",
+    "modeLabel": "Memory mode",
+    "modeHint": "How bots store and recall long-term memory.",
+    "advanced": "Advanced",
+    "advancedHint": "Custom memory backends for advanced setups.",
     "sparseSectionTitle": "Sparse Retrieval",
     "denseSectionTitle": "Dense Retrieval",
     "sparseInstallHint": "Sparse mode depends on the optional sparse service. Enable the sparse installation option when running the installer or start the sparse profile in Docker Compose.",
@@ -798,13 +803,13 @@
     "collectionUnavailable": "Unavailable",
     "modeNames": {
       "off": "Off",
-      "sparse": "Sparse",
-      "dense": "Dense"
+      "sparse": "Keyword",
+      "dense": "Semantic"
     },
     "modeDescriptions": {
-      "off": "Keep the current file-based built-in memory behavior without Qdrant retrieval.",
-      "sparse": "Use the local OpenSearch sparse model for memory indexing and retrieval with Qdrant.",
-      "dense": "Use the selected embedding model API to build dense vectors and store/search them directly in Qdrant."
+      "off": "Don't build a long-term memory index; keep only the basic file memory.",
+      "sparse": "Match memories by keyword, using the optional sparse retrieval service.",
+      "dense": "Turn memories into vectors with an embedding model and retrieve by semantic similarity."
     },
     "providerNames": {
       "builtin": "Built-in",
