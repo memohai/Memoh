@@ -3,8 +3,7 @@ set -euo pipefail
 
 PR_NUMBER="${1:-${MEMOH_KATA_GITHUB_PR:-}}"
 REPO="${MEMOH_KATA_GITHUB_REPO:-}"
-RUN_COMPOSE_E2E="${MEMOH_KATA_GITHUB_COMPOSE_E2E:-true}"
-READINESS_ONLY="${MEMOH_KATA_GITHUB_READINESS_ONLY:-false}"
+RUN_RUNNER_READINESS="${MEMOH_KATA_GITHUB_RUNNER_READINESS:-true}"
 WAIT_FOR_RUN="${MEMOH_KATA_GITHUB_WAIT:-true}"
 ALLOW_NO_RUNNER="${MEMOH_KATA_GITHUB_ALLOW_NO_RUNNER:-false}"
 WORKFLOW_FILE="${MEMOH_KATA_GITHUB_WORKFLOW:-kata-runtime.yml}"
@@ -34,8 +33,7 @@ validate_bool() {
 require_cmd gh
 require_cmd jq
 
-validate_bool MEMOH_KATA_GITHUB_COMPOSE_E2E "$RUN_COMPOSE_E2E"
-validate_bool MEMOH_KATA_GITHUB_READINESS_ONLY "$READINESS_ONLY"
+validate_bool MEMOH_KATA_GITHUB_RUNNER_READINESS "$RUN_RUNNER_READINESS"
 validate_bool MEMOH_KATA_GITHUB_WAIT "$WAIT_FOR_RUN"
 validate_bool MEMOH_KATA_GITHUB_ALLOW_NO_RUNNER "$ALLOW_NO_RUNNER"
 
@@ -86,14 +84,6 @@ if [ "$matching_runner_count" = "0" ] && [ "$ALLOW_NO_RUNNER" != "true" ]; then
   fail "no visible runner has labels [$REQUIRED_RUNNER_LABELS]; set MEMOH_KATA_GITHUB_ALLOW_NO_RUNNER=true to dispatch anyway"
 fi
 
-run_runner_readiness=false
-run_kata_e2e=true
-if [ "$READINESS_ONLY" = "true" ]; then
-  run_runner_readiness=true
-  run_kata_e2e=false
-  RUN_COMPOSE_E2E=false
-fi
-
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 echo "Dispatching Kata GitHub workflow:"
@@ -103,17 +93,13 @@ printf '  url=%s\n' "$PR_URL"
 printf '  ref=%s\n' "$HEAD_REF"
 printf '  head=%s\n' "$HEAD_SHA"
 printf '  workflow=%s\n' "$WORKFLOW_FILE"
-printf '  run_runner_readiness=%s\n' "$run_runner_readiness"
-printf '  run_kata_e2e=%s\n' "$run_kata_e2e"
-printf '  run_compose_e2e=%s\n' "$RUN_COMPOSE_E2E"
+printf '  run_runner_readiness=%s\n' "$RUN_RUNNER_READINESS"
 printf '  matching_runner_count=%s\n' "$matching_runner_count"
 
 gh workflow run "$WORKFLOW_FILE" \
   --repo "$REPO" \
   --ref "$HEAD_REF" \
-  -f "run_runner_readiness=$run_runner_readiness" \
-  -f "run_kata_e2e=$run_kata_e2e" \
-  -f "run_compose_e2e=$RUN_COMPOSE_E2E"
+  -f "run_runner_readiness=$RUN_RUNNER_READINESS"
 
 if [ "$WAIT_FOR_RUN" != "true" ]; then
   echo "Kata workflow dispatched. Waiting disabled by MEMOH_KATA_GITHUB_WAIT=false."
@@ -141,9 +127,4 @@ done
 
 echo "Watching Kata workflow run: $run_id"
 gh run watch "$run_id" --repo "$REPO" --exit-status
-
-if [ "$run_kata_e2e" = "true" ]; then
-  scripts/audit-kata-github-verification.sh "$PR_NUMBER"
-else
-  echo "Readiness-only Kata workflow completed."
-fi
+scripts/audit-kata-github-verification.sh "$PR_NUMBER"

@@ -28,7 +28,24 @@ validate_bool() {
 validate_bool MEMOH_KATA_RUNNER_CHECK_CONTAINER "$CHECK_CONTAINER"
 
 mkdir -p "$EVIDENCE_DIR"
-scripts/write-kata-evidence-environment.sh "$EVIDENCE_DIR"
+
+{
+  echo "run_id=${GITHUB_RUN_ID:-local}"
+  echo "run_attempt=${GITHUB_RUN_ATTEMPT:-1}"
+  echo "runner_name=${RUNNER_NAME:-$(hostname 2>/dev/null || echo unknown)}"
+  echo "runner_os=${RUNNER_OS:-$(uname -s 2>/dev/null || echo unknown)}"
+  echo "runner_arch=${RUNNER_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
+  echo "uname=$(uname -a 2>/dev/null || echo unknown)"
+  if command -v docker >/dev/null 2>&1; then
+    echo "docker=$(docker --version)"
+    echo "docker_compose=$(docker compose version 2>/dev/null || echo missing)"
+  else
+    echo "docker=missing"
+    echo "docker_compose=missing"
+  fi
+  echo "kvm_present=$([ -e /dev/kvm ] && echo true || echo false)"
+  echo "kata_shim=${MEMOH_KATA_SHIM_PATH:-/opt/kata/bin/containerd-shim-kata-v2}"
+} >"$EVIDENCE_DIR/environment.txt"
 
 echo "Kata runner target:"
 echo "  evidence_dir=$EVIDENCE_DIR"

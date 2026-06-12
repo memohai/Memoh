@@ -71,58 +71,21 @@ Use a host address that is reachable from Docker build containers. On Linux,
 `localhost` inside a Dockerfile `RUN` step is the build container, not the
 host.
 
-## Static Validation
-
-This can run on macOS, Docker Desktop, or GitHub-hosted Ubuntu. It does not
-prove that Kata works, but it checks the shell scripts, evidence validators,
-Kata config templates, compose overrides, and the `server-kata` Dockerfile
-target:
-
-```bash
-mise run test:kata:static
-```
-
-The GitHub `Kata Runtime` workflow uses the same script for its static job.
-Because GitHub cannot manually dispatch a newly added workflow until that file
-exists on the default branch, the already-registered `Docker` workflow also has
-a `Kata static validation` job for PR-stage remote validation. Use this task
-directly to reproduce the same static checks locally.
-
-## Development E2E
+## Development Stack
 
 Use this on a dedicated Linux/KVM development host:
 
 ```bash
-mise run test:kata:runner
-mise run test:kata:e2e
+mise run kata:runner
+mise run dev:kata
+mise run dev:kata:status
 ```
 
-The task performs the full dev validation:
-
-`test:kata:runner` is a lightweight readiness check for the runner or
+`kata:runner` is a lightweight readiness check for the runner or
 development host. It writes `tmp/kata-evidence/environment.txt`, verifies
 Docker and Docker Compose are usable, then checks Linux, `/dev/kvm`, the Kata
 shim, Kata config, and Kata runtime asset directories before any Memoh stack is
 started.
-
-`test:kata:e2e` performs the full dev validation:
-
-1. Checks the host has Linux, `/dev/kvm`, Kata shim/config/assets.
-2. Builds the Kata dev server image.
-3. Checks the same shim/config/assets are visible inside the server image.
-4. Starts the dev compose server with `devenv/app.kata.dev.toml`.
-5. Runs a direct `ctr run --runtime io.containerd.kata.v2` smoke test.
-6. Creates a temporary bot and validates the Memoh API reports the Kata runtime.
-7. Applies CPU, memory, and storage resource values.
-8. Recreates the workspace and verifies data-preserving restore.
-
-For an already-running dev stack, use:
-
-```bash
-mise run dev:kata
-mise run dev:kata:status
-mise run test:kata
-```
 
 `dev:kata:status` is a lightweight diagnostic for the current dev server. Use
 it when `http://127.0.0.1:18082` is already open and you need to check whether
@@ -133,59 +96,16 @@ Kata; the value that proves the workspace runtime is Kata is
 `runtime_backend = "io.containerd.kata.v2"` on a bot workspace, or
 `Runtime.Name = "io.containerd.kata.v2"` from `ctr containers info`.
 
-`test:kata` uses the running dev stack instead of rebuilding it, but it still
-generates and validates both the API verifier evidence and the direct
-containerd smoke evidence under `tmp/kata-evidence/` by default, and writes the
-same `environment.txt` summary used by the E2E tasks.
-
-## Production Compose E2E
+## Production Compose
 
 Use this on a dedicated Linux/KVM host because the root compose file uses fixed
 container names such as `memoh-server` and `memoh-postgres`:
 
 ```bash
-mise run test:kata:compose:e2e
-```
-
-The script refuses to run if the root compose containers already exist, then
-builds and starts:
-
-```bash
 docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build
 ```
 
-It verifies the same direct containerd runtime path and Memoh API workflow as
-the dev E2E. By default it tears the stack down when it exits. Set
-`MEMOH_KATA_COMPOSE_E2E_KEEP=true` to keep the stack for inspection.
-
-Both E2E tasks write machine-readable verification evidence under
-`tmp/kata-evidence/` by default: one JSON file for the Memoh API verifier and
-one `.smoke.json` file for the direct `ctr run --runtime ...` smoke check, plus
-`environment.txt` from `scripts/write-kata-evidence-environment.sh`. Set
-`MEMOH_KATA_EVIDENCE_DIR`, `MEMOH_VERIFY_EVIDENCE_FILE`, or
-`MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE` to choose another location.
-When an E2E task fails, it also writes `failure-context.txt` and, if the stack
-started, `compose-logs.txt` into the same evidence directory so the uploaded
-artifact contains the basic failure context. The compose logs are redacted for
-common password, JWT secret, and bearer-token patterns before they are saved.
-The evidence validator itself can be regression-tested locally with
-`mise run test:kata:evidence`. The running-stack verifier and both E2E tasks
-validate their own evidence bundles before reporting success; the GitHub
-workflow also validates the full uploaded artifact directory after all selected
-E2E tasks finish.
-
-## GitHub Actions Test Environment
-
-The `Kata Runtime` workflow always runs static validation on GitHub-hosted
-Ubuntu. Real Kata verification is opt-in because it needs a self-hosted
-Linux/KVM runner with Docker, Docker Compose v2, Kata Containers, `curl`, and
-`jq` installed.
-
-When the `Kata Runtime` workflow is being introduced in a PR, GitHub will not
-accept manual dispatch for it until the workflow file has landed on the default
-branch. During that phase, rely on the `Docker` workflow's `Kata static
-validation` job for GitHub-hosted Ubuntu coverage, plus the local E2E tasks on
-a Linux/KVM host.
+## GitHub Actions Runner
 
 Register the runner with these labels:
 
@@ -204,57 +124,36 @@ scripts/prepare-kata-github-runner.sh
 Set `MEMOH_KATA_RUNNER_NAME`, `MEMOH_KATA_RUNNER_DIR`, or
 `MEMOH_KATA_RUNNER_SCRIPT` to override the generated runner name, install
 directory, or output script. The `mise` equivalent is
-`mise run test:kata:github:runner`. The generated registration script rechecks
+`mise run kata:github:runner`. The generated registration script rechecks
 Linux, x86_64/amd64, `/dev/kvm`, Docker Compose, and the Kata shim/config paths
 before registering the runner, so a copied script cannot silently register the
 wrong host with the `kvm,kata` labels.
 
 To check a newly registered runner without starting the Memoh stack, run the
-workflow manually with `run_runner_readiness=true` and `run_kata_e2e=false`.
+workflow manually with `run_runner_readiness=true`.
 This runs only `scripts/check-kata-runner-ready.sh` and uploads a
-`kata-runner-readiness` artifact containing the environment summary. The job
-also runs `scripts/validate-kata-runner-readiness.sh` against that artifact so
-the uploaded evidence can be rechecked independently.
-
-For full verification, run the workflow manually with `run_kata_e2e=true`. The
-E2E job executes `scripts/check-kata-runner-ready.sh` first so runner, Docker,
-KVM, and Kata installation failures are reported before the Memoh stack starts.
-It then executes `scripts/test-containerd-kata-e2e.sh`; if `run_compose_e2e` is
-enabled, it also executes `scripts/test-containerd-kata-compose-e2e.sh`. Both
-runs upload their API and smoke evidence JSON files as the `kata-evidence`
-artifact. The job clears `tmp/kata-evidence/` before each run on the
-self-hosted runner and also uploads `environment.txt` with the runner, Docker,
-KVM, and Kata shim summary. Before uploading, it runs
-`scripts/validate-kata-evidence-dir.sh` to ensure the artifact has the expected
-number of API evidence files, matching `.smoke.json` files, and a Linux/KVM
-environment summary.
+`kata-runner-readiness` artifact containing the environment summary.
 
 Once a runner with the required labels is registered, this command can dispatch
-the full workflow from the PR branch, wait for it to finish, and audit the PR
+the readiness workflow from the PR branch, wait for it to finish, and audit the PR
 checks:
 
 ```bash
 scripts/run-kata-github-e2e.sh <pr-number>
 ```
 
-Set `MEMOH_KATA_GITHUB_READINESS_ONLY=true` to dispatch only the runner
-readiness job. Set `MEMOH_KATA_GITHUB_COMPOSE_E2E=false` to skip the production
-Compose E2E and run only the dev-stack E2E. The `mise` equivalent is
-`mise run test:kata:github:e2e -- <pr-number>`. Because GitHub requires
+The `mise` equivalent is
+`mise run kata:github:readiness -- <pr-number>`. Because GitHub requires
 `workflow_dispatch` workflows to be registered before they can be manually run,
 this command checks that the workflow is available before dispatching.
 
-To audit whether a PR head has actually reached the full Kata verification
-bar, run:
+To audit whether a PR head has completed runner readiness verification, run:
 
 ```bash
 scripts/audit-kata-github-verification.sh <pr-number>
 ```
 
-The audit exits successfully only when the Kata static check is successful and
-the `Linux/KVM E2E` check has succeeded for that PR head. A PR where static
-checks are green but `Linux/KVM E2E` is skipped or missing is still unverified.
-Use `mise run test:kata:github -- <pr-number>` as the task equivalent.
+Use `mise run kata:github -- <pr-number>` as the task equivalent.
 
 For manual production deployment, copy and edit the Kata config first:
 
@@ -264,66 +163,6 @@ cp conf/app.kata.docker.toml config.kata.toml
 MEMOH_CONFIG=./config.kata.toml \
   docker compose -f docker-compose.yml -f docker-compose.kata.yml up --build -d
 ```
-
-Then verify the running stack:
-
-```bash
-MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f docker-compose.yml -f docker-compose.kata.yml exec -T server ctr' \
-MEMOH_CONTAINERD_SMOKE_EVIDENCE_FILE=tmp/kata-evidence/kata-compose-manual.smoke.json \
-  scripts/smoke-containerd-runtime.sh
-MEMOH_VERIFY_BASE_URL=http://127.0.0.1:8080 \
-MEMOH_VERIFY_CONTAINERD_RUNTIME=true \
-MEMOH_VERIFY_CTR_COMMAND='docker compose -f docker-compose.yml -f docker-compose.kata.yml exec -T server ctr' \
-MEMOH_VERIFY_EVIDENCE_FILE=tmp/kata-evidence/kata-compose-manual.json \
-  scripts/verify-containerd-kata.sh
-scripts/validate-containerd-smoke-evidence.sh tmp/kata-evidence/kata-compose-manual.smoke.json
-scripts/validate-kata-evidence.sh tmp/kata-evidence/kata-compose-manual.json
-scripts/validate-kata-evidence-run-dir.sh \
-  tmp/kata-evidence/kata-compose-manual.json \
-  tmp/kata-evidence/kata-compose-manual.smoke.json
-```
-
-## Evidence Required To Call Kata Verified
-
-A valid test run must prove all of the following:
-
-- `scripts/check-kata-runner-ready.sh` passes on the Linux/KVM runner and writes
-  an environment summary proving Linux and `/dev/kvm`.
-- `scripts/validate-kata-runner-readiness.sh` passes against the readiness
-  artifact.
-- `scripts/check-kata-dev-env.sh` passes on the Linux/KVM host.
-- `scripts/check-kata-dev-env.sh` passes with `MEMOH_KATA_CHECK_CONTAINER=1`
-  after the target server image is built.
-- `scripts/smoke-containerd-runtime.sh` starts Alpine with
-  `--runtime io.containerd.kata.v2`.
-- `GET /ping` returns `container_backend = "containerd"`.
-- `GET /bots/{id}/container` returns
-  `runtime_backend = "io.containerd.kata.v2"`.
-- `ctr containers info <workspace-id>` returns
-  `Runtime.Name = "io.containerd.kata.v2"`.
-- `GET /bots/{id}/container/metrics` reports the same runtime backend.
-- `POST /bots` creation SSE emits a container `complete` event with
-  `container.runtime_backend = "io.containerd.kata.v2"`.
-- `POST /bots/{id}/container` recreate SSE completes with
-  `container.runtime_backend = "io.containerd.kata.v2"`.
-- CPU and memory resource limits become `status = "applied"` after recreate.
-- Storage remains a soft limit for this containerd/Kata path.
-- After the verifier deletes the workspace for resource-limit recreate,
-  `GET /bots/{id}/container` returns 404 before the workspace is recreated.
-- A file written under `/data` survives delete/recreate when
-  `preserve_data=true` and `restore_data=true` are used.
-
-The `test:kata:e2e` and `test:kata:compose:e2e` tasks perform these checks.
-Their evidence JSON records the target runtime, container IDs, direct
-`ctr containers info` runtime names, delete-before-recreate proof, final
-resource-limit state, create/recreate SSE runtime reporting, and data restore
-result without storing the admin password or access token.
-The running-stack verifier and E2E tasks also run
-`scripts/validate-kata-evidence.sh` against the saved API evidence and
-`scripts/validate-containerd-smoke-evidence.sh` against the saved smoke
-evidence, then validate the API evidence, paired smoke evidence, and
-environment summary together with `scripts/validate-kata-evidence-run-dir.sh`
-before reporting success.
 
 ## Troubleshooting
 
