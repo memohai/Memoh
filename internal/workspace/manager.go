@@ -93,6 +93,7 @@ type Manager struct {
 	containerLockMu   sync.Mutex
 	containerLocks    map[string]*sync.Mutex
 	grpcPool          *bridge.Pool
+	bridgeTLS         *BridgeTLSRuntimeOptions
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
 }
@@ -127,7 +128,20 @@ func NewManager(log *slog.Logger, service runtimeService, networkController netc
 	return m
 }
 
-// resolveContainerID resolves the actual containerd container ID for a bot.
+// SetBridgeTLS enables strict mTLS on TCP bridge dials and injects bridge-side
+// TLS material into new workspace containers. UDS bridge targets keep using the
+// local filesystem trust model.
+func (m *Manager) SetBridgeTLS(opts *BridgeTLSRuntimeOptions) {
+	if opts == nil {
+		m.bridgeTLS = nil
+		m.grpcPool.SetTLSOptions(nil)
+		return
+	}
+	m.bridgeTLS = opts
+	m.grpcPool.SetTLSOptions(opts.Client)
+}
+
+// resolveContainerID resolves the actual workspace container ID for a bot.
 // This is the SINGLE point of container ID resolution for all lookup operations.
 // It delegates to ContainerID (DB → label → scan) and falls back to the
 // new-style prefix if no container exists yet.
@@ -371,6 +385,18 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	}
 	tzMounts, tzEnv := ctr.TimezoneSpec()
 	mounts = append(mounts, tzMounts...)
+	if m.bridgeTLS != nil {
+		bridgeDir := strings.TrimSpace(m.bridgeTLS.BridgeMaterialDir)
+		if bridgeDir == "" || strings.TrimSpace(m.bridgeTLS.ExpectedClientURI) == "" {
+			return ctr.ContainerSpec{}, fmt.Errorf("%w: bridge TLS strict mode requires bridge material dir and expected client URI", ctr.ErrInvalidArgument)
+		}
+		mounts = append(mounts, ctr.MountSpec{
+			Destination: bridgeMTLSMountPath,
+			Type:        "bind",
+			Source:      bridgeDir,
+			Options:     []string{"rbind", "ro"},
+		})
+	}
 
 	skillRoots, err := m.ResolveWorkspaceSkillDiscoveryRoots(ctx, botID)
 	if err != nil {
@@ -384,6 +410,7 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 	} else {
 		env = append(env, "BRIDGE_SOCKET_PATH=/run/memoh/bridge.sock")
 	}
+	env = m.appendBridgeTLSEnv(env)
 	if m.botDisplayEnabled(ctx, botID) {
 		env = append(env,
 			"MEMOH_DISPLAY_ENABLED=true",
@@ -399,6 +426,19 @@ func (m *Manager) buildWorkspaceContainerSpec(ctx context.Context, botID string,
 		Env:        env,
 		CDIDevices: normalizeWorkspaceGPUDevices(gpu.Devices),
 	}, nil
+}
+
+func (m *Manager) appendBridgeTLSEnv(env []string) []string {
+	if m.bridgeTLS == nil {
+		return env
+	}
+	return append(env,
+		"BRIDGE_TLS_MODE="+config.BridgeTLSModeStrict,
+		"BRIDGE_TLS_CERT_FILE="+bridgeMTLSMountPath+"/"+bridgeServerCertFile,
+		"BRIDGE_TLS_KEY_FILE="+bridgeMTLSMountPath+"/"+bridgeServerKeyFile,
+		"BRIDGE_TLS_CLIENT_CA_FILE="+bridgeMTLSMountPath+"/"+serverClientCACertFile,
+		"BRIDGE_TLS_EXPECTED_CLIENT_URI="+m.bridgeTLS.ExpectedClientURI,
+	)
 }
 
 func (m *Manager) botDisplayEnabled(ctx context.Context, botID string) bool {

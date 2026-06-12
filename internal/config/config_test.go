@@ -156,6 +156,28 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	}
 }
 
+func TestLoadAppliesBridgeTLSEnvOverrides(t *testing.T) {
+	t.Setenv("MEMOH_INSTANCE_ID", "instance-1")
+	t.Setenv("MEMOH_BRIDGE_TLS_MODE", BridgeTLSModeStrict)
+	t.Setenv("MEMOH_BRIDGE_TLS_SERVER_DIR", "/server")
+	t.Setenv("MEMOH_BRIDGE_TLS_BRIDGE_DIR", "/bridge")
+	t.Setenv("MEMOH_BRIDGE_TLS_SERVER_NAME", "bridge.internal")
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.InstanceID != "instance-1" {
+		t.Fatalf("instance id = %q", cfg.InstanceID)
+	}
+	if cfg.BridgeTLS.Mode != BridgeTLSModeStrict ||
+		cfg.BridgeTLS.ServerDir != "/server" ||
+		cfg.BridgeTLS.BridgeDir != "/bridge" ||
+		cfg.BridgeTLS.ServerName != "bridge.internal" {
+		t.Fatalf("bridge tls config = %#v", cfg.BridgeTLS)
+	}
+}
+
 func TestLoadDefaultsContainerdRuntimeType(t *testing.T) {
 	t.Parallel()
 

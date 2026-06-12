@@ -20,6 +20,10 @@ jwt_expires_in = "168h"
 
 timezone = "UTC"
 
+# Instance identity used by bridge mTLS strict mode.
+# Leave empty unless [bridge_tls].mode = "strict".
+instance_id = ""
+
 [database]
 # Supported values: "postgres" or "sqlite".
 # PostgreSQL is recommended for shared and production deployments; SQLite is
@@ -60,6 +64,25 @@ runtime_type = "io.containerd.runc.v2"
 # Leave empty to use Docker's standard environment discovery (DOCKER_HOST,
 # DOCKER_TLS_VERIFY, DOCKER_CERT_PATH, or the platform default socket).
 host = ""
+
+[bridge_tls]
+# disabled: default for local/open-source deployments.
+# strict: TCP workspace bridge requires mTLS. UDS/local workspace bridges keep
+# using their local trust model. Shared Kata/CNI deployments should use strict.
+# Generate material with:
+#   scripts/gen-bridge-mtls.sh -instance-id <uuid> -out /opt/memoh/bridge-mtls
+mode = "disabled"
+# Directory readable by the Memoh server process. It must contain:
+# server-client.crt, server-client.key, bridge-server-ca.crt.
+server_dir = ""
+# Directory mounted read-only into workspace containers. It must contain only
+# bridge-server.crt, bridge-server.key, server-client-ca.crt. Strict mode
+# rejects unexpected files here. Do not point this at server_dir, because
+# server_dir contains the Memoh server client key.
+bridge_dir = ""
+# Optional synthetic TLS ServerName. Empty derives
+# memoh-bridge.<instance_id>.bridge.memoh.internal.
+server_name = ""
 
 [apple]
 # Used when [container].backend = "apple". Leave empty to use socktainer defaults.

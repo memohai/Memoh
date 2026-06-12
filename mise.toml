@@ -226,6 +226,10 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
   sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
+[tasks."bridge:mtls:gen"]
+description = "Generate strict bridge mTLS material (usage: mise run bridge:mtls:gen -- -instance-id <uuid> -out data/bridge-mtls)"
+run = "scripts/gen-bridge-mtls.sh"
+
 [tasks."kata:runner"]
 description = "Check that the current Linux/KVM host is ready to run Kata E2E"
 run = "scripts/check-kata-runner-ready.sh"
