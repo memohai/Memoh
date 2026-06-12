@@ -335,24 +335,35 @@ func (s *slackOutboundStream) sendToolCallMessage(
 	tc *channel.StreamToolCall,
 	p channel.ToolCallPresentation,
 ) error {
-	text := truncateSlackText(strings.TrimSpace(channel.RenderToolCallMessageMarkdown(p)))
+	payload := renderSlackToolCallMessage(p)
+	text := payload.Text
 	if text == "" {
 		return nil
 	}
+	opts := slackToolCallMsgOptions(payload.Blocks)
 	callID := ""
 	if tc != nil {
 		callID = strings.TrimSpace(tc.CallID)
 	}
 	if p.Status != channel.ToolCallStatusRunning && callID != "" {
 		if ts, ok := s.lookupToolCallMessage(callID); ok {
-			if err := s.updateMessageTextWithRetry(ctx, ts, text); err == nil {
+			if err := s.updateMessageTextWithRetry(ctx, ts, text, opts...); err == nil {
 				s.forgetToolCallMessage(callID)
 				return nil
+			}
+			if len(opts) > 0 {
+				if err := s.updateMessageTextWithRetry(ctx, ts, text); err == nil {
+					s.forgetToolCallMessage(callID)
+					return nil
+				}
 			}
 			s.forgetToolCallMessage(callID)
 		}
 	}
-	ts, err := s.postMessageWithRetry(ctx, text)
+	ts, err := s.postMessageWithRetry(ctx, text, opts...)
+	if err != nil && len(opts) > 0 {
+		ts, err = s.postMessageWithRetry(ctx, text)
+	}
 	if err != nil {
 		return err
 	}
@@ -360,6 +371,13 @@ func (s *slackOutboundStream) sendToolCallMessage(
 		s.storeToolCallMessage(callID, ts)
 	}
 	return nil
+}
+
+func slackToolCallMsgOptions(blocks []slackapi.Block) []slackapi.MsgOption {
+	if len(blocks) == 0 {
+		return nil
+	}
+	return []slackapi.MsgOption{slackapi.MsgOptionBlocks(blocks...)}
 }
 
 func (s *slackOutboundStream) lookupToolCallMessage(callID string) (string, bool) {
@@ -400,10 +418,11 @@ func (s *slackOutboundStream) resetStreamState() {
 	s.mu.Unlock()
 }
 
-func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, text string) (string, error) {
+func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, text string, extraOpts ...slackapi.MsgOption) (string, error) {
 	opts := []slackapi.MsgOption{
 		slackapi.MsgOptionText(text, false),
 	}
+	opts = append(opts, extraOpts...)
 	if s.reply != nil && s.reply.MessageID != "" {
 		opts = append(opts, slackapi.MsgOptionTS(s.reply.MessageID))
 	}
@@ -426,20 +445,24 @@ func (s *slackOutboundStream) postMessageWithRetry(ctx context.Context, text str
 	return "", lastErr
 }
 
-func (s *slackOutboundStream) updateMessageText(ctx context.Context, msgTS string, text string) error {
+func (s *slackOutboundStream) updateMessageText(ctx context.Context, msgTS string, text string, extraOpts ...slackapi.MsgOption) error {
+	opts := []slackapi.MsgOption{
+		slackapi.MsgOptionText(text, false),
+	}
+	opts = append(opts, extraOpts...)
 	_, _, _, err := s.api.UpdateMessageContext(
 		ctx,
 		s.target,
 		msgTS,
-		slackapi.MsgOptionText(text, false),
+		opts...,
 	)
 	return err
 }
 
-func (s *slackOutboundStream) updateMessageTextWithRetry(ctx context.Context, msgTS string, text string) error {
+func (s *slackOutboundStream) updateMessageTextWithRetry(ctx context.Context, msgTS string, text string, extraOpts ...slackapi.MsgOption) error {
 	var lastErr error
 	for attempt := 0; attempt < slackStreamFinalMaxRetries; attempt++ {
-		err := s.updateMessageText(ctx, msgTS, text)
+		err := s.updateMessageText(ctx, msgTS, text, extraOpts...)
 		if err == nil {
 			return nil
 		}

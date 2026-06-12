@@ -226,7 +226,8 @@ func (s *discordOutboundStream) finalizeMessage(text string) error {
 // on tool_call_end so the running → completed/failed transition is contained
 // in one visible post. Falls back to a new message if the edit fails.
 func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, p channel.ToolCallPresentation) error {
-	text := truncateDiscordText(strings.TrimSpace(channel.RenderToolCallMessageMarkdown(p)))
+	payload := renderDiscordToolCallMessage(p)
+	text := payload.Content
 	if text == "" {
 		return nil
 	}
@@ -236,22 +237,22 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 	}
 	if p.Status != channel.ToolCallStatusRunning && callID != "" {
 		if msgID, ok := s.lookupToolCallMessage(callID); ok {
-			if _, err := s.session.ChannelMessageEdit(s.target, msgID, text); err == nil {
+			if _, err := s.session.ChannelMessageEditComplex(discordToolCallMessageEdit(s.target, msgID, payload)); err == nil {
 				s.forgetToolCallMessage(callID)
 				return nil
+			}
+			if payload.Embed != nil {
+				if _, err := s.session.ChannelMessageEdit(s.target, msgID, text); err == nil {
+					s.forgetToolCallMessage(callID)
+					return nil
+				}
 			}
 			s.forgetToolCallMessage(callID)
 		}
 	}
-	var msg *discordgo.Message
-	var err error
-	if s.reply != nil && s.reply.MessageID != "" {
-		msg, err = s.session.ChannelMessageSendReply(s.target, text, &discordgo.MessageReference{
-			ChannelID: s.target,
-			MessageID: s.reply.MessageID,
-		})
-	} else {
-		msg, err = s.session.ChannelMessageSend(s.target, text)
+	msg, err := s.session.ChannelMessageSendComplex(s.target, s.discordToolCallMessageSend(payload))
+	if err != nil && payload.Embed != nil {
+		msg, err = s.session.ChannelMessageSendComplex(s.target, s.discordToolCallMessageSend(discordToolCallPayload{Content: text}))
 	}
 	if err != nil {
 		return err
@@ -260,6 +261,30 @@ func (s *discordOutboundStream) sendToolCallMessage(tc *channel.StreamToolCall, 
 		s.storeToolCallMessage(callID, msg.ID)
 	}
 	return nil
+}
+
+func (s *discordOutboundStream) discordToolCallMessageSend(payload discordToolCallPayload) *discordgo.MessageSend {
+	messageSend := &discordgo.MessageSend{
+		Content: payload.Content,
+	}
+	if payload.Embed != nil {
+		messageSend.Embeds = []*discordgo.MessageEmbed{payload.Embed}
+	}
+	if s.reply != nil && s.reply.MessageID != "" {
+		messageSend.Reference = &discordgo.MessageReference{
+			ChannelID: s.target,
+			MessageID: s.reply.MessageID,
+		}
+	}
+	return messageSend
+}
+
+func discordToolCallMessageEdit(channelID, messageID string, payload discordToolCallPayload) *discordgo.MessageEdit {
+	edit := discordgo.NewMessageEdit(channelID, messageID).SetContent(payload.Content)
+	if payload.Embed != nil {
+		edit.SetEmbeds([]*discordgo.MessageEmbed{payload.Embed})
+	}
+	return edit
 }
 
 func (s *discordOutboundStream) lookupToolCallMessage(callID string) (string, bool) {
