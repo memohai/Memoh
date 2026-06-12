@@ -193,16 +193,10 @@
     "commitHash": "Commit"
   },
   "people": {
-    "title": "People",
-    "subtitle": "Workspace members",
+    "title": "Members",
     "members": "Members",
     "member": "Member",
-    "memberCount": "{count} member(s)",
-    "totalMembers": "Total",
-    "activeMembers": "Active",
-    "admins": "Admins",
     "newMember": "New member",
-    "newMemberDescription": "Create a workspace login account.",
     "memberName": "Name",
     "displayNamePlaceholder": "Optional display name",
     "usernamePlaceholder": "username",
