@@ -2362,6 +2362,10 @@
   },
   "usage": {
     "title": "用量统计",
+    "filters": "筛选",
+    "overview": "概览",
+    "customRange": "自定义范围",
+    "customRangePlaceholder": "选择日期范围",
     "selectBot": "选择 Bot",
     "selectBotPlaceholder": "选择一个 Bot 查看用量",
     "timeRange": "时间范围",

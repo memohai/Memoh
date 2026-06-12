@@ -2366,6 +2366,10 @@
   },
   "usage": {
     "title": "Usage",
+    "filters": "Filters",
+    "overview": "Overview",
+    "customRange": "Custom range",
+    "customRangePlaceholder": "Pick a date range",
     "selectBot": "Select Bot",
     "selectBotPlaceholder": "Choose a bot to view usage",
     "timeRange": "Time Range",
