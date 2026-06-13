@@ -82,8 +82,8 @@
     scale: 1 1;
     transition:
       scale 0.255s linear(0, 0.3505, 0.7432, 0.9336, 0.9951, 1.0062, 1.0045, 1.0019, 1.0005, 1),
-      background-color 0.11s ease-out,
-      box-shadow 0.11s ease-out;
+      background-color 0.06s ease-out,
+      box-shadow 0.06s ease-out;
   }
   [data-button]:is([data-variant="outline"], [data-variant="secondary"]):hover::before {
     background-color: var(--btn-secondary-overlay);
@@ -717,15 +717,14 @@
   box-shadow: inset 0 0 0 1px var(--border-hairline);
 }
 
-/* Dark mode: slow down the background-color transition on both primary and
-   secondary buttons so the high-contrast color change (near-white ↔ gray,
-   transparent ↔ black) has enough time to read as a smooth fade rather than
-   a hard cut. Only overrides duration; property & easing stay from the layer. */
+/* Dark mode: tune background-color transition speed for the higher-contrast
+   dark fills. Primary is slightly faster than light (snappier hover feel on
+   white→gray); secondary is fast so transparent→black reads as instant fill. */
 .dark [data-button]:is([data-variant="default"], [data-variant="primary"])::before {
-  transition-duration: 0.255s, 0.25s;
+  transition-duration: 0.255s, 0.11s;
 }
 .dark [data-button]:is([data-variant="outline"], [data-variant="secondary"])::before {
-  transition-duration: 0.255s, 0.25s, 0.25s;
+  transition-duration: 0.255s, 0.095s, 0.095s;
 }
 
 :root {
@@ -1107,7 +1106,7 @@
      menu border is a WHITE hairline (light-on-dark), a touch stronger than
      --border-menu. (Light mode drops this border entirely — a white palette already
      separates from the scrim; see :root.) */
-  --border-menu-elevated: oklch(1 0 0 / 0.22);
+  --border-menu-elevated: oklch(1 0 0 / 0.12);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.86 0.005 285);
   --chart-1: oklch(0.488 0.243 264.376);
@@ -1146,8 +1145,8 @@
   /* Dark mode: the primary CTA inverts to a light fill (text-background gives it
      dark text automatically), still lightening rest → hover → press. */
   --btn-primary: oklch(0.976 0 0);
-  --btn-primary-hover: oklch(0.90 0 0);
-  --btn-primary-active: oklch(0.82 0 0);
+  --btn-primary-hover: oklch(0.81 0 0);
+  --btn-primary-active: oklch(0.65 0 0);
   /* Dark: the tooltip inverts to a near-white bubble with dark text. */
   --tooltip: oklch(0.22 0 0);
   --tooltip-foreground: oklch(0.92 0 0);
