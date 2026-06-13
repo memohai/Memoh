@@ -8,10 +8,12 @@
     }
   }
 
+  /* Dark-mode syntax highlight: keep only the foreground token colors.
+     Background is intentionally left untouched so every code surface uses its
+     own container background instead of the highlighter's baked-in dark fill. */
   .dark .shiki,
   .dark .shiki span {
     color: var(--shiki-dark) !important;
-    background-color: var(--shiki-dark-bg) !important;
   }
 }
 

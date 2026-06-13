@@ -73,6 +73,10 @@
                   :message="msg"
                   :session-type="activeSession?.type"
                   :bot-id="currentBotId"
+                  :channel-thread="isChannelThread"
+                  :channel-platform="channelPlatform"
+                  :bot-name="currentBot?.name"
+                  :bot-avatar-url="currentBot?.avatar_url"
                   :on-open-media="galleryOpenBySrc"
                   :on-reply-click="handleReplyJump"
                   @active="isActiveEl"
@@ -769,6 +773,14 @@ const { data: acpProfileData } = useQuery({
 })
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
+
+// A third-party synced thread (Telegram/Discord/...) is a multi-participant
+// group conversation rather than the local 1:1 chat. The message list switches
+// to a group layout for these: every turn is left-aligned with an avatar +
+// sender name + channel badge, including the bot's own replies.
+const channelPlatform = computed(() => (activeSession.value?.channel_type ?? '').trim().toLowerCase())
+const isChannelThread = computed(() => !!channelPlatform.value && channelPlatform.value !== 'local')
+
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const enabledACPProfiles = computed(() =>
   acpProfiles.value.filter(profile => isACPAgentEnabled(currentBot.value?.metadata as Record<string, unknown> | undefined, profile.id)),
