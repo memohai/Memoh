@@ -148,21 +148,42 @@
           />
         </SettingsRow>
 
-        <SettingsRow
-          :label="t('settings.appearance.codeFontFamily')"
-          :description="t('settings.appearance.codeFontFamilyDescription')"
-        >
-          <Input
-            id="code-font-family"
-            :model-value="codeFontFamilyDraft"
-            :placeholder="defaultCodeFontFamily"
-            class="h-8 w-48 font-mono text-xs"
-            @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
-            @change="commitCodeFontFamilyDraft"
-            @blur="commitCodeFontFamilyDraft"
-            @keydown.enter="commitCodeFontFamilyDraft"
-          />
-        </SettingsRow>
+        <div class="mx-4 border-b border-border py-3 last:border-b-0">
+          <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-foreground">
+                {{ t('settings.appearance.codeFontFamily') }}
+              </div>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                {{ t('settings.appearance.codeFontFamilyDescription') }}
+              </p>
+            </div>
+            <div class="shrink-0">
+              <Input
+                id="code-font-family"
+                :model-value="codeFontFamilyDraft"
+                :placeholder="defaultCodeFontFamily"
+                class="h-8 w-48 font-mono text-xs"
+                @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
+                @change="commitCodeFontFamilyDraft"
+                @blur="commitCodeFontFamilyDraft"
+                @keydown.enter="commitCodeFontFamilyDraft"
+              />
+            </div>
+          </div>
+          <div
+            class="typography-code-preview pointer-events-none mt-3 border-l-4 border-l-warning-border pl-3"
+            :style="codeFontPreviewStyle"
+            inert
+          >
+            <!-- eslint-disable vue/no-v-html -->
+            <div
+              class="overflow-x-auto"
+              v-html="codeFontPreviewHtml"
+            />
+            <!-- eslint-enable vue/no-v-html -->
+          </div>
+        </div>
       </SettingsSection>
     </div>
   </section>
@@ -184,14 +205,15 @@ import {
 import { useDark } from '@vueuse/core'
 import { Monitor, Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import type { Locale } from '@/i18n'
 import SettingsRow from '@/components/settings/row.vue'
 import SettingsSection from '@/components/settings/section.vue'
 import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
 import { useSettingsStore, type ThemePreference } from '@/store/settings'
-import { DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
+import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -222,11 +244,32 @@ const uiFontSizeDraft = ref(String(uiFontSizePx.value))
 const codeFontSizeDraft = ref(String(codeFontSizePx.value))
 const uiFontFamilyDraft = ref(uiFontFamily.value)
 const codeFontFamilyDraft = ref(codeFontFamily.value)
+const codeFontPreview = useShikiHighlighter()
+const codeFontPreviewCode = `function greet(name: string): string {
+  return \`Hello, \${name}\`
+}`
+const codeFontPreviewHtml = computed(() => codeFontPreview.html.value || `<pre><code>${codeFontPreviewCode}</code></pre>`)
+const codeFontPreviewStyle = computed(() => ({
+  '--typography-code-preview-font-family': cssFontFamilyDeclaration(codeFontFamilyDraft.value, DEFAULT_CODE_FONT_FAMILY),
+  '--typography-code-preview-font-size': `${normalizeCodeFontSizePx(codeFontSizeDraft.value)}px`,
+}))
+
+function renderCodeFontPreview() {
+  void codeFontPreview.highlightLanguage(codeFontPreviewCode, 'typescript', {
+    theme: isDark.value ? 'github-dark' : 'github-light',
+    transparentPre: true,
+  })
+}
+
+onMounted(() => {
+  renderCodeFontPreview()
+})
 
 watch(uiFontSizePx, (value) => { uiFontSizeDraft.value = String(value) })
 watch(codeFontSizePx, (value) => { codeFontSizeDraft.value = String(value) })
 watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })
 watch(codeFontFamily, (value) => { codeFontFamilyDraft.value = value })
+watch(isDark, () => { renderCodeFontPreview() })
 
 function updateUiFontSizeDraft(value: string | number) { uiFontSizeDraft.value = String(value) }
 function updateCodeFontSizeDraft(value: string | number) { codeFontSizeDraft.value = String(value) }
