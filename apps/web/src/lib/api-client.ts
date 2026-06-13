@@ -3,6 +3,7 @@ import { notifyAuthSessionCleared } from './auth-session'
 
 export interface SetupApiClientOptions {
   baseUrl?: string
+  fetch?: typeof fetch
   // Called after the access token is cleared on a 401. Hosts (web / desktop
   // chat window / desktop settings window) decide what to do — usually a
   // router redirect to the login screen, but desktop satellite windows may
@@ -44,6 +45,94 @@ export function sdkWebSocketUrl(options: SdkUrlOptions): string {
   return url.toString()
 }
 
+let onUnauthorizedHook: (() => void) | undefined
+let unauthorizedNotified = false
+
+interface ApiFetchContext {
+  input: Parameters<typeof fetch>[0]
+  init?: Parameters<typeof fetch>[1]
+  requestToken: string
+}
+
+type ApiFetchResponseHandler = (
+  response: Response,
+  context: ApiFetchContext,
+) => void | Promise<void>
+
+function handleUnauthorized(requestToken?: string) {
+  const currentToken = authToken()
+  if (currentToken && requestToken && requestToken !== currentToken) return
+
+  try {
+    if (currentToken) {
+      localStorage.removeItem('token')
+    }
+  } catch {
+  }
+  if (!currentToken && unauthorizedNotified) return
+  unauthorizedNotified = true
+  notifyAuthSessionCleared('unauthorized')
+  onUnauthorizedHook?.()
+}
+
+function createApiFetch(
+  baseFetch: typeof fetch = globalThis.fetch,
+  responseHandlers: ApiFetchResponseHandler[] = [handleAuthResponse],
+): typeof fetch {
+  return async (input, init) => {
+    const context: ApiFetchContext = {
+      input,
+      init,
+      requestToken: requestBearerToken(input, init),
+    }
+    const response = await baseFetch(input, init)
+    for (const handler of responseHandlers) {
+      await handler(response, context)
+    }
+    return response
+  }
+}
+
+function handleAuthResponse(response: Response, context: ApiFetchContext) {
+  if (response.status === 401) {
+    handleUnauthorized(context.requestToken)
+  }
+}
+
+function authToken(): string {
+  try {
+    return localStorage.getItem('token')?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function requestBearerToken(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): string {
+  const headers = input instanceof Request ? new Headers(input.headers) : new Headers()
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value)
+    })
+  }
+  const authorization = headers.get('Authorization')?.trim() ?? ''
+  const match = /^Bearer\s+(.+)$/i.exec(authorization)
+  return match?.[1]?.trim() ?? ''
+}
+
+function addAuthorizationHeader(request: Request): Request {
+  const token = authToken()
+  if (token) {
+    unauthorizedNotified = false
+    request.headers.set('Authorization', `Bearer ${token}`)
+  }
+  return request
+}
+
+function installAuthRequestInterceptor() {
+  if (client.interceptors.request.exists(addAuthorizationHeader)) return
+  client.interceptors.request.use(addAuthorizationHeader)
+}
+
 /**
  * Configure the SDK client with base URL, auth interceptor, and 401 handling.
  * Call this once at app startup (main.ts).
@@ -53,24 +142,12 @@ export function setupApiClient(options: SetupApiClientOptions = {}) {
   const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'
   void agentBaseUrl
 
-  client.setConfig({ baseUrl: apiBaseUrl })
+  onUnauthorizedHook = options.onUnauthorized
 
-  // Add auth token to every request
-  client.interceptors.request.use((request) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      request.headers.set('Authorization', `Bearer ${token}`)
-    }
-    return request
+  client.setConfig({
+    baseUrl: apiBaseUrl,
+    fetch: createApiFetch(options.fetch),
   })
 
-  // Handle 401 responses globally
-  client.interceptors.response.use((response) => {
-    if (response.status === 401) {
-      localStorage.removeItem('token')
-      notifyAuthSessionCleared('unauthorized')
-      options.onUnauthorized?.()
-    }
-    return response
-  })
+  installAuthRequestInterceptor()
 }

@@ -2,7 +2,9 @@
 
 FROM debian:bookworm-slim
 
+ARG MEMOH_APT_COMMAND_TIMEOUT=1200
 ENV DEBIAN_FRONTEND=noninteractive
+ENV MEMOH_APT_COMMAND_TIMEOUT=${MEMOH_APT_COMMAND_TIMEOUT}
 WORKDIR /data
 
 COPY scripts/desktop-install.sh /tmp/memoh-desktop-install.sh

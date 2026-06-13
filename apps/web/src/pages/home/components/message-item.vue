@@ -140,7 +140,7 @@
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
-              code-renderer="shiki"
+              :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
               custom-id="chat-msg"
             />
           </div>
@@ -295,7 +295,7 @@
                 :smooth-streaming="isBlockStreaming(segment.block)"
                 :typewriter="isBlockStreaming(segment.block)"
                 :fade="isBlockStreaming(segment.block)"
-                code-renderer="shiki"
+                :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
                 custom-id="chat-msg"
               />
             </div>
@@ -338,7 +338,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
 import { warmCodeHighlightOnIdle } from '@/utils/warm-code-highlight'
@@ -372,7 +372,7 @@ import RollingToolSlot from './rolling-tool-slot.vue'
 import ThinkingBlock from './thinking-block.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility } from '@vueuse/core'
+import { useElementVisibility, useIntersectionObserver } from '@vueuse/core'
 
 
 enableKatex()
@@ -394,18 +394,36 @@ const props = defineProps<{
   botId?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
-  isScrolling: boolean
 }>()
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-watch([isVisible, toRef(props, 'isScrolling')], () => { 
+// Every Monaco-backed code block initializes synchronously on mount with a
+// burst of forced reflows, so a freshly loaded chat used to spin up editors
+// for every offscreen message at once. Keep offscreen blocks as plain <pre>
+// until the message comes within a viewport of being seen. Observe the
+// content-visibility row (our parent) rather than our own root: targets
+// inside a skipped subtree never report as intersecting.
+const heavyBlocksReady = ref(false)
+const messageRow = computed(() => messageEl.value?.parentElement ?? null)
+const { stop: stopHeavyBlocksObserver } = useIntersectionObserver(messageRow, (entries) => {
+  if (!entries.some(entry => entry.isIntersecting)) return
+  stopHeavyBlocksObserver()
+  const flip = () => {
+    heavyBlocksReady.value = true
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(flip, { timeout: 500 })
+  else flip()
+}, { rootMargin: '100% 0px 100% 0px', threshold: 0 })
+
+const codeBlocksAsPre = computed(() => !heavyBlocksReady.value && !props.message.streaming)
+
+watch(isVisible, () => {
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
-  deep:true
 })
 
 const isSelf = computed(() =>

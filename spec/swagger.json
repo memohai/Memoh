@@ -8269,6 +8269,244 @@
                 }
             }
         },
+        "/fetch-providers": {
+            "get": {
+                "description": "List configured fetch providers",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "List fetch providers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider filter (native)",
+                        "name": "provider",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/fetchproviders.GetResponse"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a fetch provider configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Create a fetch provider",
+                "parameters": [
+                    {
+                        "description": "Fetch provider configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/fetch-providers/meta": {
+            "get": {
+                "description": "List available fetch provider types and config schemas",
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "List fetch provider metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/fetchproviders.ProviderMeta"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/fetch-providers/{id}": {
+            "get": {
+                "description": "Get fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Get a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Update a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.GetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete fetch provider by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Delete a fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/memory-providers": {
             "get": {
                 "description": "List configured memory providers",
@@ -10978,6 +11216,12 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -13934,6 +14178,128 @@
                 },
                 "provider": {
                     "type": "string"
+                }
+            }
+        },
+        "fetchproviders.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/fetchproviders.ProviderName"
+                }
+            }
+        },
+        "fetchproviders.GetResponse": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderConfigSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/fetchproviders.ProviderFieldSchema"
+                    }
+                }
+            }
+        },
+        "fetchproviders.ProviderFieldSchema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "example": {},
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderMeta": {
+            "type": "object",
+            "properties": {
+                "config_schema": {
+                    "$ref": "#/definitions/fetchproviders.ProviderConfigSchema"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "fetchproviders.ProviderName": {
+            "type": "string",
+            "enum": [
+                "native",
+                "jina",
+                "cloudflare_markdown"
+            ],
+            "x-enum-varnames": [
+                "ProviderNative",
+                "ProviderJina",
+                "ProviderCloudflareMarkdown"
+            ]
+        },
+        "fetchproviders.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "enable": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "$ref": "#/definitions/fetchproviders.ProviderName"
                 }
             }
         },
@@ -17043,6 +17409,9 @@
                 "display_enabled": {
                     "type": "boolean"
                 },
+                "fetch_provider_id": {
+                    "type": "string"
+                },
                 "heartbeat_enabled": {
                     "type": "boolean"
                 },
@@ -17189,6 +17558,9 @@
                 },
                 "display_enabled": {
                     "type": "boolean"
+                },
+                "fetch_provider_id": {
+                    "type": "string"
                 },
                 "heartbeat_enabled": {
                     "type": "boolean"

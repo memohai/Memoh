@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS search_providers (
   CONSTRAINT search_providers_name_unique UNIQUE (name)
 );
 
+CREATE TABLE IF NOT EXISTS fetch_providers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  enable BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT fetch_providers_name_unique UNIQUE (name)
+);
+
 CREATE TABLE IF NOT EXISTS models (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   model_id TEXT NOT NULL,
@@ -157,6 +168,7 @@ CREATE TABLE IF NOT EXISTS bots (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id UUID REFERENCES search_providers(id) ON DELETE SET NULL,
+  fetch_provider_id UUID REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id UUID REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled BOOLEAN NOT NULL DEFAULT false,
   heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
