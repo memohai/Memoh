@@ -79,7 +79,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
-  AND m.created_at >= sqlc.arg(created_at)
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
 ORDER BY m.created_at ASC;
 
 -- name: ListMessagesSinceBySession :many
@@ -96,7 +96,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at >= sqlc.arg(created_at)
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
 ORDER BY m.created_at ASC;
 
 -- name: ListActiveMessagesSince :many
@@ -113,7 +113,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
-  AND m.created_at >= sqlc.arg(created_at)
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC;
 
@@ -131,7 +131,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at >= sqlc.arg(created_at)
+  AND m.created_at >= strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
   AND (json_extract(m.metadata, '$.trigger_mode') IS NULL OR json_extract(m.metadata, '$.trigger_mode') != 'passive_sync')
 ORDER BY m.created_at ASC;
 
@@ -149,7 +149,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
-  AND m.created_at < sqlc.arg(created_at)
+  AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
@@ -167,7 +167,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at < sqlc.arg(created_at)
+  AND m.created_at < strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
 ORDER BY m.created_at DESC
 LIMIT sqlc.arg(max_count);
 
@@ -237,7 +237,7 @@ FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id
 LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.session_id = sqlc.arg(session_id)
-  AND m.created_at > sqlc.arg(created_at)
+  AND m.created_at > strftime('%Y-%m-%d %H:%M:%S', sqlc.arg(created_at))
 ORDER BY m.created_at ASC
 LIMIT sqlc.arg(max_count);
 
@@ -332,8 +332,8 @@ LEFT JOIN bot_sessions s ON s.id = m.session_id
 WHERE m.bot_id = sqlc.arg(bot_id)
   AND (sqlc.narg(session_id) IS NULL OR m.session_id = sqlc.narg(session_id))
   AND (sqlc.narg(contact_id) IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id))
-  AND (sqlc.narg(start_time) IS NULL OR m.created_at >= sqlc.narg(start_time))
-  AND (sqlc.narg(end_time) IS NULL OR m.created_at <= sqlc.narg(end_time))
+  AND (sqlc.narg(start_time) IS NULL OR m.created_at >= strftime('%Y-%m-%d %H:%M:%S', sqlc.narg(start_time)))
+  AND (sqlc.narg(end_time) IS NULL OR m.created_at <= strftime('%Y-%m-%d %H:%M:%S', sqlc.narg(end_time)))
   AND (sqlc.narg(role) IS NULL OR m.role = sqlc.narg(role))
   AND (sqlc.narg(keyword) IS NULL OR (
     CASE
