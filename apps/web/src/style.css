@@ -2,12 +2,91 @@
 @import "tw-animate-css";
 @import "@memohai/ui/style.css";
 
+/* Bundled MiSans Variable (Apache-2.0) as the CJK fallback so Chinese renders
+ * identically on Web / Windows / macOS instead of each OS's system font.
+ * Inter Variable still wins for Latin (declared first in --font-sans); MiSans
+ * only kicks in for CJK glyphs (per-glyph fallback). Each face is unicode-range
+ * subsetted, so the browser lazy-loads only the CJK ranges actually rendered.
+ * The wrapper declares MiSans' variable wght axis range (150..700). */
+@import "./styles/misans-vf.css";
+
 /* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
  * auto-detection anchors on the Vite project root, so when a consumer
  * (e.g. @memohai/desktop) imports this stylesheet from a different root,
  * it needs these hints to still scan our templates. */
 @source "./";
 @source "../../../packages/ui/src";
+
+/* ── Workspace surface planes ────────────────────────────────────────────────
+ * The editor workspace (dock group view, tabs, file editor, chat, previews)
+ * collapses to exactly TWO planes so the SELECTED tab reads as continuous with
+ * the content it owns, while the chrome (tab strip + unselected tabs + top
+ * strip) sits clearly apart — in BOTH light and dark. We reuse the existing
+ * elevation tokens, so any palette/scheme swap (and the dark overrides) carry
+ * through automatically (all of :root / .dark / [data-color-scheme] target
+ * <html>, so the var() resolves against that element's final value):
+ *   · editor plane = --background  (light 0.984 canvas · dark 0.152)
+ *     — already what chat/preview sit on, so content is untouched.
+ *   · chrome plane = recessed neutral: light --secondary (0.964, one notch
+ *     under the canvas) · dark --sidebar (0.185, one notch above it).
+ * In light, --background == --sidebar, so the chrome could not separate from
+ * the content before (the bug that forced the old brand top-accent). Stepping
+ * chrome to --secondary in light, and keeping --sidebar in dark, gives a clear
+ * fill step in both schemes — so the active tab separates by its FILL alone,
+ * no accent line. */
+:root {
+  --surface-editor: var(--background);
+  --surface-chrome: var(--secondary);
+}
+.dark {
+  --surface-chrome: var(--sidebar);
+}
+
+@theme inline {
+  --color-surface-editor: var(--surface-editor);
+  --color-surface-chrome: var(--surface-chrome);
+}
+
+/* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same
+ * size+weight MiSans reads heavier/darker than Inter — a screen of zh titles at
+ * medium/semibold/bold looks overbearingly bold beside the same English UI.
+ * Scoped to <html lang="zh"> (set by the settings store on locale change), so
+ * this only ever fires when the UI language is Chinese; English is untouched.
+ *
+ * Tailwind v4 emits weight utilities as LITERALS (.font-medium → 500, not
+ * var(--font-weight-*)), AND this codebase uses many arbitrary-value weights
+ * (font-[450] is the Button base; font-[550]/[475]/[430] are tuned heading and
+ * label rungs). Neither resolves through a single token, so each class is
+ * remapped here. It is admittedly a lookup table, not an elegant abstraction —
+ * the elegant fix is a real weight-token layer the whole app references, which
+ * is a design-system change deferred for now. The mapping is a single MONOTONIC
+ * compress-the-top curve: heavier source weights drop more, and the order is
+ * preserved (no rung overtakes a heavier one). Keep it sorted by source weight
+ * when editing so monotonicity stays obvious. */
+@layer utilities {
+  /* semantic utilities (literal source weights in parens) */
+  :lang(zh) .font-light { font-weight: 280; }     /* 300 */
+  :lang(zh) .font-normal { font-weight: 315; }    /* 400 */
+  :lang(zh) .font-medium { font-weight: 370; }    /* 500 */
+  :lang(zh) .font-semibold { font-weight: 410; }  /* 600 */
+  :lang(zh) .font-bold { font-weight: 450; }      /* 700 */
+  /* arbitrary-value weights, sorted ascending so the curve stays monotonic */
+  :lang(zh) .font-\[360\] { font-weight: 315; }
+  :lang(zh) .font-\[380\] { font-weight: 330; }
+  :lang(zh) .font-\[400\] { font-weight: 345; }
+  :lang(zh) .font-\[420\] { font-weight: 360; }
+  :lang(zh) .font-\[430\] { font-weight: 368; }
+  :lang(zh) .font-\[450\] { font-weight: 380; }
+  :lang(zh) .font-\[475\] { font-weight: 398; }
+  :lang(zh) .font-\[550\] { font-weight: 432; }
+}
+:lang(zh) body {
+  font-weight: 335;
+}
+/* Chat markdown body also relaxes in Chinese (it pins its own 380 weight). */
+:lang(zh) [data-chat-content] .prose {
+  font-weight: 335;
+}
 
 @layer base {
   :root {
@@ -23,8 +102,12 @@
 
 @layer components {
   [data-chat-content] .prose {
-    font-size: 0.875rem;
-    line-height: 1.625;
+    /* Compact chat body: 13px text with tight 17.5px line-height. Keep the
+     * body weight close to the global normal rung now that CJK is variable.
+     * Tables / code blocks set their own size so they don't grow with this. */
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    font-weight: 380;
   }
 
   [data-chat-content] .chat-user-bubble {
@@ -120,16 +203,19 @@
   --markstream-code-font-family: var(--memoh-code-font-family, ui-monospace, monospace);
   --ms-text-body: inherit;
   --ms-leading-body: 1.625;
-  --ms-text-h1: 2.25rem;
-  --ms-text-h2: 1.5rem;
-  --ms-text-h3: 1.25rem;
-  --ms-text-h4: 1.125rem;
-  --ms-text-h5: 1rem;
-  --ms-text-h6: 1rem;
-  --ms-weight-h1: 800;
-  --ms-weight-h2: 700;
-  --ms-weight-h3: 600;
-  --ms-weight-h4: 600;
+  /* Heading scale is em-relative (tracks the body) and restrained: headings sit
+   * just above the body rather than the old fixed 36/24/20px scale that
+   * dwarfed the text. Weights are toned down from the previous 800/700. */
+  --ms-text-h1: 1.5em;
+  --ms-text-h2: 1.3em;
+  --ms-text-h3: 1.15em;
+  --ms-text-h4: 1.05em;
+  --ms-text-h5: 1em;
+  --ms-text-h6: 1em;
+  --ms-weight-h1: 600;
+  --ms-weight-h2: 560;
+  --ms-weight-h3: 520;
+  --ms-weight-h4: 500;
 
   /* Flow spacing — calmer rhythm matching the previous defaults */
   --ms-flow-paragraph-y: 1.25em;
@@ -152,12 +238,19 @@
   --list-counter-marker: var(--color-muted-foreground);
   --list-marker: var(--color-muted-foreground);
 
-  /* Tables */
-  --table-border: var(--color-border);
-  --table-header-bg: var(--color-muted);
-  --code-action-hover-bg: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  /* Tables — no row hover (markdown tables are content, not interactive lists).
+   * markstream's `tr:hover` reads --code-action-hover-bg, so transparent here
+   * disables it uniformly for every row (avoids the odd/even specificity tie
+   * with the zebra-stripe override below). */
+  /* Outer frame is the same hairline as the inner grid (a divider, not a hard
+   * edge). Header is one notch grayer than --muted so the two title strips
+   * (table header + code-block header) read as a quiet label band. */
+  --table-border: color-mix(in oklch, var(--color-border) 55%, transparent);
+  --table-header-bg: color-mix(in oklch, var(--color-muted), var(--color-border) 35%);
+  --code-action-hover-bg: transparent;
 
-  /* Inline code — accent pill (1.x uses .inline-code, not bare <code>) */
+  /* Inline code (`internal/` etc.) — a dimmed gray chip, text-button style.
+   * It reads as a quiet token against the pure-white table/code body. */
   --inline-code-bg: var(--color-accent);
   --inline-code-fg: var(--color-foreground);
   --inline-code-border: transparent;
@@ -175,6 +268,12 @@
   line-height: 1.625;
 }
 
+.markstream-vue .strong-node,
+.markstream-vue strong,
+.markstream-vue b {
+  font-weight: 520;
+}
+
 /* Tables — restore the previous clean look: rounded outer frame, tinted header,
  * horizontal row separators only. 1.x adds vertical grid lines, zebra striping,
  * and a drop shadow that we remove here. */
@@ -189,21 +288,42 @@
 
 .markstream-vue .table-node {
   box-shadow: none;
+  /* Body is pure white so it reads brighter than the (slightly gray) chat
+   * surface — never the same as the background. */
+  background-color: #fff;
+  /* Decoupled from the larger body font so tables stay compact: table body
+   * 15px, header 14px (see thead rule). */
+  font-size: 0.9375rem;
 }
 
-/* Drop the per-cell vertical grid lines; keep a single horizontal separator */
+.dark .markstream-vue .table-node {
+  background-color: var(--color-card);
+}
+
+/* Full grid (Excel feel): both vertical + horizontal cell lines, but a finer/
+ * lighter hairline than the outer frame so the grid is calm, not heavy. */
 .markstream-vue .table-node th,
 .markstream-vue .table-node td {
+  border-right: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
+  /* Compact cell metrics: 8px/12px padding + tight 1.5 line-height keeps rows
+   * from reading tall. */
+  padding: 0.5rem 0.75rem;
+  line-height: 1.5;
+}
+
+.markstream-vue .table-node th:last-child,
+.markstream-vue .table-node td:last-child {
   border-right: 0;
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0.875rem;
 }
 
 /* Header — tinted, left-aligned, single-weight bottom border */
 .markstream-vue .table-node thead th {
   text-align: left;
-  font-weight: 600;
+  font-weight: 500;
   border-bottom-width: 1px;
+  /* One step below the body cells (14px vs 15px). */
+  font-size: 0.875rem;
 }
 
 /* Remove 1.x zebra striping */
@@ -216,9 +336,9 @@
   border-bottom: 0;
 }
 
-/* Row hover tint */
+/* No row hover on markdown tables — they're content, not an interactive list */
 .markstream-vue .table-node tbody tr:hover td {
-  background-color: color-mix(in oklch, var(--color-accent) 60%, transparent);
+  background-color: transparent;
 }
 
 /* Inline code — shape tweaks on top of CSS vars */
@@ -305,3 +425,72 @@
     background: color-mix(in oklch, var(--color-muted-foreground) 52%, transparent);
   }
 }
+
+/* ── Settings list ↔ detail swap (directional push-pop) ──────────────────────
+ * A page-turn between the list and the detail, driven by <Transition> in
+ * components/settings/swap-transition.vue (no `mode`, so enter+leave run at
+ * once and cross-slide). The leaving pane is taken out of flow so it overlaps
+ * the entering one instead of stacking above it.
+ *
+ * Speed + easing are aligned 1:1 with the settings / bot-detail open motion:
+ * enter 90ms ease-out, leave 40ms ease-in, 10px travel. Only the DIRECTION is
+ * split per forward/back to read as a push-pop:
+ *   forward (open detail): list exits LEFT,  detail enters from RIGHT
+ *   back    (return list):  detail exits RIGHT, list enters from LEFT
+ */
+.swap-forward-enter-active,
+.swap-back-enter-active {
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  transition: transform 40ms ease-in, opacity 40ms ease-in;
+}
+
+/* The pane that is leaving drops out of normal flow and pins to the wrapper, so
+ * the entering pane occupies the layout box uncontested while they cross. */
+.swap-forward-leave-active,
+.swap-back-leave-active {
+  position: absolute;
+  inset: 0;
+}
+
+/* forward: enter from the right, leave to the left */
+.swap-forward-enter-from {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+.swap-forward-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* back: enter from the left, leave to the right */
+.swap-back-enter-from {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.swap-back-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swap-forward-enter-active,
+  .swap-forward-leave-active,
+  .swap-back-enter-active,
+  .swap-back-leave-active {
+    transition: opacity 90ms ease;
+  }
+
+  .swap-forward-enter-from,
+  .swap-forward-leave-to,
+  .swap-back-enter-from,
+  .swap-back-leave-to {
+    transform: none;
+  }
+}
+

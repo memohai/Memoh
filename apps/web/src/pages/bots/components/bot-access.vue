@@ -603,7 +603,7 @@
                 v-if="savingRuleAction === 'save'"
                 class="mr-1.5 size-3.5"
               />
-              {{ editingRule ? $t('common.save') : $t('bots.access.saveOnly') }}
+              {{ editingRule ? $t('common.confirm') : $t('bots.access.saveOnly') }}
             </Button>
             <Button
               v-if="!editingRule"
@@ -632,7 +632,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Plus,

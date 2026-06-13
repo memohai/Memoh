@@ -126,7 +126,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { putFetchProvidersById, deleteFetchProvidersById } from '@memohai/sdk'
 import type { FetchprovidersGetResponse, FetchprovidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 
 const { t } = useI18n()
 const curProvider = inject('curFetchProvider', ref<FetchprovidersGetResponse>())

@@ -18,7 +18,11 @@ export function useSyncedQueryParam(key: string, defaultValue: string) {
 
   watch(model, (value) => {
     if (value !== route.query[key]) {
-      void router.push({ query: { ...route.query, [key]: value } })
+      // replace, not push: this syncs in-page state (tabs, filters) into the URL,
+      // which is not a navigation. Pushing would bury the real previous page under
+      // a trail of tab/filter swaps, so a "back" affordance could only step
+      // through them instead of returning to where the user actually came from.
+      void router.replace({ query: { ...route.query, [key]: value } })
     }
   })
 

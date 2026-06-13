@@ -249,7 +249,7 @@ import {
 } from 'lucide-vue-next'
 import { reactive, computed, watch } from 'vue'
 import type { Component, Ref } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

@@ -65,7 +65,7 @@
                 :key="msg.id"
                 :data-message-id="msg.id"
                 :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                class="rounded-2xl transition-[background-color] duration-500 scroll-mt-2 [content-visibility:auto] [contain-intrinsic-size:auto_600px]"
+                class="transition-[background-color] duration-500 scroll-mt-2 [content-visibility:auto] [contain-intrinsic-size:auto_600px]"
                 :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
                 :data-anchor="msg.id"
               >
@@ -293,7 +293,7 @@
               <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
               <span class="min-w-0 break-words">{{ composerError }}</span>
             </div>
-            <InputGroup class="bg-transparent overflow-hidden shadow-none! ring-0! border-border!">
+            <InputGroup class="bg-transparent overflow-hidden">
               <InputGroupTextarea
                 v-model="inputText"
                 class="min-h-14 max-h-14 text-xs resize-none break-all!"

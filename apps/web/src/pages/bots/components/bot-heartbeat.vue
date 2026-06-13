@@ -301,7 +301,7 @@
 import { HeartPulse, Trash2, RotateCw, Zap, ChevronDown } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import {
   Button, Spinner, NativeSelect, Label, Switch, Input,
   Pagination, PaginationContent, PaginationEllipsis,

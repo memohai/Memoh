@@ -10,7 +10,12 @@
       @submit="createProvider"
     >
       <template #trigger>
+        <span
+          v-if="hideTrigger"
+          class="hidden"
+        />
         <Button
+          v-else
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
@@ -199,7 +204,7 @@ import FormDialogShell from '@/components/form-dialog-shell/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { computed, ref, watch } from 'vue'
 import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
@@ -209,8 +214,10 @@ import { suggestProviderName } from './provider-presets'
 const open = defineModel<boolean>('open')
 const props = withDefaults(defineProps<{
   providers?: Array<{ name?: string }>
+  hideTrigger?: boolean
 }>(), {
   providers: () => [],
+  hideTrigger: false,
 })
 const { t } = useI18n()
 const { run } = useDialogMutation()

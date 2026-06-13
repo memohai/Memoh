@@ -15,7 +15,7 @@
     <!-- eslint-disable vue/no-v-html -->
     <div
       v-else-if="content"
-      class="shiki-container overflow-x-auto overflow-y-auto max-h-96 text-xs rounded-sm bg-muted/30 [&_pre]:bg-transparent! [&_pre]:p-2 [&_pre]:m-0 [&_code]:text-xs"
+      class="shiki-container overflow-x-auto overflow-y-auto max-h-96 text-xs [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-xs"
       v-html="shiki.html.value"
     />
     <!-- eslint-enable vue/no-v-html -->

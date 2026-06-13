@@ -1,5 +1,12 @@
 {
   "common": {
+    "toast": {
+      "notice": "Notice",
+      "success": "Success",
+      "error": "Error",
+      "warning": "Warning",
+      "info": "Info"
+    },
     "confirm": "Confirm",
     "cancel": "Cancel",
     "back": "Back",
@@ -24,6 +31,7 @@
     "export": "Export",
     "copy": "Copy",
     "copied": "Copied to clipboard",
+    "copyFailed": "Failed to copy",
     "tabAddSingle": "Add single",
     "tabImportJson": "Import JSON",
     "copyAsJson": "Copy as JSON",
@@ -94,9 +102,14 @@
     "providers": "Providers",
     "webSearch": "Web Search",
     "memory": "Memory",
+    "group": {
+      "integrations": "Integrations",
+      "account": "Account"
+    },
     "network": "Network",
     "speech": "Speech",
     "transcription": "Transcription",
+    "voice": "Voice",
     "email": "Email",
     "settings": "Settings",
     "profile": "Profile",
@@ -104,10 +117,12 @@
     "mcp": "MCP",
     "platform": "Platform",
     "usage": "Usage",
-    "people": "People",
+    "people": "Members",
     "appearance": "Appearance",
     "supermarket": "Supermarket",
-    "about": "About"
+    "about": "About",
+    "switchBot": "Switch bot",
+    "manageBots": "Manage Bots"
   },
   "breadcrumb": {
     "main": "Home"
@@ -126,6 +141,8 @@
     "profileUpdated": "Profile Updated",
     "profileUpdateFailed": "Failed to update profile",
     "changePassword": "Change Password",
+    "accountSection": "Account",
+    "sessionSection": "Session",
     "currentPassword": "Current Password",
     "newPassword": "New Password",
     "confirmPassword": "Confirm New Password",
@@ -146,6 +163,7 @@
     "themePlaceholder": "Select Theme",
     "themeLight": "Light",
     "themeDark": "Dark",
+    "themeSystem": "System",
     "appearance": {
       "title": "Appearance",
       "description": "Customize your interface: language, theme, and color palette.",
@@ -155,13 +173,13 @@
       "colorSchemeDescription": "Select a palette for brand, status, and UI elements.",
       "typography": "Typography",
       "uiFontFamily": "UI Font Family",
-      "uiFontFamilyDescription": "Override the interface font family",
+      "uiFontFamilyDescription": "Overrides the default interface font",
       "uiFontSize": "UI Font Size",
       "uiFontSizeDescription": "Scales interface text and controls",
       "codeFontFamily": "Code Font Family",
-      "codeFontFamilyDescription": "Override the font for code editors, code blocks, and the terminal",
+      "codeFontFamilyDescription": "Overrides the default code font",
       "codeFontSize": "Code Font Size",
-      "codeFontSizeDescription": "Font size for code editors, code blocks, and the terminal",
+      "codeFontSizeDescription": "Applies to code editors, code blocks, and the terminal",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "Ocean",
@@ -184,16 +202,10 @@
     "commitHash": "Commit"
   },
   "people": {
-    "title": "People",
-    "subtitle": "Workspace members",
+    "title": "Members",
     "members": "Members",
     "member": "Member",
-    "memberCount": "{count} member(s)",
-    "totalMembers": "Total",
-    "activeMembers": "Active",
-    "admins": "Admins",
     "newMember": "New member",
-    "newMemberDescription": "Create a workspace login account.",
     "memberName": "Name",
     "displayNamePlaceholder": "Optional display name",
     "usernamePlaceholder": "username",
@@ -230,16 +242,25 @@
     "empty": "No members"
   },
   "about": {
+    "tagline": "Open-source multi-agent platform",
+    "description": "Multiple AI agents, each with its own computer and long-term memory.",
+    "updatesSection": "Updates",
+    "currentVersion": "Version v{version}",
+    "checkHint": "Check GitHub for the latest release.",
     "checkForUpdates": "Check for Updates",
-    "checking": "Checking for Updates...",
-    "upToDate": "You're All Set",
+    "checking": "Checking…",
+    "upToDate": "You're on the latest version",
     "newVersionAvailable": "New Version Available: v{version}",
+    "newVersionTitle": "Version v{version} is available",
+    "newVersionDesc": "A newer release is published on GitHub.",
+    "whatsChanged": "What's changed",
     "releaseNotes": "Release Notes",
     "viewOnGitHub": "View on GitHub",
     "checkFailed": "Check Failed",
     "github": "GitHub",
     "docs": "Documentation",
-    "feedback": "Feedback"
+    "feedback": "Feedback",
+    "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
     "greeting": "Hi! How can I help you today?",
@@ -250,6 +271,15 @@
     "thinking": "Thinking…",
     "thinkingInProgress": "Thinking…",
     "thinkingDone": "Thinking complete",
+    "process": {
+      "browse": "Read {count} files",
+      "edit": "Edited {count} files",
+      "run": "Ran {count} commands",
+      "steps": "{count} steps",
+      "thought": "Thought",
+      "thoughtBriefly": "Thought for a moment",
+      "thoughtSeconds": "Thought for {seconds}s"
+    },
     "currentBot": "Current Bot",
     "inputPlaceholder": "Type your question…",
     "readonlyHint": "This chat is read-only",
@@ -450,7 +480,7 @@
     "reasoningXHigh": "X-High",
     "reasoningMax": "Max",
     "sessions": "Sessions",
-    "newSession": "New Session",
+    "newSession": "New Chat",
     "deleteSession": "Delete Session",
     "deleteSessionConfirm": "Are you sure you want to delete this session?",
     "renameSession": "Rename Session",
@@ -460,6 +490,9 @@
     "sessionTitle": "Session",
     "untitledSession": "Untitled Session",
     "noSessions": "No sessions yet",
+    "recents": "Recents",
+    "quickActions": "Quick Actions",
+    "scheduledJobs": "Scheduled Jobs",
     "sessionTypeHeartbeat": "Heartbeat",
     "sessionTypeSchedule": "Scheduled Task",
     "sessionTypeSubagent": "Subagent",
@@ -474,8 +507,9 @@
     "noModels": "No models available",
     "acpAttachmentsUnsupported": "Attachments are not supported in ACP sessions yet.",
     "sessionFilterAll": "All",
-    "sessionSourcePrefix": "From:",
     "searchSessionPlaceholder": "Search",
+    "searchSessions": "Search conversations",
+    "noSearchResults": "No matching conversations",
     "heartbeatTrigger": "Heartbeat Trigger",
     "heartbeatTime": "Time",
     "heartbeatInterval": "Interval",
@@ -499,25 +533,28 @@
     "compactNow": "Compact Now",
     "compactSuccess": "Context compaction completed",
     "compactFailed": "Context compaction failed",
-    "activityTabSessions": "Sessions",
-    "activityTabFiles": "Files",
-    "activityTabTerminal": "Terminal",
-    "activityTabSkills": "Skills",
-    "activityTabMcp": "MCP",
-    "activityTabSchedule": "Schedule",
-    "skillsEmpty": "No skills yet",
-    "untitledSkill": "Untitled skill",
-    "mcpEmpty": "No MCP connections",
-    "untitledMcp": "Untitled connection",
-    "mcpInactive": "Inactive",
-    "mcpOpenInSettings": "Open in settings",
-    "mcpManageInSettings": "Manage MCP",
-    "scheduleEmpty": "No scheduled tasks",
-    "untitledSchedule": "Untitled task",
-    "scheduleManageInSettings": "Manage schedules",
-    "emptyWorkspace": "No open tabs",
-    "emptyWorkspaceHint": "Open a session or file from the left",
+    "sessionStreaming": "Generating",
+    "topBar": {
+      "hideWorkbench": "Hide sidebar",
+      "showWorkbench": "Show sidebar",
+      "goBack": "Back",
+      "goForward": "Forward"
+    },
+    "activityBar": {
+      "sessions": "Chat",
+      "files": "Files",
+      "search": "Search"
+    },
+    "workspaceEmpty": "No open tabs",
+    "workspaceEmptyHint": "Pick a session from the sidebar, or open a file, terminal or browser",
+    "tabMenu": {
+      "close": "Close",
+      "closeOthers": "Close others",
+      "closeAll": "Close all"
+    },
     "tabClose": "Close tab",
+    "openPreviewToSide": "Open preview to the side",
+    "previewTab": "Preview: {name}",
     "sessionInfoRingAria": "Session info",
     "sessionInfoTooltipHint": "Hover to see session info",
     "sessionActions": "Session actions",
@@ -526,8 +563,7 @@
       "openBrowser": "Open browser",
       "openDisplay": "Open desktop window",
       "menu": "Tab actions",
-      "closeAll": "Close all",
-      "closeFinished": "Close saved and finished"
+      "closeAll": "Close all"
     },
     "browser": {
       "title": "Browser",
@@ -643,6 +679,7 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "searchPlaceholder": "Search providers...",
     "preset": "Preset",
     "presetPlaceholder": "Select preset or custom provider",
     "presetSearchPlaceholder": "Search presets...",
@@ -657,7 +694,7 @@
     "deleteConfirm": "Are you sure you want to delete this provider?",
     "saveChanges": "Save Changes",
     "emptyTitle": "No Providers",
-    "emptyDescription": "Add a model provider first to configure models",
+    "emptyDescription": "Add a provider to connect a model service for your bots.",
     "testConnection": "Test Connection",
     "reachable": "Reachable",
     "unreachable": "Unreachable",
@@ -772,6 +809,10 @@
     "namePlaceholder": "Enter provider name",
     "builtinMode": "Built-in Memory Mode",
     "builtinModeDescription": "Choose how the built-in memory provider stores and retrieves memory for bots.",
+    "modeLabel": "Memory mode",
+    "modeHint": "How bots store and recall long-term memory.",
+    "advanced": "Advanced",
+    "advancedHint": "Custom memory backends for advanced setups.",
     "sparseSectionTitle": "Sparse Retrieval",
     "denseSectionTitle": "Dense Retrieval",
     "sparseInstallHint": "Sparse mode depends on the optional sparse service. Enable the sparse installation option when running the installer or start the sparse profile in Docker Compose.",
@@ -790,13 +831,13 @@
     "collectionUnavailable": "Unavailable",
     "modeNames": {
       "off": "Off",
-      "sparse": "Sparse",
-      "dense": "Dense"
+      "sparse": "Keyword",
+      "dense": "Semantic"
     },
     "modeDescriptions": {
-      "off": "Keep the current file-based built-in memory behavior without Qdrant retrieval.",
-      "sparse": "Use the local OpenSearch sparse model for memory indexing and retrieval with Qdrant.",
-      "dense": "Use the selected embedding model API to build dense vectors and store/search them directly in Qdrant."
+      "off": "Don't build a long-term memory index; keep only the basic file memory.",
+      "sparse": "Match memories by keyword, using the optional sparse retrieval service.",
+      "dense": "Turn memories into vectors with an embedding model and retrieve by semantic similarity."
     },
     "providerNames": {
       "builtin": "Built-in",
@@ -819,6 +860,14 @@
     "actionSuccess": "Action completed",
     "name": "Name",
     "namePlaceholder": "Configuration name"
+  },
+  "voice": {
+    "title": "Voice",
+    "speakTitle": "Speaking",
+    "speakHint": "Read replies aloud.",
+    "listenTitle": "Listening",
+    "listenHint": "Turn speech into text.",
+    "empty": "No backends yet — add a provider with voice support."
   },
   "speech": {
     "title": "Speech",
@@ -1324,8 +1373,6 @@
       "importFailed": "Failed to import bot backup"
     },
     "checks": {
-      "lastSync": "Last synced",
-      "statusTitle": "Health Checks",
       "status": {
         "issue": "Needs attention",
         "stable": "Healthy",
@@ -1334,20 +1381,14 @@
         "error": "ERROR",
         "unknown": "UNKNOWN"
       },
-      "vitalityTitle": "Vitality",
-      "vitalityUnit": "events",
       "diagnosticTitle": "Diagnostics",
       "diagnosticSubtitle": "Real-time system diagnostics.",
       "expandAll": "Expand all",
       "collapse": "Collapse",
-      "title": "Runtime Checks",
-      "subtitle": "View current health status and issue details.",
-      "ok": "No issues",
       "hasIssue": "Has issues",
       "issueCount": "{count} issues",
       "empty": "No check items",
       "loadFailed": "Failed to load runtime checks",
-      "actions": {},
       "titles": {
         "containerInit": "Container initialization",
         "containerRecord": "Container record",
@@ -1365,8 +1406,36 @@
         "botDelete": "Bot deletion"
       }
     },
+    "overview": {
+      "issueHint": "View diagnostics",
+      "platformsTitle": "Platforms",
+      "platformsEmpty": "Not connected anywhere yet",
+      "platformsEmptyHint": "Connect a platform to start talking to this bot",
+      "connectAction": "Connect",
+      "configTitle": "Configuration",
+      "modelLabel": "Model",
+      "modelNone": "No model selected",
+      "reasoningBadge": "Reasoning",
+      "memoryLabel": "Memory",
+      "memoryCount": "{count} memories indexed",
+      "memoryNone": "Off",
+      "usageTitle": "Usage · last 30 days",
+      "usageTotal": "Total",
+      "usageInput": "Input",
+      "usageOutput": "Output",
+      "usageCacheHit": "Cache hit",
+      "usageNone": "No usage yet",
+      "runtimeTitle": "Runtime",
+      "runtimeSampledAt": "Updated {time}",
+      "runtimeStopped": "Container isn't running — start it to see live resource usage.",
+      "runtimeNoMetrics": "Resource usage isn't available right now.",
+      "remindersTitle": "Action needed",
+      "reminderModelTitle": "Choose a model",
+      "reminderModelHint": "This bot needs a model before it can reply.",
+      "reminderAction": "Set up"
+    },
     "tabs": {
-      "overviewSubtitle": "System vitality and quick insights.",
+      "overviewSubtitle": "Where this bot lives and how it's set up.",
       "overview": "Overview",
       "general": "General",
       "desktop": "Desktop",
@@ -2070,6 +2139,8 @@
       "fromConversation": "Create from Conversation",
       "noConversations": "No history conversations found",
       "idCopied": "ID copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "historyLoadFailed": "Failed to load history",
       "deleteConfirm": "Are you sure you want to delete this memory? This cannot be undone."
     },
     "plugins": {
@@ -2323,6 +2394,10 @@
   },
   "usage": {
     "title": "Usage",
+    "filters": "Filters",
+    "overview": "Overview",
+    "customRange": "Custom range",
+    "customRangePlaceholder": "Pick a date range",
     "selectBot": "Select Bot",
     "selectBotPlaceholder": "Choose a bot to view usage",
     "timeRange": "Time Range",

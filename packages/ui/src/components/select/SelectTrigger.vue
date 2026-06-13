@@ -5,9 +5,10 @@ import { reactiveOmit } from '@vueuse/core'
 import { ChevronDown } from 'lucide-vue-next'
 import { SelectIcon, SelectTrigger, useForwardProps } from 'reka-ui'
 import { cn } from '#/lib/utils'
+import { selectTriggerClass } from '#/lib/trigger'
 
 const props = withDefaults(
-  defineProps<SelectTriggerProps & { class?: HTMLAttributes['class'], size?: 'sm' | 'default' }>(),
+  defineProps<SelectTriggerProps & { class?: HTMLAttributes['class'], size?: 'sm' | 'default' | 'lg' }>(),
   { size: 'default' },
 )
 
@@ -20,18 +21,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     data-slot="select-trigger"
     :data-size="size"
     v-bind="forwardedProps"
-    :class="cn(
-      'flex w-fit items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs whitespace-nowrap transition-all outline-none',
-      'data-[placeholder]:text-muted-foreground',
-      '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
-      'focus:border-ring focus:ring-2 focus:ring-ring/20',
-      'hover:bg-accent',
-      'disabled:cursor-not-allowed disabled:opacity-50',
-      'data-[size=default]:h-9 data-[size=sm]:h-8',
-      '*:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2',
-      '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
-      props.class,
-    )"
+    :class="cn(selectTriggerClass, 'w-fit', props.class)"
   >
     <slot />
     <SelectIcon as-child>

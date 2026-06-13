@@ -6,8 +6,19 @@
     <Sidebar
       class="relative! **:[[role=navigation]]:relative! sidebar-container h-full! w-fit! min-w-48 lg:min-w-52 xl:min-w-60 max-w-72 border-0! [&_[data-sidebar=sidebar]]:bg-transparent!"
     >
-      <SidebarContent class="overflow-hidden p-2 pb-4 pt-4 h-full flex flex-col">
-        <div class="border border-border/60 bg-muted/10 rounded-lg flex-1 flex flex-col overflow-hidden min-h-0">
+      <SidebarContent
+        class="overflow-hidden h-full flex flex-col"
+        :class="flush ? 'p-0' : 'p-2 pb-4 pt-4'"
+      >
+        <!-- Default: a nested card shell (box-in-box) for pages that sit to the
+             right of the settings nav. flush: this layout IS the primary nav, so
+             it goes edge-to-edge with a right divider, matching SettingsSidebar. -->
+        <div
+          class="flex-1 flex flex-col overflow-hidden min-h-0"
+          :class="flush
+            ? 'bg-sidebar border-r border-sidebar-border'
+            : 'border border-border/60 bg-muted/10 rounded-lg'"
+        >
           <!-- Integrated Header (if provided) -->
           <div
             v-if="slots['sidebar-header']"
@@ -94,6 +105,15 @@ import {
   ScrollArea
 } from '@memohai/ui'
 import { useSlots } from 'vue'
+
+withDefaults(defineProps<{
+  // When true, this layout acts as the primary (only) sidebar: it drops the
+  // nested-card chrome and sits flush against the viewport edge. Used by the
+  // de-nested bot detail page; left false everywhere it nests under another nav.
+  flush?: boolean
+}>(), {
+  flush: false,
+})
 
 const slots=useSlots()
 

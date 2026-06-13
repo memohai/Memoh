@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@pinia/colada'
@@ -36,6 +36,7 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
+import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
@@ -589,29 +590,6 @@ const memoryMetricHintText = computed(() => {
   }
   return t('bots.container.metricsUnavailable')
 })
-
-function formatMetricBytes(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '--'
-  if (value === 0) return '0 B'
-
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let size = value
-  let unitIndex = 0
-
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex += 1
-  }
-
-  const fractionDigits = size >= 100 || unitIndex === 0 ? 0 : 1
-  return `${size.toFixed(fractionDigits)} ${units[unitIndex]}`
-}
-
-function formatMetricPercent(value?: number) {
-  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '--'
-  const fractionDigits = value >= 100 ? 0 : 1
-  return `${value.toFixed(fractionDigits)}%`
-}
 
 async function handleStopContainer() {
   if (botLifecyclePending.value || !containerInfo.value) return

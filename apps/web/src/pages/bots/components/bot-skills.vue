@@ -312,7 +312,7 @@
               v-if="isSaving"
               class="mr-2 size-3.5"
             />
-            {{ $t('common.save') }}
+            {{ $t('common.confirm') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -399,7 +399,7 @@
                 v-if="isSavingDiscoveryRoots"
                 class="mr-2 size-3.5"
               />
-              {{ $t('common.save') }}
+              {{ $t('common.confirm') }}
             </Button>
           </div>
         </DialogFooter>
@@ -412,7 +412,7 @@
 import { ArrowDownToLine, Eye, EyeOff, Plus, SlidersHorizontal, Zap, SquarePen, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Button,

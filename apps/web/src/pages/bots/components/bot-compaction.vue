@@ -2,7 +2,7 @@
 import { Minimize2, RefreshCw, History } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import {
   Button, Badge, Spinner, NativeSelect, Label, Switch, Input, Separator, Slider,
   Pagination, PaginationContent, PaginationEllipsis,

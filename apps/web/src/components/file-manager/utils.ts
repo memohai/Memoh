@@ -91,6 +91,13 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif',
 ])
 
+export function sortDirsFirst<T extends { isDir?: boolean, name?: string }>(entries: T[]): T[] {
+  const byName = (a: T, b: T) => (a.name ?? '').localeCompare(b.name ?? '')
+  const dirs = entries.filter(e => e.isDir).sort(byName)
+  const files = entries.filter(e => !e.isDir).sort(byName)
+  return [...dirs, ...files]
+}
+
 export function getExtension(filename: string): string {
   const dotIndex = filename.lastIndexOf('.')
   if (dotIndex === -1 || dotIndex === filename.length - 1) return ''

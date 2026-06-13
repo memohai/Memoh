@@ -1,6 +1,6 @@
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import enMessages from '@/i18n/locales/en.json'
 import zhMessages from '@/i18n/locales/zh.json'
 import { useRetryingStream } from '@/composables/useRetryingStream'
@@ -1697,7 +1697,7 @@ export const useChatStore = defineStore('chat', () => {
           return acc
         }, null)
         if (!earliest || earliest === cursor) {
-          // Cursor cannot advance — bail out to avoid a request loop.
+          // Pagination cursor cannot advance; bail out to avoid a request loop.
           hasMoreOlder.value = false
           return 0
         }

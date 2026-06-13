@@ -22,7 +22,8 @@ function refreshThemeStyle() {
   if (typeof document === 'undefined') return
   const cs = getComputedStyle(document.documentElement)
   const fg = cs.getPropertyValue('--color-foreground').trim()
-  const bg = cs.getPropertyValue('--color-background').trim()
+  // Match the editor plane so the preview canvas is continuous with its tab.
+  const bg = cs.getPropertyValue('--color-surface-editor').trim()
   const muted = cs.getPropertyValue('--color-muted-foreground').trim()
   const border = cs.getPropertyValue('--color-border').trim()
   const accent = cs.getPropertyValue('--color-accent').trim()
@@ -80,7 +81,7 @@ const srcdoc = computed(() => themeStyle.value + (props.content ?? ''))
 </script>
 
 <template>
-  <div :class="['flex h-full w-full min-h-0 bg-background', props.class]">
+  <div :class="['flex h-full w-full min-h-0 bg-surface-editor', props.class]">
     <iframe
       :srcdoc="srcdoc"
       sandbox="allow-same-origin"

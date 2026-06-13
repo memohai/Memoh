@@ -617,7 +617,7 @@ import type {
   AdaptersTopKBucket as MemoryTopKBucket,
   MessageMessage,
 } from '@memohai/sdk'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import ConfirmPopover from '@/components/confirm-popover/index.vue'
 import { useClipboard } from '@/composables/useClipboard'
@@ -1192,7 +1192,7 @@ async function loadHistory() {
     }))
   } catch (error) {
     console.error('Failed to load history:', error)
-    toast.error('Failed to load history')
+    toast.error(t('bots.memory.historyLoadFailed'))
   } finally {
     historyLoading.value = false
   }
@@ -1341,7 +1341,7 @@ async function copyToClipboard(text: string) {
     toast.success(t('bots.memory.idCopied'))
   } catch (err) {
     console.error('Failed to copy:', err)
-    toast.error('Failed to copy')
+    toast.error(t('bots.memory.copyFailed'))
   }
 }
 

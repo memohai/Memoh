@@ -1,14 +1,19 @@
 <script setup lang="ts">
+// DESIGN NOTE — use sparingly. An edge-anchored sheet that flies over the whole app
+// is a heavy, disorienting transition; prefer an IN-PAGE push panel (content that
+// slides a sibling region in beside what the user is already looking at) for most
+// "show more detail / quick edit" needs. Reserve Sheet for genuine full-context
+// secondary surfaces (mobile nav, a deep filter/settings drawer) where leaving the
+// current layout is acceptable.
 import type { DialogContentEmits, DialogContentProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { X } from 'lucide-vue-next'
 import {
-  DialogClose,
   DialogContent,
   DialogPortal,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { DialogCloseButton } from '#/components/dialog'
 import { cn } from '#/lib/utils'
 import SheetOverlay from './SheetOverlay.vue'
 
@@ -33,13 +38,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 
 <template>
   <DialogPortal>
-    <SheetOverlay class="bg-black/30 " />
+    <SheetOverlay />
     <DialogContent
       data-slot="sheet-content"
       :class="cn(
-        'fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out',
+        'fixed z-50 flex flex-col gap-4 shadow-[var(--shadow-modal)] transition ease-in-out',
         'bg-card border-border',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-150 data-[state=open]:duration-150',
         side === 'right'
           && 'data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 sm:max-w-sm',
         side === 'left'
@@ -53,12 +58,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     >
       <slot />
 
-      <DialogClose
-        class="absolute top-4 right-4 rounded-sm opacity-70 transition-all hover:opacity-100 hover:bg-accent focus:ring-2 focus:ring-ring/20 focus:outline-hidden disabled:pointer-events-none"
-      >
-        <X class="size-4" />
-        <span class="sr-only">Close</span>
-      </DialogClose>
+      <DialogCloseButton />
     </DialogContent>
   </DialogPortal>
 </template>

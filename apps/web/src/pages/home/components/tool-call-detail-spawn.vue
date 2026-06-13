@@ -85,7 +85,6 @@ import { computed } from 'vue'
 import { CircleCheck, CircleX, ExternalLink } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
-import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import type { ToolCallBlock } from '@/store/chat-list'
 
 interface SpawnTaskResult {
@@ -100,7 +99,6 @@ const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 
 const chatStore = useChatStore()
-const workspaceTabs = useWorkspaceTabsStore()
 
 const tasks = computed(() => {
   const input = props.block.input as Record<string, unknown> | undefined
@@ -127,6 +125,6 @@ const hasDetailedResults = computed(() =>
 
 function navigateToSession(sessionId: string) {
   if (!sessionId || !chatStore.currentBotId) return
-  workspaceTabs.openChat(sessionId)
+  void chatStore.selectSession(sessionId)
 }
 </script>

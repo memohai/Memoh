@@ -1,5 +1,5 @@
 <template>
-  <SettingsShell width="standard">
+  <SettingsShell width="narrow">
     <section class="flex items-center gap-3">
       <SearchProviderLogo
         :provider="curProvider?.provider || ''"
@@ -156,7 +156,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { putSearchProvidersById, deleteSearchProvidersById } from '@memohai/sdk'
 import type { SearchprovidersGetResponse, SearchprovidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 
 const { t } = useI18n()
 const curProvider = inject('curSearchProvider', ref<SearchprovidersGetResponse>())

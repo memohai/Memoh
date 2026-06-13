@@ -10,7 +10,12 @@
       @submit="handleCreate"
     >
       <template #trigger>
+        <span
+          v-if="hideTrigger"
+          class="hidden"
+        />
         <Button
+          v-else
           class="w-full shadow-none! text-muted-foreground h-9 px-3 rounded-md border-border bg-background hover:bg-accent"
           variant="outline"
         >
@@ -158,6 +163,11 @@ const providerGroups: Array<{ kind: ProviderKind; labelKey: string; options: Pro
 const providerOptions = providerGroups.flatMap(group => group.options)
 
 const open = defineModel<boolean>('open')
+withDefaults(defineProps<{
+  hideTrigger?: boolean
+}>(), {
+  hideTrigger: false,
+})
 const { t } = useI18n()
 const { run } = useDialogMutation()
 

@@ -224,9 +224,8 @@
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
 import { Archive, ExternalLink, PackageOpen, Power, PowerOff, RefreshCw, Store, Trash2 } from 'lucide-vue-next'
-import { Badge, Button, Spinner } from '@memohai/ui'
+import { Badge, Button, Spinner, toast } from '@memohai/ui'
 import {
   deleteBotsByBotIdPluginsById,
   getBotsByBotIdPlugins,

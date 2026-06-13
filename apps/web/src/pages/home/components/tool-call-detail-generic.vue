@@ -1,23 +1,28 @@
 <template>
-  <div class="space-y-1.5">
-    <div v-if="hasInput">
-      <div class="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-0.5">
-        {{ t('chat.tools.detail.input') }}
-      </div>
-      <pre class="text-xs text-muted-foreground overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm bg-muted/30 px-2 py-1">{{ inputText }}</pre>
+  <div class="space-y-0.5 text-xs leading-relaxed">
+    <div
+      v-for="entry in inputEntries"
+      :key="entry.k"
+      class="flex gap-1.5 font-mono break-all"
+    >
+      <span class="shrink-0 text-muted-foreground">{{ entry.k }}:</span>
+      <span class="min-w-0 text-foreground">{{ entry.v }}</span>
     </div>
-    <div v-if="hasResult">
-      <div class="text-[10px] uppercase tracking-wide text-muted-foreground/70 mb-0.5">
-        {{ t('chat.tools.detail.result') }}
-      </div>
-      <pre
-        class="text-xs overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto rounded-sm px-2 py-1"
-        :class="isError ? 'text-destructive bg-destructive/5' : 'text-muted-foreground bg-muted/30'"
-      >{{ resultText }}</pre>
+    <div
+      v-if="errorText"
+      class="font-mono whitespace-pre-wrap break-all text-destructive"
+    >
+      {{ errorText }}
+    </div>
+    <div
+      v-else-if="resultText"
+      class="font-mono whitespace-pre-wrap break-all text-foreground"
+    >
+      {{ resultText }}
     </div>
     <p
-      v-if="!hasInput && !hasResult"
-      class="text-xs text-muted-foreground italic"
+      v-if="!inputEntries.length && !resultText && !errorText"
+      class="text-muted-foreground italic"
     >
       {{ t('chat.tools.detail.noData') }}
     </p>
@@ -32,40 +37,49 @@ import type { ToolCallBlock } from '@/store/chat-list'
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
 
-function formatJson(val: unknown): string {
+function stringify(val: unknown): string {
   if (val == null) return ''
   if (typeof val === 'string') return val
   try {
-    return JSON.stringify(val, null, 2)
+    return JSON.stringify(val)
   }
   catch {
     return String(val)
   }
 }
 
-const inputText = computed(() => formatJson(props.block.input))
-
-const isError = computed(() => {
-  if (!props.block.result) return false
-  const r = props.block.result as Record<string, unknown>
-  return r.isError === true
+// Input params rendered as a half-embedded key:value list (the codegraph look:
+// format: flat / maxDepth: 3 / projectPath: …), not a JSON blob in a card.
+const inputEntries = computed(() => {
+  const input = props.block.input
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return []
+  return Object.entries(input as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => ({ k, v: stringify(v) }))
 })
 
-const resultText = computed(() => {
-  if (!props.block.result) return ''
-  const r = props.block.result as Record<string, unknown>
-  if (Array.isArray(r.content)) {
-    const texts = (r.content as Array<Record<string, unknown>>)
+const isError = computed(() => {
+  const r = props.block.result as Record<string, unknown> | null
+  return Boolean(r && r.isError === true)
+})
+
+function extractText(): string {
+  const r = props.block.result
+  if (r == null) return ''
+  if (typeof r === 'string') return r
+  const obj = r as Record<string, unknown>
+  if (Array.isArray(obj.content)) {
+    const texts = (obj.content as Array<Record<string, unknown>>)
       .filter(c => c.type === 'text')
       .map(c => c.text as string)
       .filter(Boolean)
     if (texts.length) return texts.join('\n')
   }
-  const sc = r.structuredContent
-  if (sc) return formatJson(sc)
-  return formatJson(r)
-})
+  if (typeof obj.content === 'string') return obj.content
+  const sc = obj.structuredContent
+  return sc ? stringify(sc) : ''
+}
 
-const hasInput = computed(() => Boolean(inputText.value))
-const hasResult = computed(() => Boolean(resultText.value))
+const errorText = computed(() => (isError.value ? extractText() : ''))
+const resultText = computed(() => (isError.value ? '' : extractText()))
 </script>

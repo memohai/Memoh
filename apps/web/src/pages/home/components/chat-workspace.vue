@@ -1,149 +1,188 @@
 <template>
-  <div class="flex flex-col flex-1 h-full min-w-0 bg-card">
-    <WorkspaceTabBar />
-
-    <div class="flex-1 min-h-0 relative">
-      <template v-if="activeTab">
-        <KeepAlive>
-          <component
-            :is="currentChat?.component"
-            v-if="activeTab.type === 'chat' || activeTab.type === 'draft'"
-            :key="`chat-pane:${currentBotId}:${currentChat?.id}`"
-            :tab-id="currentChat?.id"
-            :active="activeTab.id === currentChat?.id"
-          />
-          <component
-            :is="currentFile?.component"
-            v-else-if="activeTab.type==='file'&&currentFile?.type==='file'"
-            :key="`file-pane:${currentBotId}:${currentFile.id}`"
-            :tab-id="currentFile.id"
-            :file-path="currentFile.filePath"
-          />
-
-          <component
-            :is="currentTerminal?.component"
-            v-else-if="activeTab.type==='terminal'"
-            :key="`terminal-pane:${currentBotId}:${currentTerminal?.id}`"
-            :bot-id="currentBotId"
-            :tab-id="currentTerminal?.id"
-            :active="activeTab.id === currentTerminal?.id"  
-          />
-        </KeepAlive>
-      </template>
-      <DisplayPane
-        v-for="display in displayTabs"
-        v-show="activeTab?.id === display.id"
-        :key="`display-pane:${display.id}:${currentBotId}`"
-        :bot-id="currentBotId || ''"
-        :tab-id="display.id"
-        :title="display.title"
-        :active="activeTab?.id === display.id"
-        @close="store.closeTab(display.id)"
-        @snapshot="handleDisplaySnapshot"
-      />
-      <BrowserPane
-        v-for="browser in browserTabs"
-        v-show="activeTab?.id === browser.id"
-        :key="`browser-pane:${browser.id}:${currentBotId}`"
-        :bot-id="currentBotId || ''"
-        :tab-id="browser.id"
-        :address="browser.address"
-        :active="activeTab?.id === browser.id"
-      />
-      <div
-        v-if="!activeTab"
-        class="absolute inset-0 flex items-center justify-center"
-      >
-        <div class="text-center px-6">
-          <p class="text-xs font-medium text-foreground">
-            {{ t('chat.emptyWorkspace') }}
-          </p>
-          <p class="mt-1 text-xs text-muted-foreground">
-            {{ t('chat.emptyWorkspaceHint') }}
-          </p>
-        </div>
-      </div>     
-    </div>
+  <div
+    ref="rootEl"
+    class="flex flex-col flex-1 h-full min-w-0 bg-background"
+  >
+    <DockviewVue
+      class="h-full w-full"
+      :components="panelComponents"
+      :watermark-component="watermarkComponent"
+      :default-tab-component="defaultTabComponent"
+      :right-header-actions-component="rightHeaderActionsComponent"
+      :theme="memohTheme"
+      :disable-floating-groups="true"
+      :disable-tabs-overflow-list="true"
+      :disable-auto-resizing="true"
+      :get-tab-context-menu-items="getTabContextMenuItems"
+      @ready="onReady"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useWorkspaceTabsStore, type WorkspaceTab } from '@/store/workspace-tabs'
+import {
+  DockviewVue,
+  type DockviewReadyEvent,
+  type DockviewTheme,
+  type GetTabContextMenuItemsParams,
+  type ContextMenuItem,
+  type VueComponent,
+} from 'dockview-vue'
+import 'dockview-vue/dist/styles/dockview.css'
+import '@/styles/dockview-theme.css'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
-import { useDisplaySnapshotsStore } from '@/store/display-snapshots'
-import WorkspaceTabBar from './workspace-tab-bar.vue'
-import ChatPane from './chat-pane.vue'
-import FilePane from './file-pane.vue'
-import TerminalPane from './terminal-pane.vue'
-import DisplayPane from './display-pane.vue'
-import BrowserPane from './browser-pane.vue'
-import { type ComputedRef } from 'vue'
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import PanelChat from './dockview/panel-chat.vue'
+import PanelFile from './dockview/panel-file.vue'
+import PanelPreview from './dockview/panel-preview.vue'
+import PanelTerminal from './dockview/panel-terminal.vue'
+import PanelBrowser from './dockview/panel-browser.vue'
+import PanelDisplay from './dockview/panel-display.vue'
+import WorkspaceWatermark from './dockview/workspace-watermark.vue'
+import WorkspaceTab from './dockview/workspace-tab.vue'
+import GroupActions from './dockview/group-actions.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
-const displaySnapshots = useDisplaySnapshotsStore()
-const { activeTab, tabs } = storeToRefs(store)
+const { api } = storeToRefs(store)
 const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
+const { currentBotId, sessionId, activeSession } = storeToRefs(chatStore)
 
+// dockview's own auto-resize is disabled at construction (:disable-auto-resizing);
+// we drive layout from this ResizeObserver instead. The dock is a flex-1 sibling
+// of the sidebar (push/pull model), so when the sidebar slides out/in this root's
+// width animates frame-by-frame; the observer relays out on each of those frames,
+// keeping panels matched to the container the whole way. The right edge is pinned
+// (viewport edge), so the right-side actions ("+") never move while the width
+// changes — no snap.
+// (NOTE: dockview 6.6.1 ignores updateOptions({ disableAutoResizing }) at runtime
+// — a guard checks the wrong key — so toggling the prop reactively does nothing;
+// owning the observer is the reliable route.)
+const rootEl = ref<HTMLElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
 
-type TerminalTab = Extract<WorkspaceTab, { type: 'terminal' }>
-type ChatTab = Extract<WorkspaceTab, { type: 'chat' | 'draft' }>
-type FileTab = Extract<WorkspaceTab, { type: 'file' }>
-type BrowserTab = Extract<WorkspaceTab, { type: 'browser' }>
-type DisplayTab = Extract<WorkspaceTab, { type: 'display' }>
+function applyLayout() {
+  const dock = api.value
+  const el = rootEl.value
+  if (!dock || !el) return
+  dock.layout(el.clientWidth, el.clientHeight)
+}
 
-const chatTabs = computed<ChatTab[]>(() =>
-  tabs.value.filter((tab): tab is ChatTab => tab.type === 'chat' || tab.type === 'draft'),
-)
+// Panel components are looked up by name when panels are added or restored
+// from a serialized layout. dockview-vue types frameworks components as
+// DefineComponent<T> (single generic), which script-setup SFC types do not
+// structurally match, hence the casts.
+const panelComponents: Record<string, VueComponent> = {
+  chat: PanelChat as unknown as VueComponent,
+  file: PanelFile as unknown as VueComponent,
+  preview: PanelPreview as unknown as VueComponent,
+  terminal: PanelTerminal as unknown as VueComponent,
+  browser: PanelBrowser as unknown as VueComponent,
+  display: PanelDisplay as unknown as VueComponent,
+}
 
-function TypeTab<T extends (TerminalTab | ChatTab | FileTab)[]>(tabComp: ComputedRef<T>) {
-  const componentMap = {
-    chat: ChatPane,
-    draft: ChatPane,
-    file: FilePane,
-    terminal: TerminalPane,
+const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
+const defaultTabComponent = WorkspaceTab as unknown as VueComponent
+const rightHeaderActionsComponent = GroupActions as unknown as VueComponent
+
+const memohTheme: DockviewTheme = {
+  name: 'memoh',
+  className: 'dockview-theme-memoh',
+  gap: 0,
+  dndTabIndicator: 'fill',
+}
+
+function getTabContextMenuItems({ panel, group }: GetTabContextMenuItemsParams): ContextMenuItem[] {
+  return [
+    {
+      label: t('chat.tabMenu.close'),
+      action: () => panel.api.close(),
+    },
+    {
+      label: t('chat.tabMenu.closeOthers'),
+      disabled: group.panels.length <= 1,
+      action: () => {
+        for (const other of [...group.panels]) {
+          if (other.id !== panel.id) other.api.close()
+        }
+      },
+    },
+    {
+      label: t('chat.tabMenu.closeAll'),
+      action: () => {
+        for (const other of [...group.panels]) {
+          other.api.close()
+        }
+      },
+    },
+  ]
+}
+
+const chatPanelTitle = computed(() => {
+  if (!sessionId.value) return t('chat.newSession')
+  return (activeSession.value?.title ?? '').trim() || t('chat.untitledSession')
+})
+
+function onReady(event: DockviewReadyEvent) {
+  store.registerApi(event.api)
+  // Size the grid before adding panels (auto-resize is off, so without this the
+  // grid would be 0×0 and the first panel would lay out empty).
+  if (rootEl.value) event.api.layout(rootEl.value.clientWidth, rootEl.value.clientHeight)
+  ensureChatPanel()
+}
+
+function ensureChatPanel() {
+  if (!currentBotId.value || !api.value) return
+  store.openChat(chatPanelTitle.value)
+}
+
+// Bot ready/switch: the store restores the persisted layout; make sure the
+// chat panel exists afterwards (it may have been closed in a past session).
+watch(currentBotId, (bid) => {
+  if (bid && api.value) ensureChatPanel()
+})
+
+// Keep the singleton chat tab title in sync with the active session.
+watch(chatPanelTitle, (title) => {
+  store.setChatTitle(title)
+}, { immediate: true })
+
+const FILE_MANAGER_ROOT = '/data'
+
+function normalizeFileManagerPath(path: string): string {
+  const trimmedPath = path.trim()
+  if (!trimmedPath) return FILE_MANAGER_ROOT
+  if (trimmedPath === FILE_MANAGER_ROOT || trimmedPath.startsWith(`${FILE_MANAGER_ROOT}/`)) {
+    return trimmedPath
   }
-  return computed(() => {
-    if (!activeTab.value?.id) return
-    const currentTab = tabComp.value.find(v => v.id === activeTab.value?.id)
-    if (!currentTab) {
-      return
-    }
-    return { ...currentTab, component: componentMap[activeTab.value['type'] as keyof typeof componentMap] }
-  })
+  if (trimmedPath === '/') return FILE_MANAGER_ROOT
+  if (trimmedPath.startsWith('/')) {
+    return `${FILE_MANAGER_ROOT}${trimmedPath}`
+  }
+  return `${FILE_MANAGER_ROOT}/${trimmedPath}`
 }
 
-const fileTabs = computed<FileTab[]>(() =>
-  tabs.value.filter((tab): tab is FileTab => tab.type === 'file'),
-)
+provide(openInFileManagerKey, (path: string, isDir = false) => {
+  const normalizedPath = normalizeFileManagerPath(path)
+  if (isDir) {
+    store.openFilesAt(normalizedPath)
+  } else {
+    store.openFile(normalizedPath)
+  }
+})
 
-const terminalTabs = computed<TerminalTab[]>(() =>
-  tabs.value.filter((tab): tab is TerminalTab => tab.type === 'terminal'),
-)
+onMounted(() => {
+  resizeObserver = new ResizeObserver(() => applyLayout())
+  if (rootEl.value) resizeObserver.observe(rootEl.value)
+})
 
-const displayTabs = computed<DisplayTab[]>(() =>
-  currentBotId.value
-    ? tabs.value.filter((tab): tab is DisplayTab => tab.type === 'display')
-    : [],
-)
-const browserTabs = computed<BrowserTab[]>(() =>
-  currentBotId.value
-    ? tabs.value.filter((tab): tab is BrowserTab => tab.type === 'browser')
-    : [],
-)
-const currentFile = TypeTab(fileTabs)
-const currentChat = TypeTab(chatTabs)
-const currentTerminal=TypeTab(terminalTabs)
-
-
-
-function handleDisplaySnapshot(payload: { tabId: string; sessionId?: string; dataUrl: string }) {
-  const botId = currentBotId.value
-  if (!botId) return
-  displaySnapshots.upsert(botId, payload)
-}
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  store.releaseApi()
+})
 </script>

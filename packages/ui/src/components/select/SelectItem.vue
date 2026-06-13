@@ -9,6 +9,7 @@ import {
   SelectItemText,
   useForwardProps,
 } from 'reka-ui'
+import { menuItemClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<SelectItemProps & { class?: HTMLAttributes['class'] }>()
@@ -24,11 +25,9 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="forwardedProps"
     :class="
       cn(
-        'relative flex w-full cursor-default items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-xs outline-hidden select-none transition-colors',
-        'focus:bg-accent focus:text-accent-foreground',
-        '[&_svg:not([class*=\'text-\'])]:text-muted-foreground',
-        'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
-        '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4',
+        // Shared menu row (lib/menu.ts). Right-side check ⇒ pr-8.
+        menuItemClass,
+        'pr-8',
         '*:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2',
         props.class,
       )

@@ -23,7 +23,7 @@ interface ACPClaudeCodeOAuthAuthorizeResponse {
 }
 
 /**
- * Bot-scoped ACP OAuth flows for Codex (ChatGPT) and Claude Code, shared by the
+ * Bot-scoped ACP OAuth flows for Codex and Claude Code, shared by the
  * bot settings card and the onboarding wizard. All endpoints require a live
  * bot + managed workspace, so `getBotId` must resolve to an existing bot id.
  */

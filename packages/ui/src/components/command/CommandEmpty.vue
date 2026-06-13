@@ -21,7 +21,7 @@ const isRender = computed(() => !!filterState.search && filterState.filtered.cou
     v-if="isRender"
     data-slot="command-empty"
     v-bind="delegatedProps"
-    :class="cn('py-6 text-center text-xs', props.class)"
+    :class="cn('py-6 text-center text-body', props.class)"
   >
     <slot />
   </Primitive>

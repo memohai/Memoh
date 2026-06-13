@@ -86,8 +86,8 @@ async function handleComplete() {
       class="mb-8 flex justify-center transition-all duration-[350ms] ease-out delay-[200ms]"
       :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
     >
-      <div class="inline-flex items-start gap-2.5 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-left">
-        <AlertTriangle class="size-4 shrink-0 text-yellow-600 dark:text-yellow-500 mt-0.5" />
+      <div class="inline-flex items-start gap-2.5 rounded-lg border border-warning-border bg-warning-soft px-4 py-3 text-left">
+        <AlertTriangle class="size-4 shrink-0 text-warning-foreground mt-0.5" />
         <p class="text-xs text-muted-foreground leading-relaxed">
           {{ t('onboarding.complete.noProviderWarning') }}
         </p>

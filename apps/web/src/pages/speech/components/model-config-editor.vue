@@ -315,7 +315,7 @@ import {
 } from '@memohai/ui'
 import { ChevronDown, ChevronUp, Eye, EyeOff, Play } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 

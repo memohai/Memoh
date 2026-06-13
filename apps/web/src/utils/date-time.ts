@@ -61,6 +61,28 @@ export function formatDateTimeSeconds(
 }
 
 /**
+ * Compact, locale-aware "month day, time" stamp for dense data tables — e.g.
+ * "Jun 11, 6:43 PM" (en) or "6月11日 下午6:43" (zh). Year is omitted (usage logs
+ * are recent), and seconds are dropped so rows read at a glance instead of as a
+ * full ISO timestamp.
+ */
+export function formatDateTimeShort(
+  value: string | null | undefined,
+  options: FormatDateOptions = {},
+): string {
+  if (!value) return options.fallback ?? ''
+  const parsed = parseDate(value)
+  if (!parsed) return resolveInvalid(value, options)
+  return parsed.toLocaleString(options.locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
+/**
  * Returns a locale-aware relative time string such as "3 minutes ago" or
  * "in 2 days".  Falls back to `toLocaleDateString()` for dates older than a
  * week.  Accepts either an ISO string or a `Date` object.

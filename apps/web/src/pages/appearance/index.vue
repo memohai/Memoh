@@ -1,315 +1,237 @@
 <template>
-  <section class="max-w-7xl mx-auto px-4 pt-2 pb-10 md:px-6 md:pt-4 md:pb-12">
-    <div class="max-w-3xl mx-auto space-y-6">
-      <div>
-        <h1 class="text-lg font-semibold">
-          {{ t('settings.appearance.title') }}
-        </h1>
-        <p class="mt-1 text-xs text-muted-foreground">
-          {{ t('settings.appearance.description') }}
-        </p>
-      </div>
+  <section class="mx-auto max-w-3xl px-6 pt-10 pb-12">
+    <h1 class="mb-6 px-2 text-lg font-semibold">
+      {{ t('settings.appearance.title') }}
+    </h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle class="text-sm">
-            {{ t('settings.appearance.interface') }}
-          </CardTitle>
-          <CardDescription class="text-xs">
-            {{ t('settings.appearance.interfaceDescription') }}
-          </CardDescription>
-        </CardHeader>
-        <CardContent class="space-y-5">
-          <div class="grid gap-2">
-            <Label>{{ t('settings.language') }}</Label>
-            <Select
-              :model-value="language"
-              @update:model-value="(value) => value && setLanguage(value as Locale)"
+    <div class="space-y-8">
+      <SettingsSection :title="t('settings.appearance.interface')">
+        <SettingsRow :label="t('settings.language')">
+          <Select
+            :model-value="language"
+            @update:model-value="(value) => value && setLanguage(value as Locale)"
+          >
+            <SelectTrigger size="sm">
+              <SelectValue :placeholder="t('settings.languagePlaceholder')" />
+            </SelectTrigger>
+            <SelectContent
+              align="end"
+              :align-offset="0"
             >
-              <SelectTrigger class="w-full sm:w-56">
-                <SelectValue :placeholder="t('settings.languagePlaceholder')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="en">
-                  {{ t('settings.langEn') }}
-                </SelectItem>
-                <SelectItem value="zh">
-                  {{ t('settings.langZh') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              <SelectItem value="en">
+                {{ t('settings.langEn') }}
+              </SelectItem>
+              <SelectItem value="zh">
+                {{ t('settings.langZh') }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
 
-          <div class="grid gap-2">
-            <Label>{{ t('settings.theme') }}</Label>
-            <div class="grid grid-cols-2 gap-2 sm:flex">
-              <Button
-                type="button"
-                variant="outline"
-                class="justify-start gap-2"
-                :class="theme === 'light' ? 'border-foreground bg-accent text-foreground' : ''"
-                @click="setTheme('light')"
-              >
-                <Sun class="size-4" />
-                {{ t('settings.themeLight') }}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                class="justify-start gap-2"
-                :class="theme === 'dark' ? 'border-foreground bg-accent text-foreground' : ''"
-                @click="setTheme('dark')"
-              >
-                <Moon class="size-4" />
-                {{ t('settings.themeDark') }}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle class="text-sm">
-            {{ t('settings.appearance.colorScheme') }}
-          </CardTitle>
-          <CardDescription class="text-xs">
-            {{ t('settings.appearance.colorSchemeDescription') }}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <ColorSchemeCard
-              v-for="scheme in colorSchemes"
-              :key="scheme.id"
-              :scheme="scheme"
-              :selected="colorScheme === scheme.id"
-              show-description
-              @select="setColorScheme(scheme.id)"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle class="text-sm">
-            {{ t('settings.appearance.typography') }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent class="space-y-5">
-          <div class="grid gap-2">
-            <div>
-              <Label for="ui-font-size">{{ t('settings.appearance.uiFontSize') }}</Label>
-              <p
-                id="ui-font-size-description"
-                class="mt-1 text-xs text-muted-foreground"
-              >
-                {{ t('settings.appearance.uiFontSizeDescription') }}
-              </p>
-            </div>
-            <Input
-              id="ui-font-size"
-              type="number"
-              min="12"
-              max="20"
-              step="1"
-              :model-value="uiFontSizeDraft"
-              :placeholder="String(DEFAULT_UI_FONT_SIZE_PX)"
-              :class="typographyNumberInputClass"
-              aria-describedby="ui-font-size-description"
-              @update:model-value="(value) => updateUiFontSizeDraft(value)"
-              @change="commitUiFontSizeDraft"
-              @blur="commitUiFontSizeDraft"
-              @keydown.enter="commitUiFontSizeDraft"
-            />
-          </div>
-
-          <div class="grid gap-2">
-            <div>
-              <Label for="code-font-size">{{ t('settings.appearance.codeFontSize') }}</Label>
-              <p
-                id="code-font-size-description"
-                class="mt-1 text-xs text-muted-foreground"
-              >
-                {{ t('settings.appearance.codeFontSizeDescription') }}
-              </p>
-            </div>
-            <Input
-              id="code-font-size"
-              type="number"
-              min="11"
-              max="20"
-              step="1"
-              :model-value="codeFontSizeDraft"
-              :placeholder="String(DEFAULT_CODE_FONT_SIZE_PX)"
-              :class="typographyNumberInputClass"
-              aria-describedby="code-font-size-description"
-              @update:model-value="(value) => updateCodeFontSizeDraft(value)"
-              @change="commitCodeFontSizeDraft"
-              @blur="commitCodeFontSizeDraft"
-              @keydown.enter="commitCodeFontSizeDraft"
-            />
-          </div>
-
-          <div class="grid gap-2">
-            <div>
-              <Label for="ui-font-family">{{ t('settings.appearance.uiFontFamily') }}</Label>
-              <p
-                id="ui-font-family-description"
-                class="mt-1 text-xs text-muted-foreground"
-              >
-                {{ t('settings.appearance.uiFontFamilyDescription') }}
-              </p>
-            </div>
-            <Input
-              id="ui-font-family"
-              :model-value="uiFontFamilyDraft"
-              :placeholder="defaultUiFontFamily"
-              :class="typographyFamilyInputClass"
-              aria-describedby="ui-font-family-description"
-              @update:model-value="(value) => updateUiFontFamilyDraft(value)"
-              @change="commitUiFontFamilyDraft"
-              @blur="commitUiFontFamilyDraft"
-              @keydown.enter="commitUiFontFamilyDraft"
-            />
-          </div>
-
-          <div class="grid gap-2">
-            <div>
-              <Label for="code-font-family">{{ t('settings.appearance.codeFontFamily') }}</Label>
-              <p
-                id="code-font-family-description"
-                class="mt-1 text-xs text-muted-foreground"
-              >
-                {{ t('settings.appearance.codeFontFamilyDescription') }}
-              </p>
-            </div>
-            <Input
-              id="code-font-family"
-              :model-value="codeFontFamilyDraft"
-              :placeholder="defaultCodeFontFamily"
-              :class="typographyFamilyInputClass"
-              aria-describedby="code-font-family-description"
-              @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
-              @change="commitCodeFontFamilyDraft"
-              @blur="commitCodeFontFamilyDraft"
-              @keydown.enter="commitCodeFontFamilyDraft"
-            />
-            <div
-              class="typography-code-preview pointer-events-none mt-1 border-l-4 border-l-warning-border pl-2"
-              :style="codeFontPreviewStyle"
-              inert
-            >
-              <!-- eslint-disable vue/no-v-html -->
-              <div
-                class="overflow-x-auto"
-                v-html="codeFontPreviewHtml"
+        <SettingsRow :label="t('settings.theme')">
+          <SegmentedControl
+            :model-value="theme"
+            :items="themeItems"
+            :aria-label="t('settings.theme')"
+            @update:model-value="(value) => setTheme(value as ThemePreference)"
+          >
+            <template #item="{ item }">
+              <component
+                :is="themeIcons[item.value]"
+                class="size-4"
               />
-              <!-- eslint-enable vue/no-v-html -->
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </template>
+          </SegmentedControl>
+        </SettingsRow>
+
+        <SettingsRow :label="t('settings.appearance.colorScheme')">
+          <Select
+            :model-value="colorScheme"
+            @update:model-value="(value) => value && setColorScheme(value as ColorSchemeId)"
+          >
+            <SelectTrigger
+              size="sm"
+              class="min-w-36"
+            >
+              <span class="flex min-w-0 items-center gap-1.5">
+                <span
+                  class="flex size-5 shrink-0 items-center justify-center rounded-sm border border-border text-[10px] font-semibold"
+                  :style="{ backgroundColor: previewSwatches(currentColorScheme)[0] }"
+                >
+                  <span :style="{ color: previewSwatches(currentColorScheme)[4] }">Aa</span>
+                </span>
+                <span class="truncate">
+                  {{ t(currentColorScheme.labelKey) }}
+                </span>
+              </span>
+            </SelectTrigger>
+            <SelectContent
+              align="end"
+              :align-offset="0"
+            >
+              <SelectItem
+                v-for="scheme in colorSchemes"
+                :key="scheme.id"
+                :value="scheme.id"
+              >
+                <span class="flex min-w-0 items-center gap-1.5">
+                  <span
+                    class="flex size-6 shrink-0 items-center justify-center rounded-sm border border-border text-[11px] font-semibold"
+                    :style="{ backgroundColor: previewSwatches(scheme)[0] }"
+                  >
+                    <span :style="{ color: previewSwatches(scheme)[4] }">Aa</span>
+                  </span>
+                  <span class="truncate">
+                    {{ t(scheme.labelKey) }}
+                  </span>
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection :title="t('settings.appearance.typography')">
+        <SettingsRow
+          :label="t('settings.appearance.uiFontSize')"
+          :description="t('settings.appearance.uiFontSizeDescription')"
+        >
+          <Input
+            id="ui-font-size"
+            type="number"
+            min="12"
+            max="20"
+            step="1"
+            :model-value="uiFontSizeDraft"
+            :placeholder="String(DEFAULT_UI_FONT_SIZE_PX)"
+            class="h-8 w-20 tabular-nums"
+            @update:model-value="(value) => updateUiFontSizeDraft(value)"
+            @change="commitUiFontSizeDraft"
+            @blur="commitUiFontSizeDraft"
+            @keydown.enter="commitUiFontSizeDraft"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.codeFontSize')"
+          :description="t('settings.appearance.codeFontSizeDescription')"
+        >
+          <Input
+            id="code-font-size"
+            type="number"
+            min="11"
+            max="20"
+            step="1"
+            :model-value="codeFontSizeDraft"
+            :placeholder="String(DEFAULT_CODE_FONT_SIZE_PX)"
+            class="h-8 w-20 tabular-nums"
+            @update:model-value="(value) => updateCodeFontSizeDraft(value)"
+            @change="commitCodeFontSizeDraft"
+            @blur="commitCodeFontSizeDraft"
+            @keydown.enter="commitCodeFontSizeDraft"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.uiFontFamily')"
+          :description="t('settings.appearance.uiFontFamilyDescription')"
+        >
+          <Input
+            id="ui-font-family"
+            :model-value="uiFontFamilyDraft"
+            :placeholder="defaultUiFontFamily"
+            class="h-8 w-48 font-mono text-xs"
+            @update:model-value="(value) => updateUiFontFamilyDraft(value)"
+            @change="commitUiFontFamilyDraft"
+            @blur="commitUiFontFamilyDraft"
+            @keydown.enter="commitUiFontFamilyDraft"
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.codeFontFamily')"
+          :description="t('settings.appearance.codeFontFamilyDescription')"
+        >
+          <Input
+            id="code-font-family"
+            :model-value="codeFontFamilyDraft"
+            :placeholder="defaultCodeFontFamily"
+            class="h-8 w-48 font-mono text-xs"
+            @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
+            @change="commitCodeFontFamilyDraft"
+            @blur="commitCodeFontFamilyDraft"
+            @keydown.enter="commitCodeFontFamilyDraft"
+          />
+        </SettingsRow>
+      </SettingsSection>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import type { Component } from 'vue'
+
 import {
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Input,
-  Label,
+  SegmentedControl,
+  type SegmentedItem,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@memohai/ui'
-import { Moon, Sun } from 'lucide-vue-next'
+import { useDark } from '@vueuse/core'
+import { Monitor, Moon, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import type { Locale } from '@/i18n'
-import ColorSchemeCard from '@/components/color-scheme-card/index.vue'
-import { colorSchemes } from '@/constants/color-schemes'
-import { useSettingsStore } from '@/store/settings'
-import { cssFontFamilyDeclaration, DEFAULT_CODE_FONT_FAMILY, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
+import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/constants/color-schemes'
+import { useSettingsStore, type ThemePreference } from '@/store/settings'
+import { DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, defaultUiFontFamily, defaultCodeFontFamily } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx } = settingsStore
+const isDark = useDark()
 
-const typographyNumberInputClass = 'h-8 w-20 tabular-nums [&:not(:focus)]:[-moz-appearance:textfield] [&:not(:focus)::-webkit-inner-spin-button]:m-0 [&:not(:focus)::-webkit-inner-spin-button]:appearance-none [&:not(:focus)::-webkit-outer-spin-button]:m-0 [&:not(:focus)::-webkit-outer-spin-button]:appearance-none'
-const typographyFamilyInputClass = 'h-8 font-mono text-xs'
+const currentColorScheme = computed(() =>
+  colorSchemes.find(scheme => scheme.id === colorScheme.value) ?? colorSchemes[0],
+)
+
+function previewSwatches(scheme: ColorSchemeOption) {
+  return isDark.value ? scheme.darkSwatches : scheme.swatches
+}
+
+const themeItems: SegmentedItem<ThemePreference>[] = [
+  { value: 'system' },
+  { value: 'light' },
+  { value: 'dark' },
+]
+const themeIcons: Record<ThemePreference, Component> = {
+  system: Monitor,
+  light: Sun,
+  dark: Moon,
+}
 
 const uiFontSizeDraft = ref(String(uiFontSizePx.value))
 const codeFontSizeDraft = ref(String(codeFontSizePx.value))
 const uiFontFamilyDraft = ref(uiFontFamily.value)
 const codeFontFamilyDraft = ref(codeFontFamily.value)
-const codeFontPreview = useShikiHighlighter()
-const codeFontPreviewCode = `function greet(name: string): string {
-  return \`Hello, \${name}\`
-}`
-const codeFontPreviewHtml = computed(() => codeFontPreview.html.value || `<pre><code>${codeFontPreviewCode}</code></pre>`)
-const codeFontPreviewStyle = computed(() => ({
-  '--typography-code-preview-font-family': cssFontFamilyDeclaration(codeFontFamilyDraft.value, DEFAULT_CODE_FONT_FAMILY),
-  '--typography-code-preview-font-size': `${normalizeCodeFontSizePx(codeFontSizeDraft.value)}px`,
-}))
 
-function renderCodeFontPreview() {
-  void codeFontPreview.highlightLanguage(codeFontPreviewCode, 'typescript', {
-    theme: settingsStore.theme === 'dark' ? 'github-dark' : 'github-light',
-    transparentPre: true,
-  })
-}
+watch(uiFontSizePx, (value) => { uiFontSizeDraft.value = String(value) })
+watch(codeFontSizePx, (value) => { codeFontSizeDraft.value = String(value) })
+watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })
+watch(codeFontFamily, (value) => { codeFontFamilyDraft.value = value })
 
-onMounted(() => {
-  renderCodeFontPreview()
-})
-
-watch(() => settingsStore.theme, () => {
-  renderCodeFontPreview()
-})
-
-watch(uiFontSizePx, (value) => {
-  uiFontSizeDraft.value = String(value)
-})
-
-watch(codeFontSizePx, (value) => {
-  codeFontSizeDraft.value = String(value)
-})
-
-watch(uiFontFamily, (value) => {
-  uiFontFamilyDraft.value = value
-})
-
-watch(codeFontFamily, (value) => {
-  codeFontFamilyDraft.value = value
-})
-
-function updateUiFontSizeDraft(value: string | number) {
-  uiFontSizeDraft.value = String(value)
-}
-
-function updateCodeFontSizeDraft(value: string | number) {
-  codeFontSizeDraft.value = String(value)
-}
-
-function updateUiFontFamilyDraft(value: string | number) {
-  uiFontFamilyDraft.value = String(value)
-}
-
-function updateCodeFontFamilyDraft(value: string | number) {
-  codeFontFamilyDraft.value = String(value)
-}
+function updateUiFontSizeDraft(value: string | number) { uiFontSizeDraft.value = String(value) }
+function updateCodeFontSizeDraft(value: string | number) { codeFontSizeDraft.value = String(value) }
+function updateUiFontFamilyDraft(value: string | number) { uiFontFamilyDraft.value = String(value) }
+function updateCodeFontFamilyDraft(value: string | number) { codeFontFamilyDraft.value = String(value) }
 
 function commitUiFontSizeDraft() {
   const draft = uiFontSizeDraft.value.trim()

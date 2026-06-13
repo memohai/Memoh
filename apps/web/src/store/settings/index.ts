@@ -16,9 +16,11 @@ import {
   normalizeUiFontSizePx,
 } from './typography'
 
+export type ThemePreference = 'light' | 'dark' | 'system'
+
 export interface Settings {
   language: Locale;
-  theme: 'light' | 'dark';
+  theme: ThemePreference;
   colorScheme: ColorSchemeId;
   uiFontFamily: string;
   codeFontFamily: string;
@@ -27,13 +29,12 @@ export interface Settings {
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const colorMode = useColorMode()
+  const colorMode = useColorMode({ emitAuto: true })
   const i18n = useI18n()
   const defaultUiFontFamily = computed(() => DEFAULT_UI_FONT_FAMILY)
   const defaultCodeFontFamily = computed(() => DEFAULT_CODE_FONT_FAMILY)
   const language = useStorage<Locale>('language', 'en')
-  const theme = useStorage<'light' | 'dark'>('theme',
-    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  const theme = useStorage<ThemePreference>('theme', 'system')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
   const uiFontFamily = useStorage<string>('ui-font-family', '')
   const codeFontFamily = useStorage<string>('code-font-family', '')
@@ -71,11 +72,18 @@ export const useSettingsStore = defineStore('settings', () => {
   normalizeTypographySettings()
 
   watch(theme, (value) => {
-    colorMode.value = value
+    colorMode.value = value === 'system' ? 'auto' : value
   }, { immediate: true })
 
   watch(language, (value) => {
     i18n.locale.value = value
+    // Reflect the active locale onto <html lang> so locale-scoped CSS can target
+    // it — chiefly the CJK font-weight de-emphasis (see :lang(zh) in style.css):
+    // CJK glyphs render visually heavier than Latin at the same numeric weight, so
+    // Chinese UI needs a lighter rung than English to read at the same density.
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = value
+    }
   }, { immediate: true })
 
   watch(colorScheme, (value) => {
@@ -95,12 +103,28 @@ export const useSettingsStore = defineStore('settings', () => {
     language.value = value
   }
 
-  const setTheme = (value: 'light' | 'dark') => {
+  const withViewTransition = (fn: () => void) => {
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as Document & { startViewTransition: (cb: () => void) => unknown }).startViewTransition(fn)
+    } else {
+      fn()
+    }
+  }
+
+  const setTheme = (value: ThemePreference) => {
+    // No view transition here: the segmented control already animates its own
+    // thumb, and wrapping each toggle in startViewTransition freezes the page for
+    // the transition's duration — which made rapid segment switching feel laggy
+    // and swallowed hover. Theme flip is applied instantly instead.
     theme.value = value
+    colorMode.value = value === 'system' ? 'auto' : value
   }
 
   const setColorScheme = (value: ColorSchemeId) => {
-    colorScheme.value = value
+    withViewTransition(() => {
+      colorScheme.value = value
+      applyColorScheme(value)
+    })
   }
 
   const setUiFontFamily = (value: string) => {

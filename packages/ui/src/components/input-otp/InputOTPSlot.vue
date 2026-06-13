@@ -22,7 +22,16 @@ const slot = computed(() => context?.value.slots[props.index])
     v-bind="forwarded"
     data-slot="input-otp-slot"
     :data-active="slot?.isActive"
-    :class="cn('data-[active=true]:border-ring [&:has(+_[data-active=true])]:border-r-ring data-[active=true]:aria-invalid:ring-destructive/20 dark:data-[active=true]:aria-invalid:ring-destructive/40 aria-invalid:border-destructive data-[active=true]:aria-invalid:border-destructive dark:bg-input/30 border-input relative flex h-9 w-9 items-center justify-center border-y-2 border-r-2 text-xs shadow-xs transition-all outline-none first:rounded-l-md first:border-l-2 last:rounded-r-md data-[active=true]:z-10', props.class)"
+    :class="cn(
+      // Each cell is its OWN mini field box: the edge is the shared --field-edge
+      // inset hairline from style.css (pixel-identical to <Input> — same mechanism,
+      // so no border-miter corner darkening, no doubled dividers). Cells are spaced
+      // by the group's gap, so every corner is rounded like a small input and the
+      // active cell deepens its whole edge in place (data-active drives --field-edge).
+      'relative flex h-8 w-8 items-center justify-center rounded-md bg-transparent text-body text-foreground',
+      'outline-none',
+      props.class,
+    )"
   >
     {{ slot?.char }}
     <div

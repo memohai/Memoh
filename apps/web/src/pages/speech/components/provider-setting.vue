@@ -1,5 +1,5 @@
 <template>
-  <SettingsShell width="wide">
+  <SettingsShell width="narrow">
     <section class="flex items-center gap-3">
       <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
         <ProviderIcon
@@ -228,7 +228,7 @@ import {
 import ModelConfigEditor from './model-config-editor.vue'
 import { ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-vue-next'
 import { computed, inject, reactive, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getSpeechProvidersById, getSpeechProvidersByIdModels, getSpeechProvidersMeta, postSpeechModelsByIdTest, postSpeechProvidersByIdImportModels, putProvidersById, putSpeechModelsById } from '@memohai/sdk'

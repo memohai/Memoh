@@ -1,0 +1,936 @@
+<template>
+  <div class="flex flex-col h-full min-w-0">
+    <div class="flex items-center gap-1 border-b border-border px-2 py-1.5 shrink-0">
+      <Button
+        v-if="canWrite"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :disabled="operationLoading"
+        :title="t('bots.files.upload')"
+        @click="triggerUpload(rootPath)"
+      >
+        <Upload class="size-3.5" />
+      </Button>
+      <Button
+        v-if="canWrite"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :disabled="operationLoading"
+        :title="t('bots.files.uploadFolder')"
+        @click="triggerDirectoryUpload"
+      >
+        <CloudUpload class="size-3.5" />
+      </Button>
+      <Button
+        v-if="canWrite"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :disabled="operationLoading"
+        :title="t('bots.files.newFolder')"
+        @click="openMkdirDialog(rootPath)"
+      >
+        <FolderPlus class="size-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :class="selectionMode ? 'bg-sidebar-accent text-foreground!' : ''"
+        :disabled="operationLoading"
+        :aria-pressed="selectionMode"
+        :title="selectionMode ? t('bots.files.doneSelecting') : t('bots.files.selectMode')"
+        @click="toggleSelectionMode"
+      >
+        <ListChecks class="size-3.5" />
+      </Button>
+      <span
+        v-if="selectedCount > 0"
+        class="ml-auto truncate text-[11px] text-muted-foreground"
+      >
+        {{ t('bots.files.selectedCount', { count: selectedCount }) }}
+      </span>
+      <Button
+        v-if="selectedCount > 0 && canWrite"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :disabled="operationLoading"
+        :title="t('bots.files.download')"
+        @click="handleBatchDownload"
+      >
+        <Download class="size-3.5" />
+      </Button>
+      <Button
+        v-if="selectedCount > 0"
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0 text-destructive hover:text-destructive"
+        :disabled="operationLoading"
+        :title="t('bots.files.delete')"
+        @click="openBatchDeleteDialog"
+      >
+        <Trash2 class="size-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        class="size-7 p-0"
+        :class="selectedCount > 0 ? '' : 'ml-auto'"
+        :disabled="operationLoading"
+        :title="t('common.refresh')"
+        @click="reload"
+      >
+        <RefreshCw class="size-3.5" />
+      </Button>
+    </div>
+
+    <input
+      ref="uploadInputRef"
+      type="file"
+      class="hidden"
+      :disabled="operationLoading || !canWrite"
+      @change="handleUpload"
+    >
+    <input
+      ref="directoryInputRef"
+      type="file"
+      class="hidden"
+      multiple
+      webkitdirectory
+      :disabled="operationLoading || !canWrite"
+      @change="handleDirectoryInputUpload"
+    >
+
+    <div
+      v-if="uploadStatus"
+      class="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 text-caption"
+    >
+      <span class="min-w-0 truncate text-muted-foreground">
+        {{ uploadStatus }}
+      </span>
+    </div>
+
+    <div class="flex-1 min-h-0 relative">
+      <div class="absolute inset-0">
+        <ScrollArea class="h-full">
+          <FileTree />
+        </ScrollArea>
+      </div>
+    </div>
+
+    <Dialog v-model:open="mkdirDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.files.newFolder') }}</DialogTitle>
+        </DialogHeader>
+        <Input
+          v-model="mkdirName"
+          :placeholder="t('bots.files.folderNamePlaceholder')"
+          :disabled="mkdirLoading"
+          @keydown.enter.prevent="handleMkdir"
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="mkdirLoading"
+            @click="mkdirDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            :disabled="!mkdirName.trim() || mkdirLoading"
+            @click="handleMkdir"
+          >
+            <Spinner
+              v-if="mkdirLoading"
+              class="mr-1"
+            />
+            {{ t('common.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="renameDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.files.rename') }}</DialogTitle>
+        </DialogHeader>
+        <Input
+          v-model="renameNewName"
+          :placeholder="t('bots.files.newNamePlaceholder')"
+          :disabled="renameLoading"
+          @keydown.enter.prevent="handleRename"
+        />
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="renameLoading"
+            @click="renameDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            :disabled="!renameNewName.trim() || renameLoading"
+            @click="handleRename"
+          >
+            <Spinner
+              v-if="renameLoading"
+              class="mr-1"
+            />
+            {{ t('common.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="deleteDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.files.confirmDelete') }}</DialogTitle>
+        </DialogHeader>
+        <p class="text-xs text-muted-foreground">
+          {{ t('bots.files.confirmDeleteMessage', { name: deleteTarget?.name ?? '' }) }}
+        </p>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="deleteLoading"
+            @click="deleteDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            variant="destructive"
+            :disabled="deleteLoading"
+            @click="handleDelete"
+          >
+            <Spinner
+              v-if="deleteLoading"
+              class="mr-1"
+            />
+            {{ t('bots.files.delete') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="batchDeleteDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bots.files.confirmDelete') }}</DialogTitle>
+        </DialogHeader>
+        <p class="text-xs text-muted-foreground">
+          {{ t('bots.files.confirmBatchDeleteMessage', { count: selectedCount }) }}
+        </p>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            :disabled="batchDeleteLoading"
+            @click="batchDeleteDialogOpen = false"
+          >
+            {{ t('common.cancel') }}
+          </Button>
+          <Button
+            variant="destructive"
+            :disabled="batchDeleteLoading"
+            @click="handleBatchDelete"
+          >
+            <Spinner
+              v-if="batchDeleteLoading"
+              class="mr-1"
+            />
+            {{ t('bots.files.delete') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, provide, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toast } from '@memohai/ui'
+import { CloudUpload, Download, Upload, FolderPlus, ListChecks, RefreshCw, Trash2 } from 'lucide-vue-next'
+import {
+  Button,
+  Input,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Spinner,
+  ScrollArea,
+} from '@memohai/ui'
+import {
+  getBotsByBotIdContainerFsList,
+  postBotsByBotIdContainerFsUpload,
+  postBotsByBotIdContainerFsMkdir,
+  postBotsByBotIdContainerFsDelete,
+  postBotsByBotIdContainerFsRename,
+} from '@memohai/sdk'
+import type { HandlersFsFileInfo } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { sdkApiUrl, sdkAuthQuery } from '@/lib/api-client'
+import { joinPath, parentPath } from '@/components/file-manager/utils'
+import FileTree from '@/components/file-manager/file-tree.vue'
+import { FileTreeKey } from '@/components/file-manager/file-tree-context'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatStore } from '@/store/chat-list'
+import { storeToRefs } from 'pinia'
+
+const props = withDefaults(defineProps<{
+  botId: string
+  canWrite?: boolean
+}>(), {
+  canWrite: false,
+})
+
+const { t } = useI18n()
+const workspaceTabs = useWorkspaceTabsStore()
+const { activeId } = storeToRefs(workspaceTabs)
+const canWrite = computed(() => props.canWrite)
+
+const rootPath = '/data'
+
+// Tree state shared with FileTree / FileTreeNode via provide.
+const refreshKey = ref(0)
+const revealPath = ref<string | null>(null)
+const activePath = computed(() => {
+  const id = activeId.value
+  return id && id.startsWith('file:') ? id.slice('file:'.length) : null
+})
+
+const uploadInputRef = ref<HTMLInputElement>()
+const directoryInputRef = ref<HTMLInputElement>()
+const uploadStatus = ref('')
+const directoryUploading = ref(false)
+const batchArchiveLoading = ref(false)
+const extractLoading = ref(false)
+const batchDeleteDialogOpen = ref(false)
+const batchDeleteLoading = ref(false)
+const selectionMode = ref(false)
+const selectedEntries = ref<Map<string, HandlersFsFileInfo>>(new Map())
+const selectedCount = computed(() => selectedEntries.value.size)
+const operationLoading = computed(() => directoryUploading.value || batchArchiveLoading.value || extractLoading.value || batchDeleteLoading.value)
+
+interface DirectoryUploadFile {
+  file: File
+  relativePath: string
+}
+
+interface DirectoryUploadPayload {
+  rootName: string
+  files: DirectoryUploadFile[]
+  directories: string[]
+}
+
+interface FileSystemDirectoryHandleLike {
+  name: string
+  entries(): AsyncIterableIterator<[string, FileSystemHandleLike]>
+}
+
+interface FileSystemFileHandleLike {
+  name: string
+  getFile(): Promise<File>
+}
+
+type FileSystemHandleLike =
+  | (FileSystemDirectoryHandleLike & { kind: 'directory' })
+  | (FileSystemFileHandleLike & { kind: 'file' })
+
+function isTransientWorkspaceError(error: unknown): boolean {
+  const detail = resolveApiErrorMessage(error, '').toLowerCase()
+  return detail.includes('container not reachable')
+    || detail.includes('unavailable')
+    || detail.includes('client connection is closing')
+    || detail.includes('transport is closing')
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+function authHeaders(): HeadersInit {
+  const headers: Record<string, string> = {}
+  const token = localStorage.getItem('token')?.trim()
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = await response.json() as { message?: string, error?: string }
+    return data.message || data.error || fallback
+  } catch {
+    const text = await response.text().catch(() => '')
+    return text || fallback
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+// List a single directory's entries (with a short retry for transient workspace
+// errors). Used by the tree per folder; failures surface as a toast and an empty
+// folder rather than breaking the whole tree.
+async function listDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+  if (!props.botId) return []
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { data } = await getBotsByBotIdContainerFsList({
+        path: { bot_id: props.botId },
+        query: { path },
+        throwOnError: true,
+      })
+      return data.entries ?? []
+    } catch (error) {
+      lastError = error
+      if (attempt < 2 && isTransientWorkspaceError(error)) {
+        await wait(500 * (attempt + 1))
+        continue
+      }
+      throw error
+    }
+  }
+  throw lastError
+}
+
+async function safeListDirectory(path: string): Promise<HandlersFsFileInfo[]> {
+  try {
+    return await listDirectory(path)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.loadFailed')))
+    return []
+  }
+}
+
+function reload() {
+  refreshKey.value++
+}
+
+// Reveal a path in the tree (expand its ancestors + scroll into view). Used by
+// the store's openFilesAt deep-link.
+function navigateTo(path: string) {
+  const target = (path ?? '').trim()
+  if (!target) return
+  // Re-assign even if unchanged so repeated requests still re-trigger reveal.
+  revealPath.value = null
+  void Promise.resolve().then(() => {
+    revealPath.value = target
+  })
+}
+
+function handleOpenFile(entry: HandlersFsFileInfo) {
+  if (!entry.path) return
+  workspaceTabs.openFile(entry.path)
+}
+
+// ---- upload --------------------------------------------------------------
+
+const uploadTarget = ref(rootPath)
+
+function triggerUpload(target: string) {
+  if (!props.canWrite) return
+  uploadTarget.value = target || rootPath
+  uploadInputRef.value?.click()
+}
+
+async function triggerDirectoryUpload() {
+  if (!props.canWrite) return
+  uploadTarget.value = rootPath
+  const picker = (window as unknown as {
+    showDirectoryPicker?: () => Promise<FileSystemDirectoryHandleLike>
+  }).showDirectoryPicker
+
+  if (picker) {
+    try {
+      const handle = await picker()
+      await uploadDirectoryPayload(await collectDirectoryHandle(handle))
+      return
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
+      return
+    }
+  }
+
+  directoryInputRef.value?.click()
+}
+
+function joinRelativePath(...parts: string[]): string {
+  return parts
+    .filter(Boolean)
+    .join('/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+}
+
+function parentRelativeDirs(relativePath: string): string[] {
+  const parts = relativePath.split('/').filter(Boolean)
+  parts.pop()
+  const dirs: string[] = []
+  let current = ''
+  for (const part of parts) {
+    current = joinRelativePath(current, part)
+    dirs.push(current)
+  }
+  return dirs
+}
+
+async function collectDirectoryHandle(root: FileSystemDirectoryHandleLike): Promise<DirectoryUploadPayload> {
+  const files: DirectoryUploadFile[] = []
+  const directories = new Set<string>()
+
+  async function walk(dir: FileSystemDirectoryHandleLike, prefix = '') {
+    for await (const [name, handle] of dir.entries()) {
+      const relativePath = joinRelativePath(prefix, name)
+      if (handle.kind === 'directory') {
+        directories.add(relativePath)
+        await walk(handle, relativePath)
+      } else {
+        files.push({ file: await handle.getFile(), relativePath })
+      }
+    }
+  }
+
+  await walk(root)
+  return {
+    rootName: root.name || t('bots.files.uploadedFolderFallbackName'),
+    files,
+    directories: [...directories],
+  }
+}
+
+function collectDirectoryInput(files: FileList): DirectoryUploadPayload | null {
+  const uploadFiles = Array.from(files)
+  if (uploadFiles.length === 0) return null
+  const firstPath = uploadFiles[0]?.webkitRelativePath || uploadFiles[0]?.name || ''
+  const rootName = firstPath.split('/').filter(Boolean)[0] || t('bots.files.uploadedFolderFallbackName')
+  const directories = new Set<string>()
+  const payloadFiles = uploadFiles.map((file) => {
+    const rawRelativePath = file.webkitRelativePath || file.name
+    const parts = rawRelativePath.split('/').filter(Boolean)
+    const relativePath = joinRelativePath(...(parts[0] === rootName ? parts.slice(1) : parts))
+    for (const dir of parentRelativeDirs(relativePath)) {
+      directories.add(dir)
+    }
+    return { file, relativePath }
+  }).filter(item => item.relativePath)
+  return { rootName, files: payloadFiles, directories: [...directories] }
+}
+
+async function handleDirectoryInputUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const payload = input.files ? collectDirectoryInput(input.files) : null
+  if (!payload) return
+  try {
+    await uploadDirectoryPayload(payload)
+  } finally {
+    input.value = ''
+  }
+}
+
+async function uploadDirectoryPayload(payload: DirectoryUploadPayload) {
+  if (!props.canWrite) return
+  if (directoryUploading.value) return
+  const rootName = payload.rootName.trim() || t('bots.files.uploadedFolderFallbackName')
+  const destinationRoot = joinPath(uploadTarget.value, rootName)
+  const directories = [...new Set([
+    '',
+    ...payload.directories,
+    ...payload.files.flatMap(file => parentRelativeDirs(file.relativePath)),
+  ])]
+
+  directoryUploading.value = true
+  uploadStatus.value = t('bots.files.uploadFolderProgress', {
+    done: 0,
+    total: payload.files.length + directories.length,
+  })
+  let completed = 0
+  let failed = 0
+  const total = payload.files.length + directories.length
+  const updateProgress = () => {
+    uploadStatus.value = t('bots.files.uploadFolderProgress', { done: completed, total })
+  }
+
+  try {
+    for (const dir of directories) {
+      try {
+        await postBotsByBotIdContainerFsMkdir({
+          path: { bot_id: props.botId },
+          body: { path: joinPath(destinationRoot, dir) },
+          throwOnError: true,
+        })
+      } catch {
+        failed++
+      } finally {
+        completed++
+        updateProgress()
+      }
+    }
+
+    let cursor = 0
+    const concurrency = 4
+    async function worker() {
+      for (;;) {
+        const index = cursor++
+        const item = payload.files[index]
+        if (!item) return
+        try {
+          await postBotsByBotIdContainerFsUpload({
+            path: { bot_id: props.botId },
+            body: { path: joinPath(destinationRoot, item.relativePath), file: item.file } as never,
+            throwOnError: true,
+          })
+        } catch {
+          failed++
+        } finally {
+          completed++
+          updateProgress()
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, payload.files.length) }, () => worker()))
+
+    if (failed > 0) {
+      toast.error(t('bots.files.uploadFolderPartialFailed', { failed, total }))
+    } else {
+      toast.success(t('bots.files.uploadFolderSuccess'))
+    }
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
+  } finally {
+    directoryUploading.value = false
+    window.setTimeout(() => {
+      if (!directoryUploading.value) uploadStatus.value = ''
+    }, 1500)
+  }
+}
+
+async function handleUpload(event: Event) {
+  if (!props.canWrite) return
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  const destPath = joinPath(uploadTarget.value, file.name)
+  try {
+    await postBotsByBotIdContainerFsUpload({
+      path: { bot_id: props.botId },
+      body: { path: destPath, file } as never,
+      throwOnError: true,
+    })
+    toast.success(t('bots.files.uploadSuccess'))
+    if (uploadTarget.value !== rootPath) navigateTo(uploadTarget.value)
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.uploadFailed')))
+  } finally {
+    input.value = ''
+  }
+}
+
+// ---- mkdir ---------------------------------------------------------------
+
+const mkdirDialogOpen = ref(false)
+const mkdirName = ref('')
+const mkdirLoading = ref(false)
+const mkdirTarget = ref(rootPath)
+
+function openMkdirDialog(target: string) {
+  if (!props.canWrite) return
+  mkdirTarget.value = target || rootPath
+  mkdirName.value = ''
+  mkdirDialogOpen.value = true
+}
+
+async function handleMkdir() {
+  if (!props.canWrite) return
+  const name = mkdirName.value.trim()
+  if (!name || mkdirLoading.value) return
+
+  mkdirLoading.value = true
+  try {
+    await postBotsByBotIdContainerFsMkdir({
+      path: { bot_id: props.botId },
+      body: { path: joinPath(mkdirTarget.value, name) },
+      throwOnError: true,
+    })
+    mkdirDialogOpen.value = false
+    toast.success(t('bots.files.mkdirSuccess'))
+    if (mkdirTarget.value !== rootPath) navigateTo(mkdirTarget.value)
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.mkdirFailed')))
+  } finally {
+    mkdirLoading.value = false
+  }
+}
+
+// ---- rename --------------------------------------------------------------
+
+const renameDialogOpen = ref(false)
+const renameTarget = ref<HandlersFsFileInfo | null>(null)
+const renameNewName = ref('')
+const renameLoading = ref(false)
+
+function openRenameDialog(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
+  renameTarget.value = entry
+  renameNewName.value = entry.name ?? ''
+  renameDialogOpen.value = true
+}
+
+async function handleRename() {
+  if (!props.canWrite) return
+  const target = renameTarget.value
+  const newName = renameNewName.value.trim()
+  if (!target || !target.path || !newName || renameLoading.value) return
+
+  renameLoading.value = true
+  try {
+    await postBotsByBotIdContainerFsRename({
+      path: { bot_id: props.botId },
+      body: {
+        oldPath: target.path,
+        newPath: joinPath(parentPath(target.path), newName),
+      },
+      throwOnError: true,
+    })
+    renameDialogOpen.value = false
+    toast.success(t('bots.files.renameSuccess'))
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.renameFailed')))
+  } finally {
+    renameLoading.value = false
+  }
+}
+
+// ---- delete --------------------------------------------------------------
+
+const deleteDialogOpen = ref(false)
+const deleteTarget = ref<HandlersFsFileInfo | null>(null)
+const deleteLoading = ref(false)
+
+function openDeleteDialog(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
+  deleteTarget.value = entry
+  deleteDialogOpen.value = true
+}
+
+async function handleDelete() {
+  if (!props.canWrite) return
+  const target = deleteTarget.value
+  if (!target || deleteLoading.value) return
+
+  deleteLoading.value = true
+  try {
+    await postBotsByBotIdContainerFsDelete({
+      path: { bot_id: props.botId },
+      body: { path: target.path, recursive: target.isDir },
+      throwOnError: true,
+    })
+    deleteDialogOpen.value = false
+    toast.success(t('bots.files.deleteSuccess'))
+    if (target.path) {
+      const next = new Map(selectedEntries.value)
+      next.delete(target.path)
+      selectedEntries.value = next
+    }
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.deleteFailed')))
+  } finally {
+    deleteLoading.value = false
+  }
+}
+
+// ---- selection + batch ---------------------------------------------------
+
+function isSelected(path: string): boolean {
+  return selectedEntries.value.has(path)
+}
+
+function toggleSelection(entry: HandlersFsFileInfo, selected: boolean) {
+  if (!entry.path) return
+  const next = new Map(selectedEntries.value)
+  if (selected) next.set(entry.path, entry)
+  else next.delete(entry.path)
+  selectedEntries.value = next
+  if (selected) selectionMode.value = true
+}
+
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) {
+    selectedEntries.value = new Map()
+  }
+}
+
+async function handleBatchDownload() {
+  const paths = [...selectedEntries.value.values()].map(entry => entry.path).filter((value): value is string => !!value)
+  if (paths.length === 0 || batchArchiveLoading.value) return
+  batchArchiveLoading.value = true
+  try {
+    const response = await fetch(sdkApiUrl({
+      url: '/bots/{bot_id}/container/fs/archive',
+      path: { bot_id: props.botId },
+    }), {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ paths }),
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('bots.files.downloadFailed')))
+    }
+    downloadBlob(await response.blob(), 'workspace-selection.tar.gz')
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.downloadFailed')))
+  } finally {
+    batchArchiveLoading.value = false
+  }
+}
+
+function openBatchDeleteDialog() {
+  if (!props.canWrite) return
+  if (selectedCount.value === 0) return
+  batchDeleteDialogOpen.value = true
+}
+
+async function handleBatchDelete() {
+  if (!props.canWrite) return
+  const targets = [...selectedEntries.value.values()]
+  if (targets.length === 0 || batchDeleteLoading.value) return
+  batchDeleteLoading.value = true
+  let failed = 0
+  try {
+    for (const target of targets) {
+      try {
+        await postBotsByBotIdContainerFsDelete({
+          path: { bot_id: props.botId },
+          body: { path: target.path, recursive: target.isDir },
+          throwOnError: true,
+        })
+      } catch {
+        failed++
+      }
+    }
+    batchDeleteDialogOpen.value = false
+    selectedEntries.value = new Map()
+    if (failed > 0) {
+      toast.error(t('bots.files.batchDeletePartialFailed', { failed, total: targets.length }))
+    } else {
+      toast.success(t('bots.files.deleteSuccess'))
+    }
+    reload()
+  } finally {
+    batchDeleteLoading.value = false
+  }
+}
+
+async function handleExtract(entry: HandlersFsFileInfo) {
+  if (!props.canWrite) return
+  if (!entry.path || extractLoading.value) return
+  extractLoading.value = true
+  try {
+    const response = await fetch(sdkApiUrl({
+      url: '/bots/{bot_id}/container/fs/extract',
+      path: { bot_id: props.botId },
+    }), {
+      method: 'POST',
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path: entry.path }),
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, t('bots.files.extractFailed')))
+    }
+    toast.success(t('bots.files.extractSuccess'))
+    reload()
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.files.extractFailed')))
+  } finally {
+    extractLoading.value = false
+  }
+}
+
+function handleDownload(entry: HandlersFsFileInfo) {
+  const url = sdkApiUrl({
+    url: '/bots/{bot_id}/container/fs/download',
+    path: { bot_id: props.botId },
+    query: { path: entry.path ?? '', ...sdkAuthQuery() },
+  })
+  const a = document.createElement('a')
+  a.href = url
+  a.download = entry.isDir ? `${entry.name ?? 'folder'}.tar.gz` : (entry.name ?? 'file')
+  a.click()
+}
+
+function requestNewFolder(entry: HandlersFsFileInfo) {
+  if (entry.isDir && entry.path) openMkdirDialog(entry.path)
+}
+
+function requestUpload(entry: HandlersFsFileInfo) {
+  if (entry.isDir && entry.path) triggerUpload(entry.path)
+}
+
+provide(FileTreeKey, {
+  canWrite,
+  selectionMode,
+  refreshKey,
+  revealPath,
+  activePath,
+  rootPath,
+  listDirectory: safeListDirectory,
+  isSelected,
+  toggleSelect: toggleSelection,
+  openFile: handleOpenFile,
+  requestDownload: handleDownload,
+  requestRename: openRenameDialog,
+  requestDelete: openDeleteDialog,
+  requestExtract: handleExtract,
+  requestNewFolder,
+  requestUpload,
+})
+
+// Reset + reload when the bot changes.
+watch(() => props.botId, () => {
+  selectedEntries.value = new Map()
+  selectionMode.value = false
+  revealPath.value = null
+  reload()
+}, { immediate: true })
+
+// Auto-refresh listing when the chat agent runs a fs-mutating tool (write/edit/exec).
+const chatStore = useChatStore()
+const { fsChangedAt } = storeToRefs(chatStore)
+watch(fsChangedAt, () => {
+  if (!props.botId) return
+  reload()
+})
+
+defineExpose({
+  navigateTo,
+  reload,
+})
+</script>

@@ -20,7 +20,7 @@ import {
 } from '@memohai/ui'
 import { SquarePen, CircleHelp, Bot, LoaderCircle } from 'lucide-vue-next'
 import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
-import { toast } from 'vue-sonner'
+import { toast } from '@memohai/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getModels, getProviders, getMemoryProviders, getAcpProfiles, type AcpprofilePublicProfile } from '@memohai/sdk'

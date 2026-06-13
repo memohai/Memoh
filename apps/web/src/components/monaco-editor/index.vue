@@ -51,8 +51,15 @@ const {
   automaticLayout: true,
   autoScrollInitial: false,
   autoScrollOnUpdate: false,
-  minimap: { enabled: false },
+  minimap: { enabled: true, renderCharacters: true, maxColumn: 80 },
   scrollBeyondLastLine: true,
+  scrollbar: {
+    vertical: 'auto',
+    horizontal: 'auto',
+    verticalScrollbarSize: 12,
+    horizontalScrollbarSize: 12,
+    useShadows: true,
+  },
   fontSize: editorFontSize.value,
   fontFamily: editorFontFamily.value,
   lineNumbers: 'on',
@@ -138,6 +145,21 @@ watch(editorFontFamily, (fontFamily) => {
 <template>
   <div
     ref="editorRef"
-    class="h-full w-full overflow-hidden"
+    class="h-full w-full overflow-hidden bg-surface-editor"
   />
 </template>
+
+<style scoped>
+/* Best-effort: align Monaco's editor + gutter fill with the workspace editor
+ * plane so the code surface is continuous with its tab (no white-on-canvas
+ * seam). vitesse's syntax token colors are untouched — only the background fill
+ * is nudged from near-white / near-black to the exact surface token. The
+ * minimap is a painted canvas, so it keeps the theme background (an acceptable
+ * thin strip on the right). !important beats Monaco's non-important inline fill. */
+:deep(.monaco-editor),
+:deep(.monaco-editor .overflow-guard),
+:deep(.monaco-editor-background),
+:deep(.monaco-editor .margin) {
+  background-color: var(--surface-editor) !important;
+}
+</style>

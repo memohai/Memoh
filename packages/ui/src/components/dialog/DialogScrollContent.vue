@@ -2,15 +2,14 @@
 import type { DialogContentEmits, DialogContentProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { X } from 'lucide-vue-next'
 import {
-  DialogClose,
   DialogContent,
   DialogOverlay,
   DialogPortal,
   useForwardPropsEmits,
 } from 'reka-ui'
 import { cn } from '#/lib/utils'
+import DialogCloseButton from './DialogCloseButton.vue'
 
 defineOptions({
   inheritAttrs: false,
@@ -27,12 +26,16 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 <template>
   <DialogPortal>
     <DialogOverlay
-      class="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+      class="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[var(--scrim)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
     >
       <DialogContent
         :class="
           cn(
-            'relative z-50 grid w-full max-w-lg my-8 gap-4 border border-border bg-background p-6 shadow-lg duration-200 sm:rounded-lg md:w-full',
+            'relative z-50 grid w-full max-w-lg my-8 gap-4 border border-[color:var(--border-menu-elevated)] bg-card p-6 shadow-[var(--shadow-modal)] sm:rounded-xl md:w-full',
+            // Same 100ms fade + 2% zoom modal entrance as DialogContent (was an inert
+            // duration-200 with no animation utilities attached) so the scrollable
+            // variant opens with the one shared modal motion.
+            'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-[0.98] data-[state=open]:zoom-in-[0.98] duration-100',
             props.class,
           )
         "
@@ -47,12 +50,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       >
         <slot />
 
-        <DialogClose
-          class="absolute top-4 right-4 p-0.5 transition-colors rounded-md hover:bg-secondary"
-        >
-          <X class="w-4 h-4" />
-          <span class="sr-only">Close</span>
-        </DialogClose>
+        <DialogCloseButton />
       </DialogContent>
     </DialogOverlay>
   </DialogPortal>

@@ -3,6 +3,7 @@ import type { DropdownMenuLabelProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
 import { DropdownMenuLabel, useForwardProps } from 'reka-ui'
+import { menuLabelClass } from '#/lib/menu'
 import { cn } from '#/lib/utils'
 
 const props = defineProps<DropdownMenuLabelProps & { class?: HTMLAttributes['class'], inset?: boolean }>()
@@ -16,7 +17,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     data-slot="dropdown-menu-label"
     :data-inset="inset ? '' : undefined"
     v-bind="forwardedProps"
-    :class="cn('px-2 py-1.5 text-xs font-medium text-muted-foreground data-[inset]:pl-8', props.class)"
+    :class="cn(menuLabelClass, 'data-[inset]:pl-8', props.class)"
   >
     <slot />
   </DropdownMenuLabel>

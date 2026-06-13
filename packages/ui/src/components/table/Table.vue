@@ -10,11 +10,11 @@ const props = defineProps<{
 <template>
   <div
     data-slot="table-container"
-    class="relative w-full overflow-auto border border-border rounded-sm"
+    class="relative w-full overflow-auto rounded-lg border border-border bg-card"
   >
     <table
       data-slot="table"
-      :class="cn('w-full caption-bottom text-xs', props.class)"
+      :class="cn('w-full caption-top text-label', props.class)"
     >
       <slot />
     </table>

@@ -71,7 +71,7 @@
       >
         <BackgroundTaskBlock :task="message.backgroundTask" />
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1"
+          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -94,7 +94,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1"
+          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -117,7 +117,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1"
+          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -135,14 +135,11 @@
         >
           <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
             <MarkdownRender
-              :key="chatMarkdownRenderKey('subagent-user')"
               :content="message.text"
               :is-dark="isDark"
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
-              :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
-              :code-block-monaco-options="codeBlockMonacoOptions"
               custom-id="chat-msg"
             />
           </div>
@@ -153,7 +150,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1"
+          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -167,14 +164,14 @@
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="chat-user-bubble rounded-2xl px-3 py-2 whitespace-pre-wrap break-all"
+          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
           :class="isSelf
             ? 'rounded-tr-sm bg-accent text-foreground'
             : 'rounded-tl-sm bg-muted text-foreground'"
         >
           <div
             v-if="message.forward"
-            class="mb-1 text-[0.6875rem] font-medium leading-snug text-muted-foreground"
+            class="mb-1 text-[11px] font-medium leading-snug text-muted-foreground"
           >
             {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
           </div>
@@ -196,14 +193,14 @@
             <div class="flex min-w-0 items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div
-                  class="truncate text-[0.6875rem] font-semibold"
+                  class="truncate text-[11px] font-semibold"
                   :class="isSelf ? 'text-foreground' : 'text-primary'"
                 >
                   {{ replySenderLabel }}
                 </div>
                 <div
                   v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[0.6875rem] whitespace-pre-wrap break-words text-muted-foreground"
+                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
                 >
                   {{ replyPreviewLabel }}
                 </div>
@@ -227,7 +224,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1 text-right"
+          class="text-xs text-muted-foreground/80 mt-1 text-right"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -237,7 +234,7 @@
       <!-- Assistant message blocks -->
       <div
         v-else
-        class="space-y-3"
+        class="space-y-1.5"
       >
         <!-- Bot name label -->
         <!-- <p
@@ -248,75 +245,46 @@
         </p> -->
 
         <template
-          v-for="segment in renderSegments"
-          :key="segment.key"
+          v-for="node in renderNodes"
+          :key="node.key"
         >
-          <!-- Active rail (streaming): prior steps as a chip + the current
-               phase live — one rolling command, or the thinking peek. -->
-          <ProcessRail v-if="segment.kind === 'rail-active'">
-            <RailSummary
-              v-if="segment.prior.length"
-              :blocks="segment.prior"
-            />
-            <ThinkingBlock
-              v-if="segment.current && segment.current.kind === 'think'"
-              :block="(segment.current.blocks[0] as ThinkingBlockType)"
-              :streaming="true"
-            />
-            <RollingToolSlot
-              v-else-if="segment.current && segment.current.kind === 'tools'"
-              :tools="(segment.current.blocks as ToolCallBlockType[])"
-            />
-          </ProcessRail>
+          <!-- Process segment: consecutive tool + reasoning blocks. A single
+               item renders as a bare row; multiple collapse into one group. -->
+          <ToolCallGroup
+            v-if="node.kind === 'process'"
+            :items="node.items"
+            :active="message.streaming && node.lastIndex === message.messages.length - 1"
+          />
 
-          <!-- Process rail: recessed lane for thinking + tool calls. Settled
-               segments collapse to a single summary line; otherwise the rows
-               (with consecutive done tools clustered) render in the lane. -->
-          <ProcessRail v-else-if="segment.kind === 'summary' || segment.kind === 'rail'">
-            <RailSummary
-              v-if="segment.kind === 'summary'"
-              :blocks="segment.blocks"
-            />
-            <RailItems
-              v-else
-              :items="segment.items"
-              :streaming-block-id="streamingBlockId"
-            />
-          </ProcessRail>
-
-          <!-- Flow segment: the answer / error / attachments break out full-width -->
           <template v-else>
             <!-- Text block -->
             <div
-              v-if="segment.block.type === 'text' && segment.block.content"
-              class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
+              v-if="node.block.type === 'text' && node.block.content"
+              class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mt-2.5! [&_:is(h1,h2,h3,h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
             >
               <MarkdownRender
-                :key="chatMarkdownRenderKey(`assistant-${segment.block.id}`)"
-                :content="segment.block.content"
+                :content="node.block.content"
                 :is-dark="isDark"
-                :smooth-streaming="isBlockStreaming(segment.block)"
-                :typewriter="isBlockStreaming(segment.block)"
-                :fade="isBlockStreaming(segment.block)"
-                :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
-                :code-block-monaco-options="codeBlockMonacoOptions"
+                :smooth-streaming="isAssistantBlockStreaming(node.index)"
+                :typewriter="isAssistantBlockStreaming(node.index)"
+                :fade="isAssistantBlockStreaming(node.index)"
                 custom-id="chat-msg"
               />
             </div>
 
             <!-- Error block -->
             <div
-              v-else-if="segment.block.type === 'error' && segment.block.content"
+              v-else-if="node.block.type === 'error' && node.block.content"
               class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
             >
               <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-              <span class="min-w-0 whitespace-pre-wrap break-words">{{ segment.block.content }}</span>
+              <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
             </div>
 
             <!-- Attachment block -->
             <AttachmentBlock
-              v-else-if="segment.block.type === 'attachments'"
-              :block="(segment.block as AttachmentBlockType)"
+              v-else-if="node.block.type === 'attachments'"
+              :block="(node.block as AttachmentBlockType)"
               :on-open-media="onOpenMedia"
             />
           </template>
@@ -325,13 +293,13 @@
         <!-- Streaming indicator -->
         <div
           v-if="message.streaming && !hasVisibleAssistantBlocks"
-          class="chat-message-meta flex items-center gap-2 text-muted-foreground h-6"
+          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
         >
           <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
         <p
-          class="chat-message-meta text-muted-foreground/80 mt-1"
+          class="text-xs text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -341,14 +309,28 @@
   </div>
 </template>
 
+<script lang="ts">
+import { setCustomComponents } from 'markstream-vue'
+import ChatCodeBlock from './chat-code-block.vue'
+
+// Replace markstream's heavy Monaco code block (and its font-size/expand/preview
+// toolbar that surfaced raw i18n keys) with a clean integral code block, scoped
+// to the chat renderer id ("chat-msg"). Both `code_block` and `shell` are mapped
+// to the same component so shell/bash blocks render identically (no separate
+// terminal "run" toolbar / language chrome). Runs once at module load.
+setCustomComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+</script>
+
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { computed, toRef, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
-import { warmCodeHighlightOnIdle } from '@/utils/warm-code-highlight'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
+import ToolCallGroup from './tool-call-group.vue'
+import { isReadOnlyTool } from './tool-call-registry'
+import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
 import AttachmentBlock from './attachment-block.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import HeartbeatTriggerBlock from './heartbeat-trigger-block.vue'
@@ -362,39 +344,21 @@ import type {
   AttachmentItem,
   ChatMessage,
   ContentBlock,
-  ThinkingBlock as ThinkingBlockType,
   ToolCallBlock as ToolCallBlockType,
+  ThinkingBlock as ThinkingBlockType,
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
-import type { RailGroup, RailItem, TurnSegment } from '@/store/chat-list.utils'
-import { canSummarizeRailSegment, clusterRailBlocks, latestOutputLine, segmentHasLiveBg, segmentTurnBlocks, splitActiveRail } from '@/store/chat-list.utils'
-import { useBgTaskBeacon } from '../composables/useBgTaskBeacons'
-import ProcessRail from './process-rail.vue'
-import RailItems from './rail-items.vue'
-import RailSummary from './rail-summary.vue'
-import RollingToolSlot from './rolling-tool-slot.vue'
-import ThinkingBlock from './thinking-block.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility, useIntersectionObserver } from '@vueuse/core'
+import { useElementVisibility } from '@vueuse/core'
 
 
 enableKatex()
 enableMermaid()
-warmCodeHighlightOnIdle()
 
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
-const codeBlockMonacoOptions = computed(() => ({
-  fontFamily: settingsStore.codeFontStack,
-  fontSize: settingsStore.codeFontSizePx,
-}))
-const codeFontRenderKey = computed(() => settingsStore.codeFontStack)
-
-function chatMarkdownRenderKey(scope: string): string {
-  return `${scope}:${codeFontRenderKey.value}`
-}
 
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
@@ -407,36 +371,18 @@ const props = defineProps<{
   botId?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
+  isScrolling: boolean
 }>()
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-// Every Monaco-backed code block initializes synchronously on mount with a
-// burst of forced reflows, so a freshly loaded chat used to spin up editors
-// for every offscreen message at once. Keep offscreen blocks as plain <pre>
-// until the message comes within a viewport of being seen. Observe the
-// content-visibility row (our parent) rather than our own root: targets
-// inside a skipped subtree never report as intersecting.
-const heavyBlocksReady = ref(false)
-const messageRow = computed(() => messageEl.value?.parentElement ?? null)
-const { stop: stopHeavyBlocksObserver } = useIntersectionObserver(messageRow, (entries) => {
-  if (!entries.some(entry => entry.isIntersecting)) return
-  stopHeavyBlocksObserver()
-  const flip = () => {
-    heavyBlocksReady.value = true
-  }
-  if ('requestIdleCallback' in window) requestIdleCallback(flip, { timeout: 500 })
-  else flip()
-}, { rootMargin: '100% 0px 100% 0px', threshold: 0 })
-
-const codeBlocksAsPre = computed(() => !heavyBlocksReady.value && !props.message.streaming)
-
-watch(isVisible, () => {
+watch([isVisible, toRef(props, 'isScrolling')], () => { 
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
+  deep:true
 })
 
 const isSelf = computed(() =>
@@ -528,118 +474,12 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
   }
 })
 
-const turnSegments = computed<TurnSegment<ContentBlock>[]>(() =>
-  props.message.role === 'assistant' ? segmentTurnBlocks(props.message.messages) : [],
-)
+function hasLaterAssistantMessage(index: number): boolean {
+  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
+}
 
-type RenderSegment =
-  | { kind: 'rail-active'; key: string; prior: ContentBlock[]; current: RailGroup<ContentBlock> | null }
-  | { kind: 'summary'; key: string; blocks: ContentBlock[] }
-  | { kind: 'rail'; key: string; items: RailItem<ContentBlock>[] }
-  | { kind: 'flow'; key: string; block: ContentBlock }
-
-// The active (last) rail of a streaming turn rolls its current phase live: prior
-// steps collapse to a summary chip, the current tool run shows one rolling
-// command, current thinking shows its peek. Settled segments collapse to a
-// summary; remaining settled tool runs cluster. Folding here only touches
-// settled prior rows (a deliberate collapse motion) — the streaming answer
-// markdown never reparents, so the answer itself never stalls.
-const renderSegments = computed<RenderSegment[]>(() => {
-  const streaming = props.message.role === 'assistant' && props.message.streaming
-  const segments = turnSegments.value
-  const lastIndex = segments.length - 1
-  return segments.map((segment, index) => {
-    if (segment.kind === 'flow') return segment
-    if (streaming && index === lastIndex) {
-      // A live background-task row must stay visible — never roll/collapse it
-      // into the prior chip. Render the whole active rail as solo rows instead.
-      if (segmentHasLiveBg(segment.blocks)) {
-        return { kind: 'rail', key: segment.key, items: clusterRailBlocks(segment.blocks, true) }
-      }
-      const { prior, current } = splitActiveRail(segment.blocks)
-      return { kind: 'rail-active', key: segment.key, prior, current }
-    }
-    if (canSummarizeRailSegment(segment.blocks)) {
-      return { kind: 'summary', key: segment.key, blocks: segment.blocks }
-    }
-    return {
-      kind: 'rail',
-      key: segment.key,
-      items: clusterRailBlocks(segment.blocks, false),
-    }
-  })
-})
-
-// Mirror this turn's background tasks into the pane-level beacon so a floating
-// pill can surface a running task once the turn scrolls off screen — regardless
-// of whether the task's row is expanded or folded into a cluster. Visibility is
-// the turn's, which is robust to that collapse state (the row may not be in the
-// DOM when clustered).
-const beacon = useBgTaskBeacon()
-
-const bgTasks = computed(() => {
-  if (props.message.role !== 'assistant') return []
-  const tasks: { taskId: string, phase: 'active' | 'done', latestLine: string }[] = []
-  for (const block of props.message.messages) {
-    if (block.type !== 'tool') continue
-    const task = (block as ToolCallBlockType).backgroundTask
-    if (!task) continue
-    const status = (task.status || '').trim().toLowerCase()
-    const active = status === 'running' || status === 'stalled'
-    const done = status === 'completed' || status === 'failed' || status === 'killed'
-    if (!active && !done) continue
-    tasks.push({
-      taskId: task.taskId,
-      phase: active ? 'active' : 'done',
-      latestLine: latestOutputLine(task.outputTail) || task.command || '',
-    })
-  }
-  return tasks
-})
-
-const registeredTaskIds = new Set<string>()
-
-watch(
-  [bgTasks, isVisible],
-  ([tasks, visible]) => {
-    if (!beacon) return
-    const current = new Set<string>()
-    for (const task of tasks) {
-      current.add(task.taskId)
-      beacon.upsert({
-        taskId: task.taskId,
-        phase: task.phase,
-        visible,
-        latestLine: task.latestLine,
-        scrollIntoView: () => messageEl.value?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
-      })
-    }
-    for (const id of registeredTaskIds) {
-      if (!current.has(id)) beacon.remove(id)
-    }
-    registeredTaskIds.clear()
-    for (const id of current) registeredTaskIds.add(id)
-  },
-  { immediate: true, deep: true },
-)
-
-onBeforeUnmount(() => {
-  if (!beacon) return
-  for (const id of registeredTaskIds) beacon.remove(id)
-})
-
-// Only the final block of a streaming turn is "live" — earlier blocks have
-// settled. We compare by stable block id (never array index) so segmentation
-// and streaming state agree without depending on position.
-const streamingBlockId = computed<number | null>(() => {
-  if (props.message.role !== 'assistant' || !props.message.streaming) return null
-  const blocks = props.message.messages
-  const last = blocks[blocks.length - 1]
-  return last ? last.id : null
-})
-
-function isBlockStreaming(block: ContentBlock): boolean {
-  return streamingBlockId.value !== null && block.id === streamingBlockId.value
+function isAssistantBlockStreaming(index: number): boolean {
+  return props.message.role === 'assistant' && props.message.streaming && !hasLaterAssistantMessage(index)
 }
 
 const hasVisibleAssistantBlocks = computed(() =>
@@ -657,6 +497,79 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
   if (block.type === 'attachments') return block.attachments.length > 0
   return true
 }
+
+// Project the flat assistant block list into render nodes.
+//  - A "process" node is a run of consecutive tool + reasoning blocks. It splits
+//    by tool category (read-only "explore" vs side-effecting "action") so reads
+//    and edits don't merge into one bucket; reasoning rides along with whichever
+//    segment it sits next to (it is never rendered standalone).
+//  - Every other block type (text / error / attachments) keeps its place.
+// Keyed by stable block id.
+type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; cat: 'explore' | 'action' | null; lastIndex: number }
+type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
+type RenderNode = ProcessNode | BlockNode
+
+const renderNodes = computed<RenderNode[]>(() => {
+  if (props.message.role !== 'assistant') return []
+  const nodes: RenderNode[] = []
+  let run: ProcessNode | null = null
+  props.message.messages.forEach((block, index) => {
+    if (!isVisibleAssistantBlock(block)) return
+    if (block.type === 'tool' || block.type === 'reasoning') {
+      const cat = block.type === 'tool'
+        ? (isReadOnlyTool((block as ToolCallBlockType).toolName) ? 'explore' : 'action')
+        : null
+      if (!run) {
+        run = { kind: 'process', key: `p${block.id}`, items: [block], cat, lastIndex: index }
+        nodes.push(run)
+      } else if (cat !== null && run.cat !== null && cat !== run.cat) {
+        // Category switch (e.g. finished reading, now editing) → new segment.
+        run = { kind: 'process', key: `p${block.id}`, items: [block], cat, lastIndex: index }
+        nodes.push(run)
+      } else {
+        run.items.push(block)
+        run.lastIndex = index
+        if (run.cat === null && cat !== null) run.cat = cat
+      }
+    } else {
+      run = null
+      nodes.push({ kind: 'block', key: `b${block.type}-${block.id}`, block, index })
+    }
+  })
+  return nodes
+})
+
+// Centralized reasoning timing. The stream carries no duration, so we measure
+// it client-side: stamp a reasoning block the first time it appears mid-stream,
+// and finalize it once a later block supersedes it (or the turn ends). This
+// covers every reasoning step — including ones immediately followed by a tool
+// call — so they show a real "Thought for Ns" instead of a bare "Thought".
+watch(
+  () => (props.message.role === 'assistant' && props.message.streaming
+    ? props.message.messages.map(block => `${block.type}:${block.id}`).join('|')
+    : ''),
+  () => {
+    if (props.message.role !== 'assistant' || !props.message.streaming) return
+    const blocks = props.message.messages
+    blocks.forEach((block, index) => {
+      if (block.type !== 'reasoning') return
+      const content = (block as ThinkingBlockType).content ?? ''
+      markReasoningSeen(content)
+      if (index < blocks.length - 1) finalizeReasoning(content)
+    })
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.message.role === 'assistant' && props.message.streaming,
+  (streaming, was) => {
+    if (!was || streaming || props.message.role !== 'assistant') return
+    props.message.messages.forEach((block) => {
+      if (block.type === 'reasoning') finalizeReasoning((block as ThinkingBlockType).content ?? '')
+    })
+  },
+)
 
 const relativeTimestamp = computed(() =>
   formatRelativeTime(props.message.timestamp, { locale: locale.value }),

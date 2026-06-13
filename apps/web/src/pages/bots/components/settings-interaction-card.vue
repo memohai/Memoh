@@ -1,6 +1,11 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
-  <div class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none">
+  <!-- id is a scroll anchor: the Overview "choose a model" reminder navigates
+       here with ?section=interaction, and bot-settings.vue scrolls to it. -->
+  <div
+    id="settings-section-interaction"
+    class="space-y-4 rounded-md border border-border bg-background p-4 shadow-none"
+  >
     <!-- Header Section -->
     <div class="space-y-0.5">
       <h4 class="text-xs font-medium text-foreground">
