@@ -119,9 +119,19 @@
 :lang(zh) body {
   font-weight: 335;
 }
-/* Chat markdown body also relaxes in Chinese (it pins its own 380 weight). */
+/* Chat markdown body in Chinese: relax both weight (it pins its own 380) and
+ * leading. CJK glyphs fill the em box, so lines pack tighter vertically and need
+ * more line-height than Latin (~1.7 vs the compact Latin body) to breathe.
+ * :lang(zh)-scoped, so it only loosens the chat body when the UI language is
+ * Chinese; CJK that appears inside an English UI rides markstream's own 1.625
+ * paragraph leading below, which is already comfortable for mixed runs. */
 :lang(zh) [data-chat-content] .prose {
   font-weight: 335;
+  line-height: 1.7;
+}
+:lang(zh) [data-chat-content] .markstream-vue,
+:lang(zh) [data-chat-content] .markstream-vue .paragraph-node {
+  line-height: 1.75;
 }
 
 @layer base {
