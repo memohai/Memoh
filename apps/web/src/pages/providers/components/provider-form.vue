@@ -1,116 +1,208 @@
 <template>
   <form @submit="editProvider">
-    <div class="grid gap-4 md:grid-cols-2">
+    <SettingsSection :title="$t('provider.configurationTitle')">
       <FormField
-        v-slot="{ componentField }"
+        v-slot="{ componentField, errorMessage }"
         name="name"
       >
-        <FormItem>
-          <FormLabel>{{ $t('common.name') }}</FormLabel>
-          <FormControl>
-            <Input
-              type="text"
-              :placeholder="$t('common.namePlaceholder')"
-              :aria-label="$t('common.name')"
-              v-bind="componentField"
-            />
-          </FormControl>
-        </FormItem>
+        <SettingsRow :label="$t('common.name')">
+          <FormItem class="w-80">
+            <FormControl>
+              <Input
+                type="text"
+                :placeholder="$t('common.namePlaceholder')"
+                :aria-label="$t('common.name')"
+                :aria-invalid="!!errorMessage"
+                v-bind="componentField"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </SettingsRow>
       </FormField>
 
       <FormField
-        v-slot="{ value, handleChange }"
+        v-slot="{ value, handleChange, errorMessage }"
         name="client_type"
       >
-        <FormItem>
-          <FormLabel>{{ $t('provider.clientType') }}</FormLabel>
-          <FormControl>
-            <SearchableSelectPopover
-              :model-value="value"
-              :options="clientTypeOptions"
-              :placeholder="$t('models.clientTypePlaceholder')"
-              @update:model-value="handleChange"
-            />
-          </FormControl>
-        </FormItem>
+        <SettingsRow :label="$t('provider.clientType')">
+          <FormItem class="w-80">
+            <FormControl>
+              <Select
+                :model-value="value"
+                :aria-invalid="!!errorMessage"
+                @update:model-value="handleChange"
+              >
+                <SelectTrigger class="w-full">
+                  <SelectValue :placeholder="$t('models.clientTypePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="option in clientTypeOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </SettingsRow>
       </FormField>
 
       <FormField
         v-if="form.values.client_type !== 'github-copilot'"
-        v-slot="{ componentField }"
+        v-slot="{ componentField, errorMessage }"
         name="base_url"
       >
-        <FormItem class="md:col-span-2">
-          <FormLabel>{{ $t('provider.url') }}</FormLabel>
-          <FormControl>
-            <Input
-              type="text"
-              :placeholder="$t('provider.urlPlaceholder')"
-              :aria-label="$t('provider.url')"
-              v-bind="componentField"
-            />
-          </FormControl>
-        </FormItem>
+        <SettingsRow :label="$t('provider.url')">
+          <FormItem class="w-80">
+            <FormControl>
+              <Input
+                type="text"
+                :placeholder="$t('provider.urlPlaceholder')"
+                :aria-label="$t('provider.url')"
+                :aria-invalid="!!errorMessage"
+                v-bind="componentField"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </SettingsRow>
       </FormField>
 
       <FormField
         v-if="!isProviderOAuthClientType(form.values.client_type)"
-        v-slot="{ componentField }"
+        v-slot="{ componentField, errorMessage }"
         name="api_key"
       >
-        <FormItem class="md:col-span-2">
-          <FormLabel>{{ $t('provider.apiKey') }}</FormLabel>
-          <FormControl>
-            <Input
-              type="password"
-              :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
-              :aria-label="$t('provider.apiKey')"
-              v-bind="componentField"
-            />
-          </FormControl>
-        </FormItem>
+        <SettingsRow :label="$t('provider.apiKey')">
+          <FormItem class="w-80">
+            <FormControl>
+              <Input
+                type="password"
+                :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
+                :aria-label="$t('provider.apiKey')"
+                :aria-invalid="!!errorMessage"
+                v-bind="componentField"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </SettingsRow>
       </FormField>
 
       <FormField
         v-if="supportsPromptCache(form.values.client_type)"
-        v-slot="{ value, handleChange }"
+        v-slot="{ value, handleChange, errorMessage }"
         name="prompt_cache_ttl"
       >
-        <FormItem class="md:col-span-2">
-          <FormLabel>{{ $t('provider.promptCache.label') }}</FormLabel>
-          <FormControl>
-            <Select
-              :model-value="value || '5m'"
-              @update:model-value="handleChange"
-            >
-              <SelectTrigger>
-                <SelectValue :placeholder="$t('provider.promptCache.label')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5m">
-                  {{ $t('provider.promptCache.option5m') }}
-                </SelectItem>
-                <SelectItem value="1h">
-                  {{ $t('provider.promptCache.option1h') }}
-                </SelectItem>
-                <SelectItem value="off">
-                  {{ $t('provider.promptCache.optionOff') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </FormControl>
-          <FormDescription>
-            {{ form.values.prompt_cache_ttl === 'off'
-              ? $t('provider.promptCache.descriptionOff')
-              : $t('provider.promptCache.description') }}
-          </FormDescription>
-        </FormItem>
+        <SettingsRow
+          :label="$t('provider.promptCache.label')"
+          :description="cacheDescription"
+        >
+          <FormItem>
+            <FormControl>
+              <Select
+                :model-value="value || '5m'"
+                :aria-invalid="!!errorMessage"
+                @update:model-value="handleChange"
+              >
+                <SelectTrigger
+                  size="sm"
+                  class="min-w-36"
+                >
+                  <SelectValue :placeholder="$t('provider.promptCache.label')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5m">
+                    {{ $t('provider.promptCache.option5m') }}
+                  </SelectItem>
+                  <SelectItem value="1h">
+                    {{ $t('provider.promptCache.option1h') }}
+                  </SelectItem>
+                  <SelectItem value="off">
+                    {{ $t('provider.promptCache.optionOff') }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </SettingsRow>
       </FormField>
 
-      <section
-        v-if="isProviderOAuthClientType(form.values.client_type)"
-        class="md:col-span-2 rounded-lg border p-4 space-y-3 text-xs"
-      >
+      <!-- Actions -->
+      <div class="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
+        <HoverCard :open-delay="120">
+          <HoverCardTrigger as-child>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              loading-mode="manual"
+              :loading="testLoading"
+              :disabled="!props.provider?.id"
+              @click="runTest"
+            >
+              <Spinner
+                v-if="testLoading"
+                class="size-4"
+              />
+              <svg
+                v-else-if="testStatus === 'ok'"
+                class="check-draw size-4 text-success"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 12.5 9 17.5 20 6.5"
+                  pathLength="1"
+                />
+              </svg>
+              <AlertCircle
+                v-else-if="testStatus === 'error'"
+                class="size-4 text-destructive"
+              />
+              <RefreshCw
+                v-else
+                class="size-4"
+              />
+              {{ $t('provider.testConnection') }}
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent
+            v-if="testError"
+            class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
+          >
+            {{ testError }}
+          </HoverCardContent>
+        </HoverCard>
+
+        <LoadingButton
+          type="submit"
+          size="sm"
+          :loading="editLoading"
+          :disabled="!hasChanges || !form.meta.value.valid"
+        >
+          {{ $t('provider.saveChanges') }}
+        </LoadingButton>
+      </div>
+    </SettingsSection>
+
+    <!-- OAuth -->
+    <SettingsSection
+      v-if="isProviderOAuthClientType(form.values.client_type)"
+      class="mt-6"
+    >
+      <div class="p-4 space-y-3 text-xs">
         <div class="space-y-1">
           <div class="font-medium">
             {{ $t(form.values.client_type === 'github-copilot' ? 'provider.oauth.githubDeviceTitle' : 'provider.oauth.openaiTitle') }}
@@ -224,6 +316,7 @@
               && (!oauthStatus?.has_token || oauthExpired)"
             type="button"
             variant="outline"
+            size="sm"
             :disabled="!props.provider?.id || !isProviderOAuthClientType(form.values.client_type) || oauthStatusLoading"
             :loading="authorizeLoading"
             @click="handleAuthorize"
@@ -235,6 +328,7 @@
             v-if="webOAuthFlow"
             type="button"
             variant="ghost"
+            size="sm"
             @click="cancelWebOAuthAuthorization"
           >
             {{ $t('common.cancel') }}
@@ -243,87 +337,15 @@
             v-if="oauthStatus?.has_token"
             type="button"
             variant="ghost"
+            size="sm"
             :loading="revokeLoading"
             @click="handleRevoke"
           >
             {{ $t('provider.oauth.revoke') }}
           </LoadingButton>
         </div>
-      </section>
-    </div>
-
-    <section class="flex justify-between items-center mt-4">
-      <LoadingButton
-        type="button"
-        variant="outline"
-        :loading="testLoading"
-        :disabled="!props.provider?.id"
-        @click="runTest"
-      >
-        <RefreshCw
-          v-if="!testLoading"
-        />
-        {{ $t('provider.testConnection') }}
-      </LoadingButton>
-
-      <div class="flex gap-4">
-        <ConfirmPopover
-          :message="$t('provider.deleteConfirm')"
-          :loading="deleteLoading"
-          @confirm="$emit('delete')"
-        >
-          <template #trigger>
-            <Button
-              type="button"
-              variant="outline"
-              :aria-label="$t('common.delete')"
-            >
-              <Trash2 />
-            </Button>
-          </template>
-        </ConfirmPopover>
-
-        <LoadingButton
-          type="submit"
-          :loading="editLoading"
-          :disabled="!hasChanges || !form.meta.value.valid"
-        >
-          {{ $t('provider.saveChanges') }}
-        </LoadingButton>
       </div>
-    </section>
-
-    <section
-      v-if="testResult"
-      class="mt-4 rounded-lg border p-4 space-y-3 text-xs"
-    >
-      <div class="flex items-center gap-2">
-        <StatusDot :status="testResult.status === 'ok' ? 'success' : 'error'" />
-        <span class="font-medium">
-          {{ testResult.status === 'ok' ? $t('provider.reachable') : $t('provider.unreachable') }}
-        </span>
-        <span
-          v-if="testResult.latency_ms"
-          class="text-muted-foreground"
-        >
-          {{ testResult.latency_ms }}ms
-        </span>
-      </div>
-
-      <div
-        v-if="testResult.message"
-        class="text-muted-foreground text-xs"
-      >
-        {{ testResult.message }}
-      </div>
-
-      <div
-        v-if="testError"
-        class="text-destructive text-xs"
-      >
-        {{ testError }}
-      </div>
-    </section>
+    </SettingsSection>
   </form>
 </template>
 
@@ -332,10 +354,12 @@ import {
   Input,
   Button,
   FormControl,
-  FormDescription,
   FormField,
-  FormLabel,
   FormItem,
+  FormMessage,
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -343,13 +367,12 @@ import {
   SelectValue,
   Spinner,
 } from '@memohai/ui'
-import { Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-vue-next'
-import ConfirmPopover from '@/components/confirm-popover/index.vue'
-import StatusDot from '@/components/status-dot/index.vue'
+import { AlertCircle, Copy, KeyRound, RefreshCw } from 'lucide-vue-next'
 import LoadingButton from '@/components/loading-button/index.vue'
-import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
+import SettingsRow from '@/components/settings/row.vue'
+import SettingsSection from '@/components/settings/section.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import { LLM_CLIENT_TYPE_LIST, CLIENT_TYPE_META } from '@/constants/client-types'
+import { LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -403,12 +426,10 @@ function isProviderOAuthClientType(clientType: string | undefined): boolean {
 const props = defineProps<{
   provider: ProviderWithAuth | undefined
   editLoading: boolean
-  deleteLoading: boolean
 }>()
 
 const emit = defineEmits<{
   submit: [values: Record<string, unknown>]
-  delete: []
 }>()
 
 const testLoading = ref(false)
@@ -423,6 +444,44 @@ const webOAuthFlow = ref<OAuthPopupFlowController | null>(null)
 const webOAuthPollIntervalMs = 2000
 const webOAuthPollTimeoutMs = 5 * 60 * 1000
 
+const testStatus = computed(() => {
+  if (testResult.value?.status === 'ok') return 'ok'
+  if (testError.value) return 'error'
+  if (testResult.value && testResult.value.status !== 'ok') return 'error'
+  return 'idle'
+})
+
+const cacheDescription = computed(() =>
+  form.values.prompt_cache_ttl === 'off'
+    ? t('provider.promptCache.descriptionOff')
+    : t('provider.promptCache.description'),
+)
+
+function truncateError(text: string): string {
+  const max = 220
+  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text
+}
+
+// The probe detail can embed the raw upstream response inside `[body: …]`. When
+// a Base URL points at a website instead of an API the body is a full HTML
+// page, so strip the markup down to its visible text (often near-empty) and
+// keep only a short, actionable hint instead of dumping the document.
+function formatTestError(raw: string | undefined): string {
+  const text = (raw ?? '').trim()
+  if (!text) return t('provider.unreachable')
+  const bodyStart = text.indexOf('[body:')
+  if (bodyStart === -1) return truncateError(text)
+  const head = text.slice(0, bodyStart).trim()
+  let body = text.slice(bodyStart + '[body:'.length).replace(/\]\s*$/, '').trim()
+  if (/<!doctype|<\/?[a-z][^>]*>/i.test(body)) {
+    body = body
+      .replace(/<(script|style)[^>]*>[\s\S]*?(<\/\1>|$)/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+  }
+  body = body.replace(/\s+/g, ' ').trim()
+  return truncateError(body ? `${head} · ${body}` : head)
+}
+
 async function runTest() {
   if (!props.provider?.id) return
   testLoading.value = true
@@ -434,8 +493,12 @@ async function runTest() {
       throwOnError: true,
     })
     testResult.value = data ?? null
+    if (testResult.value?.status !== 'ok') {
+      testError.value = formatTestError(testResult.value?.message)
+    }
   } catch (err: unknown) {
-    testError.value = err instanceof Error ? err.message : t('provider.testFailed')
+    const message = err instanceof Error ? err.message : ''
+    testError.value = message ? formatTestError(message) : t('provider.testFailed')
   } finally {
     testLoading.value = false
   }
@@ -450,8 +513,6 @@ const clientTypeOptions = computed(() =>
   LLM_CLIENT_TYPE_LIST.map((ct) => ({
     value: ct.value,
     label: ct.label,
-    description: ct.hint,
-    keywords: [ct.label, ct.hint, CLIENT_TYPE_META[ct.value]?.value ?? ct.value],
   })),
 )
 
@@ -466,7 +527,7 @@ const providerSchema = toTypedSchema(z.object({
   const existingSecret = getStoredSecret(
     props.provider?.config as Record<string, unknown> | undefined,
   )
-  if (!['openai-codex', 'github-copilot'].includes(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
+  if (!isProviderOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
@@ -756,3 +817,27 @@ async function handleRevoke() {
   }
 }
 </script>
+
+<style scoped>
+/* pathLength="1" normalizes the stroke so the dash math is length-agnostic: the
+   check is fully hidden (offset 1) then drawn on (offset 0). Stroke only — no
+   scale — so the glyph appears by being drawn, not by popping in. */
+.check-draw path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: check-draw 0.3s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+@keyframes check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .check-draw path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+</style>

@@ -353,25 +353,32 @@
   [data-button][data-loading][data-loading-mode="overlay"] > [data-button-content] {
     visibility: hidden;
   }
-  [data-button][data-loading-mode="leading"] {
-    gap: 0;
-  }
+  /* LEADING: a spinner slot grows in before the label. The slot is the first
+     flex child, so its flex gap to the content would otherwise leave a phantom
+     space at rest (the slot is width:0 but the gap is not). A blanket `gap: 0`
+     here loses to the gap-2/gap-1.5 utility (utilities layer beats components)
+     AND would also flatten the label's own icon↔text gap. Instead the slot
+     carries its own spacing via its expanded width and cancels exactly the one
+     gap to the content with a negative end-margin (held constant in both states
+     so the rest position is flush and the grow lands at the intended tight gap).
+     --btn-leading-gap mirrors the size's flex gap (see data-size below). */
   [data-button] > [data-button-leading-spinner] {
     display: inline-grid;
     place-items: center;
     width: 0;
     opacity: 0;
-    translate: -5px 0;
     overflow: hidden;
+    margin-inline-end: calc(-1 * var(--btn-leading-gap, 0.5rem));
     transition:
       width 0.24s cubic-bezier(0.32, 0.72, 0, 1),
-      opacity 0.18s ease,
-      translate 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+      opacity 0.18s ease;
+  }
+  [data-button]:is([data-size="sm"], [data-size="text"]) {
+    --btn-leading-gap: 0.375rem;
   }
   [data-button][data-loading][data-loading-mode="leading"] > [data-button-leading-spinner] {
     width: 1.5rem;
     opacity: 1;
-    translate: 0 0;
   }
   [data-button][data-loading][data-loading-mode="icon"] > [data-button-content] > svg:first-child {
     animation: button-spin 1s linear infinite;

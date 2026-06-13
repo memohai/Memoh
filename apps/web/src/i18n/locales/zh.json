@@ -697,6 +697,7 @@
     "testFailed": "测试失败",
     "autoImport": "自动导入模型",
     "autoImportHint": "创建后自动从服务商获取并导入模型",
+    "configurationTitle": "配置",
     "clientType": "客户端类型",
     "icon": "图标",
     "iconPlaceholder": "图标 URL 或标识（可选）",

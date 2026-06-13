@@ -701,6 +701,7 @@
     "testFailed": "Test failed",
     "autoImport": "Auto Import Models",
     "autoImportHint": "Automatically fetch and import models from the provider after creation",
+    "configurationTitle": "Configuration",
     "clientType": "Client Type",
     "icon": "Icon",
     "iconPlaceholder": "Icon URL or identifier (optional)",

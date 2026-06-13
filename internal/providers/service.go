@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -253,6 +254,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
+	message := providerTestMessage(result)
 
 	switch result.Status {
 	case sdk.ProviderStatusUnreachable:
@@ -260,7 +262,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Status:    TestStatusError,
 			Reachable: false,
 			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
+			Message:   message,
 		}, nil
 	case sdk.ProviderStatusUnhealthy:
 		status := TestStatusError
@@ -271,7 +273,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Status:    status,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
+			Message:   message,
 		}, nil
 	default:
 		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
@@ -291,6 +293,30 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Message:   result.Message,
 		}, nil
 	}
+}
+
+// errorDetailer is implemented by transport errors that can expand into a
+// fuller diagnostic, including the raw upstream response body. The probe path
+// only fills a short summary (e.g. "service error (404):"), so we reach for
+// this richer detail when the upstream replies with an opaque, non-JSON body.
+type errorDetailer interface {
+	Detail() string
+}
+
+// providerTestMessage returns the most informative message for a probe result,
+// preferring the upstream response detail over the short summary so that
+// opaque statuses still surface the provider's actual response body.
+func providerTestMessage(result *sdk.ProviderTestResult) string {
+	if result == nil {
+		return ""
+	}
+	var detailer errorDetailer
+	if errors.As(result.Error, &detailer) {
+		if detail := strings.TrimSpace(detailer.Detail()); detail != "" {
+			return detail
+		}
+	}
+	return result.Message
 }
 
 // FetchRemoteModels fetches available models from the provider using the Twilight AI SDK.
