@@ -7,7 +7,26 @@
  * Inter Variable still wins for Latin (declared first in --font-sans); MiSans
  * only kicks in for CJK glyphs (per-glyph fallback). Each face is unicode-range
  * subsetted, so the browser lazy-loads only the CJK ranges actually rendered.
- * The wrapper declares MiSans' variable wght axis range (150..700). */
+ *
+ * The wrapper CLAMPS MiSans' variable wght axis to 150..450 (the font masters up
+ * to 700). CJK glyphs are stroke-dense and fill the em box, so they read heavier
+ * than Latin at the same weight; capping the top means a request for 500/600/700
+ * renders MiSans at 450, so Chinese never goes truly bold. Crucially this is a
+ * FONT-level cap — it fires per CJK glyph regardless of the UI's lang attribute,
+ * so it also tames Chinese that appears inside an English-language UI (session
+ * titles, mixed labels) where the :lang(zh) rules below never match. Inter is
+ * unaffected (it owns the Latin glyphs).
+ *
+ * The wrapper also applies size-adjust:96% to every MiSans face. CJK glyphs fill
+ * the whole em box (Latin uses ~70%), so at the same font-size Chinese reads
+ * visibly LARGER than the surrounding English — MiSans in particular draws a
+ * fuller face than the system PingFang other products fall back to. size-adjust
+ * scales ONLY MiSans' glyphs/metrics, so CJK shrinks to ~96% (≈13.4px at our 14px
+ * control size) while Inter's Latin stays at full size, the type scale is
+ * untouched, and — because it rides the bundled face — the shrink is identical
+ * on Web / Windows / macOS (no cross-platform divergence). This is the size
+ * counterpart of the weight clamp above: clamp tames "too heavy", size-adjust
+ * tames "too big", both per-CJK-glyph and language-agnostic. */
 @import "./styles/misans-vf.css";
 
 /* Explicit `@source` paths (relative to this CSS file) — Tailwind v4's
@@ -52,6 +71,16 @@
 @theme inline {
   --color-surface-editor: var(--surface-editor);
   --color-surface-chrome: var(--surface-chrome);
+}
+
+/* Inter-script spacing (W3C CLREQ / CSS Text 4): insert the standard ~1/8em gap
+ * between CJK (Han/kana) and adjacent Latin letters or numerals, so mixed runs
+ * like "Chat查看文件" stop colliding into one dense blob. The property is
+ * inherited, so declaring it on the root cascades to all text. Browsers without
+ * support (older Blink/Gecko) ignore it, and it has no effect on Latin-only or
+ * CJK-only runs — so this is purely additive, zero-risk for existing layout. */
+:root {
+  text-autospace: normal;
 }
 
 /* CJK font-weight de-emphasis. CJK glyphs are stroke-dense, so at the same

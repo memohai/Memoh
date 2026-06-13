@@ -15,6 +15,7 @@
     "add": "Add",
     "edit": "Edit",
     "delete": "Delete",
+    "rename": "Rename",
     "search": "Search",
     "loading": "Loading...",
     "operation": "Actions",
