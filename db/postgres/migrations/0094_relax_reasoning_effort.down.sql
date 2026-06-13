@@ -1,4 +1,4 @@
--- 0093_relax_reasoning_effort (down)
+-- 0094_relax_reasoning_effort (down)
 -- Restore the previous fixed reasoning effort ladder. Rows with newer effort
 -- tiers (minimal/max/custom) are reconciled into the old ladder first, otherwise
 -- re-adding the CHECK constraint would fail on any row using a relaxed value.
