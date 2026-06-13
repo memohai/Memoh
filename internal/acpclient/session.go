@@ -14,7 +14,10 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
+	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
@@ -37,18 +40,22 @@ type StartRequest struct {
 	// SessionConfigValues are pinned via session/set_config_option after the
 	// session is created, for options the agent advertises (see
 	// acpprofile.Profile.SessionConfigValues).
-	SessionConfigValues map[string]string
-	Timeout             time.Duration
-	ToolSession         ToolSessionContext
-	ToolApproval        ToolApprovalService
-	ToolHTTPURL         string
-	ToolHTTPHandler     http.Handler
+	SessionConfigValues  map[string]string
+	Timeout              time.Duration
+	ToolSession          ToolSessionContext
+	ToolApproval         ToolApprovalService
+	ToolGateway          *mcp.ToolGatewayService
+	ToolPreflightGateway *mcp.ToolGatewayService
+	ToolHTTPURL          string
+	ToolHTTPHandler      http.Handler
 }
 
 type PromptResult struct {
-	StopReason string        `json:"stop_reason,omitempty"`
-	Text       string        `json:"text,omitempty"`
-	Events     []StreamEvent `json:"events,omitempty"`
+	StopReason string              `json:"stop_reason,omitempty"`
+	Text       string              `json:"text,omitempty"`
+	Events     []event.StreamEvent `json:"events,omitempty"`
+	// Output is the in-process transcript used for persistence.
+	Output []sdk.Message `json:"-"`
 }
 
 // PromptResource is an embedded text resource sent alongside an ACP prompt.
@@ -197,7 +204,11 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if strings.TrimSpace(toolSession.ChatID) == "" {
 		toolSession.ChatID = toolSession.BotID
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, backend == WorkspaceBackendContainer, req.ToolApproval, toolSession)
+	preflightGateway := req.ToolPreflightGateway
+	if preflightGateway == nil {
+		preflightGateway = req.ToolGateway
+	}
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.env, backend == WorkspaceBackendContainer, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
@@ -656,6 +667,7 @@ func (s *Session) PromptWithToolContext(ctx context.Context, prompt string, reso
 		StopReason: string(resp.StopReason),
 		Text:       collected.Text,
 		Events:     collected.Events,
+		Output:     collected.Output,
 	}
 	if err != nil {
 		if proc != nil {

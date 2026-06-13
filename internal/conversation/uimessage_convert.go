@@ -266,20 +266,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				}
 
 				for _, call := range toolCalls {
-					block := UIMessage{
-						ID:         pending.NextID,
-						Type:       UIMessageTool,
-						Name:       call.Name,
-						Input:      call.Input,
-						ToolCallID: call.ID,
-						Running:    uiBoolPtr(true),
-						Approval:   call.Approval,
-						UserInput:  call.UserInput,
-					}
-					appendPendingAssistantMessage(pending, block)
-					if call.ID != "" {
-						pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
-					}
+					upsertPendingToolCall(pending, call)
 				}
 
 				if len(attachments) > 0 {
@@ -375,6 +362,44 @@ func appendPendingAssistantMessage(pending *uiPendingAssistantTurn, message UIMe
 	message.ID = pending.NextID
 	pending.NextID++
 	pending.Turn.Messages = append(pending.Turn.Messages, message)
+}
+
+func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedToolCall) {
+	if pending == nil {
+		return
+	}
+	if call.ID != "" {
+		if idx, ok := pending.ToolIndexes[call.ID]; ok && idx >= 0 && idx < len(pending.Turn.Messages) {
+			msg := &pending.Turn.Messages[idx]
+			if call.Name != "" {
+				msg.Name = call.Name
+			}
+			if call.Input != nil {
+				msg.Input = call.Input
+			}
+			if call.Approval != nil {
+				msg.Approval = call.Approval
+			}
+			if call.UserInput != nil {
+				msg.UserInput = call.UserInput
+			}
+			msg.Running = uiBoolPtr(true)
+			return
+		}
+	}
+	block := UIMessage{
+		Type:       UIMessageTool,
+		Name:       call.Name,
+		Input:      call.Input,
+		ToolCallID: call.ID,
+		Running:    uiBoolPtr(true),
+		Approval:   call.Approval,
+		UserInput:  call.UserInput,
+	}
+	appendPendingAssistantMessage(pending, block)
+	if call.ID != "" {
+		pending.ToolIndexes[call.ID] = len(pending.Turn.Messages) - 1
+	}
 }
 
 func buildStandaloneAssistantMessages(text string, reasonings []string, attachments []UIAttachment) []UIMessage {

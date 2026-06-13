@@ -4,7 +4,7 @@
 // instance only. A runtime is an OS process plus protocol state; it is
 // identified by a server-generated runtime ID and optionally *bound* to one
 // chat session. Sessions live in the database and survive restarts; runtimes
-// do not — after a restart the next prompt simply cold-starts a fresh
+// do not - after a restart the next prompt simply cold-starts a fresh
 // runtime. "First-class" here means code abstraction and lifecycle ownership,
 // not persistence.
 package acpagent
@@ -23,9 +23,12 @@ import (
 
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 )
 
@@ -74,14 +77,15 @@ const (
 // handle.state (budget scans), but handle.state is never held while taking
 // p.mu, and p.mu is never held while taking handle.op.
 type SessionPool struct {
-	logger   *slog.Logger
-	runner   sessionRunner
-	bots     botGetter
-	store    sessionGetter
-	tools    *mcp.ToolGatewayService
-	contexts *mcp.ToolSessionContextStore
-	approval acpclient.ToolApprovalService
-	timeout  time.Duration
+	logger    *slog.Logger
+	runner    sessionRunner
+	bots      botGetter
+	store     sessionGetter
+	tools     *mcp.ToolGatewayService
+	contexts  *mcp.ToolSessionContextStore
+	approval  acpclient.ToolApprovalService
+	userInput pendingUserInputCanceller
+	timeout   time.Duration
 
 	mu        sync.RWMutex
 	runtimes  map[string]*runtimeHandle
@@ -97,6 +101,10 @@ type workspaceClientRunner interface {
 	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
 }
 
+type pendingUserInputCanceller interface {
+	CancelPendingForSession(context.Context, string, string, string) ([]userinput.Request, error)
+}
+
 type botGetter interface {
 	Get(ctx context.Context, botID string) (bots.Bot, error)
 }
@@ -106,8 +114,8 @@ type sessionGetter interface {
 }
 
 // runtimeHandle is the single owner of one agent process. All internal code
-// operates on handles resolved through the pool's tenancy gate — never on
-// bare string IDs — so cleanup can only ever touch the runtime it resolved.
+// operates on handles resolved through the pool's tenancy gate - never on
+// bare string IDs - so cleanup can only ever touch the runtime it resolved.
 type runtimeHandle struct {
 	// Stable identity, fixed at creation.
 	id          string
@@ -224,13 +232,19 @@ func (p *SessionPool) SetToolApprovalService(service acpclient.ToolApprovalServi
 	}
 }
 
+func (p *SessionPool) SetUserInputService(service pendingUserInputCanceller) {
+	if p != nil {
+		p.userInput = service
+	}
+}
+
 func newRuntimeID() string {
 	return runtimeIDPrefix + uuid.NewString()
 }
 
 // owned is the single tenancy gate: every runtime-scoped operation resolves
 // through here, and a cross-bot reference behaves exactly like a missing
-// runtime — zero side effects.
+// runtime - zero side effects.
 func (p *SessionPool) owned(botID, runtimeID string) (*runtimeHandle, error) {
 	botID = strings.TrimSpace(botID)
 	runtimeID = strings.TrimSpace(runtimeID)
@@ -537,10 +551,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	defer unregisterToolSink()
 
 	result, err := sess.PromptWithToolContext(ctx, input.Prompt, promptResources(input), toolCtx, toolSink)
-	orderedEvents := toolSink.Events()
-	if len(orderedEvents) > 0 {
-		result.Events = orderedEvents
-	}
+	toolSink.ApplyToResult(&result)
 	if err != nil {
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
@@ -642,7 +653,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 
 		if h.botID != input.BotID {
 			// resolveSessionMetadata already pins the session to the calling
-			// bot, so this is purely defensive — and side-effect free.
+			// bot, so this is purely defensive - and side-effect free.
 			return nil, ErrRuntimeNotFound
 		}
 		h.state.Lock()
@@ -759,6 +770,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		// The handler resolves identity from the handle per request, so the
 		// process configuration only ever carries stable runtime identity.
 		ToolHTTPHandler: p.toolHTTPHandler(h),
+		ToolGateway:     p.tools,
 		ToolSession:     h.stableToolIdentity(),
 		ToolApproval:    p.approval,
 	}, opts.Sink)
@@ -948,7 +960,7 @@ func (p *SessionPool) tryCloseIdle(h *runtimeHandle, minIdle time.Duration) bool
 
 // teardown is the single destruction path for a runtime: it marks the handle
 // closed, cancels a pending start, kills the agent process, and removes the
-// handle from both pool indexes. Idempotent — and it always re-runs the map
+// handle from both pool indexes. Idempotent - and it always re-runs the map
 // cleanup, because a handle can be marked closed (aborted start) before its
 // registration is removed.
 func (p *SessionPool) teardown(h *runtimeHandle) error {
@@ -959,8 +971,12 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	h.session = nil
 	cancel := h.startCancel
 	h.startCancel = nil
-	h.active = nil
 	bound := h.boundSession
+	activeSession := ""
+	if h.active != nil {
+		activeSession = strings.TrimSpace(h.active.SessionID)
+	}
+	h.active = nil
 	h.state.Unlock()
 
 	p.mu.Lock()
@@ -973,10 +989,44 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	if cancel != nil {
 		cancel()
 	}
+	var closeErr error
 	if sess != nil {
-		return sess.Close()
+		closeErr = sess.Close()
 	}
-	return nil
+	sessionID := strings.TrimSpace(bound)
+	if sessionID == "" {
+		sessionID = activeSession
+	}
+	p.cancelPendingDecisions(h.botID, sessionID, "decision cancelled: ACP runtime closed before a response arrived")
+	return closeErr
+}
+
+func (p *SessionPool) cancelPendingDecisions(botID, sessionID, reason string) {
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
+	if p == nil || botID == "" || sessionID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if approval, ok := p.approval.(interface {
+		CancelPendingForSession(context.Context, string, string, string) ([]toolapproval.Request, error)
+	}); ok {
+		if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil {
+			p.logger.Warn("cancel pending ACP approvals failed",
+				slog.Any("error", err),
+				slog.String("bot_id", botID),
+				slog.String("session_id", sessionID))
+		}
+	}
+	if p.userInput != nil {
+		if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil {
+			p.logger.Warn("cancel pending ACP user inputs failed",
+				slog.Any("error", err),
+				slog.String("bot_id", botID),
+				slog.String("session_id", sessionID))
+		}
+	}
 }
 
 func (p *SessionPool) CloseAll() {
@@ -1223,64 +1273,78 @@ func (p *SessionPool) reconcileManagedCodexConfig(ctx context.Context, botID str
 }
 
 type promptToolEventSink struct {
-	mu     sync.Mutex
-	next   acpclient.EventSink
-	events []acpclient.StreamEvent
+	mu         sync.Mutex
+	next       acpclient.EventSink
+	events     []event.StreamEvent
+	transcript *acpclient.TranscriptRecorder
 }
 
 func newPromptToolEventSink(next acpclient.EventSink) *promptToolEventSink {
-	return &promptToolEventSink{next: next}
+	return &promptToolEventSink{
+		next:       next,
+		transcript: acpclient.NewTranscriptRecorder(),
+	}
 }
 
-func (s *promptToolEventSink) EmitACPEvent(event acpclient.StreamEvent) {
+func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	s.events = append(s.events, event)
+	s.events = appendBoundedPromptEvents(s.events, ev)
+	if s.transcript != nil {
+		s.transcript.Add(ev)
+	}
 	s.mu.Unlock()
 	if s.next != nil {
-		s.next.EmitACPEvent(event)
+		s.next.EmitStreamEvent(ev)
 	}
 }
 
-func (s *promptToolEventSink) EmitToolStreamEvent(event mcp.ToolStreamEvent) {
+func (s *promptToolEventSink) EmitToolStreamEvent(toolEvent mcp.ToolStreamEvent) {
 	if s == nil {
 		return
 	}
-	typ := acpclient.StreamEventType(strings.TrimSpace(event.Type))
-	switch typ {
-	case acpclient.StreamEventToolCallStart, acpclient.StreamEventToolCallEnd:
-		s.EmitACPEvent(acpclient.StreamEvent{
-			Type:       typ,
-			ToolCallID: event.ToolCallID,
-			ToolName:   event.ToolName,
-			Input:      event.Input,
-			Result:     event.Result,
-			Error:      event.Error,
-		})
-	case acpclient.StreamEventUserInputRequest:
-		s.EmitACPEvent(acpclient.StreamEvent{
-			Type:        typ,
-			ToolCallID:  event.ToolCallID,
-			ToolName:    event.ToolName,
-			Input:       event.Input,
-			UserInputID: event.UserInputID,
-			ShortID:     event.ShortID,
-			Status:      event.Status,
-			Metadata:    event.Metadata,
-		})
+	if ev, ok := toolEvent.ToAgentStreamEvent(); ok {
+		s.EmitStreamEvent(ev)
 	}
 }
 
-func (s *promptToolEventSink) Events() []acpclient.StreamEvent {
+func (s *promptToolEventSink) Events() []event.StreamEvent {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]acpclient.StreamEvent(nil), s.events...)
+	return append([]event.StreamEvent(nil), s.events...)
 }
+
+func (s *promptToolEventSink) ApplyToResult(result *acpclient.PromptResult) {
+	if s == nil || result == nil {
+		return
+	}
+	events := s.Events()
+	if len(events) == 0 {
+		return
+	}
+	result.Events = events
+	if s.transcript != nil {
+		result.Output = s.transcript.Messages(result.Text)
+	}
+}
+
+func appendBoundedPromptEvents(events []event.StreamEvent, incoming ...event.StreamEvent) []event.StreamEvent {
+	if len(incoming) == 0 {
+		return events
+	}
+	events = append(events, incoming...)
+	if len(events) <= maxCollectedPromptToolEvents {
+		return events
+	}
+	return append([]event.StreamEvent(nil), events[len(events)-maxCollectedPromptToolEvents:]...)
+}
+
+const maxCollectedPromptToolEvents = 4096
 
 func validateManagedFields(profile acpprofile.Profile, values map[string]string, mode acpclient.SetupMode) error {
 	if profile.ID == acpprofile.AgentCodexID {

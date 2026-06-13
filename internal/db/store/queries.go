@@ -13,6 +13,8 @@ import (
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
+	CancelPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.CancelPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
+	CancelPendingUserInputsBySession(ctx context.Context, arg dbsqlc.CancelPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	CancelUserInputRequest(ctx context.Context, arg dbsqlc.CancelUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error
 	CompleteCompactionLog(ctx context.Context, arg dbsqlc.CompleteCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)

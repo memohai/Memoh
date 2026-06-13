@@ -6,47 +6,25 @@ import (
 	"sync"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 )
 
-type StreamEventType string
-
 const (
-	StreamEventTextDelta           StreamEventType = "text_delta"
-	StreamEventReasoningDelta      StreamEventType = "reasoning_delta"
-	StreamEventToolCallStart       StreamEventType = "tool_call_start"
-	StreamEventToolCallEnd         StreamEventType = "tool_call_end"
-	StreamEventToolApprovalRequest StreamEventType = "tool_approval_request"
-	StreamEventUserInputRequest    StreamEventType = "user_input_request"
-
 	maxCollectedStreamEvents = 4096
 	maxTrackedACPToolStates  = 1024
 )
 
-type StreamEvent struct {
-	Type       StreamEventType `json:"type"`
-	Delta      string          `json:"delta,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	ToolName   string          `json:"tool_name,omitempty"`
-	Input      any             `json:"input,omitempty"`
-	Result     any             `json:"result,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	ApprovalID string          `json:"approval_id,omitempty"`
-	// Interactive request fields (Type StreamEventUserInputRequest).
-	UserInputID string         `json:"user_input_id,omitempty"`
-	ShortID     int            `json:"short_id,omitempty"`
-	Status      string         `json:"status,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-}
-
 type EventSink interface {
-	EmitACPEvent(StreamEvent)
+	EmitStreamEvent(event.StreamEvent)
 }
 
-type EventSinkFunc func(StreamEvent)
+type EventSinkFunc func(event.StreamEvent)
 
-func (f EventSinkFunc) EmitACPEvent(event StreamEvent) {
+func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) {
 	if f != nil {
-		f(event)
+		f(ev)
 	}
 }
 
@@ -66,7 +44,7 @@ func (e *toolEventEmitter) setPromptState(collector *eventCollector, sink EventS
 	e.mu.Unlock()
 }
 
-func (e *toolEventEmitter) emit(event StreamEvent) {
+func (e *toolEventEmitter) emit(ev event.StreamEvent) {
 	if e == nil {
 		return
 	}
@@ -75,38 +53,44 @@ func (e *toolEventEmitter) emit(event StreamEvent) {
 	sink := e.sink
 	e.mu.RUnlock()
 	if collector != nil {
-		collector.record(event)
+		collector.record(ev)
 	}
 	if sink != nil {
-		sink.EmitACPEvent(event)
+		sink.EmitStreamEvent(ev)
 	}
 }
 
 type eventCollector struct {
 	mu     sync.Mutex
 	text   strings.Builder
-	events []StreamEvent
+	events []event.StreamEvent
+	// transcript is kept separately from the capped UI event buffer.
+	transcript *TranscriptRecorder
 }
 
 func newEventCollector() *eventCollector {
-	return &eventCollector{}
+	return &eventCollector{transcript: NewTranscriptRecorder()}
 }
 
-func (c *eventCollector) record(event StreamEvent) {
+func (c *eventCollector) record(ev event.StreamEvent) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.events = appendBoundedStreamEvents(c.events, event)
+	c.events = appendBoundedStreamEvents(c.events, ev)
+	c.transcript.Add(ev)
 }
 
-func (c *eventCollector) apply(n acp.SessionNotification, events []StreamEvent) {
+func (c *eventCollector) apply(n acp.SessionNotification, events []event.StreamEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	update := n.Update
 	c.events = appendBoundedStreamEvents(c.events, events...)
+	for _, ev := range events {
+		c.transcript.Add(ev)
+	}
 	if update.AgentMessageChunk != nil {
 		c.text.WriteString(contentText(update.AgentMessageChunk.Content))
 	}
@@ -116,10 +100,12 @@ func (c *eventCollector) result() RunResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	events := append([]StreamEvent(nil), c.events...)
+	events := append([]event.StreamEvent(nil), c.events...)
+	text := strings.TrimSpace(c.text.String())
 	return RunResult{
-		Text:   strings.TrimSpace(c.text.String()),
+		Text:   text,
 		Events: events,
+		Output: c.transcript.Messages(text),
 	}
 }
 
@@ -137,6 +123,7 @@ type acpToolEventMapper struct {
 	mu       sync.Mutex
 	tools    map[string]*acpToolState
 	lastPlan string
+	quirks   acpprofile.ToolQuirks
 }
 
 type acpToolState struct {
@@ -154,11 +141,11 @@ type acpToolState struct {
 	done      bool
 }
 
-func newACPToolEventMapper() *acpToolEventMapper {
-	return &acpToolEventMapper{tools: map[string]*acpToolState{}}
+func newACPToolEventMapper(quirks acpprofile.ToolQuirks) *acpToolEventMapper {
+	return &acpToolEventMapper{tools: map[string]*acpToolState{}, quirks: quirks}
 }
 
-func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) []StreamEvent {
+func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) []event.StreamEvent {
 	update := n.Update
 	switch {
 	case update.AgentMessageChunk != nil:
@@ -166,8 +153,8 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 		if text == "" {
 			return nil
 		}
-		return []StreamEvent{{
-			Type:  StreamEventTextDelta,
+		return []event.StreamEvent{{
+			Type:  event.TextDelta,
 			Delta: text,
 		}}
 	case update.AgentThoughtChunk != nil:
@@ -175,8 +162,8 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 		if text == "" {
 			return nil
 		}
-		return []StreamEvent{{
-			Type:  StreamEventReasoningDelta,
+		return []event.StreamEvent{{
+			Type:  event.ReasoningDelta,
 			Delta: text,
 		}}
 	case update.Plan != nil:
@@ -190,7 +177,7 @@ func (m *acpToolEventMapper) eventsFromNotification(n acp.SessionNotification) [
 	}
 }
 
-func (m *acpToolEventMapper) applyPlan(plan acp.SessionUpdatePlan) []StreamEvent {
+func (m *acpToolEventMapper) applyPlan(plan acp.SessionUpdatePlan) []event.StreamEvent {
 	text := formatPlanEntries(plan.Entries)
 	if text == "" {
 		return nil
@@ -206,8 +193,8 @@ func (m *acpToolEventMapper) applyPlan(plan acp.SessionUpdatePlan) []StreamEvent
 		prefix = "\nPlan updated:\n"
 	}
 	m.lastPlan = text
-	return []StreamEvent{{
-		Type:  StreamEventReasoningDelta,
+	return []event.StreamEvent{{
+		Type:  event.ReasoningDelta,
 		Delta: prefix + text,
 	}}
 }
@@ -234,7 +221,7 @@ func formatPlanEntries(entries []acp.PlanEntry) string {
 	return strings.TrimSpace(sb.String())
 }
 
-func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []StreamEvent {
+func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []event.StreamEvent {
 	id := strings.TrimSpace(string(tc.ToolCallId))
 	if id == "" {
 		return nil
@@ -253,7 +240,7 @@ func (m *acpToolEventMapper) applyToolCall(tc acp.SessionUpdateToolCall) []Strea
 	return m.eventsForState(state)
 }
 
-func (m *acpToolEventMapper) applyToolUpdate(tc acp.SessionToolCallUpdate) []StreamEvent {
+func (m *acpToolEventMapper) applyToolUpdate(tc acp.SessionToolCallUpdate) []event.StreamEvent {
 	id := strings.TrimSpace(string(tc.ToolCallId))
 	if id == "" {
 		return nil
@@ -301,7 +288,7 @@ func (m *acpToolEventMapper) ensureTool(id string) *acpToolState {
 	return state
 }
 
-func appendBoundedStreamEvents(events []StreamEvent, incoming ...StreamEvent) []StreamEvent {
+func appendBoundedStreamEvents(events []event.StreamEvent, incoming ...event.StreamEvent) []event.StreamEvent {
 	if len(incoming) == 0 {
 		return events
 	}
@@ -309,22 +296,22 @@ func appendBoundedStreamEvents(events []StreamEvent, incoming ...StreamEvent) []
 	if len(events) <= maxCollectedStreamEvents {
 		return events
 	}
-	return append([]StreamEvent(nil), events[len(events)-maxCollectedStreamEvents:]...)
+	return append([]event.StreamEvent(nil), events[len(events)-maxCollectedStreamEvents:]...)
 }
 
-func (m *acpToolEventMapper) eventsForState(state *acpToolState) []StreamEvent {
-	name, input, ok := nativeToolFromACPState(state)
+func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamEvent {
+	name, input, ok := nativeToolFromACPState(state, m.quirks)
 	if !ok {
 		return nil
 	}
 	state.name = name
 	state.nativeIn = input
 
-	events := make([]StreamEvent, 0, 2)
+	events := make([]event.StreamEvent, 0, 2)
 	if !state.started {
 		state.started = true
-		events = append(events, StreamEvent{
-			Type:       StreamEventToolCallStart,
+		events = append(events, event.StreamEvent{
+			Type:       event.ToolCallStart,
 			ToolCallID: state.id,
 			ToolName:   state.name,
 			Input:      state.nativeIn,
@@ -332,23 +319,27 @@ func (m *acpToolEventMapper) eventsForState(state *acpToolState) []StreamEvent {
 	}
 	if isTerminalACPToolStatus(state.status) && !state.done {
 		state.done = true
-		event := StreamEvent{
-			Type:       StreamEventToolCallEnd,
+		ev := event.StreamEvent{
+			Type:       event.ToolCallEnd,
 			ToolCallID: state.id,
 			ToolName:   state.name,
 			Input:      state.nativeIn,
 			Result:     nativeToolResultFromACPState(state),
 		}
 		if isFailedACPToolStatus(state.status) {
-			event.Error = state.status
+			ev.Error = state.status
 		}
-		events = append(events, event)
+		events = append(events, ev)
 		delete(m.tools, state.id)
 	}
 	return events
 }
 
-func nativeToolFromACPState(state *acpToolState) (string, map[string]any, bool) {
+// nativeToolFromACPState maps an agent-reported tool call onto a canonical
+// native tool name and input. All agent-wording knowledge (title heuristics)
+// comes from quirks, which acpprofile owns per agent - never inline keyword
+// checks here.
+func nativeToolFromACPState(state *acpToolState, quirks acpprofile.ToolQuirks) (string, map[string]any, bool) {
 	if state == nil {
 		return "", nil, false
 	}
@@ -356,7 +347,7 @@ func nativeToolFromACPState(state *acpToolState) (string, map[string]any, bool) 
 	case string(acp.ToolKindExecute):
 		command := commandFromACPInput(state.input)
 		if command == "" {
-			command = commandFromACPTitle(state.title)
+			command = quirks.CommandFromTitle(state.title)
 		}
 		if command == "" {
 			return "", nil, false
@@ -372,7 +363,15 @@ func nativeToolFromACPState(state *acpToolState) (string, map[string]any, bool) 
 		}
 		return "read", map[string]any{"path": path}, true
 	case string(acp.ToolKindEdit):
-		return editToolFromACPState(state)
+		name, input, ok := editToolFromACPState(state)
+		// A title like "Write file X" overrides the structural edit shape. Apply
+		// it HERE so the streamed tool-event name and the approval name (both
+		// resolve through this function) agree - one action must not surface as
+		// "edit" on the stream while its approval says "write".
+		if ok && name == "edit" && quirks.TitleIndicatesWrite(state.title) {
+			name = "write"
+		}
+		return name, input, ok
 	default:
 		return "", nil, false
 	}
@@ -501,16 +500,6 @@ func commandFromACPInput(value any) string {
 		}
 	}
 	return ""
-}
-
-func commandFromACPTitle(title string) string {
-	title = strings.TrimSpace(title)
-	switch strings.ToLower(title) {
-	case "", "shell", "shell command", "command", "run", "run command", "execute", "exec", "bash", "terminal", "terminal command":
-		return ""
-	default:
-		return title
-	}
 }
 
 func pathFromACPInput(value any) string {

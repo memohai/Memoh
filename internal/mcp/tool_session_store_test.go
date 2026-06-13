@@ -80,6 +80,33 @@ func TestToolSessionContextStoreRegisteredSinkReceivesToolEvents(t *testing.T) {
 	}
 }
 
+func TestToolSessionContextStoreOldCleanupDoesNotRemoveNewerSink(t *testing.T) {
+	store := NewToolSessionContextStore()
+	session := ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}
+	var first, second int
+	unregisterFirst := store.RegisterToolEventSink(session, func(ToolStreamEvent) {
+		first++
+	})
+	unregisterSecond := store.RegisterToolEventSink(session, func(ToolStreamEvent) {
+		second++
+	})
+	defer unregisterSecond()
+
+	unregisterFirst()
+
+	ok := store.AppendToolEvent(session, ToolStreamEvent{
+		Type:       "tool_call_start",
+		ToolCallID: "call-1",
+		ToolName:   "schedule_list",
+	})
+	if !ok {
+		t.Fatalf("AppendToolEvent delivered=false, want newer sink to remain")
+	}
+	if first != 0 || second != 1 {
+		t.Fatalf("sink calls: first=%d second=%d, want 0/1", first, second)
+	}
+}
+
 func TestToolSessionContextStoreDropsToolEventsWithoutSink(t *testing.T) {
 	store := NewToolSessionContextStore()
 	delivered := store.AppendToolEvent(ToolSessionContext{BotID: "bot-1", SessionID: "session-1", StreamID: "stream-1"}, ToolStreamEvent{

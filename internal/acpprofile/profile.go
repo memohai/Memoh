@@ -36,9 +36,12 @@ type Profile struct {
 	// select, which gates extended thinking on newer models). Options the
 	// agent does not expose are skipped.
 	SessionConfigValues map[string]string
-	ManagedFields       []ManagedField
-	SupportedBackends   []string
-	SetupModes          []string
+	// ToolQuirks override the default title heuristics for this agent; nil
+	// means DefaultToolQuirks. See ToolQuirks for why this lives here.
+	ToolQuirks        *ToolQuirks
+	ManagedFields     []ManagedField
+	SupportedBackends []string
+	SetupModes        []string
 }
 
 type ManagedField struct {

@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 )
@@ -43,6 +44,8 @@ type terminalApprovalFunc func(toolCallID string, input map[string]any) (termina
 type terminalApprovalResult struct {
 	Approved   bool
 	ToolCallID string
+	// RejectionMessage is the agent-visible text for an unapproved result.
+	RejectionMessage string
 }
 
 type terminal struct {
@@ -111,6 +114,7 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 	if approve != nil {
 		approval, err := approve(toolCallID, input)
 		if err != nil {
+			m.emitToolCallStart(toolCallID, "exec", input)
 			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 			return acp.CreateTerminalResponse{}, err
 		}
@@ -118,7 +122,12 @@ func (m *terminalManager) CreateTerminal(_ context.Context, p acp.CreateTerminal
 			toolCallID = strings.TrimSpace(approval.ToolCallID)
 		}
 		if !approval.Approved {
-			err := errors.New("tool execution rejected by user")
+			message := strings.TrimSpace(approval.RejectionMessage)
+			if message == "" {
+				message = "tool execution was not approved"
+			}
+			err := errors.New(message)
+			m.emitToolCallStart(toolCallID, "exec", input)
 			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 			return acp.CreateTerminalResponse{}, err
 		}
@@ -230,8 +239,8 @@ func (m *terminalManager) emitToolCallStart(id, name string, input map[string]an
 	if m == nil || m.events == nil {
 		return
 	}
-	m.events.emit(StreamEvent{
-		Type:       StreamEventToolCallStart,
+	m.events.emit(event.StreamEvent{
+		Type:       event.ToolCallStart,
 		ToolCallID: id,
 		ToolName:   name,
 		Input:      input,
@@ -242,17 +251,17 @@ func (m *terminalManager) emitToolCallEnd(id, name string, input map[string]any,
 	if m == nil || m.events == nil {
 		return
 	}
-	event := StreamEvent{
-		Type:       StreamEventToolCallEnd,
+	ev := event.StreamEvent{
+		Type:       event.ToolCallEnd,
 		ToolCallID: id,
 		ToolName:   name,
 		Input:      input,
 		Result:     result,
 	}
 	if err != nil {
-		event.Error = err.Error()
+		ev.Error = err.Error()
 	}
-	m.events.emit(event)
+	m.events.emit(ev)
 }
 
 func (m *terminalManager) emitTerminalEnd(term *terminal) {

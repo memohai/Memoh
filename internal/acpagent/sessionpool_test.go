@@ -13,16 +13,20 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/memohai/twilight-ai/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/memohai/memoh/internal/acpclient"
 	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/bots"
 	"github.com/memohai/memoh/internal/config"
 	"github.com/memohai/memoh/internal/mcp"
 	sessionpkg "github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/toolapproval"
+	"github.com/memohai/memoh/internal/userinput"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
 	"github.com/memohai/memoh/internal/workspace/bridgesvc"
@@ -300,7 +304,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 		t.Fatalf("session index does not point at the bound runtime")
 	}
 
-	// The bound session reuses the warm process — including its model.
+	// The bound session reuses the warm process - including its model.
 	status, err := pool.Ensure(context.Background(), PromptInput{
 		BotID:       "bot-1",
 		SessionID:   "session-1",
@@ -1274,26 +1278,67 @@ func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
 
 func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 	sink := newPromptToolEventSink(nil)
-	sink.EmitACPEvent(acpclient.StreamEvent{Type: acpclient.StreamEventTextDelta, Delta: "before"})
+	sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "before"})
 	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
 		Type:       "tool_call_start",
 		ToolCallID: "call-1",
-		ToolName:   "schedule_list",
+		ToolName:   "write",
+		Input:      map[string]any{"path": "notes.txt"},
+	})
+	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
+		Type:       "tool_approval_request",
+		ToolCallID: "call-1",
+		ToolName:   "write",
+		Input:      map[string]any{"path": "notes.txt"},
+		ApprovalID: "approval-1",
+		ShortID:    7,
+		Status:     toolapproval.StatusPending,
+		Metadata: map[string]any{
+			"approval": toolapproval.RequestMetadata(toolapproval.Request{
+				ID:      "approval-1",
+				ShortID: 7,
+				Status:  toolapproval.StatusPending,
+			}),
+		},
 	})
 	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
 		Type:       "tool_call_end",
 		ToolCallID: "call-1",
-		ToolName:   "schedule_list",
+		ToolName:   "write",
 		Result:     map[string]any{"ok": true},
 	})
-	sink.EmitACPEvent(acpclient.StreamEvent{Type: acpclient.StreamEventTextDelta, Delta: "after"})
+	sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "after"})
 
 	events := sink.Events()
-	if len(events) != 4 {
+	if len(events) != 5 {
 		t.Fatalf("events = %#v", events)
 	}
-	if events[0].Type != acpclient.StreamEventTextDelta || events[1].Type != acpclient.StreamEventToolCallStart || events[2].Type != acpclient.StreamEventToolCallEnd || events[3].Type != acpclient.StreamEventTextDelta {
+	if events[0].Type != event.TextDelta || events[1].Type != event.ToolCallStart || events[2].Type != event.ToolApprovalRequest || events[3].Type != event.ToolCallEnd || events[4].Type != event.TextDelta {
 		t.Fatalf("events order = %#v", events)
+	}
+
+	result := acpclient.PromptResult{}
+	sink.ApplyToResult(&result)
+	if len(result.Events) != 5 {
+		t.Fatalf("result events = %#v, want sink events", result.Events)
+	}
+	if len(result.Output) != 3 {
+		t.Fatalf("output = %#v, want assistant text+tool call/tool result/after", result.Output)
+	}
+	if len(result.Output[0].Content) != 2 {
+		t.Fatalf("output[0] = %#v, want text plus tool call", result.Output[0])
+	}
+	toolCall, ok := result.Output[0].Content[1].(sdk.ToolCallPart)
+	if !ok {
+		t.Fatalf("output[0] = %#v, want tool call", result.Output[0])
+	}
+	approval, ok := toolCall.ProviderMetadata["approval"].(map[string]any)
+	if !ok || approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusPending {
+		t.Fatalf("tool call approval metadata = %#v", toolCall.ProviderMetadata)
+	}
+	toolResult, ok := result.Output[1].Content[0].(sdk.ToolResultPart)
+	if !ok || toolResult.ToolCallID != "call-1" || toolResult.IsError {
+		t.Fatalf("output[1] = %#v, want successful tool result", result.Output[1])
 	}
 }
 
@@ -1374,6 +1419,33 @@ func TestSessionPoolReapIdlePolicies(t *testing.T) {
 	}
 }
 
+func TestCloseSessionCancelsPendingDecisions(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeToolApprovalService{}
+	userInput := &fakeUserInputCanceller{}
+	pool := newSessionPool(nil, nil, fakeBotGetter{})
+	pool.SetToolApprovalService(approval)
+	pool.SetUserInputService(userInput)
+	injectRuntime(pool, &runtimeHandle{
+		id:           "rt_decision-cleanup",
+		botID:        "bot-1",
+		status:       stateIdle,
+		boundSession: "session-1",
+		lastActive:   time.Now(),
+	})
+
+	if err := pool.CloseSession("session-1"); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+	if approval.cancelBotID != "bot-1" || approval.cancelSessionID != "session-1" || approval.cancelReason == "" {
+		t.Fatalf("cancel pending approvals = bot:%q session:%q reason:%q", approval.cancelBotID, approval.cancelSessionID, approval.cancelReason)
+	}
+	if userInput.cancelBotID != "bot-1" || userInput.cancelSessionID != "session-1" || userInput.cancelReason == "" {
+		t.Fatalf("cancel pending user inputs = bot:%q session:%q reason:%q", userInput.cancelBotID, userInput.cancelSessionID, userInput.cancelReason)
+	}
+}
+
 type fakeBotGetter struct {
 	bot bots.Bot
 	err error
@@ -1390,6 +1462,56 @@ type fakeSessionGetter struct {
 
 func (g fakeSessionGetter) Get(context.Context, string) (sessionpkg.Session, error) {
 	return g.session, g.err
+}
+
+type fakeToolApprovalService struct {
+	cancelBotID     string
+	cancelSessionID string
+	cancelReason    string
+}
+
+func (*fakeToolApprovalService) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
+	return toolapproval.Evaluation{Decision: toolapproval.DecisionBypass}, nil
+}
+
+func (*fakeToolApprovalService) CreatePending(context.Context, toolapproval.CreatePendingInput) (toolapproval.Request, error) {
+	return toolapproval.Request{}, nil
+}
+
+func (*fakeToolApprovalService) Get(context.Context, string) (toolapproval.Request, error) {
+	return toolapproval.Request{}, toolapproval.ErrNotFound
+}
+
+func (*fakeToolApprovalService) Reject(context.Context, string, string, string) (toolapproval.Request, error) {
+	return toolapproval.Request{}, nil
+}
+
+func (*fakeToolApprovalService) WaitForDecision(context.Context, string) (toolapproval.Request, error) {
+	return toolapproval.Request{}, nil
+}
+
+func (*fakeToolApprovalService) RegisterWaiter(string) func() {
+	return func() {}
+}
+
+func (f *fakeToolApprovalService) CancelPendingForSession(_ context.Context, botID, sessionID, reason string) ([]toolapproval.Request, error) {
+	f.cancelBotID = botID
+	f.cancelSessionID = sessionID
+	f.cancelReason = reason
+	return nil, nil
+}
+
+type fakeUserInputCanceller struct {
+	cancelBotID     string
+	cancelSessionID string
+	cancelReason    string
+}
+
+func (f *fakeUserInputCanceller) CancelPendingForSession(_ context.Context, botID, sessionID, reason string) ([]userinput.Request, error) {
+	f.cancelBotID = botID
+	f.cancelSessionID = sessionID
+	f.cancelReason = reason
+	return nil, nil
 }
 
 type recordingRunner struct {

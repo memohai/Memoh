@@ -95,6 +95,8 @@ type Resolver struct {
 	bgManager         *background.Manager
 	toolApproval      *toolapproval.Service
 	userInput         userInputService
+	acpPromptMu       sync.Mutex
+	acpPromptHubs     map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the chat-flow resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error

@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -13,36 +12,30 @@ import (
 	sdk "github.com/memohai/twilight-ai/sdk"
 
 	"github.com/memohai/memoh/internal/mcp"
-	messageevent "github.com/memohai/memoh/internal/message/event"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
-const (
-	nativeToolApprovalWaitTimeout = 10 * time.Minute
-	nativeUserInputWaitTimeout    = 10 * time.Minute
-)
-
 type NativeToolSourceOptions struct {
-	AllowAll          bool
-	AllowTools        map[string]bool
-	Approval          NativeToolApprovalService
-	ApprovalPublisher messageevent.Publisher
-	UserInput         NativeToolUserInputService
-	ToolEvents        NativeToolEventSink
+	AllowAll   bool
+	AllowTools map[string]bool
+	Approval   NativeToolApprovalService
+	UserInput  NativeToolUserInputService
+	ToolEvents NativeToolEventSink
 }
 
 type NativeToolApprovalService interface {
 	EvaluatePolicy(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Evaluation, error)
 	CreatePending(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Request, error)
+	Get(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	Reject(ctx context.Context, approvalID, actorID, reason string) (toolapproval.Request, error)
 	WaitForDecision(ctx context.Context, approvalID string) (toolapproval.Request, error)
+	RegisterWaiter(approvalID string) func()
 }
 
 type NativeToolUserInputService interface {
 	CreatePending(ctx context.Context, input userinput.CreatePendingInput) (userinput.Request, error)
 	Cancel(ctx context.Context, input userinput.CancelInput) (userinput.Request, error)
-	WaitForResponse(ctx context.Context, requestID string) (userinput.Request, error)
 	WaitForRegisteredResponse(ctx context.Context, requestID string) (userinput.Request, error)
 	// RegisterWaiter must be called before the pending request is announced
 	// to users, or an instant answer can be misjudged as orphaned.
@@ -50,7 +43,7 @@ type NativeToolUserInputService interface {
 }
 
 // NativeToolEventSink delivers tool lifecycle events into the live prompt
-// stream of the calling runtime — the same channel tool_call_start travels —
+// stream of the calling runtime - the same channel tool_call_start travels -
 // so attachments like pending user input land on the existing tool call block.
 type NativeToolEventSink interface {
 	AppendToolEvent(session mcp.ToolSessionContext, event mcp.ToolStreamEvent) bool
@@ -65,7 +58,6 @@ type NativeToolSource struct {
 	allowAll   bool
 	allow      map[string]struct{}
 	approval   NativeToolApprovalService
-	publisher  messageevent.Publisher
 	userInput  NativeToolUserInputService
 	toolEvents NativeToolEventSink
 }
@@ -88,7 +80,6 @@ func NewNativeToolSource(log *slog.Logger, providers []ToolProvider, opts Native
 		allowAll:   opts.AllowAll,
 		allow:      allow,
 		approval:   opts.Approval,
-		publisher:  opts.ApprovalPublisher,
 		userInput:  opts.UserInput,
 		toolEvents: opts.ToolEvents,
 	}
@@ -186,117 +177,52 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 	if toolCallID == "" {
 		toolCallID = "mcp-" + uuid.NewString()
 	}
-	// This request only has an in-process waiter; if the process dies before
-	// the waiter can cancel it, the expiry guard keeps it from living forever
-	// as an answerable zombie. The buffer keeps the waiter's own timeout as
-	// the normal-path winner.
-	expiresAt := time.Now().Add(nativeUserInputWaitTimeout + time.Minute)
-	req, err := s.userInput.CreatePending(ctx, userinput.CreatePendingInput{
-		BotID:                        session.BotID,
-		SessionID:                    session.SessionID,
-		RouteID:                      session.RouteID,
-		ChannelIdentityID:            session.ChannelIdentityID,
-		RequestedByChannelIdentityID: session.ChannelIdentityID,
-		ToolCallID:                   toolCallID,
-		ToolName:                     userinput.ToolNameAskUser,
-		Input:                        arguments,
-		ProviderMetadata: map[string]any{
-			"source":     userinput.ProviderSourceACPMCP,
-			"runtime_id": session.RuntimeID,
-			"stream_id":  session.StreamID,
+	// This request only has an in-process waiter. If the process exits before
+	// the waiter can cancel it, the expiry guard prevents later answers from
+	// being accepted with no consumer left to observe them.
+	expiresAt := time.Now().Add(userinput.DefaultWaitTimeout + time.Minute)
+	result, err := userinput.RunFlow(ctx, s.userInput, userinput.FlowRequest{
+		Input: userinput.CreatePendingInput{
+			BotID:                        session.BotID,
+			SessionID:                    session.SessionID,
+			RouteID:                      session.RouteID,
+			ChannelIdentityID:            session.ChannelIdentityID,
+			RequestedByChannelIdentityID: session.ChannelIdentityID,
+			ToolCallID:                   toolCallID,
+			ToolName:                     userinput.ToolNameAskUser,
+			Input:                        arguments,
+			ProviderMetadata: map[string]any{
+				"source":     userinput.ProviderSourceACPMCP,
+				"runtime_id": session.RuntimeID,
+				"stream_id":  session.StreamID,
+			},
+			SourcePlatform:   session.CurrentPlatform,
+			ReplyTarget:      session.ReplyTarget,
+			ConversationType: session.ConversationType,
+			ExpiresAt:        &expiresAt,
 		},
-		SourcePlatform:   session.CurrentPlatform,
-		ReplyTarget:      session.ReplyTarget,
-		ConversationType: session.ConversationType,
-		ExpiresAt:        &expiresAt,
+		ActorChannelIdentityID: session.ChannelIdentityID,
+		Interactive:            strings.TrimSpace(session.StreamID) != "",
+		WaitTimeout:            userinput.DefaultWaitTimeout,
+		NonInteractiveReason:   "user input requested without an interactive stream",
+		UndeliveredReason:      "user input request was not delivered to the interactive stream",
+		TimeoutReason:          "user input timed out",
+		AbortReason:            "user input aborted",
+		Emit: func(req userinput.Request) bool {
+			return s.emitUserInputRequest(session, req)
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
+	req := result.Request
 	if req.Status != userinput.StatusPending {
 		if len(req.Result) > 0 {
 			return mcp.BuildToolSuccessResult(req.Result), nil
 		}
 		return mcp.BuildToolErrorResult("ask_user request is no longer pending"), nil
 	}
-	if strings.TrimSpace(session.StreamID) == "" {
-		// Cleanup must survive caller cancellation, or the request stays
-		// pending with nobody waiting.
-		cancelCtx, cancelCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancelCancel()
-		canceled, cancelErr := s.userInput.Cancel(cancelCtx, userinput.CancelInput{
-			RequestID:              req.ID,
-			ActorChannelIdentityID: session.ChannelIdentityID,
-			Reason:                 "user input requested without an interactive stream",
-		})
-		if cancelErr != nil {
-			return nil, cancelErr
-		}
-		return mcp.BuildToolSuccessResult(canceled.Result), nil
-	}
-
-	// Register before announcing: the responder treats "no registered waiter"
-	// as an orphaned request, so an instant answer must already see us.
-	// Release before timeout/abort cleanup; cleanup must not look like a live
-	// consumer.
-	release := s.userInput.RegisterWaiter(req.ID)
-	delivered := s.emitUserInputRequest(session, req)
-	if !delivered {
-		release()
-		cancelCtx, cancelCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancelCancel()
-		canceled, cancelErr := s.userInput.Cancel(cancelCtx, userinput.CancelInput{
-			RequestID:              req.ID,
-			ActorChannelIdentityID: session.ChannelIdentityID,
-			Reason:                 "user input request was not delivered to the interactive stream",
-		})
-		if cancelErr != nil {
-			return nil, cancelErr
-		}
-		return mcp.BuildToolSuccessResult(canceled.Result), nil
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, nativeUserInputWaitTimeout)
-	defer cancel()
-	resolved, err := s.userInput.WaitForRegisteredResponse(waitCtx, req.ID)
-	release()
-	if err != nil {
-		// The waiter is gone either way (timeout or aborted run); never leave
-		// the request pending, or the UI keeps offering a question nobody is
-		// waiting on.
-		timedOut := errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil
-		reason := "user input aborted"
-		if timedOut {
-			reason = "user input timed out"
-		}
-		cancelCtx, cancelCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancelCancel()
-		canceled, cancelErr := s.userInput.Cancel(cancelCtx, userinput.CancelInput{
-			RequestID:              req.ID,
-			ActorChannelIdentityID: session.ChannelIdentityID,
-			Reason:                 reason,
-		})
-		if cancelErr != nil {
-			// Cancel can lose to a real answer even when the parent run was
-			// aborted. If the user beat cleanup, deliver that answer instead
-			// of reporting the cleanup race as a tool failure.
-			if late, waitErr := s.userInput.WaitForRegisteredResponse(cancelCtx, req.ID); waitErr == nil &&
-				late.Status != userinput.StatusPending && len(late.Result) > 0 {
-				return mcp.BuildToolSuccessResult(late.Result), nil
-			}
-		}
-		if !timedOut {
-			if cancelErr != nil && s.logger != nil {
-				s.logger.Warn("cancel pending user input after aborted wait failed",
-					slog.String("request_id", req.ID), slog.Any("error", cancelErr))
-			}
-			return nil, err
-		}
-		if cancelErr != nil {
-			return nil, cancelErr
-		}
-		return mcp.BuildToolSuccessResult(canceled.Result), nil
-	}
-	return mcp.BuildToolSuccessResult(resolved.Result), nil
+	return mcp.BuildToolErrorResult("ask_user request is still pending"), nil
 }
 
 type nativeApprovalResult struct {
@@ -304,6 +230,7 @@ type nativeApprovalResult struct {
 	message  string
 }
 
+// requireApproval delegates approval policy and waiting to toolapproval.RunFlow.
 func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (nativeApprovalResult, error) {
 	if s == nil || s.approval == nil {
 		return nativeApprovalResult{approved: true}, nil
@@ -312,88 +239,70 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 	if toolCallID == "" {
 		toolCallID = "mcp-" + uuid.NewString()
 	}
-	input := toolapproval.CreatePendingInput{
-		BotID:                        session.BotID,
-		SessionID:                    session.SessionID,
-		RouteID:                      session.RouteID,
-		ChannelIdentityID:            session.ChannelIdentityID,
-		RequestedByChannelIdentityID: session.ChannelIdentityID,
-		ToolCallID:                   toolCallID,
-		ToolName:                     toolName,
-		ToolInput:                    arguments,
-		SourcePlatform:               session.CurrentPlatform,
-		ReplyTarget:                  session.ReplyTarget,
-		ConversationType:             session.ConversationType,
-	}
-	eval, err := s.approval.EvaluatePolicy(ctx, input)
+	result, err := toolapproval.RunFlow(ctx, s.approval, toolapproval.FlowRequest{
+		Input: toolapproval.CreatePendingInput{
+			BotID:                        session.BotID,
+			SessionID:                    session.SessionID,
+			RouteID:                      session.RouteID,
+			ChannelIdentityID:            session.ChannelIdentityID,
+			RequestedByChannelIdentityID: session.ChannelIdentityID,
+			ToolCallID:                   toolCallID,
+			ToolName:                     toolName,
+			ToolInput:                    arguments,
+			SourcePlatform:               session.CurrentPlatform,
+			ReplyTarget:                  session.ReplyTarget,
+			ConversationType:             session.ConversationType,
+		},
+		Interactive:       strings.TrimSpace(session.StreamID) != "",
+		UndeliveredReason: "tool approval request was not delivered to the interactive stream",
+		RegisterWaiter:    s.approval.RegisterWaiter,
+		Emit: func(req toolapproval.Request) bool {
+			return s.emitToolApprovalRequest(session, req)
+		},
+	})
 	if err != nil {
 		return nativeApprovalResult{}, err
 	}
-	if eval.Decision == toolapproval.DecisionBypass {
+	if result.Approved {
 		return nativeApprovalResult{approved: true}, nil
 	}
+	return nativeApprovalResult{message: toolapproval.RejectionMessage(result)}, nil
+}
 
-	req, err := s.approval.CreatePending(ctx, input)
-	if err != nil {
-		return nativeApprovalResult{}, err
+func (s *NativeToolSource) emitToolApprovalRequest(session mcp.ToolSessionContext, req toolapproval.Request) bool {
+	if s == nil || s.toolEvents == nil {
+		return false
 	}
-	if strings.TrimSpace(session.StreamID) == "" {
-		reason := "tool execution requires approval, but this ACP tool call is not attached to an interactive stream"
-		rejected, rejectErr := s.approval.Reject(ctx, req.ID, session.ChannelIdentityID, reason)
-		if rejectErr != nil {
-			return nativeApprovalResult{}, rejectErr
-		}
-		return nativeApprovalResult{message: rejectedToolApprovalText(rejected.DecisionReason)}, nil
+	delivered := s.toolEvents.AppendToolEvent(session, mcp.ToolStreamEvent{
+		Type:       "tool_approval_request",
+		ToolCallID: req.ToolCallID,
+		ToolName:   req.ToolName,
+		Input:      req.ToolInput,
+		ApprovalID: req.ID,
+		ShortID:    req.ShortID,
+		Status:     toolapproval.NormalizedStatus(req.Status),
+		Metadata: map[string]any{
+			"approval": toolapproval.RequestMetadata(req),
+		},
+	})
+	if !delivered && s.logger != nil {
+		s.logger.Warn("tool approval request not delivered to prompt stream",
+			slog.String("approval_id", req.ID),
+			slog.String("stream_id", session.StreamID))
 	}
-
-	s.publishToolApprovalRequest(session, req)
-	waitCtx, cancel := context.WithTimeout(ctx, nativeToolApprovalWaitTimeout)
-	defer cancel()
-	decided, err := s.approval.WaitForDecision(waitCtx, req.ID)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			rejectCtx, rejectCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer rejectCancel()
-			rejected, rejectErr := s.approval.Reject(rejectCtx, req.ID, session.ChannelIdentityID, "tool approval timed out")
-			if rejectErr != nil {
-				return nativeApprovalResult{}, rejectErr
-			}
-			timeoutReq := req
-			timeoutReq.Status = toolapproval.StatusRejected
-			timeoutReq.DecisionReason = rejected.DecisionReason
-			s.publishToolApprovalRequest(session, timeoutReq)
-			return nativeApprovalResult{message: rejectedToolApprovalText(rejected.DecisionReason)}, nil
-		}
-		return nativeApprovalResult{}, err
-	}
-	decisionReq := req
-	if status := strings.TrimSpace(decided.Status); status != "" {
-		decisionReq.Status = status
-	} else {
-		decisionReq.Status = toolapproval.StatusRejected
-	}
-	decisionReq.DecisionReason = decided.DecisionReason
-	s.publishToolApprovalRequest(session, decisionReq)
-	switch strings.ToLower(strings.TrimSpace(decisionReq.Status)) {
-	case toolapproval.StatusApproved:
-		return nativeApprovalResult{approved: true}, nil
-	case toolapproval.StatusRejected:
-		return nativeApprovalResult{message: rejectedToolApprovalText(decided.DecisionReason)}, nil
-	default:
-		msg := "tool execution was not approved"
-		if status := strings.TrimSpace(decided.Status); status != "" {
-			msg += ": " + status
-		}
-		return nativeApprovalResult{message: msg}, nil
-	}
+	return delivered
 }
 
 // emitUserInputRequest delivers the pending question over the same tool event
 // channel as the gateway's tool_call_start, so the stream converter attaches
-// it to the existing tool call block — exactly like the in-process agent loop.
+// it to the existing tool call block - exactly like the in-process agent loop.
 func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, req userinput.Request) bool {
 	if s == nil || s.toolEvents == nil {
 		return false
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = userinput.StatusPending
 	}
 	delivered := s.toolEvents.AppendToolEvent(session, mcp.ToolStreamEvent{
 		Type:        "user_input_request",
@@ -402,7 +311,7 @@ func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, 
 		Input:       req.Input,
 		UserInputID: req.ID,
 		ShortID:     req.ShortID,
-		Status:      userinput.StatusPending,
+		Status:      status,
 		Metadata:    userinput.DeferredMetadata(req),
 	})
 	if !delivered && s.logger != nil {
@@ -411,80 +320,6 @@ func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, 
 			slog.String("stream_id", session.StreamID))
 	}
 	return delivered
-}
-
-func (s *NativeToolSource) publishToolApprovalRequest(session mcp.ToolSessionContext, req toolapproval.Request) {
-	if s == nil || s.publisher == nil {
-		return
-	}
-	streamID := strings.TrimSpace(session.StreamID)
-	sessionID := strings.TrimSpace(session.SessionID)
-	botID := strings.TrimSpace(session.BotID)
-	if streamID == "" || sessionID == "" || botID == "" {
-		return
-	}
-
-	running := false
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = toolapproval.StatusPending
-	}
-	canApprove := strings.EqualFold(status, toolapproval.StatusPending)
-	messageID := 1000000 + req.ShortID
-	message := map[string]any{
-		"id":           messageID,
-		"type":         "tool",
-		"name":         req.ToolName,
-		"input":        req.ToolInput,
-		"tool_call_id": req.ToolCallID,
-		"running":      &running,
-		"approval": map[string]any{
-			"approval_id": req.ID,
-			"short_id":    req.ShortID,
-			"status":      status,
-			"can_approve": canApprove,
-		},
-	}
-	s.publishAgentStream(botID, sessionID, map[string]any{
-		"type":       "start",
-		"stream_id":  streamID,
-		"session_id": sessionID,
-	})
-	s.publishAgentStream(botID, sessionID, map[string]any{
-		"type":       "message",
-		"stream_id":  streamID,
-		"session_id": sessionID,
-		"data":       message,
-	})
-	s.publishAgentStream(botID, sessionID, map[string]any{
-		"type":       "end",
-		"stream_id":  streamID,
-		"session_id": sessionID,
-	})
-}
-
-func (s *NativeToolSource) publishAgentStream(botID, sessionID string, stream map[string]any) {
-	payload := map[string]any{
-		"session_id": sessionID,
-		"stream":     stream,
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	s.publisher.Publish(messageevent.Event{
-		Type:  messageevent.EventTypeAgentStream,
-		BotID: botID,
-		Data:  data,
-	})
-}
-
-func rejectedToolApprovalText(reason string) string {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return "tool execution rejected by user"
-	}
-	return "tool execution rejected by user: " + reason
 }
 
 func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessionContext) []sdk.Tool {

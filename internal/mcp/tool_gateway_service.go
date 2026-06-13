@@ -55,6 +55,26 @@ func (s *ToolGatewayService) ListTools(ctx context.Context, session ToolSessionC
 	return registry.List(), nil
 }
 
+func (s *ToolGatewayService) LookupTool(ctx context.Context, session ToolSessionContext, toolName string) (ToolDescriptor, bool, error) {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return ToolDescriptor{}, false, nil
+	}
+	registry, err := s.getRegistry(ctx, session, false)
+	if err != nil {
+		return ToolDescriptor{}, false, err
+	}
+	if _, desc, ok := registry.Lookup(toolName); ok {
+		return desc, true, nil
+	}
+	registry, err = s.getRegistry(ctx, session, true)
+	if err != nil {
+		return ToolDescriptor{}, false, err
+	}
+	_, desc, ok := registry.Lookup(toolName)
+	return desc, ok, nil
+}
+
 func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionContext, payload ToolCallPayload) (map[string]any, error) {
 	toolName := strings.TrimSpace(payload.Name)
 	if toolName == "" {

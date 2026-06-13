@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +17,7 @@ import (
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/memohai/memoh/internal/decision"
 )
 
 const (
@@ -28,43 +28,20 @@ const (
 type Service struct {
 	queries dbstore.Queries
 
-	mu          sync.Mutex
-	waiters     map[string][]chan Request
-	waiterCount map[string]int
+	logger *slog.Logger
+
+	waiter *decision.Waiter[Request]
 }
 
-func NewService(_ *slog.Logger, queries dbstore.Queries) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Service{
 		queries: queries,
-		waiters: map[string][]chan Request{},
+		logger:  log.With(slog.String("service", "userinput")),
+		waiter:  decision.NewWaiter[Request](),
 	}
-}
-
-// subscribe registers a waiter for the request before any status check so a
-// concurrent Submit/Cancel cannot slip between check and wait.
-func (s *Service) subscribe(requestID string) (<-chan Request, func()) {
-	ch := make(chan Request, 1)
-	s.mu.Lock()
-	if s.waiters == nil {
-		s.waiters = map[string][]chan Request{}
-	}
-	s.waiters[requestID] = append(s.waiters[requestID], ch)
-	s.mu.Unlock()
-	unsubscribe := func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		chans := s.waiters[requestID]
-		for i, c := range chans {
-			if c == ch {
-				s.waiters[requestID] = append(chans[:i], chans[i+1:]...)
-				break
-			}
-		}
-		if len(s.waiters[requestID]) == 0 {
-			delete(s.waiters, requestID)
-		}
-	}
-	return ch, unsubscribe
 }
 
 // RegisterWaiter records that a caller in this process owns the request's
@@ -72,53 +49,37 @@ func (s *Service) subscribe(requestID string) (<-chan Request, func()) {
 // BEFORE announcing, or an instant response can be misjudged as orphaned.
 // The returned release must run when the wait ends.
 func (s *Service) RegisterWaiter(requestID string) func() {
-	if s == nil {
+	if s == nil || s.waiter == nil {
 		return func() {}
 	}
-	s.mu.Lock()
-	if s.waiterCount == nil {
-		s.waiterCount = map[string]int{}
-	}
-	s.waiterCount[requestID]++
-	s.mu.Unlock()
-	return func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.waiterCount[requestID] > 1 {
-			s.waiterCount[requestID]--
-			return
-		}
-		delete(s.waiterCount, requestID)
-	}
+	return s.waiter.Register(requestID)
 }
 
 // HasWaiter reports whether anyone in this process is currently registered
-// for the request. A pending row without a live waiter (timeout fired, or
-// the process restarted) must not accept answers — recording one would look
-// successful while nothing consumes it.
+// for the request. It is only a local fast-path signal; DB status remains the
+// cross-process source of truth for whether a request can accept a response.
 func (s *Service) HasWaiter(requestID string) bool {
-	if s == nil {
+	return s != nil && s.waiter != nil && s.waiter.Has(requestID)
+}
+
+// CanRespond reports whether the UI should offer a response action for this
+// request in the current server process. ACP/MCP requests are consumed by an
+// in-process waiter, so a pending DB row alone is not enough.
+func (s *Service) CanRespond(req Request) bool {
+	if req.Status != StatusPending {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.waiterCount[requestID] > 0
+	if IsACPMCPRequest(req) {
+		return s.HasWaiter(req.ID)
+	}
+	return true
 }
 
 func (s *Service) notifyResolved(req Request) {
-	if s == nil {
+	if s == nil || s.waiter == nil {
 		return
 	}
-	s.mu.Lock()
-	chans := s.waiters[req.ID]
-	delete(s.waiters, req.ID)
-	s.mu.Unlock()
-	for _, ch := range chans {
-		select {
-		case ch <- req:
-		default:
-		}
-	}
+	s.waiter.Notify(req.ID, req)
 }
 
 // resolveAndNotify converts a terminal-transition row, then wakes any waiters.
@@ -211,7 +172,11 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 				ToolCallID: toolCallID,
 			})
 			if getErr == nil {
-				return requestFromRow(existing), nil
+				existingReq := requestFromRow(existing)
+				if existingReq.Status != StatusPending {
+					return Request{}, ErrAlreadyDecided
+				}
+				return existingReq, nil
 			}
 		}
 		return Request{}, mapLookupErr(err)
@@ -317,49 +282,26 @@ func (s *Service) WaitForRegisteredResponse(ctx context.Context, requestID strin
 }
 
 func (s *Service) waitForResponse(ctx context.Context, requestID string) (Request, error) {
-	resolved, unsubscribe := s.subscribe(requestID)
-	defer unsubscribe()
-
-	req, err := s.Get(ctx, requestID)
-	if err != nil {
-		if ctx.Err() != nil {
-			return s.resolvedAfterContextDone(ctx, requestID, resolved)
+	poll := func(ctx context.Context) (Request, bool, error) {
+		req, err := s.Get(ctx, requestID)
+		if err != nil {
+			return Request{}, false, err
 		}
-		return Request{}, err
-	}
-	if req.Status != StatusPending {
-		return req, nil
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return s.resolvedAfterContextDone(ctx, requestID, resolved)
-		case req := <-resolved:
-			return req, nil
-		case <-ticker.C:
-			req, err := s.Get(ctx, requestID)
-			if err != nil {
-				return Request{}, err
-			}
-			if req.Status != StatusPending {
-				return req, nil
-			}
+		if req.Status != StatusPending {
+			return req, true, nil
 		}
+		return Request{}, false, nil
 	}
+	req, err := s.waiter.Await(ctx, requestID, decision.DefaultFallbackInterval, poll)
+	if err != nil && ctx.Err() != nil {
+		return s.resolvedAfterContextDone(ctx, requestID)
+	}
+	return req, err
 }
 
-func (s *Service) resolvedAfterContextDone(ctx context.Context, requestID string, resolved <-chan Request) (Request, error) {
-	// A resolution may have landed at the same instant (select picks randomly
-	// among ready cases) or committed before its notification was delivered.
+func (s *Service) resolvedAfterContextDone(ctx context.Context, requestID string) (Request, error) {
+	// A resolution may have committed before its notification was delivered.
 	// Prefer the answer over the caller's cancellation.
-	select {
-	case req := <-resolved:
-		return req, nil
-	default:
-	}
 	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	if req, err := s.Get(finalCtx, requestID); err == nil && req.Status != StatusPending {
@@ -426,6 +368,39 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 		RespondedByChannelIdentityID: actorID,
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
+}
+
+func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]Request, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("user input queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	resultJSON, err := json.Marshal(canceledResult(reason))
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.CancelPendingUserInputsBySession(ctx, sqlc.CancelPendingUserInputsBySessionParams{
+		BotID:      pgBotID,
+		SessionID:  pgSessionID,
+		ResultJson: resultJSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		req := requestFromRow(row)
+		requests = append(requests, req)
+		s.notifyResolved(req)
+	}
+	return requests, nil
 }
 
 func (s *Service) Fail(ctx context.Context, requestID string, result map[string]any) (Request, error) {

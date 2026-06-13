@@ -196,6 +196,44 @@ func TestWSStreamRegistry_RejectsDuplicateStreamID(t *testing.T) {
 	}
 }
 
+func TestWSStreamRegistry_HasSessionTracksActiveStreams(t *testing.T) {
+	t.Parallel()
+
+	registry := newWSStreamRegistry()
+	_, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	_, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+
+	if registry.hasSession("session-1") {
+		t.Fatal("empty registry reported active session")
+	}
+	if err := registry.register(&activeWSStream{streamID: "stream-a", sessionID: " session-1 ", cancel: cancelA, abortCh: make(chan struct{}, 1)}); err != nil {
+		t.Fatalf("register stream-a: %v", err)
+	}
+	if err := registry.register(&activeWSStream{streamID: "stream-b", sessionID: "session-2", cancel: cancelB, abortCh: make(chan struct{}, 1)}); err != nil {
+		t.Fatalf("register stream-b: %v", err)
+	}
+
+	if !registry.hasSession("session-1") {
+		t.Fatal("expected session-1 to be active")
+	}
+	if !registry.hasSession(" session-2 ") {
+		t.Fatal("expected trimmed session-2 to be active")
+	}
+	if registry.hasSession("session-3") {
+		t.Fatal("unexpected session-3 activity")
+	}
+
+	registry.finish("stream-a")
+	if registry.hasSession("session-1") {
+		t.Fatal("session-1 should be inactive after finish")
+	}
+	if !registry.hasSession("session-2") {
+		t.Fatal("session-2 should remain active")
+	}
+}
+
 func TestWSIngestAttachments_RewritesContainerPathToAssetRef(t *testing.T) {
 	t.Parallel()
 

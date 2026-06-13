@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/memohai/memoh/internal/conversation"
+	"github.com/memohai/memoh/internal/toolapproval"
 )
 
 type testFlusher struct{}
@@ -56,6 +59,45 @@ func TestParseBeforeParam(t *testing.T) {
 	}
 	if parsed.UnixMilli() != 1735689600000 {
 		t.Fatalf("expected parsed epoch millis 1735689600000, got %d", parsed.UnixMilli())
+	}
+}
+
+func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
+	t.Parallel()
+
+	turns := []conversation.UITurn{
+		{
+			Role: "assistant",
+			Messages: []conversation.UIMessage{
+				{
+					Type:       conversation.UIMessageTool,
+					ToolCallID: "call-1",
+				},
+			},
+		},
+	}
+	approvals := []toolapproval.Request{
+		{
+			ID:         "approval-1",
+			ToolCallID: "call-1",
+			ShortID:    7,
+			Status:     toolapproval.StatusPending,
+		},
+	}
+
+	mergeToolApprovals(turns, approvals, func(req toolapproval.Request) bool {
+		return req.ID == "approval-2"
+	})
+
+	approval := turns[0].Messages[0].Approval
+	if approval == nil {
+		t.Fatal("approval metadata was not merged")
+	}
+	if approval.Status != toolapproval.StatusPending {
+		t.Fatalf("approval status = %q, want pending", approval.Status)
+	}
+	if approval.CanApprove {
+		t.Fatal("mergeToolApprovals ignored injected canApprove function")
 	}
 }
 

@@ -2,29 +2,30 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
 type fakeUserInputService struct {
-	target    userinput.Request
-	resolved  userinput.Request
-	hasWaiter bool
+	target   userinput.Request
+	resolved userinput.Request
 
-	submitCalls int
-	cancelCalls int
-	submitted   userinput.SubmitInput
-	canceled    userinput.CancelInput
-	submitErr   error
-	cancelErr   error
-}
-
-func (f *fakeUserInputService) HasWaiter(string) bool {
-	return f.hasWaiter
+	submitCalls   int
+	cancelCalls   int
+	submitted     userinput.SubmitInput
+	canceled      userinput.CancelInput
+	submitErr     error
+	cancelErr     error
+	submitHook    func()
+	canRespond    bool
+	canRespondSet bool
 }
 
 func (*fakeUserInputService) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
@@ -38,6 +39,9 @@ func (f *fakeUserInputService) ResolveTarget(context.Context, userinput.ResolveI
 func (f *fakeUserInputService) Submit(_ context.Context, input userinput.SubmitInput) (userinput.Request, error) {
 	f.submitCalls++
 	f.submitted = input
+	if f.submitHook != nil {
+		f.submitHook()
+	}
 	if f.submitErr != nil {
 		return userinput.Request{}, f.submitErr
 	}
@@ -51,6 +55,16 @@ func (f *fakeUserInputService) Cancel(_ context.Context, input userinput.CancelI
 		return userinput.Request{}, f.cancelErr
 	}
 	return f.resolved, nil
+}
+
+func (f *fakeUserInputService) CanRespond(req userinput.Request) bool {
+	if f.canRespondSet {
+		return f.canRespond
+	}
+	if userinput.IsACPMCPRequest(req) {
+		return false
+	}
+	return req.Status == userinput.StatusPending
 }
 
 func chatResolvedRequest() userinput.Request {
@@ -67,6 +81,25 @@ func chatResolvedRequest() userinput.Request {
 			},
 		},
 	}
+}
+
+func collectAgentStreamEvents(t *testing.T, ch <-chan WSStreamEvent, count int) []agentpkg.StreamEvent {
+	t.Helper()
+	events := make([]agentpkg.StreamEvent, 0, count)
+	timeout := time.After(2 * time.Second)
+	for len(events) < count {
+		select {
+		case raw := <-ch:
+			var ev agentpkg.StreamEvent
+			if err := json.Unmarshal(raw, &ev); err != nil {
+				t.Fatalf("unmarshal stream event: %v", err)
+			}
+			events = append(events, ev)
+		case <-timeout:
+			t.Fatalf("timed out waiting for stream event %d/%d", len(events)+1, count)
+		}
+	}
+	return events
 }
 
 func TestRespondUserInputContinuesChatSession(t *testing.T) {
@@ -122,9 +155,10 @@ func TestRespondUserInputOnlyAcksACPRequests(t *testing.T) {
 	resolved := chatResolvedRequest()
 	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
 	fake := &fakeUserInputService{
-		target:    userinput.Request{ID: "input-1", Status: userinput.StatusPending, ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP}},
-		resolved:  resolved,
-		hasWaiter: true,
+		target:        userinput.Request{ID: "input-1", Status: userinput.StatusPending, ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP}},
+		resolved:      resolved,
+		canRespond:    true,
+		canRespondSet: true,
 	}
 	resolver := &Resolver{
 		userInput: fake,
@@ -161,8 +195,9 @@ func TestRespondUserInputAcksAlreadyDecidedACPRequest(t *testing.T) {
 			Status:           userinput.StatusPending,
 			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
 		},
-		hasWaiter: true,
-		submitErr: userinput.ErrAlreadyDecided,
+		submitErr:     userinput.ErrAlreadyDecided,
+		canRespond:    true,
+		canRespondSet: true,
 	}
 	resolver := &Resolver{
 		userInput: fake,
@@ -189,22 +224,25 @@ func TestRespondUserInputAcksAlreadyDecidedACPRequest(t *testing.T) {
 	}
 }
 
-func TestRespondUserInputWithoutWaiterCancelsInsteadOfSubmitting(t *testing.T) {
+func TestRespondUserInputACPRequestSubmitsWithLiveWaiter(t *testing.T) {
 	t.Parallel()
 
+	resolved := chatResolvedRequest()
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
 	fake := &fakeUserInputService{
 		target: userinput.Request{
 			ID:               "input-1",
 			Status:           userinput.StatusPending,
 			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
 		},
-		resolved:  chatResolvedRequest(),
-		hasWaiter: false,
+		resolved:      resolved,
+		canRespond:    true,
+		canRespondSet: true,
 	}
 	resolver := &Resolver{
 		userInput: fake,
 		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
-			t.Error("orphaned waiter-backed request must not continue the session")
+			t.Error("ACP request must not continue the session in this response handler")
 			return nil
 		},
 	}
@@ -218,13 +256,189 @@ func TestRespondUserInputWithoutWaiterCancelsInsteadOfSubmitting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("respond user input: %v", err)
 	}
-	// No live waiter would consume the answer; submitting would look
-	// successful while nothing continues. The request must be closed out.
+	if fake.submitCalls != 1 {
+		t.Fatalf("submit calls = %d, want 1", fake.submitCalls)
+	}
+	if fake.cancelCalls != 0 {
+		t.Fatalf("cancel calls = %d, want 0", fake.cancelCalls)
+	}
+	if len(eventCh) != 2 {
+		t.Fatalf("ack events = %d, want 2", len(eventCh))
+	}
+}
+
+func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
+	t.Parallel()
+
+	resolved := chatResolvedRequest()
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	submitted := make(chan struct{})
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:               "input-1",
+			SessionID:        "session-1",
+			ToolCallID:       "call-1",
+			Status:           userinput.StatusPending,
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+		},
+		resolved:      resolved,
+		submitHook:    func() { close(submitted) },
+		canRespond:    true,
+		canRespondSet: true,
+	}
+	resolver := &Resolver{
+		userInput: fake,
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Error("ACP request must resume through the active ACP prompt")
+			return nil
+		},
+	}
+	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
+	if hub == nil {
+		t.Fatal("expected active ACP prompt hub")
+	}
+	defer resolver.unregisterACPActivePrompt("bot-1", "session-1", hub)
+
+	eventCh := make(chan WSStreamEvent, 8)
+	done := make(chan error, 1)
+	go func() {
+		done <- resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		}, eventCh)
+	}()
+
+	select {
+	case <-submitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for submit")
+	}
+	hub.emit(agentpkg.StreamEvent{
+		Type:        agentpkg.EventUserInputRequest,
+		ToolCallID:  "call-1",
+		ToolName:    userinput.ToolNameAskUser,
+		UserInputID: "input-1",
+		Status:      userinput.StatusSubmitted,
+	})
+	hub.emit(agentpkg.StreamEvent{
+		Type:       agentpkg.EventToolCallEnd,
+		ToolCallID: "call-1",
+		ToolName:   userinput.ToolNameAskUser,
+		Result:     map[string]any{"status": userinput.StatusSubmitted},
+	})
+	hub.emit(agentpkg.StreamEvent{Type: agentpkg.EventTextDelta, Delta: "continuing"})
+	hub.emit(agentpkg.StreamEvent{Type: agentpkg.EventEnd})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("respond user input: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ACP prompt reattach")
+	}
+
+	events := collectAgentStreamEvents(t, eventCh, 3)
+	if events[0].Type != agentpkg.EventStart {
+		t.Fatalf("first event = %q, want %q", events[0].Type, agentpkg.EventStart)
+	}
+	if events[1].Type != agentpkg.EventTextDelta || events[1].Delta != "continuing" {
+		t.Fatalf("second event = %#v, want text delta", events[1])
+	}
+	if events[2].Type != agentpkg.EventEnd {
+		t.Fatalf("third event = %q, want %q", events[2].Type, agentpkg.EventEnd)
+	}
+	if fake.submitCalls != 1 || fake.cancelCalls != 0 {
+		t.Fatalf("submit/cancel calls = %d/%d", fake.submitCalls, fake.cancelCalls)
+	}
+}
+
+func TestRespondUserInputACPRequestCanSuppressActivePromptReattach(t *testing.T) {
+	t.Parallel()
+
+	resolved := chatResolvedRequest()
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:               "input-1",
+			SessionID:        "session-1",
+			Status:           userinput.StatusPending,
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+		},
+		resolved:      resolved,
+		canRespond:    true,
+		canRespondSet: true,
+	}
+	resolver := &Resolver{
+		userInput: fake,
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Error("ACP request must not continue the chat session")
+			return nil
+		},
+	}
+	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
+	if hub == nil {
+		t.Fatal("expected active ACP prompt hub")
+	}
+	defer resolver.unregisterACPActivePrompt("bot-1", "session-1", hub)
+
+	eventCh := make(chan WSStreamEvent, 4)
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:                      "bot-1",
+		SessionID:                  "session-1",
+		Answers:                    []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+		SuppressActivePromptAttach: true,
+	}, eventCh)
+	if err != nil {
+		t.Fatalf("respond user input: %v", err)
+	}
+	if fake.submitCalls != 1 || fake.cancelCalls != 0 {
+		t.Fatalf("submit/cancel calls = %d/%d", fake.submitCalls, fake.cancelCalls)
+	}
+	if len(eventCh) != 2 {
+		t.Fatalf("ack events = %d, want 2", len(eventCh))
+	}
+}
+
+func TestRespondUserInputACPRequestWithoutWaiterCancelsInsteadOfSubmitting(t *testing.T) {
+	t.Parallel()
+
+	resolved := chatResolvedRequest()
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	fake := &fakeUserInputService{
+		target: userinput.Request{
+			ID:               "input-1",
+			Status:           userinput.StatusPending,
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+		},
+		resolved: resolved,
+	}
+	resolver := &Resolver{
+		userInput: fake,
+		continueUserInputFn: func(context.Context, userinput.Request, UserInputResponseInput, sdk.ToolResultPart, chan<- WSStreamEvent) error {
+			t.Error("orphaned ACP request must not continue the chat session")
+			return nil
+		},
+	}
+
+	eventCh := make(chan WSStreamEvent, 4)
+	err := resolver.RespondUserInput(context.Background(), UserInputResponseInput{
+		BotID:     "bot-1",
+		SessionID: "session-1",
+		Answers:   []userinput.QuestionAnswer{{QuestionID: "q1", OptionIDs: []string{"q1.o1"}}},
+	}, eventCh)
+	if err != nil {
+		t.Fatalf("respond user input: %v", err)
+	}
 	if fake.submitCalls != 0 {
 		t.Fatalf("submit calls = %d, want 0", fake.submitCalls)
 	}
-	if fake.cancelCalls != 1 || fake.canceled.RequestID != "input-1" {
-		t.Fatalf("cancel calls/input = %d/%#v", fake.cancelCalls, fake.canceled)
+	if fake.cancelCalls != 1 {
+		t.Fatalf("cancel calls = %d, want 1", fake.cancelCalls)
+	}
+	if fake.canceled.RequestID != "input-1" || fake.canceled.Reason == "" {
+		t.Fatalf("canceled input = %#v", fake.canceled)
 	}
 	if len(eventCh) != 2 {
 		t.Fatalf("ack events = %d, want 2", len(eventCh))

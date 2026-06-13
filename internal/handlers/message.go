@@ -217,12 +217,12 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		}
 		if sessionID != "" && h.toolApproval != nil {
 			if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeToolApprovals(items, approvals)
+				mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
 			}
 		}
 		if sessionID != "" && h.userInput != nil {
 			if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-				mergeUserInputs(items, requests, h.userInput.HasWaiter)
+				mergeUserInputs(items, requests, h.userInput.CanRespond)
 			}
 		}
 		return c.JSON(http.StatusOK, map[string]any{
@@ -295,12 +295,12 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	}
 	if h.toolApproval != nil {
 		if approvals, err := h.toolApproval.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeToolApprovals(items, approvals)
+			mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(c.Request().Context(), sessionID))
 		}
 	}
 	if h.userInput != nil {
 		if requests, err := h.userInput.ListBySession(c.Request().Context(), botID, sessionID); err == nil {
-			mergeUserInputs(items, requests, h.userInput.HasWaiter)
+			mergeUserInputs(items, requests, h.userInput.CanRespond)
 		}
 	}
 	return c.JSON(http.StatusOK, map[string]any{
@@ -356,9 +356,28 @@ func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conv
 	return tasks
 }
 
-func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request) {
+func (h *MessageHandler) toolApprovalCanApproveFn(ctx context.Context, sessionID string) func(toolapproval.Request) bool {
+	defaultFn := func(req toolapproval.Request) bool {
+		return toolapproval.CanApprove(req.Status)
+	}
+	if h == nil || h.toolApproval == nil || h.sessionService == nil || strings.TrimSpace(sessionID) == "" {
+		return defaultFn
+	}
+	sess, err := h.sessionService.Get(ctx, sessionID)
+	if err != nil || sess.Type != session.TypeACPAgent {
+		return defaultFn
+	}
+	return h.toolApproval.CanRespond
+}
+
+func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
 	if len(turns) == 0 || len(approvals) == 0 {
 		return
+	}
+	if canApproveFn == nil {
+		canApproveFn = func(req toolapproval.Request) bool {
+			return toolapproval.CanApprove(req.Status)
+		}
 	}
 	byCallID := make(map[string]toolapproval.Request, len(approvals))
 	for _, approval := range approvals {
@@ -386,13 +405,13 @@ func mergeToolApprovals(turns []conversation.UITurn, approvals []toolapproval.Re
 				ShortID:        approval.ShortID,
 				Status:         approval.Status,
 				DecisionReason: approval.DecisionReason,
-				CanApprove:     approval.Status == toolapproval.StatusPending,
+				CanApprove:     canApproveFn(approval),
 			}
 		}
 	}
 }
 
-func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, hasWaiter func(requestID string) bool) {
+func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
 	if len(turns) == 0 || len(requests) == 0 {
 		return
 	}
@@ -418,11 +437,8 @@ func mergeUserInputs(turns []conversation.UITurn, requests []userinput.Request, 
 			running := false
 			msg.Running = &running
 			canRespond := req.Status == userinput.StatusPending
-			// A waiter-backed request whose waiter is gone (timeout or
-			// process restart) would drop any submitted answer; never offer
-			// the form for it.
-			if canRespond && userinput.IsACPMCPRequest(req) && (hasWaiter == nil || !hasWaiter(req.ID)) {
-				canRespond = false
+			if canRespondFn != nil {
+				canRespond = canRespondFn(req)
 			}
 			msg.UserInput = &conversation.UIUserInput{
 				UserInputID: req.ID,

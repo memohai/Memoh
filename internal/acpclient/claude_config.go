@@ -16,11 +16,11 @@ func isClaudeCodeAgent(agentID string) bool {
 	return strings.EqualFold(strings.TrimSpace(agentID), claudeCodeAgentID)
 }
 
-// claudeManagedSettings is written to the managed HOME's .claude/settings.json
-// for Claude Code sessions. The explicit "ask" rule outranks the CLI's
-// built-in auto-allow for "safe" read-only commands (pwd, ls, ...), so every
-// Bash invocation reaches the permission prompt and therefore Memoh's tool
-// approval — Memoh policy stays the single authority over what runs unasked.
+// claudeManagedSettings is the managed settings.json for Claude Code
+// sessions. The explicit "ask" rule outranks the CLI's built-in auto-allow
+// for "safe" read-only commands (pwd, ls, ...), so every Bash invocation
+// reaches the permission prompt and therefore Memoh's tool approval - Memoh
+// policy stays the single authority over what runs unasked.
 var claudeManagedSettings = []byte(`{
   "permissions": {
     "ask": [
@@ -31,12 +31,24 @@ var claudeManagedSettings = []byte(`{
 `)
 
 // WriteClaudeManagedSettings writes the managed Claude Code settings into the
-// given HOME directory via the workspace bridge.
+// given HOME directory (HOME/.claude/settings.json). Used for container
+// sessions, where the managed HOME is fresh and CLAUDE_CONFIG_DIR is unset.
 func WriteClaudeManagedSettings(ctx context.Context, client *bridge.Client, homeDir string) error {
+	return writeClaudeSettingsDir(ctx, client, path.Join(homeDir, ".claude"))
+}
+
+// WriteClaudeManagedConfigDir writes the managed Claude Code settings into an
+// explicit CLAUDE_CONFIG_DIR (configDir/settings.json). Used for local
+// sessions, where HOME stays the host HOME and isolation comes from pointing
+// CLAUDE_CONFIG_DIR at a workspace-scoped directory.
+func WriteClaudeManagedConfigDir(ctx context.Context, client *bridge.Client, configDir string) error {
+	return writeClaudeSettingsDir(ctx, client, configDir)
+}
+
+func writeClaudeSettingsDir(ctx context.Context, client *bridge.Client, dir string) error {
 	if client == nil {
 		return errors.New("workspace bridge client is required")
 	}
-	dir := path.Join(homeDir, ".claude")
 	if err := client.Mkdir(ctx, dir); err != nil {
 		return fmt.Errorf("create Claude settings dir: %w", err)
 	}

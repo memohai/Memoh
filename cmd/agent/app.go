@@ -370,11 +370,12 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, sessionService)
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
+	pool.SetUserInputService(userInput)
 	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -610,13 +611,12 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, eventHub *event.Hub) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore) *agenttools.NativeToolSource {
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
-		AllowAll:          true,
-		Approval:          toolApproval,
-		ApprovalPublisher: eventHub,
-		UserInput:         userInput,
-		ToolEvents:        toolContexts,
+		AllowAll:   true,
+		Approval:   toolApproval,
+		UserInput:  userInput,
+		ToolEvents: toolContexts,
 	})
 }
 

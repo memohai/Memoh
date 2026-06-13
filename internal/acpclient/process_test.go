@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -143,8 +145,7 @@ func TestPrepareProcessEnvLocalCodexSetsScopedCodexHome(t *testing.T) {
 
 func TestPrepareProcessEnvLocalCodexRequiresWorkspaceRoot(t *testing.T) {
 	client, _ := newRecordingBridgeClient(t)
-	// Without a workspace root we cannot isolate CODEX_HOME, so BYOK Codex must
-	// fail loudly rather than silently fall back to the user's real ~/.codex.
+	// Without a workspace root, BYOK Codex cannot isolate CODEX_HOME.
 	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
 		Backend:   WorkspaceBackendLocal,
 		AgentID:   "codex",
@@ -152,6 +153,84 @@ func TestPrepareProcessEnvLocalCodexRequiresWorkspaceRoot(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
+	}
+}
+
+// TestPrepareProcessEnvLocalClaudeSetsScopedConfigDir pins the local Claude
+// isolation for managed modes.
+func TestPrepareProcessEnvLocalClaudeSetsScopedConfigDir(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "claude-code",
+		SetupMode:     SetupModeAPIKey,
+		Env:           []string{"ANTHROPIC_API_KEY=sk-test", "CLAUDE_CONFIG_DIR=/home/user/.claude"},
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+	wantDir := filepath.Join("/home/user/ws", ".memoh-claude")
+	if got := envValue(env, "CLAUDE_CONFIG_DIR"); got != wantDir {
+		t.Fatalf("local Claude CLAUDE_CONFIG_DIR = %q, want %q", got, wantDir)
+	}
+	if envHasKeyValue(env, "CLAUDE_CONFIG_DIR", "/home/user/.claude") {
+		t.Fatalf("host CLAUDE_CONFIG_DIR must be replaced, not kept: %v", env)
+	}
+	if envHasKey(env, "HOME") {
+		t.Fatalf("local Claude must not override HOME: %v", env)
+	}
+	// The isolated dir is seeded before the first session starts.
+	writes := server.writes()
+	if len(writes) != 1 || writes[0].Path != path.Join(wantDir, "settings.json") {
+		t.Fatalf("managed config writes = %#v, want settings.json under %q", writes, wantDir)
+	}
+	if !strings.Contains(string(writes[0].Content), `"ask"`) {
+		t.Fatalf("managed settings content = %s, want ask rule", writes[0].Content)
+	}
+}
+
+func TestPrepareProcessEnvLocalClaudeRequiresWorkspaceRoot(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	// Without a workspace root, managed local Claude cannot isolate
+	// CLAUDE_CONFIG_DIR.
+	_, _, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:   WorkspaceBackendLocal,
+		AgentID:   "claude-code",
+		SetupMode: SetupModeOAuth,
+	})
+	if err == nil {
+		t.Fatalf("prepareProcessEnv() error = nil, want error for empty WorkspaceRoot")
+	}
+	if !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR") {
+		t.Fatalf("error = %v, want CLAUDE_CONFIG_DIR isolation error", err)
+	}
+}
+
+func TestPrepareProcessEnvLocalClaudeSelfKeepsHostConfig(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	// Self mode means "use the host's own Claude login and configuration";
+	// no override, no managed settings write.
+	env, cleanup, err := prepareProcessEnv(context.Background(), client, "/home/user/ws/project", processOptions{
+		Backend:       WorkspaceBackendLocal,
+		AgentID:       "claude-code",
+		SetupMode:     SetupModeSelf,
+		WorkspaceRoot: "/home/user/ws",
+	})
+	if err != nil {
+		t.Fatalf("prepareProcessEnv() error = %v", err)
+	}
+	if cleanup != nil {
+		t.Fatalf("local cleanup should be nil")
+	}
+	if env != nil {
+		t.Fatalf("local self env = %v, want nil (host config used as-is)", env)
+	}
+	if writes := server.writes(); len(writes) != 0 {
+		t.Fatalf("self mode writes = %#v, want none", writes)
 	}
 }
 

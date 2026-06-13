@@ -20,20 +20,21 @@ type userInputService interface {
 	ResolveTarget(ctx context.Context, input userinput.ResolveInput) (userinput.Request, error)
 	Submit(ctx context.Context, input userinput.SubmitInput) (userinput.Request, error)
 	Cancel(ctx context.Context, input userinput.CancelInput) (userinput.Request, error)
-	HasWaiter(requestID string) bool
+	CanRespond(req userinput.Request) bool
 }
 
 type UserInputResponseInput struct {
-	BotID                  string
-	SessionID              string
-	ActorChannelIdentityID string
-	UserInputID            string
-	ExplicitID             string
-	ReplyExternalMessageID string
-	Answers                []userinput.QuestionAnswer
-	Canceled               bool
-	Reason                 string
-	ChatToken              string
+	BotID                      string
+	SessionID                  string
+	ActorChannelIdentityID     string
+	UserInputID                string
+	ExplicitID                 string
+	ReplyExternalMessageID     string
+	Answers                    []userinput.QuestionAnswer
+	Canceled                   bool
+	Reason                     string
+	ChatToken                  string
+	SuppressActivePromptAttach bool
 }
 
 func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
@@ -50,10 +51,8 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		return err
 	}
 
-	if userinput.IsACPMCPRequest(target) && !input.Canceled && !r.userInput.HasWaiter(target.ID) {
-		// No waiter is blocked on this request in this process (its timeout
-		// fired, or the process restarted). Submitting would record an
-		// answer nobody consumes — close it out honestly instead.
+	isACPMCP := userinput.IsACPMCPRequest(target)
+	if isACPMCP && !r.userInput.CanRespond(target) {
 		if _, err := r.userInput.Cancel(ctx, userinput.CancelInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
@@ -62,6 +61,13 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 			return err
 		}
 		return emitApprovalAck(ctx, eventCh)
+	}
+	var activePrompt *acpActivePromptSubscription
+	if isACPMCP && eventCh != nil && !input.SuppressActivePromptAttach {
+		activePrompt, _ = r.subscribeACPActivePrompt(
+			firstNonEmpty(target.BotID, input.BotID),
+			firstNonEmpty(target.SessionID, input.SessionID),
+		)
 	}
 
 	var resolved userinput.Request
@@ -79,14 +85,25 @@ func (r *Resolver) RespondUserInput(ctx context.Context, input UserInputResponse
 		})
 	}
 	if err != nil {
-		if userinput.IsACPMCPRequest(target) && errors.Is(err, userinput.ErrAlreadyDecided) {
+		if activePrompt != nil {
+			activePrompt.release()
+		}
+		if isACPMCP && errors.Is(err, userinput.ErrAlreadyDecided) {
 			return emitApprovalAck(ctx, eventCh)
 		}
 		return err
 	}
 	if userinput.IsACPMCPRequest(resolved) {
 		// An ACP/MCP waiter is blocked on this request and resumes the run
-		// itself; only acknowledge here instead of continuing the session.
+		// itself. When this response stream has reattached to the active ACP
+		// prompt, forward that live continuation so refreshes observe the same
+		// loading/progress shape as native deferred requests.
+		if activePrompt != nil {
+			return forwardACPActivePrompt(ctx, activePrompt, eventCh, acpActivePromptForwardOptions{
+				SkipToolCallID:  target.ToolCallID,
+				SkipUserInputID: target.ID,
+			})
+		}
 		return emitApprovalAck(ctx, eventCh)
 	}
 

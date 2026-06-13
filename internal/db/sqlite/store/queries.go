@@ -46,6 +46,44 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg pgsqlc.App
 	return result, nil
 }
 
+func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg pgsqlc.CancelPendingToolApprovalsBySessionParams) ([]pgsqlc.ToolApprovalRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelPendingToolApprovalsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.CancelPendingToolApprovalsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.ToolApprovalRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (q *Queries) CancelPendingUserInputsBySession(ctx context.Context, arg pgsqlc.CancelPendingUserInputsBySessionParams) ([]pgsqlc.UserInputRequest, error) {
+	if q == nil || q.store == nil || q.store.queries == nil {
+		return nil, errSQLiteQueriesNotConfigured
+	}
+	var sqliteArg sqlitesqlc.CancelPendingUserInputsBySessionParams
+	if err := convertValue(arg, &sqliteArg); err != nil {
+		return nil, err
+	}
+	out, err := q.store.queries.CancelPendingUserInputsBySession(ctx, sqliteArg)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	var result []pgsqlc.UserInputRequest
+	if err := convertValue(out, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (q *Queries) ClearMCPOAuthTokens(ctx context.Context, connectionID pgtype.UUID) error {
 	if q == nil || q.store == nil || q.store.queries == nil {
 		return errSQLiteQueriesNotConfigured

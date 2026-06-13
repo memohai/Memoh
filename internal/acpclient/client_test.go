@@ -15,11 +15,15 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/memohai/twilight-ai/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/memohai/memoh/internal/acpprofile"
+	"github.com/memohai/memoh/internal/agent/event"
 	"github.com/memohai/memoh/internal/config"
+	"github.com/memohai/memoh/internal/mcp"
 	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/workspace/bridge"
 	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
@@ -147,19 +151,19 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 
 	var streamedMu sync.Mutex
 	var streamed strings.Builder
-	var streamedEvents []StreamEvent
+	var streamedEvents []event.StreamEvent
 	startupCtx, cancelStartup := context.WithCancel(context.Background())
 	sess, err := runner.StartSession(startupCtx, StartRequest{
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
-	}, EventSinkFunc(func(event StreamEvent) {
+	}, EventSinkFunc(func(ev event.StreamEvent) {
 		streamedMu.Lock()
 		defer streamedMu.Unlock()
-		streamedEvents = append(streamedEvents, event)
-		if event.Type == StreamEventTextDelta {
-			streamed.WriteString(event.Delta)
+		streamedEvents = append(streamedEvents, ev)
+		if ev.Type == event.TextDelta {
+			streamed.WriteString(ev.Delta)
 		}
 	}))
 	if err != nil {
@@ -177,20 +181,22 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	}
 	streamedMu.Lock()
 	streamedText := streamed.String()
-	streamedEventsSnapshot := append([]StreamEvent(nil), streamedEvents...)
+	streamedEventsSnapshot := append([]event.StreamEvent(nil), streamedEvents...)
 	streamedMu.Unlock()
 	if !strings.Contains(streamedText, "read: hello") {
 		t.Fatalf("streamed text = %q", streamedText)
 	}
 	for _, want := range []string{"read", "write", "exec"} {
-		if !hasStreamedToolEvent(streamedEventsSnapshot, StreamEventToolCallEnd, want) {
+		if !hasStreamedToolEvent(streamedEventsSnapshot, event.ToolCallEnd, want) {
 			t.Fatalf("streamed events missing %s tool end: %#v", want, streamedEventsSnapshot)
 		}
-		if !hasStreamedToolEvent(result.Events, StreamEventToolCallEnd, want) {
+	}
+	for _, want := range []string{"read", "write", "exec"} {
+		if !hasStreamedToolEvent(result.Events, event.ToolCallEnd, want) {
 			t.Fatalf("result events missing %s tool end: %#v", want, result.Events)
 		}
 	}
-	writeEvent := findStreamedToolEvent(streamedEventsSnapshot, StreamEventToolCallEnd, "write")
+	writeEvent := findStreamedToolEvent(streamedEventsSnapshot, event.ToolCallEnd, "write")
 	if writeEvent == nil {
 		t.Fatalf("streamed events missing write tool end: %#v", streamedEventsSnapshot)
 	}
@@ -346,11 +352,11 @@ func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
 	}
 }
 
-func hasStreamedToolEvent(events []StreamEvent, typ StreamEventType, toolName string) bool {
+func hasStreamedToolEvent(events []event.StreamEvent, typ event.StreamEventType, toolName string) bool {
 	return findStreamedToolEvent(events, typ, toolName) != nil
 }
 
-func findStreamedToolEvent(events []StreamEvent, typ StreamEventType, toolName string) *StreamEvent {
+func findStreamedToolEvent(events []event.StreamEvent, typ event.StreamEventType, toolName string) *event.StreamEvent {
 	for i := range events {
 		if events[i].Type == typ && events[i].ToolName == toolName {
 			return &events[i]
@@ -813,6 +819,7 @@ func TestRequestPermissionOnlyAutoAllowsOnce(t *testing.T) {
 	allowed, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
 			Locations: []acp.ToolCallLocation{{Path: "/data/output.txt"}},
+			Kind:      acp.Ptr(acp.ToolKindRead),
 			RawInput:  map[string]any{"path": "/data/output.txt", "cwd": "/data"},
 		},
 		Options: []acp.PermissionOption{
@@ -829,6 +836,7 @@ func TestRequestPermissionOnlyAutoAllowsOnce(t *testing.T) {
 	always, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
 			Locations: []acp.ToolCallLocation{{Path: "/data/output.txt"}},
+			Kind:      acp.Ptr(acp.ToolKindRead),
 			RawInput:  map[string]any{"path": "/data/output.txt", "cwd": "/data"},
 		},
 		Options: []acp.PermissionOption{
@@ -919,7 +927,7 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 		t.Fatalf("events = %#v, want pending and approved approval events", events)
 	}
 	for i, status := range []string{toolapproval.StatusPending, toolapproval.StatusApproved} {
-		if events[i].Type != StreamEventToolApprovalRequest ||
+		if events[i].Type != event.ToolApprovalRequest ||
 			events[i].ToolCallID != "write-1" ||
 			events[i].ApprovalID != "approval-1" ||
 			events[i].Status != status {
@@ -932,52 +940,454 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	}
 }
 
-func TestRequestPermissionWithApprovalRejectsUnknownTool(t *testing.T) {
+type fakeACPToolSource struct {
+	tools []mcp.ToolDescriptor
+}
+
+func (s fakeACPToolSource) ListTools(context.Context, mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+	return append([]mcp.ToolDescriptor(nil), s.tools...), nil
+}
+
+func (fakeACPToolSource) CallTool(context.Context, mcp.ToolSessionContext, string, map[string]any) (map[string]any, error) {
+	return mcp.BuildToolSuccessResult(map[string]any{"ok": true}), nil
+}
+
+func testACPToolGateway(toolNames ...string) *mcp.ToolGatewayService {
+	tools := make([]mcp.ToolDescriptor, 0, len(toolNames))
+	for _, name := range toolNames {
+		tools = append(tools, mcp.ToolDescriptor{
+			Name:        name,
+			InputSchema: map[string]any{"type": "object"},
+		})
+	}
+	return mcp.NewToolGatewayService(nil, []mcp.ToolSource{fakeACPToolSource{tools: tools}})
+}
+
+func TestMCPPermissionPreflightFromRequestShapes(t *testing.T) {
 	t.Parallel()
 
-	callbacks := &clientCallbacks{
-		root:        "/data",
-		cwd:         "/data",
-		virtualRoot: true,
-		approval: &fakeACPToolApproval{
-			decision: toolapproval.Request{Status: toolapproval.StatusApproved},
+	cases := []struct {
+		name       string
+		request    acp.RequestPermissionRequest
+		want       mcpPermissionPreflight
+		wantParsed bool
+	}{
+		{
+			name: "Codex generic title",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					Title: acp.Ptr("Approve MCP tool call"),
+					Kind:  acp.Ptr(acp.ToolKindOther),
+					RawInput: map[string]any{
+						"server_name": memohToolsMCPServerName,
+						"method":      "tools/call",
+						"params":      map[string]any{"name": "ask_user"},
+					},
+				},
+			},
+			want: mcpPermissionPreflight{
+				toolName:        "ask_user",
+				serverName:      memohToolsMCPServerName,
+				hasToolName:     true,
+				supportedMethod: true,
+				shape:           mcpPermissionShapeGenericTitle,
+			},
+			wantParsed: true,
 		},
-		baseSession: ToolSessionContext{
-			BotID:             "bot-1",
-			SessionID:         "session-1",
-			StreamID:          "stream-1",
-			ChannelIdentityID: "channel-1",
+		{
+			name: "Claude Code structured title",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					Title:    acp.Ptr("mcp__Memoh_Tools__ask_user"),
+					Kind:     acp.Ptr(acp.ToolKindOther),
+					RawInput: map[string]any{"questions": []any{}},
+				},
+			},
+			want: mcpPermissionPreflight{
+				toolName:        "ask_user",
+				serverName:      memohToolsMCPServerSlug,
+				hasToolName:     true,
+				supportedMethod: true,
+				shape:           mcpPermissionShapeStructuredTitle,
+			},
+			wantParsed: true,
+		},
+		{
+			name: "plain unknown tool title",
+			request: acp.RequestPermissionRequest{
+				ToolCall: acp.ToolCallUpdate{
+					Title:    acp.Ptr("some_custom_tool"),
+					Kind:     acp.Ptr(acp.ToolKindOther),
+					RawInput: map[string]any{"value": "ok"},
+				},
+			},
 		},
 	}
-	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
 
-	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
-		ToolCall: acp.ToolCallUpdate{
-			ToolCallId: acp.ToolCallId("unknown-1"),
-			Title:      acp.Ptr("Custom approval"),
-			RawInput:   map[string]any{"description": "approve a custom action"},
-		},
-		Options: []acp.PermissionOption{
-			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
-			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RequestPermission error = %v", err)
-	}
-	if resp.Outcome.Cancelled == nil {
-		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := mcpPermissionPreflightFromRequest(tc.request)
+			if ok != tc.wantParsed {
+				t.Fatalf("parsed = %v, want %v", ok, tc.wantParsed)
+			}
+			if !tc.wantParsed {
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("preflight = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestRequestPermissionRejectedByMemohToolApprovalCancelsACP(t *testing.T) {
+// TestRequestPermissionUnmappedToolAllowsWithoutApproval pins the native
+// parity rule for permission requests that do not map to ACP client
+// capabilities: harmless ACP protocol permissions are allowed directly, and
+// MCP preflights are allowed only when their structured tools/call payload
+// points at Memoh's actual ACP tool gateway.
+func TestRequestPermissionUnmappedToolAllowsWithoutApproval(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		toolGateway *mcp.ToolGatewayService
+		toolCall    acp.ToolCallUpdate
+	}{
+		{
+			name:        "ACP MCP gateway tool",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-1"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKind("other")),
+				RawInput: map[string]any{
+					"server_name": memohToolsMCPServerName,
+					"method":      "tools/call",
+					"params": map[string]any{
+						"name":      "native_tool",
+						"arguments": map[string]any{"value": "ok"},
+					},
+				},
+			},
+		},
+		{
+			name:        "ACP MCP gateway wrapped Codex request",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-wrapped"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"id":          "approval-1",
+					"turn_id":     "turn-1",
+					"server_name": memohToolsMCPServerName,
+					"request": map[string]any{
+						"name":      "native_tool",
+						"arguments": map[string]any{"value": "ok"},
+					},
+				},
+			},
+		},
+		{
+			name:        "ACP MCP gateway Codex request without tool name",
+			toolGateway: testACPToolGateway("ask_user"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-codex-request"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"id":          "approval-2",
+					"turn_id":     "turn-1",
+					"server_name": memohToolsMCPServerSlug,
+					"request": map[string]any{
+						"_meta":            map[string]any{},
+						"message":          "choose one",
+						"mode":             "select",
+						"requested_schema": map[string]any{"type": "object"},
+					},
+				},
+			},
+		},
+		{
+			name:        "ACP MCP gateway CallTool params",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-params"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKind("other")),
+				RawInput: map[string]any{
+					"server_name": memohToolsMCPServerName,
+					"name":        "native_tool",
+					"arguments":   map[string]any{"value": "ok"},
+				},
+			},
+		},
+		{
+			name:        "Claude Code MCP title with direct tool args",
+			toolGateway: testACPToolGateway("ask_user"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("claude-ask-user"),
+				Title:      acp.Ptr("mcp__Memoh_Tools__ask_user"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"questions": []any{
+						map[string]any{"id": "answer", "question": "choose one"},
+					},
+				},
+			},
+		},
+		{
+			name: "agent mode switch",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-2"),
+				Title:      acp.Ptr("Exit plan mode"),
+				Kind:       acp.Ptr(acp.ToolKind("switch_mode")),
+				RawInput:   map[string]any{"description": "approve a custom action"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			approval := &fakeACPToolApproval{}
+			callbacks := &clientCallbacks{
+				root:        "/data",
+				cwd:         "/data",
+				virtualRoot: true,
+				approval:    approval,
+				toolGateway: tc.toolGateway,
+				baseSession: ToolSessionContext{
+					BotID:             "bot-1",
+					SessionID:         "session-1",
+					StreamID:          "stream-1",
+					ChannelIdentityID: "channel-1",
+				},
+				events: &toolEventEmitter{},
+			}
+			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+				ToolCall: tc.toolCall,
+				Options: []acp.PermissionOption{
+					{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+					{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+				},
+			})
+			if err != nil {
+				t.Fatalf("RequestPermission error = %v", err)
+			}
+			if resp.Outcome.Selected == nil || resp.Outcome.Selected.OptionId != acp.PermissionOptionId("allow") {
+				t.Fatalf("permission outcome = %#v, want allow once", resp.Outcome)
+			}
+			if got := approval.createdCount(); got != 0 {
+				t.Fatalf("pending approvals created = %d, want 0 (unmapped permissions bypass like native)", got)
+			}
+		})
+	}
+}
+
+func TestRequestPermissionUnknownUnmappedToolCancels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		toolGateway *mcp.ToolGatewayService
+		toolCall    acp.ToolCallUpdate
+	}{
+		{
+			name: "unknown direct title",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-danger"),
+				Title:      acp.Ptr("new_dangerous_tool"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput:   map[string]any{"path": "/data/output.txt"},
+			},
+		},
+		{
+			name:        "generic MCP preflight without structured name",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-no-name"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput:   map[string]any{"description": "please call native_tool"},
+			},
+		},
+		{
+			name:        "generic MCP preflight with free text raw input",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-free-text"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput:   "tools/call native_tool",
+			},
+		},
+		{
+			name:        "generic MCP preflight for unknown tool",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-unknown"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"method": "tools/call",
+					"params": map[string]any{"name": "external_tool"},
+				},
+			},
+		},
+		{
+			name:        "generic MCP preflight without server name",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-missing-server"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"method": "tools/call",
+					"params": map[string]any{
+						"name":      "native_tool",
+						"arguments": map[string]any{"value": "ok"},
+					},
+				},
+			},
+		},
+		{
+			name:        "generic MCP preflight for non-Memoh server",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-external-server"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"id":          "approval-external",
+					"turn_id":     "turn-1",
+					"server_name": "External Tools",
+					"request": map[string]any{
+						"name":      "native_tool",
+						"arguments": map[string]any{"value": "ok"},
+					},
+				},
+			},
+		},
+		{
+			name:        "generic MCP preflight for non-Memoh server without tool name",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-external-server-no-name"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"id":          "approval-external",
+					"turn_id":     "turn-1",
+					"server_name": "External Tools",
+					"request": map[string]any{
+						"message":          "choose one",
+						"mode":             "select",
+						"requested_schema": map[string]any{"type": "object"},
+					},
+				},
+			},
+		},
+		{
+			name:        "generic MCP preflight for unsupported method",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-list"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"method": "tools/list",
+					"params": map[string]any{},
+				},
+			},
+		},
+		{
+			name:        "generic MCP preflight for Memoh server unsupported method",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("mcp-memoh-list"),
+				Title:      acp.Ptr("Approve MCP tool call"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput: map[string]any{
+					"server_name": "Memoh Tools",
+					"method":      "tools/list",
+					"params":      map[string]any{},
+				},
+			},
+		},
+		{
+			name:        "Claude Code MCP title for unknown Memoh tool",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("claude-unknown-tool"),
+				Title:      acp.Ptr("mcp__Memoh_Tools__external_tool"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput:   map[string]any{"value": "ok"},
+			},
+		},
+		{
+			name:        "Claude Code MCP title for non-Memoh server",
+			toolGateway: testACPToolGateway("native_tool"),
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("claude-external-server"),
+				Title:      acp.Ptr("mcp__External_Tools__native_tool"),
+				Kind:       acp.Ptr(acp.ToolKindOther),
+				RawInput:   map[string]any{"value": "ok"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			approval := &fakeACPToolApproval{}
+			callbacks := &clientCallbacks{
+				root:        "/data",
+				cwd:         "/data",
+				virtualRoot: true,
+				approval:    approval,
+				toolGateway: tc.toolGateway,
+				baseSession: ToolSessionContext{
+					BotID:             "bot-1",
+					SessionID:         "session-1",
+					StreamID:          "stream-1",
+					ChannelIdentityID: "channel-1",
+				},
+				events: &toolEventEmitter{},
+			}
+			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+				ToolCall: tc.toolCall,
+				Options: []acp.PermissionOption{
+					{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+					{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+				},
+			})
+			if err != nil {
+				t.Fatalf("RequestPermission error = %v", err)
+			}
+			if resp.Outcome.Cancelled == nil {
+				t.Fatalf("permission outcome = %#v, want cancelled for unknown unmapped permission", resp.Outcome)
+			}
+			if got := approval.createdCount(); got != 0 {
+				t.Fatalf("pending approvals created = %d, want 0 for unknown unmapped permission", got)
+			}
+		})
+	}
+}
+
+func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *testing.T) {
 	t.Parallel()
 
 	approval := &fakeACPToolApproval{
 		decision: toolapproval.Request{
-			ID:      "approval-2",
-			ShortID: 10,
-			Status:  toolapproval.StatusRejected,
+			ID:            "approval-2",
+			ShortID:       10,
+			Status:        toolapproval.StatusRejected,
+			DecidedByUser: true,
 		},
 	}
 	callbacks := &clientCallbacks{
@@ -1010,23 +1420,69 @@ func TestRequestPermissionRejectedByMemohToolApprovalCancelsACP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestPermission error = %v", err)
 	}
-	if resp.Outcome.Cancelled == nil {
-		t.Fatalf("permission outcome = %#v, want cancelled", resp.Outcome)
+	if resp.Outcome.Selected == nil || resp.Outcome.Selected.OptionId != acp.PermissionOptionId("reject") {
+		t.Fatalf("permission outcome = %#v, want reject once", resp.Outcome)
 	}
 	if approval.created.ToolName != "exec" {
 		t.Fatalf("approval input = %#v", approval.created)
 	}
 	var sawRejected bool
-	for _, event := range collector.result().Events {
-		if event.Type == StreamEventToolApprovalRequest &&
-			event.ToolCallID == "exec-1" &&
-			event.ApprovalID == "approval-2" &&
-			event.Status == toolapproval.StatusRejected {
+	for _, ev := range collector.result().Events {
+		if ev.Type == event.ToolApprovalRequest &&
+			ev.ToolCallID == "exec-1" &&
+			ev.ApprovalID == "approval-2" &&
+			ev.Status == toolapproval.StatusRejected {
 			sawRejected = true
 		}
 	}
 	if !sawRejected {
 		t.Fatalf("events = %#v, want rejected approval update", collector.result().Events)
+	}
+}
+
+func TestRequestPermissionSystemRejectedByMemohToolApprovalCancels(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeACPToolApproval{
+		decision: toolapproval.Request{
+			ID:             "approval-system-reject",
+			ShortID:        11,
+			Status:         toolapproval.StatusRejected,
+			DecisionReason: "tool approval timed out",
+		},
+	}
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		virtualRoot: true,
+		approval:    approval,
+		baseSession: ToolSessionContext{
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			StreamID:  "stream-1",
+		},
+		events: &toolEventEmitter{},
+	}
+	collector := newEventCollector()
+	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-1"),
+			Title:      acp.Ptr("Shell"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "rm -rf *"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if resp.Outcome.Cancelled == nil || resp.Outcome.Selected != nil {
+		t.Fatalf("permission outcome = %#v, want cancellation for system rejection", resp.Outcome)
 	}
 }
 
@@ -1052,12 +1508,14 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			StreamID:          "stream-1",
 			ChannelIdentityID: "channel-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1082,17 +1540,17 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 	}
 	events := collector.result().Events
 	var sawStart, sawApproval, sawEnd bool
-	for _, event := range events {
-		if event.ToolCallID != "terminal-term-1" {
+	for _, ev := range events {
+		if ev.ToolCallID != "terminal-term-1" {
 			continue
 		}
-		switch event.Type {
-		case StreamEventToolCallStart:
-			sawStart = event.ToolName == "exec"
-		case StreamEventToolApprovalRequest:
-			sawApproval = event.ApprovalID == "approval-terminal"
-		case StreamEventToolCallEnd:
-			sawEnd = event.ToolName == "exec"
+		switch ev.Type {
+		case event.ToolCallStart:
+			sawStart = ev.ToolName == "exec"
+		case event.ToolApprovalRequest:
+			sawApproval = ev.ApprovalID == "approval-terminal"
+		case event.ToolCallEnd:
+			sawEnd = ev.ToolName == "exec"
 		}
 	}
 	if !sawStart || !sawApproval || !sawEnd {
@@ -1107,9 +1565,10 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 	client := newTestBridgeClient(t, root)
 	approval := &fakeACPToolApproval{
 		decision: toolapproval.Request{
-			ID:      "approval-terminal-reject",
-			ShortID: 12,
-			Status:  toolapproval.StatusRejected,
+			ID:            "approval-terminal-reject",
+			ShortID:       12,
+			Status:        toolapproval.StatusRejected,
+			DecidedByUser: true,
 		},
 	}
 	callbacks := newClientCallbacks(
@@ -1122,11 +1581,13 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:     "bot-1",
 			SessionID: "session-1",
 			StreamID:  "stream-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1137,15 +1598,38 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 	if err == nil || !strings.Contains(err.Error(), "rejected") {
 		t.Fatalf("CreateTerminal error = %v, want rejected", err)
 	}
-	events := collector.result().Events
-	var sawErrorEnd bool
-	for _, event := range events {
-		if event.ToolCallID == "terminal-term-1" && event.Type == StreamEventToolCallEnd && strings.Contains(event.Error, "rejected") {
-			sawErrorEnd = true
+	result := collector.result()
+	events := result.Events
+	startIdx, endIdx := -1, -1
+	for idx, ev := range events {
+		if ev.ToolCallID != "terminal-term-1" {
+			continue
+		}
+		switch ev.Type {
+		case event.ToolCallStart:
+			if startIdx < 0 {
+				startIdx = idx
+			}
+		case event.ToolCallEnd:
+			if strings.Contains(ev.Error, "rejected") {
+				endIdx = idx
+			}
 		}
 	}
-	if !sawErrorEnd {
-		t.Fatalf("events = %#v, want rejected tool_call_end", events)
+	if startIdx < 0 || endIdx < 0 || startIdx > endIdx {
+		t.Fatalf("events = %#v, want terminal tool_call_start before rejected tool_call_end", events)
+	}
+	if len(result.Output) != 2 {
+		t.Fatalf("transcript output = %#v, want assistant tool call and tool result", result.Output)
+	}
+	if result.Output[0].Role != sdk.MessageRoleAssistant {
+		t.Fatalf("first transcript message = %#v, want assistant tool call", result.Output[0])
+	}
+	if _, ok := result.Output[0].Content[0].(sdk.ToolCallPart); !ok {
+		t.Fatalf("first transcript part = %#v, want tool call", result.Output[0].Content[0])
+	}
+	if _, ok := result.Output[1].Content[0].(sdk.ToolResultPart); !ok {
+		t.Fatalf("second transcript part = %#v, want tool result", result.Output[1].Content[0])
 	}
 }
 
@@ -1171,12 +1655,14 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			StreamID:          "stream-1",
 			ChannelIdentityID: "channel-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1219,7 +1705,9 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		nil,
 		true,
 		&fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}},
+		nil,
 		ToolSessionContext{BotID: "bot-1"},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1228,21 +1716,173 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		Path:    "/data/review.txt",
 		Content: "review me\n",
 	})
-	if err == nil || !strings.Contains(err.Error(), "rejected") {
-		t.Fatalf("WriteTextFile error = %v, want rejected", err)
+	// No session identity means nobody could be asked: a system outcome, so
+	// the message must say "not approved", never "rejected by user".
+	if err == nil || !strings.Contains(err.Error(), "not approved") {
+		t.Fatalf("WriteTextFile error = %v, want not approved", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "review.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("written file stat error = %v, want not exist", err)
 	}
 	events := collector.result().Events
 	var sawRejectedEnd bool
-	for _, event := range events {
-		if event.Type == StreamEventToolCallEnd && event.ToolName == "write" && strings.Contains(event.Error, "rejected") {
+	for _, ev := range events {
+		if ev.Type == event.ToolCallEnd && ev.ToolName == "write" && strings.Contains(ev.Error, "not approved") {
 			sawRejectedEnd = true
 		}
 	}
 	if !sawRejectedEnd {
-		t.Fatalf("events = %#v, want rejected tool_call_end", events)
+		t.Fatalf("events = %#v, want not-approved tool_call_end", events)
+	}
+}
+
+// TestRequestPermissionNonInteractiveCancels asserts that system-side
+// rejections (no live stream to ask a user) cancel the permission request
+// instead of reporting a user rejection the agent would keep retrying against.
+func TestRequestPermissionNonInteractiveCancels(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeACPToolApproval{}
+	callbacks := &clientCallbacks{
+		root:        "/data",
+		cwd:         "/data",
+		virtualRoot: true,
+		approval:    approval,
+		baseSession: ToolSessionContext{
+			BotID:             "bot-1",
+			SessionID:         "session-1",
+			ChannelIdentityID: "channel-1",
+			// No StreamID: nobody can see or answer the approval.
+		},
+		events: &toolEventEmitter{},
+	}
+	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-bg"),
+			Title:      acp.Ptr("rm -rf /data/tmp"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "rm -rf /data/tmp"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+			{Kind: acp.PermissionOptionKindRejectOnce, Name: "Reject", OptionId: acp.PermissionOptionId("reject")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if resp.Outcome.Cancelled == nil {
+		t.Fatalf("permission outcome = %#v, want cancelled for system rejection", resp.Outcome)
+	}
+}
+
+// TestRequestPermissionScopeRejectsOutOfRootPaths guards the pre-ask scope
+// gate: every key the native extraction reads a path from (file_path et al.)
+// and diff-carried paths must be confined to the workspace root. A thick
+// agent executes the approved action itself, so this gate is the only chance
+// to stop an out-of-root target before a user is asked to approve it.
+func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		toolCall acp.ToolCallUpdate
+	}{
+		{
+			name: "unmapped path outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("unknown-out-of-scope"),
+				Title:      acp.Ptr("Custom action"),
+				RawInput:   map[string]any{"path": "/etc/passwd"},
+			},
+		},
+		{
+			name: "file_path key outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("write-escape"),
+				Title:      acp.Ptr("Write file"),
+				Kind:       acp.Ptr(acp.ToolKindEdit),
+				RawInput:   map[string]any{"file_path": "/etc/passwd", "content": "x"},
+			},
+		},
+		{
+			name: "filePath key outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("write-escape-camel"),
+				Title:      acp.Ptr("Write file"),
+				Kind:       acp.Ptr(acp.ToolKindEdit),
+				RawInput:   map[string]any{"filePath": "/etc/passwd", "content": "x"},
+			},
+		},
+		{
+			name: "diff path outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("edit-escape-diff"),
+				Title:      acp.Ptr("Edit file"),
+				Kind:       acp.Ptr(acp.ToolKindEdit),
+				Content: []acp.ToolCallContent{{
+					Diff: &acp.ToolCallContentDiff{Path: "/etc/cron.d/evil", NewText: "boom"},
+				}},
+			},
+		},
+		{
+			// cwd/work_dir are the exec-escape keys: a command gated for the
+			// workspace must not run with a working directory outside the root.
+			name: "cwd key outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("exec-escape-cwd"),
+				Title:      acp.Ptr("Run command"),
+				Kind:       acp.Ptr(acp.ToolKindExecute),
+				RawInput:   map[string]any{"command": "ls", "cwd": "/etc"},
+			},
+		},
+		{
+			name: "work_dir key outside root",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: acp.ToolCallId("exec-escape-workdir"),
+				Title:      acp.Ptr("Run command"),
+				Kind:       acp.Ptr(acp.ToolKindExecute),
+				RawInput:   map[string]any{"command": "ls", "work_dir": "/etc"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			approval := &fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}}
+			callbacks := &clientCallbacks{
+				root:        "/data",
+				cwd:         "/data",
+				virtualRoot: true,
+				approval:    approval,
+				baseSession: ToolSessionContext{
+					BotID:             "bot-1",
+					SessionID:         "session-1",
+					StreamID:          "stream-1",
+					ChannelIdentityID: "channel-1",
+				},
+				events: &toolEventEmitter{},
+			}
+			callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+			resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+				ToolCall: tc.toolCall,
+				Options: []acp.PermissionOption{
+					{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+				},
+			})
+			if err != nil {
+				t.Fatalf("RequestPermission error = %v", err)
+			}
+			if resp.Outcome.Cancelled == nil {
+				t.Fatalf("permission outcome = %#v, want cancelled for out-of-root path", resp.Outcome)
+			}
+			if got := approval.createdCount(); got != 0 {
+				t.Fatalf("pending approvals created = %d, want 0 - the user must never be asked to approve an out-of-scope action", got)
+			}
+		})
 	}
 }
 
@@ -1268,12 +1908,14 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			StreamID:          "stream-1",
 			ChannelIdentityID: "channel-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1333,12 +1975,14 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			StreamID:          "stream-1",
 			ChannelIdentityID: "channel-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1392,12 +2036,14 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		nil,
 		true,
 		approval,
+		nil,
 		ToolSessionContext{
 			BotID:             "bot-1",
 			SessionID:         "session-1",
 			StreamID:          "stream-1",
 			ChannelIdentityID: "channel-1",
 		},
+		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
 	callbacks.setPromptState(collector, nil, callbacks.baseSession)
@@ -1501,7 +2147,7 @@ func TestPermissionNativeToolMapsClaudeCodeShapes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			toolCallID, toolName, input, ok := permissionNativeTool(tc.request)
+			toolCallID, toolName, input, ok := permissionNativeTool(tc.request, acpprofile.DefaultToolQuirks())
 			if !ok {
 				t.Fatalf("permissionNativeTool() failed to map %s request", tc.name)
 			}
@@ -1600,35 +2246,35 @@ func TestWriteApprovalGrantKeyIncludesFullContentHashWhenPreviewTruncated(t *tes
 	}
 }
 
-func assertSingleApprovalWithStartEnd(t *testing.T, events []StreamEvent, toolCallID, toolName, approvalID string) {
+func assertSingleApprovalWithStartEnd(t *testing.T, events []event.StreamEvent, toolCallID, toolName, approvalID string) {
 	t.Helper()
 	var pendingApprovals, approvedApprovals, starts, ends int
-	for _, event := range events {
-		if event.ToolCallID != toolCallID {
+	for _, ev := range events {
+		if ev.ToolCallID != toolCallID {
 			continue
 		}
-		switch event.Type {
-		case StreamEventToolApprovalRequest:
-			if event.ApprovalID != approvalID {
-				t.Fatalf("approval event = %#v, want approval id %q", event, approvalID)
+		switch ev.Type {
+		case event.ToolApprovalRequest:
+			if ev.ApprovalID != approvalID {
+				t.Fatalf("approval event = %#v, want approval id %q", ev, approvalID)
 			}
-			switch event.Status {
+			switch ev.Status {
 			case toolapproval.StatusPending:
 				pendingApprovals++
 			case toolapproval.StatusApproved:
 				approvedApprovals++
 			default:
-				t.Fatalf("approval event = %#v, want pending or approved", event)
+				t.Fatalf("approval event = %#v, want pending or approved", ev)
 			}
-		case StreamEventToolCallStart:
+		case event.ToolCallStart:
 			starts++
-			if event.ToolName != toolName {
-				t.Fatalf("start event = %#v, want tool %q", event, toolName)
+			if ev.ToolName != toolName {
+				t.Fatalf("start event = %#v, want tool %q", ev, toolName)
 			}
-		case StreamEventToolCallEnd:
+		case event.ToolCallEnd:
 			ends++
-			if event.ToolName != toolName || event.Error != "" {
-				t.Fatalf("end event = %#v, want successful %q", event, toolName)
+			if ev.ToolName != toolName || ev.Error != "" {
+				t.Fatalf("end event = %#v, want successful %q", ev, toolName)
 			}
 		}
 	}
@@ -1993,9 +2639,14 @@ type fakeACPToolApproval struct {
 	created     toolapproval.CreatePendingInput
 	createCount int
 	decision    toolapproval.Request
+	evaluation  toolapproval.Evaluation
+	waiters     int
 }
 
-func (*fakeACPToolApproval) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
+func (f *fakeACPToolApproval) EvaluatePolicy(context.Context, toolapproval.CreatePendingInput) (toolapproval.Evaluation, error) {
+	if strings.TrimSpace(f.evaluation.Decision) != "" {
+		return f.evaluation, nil
+	}
 	return toolapproval.Evaluation{Decision: toolapproval.DecisionNeedsApproval}, nil
 }
 
@@ -2030,6 +2681,16 @@ func (*fakeACPToolApproval) Reject(context.Context, string, string, string) (too
 	return toolapproval.Request{Status: toolapproval.StatusRejected}, nil
 }
 
+func (f *fakeACPToolApproval) Get(_ context.Context, approvalID string) (toolapproval.Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	decision := f.decision
+	if strings.TrimSpace(decision.ID) == "" {
+		decision.ID = approvalID
+	}
+	return decision, nil
+}
+
 func (f *fakeACPToolApproval) WaitForDecision(_ context.Context, approvalID string) (toolapproval.Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2041,6 +2702,17 @@ func (f *fakeACPToolApproval) WaitForDecision(_ context.Context, approvalID stri
 		decision.Status = toolapproval.StatusApproved
 	}
 	return decision, nil
+}
+
+func (f *fakeACPToolApproval) RegisterWaiter(string) func() {
+	f.mu.Lock()
+	f.waiters++
+	f.mu.Unlock()
+	return func() {
+		f.mu.Lock()
+		f.waiters--
+		f.mu.Unlock()
+	}
 }
 
 func (f *fakeACPToolApproval) createdCount() int {

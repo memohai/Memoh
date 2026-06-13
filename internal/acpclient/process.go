@@ -173,6 +173,17 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		if err != nil {
 			return nil, nil, err
 		}
+		// Managed local Claude points CLAUDE_CONFIG_DIR at a workspace-scoped
+		// dir; seed it with the managed ask rule so the very first session is
+		// already governed by Memoh policy, not by an empty config falling
+		// back to CLI defaults.
+		if configDir, err := localClaudeConfigDir(opts); err != nil {
+			return nil, nil, err
+		} else if configDir != "" {
+			if err := WriteClaudeManagedConfigDir(ctx, client, configDir); err != nil {
+				return nil, nil, fmt.Errorf("prepare Claude managed config: %w", err)
+			}
+		}
 		return env, nil, nil
 	}
 
@@ -191,10 +202,9 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		if err := client.Mkdir(ctx, homeDir); err != nil {
 			return nil, nil, fmt.Errorf("prepare ACP HOME: %w", err)
 		}
-		// Container-only: local-backend Claude inherits the host HOME, where
-		// the user's own settings (and the CLI's safe-command auto-allow)
-		// still apply. Local config isolation is a follow-up (managed
-		// CLAUDE_CONFIG_DIR).
+		// Container sessions isolate via a fresh managed HOME; local sessions
+		// isolate via CLAUDE_CONFIG_DIR (see prepareLocalProcessEnv). Both end
+		// with the same managed ask rule in effect.
 		if isClaudeCodeAgent(opts.AgentID) {
 			if err := WriteClaudeManagedSettings(ctx, client, homeDir); err != nil {
 				return nil, nil, fmt.Errorf("prepare Claude managed settings: %w", err)
@@ -238,9 +248,8 @@ func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
 	if isCodexAgent(opts.AgentID) {
 		// Codex reads its config from $CODEX_HOME (falling back to ~/.codex).
 		// Point it at the bot-scoped managed dir written under the workspace
-		// root so BYOK credentials don't clobber the user's real ~/.codex. If
-		// the root is unknown we must fail loudly: silently skipping the
-		// override would leak BYOK credentials into the user's real ~/.codex.
+		// root so BYOK credentials don't clobber the user's real ~/.codex.
+		// Without a workspace root, isolation cannot be applied safely.
 		root := strings.TrimSpace(opts.WorkspaceRoot)
 		if root == "" {
 			return nil, errors.New("local Codex BYOK requires a workspace root for CODEX_HOME isolation")
@@ -248,10 +257,40 @@ func prepareLocalProcessEnv(opts processOptions) ([]string, error) {
 		env = withoutEnvKeys(env, "CODEX_HOME")
 		env = append(env, "CODEX_HOME="+filepath.Join(root, ".codex"))
 	}
+	if configDir, err := localClaudeConfigDir(opts); err != nil {
+		return nil, err
+	} else if configDir != "" {
+		// Claude Code reads its user-level config from $CLAUDE_CONFIG_DIR
+		// (falling back to ~/.claude). Without the override, the host's own
+		// ~/.claude - defaultMode, hooks, MCP servers, auto-allow rules -
+		// can govern the managed session and bypass Memoh approval. Self
+		// mode keeps host config by design; managed modes require isolation.
+		env = withoutEnvKeys(env, "CLAUDE_CONFIG_DIR")
+		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
+	}
 	if len(env) == 0 {
 		return nil, nil
 	}
 	return env, nil
+}
+
+// localClaudeConfigDir returns the workspace-scoped CLAUDE_CONFIG_DIR for a
+// managed local Claude Code session, "" when no isolation applies (other
+// agents, self mode), or an error when isolation is required but impossible.
+// The dir is named .memoh-claude (not .claude) so it can never be confused
+// with a project-level .claude directory under the same root.
+func localClaudeConfigDir(opts processOptions) (string, error) {
+	if !isClaudeCodeAgent(opts.AgentID) {
+		return "", nil
+	}
+	if normalizeSetupMode(opts.SetupMode) == SetupModeSelf {
+		return "", nil
+	}
+	root := strings.TrimSpace(opts.WorkspaceRoot)
+	if root == "" {
+		return "", errors.New("local Claude Code BYOK requires a workspace root for CLAUDE_CONFIG_DIR isolation")
+	}
+	return filepath.Join(root, ".memoh-claude"), nil
 }
 
 func normalizeSetupMode(mode SetupMode) SetupMode {
