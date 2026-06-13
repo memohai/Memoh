@@ -122,7 +122,7 @@ watch(providers, (list) => {
     <!-- Gallery -->
     <section
       v-if="view === 'list'"
-      class="mx-auto max-w-4xl px-6 pt-10 pb-12"
+      class="mx-auto max-w-3xl px-6 pt-10 pb-12"
     >
       <header class="mb-6 flex items-center justify-between gap-4 px-2">
         <h1 class="text-lg font-semibold">
@@ -234,7 +234,7 @@ watch(providers, (list) => {
     <!-- Detail -->
     <DetailPane
       v-else
-      width="standard"
+      width="narrow"
       :back-label="t('sidebar.providers')"
       @back="backToList()"
     >

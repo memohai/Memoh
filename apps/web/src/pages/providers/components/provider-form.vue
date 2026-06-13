@@ -1,199 +1,207 @@
 <template>
   <form @submit="editProvider">
     <SettingsSection :title="$t('provider.configurationTitle')">
-      <FormField
-        v-slot="{ componentField, errorMessage }"
-        name="name"
-      >
-        <SettingsRow :label="$t('common.name')">
-          <FormItem class="w-80">
-            <FormControl>
-              <Input
-                type="text"
-                :placeholder="$t('common.namePlaceholder')"
-                :aria-label="$t('common.name')"
-                :aria-invalid="!!errorMessage"
-                v-bind="componentField"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </SettingsRow>
-      </FormField>
-
-      <FormField
-        v-slot="{ value, handleChange, errorMessage }"
-        name="client_type"
-      >
-        <SettingsRow :label="$t('provider.clientType')">
-          <FormItem class="w-80">
-            <FormControl>
-              <Select
-                :model-value="value"
-                :aria-invalid="!!errorMessage"
-                @update:model-value="handleChange"
-              >
-                <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="$t('models.clientTypePlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="option in clientTypeOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </SettingsRow>
-      </FormField>
-
-      <FormField
-        v-if="form.values.client_type !== 'github-copilot'"
-        v-slot="{ componentField, errorMessage }"
-        name="base_url"
-      >
-        <SettingsRow :label="$t('provider.url')">
-          <FormItem class="w-80">
-            <FormControl>
-              <Input
-                type="text"
-                :placeholder="$t('provider.urlPlaceholder')"
-                :aria-label="$t('provider.url')"
-                :aria-invalid="!!errorMessage"
-                v-bind="componentField"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </SettingsRow>
-      </FormField>
-
-      <FormField
-        v-if="!isProviderOAuthClientType(form.values.client_type)"
-        v-slot="{ componentField, errorMessage }"
-        name="api_key"
-      >
-        <SettingsRow :label="$t('provider.apiKey')">
-          <FormItem class="w-80">
-            <FormControl>
-              <Input
-                type="password"
-                :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
-                :aria-label="$t('provider.apiKey')"
-                :aria-invalid="!!errorMessage"
-                v-bind="componentField"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </SettingsRow>
-      </FormField>
-
-      <FormField
-        v-if="supportsPromptCache(form.values.client_type)"
-        v-slot="{ value, handleChange, errorMessage }"
-        name="prompt_cache_ttl"
-      >
-        <SettingsRow
-          :label="$t('provider.promptCache.label')"
-          :description="cacheDescription"
+      <!-- Field rows are grouped so the LAST one keeps its `last:border-b-0`
+           (no trailing inset hairline) — the footer below owns the only divider,
+           and it spans full width. -->
+      <div>
+        <FormField
+          v-slot="{ componentField, errorMessage }"
+          name="name"
         >
-          <FormItem>
-            <FormControl>
-              <Select
-                :model-value="value || '5m'"
-                :aria-invalid="!!errorMessage"
-                @update:model-value="handleChange"
-              >
-                <SelectTrigger
-                  size="sm"
-                  class="min-w-36"
-                >
-                  <SelectValue :placeholder="$t('provider.promptCache.label')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5m">
-                    {{ $t('provider.promptCache.option5m') }}
-                  </SelectItem>
-                  <SelectItem value="1h">
-                    {{ $t('provider.promptCache.option1h') }}
-                  </SelectItem>
-                  <SelectItem value="off">
-                    {{ $t('provider.promptCache.optionOff') }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </SettingsRow>
-      </FormField>
-
-      <!-- Actions -->
-      <div class="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
-        <HoverCard :open-delay="120">
-          <HoverCardTrigger as-child>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              loading-mode="manual"
-              :loading="testLoading"
-              :disabled="!props.provider?.id"
-              @click="runTest"
-            >
-              <Spinner
-                v-if="testLoading"
-                class="size-4"
-              />
-              <svg
-                v-else-if="testStatus === 'ok'"
-                class="check-draw size-4 text-success"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path
-                  d="M4 12.5 9 17.5 20 6.5"
-                  pathLength="1"
+          <SettingsRow :label="$t('common.name')">
+            <FormItem class="w-80">
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('common.namePlaceholder')"
+                  :aria-label="$t('common.name')"
+                  :aria-invalid="!!errorMessage"
+                  v-bind="componentField"
                 />
-              </svg>
-              <AlertCircle
-                v-else-if="testStatus === 'error'"
-                class="size-4 text-destructive"
-              />
-              <RefreshCw
-                v-else
-                class="size-4"
-              />
-              {{ $t('provider.testConnection') }}
-            </Button>
-          </HoverCardTrigger>
-          <HoverCardContent
-            v-if="testError"
-            class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
-          >
-            {{ testError }}
-          </HoverCardContent>
-        </HoverCard>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </SettingsRow>
+        </FormField>
 
-        <LoadingButton
-          type="submit"
-          size="sm"
-          :loading="editLoading"
-          :disabled="!hasChanges || !form.meta.value.valid"
+        <FormField
+          v-slot="{ value, handleChange, errorMessage }"
+          name="client_type"
         >
-          {{ $t('provider.saveChanges') }}
-        </LoadingButton>
+          <SettingsRow :label="$t('provider.clientType')">
+            <FormItem class="w-80">
+              <FormControl>
+                <Select
+                  :model-value="value"
+                  :aria-invalid="!!errorMessage"
+                  @update:model-value="handleChange"
+                >
+                  <SelectTrigger class="w-full">
+                    <SelectValue :placeholder="$t('models.clientTypePlaceholder')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="option in clientTypeOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </SettingsRow>
+        </FormField>
+
+        <FormField
+          v-if="form.values.client_type !== 'github-copilot'"
+          v-slot="{ componentField, errorMessage }"
+          name="base_url"
+        >
+          <SettingsRow :label="$t('provider.url')">
+            <FormItem class="w-80">
+              <FormControl>
+                <Input
+                  type="text"
+                  :placeholder="$t('provider.urlPlaceholder')"
+                  :aria-label="$t('provider.url')"
+                  :aria-invalid="!!errorMessage"
+                  v-bind="componentField"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </SettingsRow>
+        </FormField>
+
+        <FormField
+          v-if="!isProviderOAuthClientType(form.values.client_type)"
+          v-slot="{ componentField, errorMessage }"
+          name="api_key"
+        >
+          <SettingsRow :label="$t('provider.apiKey')">
+            <FormItem class="w-80">
+              <FormControl>
+                <Input
+                  type="password"
+                  :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
+                  :aria-label="$t('provider.apiKey')"
+                  :aria-invalid="!!errorMessage"
+                  v-bind="componentField"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </SettingsRow>
+        </FormField>
+
+        <FormField
+          v-if="supportsPromptCache(form.values.client_type)"
+          v-slot="{ value, handleChange, errorMessage }"
+          name="prompt_cache_ttl"
+        >
+          <SettingsRow
+            :label="$t('provider.promptCache.label')"
+            :description="cacheDescription"
+          >
+            <FormItem>
+              <FormControl>
+                <Select
+                  :model-value="value || '5m'"
+                  :aria-invalid="!!errorMessage"
+                  @update:model-value="handleChange"
+                >
+                  <SelectTrigger
+                    size="sm"
+                    class="min-w-36"
+                  >
+                    <SelectValue :placeholder="$t('provider.promptCache.label')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5m">
+                      {{ $t('provider.promptCache.option5m') }}
+                    </SelectItem>
+                    <SelectItem value="1h">
+                      {{ $t('provider.promptCache.option1h') }}
+                    </SelectItem>
+                    <SelectItem value="off">
+                      {{ $t('provider.promptCache.optionOff') }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </SettingsRow>
+        </FormField>
+      </div>
+
+      <!-- Footer row: an inset top rule (same hairline as the field rows above)
+           closes the card; the actions sit on the right. -->
+      <div class="mx-4 flex items-center justify-end gap-2 border-t border-border py-3">
+        <div class="flex items-center gap-2">
+          <HoverCard :open-delay="120">
+            <HoverCardTrigger as-child>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                loading-mode="manual"
+                :loading="testLoading"
+                :disabled="!props.provider?.id"
+                @click="runTest"
+              >
+                <Spinner
+                  v-if="testLoading"
+                  class="size-4"
+                />
+                <svg
+                  v-else-if="testStatus === 'ok'"
+                  class="check-draw size-4 text-success"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 12.5 9 17.5 20 6.5"
+                    pathLength="1"
+                  />
+                </svg>
+                <AlertCircle
+                  v-else-if="testStatus === 'error'"
+                  class="size-4 text-destructive"
+                />
+                <RefreshCw
+                  v-else
+                  class="size-4"
+                />
+                {{ $t('provider.testConnection') }}
+              </Button>
+            </HoverCardTrigger>
+            <HoverCardContent
+              v-if="testError"
+              class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
+            >
+              {{ testError }}
+            </HoverCardContent>
+          </HoverCard>
+
+          <LoadingButton
+            type="submit"
+            size="sm"
+            :loading="editLoading"
+            :disabled="!hasChanges || !form.meta.value.valid"
+          >
+            {{ $t('provider.saveChanges') }}
+          </LoadingButton>
+        </div>
       </div>
     </SettingsSection>
 
@@ -450,7 +458,6 @@ const testStatus = computed(() => {
   if (testResult.value && testResult.value.status !== 'ok') return 'error'
   return 'idle'
 })
-
 const cacheDescription = computed(() =>
   form.values.prompt_cache_ttl === 'off'
     ? t('provider.promptCache.descriptionOff')

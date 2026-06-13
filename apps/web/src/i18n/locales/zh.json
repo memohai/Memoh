@@ -643,7 +643,7 @@
     "searchModelPlaceholder": "搜索模型…",
     "searchNoResults": "没有匹配的模型",
     "emptyTitle": "暂无模型",
-    "emptyDescription": "点击上方按钮为当前服务商添加模型",
+    "emptyDescription": "手动添加，或从该服务商导入完整列表。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "model": "模型 ID",
