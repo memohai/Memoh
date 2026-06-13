@@ -10,6 +10,7 @@
     "./i18n": "./src/i18n.ts",
     "./api-client": "./src/lib/api-client.ts",
     "./lib/desktop-shell": "./src/lib/desktop-shell.ts",
+    "./store/settings": "./src/store/settings/index.ts",
     "./style.css": "./src/style.css",
     "./*": "./src/*"
   },
@@ -40,7 +41,7 @@
     "echarts": "^6.0.0",
     "katex": "^0.16.28",
     "lucide-vue-next": "^0.562.0",
-    "markstream-vue": "1.0.1-beta.1",
+    "markstream-vue": "1.0.1-beta.5",
     "mermaid": "^11.12.2",
     "modern-css-reset": "^1.4.0",
     "moment": "^2.30.1",

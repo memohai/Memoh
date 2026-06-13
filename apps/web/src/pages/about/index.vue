@@ -108,10 +108,12 @@
                 <div class="rounded-md bg-muted/20 p-3 border border-border/50">
                   <div class="about-markdown-container prose prose-xs dark:prose-invert max-w-none *:first:mt-0 text-[0.8rem] leading-relaxed">
                     <MarkdownRender
+                      :key="codeFontRenderKey"
                       :content="cleanMarkdownBody(checkResult.body)"
                       :is-dark="isDark"
                       :typewriter="false"
                       :fade="false"
+                      :code-block-monaco-options="codeBlockMonacoOptions"
                       custom-id="release-notes"
                     />
                   </div>
@@ -200,6 +202,11 @@ const normalizedServerVersion = computed(() => normalizeVersion(serverVersion.va
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
+const codeBlockMonacoOptions = computed(() => ({
+  fontFamily: settingsStore.codeFontStack,
+  fontSize: settingsStore.codeFontSizePx,
+}))
+const codeFontRenderKey = computed(() => settingsStore.codeFontStack)
 
 const checking = ref(false)
 const checkResult = ref<CheckResult | null>(null)

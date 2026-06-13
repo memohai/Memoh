@@ -71,11 +71,30 @@ func TextToString(value pgtype.Text) string {
 	return value.String
 }
 
-// IsUniqueViolation reports whether err is a PostgreSQL unique constraint violation (SQLSTATE 23505).
+// IsUniqueViolation reports whether err is a UNIQUE constraint violation for
+// the configured database drivers:
+//   - PostgreSQL: SQLSTATE 23505
+//   - SQLite (modernc): SQLITE_CONSTRAINT_UNIQUE extended code 2067
+//
+// The string fallback only matches the exact SQLite error prefix so that
+// foreign-key, check, and not-null constraint errors are never mis-classified.
 func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
-	return pgErr.Code == "23505"
+	// SQLite (modernc.org/sqlite): Error.Code() returns the extended result code.
+	// SQLITE_CONSTRAINT_UNIQUE = 2067 (0x813); the generic SQLITE_CONSTRAINT = 19
+	// also covers FK/check/not-null, so we match the specific extended code only.
+	var coded interface{ Code() int }
+	if errors.As(err, &coded) {
+		const sqliteConstraintUnique = 2067
+		return coded.Code() == sqliteConstraintUnique
+	}
+	// String fallback for wrapped errors where the typed interface is unavailable.
+	// SQLite always prefixes unique violations with this exact phrase.
+	if err != nil {
+		return strings.Contains(err.Error(), "UNIQUE constraint failed")
+	}
+	return false
 }

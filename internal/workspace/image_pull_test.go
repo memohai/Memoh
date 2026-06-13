@@ -114,9 +114,9 @@ func TestPrepareImageForCreatePullsThroughRuntimeRouter(t *testing.T) {
 	}
 }
 
-func TestPrepareImageForCreateFallsBackToVNCMirror(t *testing.T) {
-	primary := "docker.io/memohai/vnc:debian"
-	fallback := "memoh.cn/memohai/vnc:debian"
+func TestPrepareImageForCreateFallsBackToWorkspaceMirror(t *testing.T) {
+	primary := "docker.io/memohai/workspace:debian"
+	fallback := "memoh.cn/memohai/workspace:debian"
 	svc := &legacyRouteTestService{
 		getImageErr: ctr.ErrNotFound,
 		pullErrs: map[string]error{
@@ -127,7 +127,7 @@ func TestPrepareImageForCreateFallsBackToVNCMirror(t *testing.T) {
 		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
 	})
 
-	result, err := m.PrepareImageForCreate(context.Background(), "memohai/vnc:debian", nil)
+	result, err := m.PrepareImageForCreate(context.Background(), "memohai/workspace:debian", nil)
 	if err != nil {
 		t.Fatalf("PrepareImageForCreate returned error: %v", err)
 	}
@@ -142,9 +142,9 @@ func TestPrepareImageForCreateFallsBackToVNCMirror(t *testing.T) {
 	}
 }
 
-func TestPrepareImageForCreateSkipsExistingVNCMirror(t *testing.T) {
-	primary := "docker.io/memohai/vnc:debian"
-	fallback := "memoh.cn/memohai/vnc:debian"
+func TestPrepareImageForCreateSkipsExistingWorkspaceMirror(t *testing.T) {
+	primary := "docker.io/memohai/workspace:debian"
+	fallback := "memoh.cn/memohai/workspace:debian"
 	svc := &legacyRouteTestService{
 		getImageErrs: map[string]error{
 			primary: ctr.ErrNotFound,
@@ -154,7 +154,7 @@ func TestPrepareImageForCreateSkipsExistingVNCMirror(t *testing.T) {
 		ImagePullPolicy: config.ImagePullPolicyIfNotPresent,
 	})
 
-	result, err := m.PrepareImageForCreate(context.Background(), "memohai/vnc:debian", nil)
+	result, err := m.PrepareImageForCreate(context.Background(), "memohai/workspace:debian", nil)
 	if err != nil {
 		t.Fatalf("PrepareImageForCreate returned error: %v", err)
 	}

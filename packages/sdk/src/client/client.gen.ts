@@ -244,18 +244,6 @@ export const createClient = (config: Config = {}): Client => {
       body: opts.body as BodyInit | null | undefined,
       headers: opts.headers as unknown as Record<string, string>,
       method,
-      onError: async (error, response, request) => {
-        let finalError = error;
-        for (const fn of interceptors.error.fns) {
-          if (fn) {
-            const nextError = await fn(finalError, response as any, request as any, opts);
-            if (nextError !== undefined && nextError !== null) {
-              finalError = nextError;
-            }
-          }
-        }
-        return finalError;
-      },
       onRequest: async (url, init) => {
         let request = new Request(url, init);
         for (const fn of interceptors.request.fns) {
@@ -264,14 +252,6 @@ export const createClient = (config: Config = {}): Client => {
           }
         }
         return request;
-      },
-      onResponse: async (response, request) => {
-        for (const fn of interceptors.response.fns) {
-          if (fn) {
-            response = await fn(response, request, opts);
-          }
-        }
-        return response;
       },
       serializedBody: getValidRequestBody(opts) as BodyInit | null | undefined,
       url,

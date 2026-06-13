@@ -77,6 +77,32 @@ COPY cmd/bridge/template /assembly/templates
 COPY docker/toolkit/bin /assembly/toolkit/bin
 RUN chmod +x /assembly/toolkit/bin/*
 
+# ---- Optional Stage: standalone toolkit + bridge over TCP (live ACP tests) ----
+# A glibc image (claude-agent-acp requires glibc; the wrapper refuses musl)
+# with the toolkit at the canonical /opt/memoh/toolkit and the bridge served
+# over TCP, so integration tests can drive the REAL container backend (agent
+# runs inside the container with a managed HOME) without the full
+# containerd/server stack. Built via `--target toolkit-acp-bridge-live`.
+FROM debian:bookworm-slim AS toolkit-acp-bridge-live
+# procps provides `ps`, which the live credential-redaction smoke test
+# (TestACPContainerAPIKeyCredentialNotInPSEF) needs to assert managed API keys
+# never surface in the container's process listing.
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates procps \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=toolkit-assembly /assembly/toolkit /opt/memoh/toolkit
+COPY --from=toolkit-assembly /assembly/bridge /usr/local/bin/bridge
+# Templates let the bridge seed /data with AGENTS.md on first boot, matching
+# real workspace containers - agents read AGENTS.md, so the live environment
+# must show them the same files production does.
+COPY --from=toolkit-assembly /assembly/templates /opt/memoh/templates
+RUN mkdir -p /data
+ENV BRIDGE_TCP_ADDR=":1455" \
+    PATH="/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
+WORKDIR /data
+EXPOSE 1455
+ENTRYPOINT ["/usr/local/bin/bridge"]
+
 # ---- Optional Stage 5a: glibc runtime for containerd/Kata deployments ----
 # Host-installed Kata shims are commonly glibc-linked. Keep this as an explicit
 # build target so the default server image remains the Alpine runtime below.

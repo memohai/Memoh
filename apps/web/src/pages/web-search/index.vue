@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, provide, watch, reactive } from 'vue'
+import { computed, ref, provide, watch } from 'vue'
 import { useQuery } from '@pinia/colada'
 import {
   ScrollArea,
@@ -16,10 +16,11 @@ import {
   Button,
   Badge,
 } from '@memohai/ui'
-import { getSearchProviders } from '@memohai/sdk'
-import type { SearchprovidersGetResponse } from '@memohai/sdk'
-import AddSearchProvider from './components/add-search-provider.vue'
+import { getFetchProviders, getSearchProviders } from '@memohai/sdk'
+import type { FetchprovidersGetResponse, SearchprovidersGetResponse } from '@memohai/sdk'
+import AddWebProvider from './components/add-web-provider.vue'
 import ProviderSetting from './components/provider-setting.vue'
+import FetchProviderSetting from './components/fetch-provider-setting.vue'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { Globe, Plus } from 'lucide-vue-next'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -34,12 +35,24 @@ const { data: providerData } = useQuery({
   },
 })
 
-const curProvider = ref<SearchprovidersGetResponse>()
-provide('curSearchProvider', curProvider)
-
-const selectProvider = (value: string) => computed(() => {
-  return curProvider.value?.name === value
+const { data: fetchProviderData } = useQuery({
+  key: () => ['fetch-providers'],
+  query: async () => {
+    const { data } = await getFetchProviders({
+      throwOnError: true,
+    })
+    return data
+  },
 })
+
+type ProviderKind = 'search' | 'fetch'
+
+const curProvider = ref<SearchprovidersGetResponse>()
+const curFetchProvider = ref<FetchprovidersGetResponse>()
+provide('curSearchProvider', curProvider)
+provide('curFetchProvider', curFetchProvider)
+
+const selectedKind = ref<ProviderKind>('search')
 
 const curFilterProvider = computed(() => {
   if (!Array.isArray(providerData.value)) {
@@ -52,9 +65,22 @@ const curFilterProvider = computed(() => {
   })
 })
 
+const curFetchFilterProvider = computed(() => {
+  if (!Array.isArray(fetchProviderData.value)) {
+    return []
+  }
+  return [...fetchProviderData.value].sort((a, b) => {
+    const an = a.provider === 'native' ? 1 : 0
+    const bn = b.provider === 'native' ? 1 : 0
+    if (an !== bn) return bn - an
+    const ae = a.enable !== false ? 1 : 0
+    const be = b.enable !== false ? 1 : 0
+    return be - ae
+  })
+})
+
 watch(curFilterProvider, (providers) => {
-  if (providers.length === 0) {
-    curProvider.value = { id: '' }
+  if (selectedKind.value !== 'search') {
     return
   }
   const currentId = curProvider.value?.id
@@ -65,22 +91,50 @@ watch(curFilterProvider, (providers) => {
       return
     }
   }
-  curProvider.value = providers[0]
+  curProvider.value = providers[0] ?? { id: '' }
 }, {
   immediate: true,
 })
 
-const openStatus = reactive({
-  addOpen: false,
+watch(curFetchFilterProvider, (providers) => {
+  if (selectedKind.value !== 'fetch') {
+    return
+  }
+  const currentId = curFetchProvider.value?.id
+  if (currentId) {
+    const stillExists = providers.find((p) => p.id === currentId)
+    if (stillExists) {
+      curFetchProvider.value = stillExists
+      return
+    }
+  }
+  curFetchProvider.value = providers[0] ?? { id: '' }
+}, {
+  immediate: true,
 })
+
+const addOpen = ref(false)
+
+function selectSearchProvider(item: SearchprovidersGetResponse) {
+  selectedKind.value = 'search'
+  curProvider.value = item
+}
+
+function selectFetchProvider(item: FetchprovidersGetResponse) {
+  selectedKind.value = 'fetch'
+  curFetchProvider.value = item
+}
 </script>
 
 <template>
   <MasterDetailSidebarLayout>
     <template #sidebar-content>
+      <div class="px-3 pb-2 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {{ $t('webSearch.searchProviders') }}
+      </div>
       <SidebarMenu
         v-for="item in curFilterProvider"
-        :key="item.name"
+        :key="`search-${item.id}`"
       >
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -90,13 +144,50 @@ const openStatus = reactive({
             <Toggle
               :class="[
                 'py-4 border',
-                curProvider?.id === item.id ? 'border-border' : 'border-transparent',
+                selectedKind === 'search' && curProvider?.id === item.id ? 'border-border' : 'border-transparent',
               ]"
-              :model-value="selectProvider(item.name as string).value"
+              :model-value="selectedKind === 'search' && curProvider?.id === item.id"
               @update:model-value="(isSelect) => {
-                if (isSelect) {
-                  curProvider = item
-                }
+                if (isSelect) selectSearchProvider(item)
+              }"
+            >
+              <span class="relative shrink-0">
+                <SearchProviderLogo
+                  :provider="item.provider || ''"
+                  size="sm"
+                />
+                <Badge
+                  v-if="item.enable !== false"
+                  class="absolute -bottom-0.5 -right-0.5 size-2.5 p-0 rounded-full ring-2 ring-background"
+                  variant="success"
+                />
+              </span>
+              <span class="truncate">{{ item.name }}</span>
+            </Toggle>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+
+      <div class="px-3 pb-2 pt-5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {{ $t('webSearch.fetchProviders') }}
+      </div>
+      <SidebarMenu
+        v-for="item in curFetchFilterProvider"
+        :key="`fetch-${item.id}`"
+      >
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            as-child
+            class="justify-start py-5! px-4"
+          >
+            <Toggle
+              :class="[
+                'py-4 border',
+                selectedKind === 'fetch' && curFetchProvider?.id === item.id ? 'border-border' : 'border-transparent',
+              ]"
+              :model-value="selectedKind === 'fetch' && curFetchProvider?.id === item.id"
+              @update:model-value="(isSelect) => {
+                if (isSelect) selectFetchProvider(item)
               }"
             >
               <span class="relative shrink-0">
@@ -118,15 +209,21 @@ const openStatus = reactive({
     </template>
 
     <template #sidebar-footer>
-      <AddSearchProvider v-model:open="openStatus.addOpen" />
+      <AddWebProvider v-model:open="addOpen" />
     </template>
 
     <template #detail>
       <ScrollArea
-        v-if="curProvider?.id"
+        v-if="selectedKind === 'search' && curProvider?.id"
         class="max-h-full h-full"
       >
         <ProviderSetting />
+      </ScrollArea>
+      <ScrollArea
+        v-else-if="selectedKind === 'fetch' && curFetchProvider?.id"
+        class="max-h-full h-full"
+      >
+        <FetchProviderSetting />
       </ScrollArea>
       <Empty
         v-else
@@ -140,9 +237,9 @@ const openStatus = reactive({
         <EmptyTitle>{{ $t('webSearch.emptyTitle') }}</EmptyTitle>
         <EmptyDescription>{{ $t('webSearch.emptyDescription') }}</EmptyDescription>
         <EmptyContent>
-          <Button            
+          <Button
             variant="outline"
-            @click="openStatus.addOpen=true"
+            @click="addOpen = true"
           >
             <Plus
               class="mr-1"

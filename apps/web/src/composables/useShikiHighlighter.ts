@@ -74,7 +74,39 @@ export function useShikiHighlighter() {
     }
   }
 
-  return { html, loading, highlight, highlightDiff }
+  async function highlightLanguage(code: string, lang: string, options: {
+    theme?: BundledTheme
+    transparentPre?: boolean
+  } = {}) {
+    loading.value = true
+    try {
+      const hl = await getHighlighter()
+      await ensureLang(hl, lang)
+      html.value = hl.codeToHtml(code, {
+        lang: loadedLangs.has(lang) ? lang : 'plaintext',
+        ...(options.theme
+          ? { theme: options.theme }
+          : { themes: { light: 'github-light', dark: 'github-dark' } }),
+        transformers: options.transparentPre ? [transparentPreTransformer] : undefined,
+      })
+    } catch {
+      html.value = `<pre>${escapeHtml(code)}</pre>`
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return { html, loading, highlight, highlightDiff, highlightLanguage }
+}
+
+const transparentPreTransformer = {
+  pre(node: { properties?: Record<string, unknown> }) {
+    if (node.properties) {
+      delete node.properties.class
+      delete node.properties.className
+      delete node.properties.style
+    }
+  },
 }
 
 function escapeHtml(str: string): string {

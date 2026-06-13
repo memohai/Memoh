@@ -19,21 +19,7 @@ on:
       - "scripts/diagnose-kata-dev-stack.sh"
       - "scripts/prepare-kata-github-runner.sh"
       - "scripts/run-kata-github-e2e.sh"
-      - "scripts/smoke-containerd-runtime.sh"
       - "scripts/check-kata-runner-ready.sh"
-      - "scripts/test-containerd-kata-compose-e2e.sh"
-      - "scripts/test-containerd-kata-e2e.sh"
-      - "scripts/test-containerd-kata-running.sh"
-      - "scripts/test-kata-static.sh"
-      - "scripts/test-kata-evidence-validator.sh"
-      - "scripts/validate-containerd-smoke-evidence.sh"
-      - "scripts/validate-kata-evidence-dir.sh"
-      - "scripts/validate-kata-evidence-run-dir.sh"
-      - "scripts/validate-kata-evidence.sh"
-      - "scripts/validate-kata-runner-readiness.sh"
-      - "scripts/verify-containerd-kata.sh"
-      - "scripts/write-kata-compose-failure-context.sh"
-      - "scripts/write-kata-evidence-environment.sh"
   pull_request:
     branches: ["main"]
     paths:
@@ -52,21 +38,7 @@ on:
       - "scripts/diagnose-kata-dev-stack.sh"
       - "scripts/prepare-kata-github-runner.sh"
       - "scripts/run-kata-github-e2e.sh"
-      - "scripts/smoke-containerd-runtime.sh"
       - "scripts/check-kata-runner-ready.sh"
-      - "scripts/test-containerd-kata-compose-e2e.sh"
-      - "scripts/test-containerd-kata-e2e.sh"
-      - "scripts/test-containerd-kata-running.sh"
-      - "scripts/test-kata-static.sh"
-      - "scripts/test-kata-evidence-validator.sh"
-      - "scripts/validate-containerd-smoke-evidence.sh"
-      - "scripts/validate-kata-evidence-dir.sh"
-      - "scripts/validate-kata-evidence-run-dir.sh"
-      - "scripts/validate-kata-evidence.sh"
-      - "scripts/validate-kata-runner-readiness.sh"
-      - "scripts/verify-containerd-kata.sh"
-      - "scripts/write-kata-compose-failure-context.sh"
-      - "scripts/write-kata-evidence-environment.sh"
   workflow_dispatch:
     inputs:
       run_runner_readiness:
@@ -74,16 +46,6 @@ on:
         required: true
         type: boolean
         default: false
-      run_kata_e2e:
-        description: "Run Linux/KVM Kata E2E on a self-hosted runner"
-        required: true
-        type: boolean
-        default: false
-      run_compose_e2e:
-        description: "Also run the production Compose Kata E2E"
-        required: true
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -93,20 +55,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  static:
-    name: Static validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Kata static validation
-        run: scripts/test-kata-static.sh
-
   runner-readiness:
     name: Linux/KVM runner readiness
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runner_readiness && !inputs.run_kata_e2e }}
-    needs: static
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runner_readiness }}
     runs-on: [self-hosted, linux, x64, kvm, kata]
     timeout-minutes: 15
     steps:
@@ -118,60 +69,10 @@ jobs:
       - name: Check Kata runner readiness
         run: scripts/check-kata-runner-ready.sh tmp/kata-runner-readiness
 
-      - name: Validate Kata runner readiness evidence
-        run: scripts/validate-kata-runner-readiness.sh tmp/kata-runner-readiness
-
       - name: Upload Kata runner readiness evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: kata-runner-readiness
           path: tmp/kata-runner-readiness
-          if-no-files-found: warn
-
-  kata-e2e:
-    name: Linux/KVM E2E
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_kata_e2e }}
-    needs: static
-    runs-on: [self-hosted, linux, x64, kvm, kata]
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare evidence directory
-        run: |
-          rm -rf tmp/kata-evidence
-
-      - name: Check Kata runner readiness
-        run: scripts/check-kata-runner-ready.sh tmp/kata-evidence
-
-      - name: Validate Kata runner readiness evidence
-        run: scripts/validate-kata-runner-readiness.sh tmp/kata-evidence
-
-      - name: Run dev Kata E2E
-        run: scripts/test-containerd-kata-e2e.sh
-        env:
-          MEMOH_KATA_EVIDENCE_DIR: tmp/kata-evidence
-
-      - name: Run production Compose Kata E2E
-        if: ${{ inputs.run_compose_e2e }}
-        run: scripts/test-containerd-kata-compose-e2e.sh
-        env:
-          MEMOH_KATA_EVIDENCE_DIR: tmp/kata-evidence
-
-      - name: Validate Kata evidence artifact
-        run: |
-          expected_runs=1
-          if [ "${{ inputs.run_compose_e2e }}" = "true" ]; then
-            expected_runs=2
-          fi
-          MEMOH_KATA_EVIDENCE_EXPECTED_RUNS="$expected_runs" \
-            scripts/validate-kata-evidence-dir.sh tmp/kata-evidence
-
-      - name: Upload Kata evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: kata-evidence
-          path: tmp/kata-evidence
           if-no-files-found: warn

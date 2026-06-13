@@ -71,7 +71,7 @@
       >
         <BackgroundTaskBlock :task="message.backgroundTask" />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -94,7 +94,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -117,7 +117,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -135,11 +135,14 @@
         >
           <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
             <MarkdownRender
+              :key="chatMarkdownRenderKey('subagent-user')"
               :content="message.text"
               :is-dark="isDark"
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
+              :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
+              :code-block-monaco-options="codeBlockMonacoOptions"
               custom-id="chat-msg"
             />
           </div>
@@ -150,7 +153,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -164,14 +167,14 @@
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
+          class="chat-user-bubble rounded-2xl px-3 py-2 whitespace-pre-wrap break-all"
           :class="isSelf
             ? 'rounded-tr-sm bg-accent text-foreground'
             : 'rounded-tl-sm bg-muted text-foreground'"
         >
           <div
             v-if="message.forward"
-            class="mb-1 text-[11px] font-medium leading-snug text-muted-foreground"
+            class="mb-1 text-[0.6875rem] font-medium leading-snug text-muted-foreground"
           >
             {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
           </div>
@@ -193,14 +196,14 @@
             <div class="flex min-w-0 items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div
-                  class="truncate text-[11px] font-semibold"
+                  class="truncate text-[0.6875rem] font-semibold"
                   :class="isSelf ? 'text-foreground' : 'text-primary'"
                 >
                   {{ replySenderLabel }}
                 </div>
                 <div
                   v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
+                  class="mt-0.5 line-clamp-2 text-[0.6875rem] whitespace-pre-wrap break-words text-muted-foreground"
                 >
                   {{ replyPreviewLabel }}
                 </div>
@@ -224,7 +227,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1 text-right"
+          class="chat-message-meta text-muted-foreground/80 mt-1 text-right"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -289,11 +292,14 @@
               class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
             >
               <MarkdownRender
+                :key="chatMarkdownRenderKey(`assistant-${segment.block.id}`)"
                 :content="segment.block.content"
                 :is-dark="isDark"
                 :smooth-streaming="isBlockStreaming(segment.block)"
                 :typewriter="isBlockStreaming(segment.block)"
                 :fade="isBlockStreaming(segment.block)"
+                :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
+                :code-block-monaco-options="codeBlockMonacoOptions"
                 custom-id="chat-msg"
               />
             </div>
@@ -319,13 +325,13 @@
         <!-- Streaming indicator -->
         <div
           v-if="message.streaming && !hasVisibleAssistantBlocks"
-          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
+          class="chat-message-meta flex items-center gap-2 text-muted-foreground h-6"
         >
           <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -336,9 +342,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, toRef, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime } from '@/utils/date-time'
+import { warmCodeHighlightOnIdle } from '@/utils/warm-code-highlight'
 import { Avatar, AvatarImage, AvatarFallback } from '@memohai/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
@@ -369,15 +376,25 @@ import RollingToolSlot from './rolling-tool-slot.vue'
 import ThinkingBlock from './thinking-block.vue'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility } from '@vueuse/core'
+import { useElementVisibility, useIntersectionObserver } from '@vueuse/core'
 
 
 enableKatex()
 enableMermaid()
+warmCodeHighlightOnIdle()
 
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
+const codeBlockMonacoOptions = computed(() => ({
+  fontFamily: settingsStore.codeFontStack,
+  fontSize: settingsStore.codeFontSizePx,
+}))
+const codeFontRenderKey = computed(() => settingsStore.codeFontStack)
+
+function chatMarkdownRenderKey(scope: string): string {
+  return `${scope}:${codeFontRenderKey.value}`
+}
 
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
@@ -390,18 +407,36 @@ const props = defineProps<{
   botId?: string
   onOpenMedia?: (src: string) => void
   onReplyClick?: (messageId: string) => void
-  isScrolling: boolean
 }>()
 
 const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-watch([isVisible, toRef(props, 'isScrolling')], () => { 
+// Every Monaco-backed code block initializes synchronously on mount with a
+// burst of forced reflows, so a freshly loaded chat used to spin up editors
+// for every offscreen message at once. Keep offscreen blocks as plain <pre>
+// until the message comes within a viewport of being seen. Observe the
+// content-visibility row (our parent) rather than our own root: targets
+// inside a skipped subtree never report as intersecting.
+const heavyBlocksReady = ref(false)
+const messageRow = computed(() => messageEl.value?.parentElement ?? null)
+const { stop: stopHeavyBlocksObserver } = useIntersectionObserver(messageRow, (entries) => {
+  if (!entries.some(entry => entry.isIntersecting)) return
+  stopHeavyBlocksObserver()
+  const flip = () => {
+    heavyBlocksReady.value = true
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(flip, { timeout: 500 })
+  else flip()
+}, { rootMargin: '100% 0px 100% 0px', threshold: 0 })
+
+const codeBlocksAsPre = computed(() => !heavyBlocksReady.value && !props.message.streaming)
+
+watch(isVisible, () => {
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
-  deep:true
 })
 
 const isSelf = computed(() =>

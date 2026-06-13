@@ -30,6 +30,45 @@ func friendlyOps(t *i18n.Localizer, verbKey string) string {
 	return t.T("ops.template", map[string]any{"verb": t.T(verbKey)})
 }
 
+func reasoningLabel(t *i18n.Localizer, cc command.CurrentContext) string {
+	if !cc.ReasoningEnabled {
+		return t.T("cmd.common.off")
+	}
+	reasoning := strings.TrimSpace(cc.ReasoningEffort)
+	if reasoning == "" {
+		return t.T("cmd.common.on")
+	}
+	return reasoning
+}
+
+// appendCurrentContextLines adds the model/heartbeat/reasoning/context summary
+// shown after /new resets a session.
+func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, cc command.CurrentContext) {
+	fmt.Fprintf(b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
+	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != t.T("cmd.common.none") {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelHeartbeat"), hb)
+	}
+	fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
+	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
+		fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
+	}
+}
+
+// formatStartWelcomeMessage builds the /start doorway greeting. It welcomes the
+// user and invites the first message — it does not reset history or dump bot
+// configuration (that is /new's job after a fresh session is created).
+func formatStartWelcomeMessage(t *i18n.Localizer) string {
+	var b strings.Builder
+	b.WriteString(command.MdBold(t.T("startWelcome.title")))
+	b.WriteString("\n\n")
+	b.WriteString(t.T("startWelcome.intro"))
+	fmt.Fprintf(&b, "\n\n%s", t.T("startWelcome.tip", map[string]any{
+		"new":  command.CmdRef("new"),
+		"help": command.CmdRef("help"),
+	}))
+	return b.String()
+}
+
 // formatNewSessionMessage builds the /new confirmation card. A fresh start is an
 // orientation moment, so it confirms the full setup the user is departing with —
 // which model (and its provider) will answer, whether reasoning is on, and how
@@ -38,25 +77,9 @@ func friendlyOps(t *i18n.Localizer, verbKey string) string {
 // and stripped later for non-markdown channels. modeKey is an i18n key under
 // "newSession.*" naming the session mode (e.g. newSession.modeChat).
 func formatNewSessionMessage(t *i18n.Localizer, modeKey string, cc command.CurrentContext) string {
-	reasoning := t.T("cmd.common.off")
-	if cc.ReasoningEnabled {
-		reasoning = strings.TrimSpace(cc.ReasoningEffort)
-		if reasoning == "" {
-			reasoning = t.T("cmd.common.on")
-		}
-	}
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": t.T(modeKey)})))
-	// Display names / enums read better as plain text than monospace.
-	fmt.Fprintf(&b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
-	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != t.T("cmd.common.none") {
-		fmt.Fprintf(&b, "\n- %s: %s", t.T("newSession.labelHeartbeat"), hb)
-	}
-	fmt.Fprintf(&b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoning)
-	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
-		fmt.Fprintf(&b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
-	}
-	// One guiding line: how to change the setup they're departing with.
+	appendCurrentContextLines(&b, t, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
 		"model":     command.CmdRef("model"),
 		"reasoning": command.CmdRef("reasoning"),

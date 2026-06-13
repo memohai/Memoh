@@ -8,8 +8,8 @@
 #
 # Start:
 #   mise run dev:kata
-# Verify:
-#   mise run test:kata
+# Inspect:
+#   mise run dev:kata:status
 
 x-kata-build-proxy: &kata-build-proxy
   HTTP_PROXY: ${MEMOH_KATA_BUILD_HTTP_PROXY:-}

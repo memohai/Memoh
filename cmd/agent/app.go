@@ -61,6 +61,7 @@ import (
 	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
 	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
+	"github.com/memohai/memoh/internal/fetchproviders"
 	"github.com/memohai/memoh/internal/handlers"
 	"github.com/memohai/memoh/internal/healthcheck"
 	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
@@ -576,7 +577,7 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -591,6 +592,7 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		Providers:       providerService,
 		Models:          modelsService,
 		SearchProviders: searchProviderService,
+		FetchProviders:  fetchProviderService,
 		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
 	})
@@ -656,7 +658,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailManager *emailpkg.Manager, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, sessionService *sessionpkg.Service, bgManager *background.Manager) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -672,7 +674,7 @@ func provideToolProviders(log *slog.Logger, channelManager *channel.Manager, reg
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount),
 		agenttools.NewBrowserProvider(log, settingsService, manager, manager, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailManager),
-		agenttools.NewWebFetchProvider(log),
+		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log),
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelManager, registry),
@@ -1015,6 +1017,17 @@ func startSearchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, spService *
 		OnStart: func(ctx context.Context) error {
 			if err := spService.EnsureDefaults(ctx); err != nil {
 				log.Warn("failed to ensure default search providers", slog.Any("error", err))
+			}
+			return nil
+		},
+	})
+}
+
+func startFetchProviderBootstrap(lc fx.Lifecycle, log *slog.Logger, fpService *fetchproviders.Service) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := fpService.EnsureDefaults(ctx); err != nil {
+				log.Warn("failed to ensure default fetch providers", slog.Any("error", err))
 			}
 			return nil
 		},
