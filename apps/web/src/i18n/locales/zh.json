@@ -153,11 +153,11 @@
       "uiFontFamily": "界面字体",
       "uiFontFamilyDescription": "设置界面使用的字体",
       "uiFontSize": "界面字号",
-      "uiFontSizeDescription": "缩放界面文字和控件（16 为跟随浏览器默认）",
+      "uiFontSizeDescription": "缩放界面文字和控件",
       "codeFontFamily": "代码字体",
       "codeFontFamilyDescription": "设置代码编辑器、代码块和终端使用的字体",
       "codeFontSize": "代码字号",
-      "codeFontSizeDescription": "代码编辑器、代码块与终端的字号（13 为各组件默认值）",
+      "codeFontSizeDescription": "代码编辑器、代码块与终端的字号",
       "colorSchemes": {
         "memoh": "Memoh (默认)",
         "ocean": "海洋",

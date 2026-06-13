@@ -157,11 +157,11 @@
       "uiFontFamily": "UI Font Family",
       "uiFontFamilyDescription": "Override the interface font family",
       "uiFontSize": "UI Font Size",
-      "uiFontSizeDescription": "Scales interface text and controls (16 follows the browser default)",
+      "uiFontSizeDescription": "Scales interface text and controls",
       "codeFontFamily": "Code Font Family",
       "codeFontFamilyDescription": "Override the font for code editors, code blocks, and the terminal",
       "codeFontSize": "Code Font Size",
-      "codeFontSizeDescription": "Font size for code editors, code blocks, and the terminal (13 keeps each tool's default)",
+      "codeFontSizeDescription": "Font size for code editors, code blocks, and the terminal",
       "colorSchemes": {
         "memoh": "Memoh",
         "ocean": "Ocean",
