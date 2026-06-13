@@ -738,26 +738,41 @@
   --font-sans: "Inter Variable", "Inter", "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --radius: 0.625rem;
   --scheme-hue: 72;
-  /* Warm elevation ladder (hue 72): red leads at this hue, so it reads warm
-     rather than yellow-green. Rules:
-       1. depth = LIGHTNESS: canvas 251 < card 255 (forward). Sidebar shares the
-          canvas color (no sidebar-specific tint) — it's just the canvas with a
-          divider + its own borderless hover/active fills.
-       2. chroma RISES as surfaces darken (canvas .0024 → active .0052) so deep
-          fills read as a clean warm, not a muddy near-gray.
-     Settings cards use true white so the primary pane reads one layer forward
-     from the warm canvas. */
-  --background: oklch(0.984 0.0024 72);
+  /* Near-neutral WARM surfaces (hue 63, faint chroma — a gentle warm lean so the
+     off-white reads cozy and slightly white-leaning, NOT yellow/red and NOT the
+     cold/green a near-zero chroma drifts to), CONTENT-anchored: the reading
+     surface is the brightest layer and chrome recesses below.
+       · CONTENT splits by role, both the brightest layer:
+           - --card ≈255 WARM near-white: cards, dialogs, popovers, the active dock
+             tab. A hair of the chrome's warm hue so these surfaces stay temperature-
+             coherent with the warm shell (a cold neutral-white card in a warm frame
+             reads clinical).
+           - --surface-editor = PURE white (set in apps/web): the long-read body
+             (chat view, file / monaco editor). Reading content is kept a NEUTRAL
+             white — no tint — so text sits on a clean ground, not a warm wash.
+       · BRIGHT chrome = --background / --sidebar (≈250): page canvas + sidebars,
+         near-white but pulled a hair off pure white so the faint warm tint has
+         headroom to read (at 251 it washed out gray — warmth needs room below white).
+       · GRAY chrome = --background-chrome (≈248), used by --surface-chrome for the
+         dock tab strip + unselected tabs. Only Δ≈2 below the sidebar — a barely-
+         visible-but-present step so an inactive tab differentiates from the white
+         active tab WITHOUT the sidebar reading as the gray one. It is its OWN token
+         (not --secondary) so the tab tone can be tuned apart from the muted chips.
+     --muted/--secondary/--accent sit lower (≈246) as recessed CHIPS — a separate
+     role from the tab strip. chroma stays tiny (≈.0026); sidebar hover/active carry
+     a hair more so they don't go dead gray. */
+  --background: oklch(0.981 0.0026 63);
+  --background-chrome: oklch(0.975 0.0026 63);
   --foreground: oklch(0.21 0.004 95);
-  --card: rgb(255 255 255);
+  --card: oklch(0.998 0.0018 63);
   --card-foreground: oklch(0.21 0.004 95);
   --popover: var(--card);
   --popover-foreground: var(--card-foreground);
   --primary: oklch(0.37 0.015 285);
   --primary-foreground: oklch(0.985 0.001 286);
-  --secondary: oklch(0.964 0.004 72);
+  --secondary: oklch(0.968 0.0026 63);
   --secondary-foreground: oklch(0.21 0.004 95);
-  --muted: oklch(0.964 0.004 72);
+  --muted: oklch(0.968 0.0026 63);
   --muted-foreground: oklch(0.52 0.006 95);
   /* Skeleton shimmer mid-stop — one hair DARKER than --muted (0.967) so the sliding
      seam is a calm shadow, not a bright flash, on the light gray block. */
@@ -765,7 +780,7 @@
   /* Shimmer tile width — narrower than a typical skeleton row so a fresh seam revisits
      each cluster every cycle (short gap). Bigger = longer gap; smaller = denser. */
   --skeleton-tile: 640px;
-  --accent: oklch(0.964 0.004 72);
+  --accent: oklch(0.968 0.0026 63);
   --accent-foreground: oklch(0.21 0.004 95);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0.001 286);
@@ -781,17 +796,16 @@
   --sidebar-foreground: oklch(0.21 0.004 95);
   --sidebar-primary: oklch(0.55 0.22 290);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.93 0.0052 72);
+  --sidebar-accent: oklch(0.945 0.003 63);
   --sidebar-accent-foreground: oklch(0.21 0.004 95);
-  /* Sidebar hover/active live on the 0.984 canvas, NOT pure white, so the old
-   * very-light pair (hover 0.955 / active 0.94) only cleared the bg by ~0.03 and
-   * read as almost no feedback. Both are pulled one notch darker (hover 0.945 →
-   * Δbg 0.039, active 0.93 → Δbg 0.054) for real contrast, keeping the same
-   * hover < active gap (0.015). The bot-switcher TRIGGER avatar (≈0.932) now sits
-   * right under the hover, so it gets a hairline border locally (bot-switcher.vue)
-   * to stay crisp — we deliberately do NOT touch the shared Avatar or the menu
-   * avatars. */
-  --sidebar-hover: oklch(0.945 0.004 72);
+  /* Sidebar sits on the recessed chrome plane (--background ≈250), so its
+   * hover/active fills are read against that near-white base: hover 0.958 (≈243,
+   * Δbg ~7) and active 0.945 (--sidebar-accent, ≈238, Δbg ~12 — the target, no
+   * longer the old Δ17). hover < active gap is preserved. The bot-switcher TRIGGER
+   * avatar (≈0.932) sits below the active fill, so it gets a hairline border
+   * locally (bot-switcher.vue) to stay crisp — we deliberately do NOT touch the
+   * shared Avatar or the menu avatars. */
+  --sidebar-hover: oklch(0.958 0.0025 63);
   --sidebar-border: oklch(0.905 0.0045 72);
   --sidebar-ring: oklch(0.55 0.22 290);
   --scrollbar-thumb: oklch(0 0 0 / 0.18);
@@ -1505,9 +1519,10 @@
 }
 
 :root[data-color-scheme]:not([data-color-scheme="memoh"]) {
-  --background: oklch(0.984 0.0024 var(--scheme-hue));
+  --background: oklch(0.984 0.004 var(--scheme-hue));
+  --background-chrome: oklch(0.978 0.004 var(--scheme-hue));
   --foreground: oklch(0.21 0.004 var(--scheme-hue));
-  --secondary: oklch(0.964 0.004 var(--scheme-hue));
+  --secondary: oklch(0.968 0.004 var(--scheme-hue));
   --secondary-foreground: var(--foreground);
   --muted: var(--secondary);
   --muted-foreground: oklch(0.52 0.006 var(--scheme-hue));
@@ -1519,9 +1534,9 @@
   --popover-foreground: var(--card-foreground);
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
-  --sidebar-accent: oklch(0.93 0.0052 var(--scheme-hue));
+  --sidebar-accent: oklch(0.945 0.004 var(--scheme-hue));
   --sidebar-accent-foreground: var(--foreground);
-  --sidebar-hover: oklch(0.945 0.004 var(--scheme-hue));
+  --sidebar-hover: oklch(0.958 0.0025 var(--scheme-hue));
   --sidebar-border: oklch(0.905 0.0045 var(--scheme-hue));
   --ui-hover: oklch(0.949 0.004 var(--scheme-hue));
   --ui-selected: oklch(0.945 0.005 var(--scheme-hue));
