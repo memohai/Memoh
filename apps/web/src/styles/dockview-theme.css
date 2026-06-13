@@ -166,6 +166,20 @@
   border-right-color: transparent;
 }
 
+/* Same doubling at the strip's HEAD: the nav cluster paints a right seam against
+ * the first tab (prefix-header-actions.vue, first group only), but when that first
+ * tab is active it ALSO paints its own border-left frame — the two stack into a 2px
+ * line. When the first tab is active, retract the nav seam; the active tab's frame
+ * is then the single 1px line. Non-active first tab keeps the nav seam (its own
+ * left edge is transparent). Non-first groups have no nav seam, so they're untouched. */
+.dockview-theme-memoh
+  .dv-tabs-and-actions-container:has(.dv-tabs-container > .dv-tab:first-child.dv-active-tab)
+  .dv-pre-actions-container
+  .dv-vue-part
+  > div {
+  border-right-color: transparent;
+}
+
 /* Dockview paints its tab "selection" box as a PSEUDO-ELEMENT outline, not as an
  * outline on the tab element itself: it ships `.dv-tab:focus::after` /
  * `:focus-within::after` with `outline: 1px solid var(--dv-tab-divider-color)

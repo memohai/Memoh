@@ -17,6 +17,7 @@
       :get-tab-context-menu-items="getTabContextMenuItems"
       @ready="onReady"
     />
+    <TabCloseConfirm />
   </div>
 </template>
 
@@ -47,6 +48,7 @@ import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
 import PrefixHeaderActions from './dockview/prefix-header-actions.vue'
+import TabCloseConfirm from './dockview/tab-close-confirm.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
@@ -99,28 +101,24 @@ const memohTheme: DockviewTheme = {
   dndTabIndicator: 'fill',
 }
 
+// Closes route through the store guard so dirty files prompt to save instead of
+// discarding edits silently — close-others / close-all walk the dialog per file.
 function getTabContextMenuItems({ panel, group }: GetTabContextMenuItemsParams): ContextMenuItem[] {
   return [
     {
       label: t('chat.tabMenu.close'),
-      action: () => panel.api.close(),
+      action: () => store.requestCloseTab(panel.id),
     },
     {
       label: t('chat.tabMenu.closeOthers'),
       disabled: group.panels.length <= 1,
-      action: () => {
-        for (const other of [...group.panels]) {
-          if (other.id !== panel.id) other.api.close()
-        }
-      },
+      action: () => store.requestCloseTabs(
+        group.panels.filter(other => other.id !== panel.id).map(other => other.id),
+      ),
     },
     {
       label: t('chat.tabMenu.closeAll'),
-      action: () => {
-        for (const other of [...group.panels]) {
-          other.api.close()
-        }
-      },
+      action: () => store.requestCloseTabs(group.panels.map(other => other.id)),
     },
   ]
 }

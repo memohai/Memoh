@@ -150,7 +150,7 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('chat')?.title).toBe('Renamed')
   })
 
-  it('marks file panels dirty through the tab title', () => {
+  it('tracks file dirty state without mangling the tab title', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
@@ -160,10 +160,68 @@ describe('workspace layout store', () => {
     expect(panel?.title).toBe('todo.md')
 
     store.setFileDirty('file:/data/notes/todo.md', true)
-    expect(panel?.title).toBe('● todo.md')
+    expect(store.fileDirty['file:/data/notes/todo.md']).toBe(true)
+    expect(store.dirtyFileCount).toBe(1)
+    // Title stays the clean base name — the dot is now a tab-rendered affordance.
+    expect(panel?.title).toBe('todo.md')
 
     store.setFileDirty('file:/data/notes/todo.md', false)
-    expect(panel?.title).toBe('todo.md')
+    expect(store.fileDirty['file:/data/notes/todo.md']).toBeUndefined()
+    expect(store.dirtyFileCount).toBe(0)
+  })
+
+  it('queues a dirty tab for confirmation instead of closing it', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openFile('/data/a.md')
+    store.setFileDirty('file:/data/a.md', true)
+
+    // A dirty close is blocked; the tab is queued for the confirm dialog.
+    store.requestCloseTab('file:/data/a.md')
+    expect(dock.getPanel('file:/data/a.md')).toBeTruthy()
+    expect(store.pendingClose?.panelId).toBe('file:/data/a.md')
+    expect(store.pendingClose?.title).toBe('a.md')
+
+    // Discard closes it and clears the queue.
+    await store.resolvePendingClose('discard')
+    expect(dock.getPanel('file:/data/a.md')).toBeUndefined()
+    expect(store.pendingClose).toBeNull()
+  })
+
+  it('saves a dirty tab via its handler before closing', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openFile('/data/b.md')
+    store.setFileDirty('file:/data/b.md', true)
+    const save = vi.fn(async () => true)
+    store.registerFileSaveHandler('file:/data/b.md', save)
+
+    store.requestCloseTab('file:/data/b.md')
+    await store.resolvePendingClose('save')
+
+    expect(save).toHaveBeenCalledOnce()
+    expect(dock.getPanel('file:/data/b.md')).toBeUndefined()
+  })
+
+  it('keeps a dirty tab open when its save fails', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openFile('/data/c.md')
+    store.setFileDirty('file:/data/c.md', true)
+    store.registerFileSaveHandler('file:/data/c.md', async () => false)
+
+    store.requestCloseTab('file:/data/c.md')
+    await store.resolvePendingClose('save')
+
+    // Save failed → tab stays, but it leaves the queue so the dialog dismisses.
+    expect(dock.getPanel('file:/data/c.md')).toBeTruthy()
+    expect(store.pendingClose).toBeNull()
   })
 
   it('switches the active view and keeps the sidebar open', () => {

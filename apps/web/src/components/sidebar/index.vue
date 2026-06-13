@@ -63,11 +63,20 @@
         :aria-pressed="sidebarView === view.id"
         @click="store.selectSidebarView(view.id)"
       >
-        <component
-          :is="view.icon"
-          :stroke-width="1.75"
-          class="size-[18px] shrink-0"
-        />
+        <span class="relative shrink-0">
+          <component
+            :is="view.icon"
+            :stroke-width="1.75"
+            class="size-[18px] shrink-0"
+          />
+          <!-- Unsaved files live on the Files view, so a count here surfaces them
+               even while the user is in Chat (mirrors VS Code's explorer badge). -->
+          <BadgeCount
+            v-if="view.id === 'files' && dirtyFileCount > 0"
+            :count="dirtyFileCount"
+            class="pointer-events-none absolute -right-1.5 -top-1 h-[13px] min-w-[13px] text-[9px]"
+          />
+        </span>
         <span
           class="grid transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)]"
           :class="sidebarView === view.id ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'"
@@ -159,7 +168,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { Files, MessageCircle, Search, Settings } from 'lucide-vue-next'
-import { Button } from '@memohai/ui'
+import { BadgeCount, Button } from '@memohai/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -182,7 +191,7 @@ const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
-const { sidebarView, sidebarWidth, workbenchOpen } = storeToRefs(store)
+const { sidebarView, sidebarWidth, workbenchOpen, dirtyFileCount } = storeToRefs(store)
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
 

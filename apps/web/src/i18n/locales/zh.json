@@ -550,6 +550,12 @@
       "closeAll": "关闭全部"
     },
     "tabClose": "关闭标签页",
+    "unsaved": {
+      "title": "是否保存对 {name} 的更改？",
+      "description": "如果不保存，你的更改将会丢失。",
+      "save": "保存",
+      "dontSave": "不保存"
+    },
     "openPreviewToSide": "在侧边打开预览",
     "previewTab": "预览：{name}",
     "sessionInfoRingAria": "会话信息",
