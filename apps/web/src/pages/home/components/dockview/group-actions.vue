@@ -26,21 +26,21 @@
       <DropdownMenuContent align="end">
         <DropdownMenuItem
           v-if="canWorkspaceExec"
-          @select="store.openTerminal()"
+          @select="store.openTerminal(props.params.group.id)"
         >
           <TerminalSquare class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.newTerminal') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canManage && !isLocalWorkspace"
-          @select="store.openBrowser()"
+          @select="store.openBrowser(props.params.group.id)"
         >
           <Globe class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openBrowser') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canManage && !isLocalWorkspace"
-          @select="store.openDisplay()"
+          @select="store.openDisplay(props.params.group.id)"
         >
           <Monitor class="mr-2 size-3.5" />
           {{ t('chat.tabBarToolkit.openDisplay') }}
@@ -117,6 +117,6 @@ function openPreviewToSide() {
   const path = previewPath.value
   if (!path) return
   const name = path.slice(path.lastIndexOf('/') + 1)
-  store.openPreview(path, t('chat.previewTab', { name }))
+  store.openPreview(path, t('chat.previewTab', { name }), props.params.group.id)
 }
 </script>

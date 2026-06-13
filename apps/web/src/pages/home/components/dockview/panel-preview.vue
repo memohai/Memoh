@@ -1,32 +1,35 @@
 <template>
-  <div class="h-full w-full bg-surface-editor">
-    <div
-      v-if="loading"
-      class="flex h-full items-center justify-center text-muted-foreground"
-    >
-      <Spinner class="mr-2" />
-      {{ t('common.loading') }}
-    </div>
+  <div class="flex flex-col h-full w-full bg-surface-editor">
+    <PanelBreadcrumb :path="filePath" />
+    <div class="flex-1 min-h-0">
+      <div
+        v-if="loading"
+        class="flex h-full items-center justify-center text-muted-foreground"
+      >
+        <Spinner class="mr-2" />
+        {{ t('common.loading') }}
+      </div>
 
-    <MarkdownPreview
-      v-else-if="isMd"
-      :content="content"
-      class="h-full"
-    />
-    <HtmlPreview
-      v-else-if="isHtml"
-      :content="content"
-      class="h-full"
-    />
+      <MarkdownPreview
+        v-else-if="isMd"
+        :content="content"
+        class="h-full"
+      />
+      <HtmlPreview
+        v-else-if="isHtml"
+        :content="content"
+        class="h-full"
+      />
 
-    <div
-      v-else
-      class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"
-    >
-      <FileText class="size-10 opacity-30" />
-      <p class="text-xs">
-        {{ t('bots.files.previewNotAvailable') }}
-      </p>
+      <div
+        v-else
+        class="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"
+      >
+        <FileText class="size-10 opacity-30" />
+        <p class="text-xs">
+          {{ t('bots.files.previewNotAvailable') }}
+        </p>
+      </div>
     </div>
   </div>
 </template>
@@ -43,6 +46,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isMarkdownFile, isHtmlFile } from '@/components/file-manager/utils'
 import { useChatStore } from '@/store/chat-list'
 import { usePanelVisible } from './use-panel-visible'
+import PanelBreadcrumb from './panel-breadcrumb.vue'
 
 const MarkdownPreview = defineAsyncComponent(() => import('@/components/markdown-preview/index.vue'))
 const HtmlPreview = defineAsyncComponent(() => import('@/components/html-preview/index.vue'))

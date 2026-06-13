@@ -8,6 +8,7 @@
       :components="panelComponents"
       :watermark-component="watermarkComponent"
       :default-tab-component="defaultTabComponent"
+      :prefix-header-actions-component="prefixHeaderActionsComponent"
       :right-header-actions-component="rightHeaderActionsComponent"
       :theme="memohTheme"
       :disable-floating-groups="true"
@@ -45,6 +46,7 @@ import PanelDisplay from './dockview/panel-display.vue'
 import WorkspaceWatermark from './dockview/workspace-watermark.vue'
 import WorkspaceTab from './dockview/workspace-tab.vue'
 import GroupActions from './dockview/group-actions.vue'
+import PrefixHeaderActions from './dockview/prefix-header-actions.vue'
 
 const { t } = useI18n()
 const store = useWorkspaceTabsStore()
@@ -88,6 +90,7 @@ const panelComponents: Record<string, VueComponent> = {
 const watermarkComponent = WorkspaceWatermark as unknown as VueComponent
 const defaultTabComponent = WorkspaceTab as unknown as VueComponent
 const rightHeaderActionsComponent = GroupActions as unknown as VueComponent
+const prefixHeaderActionsComponent = PrefixHeaderActions as unknown as VueComponent
 
 const memohTheme: DockviewTheme = {
   name: 'memoh',

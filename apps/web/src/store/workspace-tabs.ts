@@ -26,6 +26,8 @@ export type SidebarView = 'sessions' | 'files'
 
 export const CHAT_PANEL_ID = 'chat'
 
+const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
+
 export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'terminal' | 'browser' | 'display'
 
 interface BotLayoutState {
@@ -175,6 +177,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     component: WorkspacePanelComponent
     title: string
     params?: Record<string, unknown>
+    // The tab group whose header strip triggered the open (the "+" lives per
+    // group). Without it dockview drops the new panel into the active group,
+    // which is why a "+" in the right split used to open its terminal back in
+    // the left pane.
+    groupId?: string
   }): boolean {
     const dock = api.value
     if (!dock) return false
@@ -191,6 +198,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // Keep panel DOM mounted while hidden: terminals, WebRTC display and
       // chat scroll state do not survive detach/reattach cycles.
       renderer: 'always',
+      ...(options.groupId
+        ? { position: { referenceGroup: options.groupId, direction: 'within' as const } }
+        : {}),
     })
     return true
   }
@@ -222,7 +232,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // VS Code's "Open Preview to the Side": render a markdown/html file's preview
   // as its own panel in a group beside the source editor, instead of toggling the
   // source view in place. Focuses an existing preview for the same file.
-  function openPreview(filePath: string, title?: string) {
+  function openPreview(filePath: string, title?: string, groupId?: string) {
     if (!hasCurrentPermission('workspace_read')) return
     const path = (filePath ?? '').trim()
     if (!path) return
@@ -234,18 +244,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       existing.api.setActive()
       return
     }
-    const activeGroup = dock.activeGroup
+    // Split to the right of the source editor's own group (the preview action
+    // lives in that group's header); fall back to the active group.
+    const referenceGroup = groupId || dock.activeGroup
     dock.addPanel({
       id,
       component: 'preview',
       title: title || fileBaseName(path),
       params: { filePath: path },
       renderer: 'always',
-      ...(activeGroup ? { position: { referenceGroup: activeGroup, direction: 'right' as const } } : {}),
+      ...(referenceGroup ? { position: { referenceGroup, direction: 'right' as const } } : {}),
     })
   }
 
-  function openTerminal() {
+  function openTerminal(groupId?: string) {
     if (!hasCurrentPermission('workspace_exec')) return
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
@@ -256,10 +268,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `terminal:${next}`,
       component: 'terminal',
       title: `Terminal ${next}`,
+      groupId,
     })
   }
 
-  function openBrowser(address = 'localhost:5173/') {
+  function openBrowser(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
@@ -270,11 +283,12 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `browser:${next}`,
       component: 'browser',
       title: `Browser ${next}`,
-      params: { address },
+      params: { address: DEFAULT_BROWSER_ADDRESS },
+      groupId,
     })
   }
 
-  function openDisplay() {
+  function openDisplay(groupId?: string) {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
@@ -292,6 +306,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       id: `display:${next}`,
       component: 'display',
       title: `Desktop ${next}`,
+      groupId,
     })
   }
 

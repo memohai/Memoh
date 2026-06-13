@@ -31,7 +31,7 @@
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
 
-  --dv-tab-divider-color: transparent;
+  --dv-tab-divider-color: var(--border);
   --dv-tab-font-size: 12px;
 
   --dv-separator-border: var(--border);
@@ -84,4 +84,86 @@
 .dockview-theme-memoh .dv-right-actions-container,
 .dockview-theme-memoh .dv-left-actions-container {
   align-items: center;
+}
+
+/* Prefix actions container: renders navigation buttons before the tabs. */
+.dockview-theme-memoh .dv-pre-actions-container {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Desktop drag region: the void container (empty tab-strip area) acts as the
+ * window drag handle, replacing the removed chrome strip. Individual buttons
+ * inside actions containers opt out via [-webkit-app-region:no-drag]. */
+.dockview-theme-memoh .dv-void-container {
+  -webkit-app-region: drag;
+}
+
+/* Row-separator strategy (VS Code continuous tab). The strip must NOT carry the
+ * bottom border itself: that 1px shrinks the tab layer, and dockview's
+ * .dv-tabs-container (overflow:hidden + a transform that opens its own stacking
+ * context) then clips/over-paints any "punch-through" the active tab tries — the
+ * old margin/z-index trick could never win that fight. Instead each strip cell
+ * paints its OWN 1px bottom edge, so the line lives inside every box: no
+ * cross-layer clipping, no z-index race.
+ *
+ *   non-tab cells (nav · void · actions) + inactive tabs -> --border  (the line)
+ *   active tab -> --surface-editor bottom  (a seamless gap that flows straight
+ *                 into the pane below) + --border left/right (the two vertical
+ *                 edges that hand the line back). Top is left borderless. */
+.dockview-theme-memoh .dv-pre-actions-container,
+.dockview-theme-memoh .dv-left-actions-container,
+.dockview-theme-memoh .dv-void-container,
+.dockview-theme-memoh .dv-right-actions-container {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Vertical inter-tab divider (VS Code's tab.border): every tab paints the line on
+ * its RIGHT edge, so adjacent tabs — including two inactive ones — are always
+ * separated. The left edge is reserved-transparent and only lights up to frame the
+ * active tab. Reserving all edges means selecting a tab merely recolours borders,
+ * never resizing the chip. */
+.dockview-theme-memoh .dv-tab {
+  border-left: 1px solid transparent;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Active tab: framed on both sides (left lights up; right already carries the
+ * divider) and hands its bottom edge to the pane below — a seamless
+ * --surface-editor gap that "punches through" the strip line. Top stays borderless. */
+.dockview-theme-memoh .dv-tab.dv-active-tab {
+  border-left-color: var(--border);
+  border-bottom-color: var(--surface-editor);
+}
+
+/* The tab immediately before the active one drops its own right divider, so the
+ * active tab's left frame reads as a single 1px line, not a doubled 2px seam. */
+.dockview-theme-memoh .dv-tab:has(+ .dv-active-tab) {
+  border-right-color: transparent;
+}
+
+/* Dockview paints its tab "selection" box as a PSEUDO-ELEMENT outline, not as an
+ * outline on the tab element itself: it ships `.dv-tab:focus::after` /
+ * `:focus-within::after` with `outline: 1px solid var(--dv-tab-divider-color)
+ * !important; outline-offset: -1px` covering the whole chip. A plain
+ * `outline: none` on .dv-tab therefore never removes it — the ring lives on
+ * ::after. It also fires on `:focus` (mouse click), not just `:focus-visible`.
+ * Selection is already carried by the fill + the connected bottom edge, so kill
+ * the pseudo's outline at the source. */
+.dockview-theme-memoh .dv-tab:focus::after,
+.dockview-theme-memoh .dv-tab:focus-within::after {
+  outline: none !important;
+}
+
+/* Belt-and-suspenders: also drop the browser's own focus ring on the focusable
+ * dock chrome (tab chip, tabindex=0; group host, tabindex=-1). !important defeats
+ * the global `* { outline-color: … }` base layer regardless of cascade order. This
+ * only touches dock chrome — focus rings inside panes (editor, inputs) are intact. */
+.dockview-theme-memoh .dv-tab:focus,
+.dockview-theme-memoh .dv-tab:focus-visible,
+.dockview-theme-memoh .dv-groupview:focus,
+.dockview-theme-memoh .dv-groupview:focus-visible {
+  outline: none !important;
 }

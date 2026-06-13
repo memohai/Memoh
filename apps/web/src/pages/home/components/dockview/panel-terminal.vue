@@ -1,14 +1,16 @@
 <template>
-  <div class="relative h-full w-full">
-    <KeepAlive>
-      <TerminalPane
-        v-if="visible && currentBotId"
-        :key="`terminal-pane:${currentBotId}:${props.params.api.id}`"
-        :bot-id="currentBotId"
-        :tab-id="props.params.api.id"
-        :active="visible"
-      />
-    </KeepAlive>
+  <div class="flex flex-col relative h-full w-full">
+    <div class="flex-1 min-h-0">
+      <KeepAlive>
+        <TerminalPane
+          v-if="visible && currentBotId"
+          :key="`terminal-pane:${currentBotId}:${props.params.api.id}`"
+          :bot-id="currentBotId"
+          :tab-id="props.params.api.id"
+          :active="visible"
+        />
+      </KeepAlive>
+    </div>
   </div>
 </template>
 
