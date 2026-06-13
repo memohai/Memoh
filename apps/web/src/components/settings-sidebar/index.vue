@@ -1,11 +1,16 @@
 <template>
+  <!-- Web: a plain resizable panel — width is driven by --sidebar-width (set
+       from the dragged value, clamped to a readable minimum). Desktop pins a
+       fixed 15rem. There is no icon-rail collapse; the minimum width is the
+       floor, so the panel never shrinks into something cramped. -->
   <aside
+    ref="asideEl"
     class="relative h-full"
-    style="--sidebar-width: 15rem"
+    :style="{ '--sidebar-width': desktopShell ? '15rem' : `${sidebarWidth}px` }"
   >
     <Sidebar
-      :collapsible="desktopShell ? 'none' : 'icon'"
-      :class="desktopShell ? 'h-dvh border-r border-sidebar-border' : ''"
+      collapsible="none"
+      :class="['border-r border-sidebar-border', desktopShell && 'h-dvh']"
     >
       <!-- Traffic-reserve top padding: clears the macOS traffic lights (bottom edge
            ≈28px from top) with a comfortable ~20px gap below them — tighter than the
@@ -23,7 +28,7 @@
           @click="router.push(_backToChatRoute).catch(() => {})"
         >
           <ChevronLeft class="size-3.5 shrink-0" />
-          <span class="group-data-[collapsible=icon]:hidden">{{ t('sidebar.settings') }}</span>
+          <span>{{ t('sidebar.settings') }}</span>
         </NavItem>
       </SidebarHeader>
 
@@ -47,7 +52,7 @@
                     class="size-4 shrink-0"
                     :class="item.flipX && '-scale-x-100'"
                   />
-                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                  <span>{{ item.title }}</span>
                 </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -59,7 +64,7 @@
           v-if="integrationsNavItems.length"
           class="px-[16px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground">
             {{ t('sidebar.group.integrations') }}
           </SidebarGroupLabel>
           <SidebarGroupContent class="pt-0">
@@ -79,7 +84,7 @@
                     class="size-4 shrink-0"
                     :class="item.flipX && '-scale-x-100'"
                   />
-                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                  <span>{{ item.title }}</span>
                 </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -91,7 +96,7 @@
           v-if="accountNavItems.length"
           class="px-[16px] pt-4 pb-0"
         >
-          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel class="h-6! pl-[14px]! pr-3! font-[475] text-muted-foreground">
             {{ t('sidebar.group.account') }}
           </SidebarGroupLabel>
           <SidebarGroupContent class="pt-0">
@@ -111,7 +116,7 @@
                     class="size-4 shrink-0"
                     :class="item.flipX && '-scale-x-100'"
                   />
-                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
+                  <span>{{ item.title }}</span>
                 </NavItem>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -119,13 +124,26 @@
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarRail v-if="!desktopShell" />
+      <!-- Width resize handle (web only). Drag to resize the sidebar; the width
+           is clamped to [MIN_FULL, MAX_WIDTH] so it can't shrink past a readable
+           minimum. Sits on the sidebar's right edge. -->
+      <div
+        v-if="!desktopShell"
+        class="group/resize absolute right-0 top-0 z-20 h-full w-1 cursor-col-resize"
+        @mousedown="onResizeStart"
+      >
+        <div
+          class="h-full w-full transition-colors group-hover/resize:bg-border"
+          :class="{ 'bg-ring': isResizing }"
+        />
+      </div>
     </Sidebar>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, type Component } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -156,7 +174,6 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
-  SidebarRail,
 } from '@memohai/ui'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import NavItem from './nav-item.vue'
@@ -177,6 +194,52 @@ const props = withDefaults(defineProps<{
 defineEmits<{ back: [] }>()
 
 const desktopShell = inject(DesktopShellKey, false)
+
+// ---- resizable width (web only) ------------------------------------------
+// The sidebar is a plain resizable panel: drag the right-edge handle to set its
+// width, clamped to [MIN_FULL, MAX_WIDTH] so it can never shrink past a readable
+// minimum. There is no icon-rail collapse — the minimum width is the floor.
+// Desktop pins a fixed width and renders no handle, so this stays inert there.
+const sidebarWidth = useLocalStorage('settings-sidebar-width', 240)
+
+const MIN_FULL = 200
+const MAX_WIDTH = 360
+
+const asideEl = ref<HTMLElement | null>(null)
+const isResizing = ref(false)
+
+function clampWidth(w: number): number {
+  return Math.min(MAX_WIDTH, Math.max(MIN_FULL, w))
+}
+
+function onResizeStart(e: MouseEvent): void {
+  e.preventDefault()
+  isResizing.value = true
+  // Width is the pointer's distance from the sidebar's fixed left edge.
+  const leftEdge = asideEl.value?.getBoundingClientRect().left ?? 0
+
+  function onMouseMove(ev: MouseEvent): void {
+    sidebarWidth.value = clampWidth(ev.clientX - leftEdge)
+  }
+
+  function onMouseUp(): void {
+    isResizing.value = false
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+}
+
+onBeforeUnmount(() => {
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+})
 
 const router = useRouter()
 const route = useRoute()
