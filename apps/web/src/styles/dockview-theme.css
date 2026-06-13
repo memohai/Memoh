@@ -57,21 +57,41 @@
   --dv-floating-border: 1px solid var(--border);
 }
 
-/* The custom tab content (workspace-tab.vue) owns its own padding/ellipsis; the
- * .dv-tab container only carries the chip background (from the --dv-* vars above)
- * and the width clamp so a long title truncates rather than ballooning the strip
- * — short titles ("New Chat") still get a fuller chip than a cramped sliver. */
+/* The custom tab content (workspace-tab.vue) owns its padding/ellipsis; .dv-tab
+ * carries the chip background (from the --dv-* vars above), a min-width FLOOR so a
+ * short title — especially CJK like "新对话" — still reads as a proper tab instead
+ * of a cramped chip, and a max-width clamp so a long title truncates instead of
+ * ballooning the strip. The close button overlays the title on hover (no reserved
+ * slot — see workspace-tab.vue), so the floor buys breathing room, not a dead gap.
+ * --tab-hover-bg is the opaque colour a tab wears while hovered; the close
+ * affordance paints it to blot out the text beneath the button. */
 .dockview-theme-memoh .dv-tab {
   box-sizing: border-box;
   padding: 0;
+  /* A tab activates on click but is not a link/button affordance — keep the plain
+   * arrow (VS Code), not a pointer. dockview defaults .dv-tab to cursor:pointer;
+   * the close button re-enables the pointer on itself only. */
+  cursor: default;
   transition: background-color 0.12s ease;
-  min-width: 8rem;
+  min-width: 6.25rem;
   max-width: 15rem;
+  --tab-hover-bg: var(--surface-chrome-hover);
 }
 
-/* Hover lifts UNSELECTED tabs only — the active tab never hovers (VS Code). */
+/* Hover lifts UNSELECTED tabs only — the active tab never hovers (VS Code).
+ * --surface-chrome-hover is the chrome plane's own hover step (deeper than the
+ * generic --ui-hover, which is invisible against this surface).
+ *
+ * !important is required, not lazy: dockview pins the inactive tab to transparent
+ * with a (0,6,0) static rule
+ *   .dv-groupview.dv-active-group > .dv-tabs-and-actions-container
+ *     .dv-tabs-container > .dv-tab.dv-inactive-tab { background: …hiddenpanel… }
+ * which outranks this (0,4,0) hover. Static tab fills are themed via the --dv-*
+ * variables, but dockview exposes NO hover variable for tabs, so the cascade can
+ * only be won here by force. Without it the fill never paints and only the
+ * close-fade gradient (right edge) shows — the "only the right changes" bug. */
 .dockview-theme-memoh .dv-tab:not(.dv-active-tab):hover {
-  background-color: var(--ui-hover);
+  background-color: var(--surface-chrome-hover) !important;
 }
 
 /* Active tab = editor surface, continuous with the pane below. The two planes
@@ -79,6 +99,9 @@
  * no top-accent line, no divider. */
 .dockview-theme-memoh .dv-tab.dv-active-tab {
   background-color: var(--surface-editor);
+  /* The active tab never takes the hover lift, so its blot-out colour is the
+   * editor surface it already wears. */
+  --tab-hover-bg: var(--surface-editor);
 }
 
 .dockview-theme-memoh .dv-right-actions-container,
@@ -122,8 +145,7 @@
 /* Vertical inter-tab divider (VS Code's tab.border): every tab paints the line on
  * its RIGHT edge, so adjacent tabs — including two inactive ones — are always
  * separated. The left edge is reserved-transparent and only lights up to frame the
- * active tab. Reserving all edges means selecting a tab merely recolours borders,
- * never resizing the chip. */
+ * active tab. Recolouring borders on select never resizes the chip. */
 .dockview-theme-memoh .dv-tab {
   border-left: 1px solid transparent;
   border-right: 1px solid var(--border);

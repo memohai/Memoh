@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="isFirstGroup"
-    class="flex h-full items-center gap-0.5 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+    class="flex h-full items-center gap-0.5 pr-2 [-webkit-app-region:drag] transition-[padding] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
     :class="shouldReserveTrafficLight ? 'pl-[76px]' : 'pl-2'"
   >
     <Button

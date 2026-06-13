@@ -1,30 +1,37 @@
 <template>
   <div
-    class="group/tab relative flex h-full min-w-0 items-center pl-3 pr-7"
+    class="group/tab relative flex h-full min-w-0 items-center pl-4 pr-4"
     @auxclick.middle.prevent="close"
   >
     <!-- Active state is signalled by text color (and the CSS top-accent on the
          tab chip), NOT by weight or size — so selecting a tab never changes the
-         label's metrics or baseline. -->
+         label's metrics or baseline. The chip hugs its title with symmetric
+         padding: no slot is reserved for the close button on ANY tab (selected or
+         not); it overlays the text on hover instead. -->
     <span
-      class="min-w-0 flex-1 truncate text-xs leading-none transition-colors"
+      class="min-w-0 flex-1 truncate text-[12.5px] leading-none transition-colors"
       :class="isActive ? 'text-foreground' : 'text-muted-foreground'"
     >{{ title }}</span>
-    <!-- Close: a fixed slot is always reserved on the right (pr-7 above), so the
-         title simply truncates before it and the button never overlaps text or
-         reflows the chip. Shown on hover (any tab) and always on the active tab,
-         dimmed otherwise — VS Code's behaviour. -->
-    <Button
-      variant="ghost"
-      class="absolute right-1 top-1/2 size-5 -translate-y-1/2 shrink-0 rounded-sm p-0 text-muted-foreground opacity-0 transition-opacity duration-100 hover:bg-[color:var(--ui-hover)] hover:text-foreground group-hover/tab:opacity-100 focus-visible:opacity-100"
-      :class="{ 'opacity-100': isActive }"
-      :aria-label="t('chat.tabMenu.close')"
-      @pointerdown.stop
-      @mousedown.stop
-      @click.stop.prevent="close"
+    <!-- Close affordance: hover-only, absolutely positioned so it never reserves a
+         slot or resizes the chip (geometry is identical hovered or not). It paints
+         the chip's own OPAQUE hover colour (--tab-hover-bg) as a left→right fade, so
+         the title dissolves into the chip and nothing stays legible under the
+         button. The fade layer is click-through; only the button takes pointer
+         events. Keyboard focus reveals it for a11y; middle-click closes without it. -->
+    <div
+      class="close-fade pointer-events-none absolute inset-y-0 right-0 flex items-center pl-8 pr-2 opacity-0 transition-opacity duration-150 ease-out group-hover/tab:opacity-100 focus-within:opacity-100"
     >
-      <X class="size-3.5" />
-    </Button>
+      <Button
+        variant="ghost"
+        class="pointer-events-auto size-5 shrink-0 rounded-sm p-0 text-muted-foreground [--btn-ghost-hover:color-mix(in_oklab,var(--foreground)_13%,transparent)] hover:text-foreground"
+        :aria-label="t('chat.tabMenu.close')"
+        @pointerdown.stop
+        @mousedown.stop
+        @click.stop.prevent="close"
+      >
+        <X class="size-3.5" />
+      </Button>
+    </div>
   </div>
 </template>
 
@@ -74,3 +81,15 @@ onBeforeUnmount(() => {
   for (const d of disposables) d.dispose()
 })
 </script>
+
+<style scoped>
+/* The close affordance blots out the title with the chip's own opaque hover colour:
+ * transparent on the left so the text dissolves into the chip, fully opaque by the
+ * button so NOTHING is legible underneath. --tab-hover-bg is inherited from .dv-tab
+ * (the editor surface for the active tab, the hover tint otherwise), so the fade is
+ * seamless with whatever the chip is wearing. Absolutely positioned, so painting it
+ * never reserves a slot or resizes the chip. */
+.close-fade {
+  background: linear-gradient(to right, transparent, var(--tab-hover-bg, var(--surface-editor)) 1.5rem);
+}
+</style>

@@ -62,6 +62,12 @@
 :root {
   --surface-editor: rgb(255 255 255);
   --surface-chrome: var(--background-chrome);
+  /* Hover lift for unselected tabs. Reuses the sidebar's accent grey so the tab
+   * strip and the recents list speak ONE hover language instead of an invented
+   * one-off step (a deeper bespoke value read as too heavy on the chrome plane).
+   * --sidebar-accent is already mode-aware (0.945 light / 0.30 dark), so no
+   * separate .dark override is needed here. */
+  --surface-chrome-hover: var(--sidebar-accent);
 }
 .dark {
   --surface-editor: var(--background);
