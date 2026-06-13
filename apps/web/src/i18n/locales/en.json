@@ -610,6 +610,7 @@
         "browser": "Installing Chrome and CJK fonts",
         "starting": "Starting VNC display",
         "desktop": "Starting desktop session",
+        "styling": "Applying desktop style",
         "complete": "Desktop is ready",
         "default": "Preparing desktop",
         "failed": "Failed to prepare desktop",
