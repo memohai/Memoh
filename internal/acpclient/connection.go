@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -44,6 +45,14 @@ func (c *clientConnection) Cancel(ctx context.Context, params acp.CancelNotifica
 	return c.conn.SendNotification(ctx, acp.AgentMethodSessionCancel, params)
 }
 
+func (c *clientConnection) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	return acp.SendRequest[acp.SetSessionModeResponse](c.conn, ctx, acp.AgentMethodSessionSetMode, params)
+}
+
+func (c *clientConnection) SetSessionConfigOption(ctx context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	return acp.SendRequest[acp.SetSessionConfigOptionResponse](c.conn, ctx, acp.AgentMethodSessionSetConfigOption, params)
+}
+
 func (c *clientConnection) UnstableSetSessionModel(ctx context.Context, params acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error) {
 	return acp.SendRequest[acp.UnstableSetSessionModelResponse](c.conn, ctx, acp.AgentMethodSessionSetModel, params)
 }
@@ -51,6 +60,9 @@ func (c *clientConnection) UnstableSetSessionModel(ctx context.Context, params a
 func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	if c == nil || c.client == nil {
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
+	}
+	if c.client.logger != nil && method != acp.ClientMethodSessionUpdate {
+		c.client.logger.Debug("ACP client method called", slog.String("method", method))
 	}
 	switch method {
 	case acp.ClientMethodFsReadTextFile:

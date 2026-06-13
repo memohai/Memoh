@@ -14,6 +14,7 @@ import (
 	agentpkg "github.com/memohai/memoh/internal/agent"
 	"github.com/memohai/memoh/internal/conversation"
 	"github.com/memohai/memoh/internal/session"
+	"github.com/memohai/memoh/internal/toolapproval"
 	"github.com/memohai/memoh/internal/userinput"
 )
 
@@ -159,6 +160,17 @@ func mapACPStreamEvent(event acpclient.StreamEvent) []agentpkg.StreamEvent {
 			Result:     event.Result,
 			Error:      event.Error,
 		}}
+	case acpclient.StreamEventToolApprovalRequest:
+		return []agentpkg.StreamEvent{{
+			Type:       agentpkg.EventToolApprovalRequest,
+			ToolName:   event.ToolName,
+			ToolCallID: event.ToolCallID,
+			Input:      event.Input,
+			ApprovalID: event.ApprovalID,
+			ShortID:    event.ShortID,
+			Status:     event.Status,
+			Metadata:   event.Metadata,
+		}}
 	case acpclient.StreamEventUserInputRequest:
 		// Same shape the in-process agent loop emits, so the stream converter
 		// attaches the pending question to the existing tool call block.
@@ -281,20 +293,32 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		})
 		output = append(output, converted...)
 	}
-	attachToolMetadata := func(event acpclient.StreamEvent, key string, value map[string]any) {
-		toolCallID := strings.TrimSpace(event.ToolCallID)
-		toolName := strings.TrimSpace(event.ToolName)
+	// findToolCallPart matches by ID when the event has one, by name otherwise.
+	// Approval events can arrive before the matching tool_call_start, so both
+	// attachToolMetadata and upsertToolCallStart merge into the same part.
+	findToolCallPart := func(toolCallID, toolName string) int {
 		for idx, part := range assistantParts {
 			toolCall, ok := part.(sdk.ToolCallPart)
 			if !ok {
 				continue
 			}
-			if toolCallID != "" && strings.TrimSpace(toolCall.ToolCallID) != toolCallID {
+			if toolCallID != "" {
+				if strings.TrimSpace(toolCall.ToolCallID) == toolCallID {
+					return idx
+				}
 				continue
 			}
-			if toolCallID == "" && toolName != "" && strings.TrimSpace(toolCall.ToolName) != toolName {
-				continue
+			if toolName != "" && strings.TrimSpace(toolCall.ToolName) == toolName {
+				return idx
 			}
+		}
+		return -1
+	}
+	attachToolMetadata := func(event acpclient.StreamEvent, key string, value map[string]any) {
+		toolCallID := strings.TrimSpace(event.ToolCallID)
+		toolName := strings.TrimSpace(event.ToolName)
+		if idx := findToolCallPart(toolCallID, toolName); idx >= 0 {
+			toolCall := assistantParts[idx].(sdk.ToolCallPart)
 			if toolCall.ProviderMetadata == nil {
 				toolCall.ProviderMetadata = map[string]any{}
 			}
@@ -317,6 +341,31 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 			},
 		})
 	}
+	upsertToolCallStart := func(event acpclient.StreamEvent) {
+		flushReasoning()
+		flushText()
+		toolCallID := strings.TrimSpace(event.ToolCallID)
+		toolName := strings.TrimSpace(event.ToolName)
+		if idx := findToolCallPart(toolCallID, toolName); idx >= 0 {
+			toolCall := assistantParts[idx].(sdk.ToolCallPart)
+			if toolCallID != "" {
+				toolCall.ToolCallID = toolCallID
+			}
+			if toolName != "" {
+				toolCall.ToolName = toolName
+			}
+			if event.Input != nil {
+				toolCall.Input = event.Input
+			}
+			assistantParts[idx] = toolCall
+			return
+		}
+		assistantParts = append(assistantParts, sdk.ToolCallPart{
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+			Input:      event.Input,
+		})
+	}
 	userInputMetadata := func(event acpclient.StreamEvent) map[string]any {
 		status := strings.TrimSpace(event.Status)
 		if status == "" {
@@ -335,6 +384,24 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 			"ui_payload":    event.Metadata["ui_payload"],
 		}
 	}
+	approvalMetadata := func(event acpclient.StreamEvent) map[string]any {
+		status := strings.TrimSpace(event.Status)
+		if status == "" {
+			status = toolapproval.StatusPending
+		}
+		approvalID := strings.TrimSpace(event.ApprovalID)
+		if approvalID == "" {
+			if value, _ := event.Metadata["approval_id"].(string); value != "" {
+				approvalID = strings.TrimSpace(value)
+			}
+		}
+		return map[string]any{
+			"approval_id": approvalID,
+			"short_id":    event.ShortID,
+			"status":      status,
+			"can_approve": strings.EqualFold(status, toolapproval.StatusPending),
+		}
+	}
 	for _, event := range result.Events {
 		switch event.Type {
 		case acpclient.StreamEventReasoningDelta:
@@ -342,16 +409,12 @@ func acpResultOutputMessages(result acpclient.PromptResult) []conversation.Model
 		case acpclient.StreamEventTextDelta:
 			appendText(event.Delta)
 		case acpclient.StreamEventToolCallStart:
-			flushReasoning()
-			flushText()
-			assistantParts = append(assistantParts, sdk.ToolCallPart{
-				ToolCallID: strings.TrimSpace(event.ToolCallID),
-				ToolName:   strings.TrimSpace(event.ToolName),
-				Input:      event.Input,
-			})
+			upsertToolCallStart(event)
 		case acpclient.StreamEventToolCallEnd:
 			flushAssistant()
 			appendToolResult(event)
+		case acpclient.StreamEventToolApprovalRequest:
+			attachToolMetadata(event, "approval", approvalMetadata(event))
 		case acpclient.StreamEventUserInputRequest:
 			attachToolMetadata(event, "user_input", userInputMetadata(event))
 		}

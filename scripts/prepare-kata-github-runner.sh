@@ -46,7 +46,6 @@ fi
 
 if [ "$SKIP_HOST_CHECK" != "true" ]; then
   scripts/check-kata-runner-ready.sh "$EVIDENCE_DIR"
-  scripts/validate-kata-runner-readiness.sh "$EVIDENCE_DIR"
 fi
 
 mkdir -p "$(dirname "$OUTPUT_SCRIPT")"

@@ -30,6 +30,7 @@ declare module '@memohai/web/i18n' {
 declare module '@memohai/web/api-client' {
   export interface SetupApiClientOptions {
     baseUrl?: string
+    fetch?: typeof fetch
     onUnauthorized?: () => void
   }
   export interface SdkUrlOptions {

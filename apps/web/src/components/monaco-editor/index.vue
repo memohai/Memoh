@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useMonaco } from 'stream-monaco'
 import { useSettingsStore } from '@/store/settings'
 import { getLanguageByFilename } from '@/components/file-manager/utils'
@@ -22,6 +22,10 @@ const emit = defineEmits<{
 const editorRef = ref<HTMLDivElement>()
 const settings = useSettingsStore()
 let observer: MutationObserver | null = null
+const editorFontSize = computed(() => settings.codeFontSizePx)
+// Keep Monaco's built-in platform default font unless the user explicitly
+// customizes the code font; `undefined` resets to the editor default.
+const editorFontFamily = computed(() => settings.codeFontFamily ? settings.codeFontStack : undefined)
 
 function resolveLanguage(): string {
   if (props.language) return props.language
@@ -56,7 +60,8 @@ const {
     horizontalScrollbarSize: 12,
     useShadows: true,
   },
-  fontSize: 13,
+  fontSize: editorFontSize.value,
+  fontFamily: editorFontFamily.value,
   lineNumbers: 'on',
   renderLineHighlight: 'line',
   tabSize: 2,
@@ -89,6 +94,10 @@ onMounted(async () => {
 
   const editor = getEditorView()
   if (editor) {
+    editor.updateOptions({
+      fontSize: editorFontSize.value,
+      fontFamily: editorFontFamily.value,
+    })
     editor.setPosition({ lineNumber: 1, column: 1 })
     editor.revealLine(1)
   }
@@ -122,6 +131,14 @@ watch([() => props.language, () => props.filename], () => {
 
 watch(() => settings.theme, () => {
   setTheme(resolveTheme())
+})
+
+watch(editorFontSize, (fontSize) => {
+  getEditorView()?.updateOptions({ fontSize })
+})
+
+watch(editorFontFamily, (fontFamily) => {
+  getEditorView()?.updateOptions({ fontFamily })
 })
 </script>
 

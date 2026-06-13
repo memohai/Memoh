@@ -33,3 +33,5 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]

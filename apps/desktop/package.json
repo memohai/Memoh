@@ -66,7 +66,7 @@
     "electron-vite": "^4.0.0",
     "katex": "^0.16.37",
     "lucide-vue-next": "^0.562.0",
-    "markstream-vue": "1.0.1-beta.1",
+    "markstream-vue": "1.0.1-beta.5",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "typescript": "~5.9.3",

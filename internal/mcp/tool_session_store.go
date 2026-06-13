@@ -51,7 +51,7 @@ func (s *ToolSessionContextStore) Put(session ToolSessionContext) {
 	}
 	s.mu.Lock()
 	if existing, ok := s.sessions[key]; ok {
-		session = mergeToolSessionContext(existing, session)
+		session = MergeToolSessionContext(existing, session)
 	}
 	s.sessions[key] = session
 	s.mu.Unlock()
@@ -71,7 +71,7 @@ func (s *ToolSessionContextStore) Merge(session ToolSessionContext) ToolSessionC
 	if !ok {
 		return session
 	}
-	return mergeToolSessionContext(session, latest)
+	return MergeToolSessionContext(session, latest)
 }
 
 func (s *ToolSessionContextStore) CloseSession(sessionID string) {
@@ -168,13 +168,20 @@ func toolStreamEventKeyHasSessionID(key, sessionID string) bool {
 	return len(parts) == 3 && parts[1] == sessionID
 }
 
-func mergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
+// MergeToolSessionContext overlays every non-empty field of latest onto base
+// (bools are sticky-true). It is the single merge for ToolSessionContext —
+// used by the tool-context store and the ACP client callbacks — so a new
+// field only needs to be wired up here.
+func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
 	merged := base
 	if value := strings.TrimSpace(latest.BotID); value != "" {
 		merged.BotID = value
 	}
 	if value := strings.TrimSpace(latest.ChatID); value != "" {
 		merged.ChatID = value
+	}
+	if value := strings.TrimSpace(latest.RuntimeID); value != "" {
+		merged.RuntimeID = value
 	}
 	if value := strings.TrimSpace(latest.SessionID); value != "" {
 		merged.SessionID = value
@@ -205,6 +212,9 @@ func mergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext
 	}
 	if latest.IsSubagent {
 		merged.IsSubagent = true
+	}
+	if latest.RuntimeActive {
+		merged.RuntimeActive = true
 	}
 	return merged
 }

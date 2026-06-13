@@ -226,61 +226,21 @@ docker compose -f devenv/docker-compose.yml -f devenv/docker-compose.selinux.yml
   sh -c 'cd /workspace && sh devenv/bridge-build.sh'
 """
 
-[tasks."test:kata"]
-description = "Verify a running containerd/Kata Memoh server with a temporary workspace"
-run = "scripts/test-containerd-kata-running.sh"
-
-[tasks."test:kata:static"]
-description = "Run static validation for Kata configs, compose overrides, scripts, and evidence checks"
-run = "scripts/test-kata-static.sh"
-
-[tasks."test:kata:runner"]
+[tasks."kata:runner"]
 description = "Check that the current Linux/KVM host is ready to run Kata E2E"
 run = "scripts/check-kata-runner-ready.sh"
 
-[tasks."test:kata:e2e"]
-description = "Build, start, verify, and tear down the Linux/KVM containerd/Kata dev environment"
-run = "scripts/test-containerd-kata-e2e.sh"
-
-[tasks."test:kata:compose:e2e"]
-description = "Build, start, verify, and tear down the production Docker Compose Kata deployment"
-run = "scripts/test-containerd-kata-compose-e2e.sh"
-
-[tasks."test:kata:evidence"]
-description = "Run local regression tests for Kata evidence validation"
-run = "scripts/test-kata-evidence-validator.sh"
-
-[tasks."test:kata:github"]
+[tasks."kata:github"]
 description = "Audit GitHub PR checks for complete Linux/KVM Kata verification"
 run = "scripts/audit-kata-github-verification.sh"
 
-[tasks."test:kata:github:e2e"]
-description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata E2E workflow"
-run = "scripts/run-kata-github-e2e.sh"
-
-[tasks."test:kata:github:runner"]
-description = "Prepare a Linux/KVM host for GitHub Kata E2E runner registration"
+[tasks."kata:github:runner"]
+description = "Prepare a Linux/KVM host for GitHub Kata runner registration"
 run = "scripts/prepare-kata-github-runner.sh"
 
-[tasks."test:kata:smoke:runc"]
-description = "Run the containerd runtime smoke check against the default runc dev runtime"
-run = """
-#!/bin/bash
-set -euo pipefail
-MEMOH_CONTAINERD_SMOKE_RUNTIME=io.containerd.runc.v2 \
-MEMOH_CONTAINERD_SMOKE_CTR_COMMAND='docker compose -f devenv/docker-compose.yml exec -T server ctr' \
-scripts/smoke-containerd-runtime.sh
-"""
-
-[tasks."test:kata:runc"]
-description = "Run the Kata verifier workflow against the default containerd/runc dev runtime"
-run = """
-#!/bin/bash
-set -euo pipefail
-MEMOH_VERIFY_EXPECTED_RUNTIME=io.containerd.runc.v2 \
-MEMOH_KATA_RUNNING_COMPOSE_CMD='docker compose -f devenv/docker-compose.yml' \
-scripts/test-containerd-kata-running.sh
-"""
+[tasks."kata:github:readiness"]
+description = "Dispatch, watch, and audit the GitHub Linux/KVM Kata runner readiness workflow"
+run = "scripts/run-kata-github-e2e.sh"
 
 [tasks.db-up]
 description = "Initialize and Migrate Database"
@@ -362,9 +322,9 @@ description = "Install workspace toolkit"
 depends = ["//:a11y-cli:build"]
 run = "./docker/toolkit/install.sh .toolkit"
 
-[tasks."docker:vnc:build"]
-description = "Build the Debian VNC workspace image used by desktop"
-run = "docker build -f docker/Dockerfile.vnc -t memohai/vnc:debian ."
+[tasks."docker:workspace:build"]
+description = "Build the Debian workspace image used by desktop"
+run = "docker build -f docker/Dockerfile.workspace -t memohai/workspace:debian ."
 
 [tasks.lint]
 description = "Run all linters"

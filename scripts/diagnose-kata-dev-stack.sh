@@ -104,5 +104,5 @@ if [ "$has_kata_shim_mount" != "true" ] || [ "$has_kata_config_mount" != "true" 
   exit 1
 fi
 
-warn "Kata uses container_backend=containerd; verify runtime on a bot workspace with: mise run test:kata"
+warn "Kata uses container_backend=containerd; verify runtime_backend on a bot workspace before treating the runtime as proven."
 echo "Kata dev stack shape looks correct."

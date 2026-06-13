@@ -191,6 +191,15 @@ func prepareProcessEnv(ctx context.Context, client *bridge.Client, workDir strin
 		if err := client.Mkdir(ctx, homeDir); err != nil {
 			return nil, nil, fmt.Errorf("prepare ACP HOME: %w", err)
 		}
+		// Container-only: local-backend Claude inherits the host HOME, where
+		// the user's own settings (and the CLI's safe-command auto-allow)
+		// still apply. Local config isolation is a follow-up (managed
+		// CLAUDE_CONFIG_DIR).
+		if isClaudeCodeAgent(opts.AgentID) {
+			if err := WriteClaudeManagedSettings(ctx, client, homeDir); err != nil {
+				return nil, nil, fmt.Errorf("prepare Claude managed settings: %w", err)
+			}
+		}
 
 		// Cleanup intentionally derives a fresh background ctx with its own
 		// short deadline: the parent ctx is usually already cancelled by the

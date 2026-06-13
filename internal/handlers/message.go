@@ -338,10 +338,14 @@ func (h *MessageHandler) backgroundTaskSnapshots(botID, sessionID string) []conv
 		if stalled {
 			status = "stalled"
 		}
+		label := snapshot.Command
+		if label == "" {
+			label = snapshot.Description
+		}
 		tasks = append(tasks, conversation.UIBackgroundTask{
 			TaskID:     snapshot.TaskID,
 			Status:     status,
-			Command:    snapshot.Command,
+			Command:    label,
 			OutputFile: snapshot.OutputFile,
 			ExitCode:   snapshot.ExitCode,
 			Duration:   snapshot.Duration.Round(time.Millisecond).String(),

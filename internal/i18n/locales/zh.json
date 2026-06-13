@@ -15,6 +15,11 @@
     "models": "模型",
     "rangeAll": "全部"
   },
+  "startWelcome": {
+    "title": "👋 你好呀！",
+    "intro": "直接发消息给我，我们就能开始聊。",
+    "tip": "第一次来？用 {help} 看看我能做什么；想从头开始，随时用 {new}。"
+  },
   "newSession": {
     "title": "✨ 已开启新{mode}。",
     "modeChat": "对话",
@@ -141,6 +146,7 @@
       "availableCommands": "可用命令",
       "top": {
         "help": "显示帮助",
+        "start": "显示欢迎信息",
         "new": "开始新对话",
         "stop": "停止当前回复",
         "approve": "批准待执行的工具调用",
@@ -446,6 +452,7 @@
     }
   },
   "menu": {
+    "start": "显示欢迎信息",
     "help": "查看可用命令",
     "new": "开始新对话",
     "stop": "停止当前回复",

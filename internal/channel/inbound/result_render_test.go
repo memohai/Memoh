@@ -266,6 +266,25 @@ func TestRenderModelPickerProviderGrid(t *testing.T) {
 	}
 }
 
+func TestFormatStartWelcomeMessage(t *testing.T) {
+	got := formatStartWelcomeMessage(i18n.New("en"))
+	for _, want := range []string{
+		"**👋 Hi there!**",
+		"Just send me a message",
+		"`/help` shows what I can do.",
+		"`/new` starts a clean slate anytime.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message missing %q:\n%s", want, got)
+		}
+	}
+	for _, omit := range []string{"Model:", "Reasoning:", "Context:", "New chat started"} {
+		if strings.Contains(got, omit) {
+			t.Errorf("/start welcome should not include %q:\n%s", omit, got)
+		}
+	}
+}
+
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage(i18n.New("en"), "newSession.modeChat", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",

@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -337,26 +339,41 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		}
 		compatibilities := m.Compatibilities
 		if len(compatibilities) == 0 && modelType == models.ModelTypeChat {
-			compatibilities = []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning}
+			// No capability info at all (no upstream claim, no registry match):
+			// fall back to a permissive default, but respect an explicit
+			// "no reasoning" discovery so we don't advertise thinking falsely.
+			compatibilities = []string{models.CompatVision, models.CompatToolCall}
+			if m.ThinkingMode != models.ThinkingModeNone {
+				compatibilities = append(compatibilities, models.CompatReasoning)
+			}
 		}
 		name := strings.TrimSpace(m.Name)
 		if name == "" {
 			name = m.ID
 		}
-		_, err := h.modelsService.Create(c.Request().Context(), models.AddRequest{
+		cfg := models.ModelConfig{
+			Compatibilities:  compatibilities,
+			ReasoningEfforts: m.ReasoningEfforts,
+			ThinkingMode:     m.ThinkingMode,
+			ContextWindow:    m.ContextWindow,
+			Dimensions:       m.Dimensions,
+		}
+		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
 			Name:       name,
 			ProviderID: id,
 			Type:       modelType,
-			Config: models.ModelConfig{
-				Compatibilities:  compatibilities,
-				ReasoningEfforts: m.ReasoningEfforts,
-				Dimensions:       m.Dimensions,
-			},
+			Config:     cfg,
 		})
 		if err != nil {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
-				resp.Skipped++
+				// Upsert/assert: re-importing fills in newly discovered
+				// capabilities on existing models without clobbering user config.
+				if h.fillExistingModel(ctx, id, m.ID, cfg) {
+					resp.Updated++
+				} else {
+					resp.Skipped++
+				}
 				continue
 			}
 			h.logger.Warn("failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
@@ -368,4 +385,67 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+// fillExistingModel refreshes an existing model's capability-discovery fields
+// from the latest trusted discovery (upstream + litellm registry) and adds
+// missing compatibility tokens. Re-import is a refresh: newer discovery
+// overwrites stale capability values (thinking_mode / effort tiers / context
+// window) rather than only filling blanks, so an old, less-accurate import
+// (e.g. an effort list missing xhigh/max) cannot survive. Returns true if the
+// model was changed and persisted.
+//
+// The lookup is provider-scoped because model_id is only unique per provider;
+// same-named models under other providers must not affect this refresh.
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.ModelConfig) bool {
+	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
+	if err != nil {
+		return false
+	}
+	merged, changed := mergeDiscoveredConfig(existing.Config, discovered)
+	if !changed {
+		return false
+	}
+	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
+		ModelID:    existing.ModelID,
+		Name:       existing.Name,
+		ProviderID: existing.ProviderID,
+		Type:       existing.Type,
+		Config:     merged,
+	}); err != nil {
+		h.logger.Warn("failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
+		return false
+	}
+	return true
+}
+
+func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
+	out := existing
+	changed := false
+	// Capability-discovery fields: a present discovery wins. The fetch layer
+	// (applyCapabilities) has already let an explicit upstream claim take
+	// precedence over the registry, so whatever arrives here is the freshest
+	// trusted value and should replace the stored one. We only skip when the
+	// discovery is empty (nothing learned this round → keep what we have).
+	if discovered.ThinkingMode != "" && discovered.ThinkingMode != out.ThinkingMode {
+		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	if len(discovered.ReasoningEfforts) > 0 && !slices.Equal(discovered.ReasoningEfforts, out.ReasoningEfforts) {
+		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
+		changed = true
+	}
+	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
+		out.ContextWindow = discovered.ContextWindow
+		changed = true
+	}
+	// Compatibilities are additive: keep anything already present and add the
+	// newly discovered tokens.
+	for _, c := range discovered.Compatibilities {
+		if !slices.Contains(out.Compatibilities, c) {
+			out.Compatibilities = append(out.Compatibilities, c)
+			changed = true
+		}
+	}
+	return out, changed
 }

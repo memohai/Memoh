@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, nextTick, ref, watch } from 'vue'
 import { useSettingsStore } from '@/store/settings'
+import { DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -27,20 +28,37 @@ function refreshThemeStyle() {
   const border = cs.getPropertyValue('--color-border').trim()
   const accent = cs.getPropertyValue('--color-accent').trim()
   const isDark = settings.theme === 'dark'
+  const uiFontFamily = settings.uiFontStack
+  // Preserve the preview's historical 14px baseline unless the user
+  // explicitly overrides the UI font size.
+  const uiFontSize = settings.uiFontSizePx === DEFAULT_UI_FONT_SIZE_PX
+    ? '14px'
+    : `${settings.uiFontSizePx}px`
+  const codeFontFamilyRule = settings.codeFontFamily
+    ? `\n  font-family: ${settings.codeFontStack};`
+    : ''
+  // Inline code keeps the surrounding text size; an explicit code font size
+  // only applies to block-level <pre>.
+  const codeFontSizeRule = settings.codeFontSizePx === DEFAULT_CODE_FONT_SIZE_PX
+    ? ''
+    : `\npre { font-size: ${settings.codeFontSizePx}px; }`
 
   themeStyle.value = `<style>
 :root { color-scheme: ${isDark ? 'dark' : 'light'}; }
 html, body {
   color: ${fg || 'inherit'};
   background-color: ${bg || 'transparent'};
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
+  font-family: ${uiFontFamily};
+  font-size: ${uiFontSize};
   line-height: 1.6;
 }
 body { margin: 16px; }
 a { color: ${fg || 'inherit'}; }
 hr { border-color: ${border || 'currentColor'}; }
-code, pre { background-color: ${accent || 'transparent'}; color: ${fg || 'inherit'}; }
+code, pre {
+  background-color: ${accent || 'transparent'};
+  color: ${fg || 'inherit'};${codeFontFamilyRule}
+}${codeFontSizeRule}
 blockquote { color: ${muted || 'inherit'}; border-left: 3px solid ${border || 'currentColor'}; padding-left: 12px; margin-left: 0; }
 ::selection { background-color: ${accent || 'rgba(127,127,127,0.3)'}; }
 </style>`
@@ -48,7 +66,13 @@ blockquote { color: ${muted || 'inherit'}; border-left: 3px solid ${border || 'c
 
 onMounted(() => refreshThemeStyle())
 
-watch(() => settings.theme, async () => {
+watch([
+  () => settings.theme,
+  () => settings.uiFontStack,
+  () => settings.uiFontSizePx,
+  () => settings.codeFontStack,
+  () => settings.codeFontSizePx,
+], async () => {
   await nextTick()
   refreshThemeStyle()
 })

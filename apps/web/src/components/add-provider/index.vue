@@ -136,6 +136,7 @@
             v-if="!selectedPreset"
             v-slot="{ value, handleChange }"
             name="client_type"
+            keep-value
           >
             <FormItem>
               <Label class="mb-2">

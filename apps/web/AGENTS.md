@@ -304,7 +304,7 @@ CSS-based configuration (no `tailwind.config.*` file). All design tokens (CSS va
 
 ### Dark Mode
 
-- Runtime: `useColorMode` from `@vueuse/core` in `store/settings.ts`
+- Runtime: `useColorMode` from `@vueuse/core` in `store/settings/index.ts`
 - Storage: theme preference persisted via `useStorage`
 - Toggle: Available in Settings page and login page
 - Usage: semantic tokens auto-switch; no `dark:` prefix needed

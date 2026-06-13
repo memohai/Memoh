@@ -84,6 +84,48 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	}
 }
 
+func TestACPGenericExecuteTerminalTitleWithoutCommandIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.StartToolCall(
+			acp.ToolCallId("call-1"),
+			"Terminal",
+			acp.WithStartKind(acp.ToolKindExecute),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+		),
+	})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want none", events)
+	}
+}
+
+func TestACPGenericExecuteTerminalTitleUsesRawCommand(t *testing.T) {
+	t.Parallel()
+
+	mapper := newACPToolEventMapper()
+	events := mapper.eventsFromNotification(acp.SessionNotification{
+		Update: acp.StartToolCall(
+			acp.ToolCallId("call-1"),
+			"Terminal",
+			acp.WithStartKind(acp.ToolKindExecute),
+			acp.WithStartStatus(acp.ToolCallStatusInProgress),
+			acp.WithStartRawInput(map[string]any{"command": "pwd"}),
+		),
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want 1", events)
+	}
+	if events[0].Type != StreamEventToolCallStart || events[0].ToolName != "exec" {
+		t.Fatalf("event = %#v, want native exec start", events[0])
+	}
+	input, ok := events[0].Input.(map[string]any)
+	if !ok || input["command"] != "pwd" {
+		t.Fatalf("input = %#v, want command pwd", events[0].Input)
+	}
+}
+
 func TestACPGenericEditWithContentMapsToNativeWriteEvents(t *testing.T) {
 	t.Parallel()
 

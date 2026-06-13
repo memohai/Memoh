@@ -308,13 +308,17 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 	if s == nil || s.approval == nil {
 		return nativeApprovalResult{approved: true}, nil
 	}
+	toolCallID := strings.TrimSpace(session.ToolCallID)
+	if toolCallID == "" {
+		toolCallID = "mcp-" + uuid.NewString()
+	}
 	input := toolapproval.CreatePendingInput{
 		BotID:                        session.BotID,
 		SessionID:                    session.SessionID,
 		RouteID:                      session.RouteID,
 		ChannelIdentityID:            session.ChannelIdentityID,
 		RequestedByChannelIdentityID: session.ChannelIdentityID,
-		ToolCallID:                   "mcp-" + uuid.NewString(),
+		ToolCallID:                   toolCallID,
 		ToolName:                     toolName,
 		ToolInput:                    arguments,
 		SourcePlatform:               session.CurrentPlatform,
@@ -354,11 +358,23 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 			if rejectErr != nil {
 				return nativeApprovalResult{}, rejectErr
 			}
+			timeoutReq := req
+			timeoutReq.Status = toolapproval.StatusRejected
+			timeoutReq.DecisionReason = rejected.DecisionReason
+			s.publishToolApprovalRequest(session, timeoutReq)
 			return nativeApprovalResult{message: rejectedToolApprovalText(rejected.DecisionReason)}, nil
 		}
 		return nativeApprovalResult{}, err
 	}
-	switch strings.ToLower(strings.TrimSpace(decided.Status)) {
+	decisionReq := req
+	if status := strings.TrimSpace(decided.Status); status != "" {
+		decisionReq.Status = status
+	} else {
+		decisionReq.Status = toolapproval.StatusRejected
+	}
+	decisionReq.DecisionReason = decided.DecisionReason
+	s.publishToolApprovalRequest(session, decisionReq)
+	switch strings.ToLower(strings.TrimSpace(decisionReq.Status)) {
 	case toolapproval.StatusApproved:
 		return nativeApprovalResult{approved: true}, nil
 	case toolapproval.StatusRejected:
@@ -409,6 +425,11 @@ func (s *NativeToolSource) publishToolApprovalRequest(session mcp.ToolSessionCon
 	}
 
 	running := false
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = toolapproval.StatusPending
+	}
+	canApprove := strings.EqualFold(status, toolapproval.StatusPending)
 	messageID := 1000000 + req.ShortID
 	message := map[string]any{
 		"id":           messageID,
@@ -420,8 +441,8 @@ func (s *NativeToolSource) publishToolApprovalRequest(session mcp.ToolSessionCon
 		"approval": map[string]any{
 			"approval_id": req.ID,
 			"short_id":    req.ShortID,
-			"status":      toolapproval.StatusPending,
-			"can_approve": true,
+			"status":      status,
+			"can_approve": canApprove,
 		},
 	}
 	s.publishAgentStream(botID, sessionID, map[string]any{

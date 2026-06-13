@@ -10,6 +10,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.4-pro
     name: GPT-5.4 Pro
@@ -17,6 +19,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.4-mini
     name: GPT-5.4 mini
@@ -24,6 +28,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [none, low, medium, high, xhigh]
 
   - model_id: gpt-5.4-nano
     name: GPT-5.4 nano
@@ -31,6 +37,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [none, low, medium, high, xhigh]
 
   - model_id: gpt-5.3-chat-latest
     name: GPT-5.3 Chat
@@ -38,6 +46,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 128000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.3-codex
     name: GPT-5.3 Codex
@@ -45,6 +55,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.2
     name: GPT-5.2
@@ -52,6 +64,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.2-codex
     name: GPT-5.2 Codex
@@ -59,6 +73,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.2-pro
     name: GPT-5.2 pro
@@ -66,6 +82,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.2-chat-latest
     name: GPT-5.2 Chat
@@ -73,6 +91,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 128000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.1
     name: GPT-5.1
@@ -80,6 +100,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [none, minimal, low, medium, high]
 
   - model_id: gpt-5.1-chat-latest
     name: GPT-5.1 Chat
@@ -87,6 +109,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 128000
+      thinking_mode: toggle
+      reasoning_efforts: [none, minimal, low, medium, high]
 
   - model_id: gpt-5.1-codex-max
     name: GPT-5.1 Codex Max
@@ -94,6 +118,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high, xhigh]
 
   - model_id: gpt-5.1-codex
     name: GPT-5.1 Codex
@@ -101,6 +127,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.1-codex-mini
     name: GPT-5.1 Codex mini
@@ -108,6 +136,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5-pro
     name: GPT-5 pro
@@ -115,6 +145,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5-codex
     name: GPT-5 Codex
@@ -122,6 +154,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5
     name: GPT-5
@@ -129,6 +163,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5-mini
     name: GPT-5 mini
@@ -136,6 +172,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5-nano
     name: GPT-5 nano
@@ -143,6 +181,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5-chat-latest
     name: GPT-5 Chat
@@ -150,6 +190,8 @@ models:
     config:
       compatibilities: [vision]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: o4-mini
     name: o4-mini
@@ -157,6 +199,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: o4-mini-deep-research
     name: o4-mini Deep Research
@@ -171,6 +215,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: o3
     name: o3
@@ -178,6 +224,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: o3-deep-research
     name: o3 Deep Research
@@ -192,6 +240,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: o1-pro
     name: o1-pro
@@ -199,6 +249,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: o1
     name: o1
@@ -206,6 +258,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 200000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: gpt-4.1
     name: GPT-4.1
@@ -371,6 +425,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 8192
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: text-embedding-3-large
     name: Text Embedding 3 Large

@@ -107,7 +107,7 @@ func TestUnknownCommandHandling(t *testing.T) {
 		}
 	}
 	// Known commands and aliases are recognized (so they aren't treated as unknown).
-	for _, c := range []string{"/help", "/commands", "/setting", "/think", "/effort", "/reason", "/model", "/models"} {
+	for _, c := range []string{"/help", "/commands", "/start", "/setting", "/think", "/effort", "/reason", "/model", "/models"} {
 		if !h.IsCommand(c) {
 			t.Errorf("%s should be a known command", c)
 		}

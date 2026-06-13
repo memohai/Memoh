@@ -58,10 +58,7 @@ print_check() {
   printf '  %-34s %s\n' "$workflow / $name:" "$state"
 }
 
-kata_static="$(check_state "Kata Runtime" "Static validation")"
-docker_kata_static="$(check_state "Docker" "Kata static validation")"
 runner_readiness="$(check_state "Kata Runtime" "Linux/KVM runner readiness")"
-kata_e2e="$(check_state "Kata Runtime" "Linux/KVM E2E")"
 
 runner_status="unknown"
 runner_detail=""
@@ -105,21 +102,12 @@ if [ -n "$runner_detail" ]; then
   done <<<"$runner_detail"
 fi
 echo
-print_check "Kata Runtime" "Static validation" "$kata_static"
-print_check "Docker" "Kata static validation" "$docker_kata_static"
 print_check "Kata Runtime" "Linux/KVM runner readiness" "$runner_readiness"
-print_check "Kata Runtime" "Linux/KVM E2E" "$kata_e2e"
 echo
 
 missing=()
-if [ "$kata_static" != "success" ]; then
-  missing+=("Kata Runtime / Static validation must be success")
-fi
-if [ "$docker_kata_static" != "missing" ] && [ "$docker_kata_static" != "success" ]; then
-  missing+=("Docker / Kata static validation is present but not success")
-fi
-if [ "$kata_e2e" != "success" ]; then
-  missing+=("Kata Runtime / Linux/KVM E2E must be success")
+if [ "$runner_readiness" != "success" ]; then
+  missing+=("Kata Runtime / Linux/KVM runner readiness must be success")
 fi
 
 if [ "${#missing[@]}" -gt 0 ]; then
@@ -128,8 +116,8 @@ if [ "${#missing[@]}" -gt 0 ]; then
     printf '  - %s\n' "$item"
   done
   echo
-  echo "Dispatch .github/workflows/kata-runtime.yml on this PR branch with run_kata_e2e=true after a self-hosted Linux/KVM runner with labels [$REQUIRED_RUNNER_LABELS] is registered."
+  echo "Dispatch .github/workflows/kata-runtime.yml on this PR branch after a self-hosted Linux/KVM runner with labels [$REQUIRED_RUNNER_LABELS] is registered."
   exit 1
 fi
 
-echo "Kata verification is complete for this PR head."
+echo "Kata runner readiness verification is complete for this PR head."

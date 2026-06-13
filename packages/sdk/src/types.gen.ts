@@ -1019,6 +1019,58 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
+export type FetchprovidersCreateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    provider?: FetchprovidersProviderName;
+};
+
+export type FetchprovidersGetResponse = {
+    config?: {
+        [key: string]: unknown;
+    };
+    created_at?: string;
+    enable?: boolean;
+    id?: string;
+    name?: string;
+    provider?: string;
+    updated_at?: string;
+};
+
+export type FetchprovidersProviderConfigSchema = {
+    fields?: {
+        [key: string]: FetchprovidersProviderFieldSchema;
+    };
+};
+
+export type FetchprovidersProviderFieldSchema = {
+    description?: string;
+    enum?: Array<string>;
+    example?: unknown;
+    required?: boolean;
+    title?: string;
+    type?: string;
+};
+
+export type FetchprovidersProviderMeta = {
+    config_schema?: FetchprovidersProviderConfigSchema;
+    display_name?: string;
+    provider?: string;
+};
+
+export type FetchprovidersProviderName = 'native' | 'jina' | 'cloudflare_markdown';
+
+export type FetchprovidersUpdateRequest = {
+    config?: {
+        [key: string]: unknown;
+    };
+    enable?: boolean;
+    name?: string;
+    provider?: FetchprovidersProviderName;
+};
+
 export type GithubComMemohaiMemohInternalMcpConnection = {
     auth_type?: string;
     bot_id?: string;
@@ -1860,6 +1912,7 @@ export type ModelsModelConfig = {
     context_window?: number;
     dimensions?: number;
     reasoning_efforts?: Array<string>;
+    thinking_mode?: string;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription';
@@ -2044,6 +2097,7 @@ export type ProvidersImportModelsResponse = {
     created?: number;
     models?: Array<string>;
     skipped?: number;
+    updated?: number;
 };
 
 export type ProvidersOAuthAccount = {
@@ -2243,6 +2297,7 @@ export type SettingsSettings = {
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -2295,6 +2350,7 @@ export type SettingsUpsertRequest = {
     compaction_threshold?: number;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
+    fetch_provider_id?: string;
     heartbeat_enabled?: boolean;
     heartbeat_interval?: number;
     heartbeat_model_id?: string;
@@ -9082,6 +9138,187 @@ export type GetEmailOauthCallbackResponses = {
 
 export type GetEmailOauthCallbackResponse = GetEmailOauthCallbackResponses[keyof GetEmailOauthCallbackResponses];
 
+export type GetFetchProvidersData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Provider filter (native)
+         */
+        provider?: string;
+    };
+    url: '/fetch-providers';
+};
+
+export type GetFetchProvidersErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetFetchProvidersError = GetFetchProvidersErrors[keyof GetFetchProvidersErrors];
+
+export type GetFetchProvidersResponses = {
+    /**
+     * OK
+     */
+    200: Array<FetchprovidersGetResponse>;
+};
+
+export type GetFetchProvidersResponse = GetFetchProvidersResponses[keyof GetFetchProvidersResponses];
+
+export type PostFetchProvidersData = {
+    /**
+     * Fetch provider configuration
+     */
+    body: FetchprovidersCreateRequest;
+    path?: never;
+    query?: never;
+    url: '/fetch-providers';
+};
+
+export type PostFetchProvidersErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PostFetchProvidersError = PostFetchProvidersErrors[keyof PostFetchProvidersErrors];
+
+export type PostFetchProvidersResponses = {
+    /**
+     * Created
+     */
+    201: FetchprovidersGetResponse;
+};
+
+export type PostFetchProvidersResponse = PostFetchProvidersResponses[keyof PostFetchProvidersResponses];
+
+export type GetFetchProvidersMetaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/fetch-providers/meta';
+};
+
+export type GetFetchProvidersMetaResponses = {
+    /**
+     * OK
+     */
+    200: Array<FetchprovidersProviderMeta>;
+};
+
+export type GetFetchProvidersMetaResponse = GetFetchProvidersMetaResponses[keyof GetFetchProvidersMetaResponses];
+
+export type DeleteFetchProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type DeleteFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type DeleteFetchProvidersByIdError = DeleteFetchProvidersByIdErrors[keyof DeleteFetchProvidersByIdErrors];
+
+export type DeleteFetchProvidersByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetFetchProvidersByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type GetFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetFetchProvidersByIdError = GetFetchProvidersByIdErrors[keyof GetFetchProvidersByIdErrors];
+
+export type GetFetchProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: FetchprovidersGetResponse;
+};
+
+export type GetFetchProvidersByIdResponse = GetFetchProvidersByIdResponses[keyof GetFetchProvidersByIdResponses];
+
+export type PutFetchProvidersByIdData = {
+    /**
+     * Updated configuration
+     */
+    body: FetchprovidersUpdateRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}';
+};
+
+export type PutFetchProvidersByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutFetchProvidersByIdError = PutFetchProvidersByIdErrors[keyof PutFetchProvidersByIdErrors];
+
+export type PutFetchProvidersByIdResponses = {
+    /**
+     * OK
+     */
+    200: FetchprovidersGetResponse;
+};
+
+export type PutFetchProvidersByIdResponse = PutFetchProvidersByIdResponses[keyof PutFetchProvidersByIdResponses];
+
 export type GetMemoryProvidersData = {
     body?: never;
     path?: never;
@@ -11303,6 +11540,10 @@ export type GetUsersMeErrors = {
      * Bad Request
      */
     400: HandlersErrorResponse;
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
     /**
      * Internal Server Error
      */

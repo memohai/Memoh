@@ -10,6 +10,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 2000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: grok-4.20-beta-0309-non-reasoning
     name: Grok 4.20 Beta (Non-Reasoning)
@@ -24,6 +26,8 @@ models:
     config:
       compatibilities: [vision]
       context_window: 2000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: grok-4-1-fast-non-reasoning
     name: Grok 4.1 Fast (Non-Reasoning)
@@ -59,6 +63,8 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 256000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
   - model_id: grok-4
     name: Grok 4 0709
@@ -80,3 +86,5 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]

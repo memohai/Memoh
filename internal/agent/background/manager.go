@@ -131,6 +131,7 @@ func (m *Manager) emitTaskEvent(task *Task, event TaskEventType, stream, chunk s
 	payload := TaskEvent{
 		Event:      event,
 		TaskID:     task.ID,
+		Kind:       task.Kind,
 		BotID:      task.BotID,
 		SessionID:  task.SessionID,
 		Command:    task.Command,
@@ -169,6 +170,7 @@ func (m *Manager) Spawn(
 
 	task := &Task{
 		ID:          taskID,
+		Kind:        KindExec,
 		BotID:       botID,
 		SessionID:   sessionID,
 		Command:     command,
@@ -210,6 +212,7 @@ func (m *Manager) SpawnAdopt(
 
 	task := &Task{
 		ID:          taskID,
+		Kind:        KindExec,
 		BotID:       botID,
 		SessionID:   sessionID,
 		Command:     command,
@@ -677,11 +680,11 @@ func (m *Manager) RunningTasksSummary(botID, sessionID string) string {
 		if desc == "" {
 			desc = truncate(command, 80)
 		}
-		lines = append(lines, fmt.Sprintf("- [%s] %s (started %s ago, output: %s)",
-			id, desc,
-			time.Since(startedAt).Round(time.Second),
-			outputFile,
-		))
+		line := fmt.Sprintf("- [%s] %s (started %s ago", id, desc, time.Since(startedAt).Round(time.Second))
+		if outputFile != "" {
+			line += fmt.Sprintf(", output: %s", outputFile)
+		}
+		lines = append(lines, line+")")
 	}
 	if len(lines) == 0 {
 		return ""

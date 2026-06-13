@@ -206,6 +206,292 @@ describe('chat-list store', () => {
     })
   })
 
+  it('merges ACP approval tool messages into the existing tool block by call id', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'make test' },
+          tool_call_id: 'mcp-http-call-1',
+          running: true,
+        },
+      } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1000007,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'make test' },
+          tool_call_id: 'mcp-http-call-1',
+          running: false,
+          approval: {
+            approval_id: 'approval-1',
+            short_id: 7,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+      { type: 'error', message: 'stop after visible output' } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const result = await store.sendMessage('run command')
+
+    expect(result).toMatchObject({ ok: false, stage: 'stream' })
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role).toBe('assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    expect(assistant.messages.filter(block => block.type === 'tool')).toHaveLength(1)
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    expect(tool).toMatchObject({
+      id: 1,
+      type: 'tool',
+      toolCallId: 'mcp-http-call-1',
+      running: false,
+      approval: {
+        approval_id: 'approval-1',
+        status: 'pending',
+      },
+    })
+  })
+
+  it('allows responding to ACP approval while the original stream is still active', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    expect(store.streaming).toBe(true)
+    const initialMessageCount = store.messages.length
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    expect(tool).toMatchObject({
+      toolCallId: 'call-pwd',
+      approval: {
+        approval_id: 'approval-pwd',
+        status: 'pending',
+      },
+    })
+
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    await store.respondToolApproval(tool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(sentWSMessages.at(-1)).toMatchObject({
+      type: 'tool_approval_response',
+      session_id: 'session-1',
+      approval_id: 'approval-pwd',
+      decision: 'approve',
+    })
+    expect(store.messages).toHaveLength(initialMessageCount)
+    const updatedAssistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!updatedAssistant || updatedAssistant.role !== 'assistant') {
+      throw new Error('assistant turn was not found after approval')
+    }
+    const updatedTool = updatedAssistant.messages.find(block => block.type === 'tool')
+    expect(updatedTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'approved',
+      can_approve: false,
+    })
+
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({
+      type: 'message',
+      stream_id: originalStreamId,
+      session_id: 'session-1',
+      data: {
+        id: 1,
+        type: 'tool',
+        name: 'exec',
+        input: { command: 'pwd' },
+        tool_call_id: 'call-pwd',
+        running: false,
+        approval: {
+          approval_id: 'approval-pwd',
+          short_id: 9,
+          status: 'pending',
+          can_approve: true,
+        },
+      },
+    } as UIStreamEvent)
+    const staleAssistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!staleAssistant || staleAssistant.role !== 'assistant') {
+      throw new Error('assistant turn was not found after stale pending')
+    }
+    const staleTool = staleAssistant.messages.find(block => block.type === 'tool')
+    expect(staleTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'approved',
+      can_approve: false,
+    })
+
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('rolls the optimistic approval back to pending when the response stream errors', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+
+    // The approval response stream fails before the server applies the decision.
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'error', message: 'approval failed' } as UIStreamEvent,
+    ]
+    await store.respondToolApproval(tool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(toast.error).toHaveBeenCalledWith('approval failed')
+    const rolledBackTool = assistant.messages.find(block => block.type === 'tool')
+    expect(rolledBackTool?.approval).toMatchObject({
+      approval_id: 'approval-pwd',
+      status: 'pending',
+      can_approve: true,
+    })
+
+    // The user can retry, and the retry goes through.
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      { type: 'end' } as UIStreamEvent,
+    ]
+    const retried = await store.respondToolApproval(rolledBackTool!.approval!, 'approve')
+    await flushPromises()
+
+    expect(retried).toBe(true)
+    const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(approvalResponses).toHaveLength(2)
+    const retriedTool = assistant.messages.find(block => block.type === 'tool')
+    expect(retriedTool?.approval).toMatchObject({
+      status: 'approved',
+      can_approve: false,
+    })
+
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('sends each ACP approval response only once while the response is in flight', async () => {
+    sendEvents = [
+      { type: 'start' } as UIStreamEvent,
+      {
+        type: 'message',
+        data: {
+          id: 1,
+          type: 'tool',
+          name: 'exec',
+          input: { command: 'pwd' },
+          tool_call_id: 'call-pwd',
+          running: false,
+          approval: {
+            approval_id: 'approval-pwd',
+            short_id: 9,
+            status: 'pending',
+            can_approve: true,
+          },
+        },
+      } as UIStreamEvent,
+    ]
+    const store = useChatStore()
+
+    await store.selectBot('bot-1')
+    const sendPromise = store.sendMessage('run pwd')
+    await flushPromises()
+    await flushPromises()
+
+    const assistant = store.messages.find(turn => turn.role === 'assistant')
+    if (!assistant || assistant.role !== 'assistant') {
+      throw new Error('assistant turn was not created')
+    }
+    const tool = assistant.messages.find(block => block.type === 'tool')
+    if (!tool?.approval) {
+      throw new Error('tool approval was not created')
+    }
+    const approval = tool.approval
+
+    sendEvents = [{ type: 'start' } as UIStreamEvent]
+    await store.respondToolApproval(approval, 'approve')
+    await store.respondToolApproval(approval, 'approve')
+    await flushPromises()
+
+    const approvalResponses = sentWSMessages.filter(message => message.type === 'tool_approval_response')
+    expect(approvalResponses).toHaveLength(1)
+
+    const approvalStreamId = approvalResponses[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: approvalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    const originalStreamId = sentWSMessages[0]?.stream_id as string
+    streamHandler?.({ type: 'end', stream_id: originalStreamId, session_id: 'session-1' } as UIStreamEvent)
+    await expect(sendPromise).resolves.toMatchObject({ ok: true })
+  })
+
   it('creates ACP sessions without a placeholder title', async () => {
     api.createSession.mockResolvedValueOnce({
       id: 'acp-session-1',

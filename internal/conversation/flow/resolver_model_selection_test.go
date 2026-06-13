@@ -7,6 +7,28 @@ import (
 	"github.com/memohai/memoh/internal/settings"
 )
 
+func TestOffEffortFor(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		levels []string
+		want   string
+	}{
+		{"none wins", []string{models.ReasoningEffortNone, "low", "medium"}, models.ReasoningEffortNone},
+		{"minimal when no none", []string{models.ReasoningEffortMinimal, "low", "medium"}, models.ReasoningEffortMinimal},
+		{"empty when only real tiers (omit, do not enable)", []string{"medium", "high", "xhigh"}, ""},
+		{"legacy base yields empty (omit reasoning_effort)", []string{"low", "medium", "high"}, ""},
+		{"empty levels yield empty", nil, ""},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := offEffortFor(tt.levels); got != tt.want {
+				t.Fatalf("offEffortFor(%v) = %q, want %q", tt.levels, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchesModelReference_ModelID(t *testing.T) {
 	t.Parallel()
 
@@ -93,10 +115,52 @@ func TestBuildModelSelectionRequest_PreservesOverrides(t *testing.T) {
 func TestResolveReasoningConfig(t *testing.T) {
 	t.Parallel()
 
-	reasoningModel := models.GetResponse{
+	// Legacy data: reasoning compat without an explicit thinking_mode resolves to
+	// toggle via the SupportsReasoning/ResolveThinkingMode bridge.
+	toggleModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
 				Compatibilities: []string{models.CompatReasoning},
+			},
+		},
+	}
+	// Adaptive-capable model (Claude 4.6+ family): user can turn thinking off,
+	// but when enabled it uses adaptive thinking.
+	adaptiveModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeAdaptive,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
+			},
+		},
+	}
+	noneEffortModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"none", "minimal", "low", "medium", "high"},
+			},
+		},
+	}
+	// Legacy Anthropic (<=4.5): toggle mode advertising only the implicit
+	// low/medium/high base. On the Anthropic wire this must stay non-adaptive so
+	// the SDK sends thinking{type:"enabled", budget_tokens:N}.
+	legacyAnthropicModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high"},
+			},
+		},
+	}
+	// Cloud-variant Claude 4.6+: the registry left it toggle (no
+	// supports_adaptive_thinking) but it advertises 4.6+ effort tiers, so the
+	// Anthropic wire promotes it to adaptive to stay off the legacy budget path.
+	cloudEffortModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
 			},
 		},
 	}
@@ -107,51 +171,106 @@ func TestResolveReasoningConfig(t *testing.T) {
 		model         models.GetResponse
 		botSettings   settings.Settings
 		requestEffort string
+		clientType    string
 		want          *models.ReasoningConfig
 	}{
 		{
 			name:          "disable overrides bot default",
-			model:         reasoningModel,
+			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: reasoningEffortDisable,
 			want:          &models.ReasoningConfig{Disabled: true},
 		},
 		{
-			name:          "adaptive enables reasoning without fixed effort",
-			model:         reasoningModel,
+			name:          "legacy adaptive request enables toggle with default effort",
+			model:         toggleModel,
 			requestEffort: reasoningEffortAdaptive,
-			want:          &models.ReasoningConfig{Enabled: true},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "none is preserved as effort",
-			model:         reasoningModel,
+			name:          "unsupported none effort falls back to bot default",
+			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortNone},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:          "explicit none effort is preserved when model supports it",
+			model:         noneEffortModel,
+			botSettings:   settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			requestEffort: models.ReasoningEffortNone,
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortNone},
 		},
 		{
 			name:          "explicit effort is trimmed",
-			model:         reasoningModel,
+			model:         toggleModel,
 			requestEffort: " low ",
-			want:          &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortLow},
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortLow},
 		},
 		{
 			name:        "bot default is used when no request override",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: " high "},
-			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortHigh},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:        "bot default falls back to medium",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: true},
-			want:        &models.ReasoningConfig{Enabled: true, Effort: models.ReasoningEffortMedium},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
 			name:        "disabled bot explicitly disables reasoning",
-			model:       reasoningModel,
+			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEnabled: false, ReasoningEffort: models.ReasoningEffortHigh},
 			want:        &models.ReasoningConfig{Disabled: true},
+		},
+		{
+			name:          "adaptive model can still be disabled",
+			model:         adaptiveModel,
+			requestEffort: reasoningEffortDisable,
+			want:          &models.ReasoningConfig{Disabled: true},
+		},
+		{
+			name:          "adaptive model honors explicit effort",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortXHigh,
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortXHigh},
+		},
+		{
+			name:          "openai wire drops max and falls back to medium",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortMax,
+			clientType:    string(models.ClientTypeOpenAICompletions),
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+		},
+		{
+			name:          "anthropic wire preserves max",
+			model:         adaptiveModel,
+			requestEffort: models.ReasoningEffortMax,
+			clientType:    string(models.ClientTypeAnthropicMessages),
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMax},
+		},
+		{
+			name:        "legacy anthropic stays non-adaptive for budget path",
+			model:       legacyAnthropicModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "anthropic cloud variant with effort tiers is promoted to adaptive",
+			model:       cloudEffortModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "non-anthropic effort tiers are not promoted to adaptive",
+			model:       cloudEffortModel,
+			botSettings: settings.Settings{ReasoningEnabled: true, ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeOpenAICompletions),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "model without reasoning ignores request",
@@ -165,14 +284,15 @@ func TestResolveReasoningConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort)
+			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort, tt.clientType)
 			if got == nil || tt.want == nil {
 				if got != tt.want {
 					t.Fatalf("expected %#v, got %#v", tt.want, got)
 				}
 				return
 			}
-			if got.Enabled != tt.want.Enabled || got.Disabled != tt.want.Disabled || got.Effort != tt.want.Effort {
+			if got.Active != tt.want.Active || got.Disabled != tt.want.Disabled ||
+				got.Adaptive != tt.want.Adaptive || got.Effort != tt.want.Effort {
 				t.Fatalf("expected %#v, got %#v", tt.want, got)
 			}
 		})
