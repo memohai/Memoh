@@ -71,7 +71,7 @@
       >
         <BackgroundTaskBlock :task="message.backgroundTask" />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -94,7 +94,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -117,7 +117,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -135,12 +135,14 @@
         >
           <div class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0">
             <MarkdownRender
+              :key="chatMarkdownRenderKey('subagent-user')"
               :content="message.text"
               :is-dark="isDark"
               :smooth-streaming="message.streaming"
               :typewriter="message.streaming"
               :fade="message.streaming"
               :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
+              :code-block-monaco-options="codeBlockMonacoOptions"
               custom-id="chat-msg"
             />
           </div>
@@ -151,7 +153,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -165,14 +167,14 @@
       >
         <div
           v-if="cleanUserText(message.text) || message.forward || message.reply"
-          class="rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap break-all"
+          class="chat-user-bubble rounded-2xl px-3 py-2 whitespace-pre-wrap break-all"
           :class="isSelf
             ? 'rounded-tr-sm bg-accent text-foreground'
             : 'rounded-tl-sm bg-muted text-foreground'"
         >
           <div
             v-if="message.forward"
-            class="mb-1 text-[11px] font-medium leading-snug text-muted-foreground"
+            class="mb-1 text-[0.6875rem] font-medium leading-snug text-muted-foreground"
           >
             {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
           </div>
@@ -194,14 +196,14 @@
             <div class="flex min-w-0 items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div
-                  class="truncate text-[11px] font-semibold"
+                  class="truncate text-[0.6875rem] font-semibold"
                   :class="isSelf ? 'text-foreground' : 'text-primary'"
                 >
                   {{ replySenderLabel }}
                 </div>
                 <div
                   v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
+                  class="mt-0.5 line-clamp-2 text-[0.6875rem] whitespace-pre-wrap break-words text-muted-foreground"
                 >
                   {{ replyPreviewLabel }}
                 </div>
@@ -225,7 +227,7 @@
           :on-open-media="onOpenMedia"
         />
         <p
-          class="text-xs text-muted-foreground/80 mt-1 text-right"
+          class="chat-message-meta text-muted-foreground/80 mt-1 text-right"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -290,12 +292,14 @@
               class="prose prose-sm dark:prose-invert max-w-none *:first:mt-0"
             >
               <MarkdownRender
+                :key="chatMarkdownRenderKey(`assistant-${segment.block.id}`)"
                 :content="segment.block.content"
                 :is-dark="isDark"
                 :smooth-streaming="isBlockStreaming(segment.block)"
                 :typewriter="isBlockStreaming(segment.block)"
                 :fade="isBlockStreaming(segment.block)"
                 :code-renderer="codeBlocksAsPre ? 'pre' : 'shiki'"
+                :code-block-monaco-options="codeBlockMonacoOptions"
                 custom-id="chat-msg"
               />
             </div>
@@ -321,13 +325,13 @@
         <!-- Streaming indicator -->
         <div
           v-if="message.streaming && !hasVisibleAssistantBlocks"
-          class="flex items-center gap-2 text-xs text-muted-foreground h-6"
+          class="chat-message-meta flex items-center gap-2 text-muted-foreground h-6"
         >
           <LoaderCircle class="size-3.5 animate-spin" />
           {{ $t('chat.thinking') }}
         </div>
         <p
-          class="text-xs text-muted-foreground/80 mt-1"
+          class="chat-message-meta text-muted-foreground/80 mt-1"
           :title="fullTimestamp"
         >
           {{ relativeTimestamp }}
@@ -382,6 +386,15 @@ warmCodeHighlightOnIdle()
 
 const settingsStore = useSettingsStore()
 const isDark = computed(() => settingsStore.theme === 'dark')
+const codeBlockMonacoOptions = computed(() => ({
+  fontFamily: settingsStore.codeFontStack,
+  fontSize: settingsStore.codeFontSizePx,
+}))
+const codeFontRenderKey = computed(() => settingsStore.codeFontStack)
+
+function chatMarkdownRenderKey(scope: string): string {
+  return `${scope}:${codeFontRenderKey.value}`
+}
 
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{

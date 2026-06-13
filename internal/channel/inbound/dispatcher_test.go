@@ -42,6 +42,31 @@ func TestDetectMode(t *testing.T) {
 	}
 }
 
+func TestIsStartCommand(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"/start", true},
+		{"/start@MemohBot", true},
+		// Telegram deep links: /start <payload> (and /start@bot <payload>).
+		{"/start abc123", true},
+		{"/start@MemohBot abc123", true},
+		{"/start deep_link_payload", true},
+		{"/new", false},
+		{"/started", false},
+		{"start", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isStartCommand(tt.input); got != tt.want {
+				t.Errorf("isStartCommand(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsModeCommand(t *testing.T) {
 	tests := []struct {
 		input string
