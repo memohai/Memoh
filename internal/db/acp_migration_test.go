@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	embeddeddb "github.com/memohai/memoh/db"
 	"github.com/memohai/memoh/internal/config"
@@ -104,6 +106,37 @@ func sqliteMigrationsFS(t *testing.T) fs.FS {
 		t.Fatalf("sqlite migrations fs: %v", err)
 	}
 	return migrations
+}
+
+func sqliteMigrationsFSUpTo(t *testing.T, maxVersion int) fs.FS {
+	t.Helper()
+	migrations := sqliteMigrationsFS(t)
+	entries, err := fs.ReadDir(migrations, ".")
+	if err != nil {
+		t.Fatalf("read sqlite migrations: %v", err)
+	}
+
+	out := fstest.MapFS{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		sep := strings.IndexByte(name, '_')
+		if sep <= 0 {
+			continue
+		}
+		version, err := strconv.Atoi(name[:sep])
+		if err != nil || version > maxVersion {
+			continue
+		}
+		data, err := fs.ReadFile(migrations, name)
+		if err != nil {
+			t.Fatalf("read sqlite migration %s: %v", name, err)
+		}
+		out[name] = &fstest.MapFile{Data: data}
+	}
+	return out
 }
 
 func tempSQLiteMigrationDSN(t *testing.T) string {

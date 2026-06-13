@@ -84,3 +84,43 @@ func TestSQLiteFreshReplayReasoningEffortLadder(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteRelaxReasoningPreservesFetchProviderID(t *testing.T) {
+	dsn := tempSQLiteMigrationDSN(t)
+
+	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFSUpTo(t, 18), "up", nil); err != nil {
+		t.Fatalf("migrate through 0018_fetch_providers: %v", err)
+	}
+
+	db := openMigrationSQLite(t, dsn)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users(id,email,role) VALUES('00000000-0000-0000-0000-0000000000c1','fetch@example.com','member')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO fetch_providers(id,name,provider) VALUES('fetch-provider-preserve','Fetch Preserve','generic')`); err != nil {
+		t.Fatalf("insert fetch provider: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO bots(id,owner_user_id,type,name,display_name,fetch_provider_id) VALUES('00000000-0000-0000-0000-0000000000c2','00000000-0000-0000-0000-0000000000c1','personal','fetch-bot','Fetch Bot','fetch-provider-preserve')`); err != nil {
+		t.Fatalf("insert bot with fetch_provider_id: %v", err)
+	}
+	closeMigrationSQLite(t, db)
+
+	if err := RunMigrateTarget(nil, MigrationTarget{Driver: DriverSQLite, DSN: dsn}, sqliteMigrationsFS(t), "up", nil); err != nil {
+		t.Fatalf("migrate through 0019_relax_reasoning_effort: %v", err)
+	}
+
+	db = openMigrationSQLite(t, dsn)
+	defer closeMigrationSQLite(t, db)
+
+	schema := sqliteTableSQL(t, db, "bots")
+	if n := strings.Count(schema, "fetch_provider_id"); n != 1 {
+		t.Fatalf("fetch_provider_id appears %d times after 0019 rebuild, want exactly 1:\n%s", n, schema)
+	}
+
+	var providerID string
+	if err := db.QueryRowContext(context.Background(), `SELECT fetch_provider_id FROM bots WHERE id='00000000-0000-0000-0000-0000000000c2'`).Scan(&providerID); err != nil {
+		t.Fatalf("select fetch_provider_id after 0019 rebuild: %v", err)
+	}
+	if providerID != "fetch-provider-preserve" {
+		t.Fatalf("fetch_provider_id after 0019 rebuild = %q, want %q", providerID, "fetch-provider-preserve")
+	}
+}

@@ -3,7 +3,7 @@
 -- driven by per-model capability discovery. SQLite cannot drop a CHECK
 -- constraint in place, so rebuild the bots table without bots_reasoning_effort_check.
 -- NOTE: this rebuild must preserve all columns added by earlier migrations,
--- including command_ui_language, and keep heartbeat_interval DEFAULT 1440.
+-- including command_ui_language and fetch_provider_id, and keep heartbeat_interval DEFAULT 1440.
 -- Use the bots_new/copy/drop/rename pattern (as in 0013) rather than renaming
 -- bots to bots_old: on SQLite 3.26+, ALTER TABLE ... RENAME rewrites dependent
 -- child-table foreign keys to the new name even with foreign_keys=OFF, so
@@ -28,6 +28,7 @@ CREATE TABLE bots_new (
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
   search_provider_id TEXT REFERENCES search_providers(id) ON DELETE SET NULL,
+  fetch_provider_id TEXT REFERENCES fetch_providers(id) ON DELETE SET NULL,
   memory_provider_id TEXT REFERENCES memory_providers(id) ON DELETE SET NULL,
   heartbeat_enabled INTEGER NOT NULL DEFAULT 0,
   heartbeat_interval INTEGER NOT NULL DEFAULT 1440,
@@ -65,7 +66,7 @@ CREATE TABLE bots_new (
 INSERT INTO bots_new (
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
   acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
-  chat_model_id, search_provider_id, memory_provider_id,
+  chat_model_id, search_provider_id, fetch_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,
   title_model_id, image_model_id, discuss_probe_model_id, tts_model_id,
@@ -76,7 +77,7 @@ INSERT INTO bots_new (
 SELECT
   id, owner_user_id, type, name, display_name, avatar_url, timezone, is_active, status,
   acl_default_effect, language, command_ui_language, reasoning_enabled, reasoning_effort,
-  chat_model_id, search_provider_id, memory_provider_id,
+  chat_model_id, search_provider_id, fetch_provider_id, memory_provider_id,
   heartbeat_enabled, heartbeat_interval, heartbeat_prompt, heartbeat_model_id,
   compaction_enabled, compaction_threshold, compaction_ratio, compaction_model_id,
   title_model_id, image_model_id, discuss_probe_model_id, tts_model_id,
