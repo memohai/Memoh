@@ -252,11 +252,11 @@ export const useChatStore = defineStore('chat', () => {
   const overrideReasoningEffort = ref<string>('')
   const startupSendFailure = ref<StartupSendFailure | null>(null)
 
-  // Bumps every time a fs-mutating tool call (write/edit/exec) finishes for the
+  // Bumps every time a fs-mutating tool call (write/edit/apply_patch/exec) finishes for the
   // current bot. File-manager components watch this to refresh their listings
   // and any open file viewers without polling.
   const fsChangedAt = ref(0)
-  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'exec'])
+  const FS_MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'exec'])
 
   function bumpFsChangedAtIfFsMutation(message: UIMessage) {
     if (message.type !== 'tool') return

@@ -61,6 +61,7 @@ import {
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
 import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
+import ToolCallDetailApplyPatch from './tool-call-detail-apply-patch.vue'
 import ToolCallDetailComputer from './tool-call-detail-computer.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
@@ -174,6 +175,84 @@ function lineCount(s: string): number {
   return s.split('\n').length
 }
 
+function resultObject(block: ToolCallBlock): Record<string, unknown> {
+  const result = asObject(block.result)
+  const sc = asObject(result.structuredContent)
+  return Object.keys(sc).length > 0 ? sc : result
+}
+
+interface PatchFileTarget {
+  operation: 'add' | 'modify' | 'delete'
+  path: string
+}
+
+function normalizePatchOperation(value: unknown): PatchFileTarget['operation'] | '' {
+  if (value === 'add' || value === 'added') return 'add'
+  if (value === 'modify' || value === 'modified' || value === 'update') return 'modify'
+  if (value === 'delete' || value === 'deleted') return 'delete'
+  return ''
+}
+
+function patchFilesFromResult(block: ToolCallBlock): PatchFileTarget[] {
+  const result = resultObject(block)
+  const rawFiles = result.files
+  if (Array.isArray(rawFiles)) {
+    return rawFiles
+      .map((item) => {
+        const obj = asObject(item)
+        const path = pickString(obj, 'path')
+        const operation = normalizePatchOperation(obj.operation)
+        return path && operation ? { operation, path } : null
+      })
+      .filter((item): item is PatchFileTarget => Boolean(item))
+  }
+
+  const out: PatchFileTarget[] = []
+  for (const [key, operation] of [
+    ['added', 'add'],
+    ['modified', 'modify'],
+    ['deleted', 'delete'],
+  ] as const) {
+    const paths = result[key]
+    if (!Array.isArray(paths)) continue
+    for (const path of paths) {
+      if (typeof path === 'string' && path) out.push({ operation, path })
+    }
+  }
+  return out
+}
+
+function patchFilesFromInput(patch: string): PatchFileTarget[] {
+  if (!patch) return []
+  const out: PatchFileTarget[] = []
+  for (const rawLine of patch.split('\n')) {
+    const line = rawLine.trim()
+    if (line.startsWith('*** Add File: ')) {
+      const path = line.slice('*** Add File: '.length).trim()
+      if (path) out.push({ operation: 'add', path })
+    }
+    else if (line.startsWith('*** Delete File: ')) {
+      const path = line.slice('*** Delete File: '.length).trim()
+      if (path) out.push({ operation: 'delete', path })
+    }
+    else if (line.startsWith('*** Update File: ')) {
+      const path = line.slice('*** Update File: '.length).trim()
+      if (path) out.push({ operation: 'modify', path })
+    }
+  }
+  return out
+}
+
+function patchLineCounts(patch: string): { add: number; remove: number } {
+  let add = 0
+  let remove = 0
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+')) add++
+    else if (line.startsWith('-') && !line.startsWith('***')) remove++
+  }
+  return { add, remove }
+}
+
 function hostnameOrUrl(url: string): string {
   if (!url) return ''
   try {
@@ -279,7 +358,7 @@ function resolveGuiAction(
 
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
-  
+
   switch (block.toolName) {
     case 'ask_user': {
       // pickString covers pre-v2 history where input was { question: "..." }.
@@ -324,6 +403,30 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailEdit,
         diffAdd: lineCount(newText),
         diffRemove: lineCount(oldText),
+      }
+    }
+    case 'apply_patch': {
+      const patch = pickString(input, 'patch')
+      const files = patchFilesFromResult(block)
+      const fileTargets = files.length > 0 ? files : patchFilesFromInput(patch)
+      const target = fileTargets.length === 1
+        ? basename(fileTargets[0]!.path)
+        : fileTargets.length > 1
+          ? `${fileTargets.length} files`
+          : ''
+      const fullTarget = fileTargets
+        .map(file => `${file.operation} ${file.path}`)
+        .join('\n')
+      const counts = patchLineCounts(patch)
+      return {
+        icon: FilePen,
+        actionKey: 'apply_patch',
+        target,
+        fullTarget,
+        detail: ToolCallDetailApplyPatch,
+        defaultOpen: true,
+        diffAdd: counts.add,
+        diffRemove: counts.remove,
       }
     }
     case 'list': {

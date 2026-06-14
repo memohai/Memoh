@@ -334,6 +334,7 @@
       "read": "读取",
       "write": "写入",
       "edit": "编辑",
+      "apply_patch": "应用补丁",
       "list": "列出",
       "exec": "执行",
       "bg_status": "后台任务",
@@ -441,7 +442,8 @@
       "pending": {
         "generic": "处理中…",
         "write": "正在写入文件…",
-        "edit": "正在编辑…"
+        "edit": "正在编辑…",
+        "apply_patch": "正在应用补丁…"
       },
       "detail": {
         "openInFiles": "在文件中打开",
