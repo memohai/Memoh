@@ -89,6 +89,14 @@ func TestRenderSlackMessagePartsMrkdwn(t *testing.T) {
 			want: "```\nraw\n```",
 		},
 		{
+			name: "code block neutralizes Slack tag after embedded fence",
+			msg: channel.Message{Parts: []channel.MessagePart{
+				{Type: channel.MessagePartCodeBlock, Text: "before\n```\n<!channel>\n<https://evil.test|click>"},
+			}},
+			want:     "```\nbefore\n```\n&lt;!channel&gt;\n&lt;https://evil.test|click&gt;\n```",
+			excludes: []string{"<!channel>", "<https://evil.test|click>"},
+		},
+		{
 			name: "mention emits text only",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartMention, Text: "@alice"},
